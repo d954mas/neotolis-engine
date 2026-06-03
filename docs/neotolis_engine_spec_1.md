@@ -132,9 +132,11 @@ If a decision can be deferred without loss of base architecture — it is deferr
   `Clay__default*` size constants) — all routed through thin wrappers in
   `engine/ui/nt_ui_clay_internal.c`, the exclusive `CLAY_IMPLEMENTATION`
   TU. The widget composition pattern (button / panel / group `_begin`)
-  needs `nt_ui_widget_register` to fire BETWEEN `Open` and `Configure`,
-  which Clay's public `CLAY({...})` macro doesn't expose. The wrappers
-  are the smallest possible escape hatch.
+  splits Clay's `CLAY({...}) { body }` into separate `_begin`/`_end`
+  calls so widget code can run between them — Clay's public macro
+  bundles `Open` + `Configure` + scoped body into a single statement
+  and can't be split across function boundaries. The wrappers are the
+  smallest possible escape hatch.
 
   With `NT_UI_DEBUG_TOOLS=ON` this expands by ~30 more Clay private
   symbols for the verbatim Clay debug-view port (the inspector body

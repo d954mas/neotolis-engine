@@ -49,7 +49,7 @@ static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx
 static void test_image_basic(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -72,7 +72,7 @@ static void test_image_slice9_override(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -94,7 +94,7 @@ static void test_image_tint_color(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -111,7 +111,7 @@ static void test_image_element_data_passthrough(void) {
     int marker = 77;
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -132,7 +132,7 @@ static void test_image_flip_bits(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -153,7 +153,7 @@ static void test_image_flags_origin(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -181,7 +181,7 @@ static void test_image_style_defaults(void) {
 static void test_image_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -190,7 +190,7 @@ static void test_image_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, bad, 0, &s_style_default)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, bad, 0, &s_style_default, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 

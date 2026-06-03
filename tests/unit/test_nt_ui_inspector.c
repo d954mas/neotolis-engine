@@ -187,7 +187,7 @@ static void test_panel_widget_tagged(void) {
 static void test_image_widget_tagged(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL); }
     uint32_t image_count = 0U;
     for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
         if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_IMAGE_DEF) {
@@ -977,7 +977,7 @@ static void test_inspector_reads_layer_from_shared_config_userdata(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     const nt_ui_element_data_t *data_with_layer = NT_UI_DATA_LAYER((nt_ui_layer_t)3);
-    CLAY({.id = CLAY_ID("root_shared_layer")}) { nt_ui_image(s_fx.ctx, data_with_layer, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style); }
+    CLAY({.id = CLAY_ID("root_shared_layer")}) { nt_ui_image(s_fx.ctx, data_with_layer, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL); }
     nt_ui_end(s_fx.ctx);
     /* Clay stored data in SHARED; cdv_element_layer's SHARED branch returns the layer. */
     TEST_ASSERT_EQUAL_UINT8(3U, (uint8_t)data_with_layer->layer);
@@ -1239,7 +1239,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
     }
     s_fx.ctx->inspector_selected_id = nt_ui_id("inspect_btn");
     nt_ui_end(s_fx.ctx);
@@ -1251,7 +1251,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -1313,7 +1313,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
     }
     s_fx.ctx->inspector_selected_id = nt_ui_id("perf_btn");
     nt_ui_end(s_fx.ctx);
@@ -1325,7 +1325,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -1472,7 +1472,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
     }
     s_fx.ctx->inspector_selected_id = nt_ui_id("split_btn");
     nt_ui_end(s_fx.ctx);
@@ -1484,7 +1484,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
     }
     nt_ui_end(s_fx.ctx);
 

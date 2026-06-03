@@ -195,6 +195,10 @@ struct nt_ui_context {
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS]; /* direct-mapped state-anim cache */
+    /* Monotonic since ctx creation. Increments every time nt_ui_anim's probe chain
+     * fails to find a free or matching slot -> base evicted -> snap-reseed each frame.
+     * Game polls via nt_ui_get_anim_collision_count to dial NT_UI_ANIM_SLOTS. */
+    uint32_t anim_collision_count;
 
 #if NT_UI_DEBUG_TOOLS
     /* Hit-zone debug overlay. OFF by default; game opts in via debug_set_recording.

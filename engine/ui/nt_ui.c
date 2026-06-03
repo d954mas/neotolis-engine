@@ -1143,7 +1143,7 @@ typedef struct {
 
 /* Typed CUSTOM dispatch: engine anchors (type=NONE) skip silently;
  * game handlers (type=GAME) flush and invoke the custom callback. */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty) {
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_aff[6], float opacity, bool *sprite_pipeline_dirty) {
     const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)c->renderData.custom.customData;
     NT_ASSERT(cd != NULL && "CUSTOM command must have nt_ui_custom_data_t");
     if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
@@ -1153,7 +1153,12 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     nt_text_renderer_flush();
     *sprite_pipeline_dirty = true;
     if (ctx->custom_fn != NULL) {
-        ctx->custom_fn((const void *)c, ctx->custom_user);
+        const nt_ui_custom_frame_t frame = {
+            .clay_cmd = (const void *)c,
+            .world_aff = {world_aff[0], world_aff[1], world_aff[2], world_aff[3], world_aff[4], world_aff[5]},
+            .opacity = opacity,
+        };
+        ctx->custom_fn(&frame, ctx->custom_user);
     }
 }
 // #endregion
@@ -1292,30 +1297,11 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
-        /* CUSTOM bbox transformed through world_aff so game handlers see GL-Y-up world coords. */
-        Clay_RenderCommand local = *c;
-        const float bx = c->boundingBox.x;
-        const float by = c->boundingBox.y;
-        const float bw = c->boundingBox.width;
-        const float bh = c->boundingBox.height;
-        const float corners[4][2] = {{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}};
-        float mn_x = (world_aff[0] * corners[0][0]) + (world_aff[1] * corners[0][1]) + world_aff[4];
-        float mx_x = mn_x;
-        float mn_y = (world_aff[2] * corners[0][0]) + (world_aff[3] * corners[0][1]) + world_aff[5];
-        float mx_y = mn_y;
-        for (int ci = 1; ci < 4; ++ci) {
-            const float wx = (world_aff[0] * corners[ci][0]) + (world_aff[1] * corners[ci][1]) + world_aff[4];
-            const float wy = (world_aff[2] * corners[ci][0]) + (world_aff[3] * corners[ci][1]) + world_aff[5];
-            mn_x = fminf(mn_x, wx);
-            mx_x = fmaxf(mx_x, wx);
-            mn_y = fminf(mn_y, wy);
-            mx_y = fmaxf(mx_y, wy);
-        }
-        local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = mn_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
-        emit_custom(ctx, &local, sprite_pipeline_dirty);
+    case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
+        /* Hand the LAYOUT bbox + composed world_aff + opacity to the game
+         * handler; it owns the transform math (e.g. rotated viewports work). */
+        emit_custom(ctx, c, world_aff, ws->accum_opacity, sprite_pipeline_dirty);
         return;
-    }
     }
 }
 
@@ -1470,9 +1456,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
                 for (int32_t j = i; j < seg_end; ++j) {
                     const Clay_RenderCommand *cc = &arr->internalArray[j];
-                    if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                        continue;
-                    }
+                    /* CUSTOM is a hard barrier in is_segmentable -> never in this segment.
+                     * No need for a defensive skip here. */
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
                         const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
@@ -2006,6 +1991,11 @@ float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx) {
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_ms: ctx must be non-NULL");
     return ctx->last_walk_ms;
+}
+
+uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_anim_collision_count: ctx must be non-NULL");
+    return ctx->anim_collision_count;
 }
 
 uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx) {

@@ -16,11 +16,17 @@ const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style) {
+void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_image: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_image: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_image: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_image: style.slice9_scale must be finite > 0");
+    /* Engine owns image/backgroundColor/userData; caller's decl must leave these zero. */
+    if (decl != NULL) {
+        NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image: decl->image.imageData must be NULL (atlas+region controls image)");
+        NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_image: decl->backgroundColor must be zero (style->color_packed controls)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_image: decl->userData must be NULL (data param controls)");
+    }
 
     /* Allocate payload from scratch arena */
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
@@ -36,7 +42,8 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
     };
     memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 
-    /* Unpack tint to Clay_Color. 0xFFFFFFFF = untinted (pass {0,0,0,0}). */
+    /* Unpack tint to Clay_Color. 0xFFFFFFFF = untinted (pass {0,0,0,0}).
+     * Transparency lives in opacity (NT_UI_DATA_XFORM), not in tint. */
     Clay_Color tint = {0};
     if (style->color_packed != 0xFFFFFFFF) {
         tint.r = (float)(style->color_packed & 0xFFU);
@@ -45,12 +52,17 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
         tint.a = (float)((style->color_packed >> 24) & 0xFFU);
     }
 
-    CLAY({
-        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-        .backgroundColor = tint,
-        .image = {.imageData = p},
-        .userData = (void *)data,
-    }) {
+    Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
+    /* Default sizing: GROW. Caller decl wins if it set anything non-zero. */
+    if (final.layout.sizing.width.type == CLAY__SIZING_TYPE_FIT && final.layout.sizing.width.size.minMax.max == 0.0F && final.layout.sizing.height.type == CLAY__SIZING_TYPE_FIT &&
+        final.layout.sizing.height.size.minMax.max == 0.0F) {
+        final.layout.sizing = (Clay_Sizing){.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)};
+    }
+    final.image = (Clay_ImageElementConfig){.imageData = p};
+    final.backgroundColor = tint;
+    final.userData = (void *)data;
+
+    CLAY(final) {
         /* Inspector tag — Clay auto-assigns the id; read top-of-stack. */
         nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL);
     }

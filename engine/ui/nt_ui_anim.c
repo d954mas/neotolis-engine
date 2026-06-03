@@ -26,6 +26,10 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
         }
     }
     if (a == NULL) {
+        /* All NT_UI_ANIM_PROBE_MAX slots taken by other ids. Evicting the base
+         * snap-reseeds this id every frame -> animation loses easing silently.
+         * Counter surfaces the degradation so games can dial NT_UI_ANIM_SLOTS. */
+        ctx->anim_collision_count++;
         a = &ctx->anim[base];
     }
     const bool fresh = (!a->valid) || (a->id != id); /* empty OR evicted → re-seed */

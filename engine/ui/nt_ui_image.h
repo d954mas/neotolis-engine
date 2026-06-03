@@ -34,7 +34,10 @@ static inline nt_ui_image_style_t nt_ui_image_style_defaults(void) { return (nt_
 
 /* Leaf image widget. Atlas+region are arguments (runtime handles).
  * Style contains visual properties only (static const safe).
- * data may be NULL (= no layer, no user_data). */
-void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style);
+ * data may be NULL (= no layer, no user_data).
+ * decl may be NULL (= GROW/GROW default sizing). When non-NULL, caller
+ * controls layout/sizing/padding/clip; engine still owns image/backgroundColor/
+ * userData and asserts caller leaves those zero. */
+void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 
 #endif /* NT_UI_IMAGE_H */

@@ -28,11 +28,15 @@ static nt_ui_image_payload_t s_image_payload;
 /* Custom-handler flag + receiver. */
 static bool s_custom_called;
 static Clay_BoundingBox s_custom_received_bbox;
+static float s_custom_received_aff[6];
+static float s_custom_received_opacity;
 static void *s_custom_received_user;
 
-static void test_custom_handler(const void *clay_cmd, void *userdata) {
+static void test_custom_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
     s_custom_called = true;
-    s_custom_received_bbox = ((const Clay_RenderCommand *)clay_cmd)->boundingBox;
+    s_custom_received_bbox = ((const Clay_RenderCommand *)frame->clay_cmd)->boundingBox;
+    memcpy(s_custom_received_aff, frame->world_aff, sizeof s_custom_received_aff);
+    s_custom_received_opacity = frame->opacity;
     s_custom_received_user = userdata;
 }
 
@@ -42,6 +46,8 @@ void setUp(void) {
     nt_test_assert_install();
     s_custom_called = false;
     s_custom_received_bbox = (Clay_BoundingBox){0};
+    memset(s_custom_received_aff, 0, sizeof s_custom_received_aff);
+    s_custom_received_opacity = 0.0F;
     s_custom_received_user = NULL;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     memset(&s_image_payload, 0, sizeof s_image_payload);
@@ -185,11 +191,20 @@ static void test_dispatch_custom(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_TRUE(s_custom_called);
-    /* Y-flipped: world_y = 0 + 600 - 0 - 10 = 590. */
+    /* bbox stays in LAYOUT (Y-down) space; handler transforms via world_aff. */
     TEST_ASSERT_EQUAL_INT(0, (int)s_custom_received_bbox.x);
-    TEST_ASSERT_EQUAL_INT(590, (int)s_custom_received_bbox.y);
+    TEST_ASSERT_EQUAL_INT(0, (int)s_custom_received_bbox.y);
     TEST_ASSERT_EQUAL_INT(10, (int)s_custom_received_bbox.width);
     TEST_ASSERT_EQUAL_INT(10, (int)s_custom_received_bbox.height);
+    /* Identity world_aff with Y-flip: (1, 0, 0, -1, 0, vy+vh=600). */
+    TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(s_custom_received_aff[0] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(0, (int)lrintf(s_custom_received_aff[1] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(0, (int)lrintf(s_custom_received_aff[2] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(-1000, (int)lrintf(s_custom_received_aff[3] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(0, (int)lrintf(s_custom_received_aff[4]));
+    TEST_ASSERT_EQUAL_INT(600, (int)lrintf(s_custom_received_aff[5]));
+    /* Opacity is 1.0 for an element with no XFORM userData. */
+    TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(s_custom_received_opacity * 1000.0F));
     TEST_ASSERT_EQUAL_PTR(&sentinel, s_custom_received_user);
 }
 

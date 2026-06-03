@@ -26,8 +26,8 @@ static ui_walker_fixture_t s_fx;
 /* Custom-handler observer for game-custom-not-confused test. */
 static int s_game_custom_calls;
 static void *s_game_custom_user;
-static void game_custom_handler(const void *clay_cmd, void *userdata) {
-    (void)clay_cmd;
+static void game_custom_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
+    (void)frame;
     s_game_custom_calls++;
     s_game_custom_user = userdata;
 }

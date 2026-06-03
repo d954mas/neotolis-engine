@@ -80,11 +80,29 @@ typedef struct {
 #define NT_UI_CUSTOM_TYPE_NONE 0 /* engine anchor: skip, bbox only */
 #define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
 
-/* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler).
- * Handler owns the GL state it touches: if you change viewport or scissor,
+/* Frame snapshot passed to the CUSTOM handler. Contains everything the
+ * handler needs to render in the same world frame as the rest of the UI:
+ *   - clay_cmd: opaque Clay_RenderCommand * (cast back inside handler).
+ *     boundingBox is in LAYOUT (Y-down) coords; pass it through world_aff
+ *     to get GL world-space corners. (Walker no longer flattens to an
+ *     axis-aligned AABB — rotation in the chain is preserved.)
+ *   - world_aff: 2x3 affine that maps a LAYOUT point (px, py) to GL world:
+ *       gl_x = aff[0]*px + aff[1]*py + aff[4]
+ *       gl_y = aff[2]*px + aff[3]*py + aff[5]
+ *     This bakes the composed parent chain AND the Y-flip; for identity
+ *     parent + 800x600 viewport it is (1, 0, 0, -1, 0, 600).
+ *   - opacity: accumulated [0..1] from ancestor opacity chain. Multiply
+ *     into your render alpha. */
+typedef struct {
+    const void *clay_cmd;
+    float world_aff[6];
+    float opacity;
+} nt_ui_custom_frame_t;
+
+/* Handler owns the GL state it touches: if you change viewport or scissor,
  * restore them before returning. Walker only rebinds the sprite material
  * (its own flush invariant) -- everything else is the handler's mess. */
-typedef void (*nt_ui_custom_handler_t)(const void *clay_cmd, void *userdata);
+typedef void (*nt_ui_custom_handler_t)(const nt_ui_custom_frame_t *frame, void *userdata);
 
 /* Render-time transform — no layout effect. */
 typedef struct {
@@ -271,6 +289,11 @@ float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx);
 /* walk_ms = walk dispatch, timed from AFTER the entry flush -- excludes
  * draining the caller's pending geometry (same scope as draw_calls). */
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
+/* Monotonic since ctx creation. Increments every time nt_ui_anim's probe chain
+ * fails (all NT_UI_ANIM_PROBE_MAX slots taken by other ids -> base evicted,
+ * snap-reseed each frame -> easing lost for one id). Sample as a delta across
+ * frames; nonzero means raise NT_UI_ANIM_SLOTS. */
+uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx);
 /* Per-type command counts (pre-emit, not pixels — use draw_calls for GPU cost). */
 uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx);
