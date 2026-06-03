@@ -48,6 +48,12 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_button_begin: decl->backgroundColor must be zero (style->bg_tint controls)");
         NT_ASSERT(decl->userData == NULL && "nt_ui_button_begin: decl->userData must be NULL (data param controls)");
     }
+    /* Button owns transform + opacity (anim eases per-state). Caller may pass
+     * layer/user_data in `data` but transform/opacity flags must be clear. */
+    if (data != NULL) {
+        NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U &&
+                  "nt_ui_button_begin: data->flags must not set HAS_TRANSFORM/HAS_OPACITY (button owns these via style); wrap with a CLAY xform parent instead");
+    }
     // #region state-pick + ease
     /* Disabled skips hit-test/capture but still records a debug zone so the
      * overlay can surface "why didn't this respond?". Recording is gated by

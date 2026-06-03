@@ -568,6 +568,11 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                     NT_ASSERT(false && "build_tree: parent elem_idx out of bounds");
                     seed = identity;
                 } else {
+                    /* Clay invariant: a floating root's parentId resolves to an element
+                     * declared BEFORE the floating root in layoutElements. Without this
+                     * tree_baked[p_elem_idx] would be the identity-init from step 1, not
+                     * the parent's composed affine — silent seed corruption. */
+                    NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must precede child in declaration order (Clay invariant broken)");
                     seed = ctx->tree_baked[p_elem_idx];
                 }
             }

@@ -230,7 +230,18 @@ typedef struct nt_ui_widget_def_t {
  * Storage is a 1024-slot direct-mapped table; first collisions expected
  * around 40 widgets (birthday-paradox), replace-on-collision. Observability-
  * only — losing a tag for one of two colliding widgets is acceptable. */
+#if NT_UI_DEBUG_TOOLS
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
+#else
+/* Release build: registry exists only for the inspector; collapse to no-op so
+ * widget begin/end pay nothing. Asserts remain inline. */
+static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+    (void)ctx;
+    (void)id;
+    (void)def;
+    (void)pad_lrtb;
+}
+#endif
 
 /* Return the descriptor registered for `id` this frame, or NULL when no
  * widget is registered at that id. The returned pointer is the same one

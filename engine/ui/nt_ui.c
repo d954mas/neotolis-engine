@@ -47,6 +47,8 @@ static bool s_nt_ui_module_initialized = false;
 
 /* Pre-built element_data for each layer (user_data=NULL). Avoids scratch alloc. */
 static nt_ui_element_data_t s_default_element_data[256];
+/* Surface element_data size changes via the static array's footprint. */
+_Static_assert(sizeof(s_default_element_data) == 256 * sizeof(nt_ui_element_data_t), "s_default_element_data sized 256 x element_data");
 // #endregion
 
 // #region clay_error_handler
@@ -406,13 +408,13 @@ nt_ui_context_t *nt_ui_internal_get_inframe_ctx(void) { return g_nt_ui_inframe_c
 // #endregion
 
 // #region widget_registry
+#if NT_UI_DEBUG_TOOLS
 /* Direct-mapped per-frame table; replace-on-collision (observability path).
- * id 0 / NULL def are silently dropped. Bodies compile to a no-op when
- * NT_UI_DEBUG_TOOLS=OFF — the registry exists purely for the inspector. */
+ * id 0 / NULL def are silently dropped. Release builds inline this to a
+ * no-op via the header — the registry exists purely for the inspector. */
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
-#if NT_UI_DEBUG_TOOLS
     if (id == 0U || def == NULL) {
         return; /* sentinel / NULL def: never register */
     }
@@ -433,13 +435,8 @@ void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget
         s->hit_padding_lrtb[2] = 0;
         s->hit_padding_lrtb[3] = 0;
     }
-#else
-    (void)ctx;
-    (void)id;
-    (void)def;
-    (void)pad_lrtb;
-#endif
 }
+#endif
 
 const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_lookup: ctx must be non-NULL");
@@ -904,19 +901,10 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
         return; /* tombstone */
     }
 
-    /* origin override only affects the local atlas-region pivot inside emit_region;
-     * full-affine path expresses the pivot through aff[4],aff[5]. Kept for future
-     * non-centered slice9 wrapping decisions. */
-    (void)((p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F);
-    (void)((p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F);
-
     /* Auto-slice9: flag OR non-zero lrtb = override; flag adds ability to
-     * override with zeros (disable slice9). Backward compat: non-zero lrtb
-     * works without flag. */
+     * override with zeros (disable slice9). */
     const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
     const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
-    /* button/image/panel entry points assert > 0; this is the last-line tripwire
-     * if a game custom widget builds payload directly with zero-init. */
     NT_ASSERT(isfinite(p->slice9_scale) && p->slice9_scale > 0.0F && "nt_ui walker: payload.slice9_scale must be finite > 0");
     const float s9_scale = p->slice9_scale;
 
@@ -1131,7 +1119,8 @@ static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
         return color_packed;
     }
     uint32_t a = (color_packed >> 24) & 0xFFU;
-    a = (uint32_t)((float)a * opacity);
+    /* Round, not truncate — opacity 0.5 * alpha 255 -> 128 not 127. */
+    a = (uint32_t)lrintf((float)a * opacity);
     if (a > 255U) {
         a = 255U;
     }
