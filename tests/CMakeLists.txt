@@ -449,6 +449,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_clip_hittest
         test_nt_ui_anim
         test_nt_ui_button
+        test_nt_ui_tree_build
     )
     # Inspector + hit-zone tests exercise the optional subsystem; only built
     # when nt_ui_inspector.c + nt_ui_debug.c are compiled in.
