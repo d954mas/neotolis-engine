@@ -6,6 +6,7 @@
 #include "clay.h"
 /* clang-format on */
 
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -314,6 +315,251 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
     return info;
 }
 // #endregion
+
+// #region build_tree
+/* Phase 57: post-EndLayout build pass. Populates ctx->tree_baked for every Clay
+ * element with the composed affine + opacity inherited from ancestors. Floating
+ * roots seed from tree_baked[parentId] — ATTACH_TO_ROOT → identity (root has no
+ * userData), ATTACH_TO_PARENT → lexical parent, ATTACH_TO_ELEMENT_WITH_ID →
+ * arbitrary (Clay validates existence at decl). Iterating layoutElements in
+ * declaration order is sufficient — Clay rejects forward-referencing parentIds. */
+
+/* Reads SHARED or TEXT userData on the element. Text leaves have only TEXT
+ * config (clay.h:2018-2021); non-text elements never attach TEXT. Mutex-asserted. */
+static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
+    nt_ui_element_data_t *shared_ud = NULL;
+    nt_ui_element_data_t *text_ud = NULL;
+    for (int32_t i = 0; i < elem->elementConfigs.length; ++i) {
+        Clay_ElementConfig *cfg = Clay__ElementConfigArraySlice_Get(&elem->elementConfigs, i);
+        if (cfg->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+            shared_ud = (nt_ui_element_data_t *)cfg->config.sharedElementConfig->userData;
+        } else if (cfg->type == CLAY__ELEMENT_CONFIG_TYPE_TEXT) {
+            text_ud = (nt_ui_element_data_t *)cfg->config.textElementConfig->userData;
+        }
+    }
+    NT_ASSERT(!(shared_ud && text_ud) && "build_tree scan_userdata: SHARED ⊕ TEXT — Clay data-model invariant");
+    return shared_ud ? shared_ud : text_ud;
+}
+
+/* Iterative DFS of an element subtree, propagating accum + opacity from seed to
+ * every descendant's tree_baked entry. Floating descendants are skipped (Clay
+ * strips them from lexical children at clay.h:1905-1908) — they are processed
+ * by the outer iterate-roots loop. Text leaves skip child iteration (their
+ * .children union slot aliases textElementData pointer). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed) {
+    nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
+    int32_t sp = 0;
+    NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
+    S[sp++] = (nt_ui_dfs_frame_t){
+        .elem_idx = root_elem_idx,
+        .a = seed->a,
+        .b = seed->b,
+        .c = seed->c,
+        .d = seed->d,
+        .tx = seed->tx,
+        .ty = seed->ty,
+        .opacity = seed->opacity,
+        .scale_x = seed->scale_x,
+        .scale_y = seed->scale_y,
+        .rotation = seed->rotation,
+        .children_cursor = 0,
+    };
+
+    while (sp > 0) {
+        nt_ui_dfs_frame_t *f = &S[sp - 1];
+        Clay_LayoutElement *elem = Clay_LayoutElementArray_Get(&cc->layoutElements, f->elem_idx);
+
+        if (f->children_cursor == 0) {
+            /* First visit: compose this element's xform/opacity, write tree_baked. */
+            nt_ui_element_data_t *ad = bt_scan_userdata(elem);
+            float a = f->a;
+            float b = f->b;
+            float c = f->c;
+            float d = f->d;
+            float tx = f->tx;
+            float ty = f->ty;
+            float op = f->opacity;
+            float sx = f->scale_x;
+            float sy = f->scale_y;
+            float rot = f->rotation;
+
+            if (ad != NULL) {
+                if ((ad->flags & NT_UI_ELEM_FLAG_HAS_TRANSFORM) != 0U) {
+                    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(elem->id);
+                    NT_ASSERT(item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: element's own hashmap lookup failed");
+                    const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
+                    const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
+                    nt_ui_internal_compose_transform_level(&ad->transform, cx, cy, &a, &b, &c, &d, &tx, &ty);
+                    sx *= ad->transform.scale_x;
+                    sy *= ad->transform.scale_y;
+                    NT_ASSERT(sx > 0.0F && sy > 0.0F && "build_tree: negative accumulated scale breaks atan2 rotation extraction");
+                    rot = atan2f(c, a);
+                }
+                if ((ad->flags & NT_UI_ELEM_FLAG_HAS_OPACITY) != 0U) {
+                    op *= ad->opacity;
+                }
+            }
+            ctx->tree_baked[f->elem_idx] = (nt_ui_baked_xform_t){
+                .a = a,
+                .b = b,
+                .c = c,
+                .d = d,
+                .tx = tx,
+                .ty = ty,
+                .scale_x = sx,
+                .scale_y = sy,
+                .rotation = rot,
+                .opacity = op,
+            };
+            f->a = a;
+            f->b = b;
+            f->c = c;
+            f->d = d;
+            f->tx = tx;
+            f->ty = ty;
+            f->opacity = op;
+            f->scale_x = sx;
+            f->scale_y = sy;
+            f->rotation = rot;
+        }
+
+        /* Text leaves don't have .children — guard before dereferencing. */
+        const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
+        const int32_t child_count = is_text ? 0 : elem->childrenOrTextContent.children.length;
+
+        if (f->children_cursor < child_count) {
+            const int32_t child_idx = elem->childrenOrTextContent.children.elements[f->children_cursor];
+            f->children_cursor++;
+            NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP && "build_tree: DFS stack overflow; raise NT_UI_TREE_DFS_DEPTH_CAP or restructure UI");
+            S[sp++] = (nt_ui_dfs_frame_t){
+                .elem_idx = child_idx,
+                .a = f->a,
+                .b = f->b,
+                .c = f->c,
+                .d = f->d,
+                .tx = f->tx,
+                .ty = f->ty,
+                .opacity = f->opacity,
+                .scale_x = f->scale_x,
+                .scale_y = f->scale_y,
+                .rotation = f->rotation,
+                .children_cursor = 0,
+            };
+        } else {
+            sp--;
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && ctx->clay != NULL && "build_tree: ctx + clay required");
+    NT_ASSERT(Clay_GetCurrentContext() == ctx->clay && "build_tree: Clay current ctx must equal ctx->clay");
+
+    Clay_Context *cc = ctx->clay;
+    const int32_t N = cc->layoutElements.length;
+    const int32_t R = cc->layoutElementTreeRoots.length;
+
+    /* Identity-init for every live element. Covers: elements not visited by any
+     * DFS (shouldn't happen but defensive), R==0 path (maxElementsExceeded), and
+     * walker reads of stale-index error-path commands. Bounded by LIVE N, not
+     * capacity — single-frame scan of N×40 B (typical 1024 → 40 KB). */
+    const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
+    for (int32_t i = 0; i < N; ++i) {
+        ctx->tree_baked[i] = identity;
+    }
+    if (R == 0) {
+        return;
+    }
+
+    /* Step 1: element_idx → root_idx map. */
+    for (int32_t i = 0; i < N; ++i) {
+        ctx->tree_root_for_elem[i] = -1;
+    }
+    for (int32_t k = 0; k < R; ++k) {
+        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, k);
+        ctx->tree_root_for_elem[root->layoutElementIndex] = k;
+    }
+
+    /* Step 2: iterate layoutElements in declaration order. Each tree root's
+     * seed = identity (root_idx == 0) OR tree_baked[parentId-resolved index]. */
+    for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
+        const int32_t root_idx = ctx->tree_root_for_elem[elem_idx];
+        if (root_idx < 0) {
+            continue;
+        }
+
+        nt_ui_baked_xform_t seed;
+        if (root_idx == 0) {
+            seed = identity;
+        } else {
+            Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx);
+            Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
+            if (p_item == &Clay_LayoutElementHashMapItem_DEFAULT) {
+                NT_ASSERT(false && "build_tree: floating root's parentId not in hashmap (Clay error path)");
+                seed = identity;
+            } else {
+                const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
+                if (p_elem_idx < 0 || p_elem_idx >= N) {
+                    NT_ASSERT(false && "build_tree: parent elem_idx out of bounds");
+                    seed = identity;
+                } else {
+                    seed = ctx->tree_baked[p_elem_idx];
+                }
+            }
+        }
+        bt_dfs_subtree(ctx, cc, elem_idx, &seed);
+    }
+
+    /* Step 3: post-process synthetic SCISSOR_START commands.
+     * Per-element SCISSOR_START emits with cmd.id == elem.id (clay.h:2807). The
+     * synthetic root-wrap SCISSOR_START (clay.h:2709-2715) emits with a derived
+     * hash Clay__HashNumber(rootElement->id, children.length+10). The id mismatch
+     * is the only signal we have without patching Clay. Walker reads
+     * nt_layout_index = -1 as identity. */
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            continue;
+        }
+        if (c->nt_layout_index < 0 || c->nt_layout_index >= N) {
+            c->nt_layout_index = -1;
+            continue;
+        }
+        Clay_LayoutElement *e = Clay_LayoutElementArray_Get(&cc->layoutElements, c->nt_layout_index);
+        if (e->id != c->id) {
+            c->nt_layout_index = -1;
+        }
+    }
+    /* SCISSOR_END is not transform-applied by the walker (it just pops the stack)
+     * → no fix needed. Error-path TEXT (clay.h:4211) reads tree_baked[stale]
+     * which is identity (G6 init above) → safe. */
+}
+// #endregion
+
+#ifdef NT_TEST_ACCESS
+const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx) {
+    NT_ASSERT(ctx != NULL);
+    if (elem_idx < 0 || ctx->clay == NULL || elem_idx >= ctx->clay->layoutElements.length) {
+        return NULL;
+    }
+    return &ctx->tree_baked[elem_idx];
+}
+
+int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return (ctx->clay != NULL) ? ctx->clay->layoutElements.length : 0;
+}
+
+int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx) {
+    NT_ASSERT(ctx != NULL);
+    if (elem_idx < 0 || ctx->clay == NULL || elem_idx >= ctx->clay->layoutElements.length) {
+        return -1;
+    }
+    return ctx->tree_root_for_elem[elem_idx];
+}
+#endif
 
 #if NT_UI_DEBUG_TOOLS
 // #region inspector_emit_layout

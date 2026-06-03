@@ -117,6 +117,7 @@ static void nt_ui_init_arc_lut(void) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_module_init(void) {
     NT_ASSERT(!s_nt_ui_module_initialized && "nt_ui_module_init: already initialized; call nt_ui_module_shutdown first");
     /* Clay__MeasureText is a CLAY_IMPLEMENTATION-private global; reach it via the wrapper. */
@@ -124,8 +125,19 @@ void nt_ui_module_init(void) {
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
     nt_ui_init_arc_lut();
+    /* Per-layer singletons. flags=0 means HAS_TRANSFORM/HAS_OPACITY OFF; the
+     * build pass treats this as identity composition. opacity=1.0F is the
+     * safe sentinel — a stray read past the flag guard still composes to no-op. */
     for (uint32_t i = 0; i < 256U; i++) {
-        s_default_element_data[i].layer = (nt_ui_layer_t)i;
+        s_default_element_data[i] = (nt_ui_element_data_t){
+            .layer = (nt_ui_layer_t)i,
+            .flags = 0U,
+            .opacity = 1.0F,
+            .transform = nt_ui_transform_defaults(),
+            .user_data = NULL,
+        };
+        NT_ASSERT(s_default_element_data[i].opacity == 1.0F);
+        NT_ASSERT(s_default_element_data[i].flags == 0U);
     }
     s_nt_ui_module_initialized = true;
 }
@@ -163,7 +175,11 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
      * sorted + sorted_temp = ping-pong buffers for the 2-pass radix sort. */
     const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + baked_bytes + (2U * sorted_bytes) + clay_bytes;
+    /* Phase 57: tree_baked + tree_root_for_elem (per-element), tree_dfs_stack (fixed depth cap). */
+    const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + baked_bytes + (2U * sorted_bytes) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -183,20 +199,29 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
 #endif
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
-    /* Layout: [ctx][markers][walker_baked][walker_sorted][walker_sorted_temp][Clay arena]. */
+    /* Layout: [ctx][markers][walker_baked][walker_sorted][walker_sorted_temp]
+     *         [tree_baked][tree_root_for_elem][tree_dfs_stack][Clay arena]. */
     ctx->max_elements = desc->max_elements;
     const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
     const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
     const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
     ctx->markers = (nt_ui_marker_t *)((char *)arena + ctx_size);
     ctx->max_markers = max_m;
     ctx->marker_count = 0;
     ctx->walker_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + marker_bytes);
     ctx->walker_sorted = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes);
     ctx->walker_sorted_temp = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes + sorted_bytes);
-    void *clay_mem = (char *)arena + ctx_size + marker_bytes + baked_bytes + (2U * sorted_bytes);
-    const size_t clay_size = arena_size - ctx_size - marker_bytes - baked_bytes - (2U * sorted_bytes);
+    const size_t after_walker = ctx_size + marker_bytes + baked_bytes + (2U * sorted_bytes);
+    ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + after_walker);
+    ctx->tree_root_for_elem = (int32_t *)((char *)arena + after_walker + tree_baked_bytes);
+    ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + after_walker + tree_baked_bytes + tree_root_bytes);
+    const size_t after_tree = after_walker + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes;
+    void *clay_mem = (char *)arena + after_tree;
+    const size_t clay_size = arena_size - after_tree;
 
     /* Stage max_elements via the Clay global so Clay_Initialize inherits it;
      * SetMaxElementCount writes per-ctx if current is non-NULL — null it first. */
@@ -340,6 +365,11 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->frozen_cmds = Clay_EndLayout();
     ctx->last_layout_ms = (float)((nt_time_now() - layout_t0) * 1000.0);
 
+    /* Phase 57: per-element baked tree. Walker reads this in 57b onward. */
+    const double build_t0 = nt_time_now();
+    nt_ui_internal_build_tree(ctx);
+    ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
+
     /* Markers keep layout-element indices (before_clay_idx). The walker
      * matches directly via nt_layout_index on each render command — no
      * O(M×R) remap needed. */
@@ -368,8 +398,33 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
         return &s_default_element_data[layer];
     }
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    d->layer = layer;
-    d->user_data = user_data;
+    NT_ASSERT(d != NULL && "nt_ui_make_element_data: scratch alloc failed");
+    *d = (nt_ui_element_data_t){
+        .layer = layer,
+        .user_data = user_data,
+        .flags = 0U,
+        .transform = nt_ui_transform_defaults(),
+        .opacity = 1.0F,
+    };
+    return d;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, void *user_data, const nt_ui_transform_t *transform, float opacity) {
+    NT_ASSERT(transform != NULL && "nt_ui_make_element_data_xform: transform must be non-NULL");
+    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && "nt_ui_make_element_data_xform: scale must be positive; use opacity=0 to hide");
+    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && isfinite(transform->rotation) && isfinite(transform->offset_x) && isfinite(transform->offset_y) &&
+              "nt_ui_make_element_data_xform: transform fields must be finite");
+    NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_make_element_data_xform: opacity must be finite in [0,1]");
+    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(d != NULL && "nt_ui_make_element_data_xform: scratch alloc failed");
+    *d = (nt_ui_element_data_t){
+        .layer = layer,
+        .user_data = user_data,
+        .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
+        .transform = *transform,
+        .opacity = opacity,
+    };
     return d;
 }
 // #endregion
@@ -2311,6 +2366,11 @@ uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx) {
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_layout_ms: ctx must be non-NULL");
     return ctx->last_layout_ms;
+}
+
+float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_build_tree_ms: ctx must be non-NULL");
+    return ctx->last_build_tree_ms;
 }
 
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx) {

@@ -86,20 +86,48 @@ typedef struct {
  * (its own flush invariant) -- everything else is the handler's mess. */
 typedef void (*nt_ui_custom_handler_t)(const void *clay_cmd, void *userdata);
 
+/* Render-time transform — no layout effect. */
+typedef struct {
+    float offset_x; /* slide-in/out, additive */
+    float offset_y;
+    float rotation; /* radians, additive */
+    float scale_x;  /* 1.0 = default, multiplicative */
+    float scale_y;  /* 1.0 = default, multiplicative */
+} nt_ui_transform_t;
+
+/* Identity transform (MUST use this, not zero-init -- scale must be positive; use opacity=0 to hide). */
+static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
+
+/* Flag bits for nt_ui_element_data_t.flags. Set when transform/opacity is
+ * carried on this element; cleared bit means "ignore the field" (build pass
+ * skips composition, walker reads identity from tree_baked seed). */
+#define NT_UI_ELEM_FLAG_HAS_TRANSFORM (1U << 0)
+#define NT_UI_ELEM_FLAG_HAS_OPACITY (1U << 1)
+
 /* Attached via Clay's userData slot. Engine owns the wire format -- ANY
  * non-NULL userData MUST be nt_ui_element_data_t* (walker casts blindly).
  * Game pointers go into the user_data field, not directly into Clay's slot.
  *
  * Layer sort applies to RECT/BORDER/IMAGE/TEXT; SCISSOR/CUSTOM are barriers.
+ * transform/opacity attach declaratively per element; the post-EndLayout tree
+ * build composes them down the children chain into ctx->tree_baked.
  *
  *   CLAY({ .userData = NT_UI_DATA_LAYER(LAYER_BG), ... })
- *   CLAY({ .userData = NT_UI_DATA_FULL(LAYER_HUD, &my_button), ... }) */
+ *   CLAY({ .userData = NT_UI_DATA_FULL(LAYER_HUD, &my_button), ... })
+ *   CLAY({ .userData = NT_UI_DATA_XFORM(LAYER_HUD, &t, 0.8F), ... }) */
 typedef uint8_t nt_ui_layer_t;
 typedef struct {
     void *user_data;
     nt_ui_layer_t layer; /* 0..255; lower draws first */
-    uint8_t _reserved[3];
+    uint8_t flags;       /* NT_UI_ELEM_FLAG_HAS_TRANSFORM | _HAS_OPACITY */
+    uint8_t _reserved[2];
+    nt_ui_transform_t transform; /* identity when !HAS_TRANSFORM */
+    float opacity;               /* 1.0F when !HAS_OPACITY */
 } nt_ui_element_data_t;
+/* Size on 64-bit (LP64 / LLP64). user_data 8B@0, layer+flags+pad 4B@8,
+ * transform 20B@12, opacity 4B@32. Struct alignment is alignof(void*)=8 → padded to 40B. */
+_Static_assert(sizeof(nt_ui_element_data_t) == 40, "nt_ui_element_data_t stable ABI on 64-bit");
+_Static_assert(sizeof(nt_ui_transform_t) == 20, "nt_ui_transform_t — fail loudly if extended");
 
 #if NT_UI_DEBUG_TOOLS
 /* Well-known debug layers for nt_ui_inspector. Engine reserves 240-255; game
@@ -120,10 +148,16 @@ _Static_assert(NT_UI_LAYER_DEBUG_HIGHLIGHT >= 240 && NT_UI_LAYER_DEBUG_PANEL_BG 
  * Typed return; auto-converts to void* for Clay's .userData slot. */
 const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
 
+/* Scratch-alloc + set HAS_TRANSFORM | HAS_OPACITY. Transform copied by value
+ * (struct, 20 B) so caller's stack-local is safe across frames. */
+const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, void *user_data, const nt_ui_transform_t *transform, float opacity);
+
 /* Returns const — element_data is immutable after creation.
  * For Clay's .userData (void*), use NT_UI_CLAY_DATA() wrapper. */
 #define NT_UI_DATA_LAYER(layer_value) nt_ui_make_element_data((layer_value), NULL)
 #define NT_UI_DATA_FULL(layer_value, user_ptr) nt_ui_make_element_data((layer_value), (user_ptr))
+#define NT_UI_DATA_XFORM(layer_value, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), NULL, (t_ptr), (opacity_value))
+#define NT_UI_DATA_XFORM_FULL(layer_value, user_ptr, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), (user_ptr), (t_ptr), (opacity_value))
 #define NT_UI_CLAY_DATA(layer_value) ((void *)nt_ui_make_element_data((layer_value), NULL))
 
 /* All four setters required per-context before first walk. */
@@ -218,6 +252,10 @@ uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
 /* CPU timing (ms); both reset to 0 on early-out walks. */
 /* layout_ms = the Clay_EndLayout solve only, not the whole begin->end span. */
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx);
+/* build_tree_ms = Phase 57 post-EndLayout pass (per-element accum + opacity
+ * composition + synthetic SCISSOR detection). Same scope as layout_ms — only
+ * the pass itself, not surrounding work. */
+float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx);
 /* walk_ms = walk dispatch, timed from AFTER the entry flush -- excludes
  * draining the caller's pending geometry (same scope as draw_calls). */
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
@@ -233,17 +271,8 @@ uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx);
 
 // #region transform_opacity_api
-/* Render-time transform — no layout effect. */
-typedef struct {
-    float offset_x; /* slide-in/out, additive */
-    float offset_y;
-    float rotation; /* radians, additive */
-    float scale_x;  /* 1.0 = default, multiplicative */
-    float scale_y;  /* 1.0 = default, multiplicative */
-} nt_ui_transform_t;
-
-/* Identity transform (MUST use this, not zero-init -- scale must be positive; use opacity=0 to hide). */
-static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
+/* nt_ui_transform_t + nt_ui_transform_defaults moved above nt_ui_element_data_t
+ * so element data can carry a transform field directly (Phase 57 refactor). */
 
 #ifndef NT_UI_TRANSFORM_STACK_DEPTH_CAP
 #define NT_UI_TRANSFORM_STACK_DEPTH_CAP 16

@@ -35,6 +35,12 @@ _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 
 #define NT_UI_CLIP_STACK_CAP 16
 #endif
 
+/* Phase 57: post-EndLayout DFS stack depth. Matches inspector's STACK_CAP=256
+ * (nt_ui_clay_internal.c) — same Clay element tree, same depth budget. */
+#ifndef NT_UI_TREE_DFS_DEPTH_CAP
+#define NT_UI_TREE_DFS_DEPTH_CAP 256
+#endif
+
 typedef struct {
     /* Layout-space rect (Clay Y-down). */
     float x, y, w, h;
@@ -83,11 +89,59 @@ typedef struct {
 } nt_ui_marker_t;
 
 /* Walker pre-pass per-command baked transform. Preallocated in ctx so
- * the walker hot path never hits the scratch arena. */
+ * the walker hot path never hits the scratch arena.
+ *
+ * Phase 57 also uses this type for per-element tree_baked[] populated by the
+ * post-EndLayout build pass. Same layout — different indexing (cmd vs elem). */
 typedef struct {
     float a, b, c, d, tx, ty;
     float scale_x, scale_y, rotation, opacity;
 } nt_ui_baked_xform_t;
+
+/* Phase 57: DFS frame for build_tree's traversal of Clay's element tree.
+ * decomposed scale/rotation cached so each child inherits without re-deriving
+ * via atan2/sqrt. */
+typedef struct {
+    int32_t elem_idx;
+    float a, b, c, d, tx, ty;
+    float opacity;
+    float scale_x, scale_y, rotation;
+    int32_t children_cursor;
+} nt_ui_dfs_frame_t;
+
+/* Header-only helper — used by both build_tree and the walker. */
+static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
+    return (nt_ui_baked_xform_t){
+        .a = 1.0F,
+        .b = 0.0F,
+        .c = 0.0F,
+        .d = 1.0F,
+        .tx = 0.0F,
+        .ty = 0.0F,
+        .scale_x = 1.0F,
+        .scale_y = 1.0F,
+        .rotation = 0.0F,
+        .opacity = 1.0F,
+    };
+}
+
+/* Inverse-affine pointer test against axis-aligned bbox in the element's own
+ * frame. Returns false on singular affine (det == 0). Shared by hit-test paths. */
+static inline bool nt_ui_internal_point_in_inverse_transformed_bbox(float px, float py, float a, float b, float c, float d, float tx, float ty, const Clay_BoundingBox *bbox) {
+    const float det = (a * d) - (b * c);
+    if (det == 0.0F) {
+        return false;
+    }
+    const float inv_a = d / det;
+    const float inv_b = -b / det;
+    const float inv_c = -c / det;
+    const float inv_d = a / det;
+    const float rx = px - tx;
+    const float ry = py - ty;
+    const float lx = (inv_a * rx) + (inv_b * ry);
+    const float ly = (inv_c * rx) + (inv_d * ry);
+    return (lx >= bbox->x) && (lx < bbox->x + bbox->width) && (ly >= bbox->y) && (ly < bbox->y + bbox->height);
+}
 
 /* Lives at arena head; hot fields first. Per-ctx -- no module globals. */
 struct nt_ui_context {
@@ -148,11 +202,22 @@ struct nt_ui_context {
     int32_t *walker_sorted;
     int32_t *walker_sorted_temp;
 
+    /* Phase 57: per-element composed accum. Populated post-EndLayout by
+     * nt_ui_internal_build_tree; indexed by Clay layoutElement index. tree_baked
+     * coexists with walker_baked during 57a (parallel paths); walker_baked is
+     * removed in 57b/57c. tree_root_for_elem maps Clay element index → root index
+     * in layoutElementTreeRoots (or -1 if not a root). tree_dfs_stack is the
+     * iterative DFS scratch (NT_UI_TREE_DFS_DEPTH_CAP frames). */
+    nt_ui_baked_xform_t *tree_baked;
+    int32_t *tree_root_for_elem;
+    nt_ui_dfs_frame_t *tree_dfs_stack;
+
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;
     uint32_t last_walk_command_count;
     /* CPU timing (ms). */
     float last_layout_ms;
+    float last_build_tree_ms; /* Phase 57 build pass timing. */
     float last_walk_ms;
     /* Per-type render-command counts, counted pre-emit. */
     uint32_t last_walk_rect_command_count;
@@ -275,6 +340,22 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
 /* Declaration-time transform composer — single source of truth shared by
  * walker, hit-test, and inspector hover. local = T(O) * T(C) * R(θ)*S * T(-C). */
 void nt_ui_internal_compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty);
+
+/* Phase 57: post-EndLayout build pass. Populates ctx->tree_baked for every Clay
+ * element. Iterates layoutElements in declaration order; each tree root seeds
+ * its DFS from the previously-computed tree_baked[parentId] (per Clay's existing
+ * parentId field — ROOT → identity, PARENT → lexical parent, ELEMENT_WITH_ID →
+ * arbitrary). Also marks synthetic SCISSOR_START commands with nt_layout_index = -1
+ * so the walker treats them as identity-baked.
+ * Caller (nt_ui_end) must be inside the Clay current-ctx scope.
+ * Implementation in nt_ui_clay_internal.c (needs Clay private symbols). */
+void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
+
+#ifdef NT_TEST_ACCESS
+const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
+int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
+int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);
+#endif
 
 /* Shared overlay helpers used by both nt_ui_debug_draw_hit_zones and
  * nt_ui_inspector_overlay_draw — keeps the Y-flip + per-level accum
