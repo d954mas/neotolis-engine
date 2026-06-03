@@ -52,11 +52,14 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
         tint.a = (float)((style->color_packed >> 24) & 0xFFU);
     }
 
-    Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
-    /* Default sizing: GROW. Caller decl wins if it set anything non-zero. */
-    if (final.layout.sizing.width.type == CLAY__SIZING_TYPE_FIT && final.layout.sizing.width.size.minMax.max == 0.0F && final.layout.sizing.height.type == CLAY__SIZING_TYPE_FIT &&
-        final.layout.sizing.height.size.minMax.max == 0.0F) {
-        final.layout.sizing = (Clay_Sizing){.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)};
+    /* decl == NULL: legacy GROW/GROW default (image expects to fill its parent).
+     * decl != NULL: respected verbatim, including explicit CLAY_SIZING_FIT(0).
+     * Mirrors panel/button — engine doesn't second-guess caller's intent. */
+    Clay_ElementDeclaration final;
+    if (decl != NULL) {
+        final = *decl;
+    } else {
+        final = (Clay_ElementDeclaration){.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)}}};
     }
     final.image = (Clay_ImageElementConfig){.imageData = p};
     final.backgroundColor = tint;
