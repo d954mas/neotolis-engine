@@ -830,12 +830,14 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
  * the atlas region; destination borders set the rendered corner/edge size. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb, uint16_t dst_sl,
-                                 uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation) {
+                                 uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "emit_slice9: atlas must be READY");
     NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9: call nt_sprite_renderer_set_material first");
-    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && isfinite(rotation));
+    NT_ASSERT(aff != NULL && "emit_slice9: aff must be non-NULL");
+    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h));
+    NT_ASSERT(isfinite(aff[0]) && isfinite(aff[1]) && isfinite(aff[2]) && isfinite(aff[3]) && isfinite(aff[4]) && isfinite(aff[5]) && "emit_slice9: aff must be finite");
     NT_ASSERT(w >= 0.0F && h >= 0.0F && "slice9 target dimensions must be non-negative");
 
     nt_atlas_region_handles_t rh;
@@ -1014,18 +1016,15 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
         }
     }
 
-    /* Rotate all 16 vertices around rect center if rotation != 0. */
-    if (rotation != 0.0F) {
-        const float rcx = x + (w * 0.5F);
-        const float rcy = y + (h * 0.5F);
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
+    /* Apply 2×3 affine to all 16 grid vertices: p' = (a·x + b·y + tx, c·x + d·y + ty).
+     * Identity aff = {1,0,0,1,0,0}; skip to save 16 multiplies × 2 adds. */
+    if (aff[0] != 1.0F || aff[1] != 0.0F || aff[2] != 0.0F || aff[3] != 1.0F || aff[4] != 0.0F || aff[5] != 0.0F) {
         for (uint32_t vi = 0; vi < 16U; vi++) {
             nt_sprite_vertex_t *v = &s_sprite.vertices[base + vi];
-            const float dx = v->position[0] - rcx;
-            const float dy = v->position[1] - rcy;
-            v->position[0] = (dx * rc) - (dy * rs) + rcx;
-            v->position[1] = (dx * rs) + (dy * rc) + rcy;
+            const float px = v->position[0];
+            const float py = v->position[1];
+            v->position[0] = (aff[0] * px) + (aff[1] * py) + aff[4];
+            v->position[1] = (aff[2] * px) + (aff[3] * py) + aff[5];
         }
     }
 
@@ -1045,17 +1044,52 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
 // #endregion
 
 // #region emit_slice9 (public; src == dst)
-/* Caller-supplied borders drive BOTH UV and destination corner size. Use this
- * when game has computed effective borders itself; for atlas-driven zoom,
- * prefer nt_sprite_renderer_emit_slice9_from_region. */
+/* Build the 2×3 affine corresponding to rotate-around-(x+w/2, y+h/2).
+ * Layout: aff = {a, b, c, d, tx, ty} where p' = (a·x + b·y + tx, c·x + d·y + ty). */
+static inline void slice9_build_rotate_aff(float x, float y, float w, float h, float rotation, float out_aff[6]) {
+    if (rotation == 0.0F) {
+        out_aff[0] = 1.0F;
+        out_aff[1] = 0.0F;
+        out_aff[2] = 0.0F;
+        out_aff[3] = 1.0F;
+        out_aff[4] = 0.0F;
+        out_aff[5] = 0.0F;
+        return;
+    }
+    const float cx = x + (w * 0.5F);
+    const float cy = y + (h * 0.5F);
+    const float cs = cosf(rotation);
+    const float sn = sinf(rotation);
+    out_aff[0] = cs;
+    out_aff[1] = -sn;
+    out_aff[2] = sn;
+    out_aff[3] = cs;
+    out_aff[4] = cx - (cs * cx) + (sn * cy);
+    out_aff[5] = cy - (sn * cx) - (cs * cy);
+}
+
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
                                     uint8_t flip_bits, float rotation) {
-    emit_slice9_internal(atlas, region_index, x, y, w, h, sl, sr, st, sb, sl, sr, st, sb, color_packed, flip_bits, rotation);
+    float aff[6];
+    slice9_build_rotate_aff(x, y, w, h, rotation, aff);
+    emit_slice9_internal(atlas, region_index, x, y, w, h, sl, sr, st, sb, sl, sr, st, sb, color_packed, flip_bits, aff);
+}
+
+void nt_sprite_renderer_emit_slice9_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
+                                           uint8_t flip_bits, const float aff[6]) {
+    emit_slice9_internal(atlas, region_index, x, y, w, h, sl, sr, st, sb, sl, sr, st, sb, color_packed, flip_bits, aff);
 }
 
 void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
                                              uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation) {
-    emit_slice9_internal(atlas, region_index, x, y, w, h, src_sl, src_sr, src_st, src_sb, dst_sl, dst_sr, dst_st, dst_sb, color_packed, flip_bits, rotation);
+    float aff[6];
+    slice9_build_rotate_aff(x, y, w, h, rotation, aff);
+    emit_slice9_internal(atlas, region_index, x, y, w, h, src_sl, src_sr, src_st, src_sb, dst_sl, dst_sr, dst_st, dst_sb, color_packed, flip_bits, aff);
+}
+
+void nt_sprite_renderer_emit_slice9_explicit_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
+                                                    uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]) {
+    emit_slice9_internal(atlas, region_index, x, y, w, h, src_sl, src_sr, src_st, src_sb, dst_sl, dst_sr, dst_st, dst_sb, color_packed, flip_bits, aff);
 }
 // #endregion
 
@@ -1064,8 +1098,8 @@ void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t regio
  * atlas_border × slice9_scale → corners look bigger/smaller WITHOUT changing
  * which atlas pixels feed the corner. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
-                                                float rotation) {
+static void emit_slice9_from_region_impl(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
+                                         const float aff[6]) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9_from_region: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9_from_region: atlas must be READY");
@@ -1073,19 +1107,29 @@ void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t re
 
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
     if (r->vertex_count == 0U) {
-        return; /* tombstone or out-of-range */
+        return;
     }
-    /* SRC borders = atlas-baked (drives UV cut, never scaled). */
     const uint16_t src_l = r->slice9_lrtb[0];
     const uint16_t src_r = r->slice9_lrtb[1];
     const uint16_t src_t = r->slice9_lrtb[2];
     const uint16_t src_b = r->slice9_lrtb[3];
-    /* DST borders = src * scale (drives destination corner size). */
     const uint16_t dst_l = nt_sprite_renderer_scale_slice9_border(src_l, slice9_scale);
     const uint16_t dst_r = nt_sprite_renderer_scale_slice9_border(src_r, slice9_scale);
     const uint16_t dst_t = nt_sprite_renderer_scale_slice9_border(src_t, slice9_scale);
     const uint16_t dst_b = nt_sprite_renderer_scale_slice9_border(src_b, slice9_scale);
-    emit_slice9_internal(atlas, region_index, x, y, w, h, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, color_packed, flip_bits, rotation);
+    emit_slice9_internal(atlas, region_index, x, y, w, h, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, color_packed, flip_bits, aff);
+}
+
+void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
+                                                float rotation) {
+    float aff[6];
+    slice9_build_rotate_aff(x, y, w, h, rotation, aff);
+    emit_slice9_from_region_impl(atlas, region_index, x, y, w, h, slice9_scale, color_packed, flip_bits, aff);
+}
+
+void nt_sprite_renderer_emit_slice9_from_region_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
+                                                       const float aff[6]) {
+    emit_slice9_from_region_impl(atlas, region_index, x, y, w, h, slice9_scale, color_packed, flip_bits, aff);
 }
 // #endregion
 

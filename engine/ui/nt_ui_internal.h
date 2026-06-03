@@ -70,24 +70,22 @@ typedef struct {
  * formulas + the offset cascade in nt_ui_create_context must update together. */
 typedef struct {
     float a, b, c, d, tx, ty;
-    float scale_x, scale_y, rotation, opacity;
+    float opacity;
+    float _pad;
 } nt_ui_baked_xform_t;
-_Static_assert(sizeof(nt_ui_baked_xform_t) == 40, "nt_ui_baked_xform_t fixed at 40B (a,b,c,d,tx,ty,scale_x,scale_y,rotation,opacity)");
+_Static_assert(sizeof(nt_ui_baked_xform_t) == 32, "nt_ui_baked_xform_t fixed at 32B (a,b,c,d,tx,ty,opacity, pad to 8B alignment)");
 
-/* DFS frame for build_tree's traversal. Decomposed scale/rotation cached so
- * each child inherits without re-deriving via atan2/sqrt. */
+/* DFS frame for build_tree's traversal — full affine + opacity, no decomposition. */
 typedef struct {
     int32_t elem_idx;
     float a, b, c, d, tx, ty;
     float opacity;
-    float scale_x, scale_y, rotation;
     int32_t children_cursor;
 } nt_ui_dfs_frame_t;
-/* DFS frame = 4 (elem_idx) + 24 (a,b,c,d,tx,ty) + 4 (opacity) + 12 (scale,rot) + 4 (cursor) = 48B.
- * At NT_UI_TREE_DFS_DEPTH_CAP=256, total stack = 12 KB independent of max_elements. */
-_Static_assert(sizeof(nt_ui_dfs_frame_t) == 48, "nt_ui_dfs_frame_t fixed at 48B");
+/* 4 (elem_idx) + 24 (a..ty) + 4 (opacity) + 4 (cursor) = 36B. Aligned to 4B = 36B. */
+_Static_assert(sizeof(nt_ui_dfs_frame_t) == 36, "nt_ui_dfs_frame_t fixed at 36B");
 
-/* Header-only helper — used by both build_tree and the walker. */
+/* Header-only helper — identity baked xform (passed to dfs seed + walker OOB). */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     return (nt_ui_baked_xform_t){
         .a = 1.0F,
@@ -96,10 +94,8 @@ static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
         .d = 1.0F,
         .tx = 0.0F,
         .ty = 0.0F,
-        .scale_x = 1.0F,
-        .scale_y = 1.0F,
-        .rotation = 0.0F,
         .opacity = 1.0F,
+        ._pad = 0.0F,
     };
 }
 

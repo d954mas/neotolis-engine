@@ -321,21 +321,18 @@ static void test_dispatch_rect_asymmetric_radii_no_over_clamp(void) {
     /* 1 center + 4 * 7 arc points = 29 verts. */
     TEST_ASSERT_EQUAL_UINT32(29U, nt_sprite_renderer_test_last_emit_vertex_count());
 
-    /* Y-flip + corner swap in dispatch_command (nt_ui.c). Vertex 1 is the
-     * function's "TL" arc west point, which after the swap lives at the
-     * world bottom-left and carries the SWAPPED radius (input.bottomLeft=10,
-     * NOT input.topLeft=40). Expected py = world_y + cr.topLeft_swapped =
-     * (vh - bb.y - bb.h) + bl_orig = 600 - 0 - 60 + 10 = 550. The non-clamp
-     * invariant (radii kept asymmetric, never halved) is what's under test;
-     * the precise vertex it lands on changed when the walker started
-     * Y-flipping bboxes to match GL bottom-left. */
+    /* Walker's world_aff carries the GL Y-flip directly — no corner swap in
+     * dispatch. Vertex 1 is the TL arc west point with the unswapped TL radius
+     * (input.topLeft=40). Expected py = vh - (y + tl) = 600 - 0 - 40 = 560.
+     * The non-clamp invariant (radii kept asymmetric, never halved) is what's
+     * under test; the precise vertex pins which radius landed where. */
     float pos[3];
     nt_sprite_renderer_test_last_emit_position(1U, pos);
     const int32_t px = (int32_t)pos[0];
     const int32_t py = (int32_t)pos[1];
     TEST_ASSERT_TRUE(px == 0 || px == -1);
-    TEST_ASSERT_GREATER_THAN_INT32(545, py);
-    TEST_ASSERT_LESS_OR_EQUAL_INT32(550, py);
+    TEST_ASSERT_GREATER_THAN_INT32(555, py);
+    TEST_ASSERT_LESS_OR_EQUAL_INT32(560, py);
 }
 
 /* Partial widths with rounded corners: inner radius clamps to 0 on zero-width

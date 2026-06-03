@@ -438,9 +438,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
         .tx = seed->tx,
         .ty = seed->ty,
         .opacity = seed->opacity,
-        .scale_x = seed->scale_x,
-        .scale_y = seed->scale_y,
-        .rotation = seed->rotation,
         .children_cursor = 0,
     };
 
@@ -458,9 +455,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             float tx = f->tx;
             float ty = f->ty;
             float op = f->opacity;
-            float sx = f->scale_x;
-            float sy = f->scale_y;
-            float rot = f->rotation;
 
             if (ad != NULL) {
                 if ((ad->flags & NT_UI_ELEM_FLAG_HAS_TRANSFORM) != 0U) {
@@ -469,10 +463,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                     const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
                     const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
                     compose_transform_level(&ad->transform, cx, cy, &a, &b, &c, &d, &tx, &ty);
-                    sx *= ad->transform.scale_x;
-                    sy *= ad->transform.scale_y;
-                    NT_ASSERT(sx > 0.0F && sy > 0.0F && "build_tree: negative accumulated scale breaks atan2 rotation extraction");
-                    rot = atan2f(c, a);
                 }
                 if ((ad->flags & NT_UI_ELEM_FLAG_HAS_OPACITY) != 0U) {
                     op *= ad->opacity;
@@ -485,10 +475,8 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                 .d = d,
                 .tx = tx,
                 .ty = ty,
-                .scale_x = sx,
-                .scale_y = sy,
-                .rotation = rot,
                 .opacity = op,
+                ._pad = 0.0F,
             };
             f->a = a;
             f->b = b;
@@ -497,9 +485,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             f->tx = tx;
             f->ty = ty;
             f->opacity = op;
-            f->scale_x = sx;
-            f->scale_y = sy;
-            f->rotation = rot;
         }
 
         /* Text leaves don't have .children — guard before dereferencing. */
@@ -519,9 +504,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                 .tx = f->tx,
                 .ty = f->ty,
                 .opacity = f->opacity,
-                .scale_x = f->scale_x,
-                .scale_y = f->scale_y,
-                .rotation = f->rotation,
                 .children_cursor = 0,
             };
         } else {

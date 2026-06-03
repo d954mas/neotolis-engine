@@ -130,6 +130,18 @@ void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t re
 void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
                                              uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation);
 
+/* Affine variants of the three slice9 entry points. aff = {a,b,c,d,tx,ty} —
+ * applied to each of the 16 grid vertices as p' = (a·x + b·y + tx, c·x + d·y + ty).
+ * Use when caller already has a composed 2×3 affine (UI walker, custom animation)
+ * and wants to avoid the cos/sin path + the shear inherent in non-uniform-scale
+ * × rotation compositions that the rotation-based variants can't represent. */
+void nt_sprite_renderer_emit_slice9_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
+                                           uint8_t flip_bits, const float aff[6]);
+void nt_sprite_renderer_emit_slice9_from_region_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
+                                                       const float aff[6]);
+void nt_sprite_renderer_emit_slice9_explicit_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
+                                                    uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]);
+
 #include "core/nt_assert.h"
 
 /* Round-nearest scale of a slice9 border to uint16_t with overflow assert.

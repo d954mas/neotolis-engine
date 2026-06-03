@@ -49,6 +49,10 @@ static bool baked_is_identity(const nt_ui_baked_xform_t *bk) {
            near_eq(bk->opacity, 1.0F, 1e-5F);
 }
 
+/* Decompose the rotation from the composed affine. Sound for rotate-scale
+ * (no shear) compositions, which is the only kind these tests build. */
+static float baked_rotation(const nt_ui_baked_xform_t *bk) { return atan2f(bk->c, bk->a); }
+
 // #endregion
 
 // #region tests
@@ -88,7 +92,7 @@ static void test_single_xform_root(void) {
     bool found = false;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (!baked_is_identity(bk) && fabsf(bk->rotation - DEG2RAD(30.0F)) <= 1e-3F) {
+        if (!baked_is_identity(bk) && fabsf(baked_rotation(bk) - DEG2RAD(30.0F)) <= 1e-3F) {
             found = true;
             break;
         }
@@ -116,7 +120,7 @@ static void test_chain_xform_2level(void) {
     bool found_inner = false;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->rotation - DEG2RAD(30.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(30.0F)) <= 1e-3F) {
             found_inner = true;
             break;
         }
@@ -179,7 +183,7 @@ static void test_floating_attach_to_root_identity_seed(void) {
         if (root_idx > 0 && baked_is_identity(bk)) {
             /* Floating root with identity baked = tooltip. */
             tooltip_idx = i;
-        } else if (root_idx < 0 && fabsf(bk->rotation - DEG2RAD(45.0F)) <= 1e-3F) {
+        } else if (root_idx < 0 && fabsf(baked_rotation(bk) - DEG2RAD(45.0F)) <= 1e-3F) {
             /* Non-root element with 45deg = wrap (composed its own xform via main-tree DFS). */
             found_wrap_45 = true;
         }
@@ -209,7 +213,7 @@ static void test_floating_attach_to_parent_inherits_xform(void) {
         const int32_t root_idx = nt_ui_internal_test_get_tree_root_for_elem(s_fx.ctx, i);
         if (root_idx > 0) {
             const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-            if (fabsf(bk->rotation - DEG2RAD(45.0F)) <= 1e-3F) {
+            if (fabsf(baked_rotation(bk) - DEG2RAD(45.0F)) <= 1e-3F) {
                 found = true;
                 break;
             }
@@ -238,7 +242,7 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     int32_t rot_count = 0;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->rotation - DEG2RAD(15.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(15.0F)) <= 1e-3F) {
             rot_count++;
         }
     }
@@ -269,7 +273,7 @@ static void test_floating_inside_floating_chain(void) {
     bool found = false;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->rotation - DEG2RAD(30.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(30.0F)) <= 1e-3F) {
             found = true;
             break;
         }
@@ -297,7 +301,7 @@ static void test_floating_with_own_xform_composes_on_seed(void) {
     bool found_30 = false;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->rotation - DEG2RAD(30.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(30.0F)) <= 1e-3F) {
             found_30 = true;
             break;
         }
@@ -342,7 +346,7 @@ static void test_user_data_xform_macro_copies_transform_by_value(void) {
     bool found_opacity = false;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->rotation - DEG2RAD(25.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(25.0F)) <= 1e-3F) {
             found_xform = true;
         }
         if (near_eq(bk->opacity, 0.7F, 1e-3F)) {
@@ -478,7 +482,7 @@ static void test_multi_ctx_tree_storage_isolated(void) {
     bool a_has_60 = false;
     for (int32_t i = 0; i < Na; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->rotation - DEG2RAD(60.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(60.0F)) <= 1e-3F) {
             a_has_60 = true;
             break;
         }
@@ -488,7 +492,7 @@ static void test_multi_ctx_tree_storage_isolated(void) {
     bool b_has_60 = false;
     for (int32_t i = 0; i < Nb; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(ctx_b, i);
-        if (fabsf(bk->rotation - DEG2RAD(60.0F)) <= 1e-3F) {
+        if (fabsf(baked_rotation(bk) - DEG2RAD(60.0F)) <= 1e-3F) {
             b_has_60 = true;
             break;
         }

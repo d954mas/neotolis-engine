@@ -488,24 +488,56 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 // #endregion
 
 // #region helper_emit_screen_rect
-static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, float rotation) {
-    if (rotation == 0.0F) {
-        const float m[16] = {
-            w, 0.0F, 0.0F, 0.0F, 0.0F, h, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, x, y, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
-    } else {
-        const float rcx = x + (w * 0.5F);
-        const float rcy = y + (h * 0.5F);
-        const float hw = w * 0.5F;
-        const float hh = h * 0.5F;
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float m[16] = {
-            w * rc, w * rs, 0, 0, h * (-rs), h * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
-        };
-        nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
-    }
+/* Build mat4 = aff · T(x, y+h) · S(w, -h). Unit-quad (0,0) lands at LAYOUT
+ * (x, y+h) — Clay's bottom-left of the bbox — which the Y-flipped world aff
+ * sends to GL bottom-left. Negative -h in the local scale offsets the Y-flip
+ * inside the aff so the atlas texture renders right-side-up. */
+static inline void build_quad_mat4(const float aff[6], float x, float y, float w, float h, float out_m[16]) {
+    const float ox = x;
+    const float oy = y + h;
+    out_m[0] = aff[0] * w;
+    out_m[1] = aff[2] * w;
+    out_m[2] = 0.0F;
+    out_m[3] = 0.0F;
+    out_m[4] = -aff[1] * h;
+    out_m[5] = -aff[3] * h;
+    out_m[6] = 0.0F;
+    out_m[7] = 0.0F;
+    out_m[8] = 0.0F;
+    out_m[9] = 0.0F;
+    out_m[10] = 1.0F;
+    out_m[11] = 0.0F;
+    out_m[12] = (aff[0] * ox) + (aff[1] * oy) + aff[4];
+    out_m[13] = (aff[2] * ox) + (aff[3] * oy) + aff[5];
+    out_m[14] = 0.0F;
+    out_m[15] = 1.0F;
+}
+
+/* Build mat4 carrying the affine alone — for callers whose vertex positions are
+ * already in layout-space (rounded rect tessellation, square border segments). */
+static inline void build_affine_mat4(const float aff[6], float out_m[16]) {
+    out_m[0] = aff[0];
+    out_m[1] = aff[2];
+    out_m[2] = 0.0F;
+    out_m[3] = 0.0F;
+    out_m[4] = aff[1];
+    out_m[5] = aff[3];
+    out_m[6] = 0.0F;
+    out_m[7] = 0.0F;
+    out_m[8] = 0.0F;
+    out_m[9] = 0.0F;
+    out_m[10] = 1.0F;
+    out_m[11] = 0.0F;
+    out_m[12] = aff[4];
+    out_m[13] = aff[5];
+    out_m[14] = 0.0F;
+    out_m[15] = 1.0F;
+}
+
+static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float aff[6]) {
+    float m[16];
+    build_quad_mat4(aff, x, y, w, h, m);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
 }
 // #endregion
 
@@ -540,7 +572,7 @@ static inline void clamp_radii_css3(float w, float h, float *tl, float *tr, floa
 
 // #region helper_emit_rounded_rect
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, float rotation) {
+static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, const float aff[6]) {
     float tl = cr.topLeft;
     float tr = cr.topRight;
     float bl = cr.bottomLeft;
@@ -550,7 +582,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     const float half_h = h * 0.5F;
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, rotation);
+        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, aff);
         return;
     }
 
@@ -624,50 +656,41 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         indices[ii++] = next;
     }
 
-    if (rotation == 0.0F) {
-        const float identity[16] = {
-            1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
-    } else {
-        /* Rotate around rect center: T(cx,cy) * R(rot) * T(-cx,-cy) */
-        const float rcx = x + half_w;
-        const float rcy = y + half_h;
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float mat[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
-    }
+    (void)half_w;
+    (void)half_h;
+    float mat[16];
+    build_affine_mat4(aff, mat);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
 }
 // #endregion
 
 // #region helper_emit_border
-/* Top/bottom run full width; left/right inset to avoid corner overlap.
- * With rotation, emits all segments as one mesh rotated around border center. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, float rotation) {
+static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float aff[6]) {
     const float top = (float)widths.top;
     const float bot = (float)widths.bottom;
     const float lft = (float)widths.left;
     const float rgt = (float)widths.right;
-    if (rotation == 0.0F) {
+    /* Axis-aligned fast path: per-edge rect emit avoids the geometry mesh.
+     * b=c=0 means no rotation/shear (pure scale + translate, including the
+     * walker's Y-flip diag = -1) — each rect goes through build_quad_mat4. */
+    const bool axis_aligned = (aff[1] == 0.0F && aff[2] == 0.0F);
+    if (axis_aligned) {
         if (widths.top) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, aff);
         }
         if (widths.bottom) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, aff);
         }
         if (widths.left) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, aff);
         }
         if (widths.right) {
-            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, aff);
         }
         return;
     }
-    /* Build quads as geometry; rotate around border center. Max 4 quads = 16 verts, 24 indices. */
+    /* Build 4 quads as one geometry mesh through the affine. Max 16 verts, 24 indices. */
     float positions[16][2];
     uint16_t indices[24];
     uint32_t vi = 0;
@@ -759,13 +782,8 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
     if (vi == 0) {
         return;
     }
-    const float rcx = bb.x + (bb.width * 0.5F);
-    const float rcy = bb.y + (bb.height * 0.5F);
-    const float rc = cosf(rotation);
-    const float rs = sinf(rotation);
-    const float mat[16] = {
-        rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
-    };
+    float mat[16];
+    build_affine_mat4(aff, mat);
     nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, col);
 }
 
@@ -799,7 +817,7 @@ static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radi
 /* Caller (emit_border) clamps radii and guarantees at least one is non-zero. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed,
-                                float rotation) {
+                                const float aff[6]) {
     const float x = bb.x;
     const float y = bb.y;
     const float w = bb.width;
@@ -834,25 +852,12 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
         indices[ii++] = out_n;
     }
 
-    if (rotation == 0.0F) {
-        const float identity[16] = {
-            1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
-    } else {
-        /* Rotate around border center: T(cx,cy) * R(rot) * T(-cx,-cy) */
-        const float rcx = bb.x + (bb.width * 0.5F);
-        const float rcy = bb.y + (bb.height * 0.5F);
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float mat[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
-    }
+    float mat[16];
+    build_affine_mat4(aff, mat);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
 }
 
-static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float rotation) {
+static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float aff[6]) {
     const Clay_BorderRenderData *b = &c->renderData.border;
     const Clay_BoundingBox bb = c->boundingBox;
     const float top = (float)b->width.top;
@@ -870,16 +875,16 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     clamp_radii_css3(bb.width, bb.height, &tl, &tr, &bl, &br);
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, rotation);
+        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, aff);
         return;
     }
-    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, rotation);
+    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, aff);
 }
 // #endregion
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, float rotation) {
+static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -901,9 +906,11 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
         return; /* tombstone */
     }
 
-    /* UI rotation center: default center (0.5), override from style flag. */
-    const float ox = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F;
-    const float oy = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F;
+    /* origin override only affects the local atlas-region pivot inside emit_region;
+     * full-affine path expresses the pivot through aff[4],aff[5]. Kept for future
+     * non-centered slice9 wrapping decisions. */
+    (void)((p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F);
+    (void)((p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F);
 
     /* Auto-slice9: flag OR non-zero lrtb = override; flag adds ability to
      * override with zeros (disable slice9). Backward compat: non-zero lrtb
@@ -917,7 +924,6 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
 
     if (has_s9_override || region_slice9) {
         if (has_s9_override) {
-            /* SRC = override (UV cut), DST = override × scale (corner size). */
             const uint16_t src_l = p->slice9_override[0];
             const uint16_t src_r = p->slice9_override[1];
             const uint16_t src_t = p->slice9_override[2];
@@ -926,10 +932,9 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
             const uint16_t dst_r = nt_sprite_renderer_scale_slice9_border(src_r, s9_scale);
             const uint16_t dst_t = nt_sprite_renderer_scale_slice9_border(src_t, s9_scale);
             const uint16_t dst_b = nt_sprite_renderer_scale_slice9_border(src_b, s9_scale);
-            nt_sprite_renderer_emit_slice9_explicit(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, col, p->flip_bits, rotation);
+            nt_sprite_renderer_emit_slice9_explicit_affine(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, col, p->flip_bits, aff);
         } else {
-            /* Atlas-driven path: src = atlas-baked, dst = src*scale (inside helper). */
-            nt_sprite_renderer_emit_slice9_from_region(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, s9_scale, col, p->flip_bits, rotation);
+            nt_sprite_renderer_emit_slice9_from_region_affine(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, s9_scale, col, p->flip_bits, aff);
         }
         return;
     }
@@ -941,32 +946,22 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
 
-    /* UI images fill Clay bbox from top-left — origin (0,0) for positioning.
-     * ox/oy from atlas/override only affects rotation center, not position. */
-    if (rotation == 0.0F) {
-        const float m[16] = {
-            sx_f, 0.0F, 0.0F, 0.0F, 0.0F, sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
-    } else {
-        const float rcx = bb.x + (ox * bb.width);
-        const float rcy = bb.y + (oy * bb.height);
-        const float hw = ox * bb.width;
-        const float hh = oy * bb.height;
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float m[16] = {
-            sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
-        };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
-    }
+    /* Same Y-flip convention as build_quad_mat4 — atlas's local (0,0) lands at
+     * GL-bottom-left. sx_f, sy_f scale the atlas region into the bbox. */
+    float m[16];
+    build_quad_mat4(aff, bb.x, bb.y, src_w, src_h, m);
+    m[0] *= sx_f / 1.0F;
+    m[1] *= sx_f / 1.0F;
+    m[4] *= sy_f / 1.0F;
+    m[5] *= sy_f / 1.0F;
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
 }
 // #endregion
 
 // #region helper_emit_text
 /* Pure text emit: no sprite renderer knowledge. dispatch_command handles
  * the sprite_flush before and the lazy sprite rebind after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, float text_rotation) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float aff[6]) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -982,24 +977,12 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
     const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
 
-    float m[16];
-    if (text_rotation == 0.0F) {
-        const float id[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, c->boundingBox.x, baseline_y, 0, 1};
-        memcpy(m, id, sizeof m);
-    } else {
-        /* M = T(center) * R(θ) * T(text_origin - center)
-         * text_origin = (bbox.x, baseline_y), center = bbox center */
-        const float bcx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-        const float bcy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-        const float dx = c->boundingBox.x - bcx;
-        const float dy = baseline_y - bcy;
-        const float rc = cosf(text_rotation);
-        const float rs = sinf(text_rotation);
-        const float rot[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, bcx + (rc * dx) - (rs * dy), bcy + (rs * dx) + (rc * dy), 0, 1,
-        };
-        memcpy(m, rot, sizeof m);
-    }
+    /* M = aff · T(bbox.x, baseline_y) — text origin in layout space then world affine. */
+    const float ox = c->boundingBox.x;
+    const float oy = baseline_y;
+    const float m[16] = {
+        aff[0], aff[2], 0.0F, 0.0F, aff[1], aff[3], 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * ox) + (aff[1] * oy) + aff[4], (aff[2] * ox) + (aff[3] * oy) + aff[5], 0.0F, 1.0F,
+    };
     const float color[4] = {
         t->textColor.r / 255.0F,
         t->textColor.g / 255.0F,
@@ -1129,9 +1112,6 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 // #region walker_state
 typedef struct {
     float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
-    float accum_scale_x;
-    float accum_scale_y;
-    float accum_rotation;
     float accum_opacity;
 } nt_ui_walker_state_t;
 
@@ -1142,9 +1122,6 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->aff_d = 1.0F;
     ws->aff_tx = 0;
     ws->aff_ty = 0;
-    ws->accum_scale_x = 1.0F;
-    ws->accum_scale_y = 1.0F;
-    ws->accum_rotation = 0;
     ws->accum_opacity = 1.0F;
 }
 
@@ -1221,19 +1198,18 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
-    /* Apply accumulated 2D affine: pos' = pos * M + T.
-     * Position uses full affine; size uses accum_scale (uniform).
-     * Rotation negated for renderers: affine is Clay Y-down, GL is Y-up. */
-    const float scx = ws->accum_scale_x;
-    const float scy = ws->accum_scale_y;
-    const float orig_cx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-    const float orig_cy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-    const float tcx = (orig_cx * ws->aff_a) + (orig_cy * ws->aff_b) + ws->aff_tx;
-    const float tcy = (orig_cx * ws->aff_c) + (orig_cy * ws->aff_d) + ws->aff_ty;
-    const float sw = c->boundingBox.width * scx;
-    const float sh = c->boundingBox.height * scy;
-    Clay_BoundingBox sbb = {.x = tcx - (sw * 0.5F), .y = tcy - (sh * 0.5F), .width = sw, .height = sh};
-    const float world_y = vy + vh - sbb.y - sbb.height;
+    /* World-space affine: composes tree_baked (Clay Y-down) with the per-frame
+     * GL Y-flip in one 2×3 matrix. Each emit_* applies this to every output
+     * vertex; no per-vertex Y-flip arithmetic remains.
+     *   layout point P → Clay-world  = (a·P.x + b·P.y + tx, c·P.x + d·P.y + ty)
+     *   Clay-world Q  → GL-world     = (Q.x, vy + vh - Q.y)
+     *   combined: a' = a, b' = b, c' = -c, d' = -d, tx' = tx, ty' = vy+vh-ty. */
+    const float world_aff[6] = {
+        ws->aff_a, ws->aff_b, -ws->aff_c, -ws->aff_d, ws->aff_tx, vy + vh - ws->aff_ty,
+    };
+    /* Uniform-scale magnitude for text font sizing; preserves crisp glyphs under
+     * size changes. atan2-free; falls back to column norm of the world affine. */
+    const float text_scale = sqrtf((ws->aff_a * ws->aff_a) + (ws->aff_c * ws->aff_c));
 
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
@@ -1244,104 +1220,75 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
         col = apply_opacity(col, ws->accum_opacity);
-        const Clay_CornerRadius cr = {
-            .topLeft = r->cornerRadius.bottomLeft,
-            .topRight = r->cornerRadius.bottomRight,
-            .bottomLeft = r->cornerRadius.topLeft,
-            .bottomRight = r->cornerRadius.topRight,
-        };
-        emit_rounded_rect(ctx->atlas, ctx->white_region, sbb.x, world_y, sbb.width, sbb.height, cr, col, -ws->accum_rotation);
+        /* No top↔bottom corner swap: world_aff carries the GL Y-flip, so an arc
+         * tessellated at layout (x, y) lands at the correct visual position. */
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_aff);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         counters->border_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        Clay_BorderRenderData *b = &local.renderData.border;
-        const Clay_BorderWidth wo = b->width;
-        b->width.top = wo.bottom;
-        b->width.bottom = wo.top;
-        const Clay_CornerRadius cro = b->cornerRadius;
-        b->cornerRadius.topLeft = cro.bottomLeft;
-        b->cornerRadius.topRight = cro.bottomRight;
-        b->cornerRadius.bottomLeft = cro.topLeft;
-        b->cornerRadius.bottomRight = cro.topRight;
-        /* Apply opacity to border color */
-        b->color.a *= ws->accum_opacity;
-        emit_border(ctx, &local, -ws->accum_rotation);
+        local.renderData.border.color.a *= ws->accum_opacity;
+        emit_border(ctx, &local, world_aff);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         counters->text_command_count++;
-        /* Drain sprite before switching to text pipeline; mark for lazy rebind. */
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         local.renderData.text.textColor.a *= ws->accum_opacity;
-        emit_text(ctx, &local, fmaxf(scx, scy), -ws->accum_rotation);
+        emit_text(ctx, &local, text_scale, world_aff);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         counters->image_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        /* Modify backgroundColor alpha for opacity -- emit_image reads it. */
         if (ws->accum_opacity < 1.0F) {
             Clay_Color tint = local.renderData.image.backgroundColor;
             const bool untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
             if (untinted) {
-                /* Default "untinted" maps to 0xFFFFFFFF; apply opacity. */
                 local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F * ws->accum_opacity};
             } else {
                 local.renderData.image.backgroundColor.a *= ws->accum_opacity;
             }
         }
-        emit_image(&local, -ws->accum_rotation);
+        emit_image(&local, world_aff);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
-        if (ws->accum_rotation != 0.0F) {
-            /* AABB of rotated scissor rect in Clay Y-down space */
-            const float cx = sbb.x + (sbb.width * 0.5F);
-            const float cy = sbb.y + (sbb.height * 0.5F);
-            const float hw = sbb.width * 0.5F;
-            const float hh = sbb.height * 0.5F;
-            const float rot = ws->accum_rotation;
-            const float rc = cosf(rot);
-            const float rs = sinf(rot);
-            const float corners[4][2] = {{cx - hw, cy - hh}, {cx + hw, cy - hh}, {cx + hw, cy + hh}, {cx - hw, cy + hh}};
-            float mn_x = corners[0][0];
-            float mn_y = corners[0][1];
-            float mx_x = corners[0][0];
-            float mx_y = corners[0][1];
-            for (int ci = 0; ci < 4; ci++) {
-                const float dx = corners[ci][0] - cx;
-                const float dy = corners[ci][1] - cy;
-                const float rx = (dx * rc) - (dy * rs) + cx;
-                const float ry = (dx * rs) + (dy * rc) + cy;
-                if (rx < mn_x) {
-                    mn_x = rx;
-                }
-                if (ry < mn_y) {
-                    mn_y = ry;
-                }
-                if (rx > mx_x) {
-                    mx_x = rx;
-                }
-                if (ry > mx_y) {
-                    mx_y = ry;
-                }
-            }
-            local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = mn_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
-        } else if (scx != 1.0F || scy != 1.0F || ws->aff_tx != 0.0F || ws->aff_ty != 0.0F) {
-            /* No rotation but has offset/scale: use transformed sbb directly */
-            local.boundingBox = sbb;
+        /* Scissor wants a GL-Y-up AABB. Transform the 4 layout-space corners
+         * through world_aff and pick min/max. Identity-fast path skips the loop. */
+        const bool is_identity = (world_aff[0] == 1.0F && world_aff[1] == 0.0F && world_aff[2] == 0.0F && world_aff[3] == -1.0F && world_aff[4] == 0.0F);
+        (void)is_identity; /* still compute below — Y-flip alone changes ty even on identity */
+        const float bx = c->boundingBox.x;
+        const float by = c->boundingBox.y;
+        const float bw = c->boundingBox.width;
+        const float bh = c->boundingBox.height;
+        const float corners[4][2] = {{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}};
+        float wx[4];
+        float wy[4];
+        for (int ci = 0; ci < 4; ++ci) {
+            wx[ci] = (world_aff[0] * corners[ci][0]) + (world_aff[1] * corners[ci][1]) + world_aff[4];
+            wy[ci] = (world_aff[2] * corners[ci][0]) + (world_aff[3] * corners[ci][1]) + world_aff[5];
         }
+        float mn_x = wx[0];
+        float mx_x = wx[0];
+        float mn_y = wy[0];
+        float mx_y = wy[0];
+        for (int ci = 1; ci < 4; ++ci) {
+            mn_x = fminf(mn_x, wx[ci]);
+            mx_x = fmaxf(mx_x, wx[ci]);
+            mn_y = fminf(mn_y, wy[ci]);
+            mx_y = fmaxf(mx_y, wy[ci]);
+        }
+        /* scissor_push reads Clay-Y-down then flips internally — convert back. */
+        const float clay_top_y = vy + vh - mx_y;
+        local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = clay_top_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
         scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
         if ((uint32_t)*depth > counters->max_scissor_depth) {
             counters->max_scissor_depth = (uint32_t)*depth;
@@ -1352,8 +1299,26 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
+        /* CUSTOM bbox transformed through world_aff so game handlers see GL-Y-up world coords. */
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
+        const float bx = c->boundingBox.x;
+        const float by = c->boundingBox.y;
+        const float bw = c->boundingBox.width;
+        const float bh = c->boundingBox.height;
+        const float corners[4][2] = {{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}};
+        float mn_x = (world_aff[0] * corners[0][0]) + (world_aff[1] * corners[0][1]) + world_aff[4];
+        float mx_x = mn_x;
+        float mn_y = (world_aff[2] * corners[0][0]) + (world_aff[3] * corners[0][1]) + world_aff[5];
+        float mx_y = mn_y;
+        for (int ci = 1; ci < 4; ++ci) {
+            const float wx = (world_aff[0] * corners[ci][0]) + (world_aff[1] * corners[ci][1]) + world_aff[4];
+            const float wy = (world_aff[2] * corners[ci][0]) + (world_aff[3] * corners[ci][1]) + world_aff[5];
+            mn_x = fminf(mn_x, wx);
+            mx_x = fmaxf(mx_x, wx);
+            mn_y = fminf(mn_y, wy);
+            mx_y = fmaxf(mx_y, wy);
+        }
+        local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = mn_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
         emit_custom(ctx, &local, sprite_pipeline_dirty);
         return;
     }
@@ -1471,9 +1436,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             ws.aff_d = b.d;
             ws.aff_tx = b.tx;
             ws.aff_ty = b.ty;
-            ws.accum_scale_x = b.scale_x;
-            ws.accum_scale_y = b.scale_y;
-            ws.accum_rotation = b.rotation;
             ws.accum_opacity = b.opacity;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
             ++i;
@@ -1524,9 +1486,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                         ws.aff_d = b.d;
                         ws.aff_tx = b.tx;
                         ws.aff_ty = b.ty;
-                        ws.accum_scale_x = b.scale_x;
-                        ws.accum_scale_y = b.scale_y;
-                        ws.accum_rotation = b.rotation;
                         ws.accum_opacity = b.opacity;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
                     }
