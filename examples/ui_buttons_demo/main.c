@@ -642,13 +642,15 @@ static void handle_transform_and_debug_input(void) {
         s_xform_scale = 1.0F;
         s_xform_deg = 0.0F;
     }
-    /* D toggles the inspector. No-op unless built with -DNT_UI_DEBUG_TOOLS=ON. */
+#endif
+    /* D toggles the inspector. Available on web too — arrow/page/Q/E above are
+     * native-only because they conflict with browser scroll/navigation, D doesn't.
+     * No-op when NT_UI_DEBUG_TOOLS=OFF (header inline stub). */
     if (nt_input_key_is_pressed(NT_KEY_D)) {
         const bool now_on = !nt_ui_inspector_is_active(s_ctx);
         nt_ui_inspector_set_active(s_ctx, now_on);
         nt_log_info("ui_buttons_demo: inspector %s", now_on ? "ON" : "OFF");
     }
-#endif
 }
 // #endregion
 
