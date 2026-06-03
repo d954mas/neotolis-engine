@@ -53,10 +53,20 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
 
 #else /* NT_UI_DEBUG_TOOLS */
 
-/* No-op stubs — game code compiles unchanged; debug calls vanish in release. */
+#include "log/nt_log.h"
+
+/* No-op stubs — game code compiles unchanged; debug calls vanish in release.
+ * set_active(true) warns once so users running release builds see in the log
+ * why their toggle does nothing. */
 static inline void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     (void)ctx;
-    (void)on;
+    if (on) {
+        static bool s_warned = false;
+        if (!s_warned) {
+            nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — inspector excluded; toggle is a no-op. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
+            s_warned = true;
+        }
+    }
 }
 static inline bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
     (void)ctx;
