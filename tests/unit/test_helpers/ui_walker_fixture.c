@@ -23,8 +23,9 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-/* Per-binary counter so multiple ui_walker_fixture_make_material() calls
- * inside the same test process do not collide on virtual-pack ids. */
+/* Per-fixture counter so multiple ui_walker_fixture_make_material() calls
+ * inside one test do not collide on virtual-pack ids. Reset to 0 by init
+ * since tearDown destroys all materials and frees their packs. */
 static uint32_t s_vpack_counter;
 
 nt_material_t ui_walker_fixture_make_material(void) {
