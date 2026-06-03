@@ -21,6 +21,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
@@ -385,16 +386,26 @@ static void test_synthetic_scissor_start_marked(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Scan frozen_cmds for SCISSOR_START with nt_layout_index = -1 (synthetic). */
-    bool found_synthetic = false;
+    /* Scan SCISSOR_START commands. There should be BOTH:
+     *  (a) at least one synthetic (root-wrap, marked nt_layout_index = -1)
+     *  (b) at least one per-element (clip_parent's own clip, nt_layout_index >= 0)
+     * Catches a regression that inverts the heuristic and marks ALL scissors
+     * as synthetic. */
+    int32_t synthetic_count = 0;
+    int32_t per_element_count = 0;
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && c->nt_layout_index < 0) {
-            found_synthetic = true;
-            break;
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            continue;
+        }
+        if (c->nt_layout_index < 0) {
+            synthetic_count++;
+        } else {
+            per_element_count++;
         }
     }
-    TEST_ASSERT_TRUE_MESSAGE(found_synthetic, "expected at least one synthetic SCISSOR_START with nt_layout_index = -1");
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(1, synthetic_count);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(1, per_element_count, "per-element SCISSOR_START from CLAY({.clip}) must survive with nt_layout_index >= 0");
 }
 
 /* ---- 14. Empty layout — tree_baked[0] still identity (no game CLAY blocks). ---- */
@@ -412,34 +423,181 @@ static void test_tree_baked_identity_init_on_empty_layout(void) {
     }
 }
 
-/* ---- 15. min_arena_size includes tree storage. ---- */
+/* ---- 15. min_arena_size includes tree storage — tight delta check.
+ *
+ *  Compare min_arena_size at two `max_elements` values. The delta must include
+ *  per-element growth for tree_baked (40B) + tree_root_for_elem (4B), times the
+ *  element count difference. tree_dfs_stack is fixed-size and doesn't scale.
+ *
+ *  A regression that drops one of these arrays from min_arena_size would shrink
+ *  the delta below this lower bound and fire the assert. */
 static void test_min_arena_size_includes_tree_storage(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.max_elements = 1024U;
-    const size_t sz = nt_ui_min_arena_size(&desc);
-    /* tree_baked (40B × 1024) + tree_root_for_elem (4B × 1024) + tree_dfs_stack
-     * (48B × 256) = 40960 + 4096 + 12288 = 57344 B before alignment. With cache
-     * line align (64 B), it rounds up. Assert sz exceeds a conservative floor
-     * that captures these three arrays at minimum. */
-    const size_t floor = 40960U + 4096U + 12288U;
-    TEST_ASSERT_GREATER_OR_EQUAL_size_t(floor, sz);
+    nt_ui_create_desc_t desc_small = nt_ui_create_desc_defaults();
+    desc_small.max_elements = 256U;
+    nt_ui_create_desc_t desc_large = nt_ui_create_desc_defaults();
+    desc_large.max_elements = 1024U;
+
+    const size_t sz_small = nt_ui_min_arena_size(&desc_small);
+    const size_t sz_large = nt_ui_min_arena_size(&desc_large);
+    TEST_ASSERT_GREATER_THAN_size_t(sz_small, sz_large);
+
+    /* Per-element bytes that grow with max_elements (sum across all arrays
+     * that scale): markers (24 × 2 cap) + walker_baked (40) + walker_sorted ×2 (8)
+     * + tree_baked (40) + tree_root_for_elem (4) = 92 + 48 = 140 B per element
+     * (markers cap is max_markers=max_elements*2 by default → 24 × 2 = 48). So
+     * delta for 768 extra elements ≥ 140 × 768 = 107520 B (before cache-line
+     * alignment, which can only INCREASE it). Lower bound is robust to formula
+     * tweaks because we're checking a delta, not absolute. */
+    const size_t per_elem_bytes = (24U * 2U) + 40U + (4U * 2U) + 40U + 4U;
+    const size_t expected_delta_floor = per_elem_bytes * (1024U - 256U);
+    TEST_ASSERT_GREATER_OR_EQUAL_size_t(expected_delta_floor, sz_large - sz_small);
 }
 
-/* ---- 16. last_build_tree_ms records timing. ---- */
-static void test_build_tree_ms_recorded(void) {
+/* ---- 17. Multi-ctx: each ctx gets its own tree storage pointers (no aliasing). ----
+ *
+ *  Creates a second nt_ui_context_t in a separate arena and verifies that the
+ *  test-access accessors return baked entries that diverge once one ctx runs a
+ *  layout with HAS_TRANSFORM while the other stays empty. If storage aliased,
+ *  both ctxes would observe the same baked values. */
+static void test_multi_ctx_tree_storage_isolated(void) {
+    /* Spin up a second ctx without re-running the fixture (which would shut
+     * down the modules s_fx depends on). Use a separate arena slot. */
+    static alignas(NT_UI_ARENA_ALIGN) uint8_t s_arena_b[NT_UI_TEST_ARENA_SIZE];
+    const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    nt_ui_context_t *ctx_b = nt_ui_create_context(s_arena_b, sizeof s_arena_b, &desc);
+    TEST_ASSERT_NOT_NULL(ctx_b);
+    nt_ui_set_atlas_white_region(ctx_b, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
+    nt_ui_set_sprite_material(ctx_b, s_fx.sprite_material);
+    nt_ui_set_text_material(ctx_b, s_fx.text_material);
+    nt_ui_set_font(ctx_b, 0U, s_fx.stub_font);
+
+    /* ctx A: declare a rotated container. ctx B: empty layout. */
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
-    /* Several elements to make the pass do meaningful work. */
-    for (int32_t i = 0; i < 8; ++i) {
-        CLAY({.id = CLAY_IDI("box", i), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}}) {}
+    nt_ui_transform_t rot = nt_ui_transform_defaults();
+    rot.rotation = DEG2RAD(60.0F);
+    CLAY({.id = CLAY_ID("ctx_a_rot"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {}
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_begin(ctx_b, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_end(ctx_b);
+
+    /* ctx A has at least one element with 60deg rotation. */
+    const int32_t Na = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    bool a_has_60 = false;
+    for (int32_t i = 0; i < Na; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (fabsf(bk->rotation - DEG2RAD(60.0F)) <= 1e-3F) {
+            a_has_60 = true;
+            break;
+        }
+    }
+    /* ctx B has no element with 60deg rotation. */
+    const int32_t Nb = nt_ui_internal_test_get_tree_baked_count(ctx_b);
+    bool b_has_60 = false;
+    for (int32_t i = 0; i < Nb; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(ctx_b, i);
+        if (fabsf(bk->rotation - DEG2RAD(60.0F)) <= 1e-3F) {
+            b_has_60 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(a_has_60, "ctx A should have a 60deg-rotated baked entry");
+    TEST_ASSERT_FALSE_MESSAGE(b_has_60, "ctx B (empty layout) must NOT see ctx A's 60deg — storage aliasing");
+
+    nt_ui_destroy_context(ctx_b);
+}
+
+/* ---- 16. last_build_tree_ms records timing + perf budget. ----
+ *
+ *  Builds a layout with ~100 elements (well within typical UI complexity) and
+ *  asserts the build pass completes under 5 ms on native-debug. A regression
+ *  that re-introduces an O(N²) walk or radix sort would fire this alarm. */
+static void test_build_tree_ms_recorded_and_under_budget(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    /* 100 nested boxes + 1 root = 101 elements. Realistic UI bound. */
+    enum { N_BOXES = 100 };
+    for (int32_t i = 0; i < N_BOXES; ++i) {
+        CLAY({.id = CLAY_IDI("box", i), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}}) {}
     }
     nt_ui_end(s_fx.ctx);
 
     const float ms = nt_ui_get_last_build_tree_ms(s_fx.ctx);
-    /* Must be >= 0 (could be 0 on very fast hardware). Defensive check that
-     * the field is populated, not stuck at uninit garbage. */
+    /* Field populated (not garbage). */
     TEST_ASSERT_TRUE_MESSAGE(ms >= 0.0F && ms < 1000.0F, "build_tree_ms outside [0, 1000] — likely uninit/garbage");
+    /* Native-debug budget: 5 ms for 100 elements. O(N) DFS over N=101 with a
+     * single compose_transform_level call per element should run in microseconds
+     * on any reasonable hardware. 5 ms is a 1000× margin for slow CI / valgrind. */
+    TEST_ASSERT_TRUE_MESSAGE(ms < 5.0F, "build_tree exceeded 5 ms perf budget for 100-element layout — likely O(N²) regression");
 }
+
+#if NT_UI_DEBUG_TOOLS
+// #region inspector_active tests
+
+/* ---- 18. Inspector-active layout: build_tree completes without crashing,
+ *         and every inspector-emitted element has identity baked.
+ *
+ *  Inspector emit_layout adds dozens of CLAY blocks with
+ *  NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_*) — singleton element_data with flags=0.
+ *  Build pass should write identity to all of them. This guards a regression
+ *  where inspector elements somehow pick up a composed transform (e.g. a stray
+ *  XFORM on an inspector wrapper). */
+static void test_inspector_subtree_baked_identity(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    /* No user CLAY blocks — let the inspector emit alone. */
+    nt_ui_end(s_fx.ctx);
+
+    /* Inspector emits many elements; tree_baked.length should now exceed the
+     * empty-layout baseline. */
+    const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    TEST_ASSERT_GREATER_THAN_INT32_MESSAGE(10, N, "inspector_active should emit many CLAY elements");
+
+    /* All entries identity — inspector userData is layer-only singletons. */
+    int32_t non_identity = 0;
+    for (int32_t i = 0; i < N; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (!baked_is_identity(bk)) {
+            non_identity++;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(0, non_identity, "every inspector-emitted element should have identity baked");
+}
+
+/* ---- 19. Inspector-active synthetic SCISSOR handling: inspector's scroll panel
+ *         uses ATTACH_TO_PARENT + CLIP_TO_ATTACHED_PARENT inside a CLIP scope,
+ *         producing real synthetic SCISSOR_START commands. Build pass must mark
+ *         them with nt_layout_index = -1 without crashing or corrupting other
+ *         commands. */
+static void test_inspector_active_synthetic_scissor_handled(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_end(s_fx.ctx);
+
+    /* At least one synthetic SCISSOR_START (from inspector's CLIP_TO_ATTACHED_PARENT
+     * floating panel). Plus at least one per-element SCISSOR_START. */
+    int32_t synthetic_count = 0;
+    int32_t per_element_count = 0;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            continue;
+        }
+        if (c->nt_layout_index < 0) {
+            synthetic_count++;
+        } else {
+            per_element_count++;
+        }
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(1, synthetic_count, "inspector's clipTo=ATTACHED_PARENT floating should emit at least one synthetic SCISSOR_START");
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(1, per_element_count, "inspector's CLIP element (scroll pane) should emit a per-element SCISSOR_START");
+}
+
+// #endregion
+#endif /* NT_UI_DEBUG_TOOLS */
 
 // #endregion
 
@@ -460,6 +618,11 @@ int main(void) {
     RUN_TEST(test_synthetic_scissor_start_marked);
     RUN_TEST(test_tree_baked_identity_init_on_empty_layout);
     RUN_TEST(test_min_arena_size_includes_tree_storage);
-    RUN_TEST(test_build_tree_ms_recorded);
+    RUN_TEST(test_multi_ctx_tree_storage_isolated);
+    RUN_TEST(test_build_tree_ms_recorded_and_under_budget);
+#if NT_UI_DEBUG_TOOLS
+    RUN_TEST(test_inspector_subtree_baked_identity);
+    RUN_TEST(test_inspector_active_synthetic_scissor_handled);
+#endif
     return UNITY_END();
 }

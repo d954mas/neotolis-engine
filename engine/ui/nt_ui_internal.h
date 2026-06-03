@@ -97,6 +97,13 @@ typedef struct {
     float a, b, c, d, tx, ty;
     float scale_x, scale_y, rotation, opacity;
 } nt_ui_baked_xform_t;
+/* Pinning the size invariant. nt_ui_min_arena_size + create_context both
+ * count `sizeof(nt_ui_baked_xform_t) * max_elements` × 2 (walker_baked + tree_baked)
+ * plus `sizeof(int32_t) * max_elements` × 3 (walker_sorted + walker_sorted_temp +
+ * tree_root_for_elem). If this struct grows, both formulas + the offset cascade
+ * in nt_ui_create_context must update together. 57b drops walker_baked + the
+ * two sorted arrays; tree_baked + tree_root_for_elem + tree_dfs_stack stay. */
+_Static_assert(sizeof(nt_ui_baked_xform_t) == 40, "nt_ui_baked_xform_t fixed at 40B (a,b,c,d,tx,ty,scale_x,scale_y,rotation,opacity)");
 
 /* Phase 57: DFS frame for build_tree's traversal of Clay's element tree.
  * decomposed scale/rotation cached so each child inherits without re-deriving
@@ -108,6 +115,9 @@ typedef struct {
     float scale_x, scale_y, rotation;
     int32_t children_cursor;
 } nt_ui_dfs_frame_t;
+/* DFS frame = 4 (elem_idx) + 24 (a,b,c,d,tx,ty) + 4 (opacity) + 12 (scale,rot) + 4 (cursor) = 48B.
+ * At NT_UI_TREE_DFS_DEPTH_CAP=256, total stack = 12 KB independent of max_elements. */
+_Static_assert(sizeof(nt_ui_dfs_frame_t) == 48, "nt_ui_dfs_frame_t fixed at 48B");
 
 /* Header-only helper — used by both build_tree and the walker. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
