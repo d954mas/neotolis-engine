@@ -5,6 +5,8 @@
 
 #include "clay.h"
 #include "graphics/nt_gfx.h"
+#include <math.h>
+
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
@@ -406,6 +408,80 @@ static void test_dispatch_image_nonzero_radius_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
+/* Vertex pin for the non-slice9 IMAGE path. Polygon region (source 16×16) into
+ * a 64×64 bbox at (100, 100): atlas vertex (0, 8) — left edge, mid-height in
+ * atlas-Y-up — must land at layout (bb.x, bb.y + bb.h/2) = (100, 132); after
+ * world_aff's Y-flip (vy + vh = 600): GL (100, 600 - 132) = (100, 468).
+ * Catches double-scale or wrong Y-axis composition in emit_image. */
+static void test_dispatch_image_non_slice9_vertex_positions(void) {
+    s_image_payload.atlas = s_fx.atlas.handle;
+    s_image_payload.region_index = s_fx.atlas.polygon_region_idx;
+    s_image_payload.flip_bits = 0;
+
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    c->boundingBox = (Clay_BoundingBox){.x = 100.0F, .y = 100.0F, .width = 64.0F, .height = 64.0F};
+    c->renderData.image.backgroundColor = (Clay_Color){0};
+    c->renderData.image.imageData = &s_image_payload;
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* Polygon vertex 0 lives at atlas-local (0, 8); expected GL (100, 468). */
+    float v0[3];
+    nt_sprite_renderer_test_last_emit_position(0U, v0);
+    TEST_ASSERT_EQUAL_INT(100, (int)v0[0]);
+    TEST_ASSERT_EQUAL_INT(468, (int)v0[1]);
+
+    /* Polygon vertex 3 at atlas-local (16, 16) — atlas top-right in Y-up — must
+     * land at bbox top-right in Y-down layout (164, 100), then GL (164, 500)
+     * via world_aff Y-flip. Catches a wrong-sign Y composition. */
+    float v3[3];
+    nt_sprite_renderer_test_last_emit_position(3U, v3);
+    TEST_ASSERT_EQUAL_INT(164, (int)v3[0]);
+    TEST_ASSERT_EQUAL_INT(500, (int)v3[1]);
+}
+
+/* Vertex-equivalent pin for emit_text. Fixture's stub font has units_per_em=0,
+ * so nt_text_renderer_draw_n captures the model matrix and skips glyph emit.
+ * We verify the matrix construction: m[5] = +1 (NOT -1) — proves the local
+ * Y-flip composes correctly with world_aff's Y-flip so glyph local Y-up isn't
+ * inverted on screen. m[13] = vy+vh - baseline_y_layout puts text baseline at
+ * the right GL coordinate. */
+static void test_dispatch_text_model_matrix_preserves_y_up(void) {
+    nt_text_renderer_test_reset_call_counters();
+
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
+    c->boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 60.0F, .width = 100.0F, .height = 20.0F};
+    static const char *kText = "AB";
+    c->renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = kText, .baseChars = kText};
+    c->renderData.text.textColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
+    c->renderData.text.fontId = 0; /* bound stub: units_per_em=0 → silent skip after capture */
+    c->renderData.text.fontSize = 14;
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
+    float m[16];
+    memcpy(m, nt_text_renderer_test_last_model(), sizeof m);
+    /* Linear part: m[0]=1, m[5]=+1 (Y-up preserved). m[5] = -1 would render
+     * glyphs upside-down — the bug this test pins against. Promote to scaled
+     * int so Unity's no-float assertions can compare. */
+    TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[0] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(0, (int)lrintf(m[1] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(0, (int)lrintf(m[4] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[5] * 1000.0F));
+    /* Translate part: ox = bbox.x = 50; baseline_y (layout) = bbox.y +
+     * (bbox.h - text_h)/2 - descent*scale = 60 + 10 + 0 = 70 (stub font has
+     * scale=0). GL baseline = vy+vh - 70 = 530. */
+    TEST_ASSERT_EQUAL_INT(50, (int)lrintf(m[12]));
+    TEST_ASSERT_EQUAL_INT(530, (int)lrintf(m[13]));
+}
+
 /* Not-READY atlas must silent no-op (async loading is legitimate). */
 static void test_dispatch_image_not_ready_silent(void) {
     nt_ui_image_payload_t bad = {.atlas = {.id = 0xDEADBEEFU}, .region_index = 0, .flip_bits = 0};
@@ -443,6 +519,8 @@ int main(void) {
     RUN_TEST(test_dispatch_custom);
     RUN_TEST(test_dispatch_none_silent_skip);
     RUN_TEST(test_dispatch_image_tinted_packs_color);
+    RUN_TEST(test_dispatch_image_non_slice9_vertex_positions);
+    RUN_TEST(test_dispatch_text_model_matrix_preserves_y_up);
     RUN_TEST(test_dispatch_image_not_ready_silent);
     return UNITY_END();
 }

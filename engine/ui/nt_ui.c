@@ -656,8 +656,6 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         indices[ii++] = next;
     }
 
-    (void)half_w;
-    (void)half_h;
     float mat[16];
     build_affine_mat4(aff, mat);
     nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
@@ -946,14 +944,15 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
 
-    /* Same Y-flip convention as build_quad_mat4 — atlas's local (0,0) lands at
-     * GL-bottom-left. sx_f, sy_f scale the atlas region into the bbox. */
-    float m[16];
-    build_quad_mat4(aff, bb.x, bb.y, src_w, src_h, m);
-    m[0] *= sx_f / 1.0F;
-    m[1] *= sx_f / 1.0F;
-    m[4] *= sy_f / 1.0F;
-    m[5] *= sy_f / 1.0F;
+    /* Region vertices live in source-unit space; map (0,0) → layout (bb.x, bb.y + bb.h)
+     * and (src_w, src_h) → (bb.x + bb.w, bb.y) so atlas-bottom-left lands at GL bottom-left
+     * after world_aff's Y-flip. Local-to-layout: T(bb.x, bb.y+bb.h) · S(sx_f, -sy_f). */
+    const float ox = bb.x;
+    const float oy = bb.y + bb.height;
+    const float m[16] = {
+        aff[0] * sx_f, aff[2] * sx_f, 0.0F, 0.0F, -aff[1] * sy_f, -aff[3] * sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * ox) + (aff[1] * oy) + aff[4], (aff[2] * ox) + (aff[3] * oy) + aff[5],
+        0.0F,          1.0F,
+    };
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
 }
 // #endregion
@@ -977,11 +976,12 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
     const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
 
-    /* M = aff · T(bbox.x, baseline_y) — text origin in layout space then world affine. */
+    /* Text renderer's local frame is Y-up (ascender > 0). world_aff bakes the GL Y-flip
+     * (d == -1 for identity), so we pre-flip local Y to cancel it: M = aff · T · S(1, -1). */
     const float ox = c->boundingBox.x;
     const float oy = baseline_y;
     const float m[16] = {
-        aff[0], aff[2], 0.0F, 0.0F, aff[1], aff[3], 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * ox) + (aff[1] * oy) + aff[4], (aff[2] * ox) + (aff[3] * oy) + aff[5], 0.0F, 1.0F,
+        aff[0], aff[2], 0.0F, 0.0F, -aff[1], -aff[3], 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * ox) + (aff[1] * oy) + aff[4], (aff[2] * ox) + (aff[3] * oy) + aff[5], 0.0F, 1.0F,
     };
     const float color[4] = {
         t->textColor.r / 255.0F,
@@ -1189,9 +1189,9 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
-/* Clay bbox is top-left Y-down; engine renders GL bottom-left Y-up. Local-copy
- * bbox.y rewrite + corner-radii/border-width top<->bottom swap mirrors the
- * scissor_push flip. */
+/* Clay bbox is top-left Y-down; engine renders GL bottom-left Y-up. The Y-flip
+ * lives inside world_aff (d → -d, ty → vy+vh-ty), so no per-command bbox or
+ * corner-radii swap is needed — every emit_* applies world_aff uniformly. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
                              nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
@@ -1207,8 +1207,10 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     const float world_aff[6] = {
         ws->aff_a, ws->aff_b, -ws->aff_c, -ws->aff_d, ws->aff_tx, vy + vh - ws->aff_ty,
     };
-    /* Uniform-scale magnitude for text font sizing; preserves crisp glyphs under
-     * size changes. atan2-free; falls back to column norm of the world affine. */
+    /* X-column magnitude of the world affine — picks one axis under non-uniform
+     * scale (Y is dropped from font sizing on purpose; glyph atlas stays crisp on
+     * the X axis. The full aff still applies inside emit_text, so non-uniform
+     * stretch is visible — only the chosen mip/atlas size is X-driven). */
     const float text_scale = sqrtf((ws->aff_a * ws->aff_a) + (ws->aff_c * ws->aff_c));
 
     switch (c->commandType) {
@@ -1262,9 +1264,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         /* Scissor wants a GL-Y-up AABB. Transform the 4 layout-space corners
-         * through world_aff and pick min/max. Identity-fast path skips the loop. */
-        const bool is_identity = (world_aff[0] == 1.0F && world_aff[1] == 0.0F && world_aff[2] == 0.0F && world_aff[3] == -1.0F && world_aff[4] == 0.0F);
-        (void)is_identity; /* still compute below — Y-flip alone changes ty even on identity */
+         * through world_aff and pick min/max — cost is 4 affine multiplies, dominated
+         * by the GL state change in scissor_push, so no identity-fast-path. */
         const float bx = c->boundingBox.x;
         const float by = c->boundingBox.y;
         const float bw = c->boundingBox.width;

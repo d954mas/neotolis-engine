@@ -49,9 +49,20 @@ static bool baked_is_identity(const nt_ui_baked_xform_t *bk) {
            near_eq(bk->opacity, 1.0F, 1e-5F);
 }
 
-/* Decompose the rotation from the composed affine. Sound for rotate-scale
- * (no shear) compositions, which is the only kind these tests build. */
-static float baked_rotation(const nt_ui_baked_xform_t *bk) { return atan2f(bk->c, bk->a); }
+/* Decompose the rotation from the composed affine. Sound ONLY for rotate-then-uniform-scale
+ * compositions (columns orthogonal, equal length). Asserts to fail loud if the caller
+ * accidentally introduces shear or non-uniform scale — atan2f(c, a) lies in those cases. */
+static float baked_rotation(const nt_ui_baked_xform_t *bk) {
+    const float col0_len = sqrtf((bk->a * bk->a) + (bk->c * bk->c));
+    const float col1_len = sqrtf((bk->b * bk->b) + (bk->d * bk->d));
+    const float ortho = (bk->a * bk->b) + (bk->c * bk->d);
+    NT_ASSERT(fabsf(ortho) < 1e-3F && "baked_rotation: composed affine has shear; helper unsound");
+    NT_ASSERT(fabsf(col0_len - col1_len) < 1e-3F && "baked_rotation: composed affine has non-uniform scale; helper unsound");
+    (void)col0_len;
+    (void)col1_len;
+    (void)ortho;
+    return atan2f(bk->c, bk->a);
+}
 
 // #endregion
 
@@ -596,6 +607,59 @@ static void test_inspector_active_synthetic_scissor_handled(void) {
 
 // #endregion
 
+// #region tests_shear_composition
+/* Outer rotation + inner non-uniform scale produces shear in the composed
+ * affine. build_tree composes as accum_inner = L_inner · L_outer (left-mul),
+ * so the inner's baked = S(2,1) · R(30°). The pre-affine pipeline decomposed
+ * this via atan2(c,a) and lost the shear component, silently diverging from
+ * the hit-test (which used the full 2×3). The refactor keeps all four
+ * coefficients exact. */
+static void test_shear_composition_rotation_then_nonuniform_scale(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+
+    nt_ui_transform_t outer = nt_ui_transform_defaults();
+    outer.rotation = DEG2RAD(30.0F);
+    nt_ui_transform_t inner = nt_ui_transform_defaults();
+    inner.scale_x = 2.0F;
+    inner.scale_y = 1.0F;
+
+    CLAY({.id = CLAY_ID("shear_outer"),
+          .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .userData = (void *)NT_UI_DATA_XFORM(0, &outer, 1.0F)}) {
+        CLAY({.id = CLAY_ID("shear_inner"), .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &inner, 1.0F)}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Expected composed linear part:
+     *   S(2,1) · R(30°) = [[2,0],[0,1]] · [[cos30,-sin30],[sin30,cos30]]
+     *                   = [[2cos30, -2sin30], [sin30, cos30]]
+     *                   ≈ [[1.732, -1.000], [0.500, 0.866]]
+     * Columns: col0=(1.732, 0.5), col1=(-1.0, 0.866).
+     *   col0·col1 = -1.732 + 0.433 = -1.299 ≠ 0 → genuine shear.
+     * Decomposed atan2(c,a) = atan2(0.5, 1.732) ≈ 16.1° (NOT the input 30°)
+     * — proves why the old decomposition was lossy. */
+    const float exp_a = 2.0F * cosf(DEG2RAD(30.0F));
+    const float exp_b = -2.0F * sinf(DEG2RAD(30.0F));
+    const float exp_c = sinf(DEG2RAD(30.0F));
+    const float exp_d = cosf(DEG2RAD(30.0F));
+
+    const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    bool found_inner = false;
+    for (int32_t i = 0; i < N; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (fabsf(bk->a - exp_a) < 1e-3F && fabsf(bk->b - exp_b) < 1e-3F && fabsf(bk->c - exp_c) < 1e-3F && fabsf(bk->d - exp_d) < 1e-3F) {
+            found_inner = true;
+            /* Sanity: columns are non-orthogonal — shear is what we wanted. */
+            const float ortho = (bk->a * bk->b) + (bk->c * bk->d);
+            TEST_ASSERT_TRUE_MESSAGE(fabsf(ortho) > 0.1F, "composed affine should carry shear (col0·col1 != 0)");
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_inner, "expected inner baked = P·C exact (no atan2 decomposition)");
+}
+// #endregion
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_identity_root);
@@ -615,6 +679,7 @@ int main(void) {
     RUN_TEST(test_min_arena_size_includes_tree_storage);
     RUN_TEST(test_multi_ctx_tree_storage_isolated);
     RUN_TEST(test_build_tree_ms_recorded_and_under_budget);
+    RUN_TEST(test_shear_composition_rotation_then_nonuniform_scale);
 #if NT_UI_DEBUG_TOOLS
     RUN_TEST(test_inspector_subtree_baked_identity);
     RUN_TEST(test_inspector_active_synthetic_scissor_handled);
