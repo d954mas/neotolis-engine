@@ -52,6 +52,58 @@ int nt_ui_clay_priv_pointer_pressed(Clay_Context *clay) {
     const Clay_PointerDataInteractionState s = clay->pointerInfo.state;
     return (s == CLAY_POINTER_DATA_PRESSED || s == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) ? 1 : 0;
 }
+
+int32_t nt_ui_clay_priv_layout_index_for_id(Clay_Context *clay, uint32_t id) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_layout_index_for_id: clay must be non-NULL");
+    if (id == 0U) {
+        return -1;
+    }
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(clay);
+    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(id);
+    int32_t idx = -1;
+    if (item != NULL && item->layoutElement != NULL) {
+        idx = (int32_t)(item->layoutElement - clay->layoutElements.internalArray);
+    }
+    Clay_SetCurrentContext(saved);
+    return idx;
+}
+
+int32_t nt_ui_clay_priv_hashmap_slot_for_id(Clay_Context *clay, uint32_t id) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_hashmap_slot_for_id: clay must be non-NULL");
+    if (id == 0U) {
+        return -1;
+    }
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(clay);
+    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(id);
+    int32_t slot = -1;
+    if (item != NULL && item != &Clay_LayoutElementHashMapItem_DEFAULT) {
+        slot = (int32_t)(item - clay->layoutElementsHashMapInternal.internalArray);
+    }
+    Clay_SetCurrentContext(saved);
+    return slot;
+}
+
+bool nt_ui_clay_priv_bbox_for_id(Clay_Context *clay, uint32_t id, float *x, float *y, float *w, float *h) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_bbox_for_id: clay must be non-NULL");
+    if (id == 0U) {
+        return false;
+    }
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(clay);
+    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(id);
+    bool ok = false;
+    if (item != NULL && item != &Clay_LayoutElementHashMapItem_DEFAULT) {
+        *x = item->boundingBox.x;
+        *y = item->boundingBox.y;
+        *w = item->boundingBox.width;
+        *h = item->boundingBox.height;
+        ok = true;
+    }
+    Clay_SetCurrentContext(saved);
+    return ok;
+}
 // #endregion
 
 // #region inspector_internal_accessors
@@ -317,12 +369,9 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
 // #endregion
 
 // #region build_tree
-/* Phase 57: post-EndLayout build pass. Populates ctx->tree_baked for every Clay
- * element with the composed affine + opacity inherited from ancestors. Floating
- * roots seed from tree_baked[parentId] — ATTACH_TO_ROOT → identity (root has no
- * userData), ATTACH_TO_PARENT → lexical parent, ATTACH_TO_ELEMENT_WITH_ID →
- * arbitrary (Clay validates existence at decl). Iterating layoutElements in
- * declaration order is sufficient — Clay rejects forward-referencing parentIds. */
+/* Post-EndLayout pass: composed affine + opacity inherited from ancestors into
+ * tree_baked. Floating roots seed from tree_baked[parentId-resolved index].
+ * Declaration order iteration is sufficient — Clay rejects forward parentIds. */
 
 /* Reads SHARED or TEXT userData on the element. Text leaves have only TEXT
  * config (clay.h:2018-2021); non-text elements never attach TEXT. Mutex-asserted. */
@@ -341,11 +390,40 @@ static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
     return shared_ud ? shared_ud : text_ud;
 }
 
+/* Compose ONE transform level (scale S, rotation θ, center C, offset O) into
+ * the accumulated affine. Local = T(O)*T(C)*R(θ)*S*T(-C); new = local * accum.
+ * Pure Clay Y-down math: NO Y-flip, NO rotation negation — render-only
+ * conversions are applied in walker dispatch_command. */
+static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
+    const float sx = t->scale_x;
+    const float sy = t->scale_y;
+    const float cr = cosf(t->rotation);
+    const float sr = sinf(t->rotation);
+    const float la = cr * sx;
+    const float lb = -(sr * sy);
+    const float lc = sr * sx;
+    const float ld = cr * sy;
+    const float ltx = cx - (la * cx) - (lb * cy) + t->offset_x;
+    const float lty = cy - (lc * cx) - (ld * cy) + t->offset_y;
+    const float na = (la * *a) + (lb * *c);
+    const float nb = (la * *b) + (lb * *d);
+    const float nc = (lc * *a) + (ld * *c);
+    const float nd = (lc * *b) + (ld * *d);
+    const float ntx = (la * *tx) + (lb * *ty) + ltx;
+    const float nty = (lc * *tx) + (ld * *ty) + lty;
+    *a = na;
+    *b = nb;
+    *c = nc;
+    *d = nd;
+    *tx = ntx;
+    *ty = nty;
+}
+
 /* Iterative DFS of an element subtree, propagating accum + opacity from seed to
- * every descendant's tree_baked entry. Floating descendants are skipped (Clay
- * strips them from lexical children at clay.h:1905-1908) — they are processed
- * by the outer iterate-roots loop. Text leaves skip child iteration (their
- * .children union slot aliases textElementData pointer). */
+ * every descendant's tree_baked entry. Floating descendants are skipped — Clay
+ * strips them from lexical children, so the outer iterate-roots loop handles
+ * them. Text leaves skip child iteration (their .children union slot aliases
+ * textElementData pointer). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
@@ -390,7 +468,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                     NT_ASSERT(item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: element's own hashmap lookup failed");
                     const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
                     const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
-                    nt_ui_internal_compose_transform_level(&ad->transform, cx, cy, &a, &b, &c, &d, &tx, &ty);
+                    compose_transform_level(&ad->transform, cx, cy, &a, &b, &c, &d, &tx, &ty);
                     sx *= ad->transform.scale_x;
                     sy *= ad->transform.scale_y;
                     NT_ASSERT(sx > 0.0F && sy > 0.0F && "build_tree: negative accumulated scale breaks atan2 rotation extraction");
@@ -462,14 +540,15 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     const int32_t R = cc->layoutElementTreeRoots.length;
 
     /* Identity-init for every live element. Covers: elements not visited by any
-     * DFS (shouldn't happen but defensive), R==0 path (maxElementsExceeded), and
-     * walker reads of stale-index error-path commands. Bounded by LIVE N, not
-     * capacity — single-frame scan of N×40 B (typical 1024 → 40 KB). */
+     * DFS (R==0 path, maxElementsExceeded), and walker reads of stale-index
+     * error-path commands. */
     const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_baked[i] = identity;
     }
     if (R == 0) {
+        /* No tree work this frame — leave hit_baked/hit_clip_parent_id untouched
+         * so prev-frame data for already-known ids stays addressable for hit-test. */
         return;
     }
 
@@ -512,12 +591,32 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         bt_dfs_subtree(ctx, cc, elem_idx, &seed);
     }
 
-    /* Step 3: post-process synthetic SCISSOR_START commands.
-     * Per-element SCISSOR_START emits with cmd.id == elem.id (clay.h:2807). The
-     * synthetic root-wrap SCISSOR_START (clay.h:2709-2715) emits with a derived
-     * hash Clay__HashNumber(rootElement->id, children.length+10). The id mismatch
-     * is the only signal we have without patching Clay. Walker reads
-     * nt_layout_index = -1 as identity. */
+    /* Step 3: snapshot per-id data into hashmap-slot-indexed arrays. Hit-test
+     * reads these instead of tree_baked / layoutElementClipElementIds because
+     * Clay's layout arrays are ephemeral (length=0 at next BeginLayout, slots
+     * may shift between frames) while its hashmap is persistent — slot index is
+     * stable across frames for a given id. hit_generation rejects stale ids
+     * Clay still holds in its hashmap but that weren't re-declared this frame. */
+    ctx->current_generation++;
+    for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
+        Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&cc->layoutElements, elem_idx);
+        Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(el->id);
+        if (item == &Clay_LayoutElementHashMapItem_DEFAULT) {
+            continue;
+        }
+        const int32_t slot = (int32_t)(item - cc->layoutElementsHashMapInternal.internalArray);
+        if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+            continue;
+        }
+        ctx->hit_baked[slot] = ctx->tree_baked[elem_idx];
+        const int32_t clip_id = (elem_idx < cc->layoutElementClipElementIds.length) ? Clay__int32_tArray_GetValue(&cc->layoutElementClipElementIds, elem_idx) : 0;
+        ctx->hit_clip_parent_id[slot] = (uint32_t)clip_id;
+        ctx->hit_generation[slot] = ctx->current_generation;
+    }
+
+    /* Mark synthetic SCISSOR_START commands. Per-element SCISSOR_START emits
+     * with cmd.id == elem.id (clay.h:2807); synthetic root-wrap (clay.h:2709)
+     * emits with a derived hash. id mismatch is our only signal without patching. */
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
         Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
         if (c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
@@ -532,9 +631,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             c->nt_layout_index = -1;
         }
     }
-    /* SCISSOR_END is not transform-applied by the walker (it just pops the stack)
-     * → no fix needed. Error-path TEXT (clay.h:4211) reads tree_baked[stale]
-     * which is identity (G6 init above) → safe. */
+    /* SCISSOR_END pops only — no transform. Error-path TEXT reads tree_baked[stale]=identity. */
 }
 // #endregion
 
@@ -997,11 +1094,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
-        /* Transform-aware: debug_zones carry the declaration-time accum stack
-         * snapshot so we inverse-affine the pointer through each zone's own
-         * transform — same math as ui_hit_test. LAST hit wins (deepest in
-         * declaration order). Panel-area filter uses the SCREEN-SPACE forward-
-         * transformed center, not the raw bbox. */
+        /* Transform-aware: zones carry composed affine, inverse-mapped here.
+         * LAST hit wins (deepest in declaration order). Panel-area filter uses
+         * the SCREEN-SPACE forward-transformed center, not the raw bbox. */
         const float px = context->pointerInfo.position.x;
         const float py = context->pointerInfo.position.y;
         for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
@@ -1010,15 +1105,12 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 continue;
             }
             /* Forward-transform the visual center to screen space for the panel filter. */
-            float a = 1.0F;
-            float b = 0.0F;
-            float c = 0.0F;
-            float dd = 1.0F;
-            float tx = 0.0F;
-            float ty = 0.0F;
-            for (uint32_t k = 0; k < z->accum_depth; ++k) {
-                nt_ui_internal_compose_transform_level(&z->accum[k], z->center_x, z->center_y, &a, &b, &c, &dd, &tx, &ty);
-            }
+            const float a = z->aff_a;
+            const float b = z->aff_b;
+            const float c = z->aff_c;
+            const float dd = z->aff_d;
+            const float tx = z->aff_tx;
+            const float ty = z->aff_ty;
             const float screen_cx = (z->center_x * a) + (z->center_y * b) + tx;
             if (screen_cx >= panel_left_x) {
                 continue;

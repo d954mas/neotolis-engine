@@ -75,8 +75,7 @@ static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
-/* GPU scissor clips highlight + label against the sidebar (replaces per-rect
- * CPU clamping that only covered the axis-aligned path). */
+/* GPU scissor clips highlight + label against the sidebar. */
 
 /* Filled rect with GL Y-up coords; (x, y_top) is the top-left. */
 static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, uint32_t color) {
@@ -156,7 +155,10 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
      * matches the rendered widget; fall back to axis-aligned bbox when no
      * zone was recorded (plain Clay elements). */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(ctx, ctx->inspector_highlight_id);
-    if (z != NULL && z->accum_depth > 0U) {
+    /* Project only when the composed affine is non-identity (saves work for
+     * untransformed widgets — fall back to axis-aligned bbox path below). */
+    const bool z_has_xform = (z != NULL) && (z->aff_a != 1.0F || z->aff_b != 0.0F || z->aff_c != 0.0F || z->aff_d != 1.0F || z->aff_tx != 0.0F || z->aff_ty != 0.0F);
+    if (z_has_xform) {
         nt_sprite_renderer_set_material(ctx->sprite_material);
 
         /* Zone carries both visual and padded bboxes; project both. */

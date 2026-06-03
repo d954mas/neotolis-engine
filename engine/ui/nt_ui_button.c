@@ -80,21 +80,25 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     };
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->transition_speed);
     // #endregion
-    // #region apply transform + opacity (ALWAYS — balanced on disabled path)
-    nt_ui_transform_t t = nt_ui_transform_defaults();
-    t.scale_x = a->scale;
-    t.scale_y = a->scale;
-    t.offset_x = a->off_x;
-    t.offset_y = a->off_y;
-    nt_ui_push_transform(ctx, &t);
-    nt_ui_push_opacity(ctx, a->opacity);
+    // #region build_element_data
+    /* Button replaces transform/opacity on its own userData. For a parent xform,
+     * wrap with a CLAY block — build_tree composes ancestors through children. */
+    nt_ui_element_data_t *btn_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(btn_data != NULL && "nt_ui_button_begin: scratch alloc failed (element_data)");
+    *btn_data = (nt_ui_element_data_t){
+        .user_data = (data != NULL) ? data->user_data : NULL,
+        .layer = (data != NULL) ? data->layer : 0U,
+        .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
+        .transform = {.scale_x = a->scale, .scale_y = a->scale, .offset_x = a->off_x, .offset_y = a->off_y, .rotation = 0.0F},
+        .opacity = a->opacity,
+    };
     // #endregion
-    // #region open Clay IMAGE element WITH .id (the one structural addition over panel)
+    // #region open_clay_image
     /* bg_region 0 = same as idle. */
     const uint32_t region = (st->bg_region != 0U) ? st->bg_region : style->idle.bg_region;
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed");
+    NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed (image_payload)");
     *p = (nt_ui_image_payload_t){
         .atlas = atlas,
         .region_index = region,
@@ -115,7 +119,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     final.id = (Clay_ElementId){.id = id};
     final.image = (Clay_ImageElementConfig){.imageData = p};
     final.backgroundColor = tint;
-    final.userData = (void *)data;
+    final.userData = (void *)btn_data;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(final);
     // #endregion
@@ -132,9 +136,6 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->pending_button.active && "nt_ui_button_end without begin");
 
     nt_ui_clay_priv_close_element();
-    /* Reverse push order from begin (opacity then transform). */
-    nt_ui_pop_opacity(ctx);
-    nt_ui_pop_transform(ctx);
 
     const bool clicked = ctx->pending_button.clicked;
     ctx->pending_button.active = false;

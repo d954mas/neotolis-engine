@@ -216,9 +216,8 @@ static void declare_animated_panel(void) {
                          .padding = CLAY_PADDING_ALL(16),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 8,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_push_transform(s_ctx, &t);
-            nt_ui_push_opacity(s_ctx, opacity);
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .userData = (void *)NT_UI_DATA_XFORM(0U, &t, opacity)}) {
             nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL);
             {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Animated Panel", &g_panel_label_style);
@@ -226,8 +225,6 @@ static void declare_animated_panel(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Children inherit transform", &g_child_label_style);
             }
             nt_ui_panel_end(s_ctx);
-            nt_ui_pop_opacity(s_ctx);
-            nt_ui_pop_transform(s_ctx);
         }
     }
 }
@@ -258,15 +255,18 @@ static void declare_nested_panels(void) {
 
     /* Inner: no transform — inherits outer scale + middle opacity */
 
+    /* Inner CLAY for middle opacity wraps with identity transform (opacity-only via DFS). */
+    nt_ui_transform_t mid_identity = nt_ui_transform_defaults();
+
     CLAY({.id = CLAY_ID("nested-wrap"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        /* Outer beige panel */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(140)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_push_transform(s_ctx, &outer_t);
+        /* Outer beige panel — userData carries outer_t to all children via DFS. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(140)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .userData = (void *)NT_UI_DATA_XFORM(0U, &outer_t, 1.0F)}) {
             nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style, NULL);
             {
-                /* Middle blue panel */
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                    nt_ui_push_opacity(s_ctx, mid_opacity);
+                /* Middle blue panel — wrapping CLAY composes mid_opacity onto inherited outer_t. */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                      .userData = (void *)NT_UI_DATA_XFORM(0U, &mid_identity, mid_opacity)}) {
                     nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style, NULL);
                     {
                         // clang-format off
@@ -278,11 +278,9 @@ static void declare_nested_panels(void) {
                         // clang-format on
                     }
                     nt_ui_panel_end(s_ctx);
-                    nt_ui_pop_opacity(s_ctx);
                 }
             }
             nt_ui_panel_end(s_ctx);
-            nt_ui_pop_transform(s_ctx);
         }
     }
 }

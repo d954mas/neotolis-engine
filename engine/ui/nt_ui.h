@@ -124,9 +124,8 @@ typedef struct {
     nt_ui_transform_t transform; /* identity when !HAS_TRANSFORM */
     float opacity;               /* 1.0F when !HAS_OPACITY */
 } nt_ui_element_data_t;
-/* Size on 64-bit (LP64 / LLP64). user_data 8B@0, layer+flags+pad 4B@8,
- * transform 20B@12, opacity 4B@32. Struct alignment is alignof(void*)=8 → padded to 40B. */
-_Static_assert(sizeof(nt_ui_element_data_t) == 40, "nt_ui_element_data_t stable ABI on 64-bit");
+/* 40B on 64-bit (alignof(void*)=8 → trailing pad), 32B on 32-bit/WASM. */
+_Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 40 : 32), "nt_ui_element_data_t stable ABI");
 _Static_assert(sizeof(nt_ui_transform_t) == 20, "nt_ui_transform_t — fail loudly if extended");
 
 #if NT_UI_DEBUG_TOOLS
@@ -172,13 +171,11 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
-    uint32_t max_markers;  /* side-channel transform/opacity markers; 0 = max_elements*2 */
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
-        .max_markers = 0,
     };
 }
 
@@ -252,9 +249,7 @@ uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
 /* CPU timing (ms); both reset to 0 on early-out walks. */
 /* layout_ms = the Clay_EndLayout solve only, not the whole begin->end span. */
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx);
-/* build_tree_ms = Phase 57 post-EndLayout pass (per-element accum + opacity
- * composition + synthetic SCISSOR detection). Same scope as layout_ms — only
- * the pass itself, not surrounding work. */
+/* build_tree_ms covers only the post-EndLayout pass, not surrounding work. */
 float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx);
 /* walk_ms = walk dispatch, timed from AFTER the entry flush -- excludes
  * draining the caller's pending geometry (same scope as draw_calls). */
@@ -264,44 +259,14 @@ uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_text_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_border_command_count(const nt_ui_context_t *ctx);
-/* Scissor + marker push counts. Reset each walk. */
+/* Scissor counts. Reset each walk. */
 uint32_t nt_ui_get_last_walk_scissor_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx);
-uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx);
-uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx);
 
 // #region transform_opacity_api
-/* nt_ui_transform_t + nt_ui_transform_defaults moved above nt_ui_element_data_t
- * so element data can carry a transform field directly (Phase 57 refactor). */
-
-#ifndef NT_UI_TRANSFORM_STACK_DEPTH_CAP
-#define NT_UI_TRANSFORM_STACK_DEPTH_CAP 16
-#endif
-#ifndef NT_UI_OPACITY_STACK_DEPTH_CAP
-#define NT_UI_OPACITY_STACK_DEPTH_CAP 16
-#endif
-
-/* Push/pop during declaration phase (between begin/end). Stack depth <= NT_UI_TRANSFORM_STACK_DEPTH_CAP.
- * Offset: applies to all element types (position shift).
- * Scale: applies to all element types (position + size).
- * Rotation: applies to all element types. SCISSOR uses AABB approximation
- *   of the rotated clip rect (conservative: slightly larger than exact).
- * Opacity (via push_opacity): applies to all element types. */
-void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform);
-void nt_ui_pop_transform(nt_ui_context_t *ctx);
-
-/* Opacity inheritance: multiplied into alpha of all children. 1.0 = opaque. */
-void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity);
-void nt_ui_pop_opacity(nt_ui_context_t *ctx);
-
-/* Hit-test clip stack. Game MUST call nt_ui_push_clip BEFORE CLAY({.clip = ...})
- * and nt_ui_pop_clip after — pair mirrors push_transform/pop_transform. x/y/w/h
- * in LAYOUT pixels; push captures the current transform accumulator so rotated
- * clip parents are handled correctly. Without pairing, hit-test ignores the
- * clip. Asserts on overflow (NT_UI_CLIP_STACK_CAP) / underflow. */
-void nt_ui_push_clip(nt_ui_context_t *ctx, float x, float y, float w, float h);
-void nt_ui_pop_clip(nt_ui_context_t *ctx);
-// #endregion
+/* Transforms/opacity attach via Clay's userData (NT_UI_DATA_XFORM / _FULL);
+ * build_tree composes them into tree_baked. Clipping uses Clay's native
+ * `.clip = {...}` element config. Renderer and hit-test share tree_baked. */
 
 /* Emit a game CUSTOM element. data is passed through to the custom handler
  * registered via nt_ui_set_custom_handler. Allocates nt_ui_custom_data_t
@@ -309,9 +274,8 @@ void nt_ui_pop_clip(nt_ui_context_t *ctx);
 void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data);
 
 // #region interaction_api
-/* Engine-owned interaction service. Transform-aware: the pointer is inverse-
- * transformed by the declaration-time accum stack, then tested against Clay's
- * stable prev-frame layout bbox. Not Clay_Hovered — Clay is layout-only. */
+/* Engine-owned, transform-aware: inverse-affine via prev-frame tree_baked, then
+ * point-in-bbox against Clay's persistent prev-frame layout bbox. */
 
 /* Precompute once per id (game caches): wraps Clay_GetElementId, returns the
  * uint32 hash (never 0 -- Clay returns hash+1). Asserts s != NULL. */
@@ -351,11 +315,9 @@ typedef struct {
  * every call returns the same struct. Use for state-dependent content
  * (label/icon swap on press), tooltips, previews. Pair with step in begin.
  *
- * In-frame: must run in the SAME transform+clip context as the eventual step
- * — hit-test reads accum_stack / clip_stack at call time. Outside-frame:
- * memory-safe (snapshot/restore Clay ctx) and returns prev-frame state, but
- * the result is only meaningful for widgets with NO active transform/clip
- * push at query time. transform/clip-wrapped widgets need in-frame query.
+ * Reads PREV-frame composed affine + clip chain via Clay's persistent hashmap
+ * slot — safe to call anywhere (in-frame before or after the matching CLAY,
+ * or outside frame). First frame an id is seen returns hovered=false.
  *
  * step is strictly in-frame — mutating cap on stale frame_pointers fires
  * spurious transitions. */

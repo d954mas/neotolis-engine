@@ -1,5 +1,4 @@
-/* Unit tests for nt_ui_panel/group. Clay element tree integrity + death tests.
- * Panel/group never push transform/opacity — game uses explicit push/pop. */
+/* Panel/group widget tree integrity + payload pinning + death tests. */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -85,23 +84,20 @@ static void test_panel_begin_end_balanced(void) {
     TEST_ASSERT_NOT_NULL(txt);
 }
 
-/* ---- Test 2: panel with explicit push_transform ---- */
+/* ---- Test 2: panel with element-attached transform via userData ---- */
 static void test_panel_with_transform(void) {
     nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 5.0F, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_push_transform(s_fx.ctx, &t);
+    CLAY({.id = CLAY_ID("root"), .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 1.0F)}) {
         nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
         {
             nt_ui_label(s_fx.ctx, NULL, "Offset", &s_label_style);
         }
         nt_ui_panel_end(s_fx.ctx);
-        nt_ui_pop_transform(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Walk succeeds (stacks balanced). */
     const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
     TEST_ASSERT_NOT_NULL(img);
 }
@@ -141,22 +137,20 @@ static void test_group_begin_end_balanced(void) {
     TEST_ASSERT_NULL(img);
 }
 
-/* ---- Test 5: group with explicit push_opacity ---- */
+/* ---- Test 5: group with element-attached opacity via userData ---- */
 static void test_group_with_opacity(void) {
+    nt_ui_transform_t identity = nt_ui_transform_defaults();
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_push_opacity(s_fx.ctx, 0.5F);
+    CLAY({.id = CLAY_ID("root"), .userData = (void *)NT_UI_DATA_XFORM(0U, &identity, 0.5F)}) {
         nt_ui_group_begin(s_fx.ctx, NULL, NULL);
         {
             nt_ui_label(s_fx.ctx, NULL, "Half opacity", &s_label_style);
         }
         nt_ui_group_end(s_fx.ctx);
-        nt_ui_pop_opacity(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Walk succeeds, stacks balanced. */
     TEST_PASS();
 }
 
@@ -177,26 +171,26 @@ static void test_panel_payload_carries_atlas(void) {
     TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.white_region_idx, p->region_index);
 }
 
-/* ---- Test 7: nested panel + group ---- */
+/* ---- Test 7: nested panel + group with opacity on inner wrapper ---- */
 static void test_nested_panel_group(void) {
+    nt_ui_transform_t identity = nt_ui_transform_defaults();
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
         {
-            nt_ui_push_opacity(s_fx.ctx, 0.8F);
-            nt_ui_group_begin(s_fx.ctx, NULL, NULL);
-            {
-                nt_ui_label(s_fx.ctx, NULL, "Nested", &s_label_style);
+            CLAY({.userData = (void *)NT_UI_DATA_XFORM(0U, &identity, 0.8F)}) {
+                nt_ui_group_begin(s_fx.ctx, NULL, NULL);
+                {
+                    nt_ui_label(s_fx.ctx, NULL, "Nested", &s_label_style);
+                }
+                nt_ui_group_end(s_fx.ctx);
             }
-            nt_ui_group_end(s_fx.ctx);
-            nt_ui_pop_opacity(s_fx.ctx);
         }
         nt_ui_panel_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Walk succeeds (both stacks balanced at depth 2). */
     const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
     TEST_ASSERT_NOT_NULL(img);
     const Clay_RenderCommand *txt = find_first_text_cmd(s_fx.ctx);

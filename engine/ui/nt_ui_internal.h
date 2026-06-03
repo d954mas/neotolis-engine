@@ -30,24 +30,10 @@ _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 
 #define NT_UI_INSPECTOR_COLLAPSED_CAP 128
 #endif
 
-/* Hit-test clip stack capacity. Real UIs nest 1-3 levels; 16 = 5x headroom. */
-#ifndef NT_UI_CLIP_STACK_CAP
-#define NT_UI_CLIP_STACK_CAP 16
-#endif
-
-/* Phase 57: post-EndLayout DFS stack depth. Matches inspector's STACK_CAP=256
- * (nt_ui_clay_internal.c) — same Clay element tree, same depth budget. */
+/* DFS depth budget for the post-EndLayout build pass. Matches inspector's STACK_CAP. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
 #define NT_UI_TREE_DFS_DEPTH_CAP 256
 #endif
-
-typedef struct {
-    /* Layout-space rect (Clay Y-down). */
-    float x, y, w, h;
-    /* Affine snapshot at push time. Same math as ui_hit_test (compose_transform_level
-     * walking the accum_stack at the clip rect's center). */
-    float accum_a, accum_b, accum_c, accum_d, accum_tx, accum_ty;
-} nt_ui_clip_entry_t;
 
 typedef struct {
     uint32_t id;                   /* 0 = slot empty */
@@ -63,9 +49,8 @@ typedef struct {
     float layout_l, layout_t, layout_r, layout_b;
     /* Exact visual bbox (unpadded), so the overlay can outline padding distinctly. */
     float visual_l, visual_t, visual_r, visual_b;
-    /* Declaration-time transform stack snapshot at query time. */
-    nt_ui_transform_t accum[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    uint32_t accum_depth;
+    /* Composed affine snapshot — matches tree_baked[] layout. */
+    float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
     /* VISUAL bbox center — used by both rotation and inverse-affine so the
      * draw path matches the hit-test math. */
     float center_x, center_y;
@@ -78,36 +63,19 @@ typedef struct {
 #define NT_UI_DEBUG_FLAG_CAPTURED (1U << 2)
 #define NT_UI_DEBUG_FLAG_DISABLED (1U << 3)
 
-/* Side-channel transform/opacity marker (not a Clay element). */
-typedef struct {
-    uint8_t type;
-    uint32_t before_clay_idx;
-    union {
-        nt_ui_transform_t transform; /* PUSH_TRANSFORM only */
-        float opacity;               /* PUSH_OPACITY only */
-    };
-} nt_ui_marker_t;
-
-/* Walker pre-pass per-command baked transform. Preallocated in ctx so
- * the walker hot path never hits the scratch arena.
- *
- * Phase 57 also uses this type for per-element tree_baked[] populated by the
- * post-EndLayout build pass. Same layout — different indexing (cmd vs elem). */
+/* Per-element composed accum. Same struct used twice: tree_baked (indexed by
+ * layout idx, drives walker) and hit_baked (indexed by Clay hashmap slot, drives
+ * hit-test). nt_ui_min_arena_size + create_context both count
+ * `sizeof(nt_ui_baked_xform_t) * max_elements` × 2; if this struct grows, both
+ * formulas + the offset cascade in nt_ui_create_context must update together. */
 typedef struct {
     float a, b, c, d, tx, ty;
     float scale_x, scale_y, rotation, opacity;
 } nt_ui_baked_xform_t;
-/* Pinning the size invariant. nt_ui_min_arena_size + create_context both
- * count `sizeof(nt_ui_baked_xform_t) * max_elements` × 2 (walker_baked + tree_baked)
- * plus `sizeof(int32_t) * max_elements` × 3 (walker_sorted + walker_sorted_temp +
- * tree_root_for_elem). If this struct grows, both formulas + the offset cascade
- * in nt_ui_create_context must update together. 57b drops walker_baked + the
- * two sorted arrays; tree_baked + tree_root_for_elem + tree_dfs_stack stay. */
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 40, "nt_ui_baked_xform_t fixed at 40B (a,b,c,d,tx,ty,scale_x,scale_y,rotation,opacity)");
 
-/* Phase 57: DFS frame for build_tree's traversal of Clay's element tree.
- * decomposed scale/rotation cached so each child inherits without re-deriving
- * via atan2/sqrt. */
+/* DFS frame for build_tree's traversal. Decomposed scale/rotation cached so
+ * each child inherits without re-deriving via atan2/sqrt. */
 typedef struct {
     int32_t elem_idx;
     float a, b, c, d, tx, ty;
@@ -164,18 +132,6 @@ struct nt_ui_context {
     uint32_t frame_pointer_count;
     float frame_dt; /* dt passed to begin; anim cache lerp uses it. */
 
-    /* Declaration-time transform stack for the hit-test. push/pop_transform
-     * maintain it live; get_interaction inverse-transforms the pointer here.
-     * Rotation/scale center resolved per-query from prev-frame bbox center. */
-    nt_ui_transform_t accum_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    uint32_t accum_depth;
-
-    /* Declaration-time clip stack. push_clip captures the current transform
-     * accum at the clip rect's center; ui_hit_test walks this BEFORE the
-     * widget inverse-affine. Reset depth=0 each begin; end asserts balanced. */
-    nt_ui_clip_entry_t clip_stack[NT_UI_CLIP_STACK_CAP];
-    uint32_t clip_depth;
-
     /* Per-pointer capture state machine. v1.8 drives pointers[0].
      * capture_seen[] tracks which captures get_interaction touched this frame
      * — orphans cleared on nt_ui_begin. pointer_over_any feeds wants_pointer. */
@@ -198,47 +154,42 @@ struct nt_ui_context {
     nt_ui_custom_handler_t custom_fn;
     void *custom_user;
 
-    /* Side-channel markers: push/pop transform/opacity without Clay elements.
-     * Markers record before_clay_idx = number of Clay elements declared before
-     * this marker. Walker pre-pass interleaves markers with Clay commands. */
-    nt_ui_marker_t *markers; /* allocated from arena at create_context */
-    uint32_t marker_count;
-    uint32_t max_markers;
-
-    /* Walker pre-pass scratch — preallocated, max_elements-sized so the hot
-     * path never touches the per-frame scratch arena. walker_sorted_temp
-     * is the ping-pong destination for the 2-pass radix sort. */
-    nt_ui_baked_xform_t *walker_baked;
-    int32_t *walker_sorted;
-    int32_t *walker_sorted_temp;
-
-    /* Phase 57: per-element composed accum. Populated post-EndLayout by
-     * nt_ui_internal_build_tree; indexed by Clay layoutElement index. tree_baked
-     * coexists with walker_baked during 57a (parallel paths); walker_baked is
-     * removed in 57b/57c. tree_root_for_elem maps Clay element index → root index
-     * in layoutElementTreeRoots (or -1 if not a root). tree_dfs_stack is the
-     * iterative DFS scratch (NT_UI_TREE_DFS_DEPTH_CAP frames). */
+    /* Per-element composed accum + clip parent, indexed by Clay LAYOUT element index.
+     * Walker reads tree_baked[c->nt_layout_index] (hot path — no hashmap lookup).
+     * tree_root_for_elem maps element idx → tree root idx (-1 if not a root).
+     * tree_dfs_stack is the iterative DFS scratch (NT_UI_TREE_DFS_DEPTH_CAP frames).
+     * Live only between EndLayout and the next BeginLayout. */
     nt_ui_baked_xform_t *tree_baked;
     int32_t *tree_root_for_elem;
     nt_ui_dfs_frame_t *tree_dfs_stack;
+
+    /* Per-id snapshot indexed by Clay's PERSISTENT hashmap slot. Survives the
+     * next BeginLayout — hit-test in frame N+1 reads frame N's data even if the
+     * widget moved to a different layout idx (e.g., game called step_interaction
+     * AFTER its CLAY({.id=X}) declaration shifted X's layout idx).
+     * hit_generation pins each slot to the build_tree pass that wrote it; a
+     * stale id (declared once, never re-declared) reads != current_generation
+     * and is rejected by hit-test even though Clay's hashmap still has it. */
+    nt_ui_baked_xform_t *hit_baked;
+    uint32_t *hit_clip_parent_id;
+    uint32_t *hit_generation;
+    uint32_t current_generation;
 
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;
     uint32_t last_walk_command_count;
     /* CPU timing (ms). */
     float last_layout_ms;
-    float last_build_tree_ms; /* Phase 57 build pass timing. */
+    float last_build_tree_ms; /* build_tree pass timing. */
     float last_walk_ms;
     /* Per-type render-command counts, counted pre-emit. */
     uint32_t last_walk_rect_command_count;
     uint32_t last_walk_image_command_count;
     uint32_t last_walk_text_command_count;
     uint32_t last_walk_border_command_count;
-    /* Scissor + marker push counts. */
+    /* Scissor counts. */
     uint32_t last_walk_scissor_command_count;
     uint32_t last_walk_max_scissor_depth;
-    uint32_t last_walk_transform_pushes;
-    uint32_t last_walk_opacity_pushes;
 #ifdef NT_TEST_ACCESS
     uint32_t test_last_walk_unlayered_count;
 #endif
@@ -347,18 +298,11 @@ typedef struct nt_ui_inspector_element_info {
 
 nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
 
-/* Declaration-time transform composer — single source of truth shared by
- * walker, hit-test, and inspector hover. local = T(O) * T(C) * R(θ)*S * T(-C). */
-void nt_ui_internal_compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty);
-
-/* Phase 57: post-EndLayout build pass. Populates ctx->tree_baked for every Clay
- * element. Iterates layoutElements in declaration order; each tree root seeds
- * its DFS from the previously-computed tree_baked[parentId] (per Clay's existing
- * parentId field — ROOT → identity, PARENT → lexical parent, ELEMENT_WITH_ID →
- * arbitrary). Also marks synthetic SCISSOR_START commands with nt_layout_index = -1
- * so the walker treats them as identity-baked.
- * Caller (nt_ui_end) must be inside the Clay current-ctx scope.
- * Implementation in nt_ui_clay_internal.c (needs Clay private symbols). */
+/* Composes tree_baked + hit_baked + hit_clip_parent_id for the current frame.
+ * Floating root seeds: parentId=ROOT → identity, =PARENT → lexical parent,
+ * =ELEMENT_WITH_ID → arbitrary. Also marks synthetic SCISSOR_START commands
+ * with nt_layout_index = -1 so the walker reads identity. Caller (nt_ui_end)
+ * must run inside the Clay current-ctx scope. */
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS

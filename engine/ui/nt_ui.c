@@ -36,15 +36,6 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "ui/nt_ui_image.h"         /* NT_UI_IMAGE_*_OVERRIDE flags */
 #include "ui/nt_ui_internal.h"
 
-// #region marker_types
-enum {
-    NT_UI_MARKER_PUSH_TRANSFORM = 1,
-    NT_UI_MARKER_POP_TRANSFORM = 2,
-    NT_UI_MARKER_PUSH_OPACITY = 3,
-    NT_UI_MARKER_POP_OPACITY = 4,
-};
-// #endregion
-
 /* Inspector sizing lives on ctx->inspector_metrics; runtime-tunable via
  * nt_ui_inspector_set_metrics. Defaults match Clay's debug-view literals. */
 
@@ -169,17 +160,13 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
     Clay_SetMaxElementCount(saved_default);
     Clay_SetCurrentContext(saved_ctx);
-    const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
-    const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
-    /* Walker pre-pass arrays sized to max_elements so the hot path never allocs.
-     * sorted + sorted_temp = ping-pong buffers for the 2-pass radix sort. */
-    const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    /* Phase 57: tree_baked + tree_root_for_elem (per-element), tree_dfs_stack (fixed depth cap). */
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + baked_bytes + (2U * sorted_bytes) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + clay_bytes;
+    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -199,27 +186,23 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
 #endif
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
-    /* Layout: [ctx][markers][walker_baked][walker_sorted][walker_sorted_temp]
-     *         [tree_baked][tree_root_for_elem][tree_dfs_stack][Clay arena]. */
+    /* Layout: [ctx][tree_baked][tree_root_for_elem][tree_dfs_stack]
+     *         [hit_baked][hit_clip_parent_id][hit_generation][Clay arena]. */
     ctx->max_elements = desc->max_elements;
-    const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
-    const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
-    const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
-    ctx->markers = (nt_ui_marker_t *)((char *)arena + ctx_size);
-    ctx->max_markers = max_m;
-    ctx->marker_count = 0;
-    ctx->walker_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + marker_bytes);
-    ctx->walker_sorted = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes);
-    ctx->walker_sorted_temp = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes + sorted_bytes);
-    const size_t after_walker = ctx_size + marker_bytes + baked_bytes + (2U * sorted_bytes);
-    ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + after_walker);
-    ctx->tree_root_for_elem = (int32_t *)((char *)arena + after_walker + tree_baked_bytes);
-    ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + after_walker + tree_baked_bytes + tree_root_bytes);
-    const size_t after_tree = after_walker + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes;
+    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size);
+    ctx->tree_root_for_elem = (int32_t *)((char *)arena + ctx_size + tree_baked_bytes);
+    ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes);
+    ctx->hit_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes);
+    ctx->hit_clip_parent_id = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes);
+    ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
+    ctx->current_generation = 0U;
+    const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes;
     void *clay_mem = (char *)arena + after_tree;
     const size_t clay_size = arena_size - after_tree;
 
@@ -280,9 +263,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
-    ctx->marker_count = 0;
-    ctx->accum_depth = 0; /* reset declaration-time transform stack */
-    ctx->clip_depth = 0;  /* reset hit-test clip stack */
 
     /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
@@ -349,9 +329,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
-    /* Asserts BEFORE inspector emit so a missing pop_clip is caught at its source. */
-    NT_ASSERT(ctx->clip_depth == 0U && "nt_ui_end: unbalanced clip stack (missing nt_ui_pop_clip)");
-
 #if NT_UI_DEBUG_TOOLS
     /* Inject the Clay debug-view at root scope; floating panels attached to
      * the root keep it out of the user's layout tree. */
@@ -365,7 +342,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->frozen_cmds = Clay_EndLayout();
     ctx->last_layout_ms = (float)((nt_time_now() - layout_t0) * 1000.0);
 
-    /* Phase 57: per-element baked tree. Walker reads this in 57b onward. */
     const double build_t0 = nt_time_now();
     nt_ui_internal_build_tree(ctx);
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
@@ -1150,32 +1126,16 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 }
 // #endregion
 
-// #region helper_emit_custom
-/* Walker-local transform/opacity state passed through dispatch_command.
- * Transform is a 2D affine: pos' = pos * aff_s + (aff_tx, aff_ty).
- * Scale center is deferred: CUSTOM push marker has a zero-size bbox
- * (it's a sibling before the panel), so we capture the center from the
- * first renderable element (IMAGE/RECT) after the push. */
+// #region walker_state
 typedef struct {
-    nt_ui_transform_t transform_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    float push_center_x[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    float push_center_y[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    int transform_depth;
-    /* 2D affine: x'=x*a+y*b+tx, y'=x*c+y*d+ty */
     float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
     float accum_scale_x;
     float accum_scale_y;
     float accum_rotation;
-    int pending_center_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    int pending_center_count;
-    bool center_resolved[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
-    int opacity_depth;
     float accum_opacity;
 } nt_ui_walker_state_t;
 
 static void walker_state_init(nt_ui_walker_state_t *ws) {
-    ws->transform_depth = 0;
     ws->aff_a = 1.0F;
     ws->aff_b = 0;
     ws->aff_c = 0;
@@ -1185,75 +1145,7 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->accum_scale_x = 1.0F;
     ws->accum_scale_y = 1.0F;
     ws->accum_rotation = 0;
-    ws->pending_center_count = 0;
-    memset(ws->center_resolved, 0, sizeof(ws->center_resolved));
-    ws->opacity_depth = 0;
     ws->accum_opacity = 1.0F;
-}
-
-/* Compose ONE transform level (scale S, rotation θ, center C, offset O) into
- * the accumulated affine (a,b,c,d,tx,ty). Local = T(O)*T(C)*R(θ)*S*T(-C),
- * then new = local * accumulated. Pure Clay Y-down math: NO Y-flip, NO rotation
- * negation -- those are render-only conversions applied in dispatch_command.
- * Shared by the walker (render) and ui_hit_test (interaction) so both agree. */
-/* Non-static so nt_ui_clay_internal.c reuses it for the inspector viewport-
- * hover propagation; prototype lives in nt_ui_internal.h. */
-void nt_ui_internal_compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
-    const float sx = t->scale_x;
-    const float sy = t->scale_y;
-    const float cr = cosf(t->rotation);
-    const float sr = sinf(t->rotation);
-    /* Local 2x2: la=cr*sx, lb=-sr*sy, lc=sr*sx, ld=cr*sy */
-    const float la = cr * sx;
-    const float lb = -(sr * sy);
-    const float lc = sr * sx;
-    const float ld = cr * sy;
-    /* Local translate about center C + offset O. */
-    const float ltx = cx - (la * cx) - (lb * cy) + t->offset_x;
-    const float lty = cy - (lc * cx) - (ld * cy) + t->offset_y;
-    /* Compose: new = local * accumulated. */
-    const float na = (la * *a) + (lb * *c);
-    const float nb = (la * *b) + (lb * *d);
-    const float nc = (lc * *a) + (ld * *c);
-    const float nd = (lc * *b) + (ld * *d);
-    const float ntx = (la * *tx) + (lb * *ty) + ltx;
-    const float nty = (lc * *tx) + (ld * *ty) + lty;
-    *a = na;
-    *b = nb;
-    *c = nc;
-    *d = nd;
-    *tx = ntx;
-    *ty = nty;
-}
-
-/* Compose local transform (scale S, rotation θ, center C, offset O) onto
- * accumulated affine. Local = T(O) * T(C) * R(θ)*S * T(-C). */
-static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
-    ws->aff_a = 1.0F;
-    ws->aff_b = 0;
-    ws->aff_c = 0;
-    ws->aff_d = 1.0F;
-    ws->aff_tx = 0;
-    ws->aff_ty = 0;
-    ws->accum_scale_x = 1.0F;
-    ws->accum_scale_y = 1.0F;
-    ws->accum_rotation = 0;
-    for (int k = 0; k < ws->transform_depth; ++k) {
-        nt_ui_internal_compose_transform_level(&ws->transform_stack[k], ws->push_center_x[k], ws->push_center_y[k], &ws->aff_a, &ws->aff_b, &ws->aff_c, &ws->aff_d, &ws->aff_tx, &ws->aff_ty);
-        ws->accum_scale_x *= ws->transform_stack[k].scale_x;
-        ws->accum_scale_y *= ws->transform_stack[k].scale_y;
-    }
-    /* Extract actual rotation from composed affine matrix.
-     * atan2(c,a) assumes positive scale; negative scale flips the angle. */
-    NT_ASSERT(ws->accum_scale_x > 0.0F && ws->accum_scale_y > 0.0F && "negative UI scale breaks atan2 rotation extraction");
-    ws->accum_rotation = atan2f(ws->aff_c, ws->aff_a);
-}
-
-static void walker_recompute_opacity(nt_ui_walker_state_t *ws) {
-    ws->accum_opacity = 1.0F;
-    for (int k = 0; k < ws->opacity_depth; ++k) {
-        ws->accum_opacity *= ws->opacity_stack[k];
-    }
 }
 
 /* Apply accumulated opacity to a packed AABBGGRR color. */
@@ -1277,59 +1169,7 @@ typedef struct {
     uint32_t border_command_count;
     uint32_t scissor_command_count;
     uint32_t max_scissor_depth;
-    uint32_t transform_pushes;
-    uint32_t opacity_pushes;
 } nt_ui_walk_counters_t;
-
-/* Process a single side-channel marker into walker state. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
-    switch (marker->type) {
-    case NT_UI_MARKER_PUSH_TRANSFORM: {
-        counters->transform_pushes++;
-        NT_ASSERT(ws->transform_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform stack overflow");
-        const int d = ws->transform_depth;
-        ws->transform_stack[d] = marker->transform;
-        ws->push_center_x[d] = 0;
-        ws->push_center_y[d] = 0;
-        ws->center_resolved[d] = true;
-        ws->transform_depth = d + 1;
-        /* Offset applies immediately; scale/rotation center deferred. */
-        ws->aff_tx += marker->transform.offset_x;
-        ws->aff_ty += marker->transform.offset_y;
-        if (marker->transform.scale_x != 1.0F || marker->transform.scale_y != 1.0F || marker->transform.rotation != 0.0F) {
-            ws->center_resolved[d] = false;
-            NT_ASSERT(ws->pending_center_count < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "pending center stack overflow");
-            ws->pending_center_stack[ws->pending_center_count++] = d;
-        }
-        return;
-    }
-    case NT_UI_MARKER_POP_TRANSFORM:
-        NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
-        --ws->transform_depth;
-        /* Unresolved center uses (0,0) — acceptable for scale=0 (hide) or offset-only transforms. */
-        /* Remove any pending entries for this depth. */
-        while (ws->pending_center_count > 0 && ws->pending_center_stack[ws->pending_center_count - 1] >= ws->transform_depth) {
-            --ws->pending_center_count;
-        }
-        walker_recompute_transform(ws);
-        return;
-    case NT_UI_MARKER_PUSH_OPACITY:
-        counters->opacity_pushes++;
-        NT_ASSERT(ws->opacity_depth < NT_UI_OPACITY_STACK_DEPTH_CAP && "opacity stack overflow");
-        ws->opacity_stack[ws->opacity_depth++] = marker->opacity;
-        ws->accum_opacity *= marker->opacity;
-        return;
-    case NT_UI_MARKER_POP_OPACITY:
-        NT_ASSERT(ws->opacity_depth > 0 && "opacity stack underflow");
-        --ws->opacity_depth;
-        walker_recompute_opacity(ws);
-        return;
-    default:
-        NT_ASSERT(false && "unknown marker type");
-        return;
-    }
-}
 
 /* Typed CUSTOM dispatch: engine anchors (type=NONE) skip silently;
  * game handlers (type=GAME) flush and invoke the custom callback. */
@@ -1550,8 +1390,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         ctx->last_walk_border_command_count = 0;
         ctx->last_walk_scissor_command_count = 0;
         ctx->last_walk_max_scissor_depth = 0;
-        ctx->last_walk_transform_pushes = 0;
-        ctx->last_walk_opacity_pushes = 0;
 #ifdef NT_TEST_ACCESS
         ctx->test_last_walk_unlayered_count = 0;
 #endif
@@ -1575,8 +1413,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         ctx->last_walk_border_command_count = 0;
         ctx->last_walk_scissor_command_count = 0;
         ctx->last_walk_max_scissor_depth = 0;
-        ctx->last_walk_transform_pushes = 0;
-        ctx->last_walk_opacity_pushes = 0;
 #ifdef NT_TEST_ACCESS
         ctx->test_last_walk_unlayered_count = 0;
 #endif
@@ -1616,35 +1452,29 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Sprite cmd open after set_material above; clean → no rebind needed. */
     bool sprite_pipeline_dirty = false;
 
-    /* Bitmask layer dispatch + ctz: O(L_active × N) per segment, only set
-     * bits visited (32 B stack vs ~2 KB for counting sort). */
+    /* Bitmask layer dispatch + ctz: O(L_active × N) per segment, only set bits
+     * visited (32 B stack vs ~2 KB for counting sort). OOB nt_layout_index →
+     * identity (synthetic Clay error-path cmds). */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    const int32_t N_elements = nt_ui_clay_priv_layout_elements_length(ctx->clay);
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
 #endif
-    uint32_t mcur = 0U; /* side-channel marker cursor */
     int32_t i = 0;
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
-            /* Match markers by nt_layout_index — no remap needed. */
-            while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= c->nt_layout_index) {
-                process_marker(&ctx->markers[mcur], &ws, &counters);
-                ++mcur;
-            }
-            /* Resolve pending centers from non-segmentable commands too (SCISSOR_START has valid bbox). */
-            if (ws.pending_center_count > 0 && c->boundingBox.width > 0 && c->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-                const float rcx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-                const float rcy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-                for (int pi = 0; pi < ws.pending_center_count; ++pi) {
-                    const int pd = ws.pending_center_stack[pi];
-                    ws.push_center_x[pd] = rcx;
-                    ws.push_center_y[pd] = rcy;
-                    ws.center_resolved[pd] = true;
-                }
-                ws.pending_center_count = 0;
-                walker_recompute_transform(&ws);
-            }
+            const nt_ui_baked_xform_t b = (c->nt_layout_index < 0 || c->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[c->nt_layout_index];
+            ws.aff_a = b.a;
+            ws.aff_b = b.b;
+            ws.aff_c = b.c;
+            ws.aff_d = b.d;
+            ws.aff_tx = b.tx;
+            ws.aff_ty = b.ty;
+            ws.accum_scale_x = b.scale_x;
+            ws.accum_scale_y = b.scale_y;
+            ws.accum_rotation = b.rotation;
+            ws.accum_opacity = b.opacity;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
             ++i;
             continue;
@@ -1658,117 +1488,22 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
             ++seg_end;
         }
-        const int32_t seg_n = seg_end - i;
-        NT_ASSERT((uint32_t)seg_n <= ctx->max_elements && "nt_ui_walk: segment size exceeds ctx->max_elements; raise desc->max_elements or split via SCISSOR");
 
-        /* Pre-pass: interleave side-channel markers with Clay commands to
-         * bake transform/opacity per render-command index. Markers fire
-         * before the Clay command whose declaration index they precede.
-         * Skipped entirely when marker_count == 0 (identity transform). */
-        nt_ui_baked_xform_t *baked = NULL;
-
+        /* Active-layer bitmask scan over this segment. */
         uint32_t active_layers[8] = {0U};
-        if (ctx->marker_count > 0) {
-            /* ctx-preallocated, max_elements-sized -- no hot-path scratch alloc. */
-            baked = ctx->walker_baked;
-            /* Sort indices by nt_layout_index so marker drain sees declaration
-             * order regardless of Clay's z-sort on the render command array.
-             * Keys are uint16_t (max_elements ≤ UINT16_MAX asserted at create);
-             * LSD radix with 2× 8-bit passes is O(2n) regardless of input order. */
-            int32_t *sorted = ctx->walker_sorted;
-            int32_t *temp = ctx->walker_sorted_temp;
-            for (int32_t k = 0; k < seg_n; ++k) {
-                sorted[k] = k;
-            }
-            // #region radix sort (2× 8-bit passes by nt_layout_index)
-            uint32_t bucket[256];
-            for (int pass = 0; pass < 2; ++pass) {
-                const int shift = pass * 8;
-                for (int b = 0; b < 256; ++b) {
-                    bucket[b] = 0U;
-                }
-                for (int32_t k = 0; k < seg_n; ++k) {
-                    const uint32_t li = (uint32_t)arr->internalArray[i + sorted[k]].nt_layout_index;
-                    bucket[(li >> shift) & 0xFFU]++;
-                }
-                uint32_t total = 0U;
-                for (int b = 0; b < 256; ++b) {
-                    const uint32_t cnt = bucket[b];
-                    bucket[b] = total;
-                    total += cnt;
-                }
-                for (int32_t k = 0; k < seg_n; ++k) {
-                    const uint32_t li = (uint32_t)arr->internalArray[i + sorted[k]].nt_layout_index;
-                    temp[bucket[(li >> shift) & 0xFFU]++] = sorted[k];
-                }
-                int32_t *swap = sorted;
-                sorted = temp;
-                temp = swap;
-            }
-            // #endregion
-            for (int32_t k = 0; k < seg_n; ++k) {
-                const int32_t orig_idx = sorted[k];
-                const Clay_RenderCommand *cc = &arr->internalArray[i + orig_idx];
-                /* Match markers by nt_layout_index — sorted order restores declaration sequence. */
-                while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= cc->nt_layout_index) {
-                    process_marker(&ctx->markers[mcur], &ws, &counters);
-                    ++mcur;
-                }
-                /* Resolve ALL pending centers from first command with valid bbox.
-                 * SCISSOR_START has a bbox -- include it so transforms wrapping a
-                 * clip-only subtree still resolve their center. */
-                if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-                    const float rcx = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
-                    const float rcy = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
-                    for (int pi = 0; pi < ws.pending_center_count; ++pi) {
-                        const int pd = ws.pending_center_stack[pi];
-                        ws.push_center_x[pd] = rcx;
-                        ws.push_center_y[pd] = rcy;
-                        ws.center_resolved[pd] = true;
-                    }
-                    ws.pending_center_count = 0;
-                    walker_recompute_transform(&ws);
-                }
-                /* baked[] indexed by original array position for layer dispatch. */
-                baked[orig_idx] = (nt_ui_baked_xform_t){
-                    .a = ws.aff_a,
-                    .b = ws.aff_b,
-                    .c = ws.aff_c,
-                    .d = ws.aff_d,
-                    .tx = ws.aff_tx,
-                    .ty = ws.aff_ty,
-                    .scale_x = ws.accum_scale_x,
-                    .scale_y = ws.accum_scale_y,
-                    .rotation = ws.accum_rotation,
-                    .opacity = ws.accum_opacity,
-                };
-                const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-                active_layers[layer >> 5U] |= (1U << (layer & 31U));
+        for (int32_t j = i; j < seg_end; ++j) {
+            const Clay_RenderCommand *cc = &arr->internalArray[j];
+            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+            active_layers[layer >> 5U] |= (1U << (layer & 31U));
 #ifdef NT_TEST_ACCESS
-                if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                    ++unlayered_count;
-                }
-#endif
+            if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                ++unlayered_count;
             }
-        } else {
-            /* No markers: identity transform/opacity. Just collect layers. */
-            for (int32_t j = i; j < seg_end; ++j) {
-                const Clay_RenderCommand *cc = &arr->internalArray[j];
-                const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-                active_layers[layer >> 5U] |= (1U << (layer & 31U));
-#ifdef NT_TEST_ACCESS
-                if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                    ++unlayered_count;
-                }
 #endif
-            }
         }
 
-        /* Save walker state after pre-pass so layer passes (which overwrite
-         * ws fields with per-command baked state) don't leak into the next segment. */
-        nt_ui_walker_state_t ws_after_prepass = ws;
-
-        /* Layer passes: dispatch renderables with baked transform state. */
+        /* Layer passes: dispatch renderables in ascending layer order, sourcing
+         * per-command baked from tree_baked. */
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
             uint32_t mask = active_layers[word_idx];
             while (mask != 0U) {
@@ -1782,40 +1517,28 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     }
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
-                        if (baked != NULL) {
-                            const int32_t bi = j - i;
-                            ws.aff_a = baked[bi].a;
-                            ws.aff_b = baked[bi].b;
-                            ws.aff_c = baked[bi].c;
-                            ws.aff_d = baked[bi].d;
-                            ws.aff_tx = baked[bi].tx;
-                            ws.aff_ty = baked[bi].ty;
-                            ws.accum_scale_x = baked[bi].scale_x;
-                            ws.accum_scale_y = baked[bi].scale_y;
-                            ws.accum_rotation = baked[bi].rotation;
-                            ws.accum_opacity = baked[bi].opacity;
-                        }
+                        const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
+                        ws.aff_a = b.a;
+                        ws.aff_b = b.b;
+                        ws.aff_c = b.c;
+                        ws.aff_d = b.d;
+                        ws.aff_tx = b.tx;
+                        ws.aff_ty = b.ty;
+                        ws.accum_scale_x = b.scale_x;
+                        ws.accum_scale_y = b.scale_y;
+                        ws.accum_rotation = b.rotation;
+                        ws.accum_opacity = b.opacity;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
                     }
                 }
             }
         }
-        /* Restore chronological state so next segment sees correct ws. */
-        ws = ws_after_prepass;
         i = seg_end;
-    }
-
-    /* Drain remaining markers (pops at end of frame). */
-    while (mcur < ctx->marker_count) {
-        process_marker(&ctx->markers[mcur], &ws, &counters);
-        ++mcur;
     }
 
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
-    NT_ASSERT(ws.transform_depth == 0 && "unbalanced transform stack at walk exit");
-    NT_ASSERT(ws.opacity_depth == 0 && "unbalanced opacity stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 
     /* Guard against CUSTOM handler resetting gfx counter -> unsigned wrap. */
@@ -1829,8 +1552,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     ctx->last_walk_border_command_count = counters.border_command_count;
     ctx->last_walk_scissor_command_count = counters.scissor_command_count;
     ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
-    ctx->last_walk_transform_pushes = counters.transform_pushes;
-    ctx->last_walk_opacity_pushes = counters.opacity_pushes;
     ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
 #ifdef NT_TEST_ACCESS
     ctx->test_last_walk_unlayered_count = unlayered_count;
@@ -1877,99 +1598,6 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
 }
 // #endregion
 
-// #region push_pop_transform_opacity
-static nt_ui_marker_t *emit_marker_base(nt_ui_context_t *ctx, uint8_t marker_type) {
-    NT_ASSERT(ctx->marker_count < ctx->max_markers && "marker array full; raise max_markers in nt_ui_create_desc_t");
-    nt_ui_marker_t *m = &ctx->markers[ctx->marker_count++];
-    m->type = marker_type;
-    /* Clay_Context.layoutElements is CLAY_IMPLEMENTATION-private; reach its length via the wrapper. */
-    m->before_clay_idx = (uint32_t)nt_ui_clay_priv_layout_elements_length(ctx->clay);
-    return m;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {
-    NT_ASSERT(ctx != NULL && "nt_ui_push_transform: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_push_transform: must be called inside begin/end");
-    NT_ASSERT(transform != NULL && "nt_ui_push_transform: transform must be non-NULL");
-    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && "nt_ui_push_transform: scale must be positive; use opacity=0 to hide");
-    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && "nt_ui_push_transform: scale must be finite");
-    NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
-    NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");
-    emit_marker_base(ctx, NT_UI_MARKER_PUSH_TRANSFORM)->transform = *transform;
-    /* Mirror onto the live accum stack for the hit-test. */
-    NT_ASSERT(ctx->accum_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform accum overflow");
-    ctx->accum_stack[ctx->accum_depth++] = *transform;
-}
-
-void nt_ui_pop_transform(nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
-    emit_marker_base(ctx, NT_UI_MARKER_POP_TRANSFORM);
-    /* Keep the live accum stack balanced with push. */
-    NT_ASSERT(ctx->accum_depth > 0 && "transform accum underflow");
-    ctx->accum_depth--;
-}
-
-void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
-    NT_ASSERT(ctx != NULL && "nt_ui_push_opacity: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_push_opacity: must be called inside begin/end");
-    NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_push_opacity: must be finite in [0,1]");
-    emit_marker_base(ctx, NT_UI_MARKER_PUSH_OPACITY)->opacity = opacity;
-}
-
-void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_pop_opacity: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_pop_opacity: must be called inside begin/end");
-    emit_marker_base(ctx, NT_UI_MARKER_POP_OPACITY);
-}
-
-/* Captures the transform accum AT THE CLIP RECT CENTER so rotated clip
- * parents preserve their frame exactly when ui_hit_test inverse-transforms. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_push_clip(nt_ui_context_t *ctx, float x, float y, float w, float h) {
-    NT_ASSERT(ctx != NULL && "nt_ui_push_clip: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_push_clip: must be called inside begin/end");
-    NT_ASSERT(ctx->clip_depth < NT_UI_CLIP_STACK_CAP && "nt_ui_push_clip: clip stack overflow; raise NT_UI_CLIP_STACK_CAP");
-    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && "nt_ui_push_clip: rect must be finite");
-    NT_ASSERT(w > 0.0F && h > 0.0F && "nt_ui_push_clip: non-positive clip size");
-
-    /* Same composition as ui_hit_test for widget bboxes so the two affines agree. */
-    const float cx = x + (w * 0.5F);
-    const float cy = y + (h * 0.5F);
-    float a = 1.0F;
-    float b = 0.0F;
-    float c = 0.0F;
-    float d = 1.0F;
-    float tx = 0.0F;
-    float ty = 0.0F;
-    for (uint32_t k = 0; k < ctx->accum_depth; ++k) {
-        nt_ui_internal_compose_transform_level(&ctx->accum_stack[k], cx, cy, &a, &b, &c, &d, &tx, &ty);
-    }
-
-    ctx->clip_stack[ctx->clip_depth] = (nt_ui_clip_entry_t){
-        .x = x,
-        .y = y,
-        .w = w,
-        .h = h,
-        .accum_a = a,
-        .accum_b = b,
-        .accum_c = c,
-        .accum_d = d,
-        .accum_tx = tx,
-        .accum_ty = ty,
-    };
-    ctx->clip_depth++;
-}
-
-void nt_ui_pop_clip(nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_pop_clip: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_pop_clip: must be called inside begin/end");
-    NT_ASSERT(ctx->clip_depth > 0U && "nt_ui_pop_clip: stack underflow");
-    ctx->clip_depth--;
-}
-// #endregion
-
 // #region nt_ui_custom
 void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data) {
     NT_ASSERT(ctx != NULL);
@@ -2005,11 +1633,50 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = d.found};
 }
 
-/* Transform-aware hit-test: compose ctx->accum_stack using the prev-frame
- * bbox center as the rotation pivot at every level, then inverse-transform
- * (px,py) and point-in-(layout)-bbox. Clay Y-down, non-negated rotation.
- * pad_lrtb inflates layout-space bbox before the inverse-affine so the
- * padded zone rotates with the widget. */
+/* Hit-test reads PREV-frame data via Clay's persistent hashmap slot — the slot
+ * index for a given id never changes across frames, so this is safe whether the
+ * caller queries before or after the matching CLAY({.id=...}) declaration.
+ * Ancestor clips walked via the same hashmap-slot snapshot of their composed
+ * affine and per-element clip-parent id — same math the renderer applies. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py) {
+    uint32_t cur_id = start_clip_id;
+    while (cur_id != 0U) {
+        float cx;
+        float cy;
+        float cw;
+        float ch;
+        /* Fail-closed: a missing or unmapped clip ancestor is an invariant
+         * violation (build_tree wrote it last frame; persistent hashmap holds
+         * the bbox). Reject the hit rather than silently let input through. */
+        if (!nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch)) {
+            NT_ASSERT(false && "hit_clip_chain: clip ancestor missing from Clay hashmap");
+            return false;
+        }
+        const int32_t cur_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, cur_id);
+        if (cur_slot < 0 || cur_slot >= N) {
+            NT_ASSERT(false && "hit_clip_chain: clip ancestor slot OOB");
+            return false;
+        }
+        const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
+        const float cdet = (cb.a * cb.d) - (cb.b * cb.c);
+        NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip ancestor has singular affine");
+        const float cinv_a = cb.d / cdet;
+        const float cinv_b = -cb.b / cdet;
+        const float cinv_c = -cb.c / cdet;
+        const float cinv_d = cb.a / cdet;
+        const float crx = px - cb.tx;
+        const float cry = py - cb.ty;
+        const float clx = (cinv_a * crx) + (cinv_b * cry);
+        const float cly = (cinv_c * crx) + (cinv_d * cry);
+        if (clx < cx || clx > cx + cw || cly < cy || cly > cy + ch) {
+            return false;
+        }
+        cur_id = ctx->hit_clip_parent_id[cur_slot];
+    }
+    return true;
+}
+
 static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
     if (id == 0U) {
         return false;
@@ -2018,58 +1685,33 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     if (!d.found) {
         return false; /* first frame an id is seen → not hovered */
     }
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+        return false;
+    }
+    /* Reject ids Clay's hashmap still holds but weren't re-declared this frame.
+     * Clay_GetElementData doesn't check generation; we do here. */
+    if (ctx->hit_generation[slot] != ctx->current_generation) {
+        return false;
+    }
 
-    /* Walk the clip stack BEFORE the widget inverse-affine — any ancestor
-     * clip rejecting the point shorts the test. Each entry stores its push-
-     * time transform accum so rotated clip parents use the same math. */
-    for (uint32_t k = 0; k < ctx->clip_depth; ++k) {
-        const nt_ui_clip_entry_t *cl = &ctx->clip_stack[k];
-        /* Inverse 2x2 + translate to bring (px,py) into this clip's frame. */
-        const float cdet = (cl->accum_a * cl->accum_d) - (cl->accum_b * cl->accum_c);
-        NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip stack entry has singular affine");
-        const float cinv_a = cl->accum_d / cdet;
-        const float cinv_b = -cl->accum_b / cdet;
-        const float cinv_c = -cl->accum_c / cdet;
-        const float cinv_d = cl->accum_a / cdet;
-        const float crx = px - cl->accum_tx;
-        const float cry = py - cl->accum_ty;
-        const float clx = (cinv_a * crx) + (cinv_b * cry);
-        const float cly = (cinv_c * crx) + (cinv_d * cry);
-        if (clx < cl->x || clx > cl->x + cl->w || cly < cl->y || cly > cl->y + cl->h) {
-            return false;
-        }
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py)) {
+        return false;
     }
 
     const Clay_BoundingBox box = d.boundingBox;
-    /* Center is the GEOMETRIC center of the visual bbox (NOT the padded one) so
-     * the same rotation pivot the renderer uses applies — padding is a hit-zone
-     * inflation, not a position shift. */
-    const float cx = box.x + (box.width * 0.5F);
-    const float cy = box.y + (box.height * 0.5F);
-
-    /* Accumulate the affine from the live declaration-time stack. */
-    float a = 1.0F;
-    float b = 0.0F;
-    float c = 0.0F;
-    float dd = 1.0F;
-    float tx = 0.0F;
-    float ty = 0.0F;
-    for (uint32_t k = 0; k < ctx->accum_depth; ++k) {
-        nt_ui_internal_compose_transform_level(&ctx->accum_stack[k], cx, cy, &a, &b, &c, &dd, &tx, &ty);
-    }
-
-    /* Inverse 2x2 (det nonzero: push_transform asserts scale > 0). */
-    const float det = (a * dd) - (b * c);
-    const float inv_a = dd / det;
-    const float inv_b = -b / det;
-    const float inv_c = -c / det;
-    const float inv_d = a / det;
-    const float rx = px - tx;
-    const float ry = py - ty;
-    const float lx = (inv_a * rx) + (inv_b * ry); /* point in the untransformed layout frame */
+    const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
+    const float det = (b.a * b.d) - (b.b * b.c);
+    NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
+    const float inv_a = b.d / det;
+    const float inv_b = -b.b / det;
+    const float inv_c = -b.c / det;
+    const float inv_d = b.a / det;
+    const float rx = px - b.tx;
+    const float ry = py - b.ty;
+    const float lx = (inv_a * rx) + (inv_b * ry);
     const float ly = (inv_c * rx) + (inv_d * ry);
 
-    /* Inflate bbox in layout space (NULL pad = zero padding -> original bbox). */
     const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
     const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
     const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
@@ -2256,10 +1898,24 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         z->layout_b = z->visual_b + pb;
         z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
         z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
-        const uint32_t depth = ctx->accum_depth;
-        z->accum_depth = depth;
-        for (uint32_t k = 0; k < depth; ++k) {
-            z->accum[k] = ctx->accum_stack[k];
+        /* Snapshot composed affine — same source as walker/hit-test. */
+        const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+        if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
+            const nt_ui_baked_xform_t b = ctx->hit_baked[e_slot];
+            z->aff_a = b.a;
+            z->aff_b = b.b;
+            z->aff_c = b.c;
+            z->aff_d = b.d;
+            z->aff_tx = b.tx;
+            z->aff_ty = b.ty;
+        } else {
+            const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
+            z->aff_a = b.a;
+            z->aff_b = b.b;
+            z->aff_c = b.c;
+            z->aff_d = b.d;
+            z->aff_tx = b.tx;
+            z->aff_ty = b.ty;
         }
         uint16_t flags = 0U;
         if (out.hovered) {
@@ -2318,10 +1974,23 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     z->layout_b = z->visual_b + pb;
     z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
     z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
-    const uint32_t depth = ctx->accum_depth;
-    z->accum_depth = depth;
-    for (uint32_t k = 0; k < depth; ++k) {
-        z->accum[k] = ctx->accum_stack[k];
+    const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
+        const nt_ui_baked_xform_t b = ctx->hit_baked[e_slot];
+        z->aff_a = b.a;
+        z->aff_b = b.b;
+        z->aff_c = b.c;
+        z->aff_d = b.d;
+        z->aff_tx = b.tx;
+        z->aff_ty = b.ty;
+    } else {
+        const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
+        z->aff_a = b.a;
+        z->aff_b = b.b;
+        z->aff_c = b.c;
+        z->aff_d = b.d;
+        z->aff_tx = b.tx;
+        z->aff_ty = b.ty;
     }
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }
@@ -2404,15 +2073,6 @@ uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx) {
     return ctx->last_walk_max_scissor_depth;
 }
 
-uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_transform_pushes: ctx must be non-NULL");
-    return ctx->last_walk_transform_pushes;
-}
-
-uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_opacity_pushes: ctx must be non-NULL");
-    return ctx->last_walk_opacity_pushes;
-}
 // #endregion
 
 // #region test_access

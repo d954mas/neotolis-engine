@@ -79,6 +79,11 @@ static inline bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) 
 static inline void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics) {
     (void)ctx;
     (void)metrics;
+    static bool s_metrics_warned = false;
+    if (!s_metrics_warned) {
+        nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — metrics ignored. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
+        s_metrics_warned = true;
+    }
 }
 static inline void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) { (void)ctx; }
 static inline void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size) {

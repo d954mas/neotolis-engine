@@ -1,12 +1,8 @@
-/* Phase 57a-08: post-EndLayout build pass tests.
+/* Post-EndLayout build pass tests.
  *
  * Verifies nt_ui_internal_build_tree composes accum + opacity correctly down
- * the Clay element tree, seeds floating roots from parentId (Option C), and
- * marks synthetic SCISSOR_START commands with nt_layout_index = -1.
- *
- * Tests use NT_TEST_ACCESS accessors (tree_baked / tree_root_for_elem) to
- * inspect the populated state. The walker is NOT exercised here — its switch
- * to tree_baked lives in 57b/57c. */
+ * the Clay element tree, seeds floating roots from parentId, and marks
+ * synthetic SCISSOR_START commands with nt_layout_index = -1. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -441,14 +437,9 @@ static void test_min_arena_size_includes_tree_storage(void) {
     const size_t sz_large = nt_ui_min_arena_size(&desc_large);
     TEST_ASSERT_GREATER_THAN_size_t(sz_small, sz_large);
 
-    /* Per-element bytes that grow with max_elements (sum across all arrays
-     * that scale): markers (24 × 2 cap) + walker_baked (40) + walker_sorted ×2 (8)
-     * + tree_baked (40) + tree_root_for_elem (4) = 92 + 48 = 140 B per element
-     * (markers cap is max_markers=max_elements*2 by default → 24 × 2 = 48). So
-     * delta for 768 extra elements ≥ 140 × 768 = 107520 B (before cache-line
-     * alignment, which can only INCREASE it). Lower bound is robust to formula
-     * tweaks because we're checking a delta, not absolute. */
-    const size_t per_elem_bytes = (24U * 2U) + 40U + (4U * 2U) + 40U + 4U;
+    /* Per-element bytes that grow with max_elements:
+     *   tree_baked (40) + tree_root_for_elem (4) + hit_baked (40) + hit_clip_parent_id (4) = 88. */
+    const size_t per_elem_bytes = 40U + 4U + 40U + 4U;
     const size_t expected_delta_floor = per_elem_bytes * (1024U - 256U);
     TEST_ASSERT_GREATER_OR_EQUAL_size_t(expected_delta_floor, sz_large - sz_small);
 }

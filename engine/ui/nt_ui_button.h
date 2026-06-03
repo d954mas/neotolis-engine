@@ -1,11 +1,9 @@
 #ifndef NT_UI_BUTTON_H
 #define NT_UI_BUTTON_H
 
-/* Interactive container button. Near-clone of nt_ui_panel with one structural
- * addition: a Clay element .id so the engine hit-test finds it. Runs the state
- * machine automatically — step interaction, pick state (disabled→pressed→hover→
- * idle), ease scale/offset/opacity via the anim cache, apply via push_transform
- * + push_opacity. Content (label / icon / icon+text) composes as children. */
+/* Interactive container button. Near-clone of nt_ui_panel with a Clay element
+ * .id so the engine hit-test finds it. Auto state machine + eased visuals
+ * applied via userData; content (label / icon / icon+text) composes as children. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,19 +39,9 @@ typedef struct {
 } nt_ui_button_style_t;
 
 /* begin → children → bool end. enabled=false short-circuits hover/click and
- * forces the disabled visual; transform/opacity still push so end stays balanced.
- *
- * `decl` is optional (NULL = FIT default). Engine OWNS .id/.image/.backgroundColor/.userData
- * — caller must leave them zero/NULL.
- *
- * State-dependent content: query (pure read) BEFORE button_begin in the SAME
- * transform+clip scope, then use it to pick label/icon.
- *
- *   nt_ui_interaction_t in = nt_ui_query_interaction(ctx, btn_id);
- *   nt_ui_button_begin(ctx, ..., btn_id, atlas, &style, &decl, true);
- *     nt_ui_label(ctx, NULL, in.pressed ? "Saving..." : "Save", &lbl);
- *   clicked = nt_ui_button_end(ctx);
- */
+ * forces the disabled visual. `decl` is optional (NULL = FIT default). Engine
+ * OWNS .id/.image/.backgroundColor/.userData — caller leaves them zero/NULL.
+ * For state-dependent content, query BEFORE button_begin to pick label/icon. */
 void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
 

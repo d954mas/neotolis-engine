@@ -1,9 +1,8 @@
 #ifndef NT_UI_PANEL_H
 #define NT_UI_PANEL_H
 
-/* Panel and group container widgets. Panel has an IMAGE background; group is
- * invisible. Game code uses explicit push_transform/push_opacity around these
- * when transforms are needed (explicit over implicit). */
+/* Panel (IMAGE bg) and group (invisible) containers. Game wraps with
+ * CLAY({.userData = NT_UI_DATA_XFORM(...)}) when transforms are needed. */
 
 #include <stdint.h>
 

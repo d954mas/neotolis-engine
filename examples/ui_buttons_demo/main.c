@@ -103,9 +103,8 @@ static const nt_ui_label_style_t g_btn_label_style = {
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
-/* Icon child = the icon_bunny region (Kenney CC0, 32x32). Untinted (0xFFFFFFFF
- * = no tint) so the bunny renders in its natural blue color. opacity still
- * inherits from the button's per-state push_opacity (WIDGET-05). */
+/* Icon child = the icon_bunny region. Untinted (0xFFFFFFFF) so the bunny
+ * renders in its natural blue. Opacity inherits from the button's eased state. */
 static const nt_ui_image_style_t g_btn_icon_style = {
     .color_packed = 0xFFFFFFFF, /* no tint (0xAABBGGRR) -- show natural art */
     .origin_x = 0.5F,
@@ -115,14 +114,6 @@ static const nt_ui_image_style_t g_btn_icon_style = {
 // #endregion
 
 // #region button style templates
-/* NOTE on the Kenney slice9 "gray center" the user spotted: button_blue_depth.png
- * and button_green_depth.png are Kenney CC0 "depth" buttons -- intentional 3D
- * art with an outer bright frame + an INNER recessed light-gray-blue panel.
- * On the dark BG (#121216) the inner panel reads as gray. This is the Kenney
- * art rendering correctly, NOT a tint/state bug; the slice9 borders (16 px
- * each side) preserve the corners and stretch the inner gray patch to fill
- * the button. Swapping to "flat" Kenney buttons (no depth suffix) would
- * remove the gray look but lose the 3D affordance the demo wants to show. */
 
 /* (a) STANDARD: eased baseline. */
 static const nt_ui_button_style_t g_btn_standard_style = {
@@ -258,8 +249,7 @@ static float s_xform_deg;
 #define LAYER_IMG 1
 #define LAYER_TEXT 2
 
-/* 1600x1200 logical: 6-cell grid (~720 px tall with status) + new BAKED
- * TRANSFORM section (~400 px with padding) + help bar. The window matches. */
+/* 1600x1200 logical: 6-cell grid + BAKED TRANSFORM section + help bar. */
 #define UI_REF_W 1600.0F
 #define UI_REF_H 1200.0F
 // #endregion
@@ -351,7 +341,7 @@ static void try_bind_resources(void) {
 // #endregion
 
 // #region grid cell sizing
-/* Each cell = vertical stack of title + sub + button (360x320 cell, 320x180 btn). */
+/* Each cell = vertical stack of title + sub + button. */
 #define CELL_W 360
 #define CELL_H 240
 #define BTN_W 320
@@ -387,8 +377,8 @@ static void try_bind_resources(void) {
         .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER} }                      \
     }
 
-/* Layout decl for button-begin — drives FIXED sizing without an inner CLAY wrap.
- * If you wrap buttons in CLAY({.clip = ...}), pair with push_clip/pop_clip. */
+/* Layout decl for button-begin — FIXED sizing without an inner CLAY wrap.
+ * For clipping, attach .clip on a wrapping CLAY. */
 static const Clay_ElementDeclaration s_btn_decl = {
     .layout =
         {
@@ -530,10 +520,8 @@ static void declare_reference_buttons(void) {
         }
 
         // #region (g) BAKED TRANSFORM
-        /* 7th button wrapped in push_transform with baked offset/rotation/scale
-         * so the user can verify the inverse-affine hit-test on a statically-
-         * transformed widget. 80 px outer padding keeps the rotated button from
-         * overlapping neighbors. */
+        /* Baked offset/rotation/scale — proves inverse-affine hit-test on a
+         * statically transformed widget. 80 px outer padding avoids overlap. */
         CLAY({.id = CLAY_ID("ref-btn-baked-section"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
                          .padding = {.left = 0, .right = 0, .top = 30, .bottom = 30},
@@ -550,25 +538,24 @@ static void declare_reference_buttons(void) {
                 const nt_ui_transform_t baked = {
                     .offset_x = 60.0F,
                     .offset_y = -20.0F,
-                    .rotation = 25.0F * 0.017453292F, /* 25 deg -> rad */
+                    .rotation = 25.0F * 0.017453292F,
                     .scale_x = 1.15F,
                     .scale_y = 0.85F,
                 };
-                nt_ui_push_transform(s_ctx, &baked);
-                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
-                if (nt_ui_button_end(s_ctx)) {
-                    s_clicks_baked++;
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_clicks_baked++;
+                    }
                 }
-                nt_ui_pop_transform(s_ctx);
             }
         }
         // #endregion
 
         // #region (g) SLICE9_SCALE row (0.25 / 1.0 / 4.0)
-        /* Identical button size + art; only slice9_scale differs. Demonstrates
-         * the new knob: scale=0.25 → tiny corners, 1.0 → atlas default, 4.0
-         * → chunky corners. */
+        /* Identical size + art; only slice9_scale differs: 0.25 → tiny corners,
+         * 1.0 → atlas default, 4.0 → chunky corners. */
         CLAY({.id = CLAY_ID("ref-btn-row-s9"),
               .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             CLAY(CELL_LAYOUT) {
@@ -779,11 +766,13 @@ static void frame(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
             }
 
-            /* Runtime transform around the grid — accumulated and fed to the
-             * inverse-affine hit-test so every variant stays clickable. */
-            nt_ui_push_transform(s_ctx, &row_xform);
-            declare_reference_buttons();
-            nt_ui_pop_transform(s_ctx);
+            /* Runtime transform around the grid — declarative on a wrapping
+             * CLAY block. build_tree composes it into every descendant's
+             * tree_baked, so both renderer and inverse-affine hit-test see it. */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .userData = (void *)NT_UI_DATA_XFORM(0U, &row_xform, 1.0F)}) {
+                declare_reference_buttons();
+            }
 
             /* Help bar pinned at the bottom. */
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {

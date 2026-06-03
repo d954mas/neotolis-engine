@@ -276,7 +276,6 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     const float b_cx = b_x + (BTN_W * 0.5F);
     const float b_cy = b_y + (BTN_H * 0.5F);
 
-    /* Helper to declare both elements at fixed absolute positions in one frame. */
     /* Frame 1: declare both elements so Clay has bboxes for next frame. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
@@ -354,13 +353,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
 }
 
 /* ---- Test 9: query is idempotent on the release frame ----
- *
- * Pins the bug that motivated the CQS split. Pre-split, the single
- * nt_ui_get_interaction silently ate clicks: on the release frame, the first
- * call cleared cap->active_id and reported clicked=true; a SECOND call saw
- * cap->active_id==0 and returned clicked=false (state visible to user
- * widgets vanished). Query is pure -- N calls return the SAME struct AND
- * cap->active_id is unchanged. */
+ * Query is pure — N calls return the SAME struct AND cap->active_id is unchanged. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_query_is_idempotent(void) {
     /* Frame 1: declare. */
@@ -438,56 +431,42 @@ static void test_step_commits_what_query_previewed(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 11: query and step agree under rotation+clip ----
- * Pointer is outside the axis-aligned AABB but inside the rotated visual. */
+/* ---- Test 11: query and step agree under rotation ----
+ * Pointer outside axis-aligned AABB but inside the rotated visual quad — the
+ * inverse-affine must un-rotate it to register a hover. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_query_step_under_rotation(void) {
-    /* Frame 1: declare under the same transform so frame 2's hit-test bbox is stored. */
+    nt_ui_transform_t rot = nt_ui_transform_defaults();
+    rot.rotation = 30.0F * 0.017453292F;
+
+    /* Frame 1: declare the rotated button so prev-frame tree_baked carries it. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
-    nt_ui_transform_t rot = nt_ui_transform_defaults();
-    rot.rotation = 30.0F * 0.017453292F; /* 30 deg */
-    CLAY({.id = CLAY_ID("rot_root")}) {
-        nt_ui_push_transform(s_fx.ctx, &rot);
-        /* Clip generous enough to contain the rotated widget. */
-        nt_ui_push_clip(s_fx.ctx, BTN_X - 200.0F, BTN_Y - 200.0F, BTN_W + 400.0F, BTN_H + 400.0F);
-        CLAY({.id = CLAY_ID("rotbtn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
-        }
-        nt_ui_pop_clip(s_fx.ctx);
-        nt_ui_pop_transform(s_fx.ctx);
-    }
+    CLAY({.id = CLAY_ID("rotbtn"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &rot, 1.0F)}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: pointer at the forward-rotated layout right-center.
-     * cos(30)=0.8660, sin(30)=0.5.
-     * dx = BTN_W/2 = 80, dy = 0.
-     * rx = BTN_CX + cos*dx = 180 + 69.3 = 249.3
-     * ry = BTN_CY + sin*dx = 224 + 40.0 = 264.0
-     * Layout AABB y-range is [200, 248]; ry=264 is OUTSIDE the AABB. */
+    /* Frame 2: pointer at the forward-rotated layout right-center. */
     const float c = 0.8660F;
     const float sn = 0.5F;
     const float dx = BTN_W * 0.5F;
     const float rx = BTN_CX + (c * dx);
     const float ry = BTN_CY + (sn * dx);
-    /* Sanity: this coord is OUTSIDE the axis-aligned layout AABB. */
     TEST_ASSERT_TRUE(ry > BTN_Y + BTN_H);
 
     nt_pointer_t f2 = make_pointer(rx, ry, true, true, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
-    CLAY({.id = CLAY_ID("rot_root")}) {
-        nt_ui_push_transform(s_fx.ctx, &rot);
-        nt_ui_push_clip(s_fx.ctx, BTN_X - 200.0F, BTN_Y - 200.0F, BTN_W + 400.0F, BTN_H + 400.0F);
-        CLAY({.id = CLAY_ID("rotbtn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
-            /* Query + step under the SAME accum stack -- both must agree. */
-            const nt_ui_interaction_t q = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("rotbtn"));
-            const nt_ui_interaction_t s = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("rotbtn"));
-            /* The inverse-rotation lands the pointer on the visual quad -> hover. */
-            TEST_ASSERT_TRUE_MESSAGE(q.hovered, "query inverse-affine missed the rotated quad");
-            TEST_ASSERT_TRUE(q.pressed_now);
-            TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&q, &s, sizeof(nt_ui_interaction_t), "query and step diverged under rotation+clip");
-        }
-        nt_ui_pop_clip(s_fx.ctx);
-        nt_ui_pop_transform(s_fx.ctx);
+    CLAY({.id = CLAY_ID("rotbtn"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &rot, 1.0F)}) {
+        const nt_ui_interaction_t q = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("rotbtn"));
+        const nt_ui_interaction_t s = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("rotbtn"));
+        TEST_ASSERT_TRUE_MESSAGE(q.hovered, "query inverse-affine missed the rotated quad");
+        TEST_ASSERT_TRUE(q.pressed_now);
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&q, &s, sizeof(nt_ui_interaction_t), "query and step diverged under rotation");
     }
     nt_ui_end(s_fx.ctx);
 }

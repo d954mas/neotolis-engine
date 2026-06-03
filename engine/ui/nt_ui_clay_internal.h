@@ -37,6 +37,16 @@ float nt_ui_clay_priv_pointer_x(Clay_Context *clay);
 float nt_ui_clay_priv_pointer_y(Clay_Context *clay);
 /* 1 if state == PRESSED or PRESSED_THIS_FRAME, else 0. */
 int nt_ui_clay_priv_pointer_pressed(Clay_Context *clay);
+
+/* Hit-test wiring. Returns -1 if id not found in Clay's persistent hashmap.
+ * Slot index is stable across frames — safe to use as an index into our
+ * ctx->hit_baked / ctx->hit_clip_parent_id arrays. */
+int32_t nt_ui_clay_priv_hashmap_slot_for_id(Clay_Context *clay, uint32_t id);
+/* Layout idx for id via current-frame `item->layoutElement`. May shift between
+ * frames as Clay reuses array slots — DO NOT cache. Used by build_tree. */
+int32_t nt_ui_clay_priv_layout_index_for_id(Clay_Context *clay, uint32_t id);
+/* Layout bbox via persistent hashmap (survives BeginLayout's ephemeral reset). */
+bool nt_ui_clay_priv_bbox_for_id(Clay_Context *clay, uint32_t id, float *x, float *y, float *w, float *h);
 // #endregion
 
 // #region in-frame ctx getter

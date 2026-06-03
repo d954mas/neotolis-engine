@@ -60,29 +60,10 @@ static uint32_t color_for_state(uint16_t flags) {
 }
 // #endregion
 
-// #region forward-transform through one accum level
-/* Same per-level math as compose_transform_level (Clay Y-down, NON-negated
- * rotation). The single GL Y-flip happens once per emitted point, AFTER all
- * accum levels — otherwise the rotation pivot re-flips. */
-static void apply_level(float *x, float *y, const nt_ui_transform_t *t, float cx, float cy) {
-    const float sx = t->scale_x;
-    const float sy = t->scale_y;
-    const float cr = cosf(t->rotation);
-    const float sr = sinf(t->rotation);
-    const float dx = *x - cx;
-    const float dy = *y - cy;
-    *x = cx + (cr * sx * dx) - (sr * sy * dy) + t->offset_x;
-    *y = cy + (sr * sx * dx) + (cr * sy * dy) + t->offset_y;
-}
-
-/* Project a Clay-space point through accum stack then walker's Y-flip.
- * Shared via nt_ui_internal.h so the inspector overlay reuses it. */
+/* Project Clay-space → world via the zone's composed affine + walker Y-flip. */
 void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y) {
-    float wx = x;
-    float wy = y;
-    for (uint32_t k = 0; k < z->accum_depth; ++k) {
-        apply_level(&wx, &wy, &z->accum[k], z->center_x, z->center_y);
-    }
+    const float wx = (z->aff_a * x) + (z->aff_b * y) + z->aff_tx;
+    const float wy = (z->aff_c * x) + (z->aff_d * y) + z->aff_ty;
     *out_x = wx;
     *out_y = vy + vh - wy; /* Clay Y-down → GL Y-up */
 }

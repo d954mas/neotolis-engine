@@ -219,13 +219,9 @@ static void test_label_widget_tagged_on_text_leaf(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 7c: label tag binds the TEXT leaf id, NOT the parent id ----
- * Pins the exact registration shape: the label's def must NOT overwrite the
- * parent container's registered widget (button/panel/group). Setup: a panel
- * wraps a label; after declaration, the panel's id must still resolve to
- * NT_UI_PANEL_DEF (not NT_UI_LABEL_DEF). Without the fix, both registers
- * would land on the same parent id -- the LATER call (label) would clobber
- * the panel tag. */
+/* ---- Test 7c: label tag binds the TEXT leaf id, not the parent id ----
+ * A panel wrapping a label resolves to NT_UI_PANEL_DEF; the label's register
+ * must NOT clobber the parent container's tag. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_label_does_not_clobber_parent_widget(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -286,7 +282,7 @@ static void test_inspector_inactive_emit_noop(void) {
 }
 
 /* ---- Test 10: active inspector grows the layout element count ----
- * Proves the verbatim port runs (emit_layout injected the panel CLAY blocks). */
+ * Proves emit_layout injected the panel CLAY blocks. */
 static void test_inspector_active_grows_element_count(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -336,13 +332,10 @@ static void test_overlay_noop_without_highlight(void) {
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
-/* ---- Test 13: inspector sidebar INTERCEPTS pointer (regression pin) ----
- * Bug: clicking the sidebar also fired the click on any button geometrically
- * behind it (the sidebar paints on top but the hit-test was pure coord-vs-
- * bbox). Fix: when inspector_active and the pointer is inside the right-
- * attached sidebar footprint (NT_UI_INSPECTOR_PANEL_WIDTH = 400 wide on a 800-wide
- * screen -> x >= 400), nt_ui_step_interaction must return a zeroed result
- * for every user widget AND nt_ui_inspector_pointer_consumed must be true
+/* ---- Test 13: inspector sidebar consumes pointer ----
+ * When inspector_active and pointer is in the right-attached sidebar footprint
+ * (panel_width wide), step_interaction returns zeroed for every user widget
+ * AND nt_ui_inspector_pointer_consumed must be true
  * AND nt_ui_wants_pointer must be true. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_intercepts_pointer_over_sidebar(void) {
@@ -484,9 +477,7 @@ static void test_inspector_walker_enumerates_user_tree(void) {
     const int32_t full_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     const int32_t full_inspector_grew = full_after - before_full;
 
-    /* The full-tree walk must emit strictly more inspector elements than the
-     * empty-root walk -- pre-fix, both produced the SAME count (walker stopped
-     * at Clay__RootContainer because children.elements was NULL). */
+    /* Full-tree walk must emit strictly more inspector elements than the empty root. */
     TEST_ASSERT_GREATER_THAN_INT32(empty_inspector_grew, full_inspector_grew);
     /* Each extra user element adds at least one ElementOuter wrapper; 5 extra
      * children must add at least 5 extra inspector elements. */
@@ -1006,40 +997,36 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     const float btn_w = 160.0F;
     const float btn_h = 48.0F;
 
-    /* Frame 1: prev-frame bbox for the hit-test. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
-    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
-    CLAY({.id = CLAY_ID("baked_root")}) {
-        CLAY({.id = CLAY_ID("xform_btn"),
-              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Frame 2: declare under the transform so accum is non-empty at query time. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
-    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     nt_ui_transform_t baked = nt_ui_transform_defaults();
     baked.offset_x = 60.0F;
     baked.offset_y = -20.0F;
-    baked.rotation = 25.0F * 0.017453292F; /* 25 deg -> rad */
+    baked.rotation = 25.0F * 0.017453292F;
     baked.scale_x = 1.15F;
     baked.scale_y = 0.85F;
-    CLAY({.id = CLAY_ID("baked_root")}) {
-        nt_ui_push_transform(s_fx.ctx, &baked);
-        CLAY({.id = CLAY_ID("xform_btn"),
-              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
-            /* Query INSIDE the CLAY block so accum is still active; recording is gated by inspector_active. */
-            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
-        }
-        nt_ui_pop_transform(s_fx.ctx);
+
+    /* Frame 1: declare with the transform so tree_baked carries it. step_interaction
+     * in frame 2 reads PREV-frame tree_baked → must include the rotation already. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("xform_btn"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {}
+    nt_ui_end(s_fx.ctx);
+
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("xform_btn"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
     }
 
-    /* Zone must be recorded; accum_depth > 0 proves the snapshot landed. */
+    /* Zone must be recorded; composed affine differs from identity (rotation+scale). */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(s_fx.ctx, nt_ui_id("xform_btn"));
     TEST_ASSERT_NOT_NULL(z);
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, z->accum_depth);
+    TEST_ASSERT_TRUE(z->aff_a != 1.0F || z->aff_b != 0.0F || z->aff_c != 0.0F || z->aff_d != 1.0F || z->aff_tx != 0.0F || z->aff_ty != 0.0F);
 
     /* Project top-left through accum + Y-flip; must differ from axis-aligned. */
     float proj_x = 0.0F;
@@ -1309,8 +1296,8 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     (void)nt_ui_test_last_walk_unlayered_count(s_fx.ctx);
 }
 
-/* ---- Test 15x-perf: inspector RECT↔TEXT alternations capped after Strategy A.
- * Per-row pill backgrounds dropped (colored text only) → alternations <= 20
+/* ---- Test 15x-perf: inspector RECT↔TEXT alternations capped.
+ * Per-row pill backgrounds dropped (colored text only) → ≤ 20 alternations
  * for the demo-shaped scene. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_alternations_capped_after_strategy_a(void) {
@@ -1646,15 +1633,14 @@ static void test_inspector_hover_transformed_widget(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     nt_ui_transform_t baked = nt_ui_transform_defaults();
-    baked.rotation = 25.0F * 0.017453292F; /* 25 deg in rad */
-    CLAY({.id = CLAY_ID("xf_btn_root")}) {
-        nt_ui_push_transform(s_fx.ctx, &baked);
-        CLAY({.id = CLAY_ID("xf_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
-            /* Issue the interaction query INSIDE the CLAY block so the
-             * declaration-time accum is captured into the zone. */
-            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
-        }
-        nt_ui_pop_transform(s_fx.ctx);
+    baked.rotation = 25.0F * 0.017453292F;
+    /* Attach userData directly to xf_btn — floating children inherit transform
+     * from their floating parentId (ROOT here = identity), not lexical wrappers. */
+    CLAY({.id = CLAY_ID("xf_btn"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
     }
     nt_ui_end(s_fx.ctx);
 
@@ -1694,14 +1680,11 @@ static void test_inspector_hover_transformed_widget(void) {
     nt_pointer_t f2 = make_pointer(rx, ry);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
-    CLAY({.id = CLAY_ID("xf_btn_root")}) {
-        nt_ui_push_transform(s_fx.ctx, &baked);
-        CLAY({.id = CLAY_ID("xf_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
-            /* Query so the zone is recorded with the live accum (otherwise
-             * frame 2 has no zone to scan). */
-            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
-        }
-        nt_ui_pop_transform(s_fx.ctx);
+    CLAY({.id = CLAY_ID("xf_btn"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
     }
     nt_ui_end(s_fx.ctx);
 

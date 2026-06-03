@@ -70,7 +70,7 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 
 1. Build affected targets: `cmake --build build/_cmake/native-debug`
 2. Tests: `ctest --test-dir build/_cmake/native-debug --output-on-failure`
-3. Formatting: `clang-format --dry-run --Werror <affected .c/.h files>`
+3. Formatting: `clang-format --dry-run --Werror <affected .c/.h files>` — vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded from the formatting check; review patches to them separately.
 4. Static analysis: `bash scripts/tidy.sh build/_cmake/native-debug`
 
 If any check fails — fix before committing. Do not commit code that hasn't passed all four checks.
