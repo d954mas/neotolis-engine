@@ -962,7 +962,11 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float scale = (metrics.units_per_em > 0) ? (font_size / (float)metrics.units_per_em) : 0.0F;
     const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
-    const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
+    /* Y-down LAYOUT: bbox.y is TOP edge; baseline lives below the top by
+     * (center_offset + ascent*scale). The Y-flip in world_aff converts this to
+     * GL Y-up — using (-descent*scale) here, the old Y-up formula, would shift
+     * the baseline by (ascent - (-descent))*scale and render text too high. */
+    const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * scale);
 
     /* Text renderer's local frame is Y-up (ascender > 0). world_aff bakes the GL Y-flip
      * (d == -1 for identity), so we pre-flip local Y to cancel it: M = aff · T · S(1, -1). */
