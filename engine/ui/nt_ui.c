@@ -370,10 +370,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     nt_ui_internal_build_tree(ctx);
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
 
-    /* Markers keep layout-element indices (before_clay_idx). The walker
-     * matches directly via nt_layout_index on each render command — no
-     * O(M×R) remap needed. */
-
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
     /* Stray CLAY_* between end and next begin NULL-derefs instead of corrupting. */

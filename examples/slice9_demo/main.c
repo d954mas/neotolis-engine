@@ -431,6 +431,9 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
+        /* Inspector highlight + id label — no-op unless inspector_active (D toggle). */
+        nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
+
         // #region metrics bridge
         nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
         nt_stats_count("ui_commands", (uint64_t)nt_ui_get_last_walk_command_count(s_ctx));

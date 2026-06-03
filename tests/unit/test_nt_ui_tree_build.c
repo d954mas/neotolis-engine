@@ -152,7 +152,12 @@ static void test_opacity_inheritance_2level(void) {
     TEST_ASSERT_TRUE_MESSAGE(found_inner, "inner opacity 0.5*0.4=0.2 not found");
 }
 
-/* ---- 5. Floating ATTACH_TO_ROOT → identity seed (parent rotation NOT inherited). ---- */
+/* ---- 5. Floating ATTACH_TO_ROOT → identity seed (parent rotation NOT inherited).
+ *
+ *  Also verifies the lexical parent `wrap` DID compose its own 45deg into
+ *  tree_baked — guards against a regression that disables non-floating subtree
+ *  DFS (would let floating identity pass while breaking main-tree composition).
+ */
 static void test_floating_attach_to_root_identity_seed(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -170,17 +175,20 @@ static void test_floating_attach_to_root_identity_seed(void) {
      * Scan all floating roots; at least one should be identity. */
     const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
     int32_t tooltip_idx = -1;
+    bool found_wrap_45 = false;
     for (int32_t i = 1; i < N; ++i) {
         const int32_t root_idx = nt_ui_internal_test_get_tree_root_for_elem(s_fx.ctx, i);
-        if (root_idx > 0) { /* a floating root */
-            const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-            if (baked_is_identity(bk)) {
-                tooltip_idx = i;
-                break;
-            }
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (root_idx > 0 && baked_is_identity(bk)) {
+            /* Floating root with identity baked = tooltip. */
+            tooltip_idx = i;
+        } else if (root_idx < 0 && fabsf(bk->rotation - DEG2RAD(45.0F)) <= 1e-3F) {
+            /* Non-root element with 45deg = wrap (composed its own xform via main-tree DFS). */
+            found_wrap_45 = true;
         }
     }
     TEST_ASSERT_TRUE_MESSAGE(tooltip_idx >= 0, "ATTACH_TO_ROOT floating with parent-rotation should have identity baked");
+    TEST_ASSERT_TRUE_MESSAGE(found_wrap_45, "lexical parent (wrap) should have composed 45deg via main-tree DFS");
 }
 
 /* ---- 6. Floating ATTACH_TO_PARENT → inherits lexical parent's xform. ---- */
