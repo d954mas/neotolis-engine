@@ -932,16 +932,20 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
 
-    /* Region vertices live in source-unit space; map (0,0) → layout (bb.x, bb.y + bb.h)
-     * and (src_w, src_h) → (bb.x + bb.w, bb.y) so atlas-bottom-left lands at GL bottom-left
-     * after world_aff's Y-flip. Local-to-layout: T(bb.x, bb.y+bb.h) · S(sx_f, -sy_f). */
-    const float ox = bb.x;
-    const float oy = bb.y + bb.height;
+    /* Sprite-anchor convention: m_translate = bbox CENTER (GL coords). emit_region
+     * bakes (origin_x*src_w, origin_y*src_h) into the translation so the source's
+     * (origin_x, origin_y) point lands at bbox center. Atlas default origin (0.5,0.5)
+     * = bbox-fill. Flipbook frames with off-center origin keep registration point
+     * at bbox center, so all frames stay aligned across a multi-frame animation. */
+    const float cx = bb.x + (bb.width * 0.5F);
+    const float cy = bb.y + (bb.height * 0.5F);
     const float m[16] = {
-        aff[0] * sx_f, aff[2] * sx_f, 0.0F, 0.0F, -aff[1] * sy_f, -aff[3] * sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * ox) + (aff[1] * oy) + aff[4], (aff[2] * ox) + (aff[3] * oy) + aff[5],
+        aff[0] * sx_f, aff[2] * sx_f, 0.0F, 0.0F, -aff[1] * sy_f, -aff[3] * sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * cx) + (aff[1] * cy) + aff[4], (aff[2] * cx) + (aff[3] * cy) + aff[5],
         0.0F,          1.0F,
     };
-    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+    const float origin_x = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : r->origin_x;
+    const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : r->origin_y;
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
 // #endregion
 
@@ -962,14 +966,10 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float scale = (metrics.units_per_em > 0) ? (font_size / (float)metrics.units_per_em) : 0.0F;
     const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
-    /* Y-down LAYOUT: bbox.y is TOP edge; baseline lives below the top by
-     * (center_offset + ascent*scale). The Y-flip in world_aff converts this to
-     * GL Y-up — using (-descent*scale) here, the old Y-up formula, would shift
-     * the baseline by (ascent - (-descent))*scale and render text too high. */
+    /* Layout (Y-down): baseline = bbox.y(top) + center_offset + ascent*scale. */
     const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * scale);
 
-    /* Text renderer's local frame is Y-up (ascender > 0). world_aff bakes the GL Y-flip
-     * (d == -1 for identity), so we pre-flip local Y to cancel it: M = aff · T · S(1, -1). */
+    /* Text renderer local is Y-up; world_aff bakes Y-flip; pre-flip local Y to cancel. */
     const float ox = c->boundingBox.x;
     const float oy = baseline_y;
     const float m[16] = {

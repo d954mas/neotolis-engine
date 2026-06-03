@@ -80,19 +80,12 @@ typedef struct {
 #define NT_UI_CUSTOM_TYPE_NONE 0 /* engine anchor: skip, bbox only */
 #define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
 
-/* Frame snapshot passed to the CUSTOM handler. Contains everything the
- * handler needs to render in the same world frame as the rest of the UI:
- *   - clay_cmd: opaque Clay_RenderCommand * (cast back inside handler).
- *     boundingBox is in LAYOUT (Y-down) coords; pass it through world_aff
- *     to get GL world-space corners. (Walker no longer flattens to an
- *     axis-aligned AABB — rotation in the chain is preserved.)
- *   - world_aff: 2x3 affine that maps a LAYOUT point (px, py) to GL world:
- *       gl_x = aff[0]*px + aff[1]*py + aff[4]
- *       gl_y = aff[2]*px + aff[3]*py + aff[5]
- *     This bakes the composed parent chain AND the Y-flip; for identity
- *     parent + 800x600 viewport it is (1, 0, 0, -1, 0, 600).
- *   - opacity: accumulated [0..1] from ancestor opacity chain. Multiply
- *     into your render alpha. */
+/* Frame snapshot passed to the CUSTOM handler.
+ *   clay_cmd  — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
+ *   world_aff — 2x3 affine, LAYOUT point -> GL world (bakes parent chain + Y-flip).
+ *                 gl_x = aff[0]*x + aff[1]*y + aff[4]
+ *                 gl_y = aff[2]*x + aff[3]*y + aff[5]
+ *   opacity   — accumulated [0..1] from ancestor chain; multiply into alpha. */
 typedef struct {
     const void *clay_cmd;
     float world_aff[6];

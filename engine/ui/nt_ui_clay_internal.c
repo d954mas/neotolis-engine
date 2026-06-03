@@ -531,8 +531,9 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         ctx->tree_baked[i] = identity;
     }
     if (R == 0) {
-        /* No tree work this frame — leave hit_baked/hit_clip_parent_id untouched
-         * so prev-frame data for already-known ids stays addressable for hit-test. */
+        /* No tree this frame. Bump generation so hit-test rejects every
+         * stale id this frame would otherwise still match. */
+        ctx->current_generation++;
         return;
     }
 
