@@ -112,6 +112,12 @@ static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_t
  * transform/opacity attach declaratively per element; the post-EndLayout tree
  * build composes them down the children chain into ctx->tree_baked.
  *
+ * Composition is standard scene-graph (CSS / Unity / Cocos): a child's local
+ * transform applies in the parent's already-transformed frame
+ *   world_point = accum_parent * L_child * local_point
+ * so e.g. parent rotate(90deg) + child translate(10, 0) moves the child 10
+ * units along parent's rotated X, not along world X.
+ *
  *   CLAY({ .userData = NT_UI_DATA_LAYER(LAYER_BG), ... })
  *   CLAY({ .userData = NT_UI_DATA_FULL(LAYER_HUD, &my_button), ... })
  *   CLAY({ .userData = NT_UI_DATA_XFORM(LAYER_HUD, &t, 0.8F), ... }) */

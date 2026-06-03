@@ -391,7 +391,9 @@ static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
 }
 
 /* Compose ONE transform level (scale S, rotation θ, center C, offset O) into
- * the accumulated affine. Local = T(O)*T(C)*R(θ)*S*T(-C); new = local * accum.
+ * the accumulated affine. Local = T(O)·T(C)·R(θ)·S·T(-C); new = accum · local.
+ * Scene-graph standard: a child's transform applies in its parent's already-
+ * transformed frame (world_point = accum_parent · L_child · local_point).
  * Pure Clay Y-down math: NO Y-flip, NO rotation negation — render-only
  * conversions are applied in walker dispatch_command. */
 static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
@@ -405,12 +407,12 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
     const float ld = cr * sy;
     const float ltx = cx - (la * cx) - (lb * cy) + t->offset_x;
     const float lty = cy - (lc * cx) - (ld * cy) + t->offset_y;
-    const float na = (la * *a) + (lb * *c);
-    const float nb = (la * *b) + (lb * *d);
-    const float nc = (lc * *a) + (ld * *c);
-    const float nd = (lc * *b) + (ld * *d);
-    const float ntx = (la * *tx) + (lb * *ty) + ltx;
-    const float nty = (lc * *tx) + (ld * *ty) + lty;
+    const float na = (*a * la) + (*b * lc);
+    const float nb = (*a * lb) + (*b * ld);
+    const float nc = (*c * la) + (*d * lc);
+    const float nd = (*c * lb) + (*d * ld);
+    const float ntx = (*a * ltx) + (*b * lty) + *tx;
+    const float nty = (*c * ltx) + (*d * lty) + *ty;
     *a = na;
     *b = nb;
     *c = nc;
