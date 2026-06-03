@@ -1,5 +1,4 @@
-/* nt_ui_inspector: public API + post-walk overlay. emit_layout body lives in
- * nt_ui_clay_internal.c (Clay private types). Clay is zlib-licensed (deps/clay). */
+/* Public API + post-walk overlay; emit_layout body lives in nt_ui_clay_internal.c. */
 
 #include "ui/nt_ui_inspector.h"
 
@@ -14,11 +13,11 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "ui/nt_ui_clay_internal.h" /* nt_ui_internal_emit_inspector_layout_extern prototype */
+#include "ui/nt_ui_clay_internal.h"
 #include "ui/nt_ui_internal.h"
 
 // #region metrics
-/* Defaults match Clay's debug-view literals (panel 400, row 30, font 16, etc.). */
+/* Defaults match Clay's debug-view literals. */
 const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT = {
     .panel_width = 400.0F,
     .row_height = 30.0F,
@@ -27,7 +26,6 @@ const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT = {
     .indent_width = 16U,
 };
 
-/* Five preconditions trip cognitive-complexity but each is straight-line. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_metrics: ctx must be non-NULL");
@@ -44,7 +42,7 @@ void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_active: ctx must be non-NULL");
     ctx->inspector_active = on;
     if (!on) {
-        /* Clear focus + selection + collapsed-set so a re-enable starts clean. */
+        /* Start clean on re-enable. */
         ctx->inspector_highlight_id = 0U;
         ctx->inspector_selected_id = 0U;
         ctx->inspector_collapsed_count = 0U;
@@ -58,26 +56,24 @@ bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
 
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_pointer_consumed: ctx must be non-NULL");
-    /* Guard against stale state when the toggle flips. */
+    /* Combined check guards against stale state when toggle flips. */
     return ctx->inspector_active && ctx->inspector_pointer_consumed;
 }
 // #endregion
 
-// #region emit_layout (forwarder; body in nt_ui_clay_internal.c)
+// #region emit_layout
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_emit_layout: ctx must be non-NULL");
     nt_ui_internal_emit_inspector_layout_extern(ctx);
 }
 // #endregion
 
-// #region overlay_draw helpers (axis-aligned world-space quads + text)
+// #region overlay_draw helpers
 static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
-/* GPU scissor clips highlight + label against the sidebar. */
-
-/* Filled rect with GL Y-up coords; (x, y_top) is the top-left. */
+/* GL Y-up; (x, y_top) is the top-left. */
 static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, uint32_t color) {
     if (w <= 0.0F || h <= 0.0F) {
         return;
@@ -92,12 +88,11 @@ static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, flo
     nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, s_identity_mat, color);
 }
 
-/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. */
 static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, uint32_t color) {
-    overlay_emit_rect(atlas, region, x, y_top, w, t, color);         /* top edge */
-    overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, color); /* bottom edge */
-    overlay_emit_rect(atlas, region, x, y_top, t, h, color);         /* left edge */
-    overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, color); /* right edge */
+    overlay_emit_rect(atlas, region, x, y_top, w, t, color);         /* top */
+    overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, color); /* bottom */
+    overlay_emit_rect(atlas, region, x, y_top, t, h, color);         /* left */
+    overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, color); /* right */
 }
 
 static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, float baseline_y, float size, const float color[4], const char *s, size_t n) {
@@ -128,7 +123,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         return;
     }
 
-    /* Bbox is Clay Y-down; walker's per-corner Y-flip maps it to GL Y-up. */
     nt_ui_inspector_element_info_t info = nt_ui_internal_get_element_info(ctx, ctx->inspector_highlight_id);
     if (!info.found) {
         return;
@@ -139,8 +133,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
 
-    /* Push GPU scissor over the GAME area (left of sidebar) so both overlay
-     * paths clip uniformly. Walker exit left scissor disabled; restore that. */
+    /* GPU scissor over the game area so both overlay paths clip uniformly. */
     const float panel_left_x = vx + vw - ctx->inspector_metrics.panel_width;
     const int scissor_x = (int)vx;
     const int scissor_y = (int)vy;
@@ -151,17 +144,13 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_gfx_set_scissor_enabled(true);
     }
 
-    /* Project corners through the recorded accum transform so the overlay
-     * matches the rendered widget; fall back to axis-aligned bbox when no
-     * zone was recorded (plain Clay elements). */
+    /* Fall back to axis-aligned bbox for plain Clay elements without a recorded zone. */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(ctx, ctx->inspector_highlight_id);
-    /* Project only when the composed affine is non-identity (saves work for
-     * untransformed widgets — fall back to axis-aligned bbox path below). */
+    /* Skip projection when composed affine is identity. */
     const bool z_has_xform = (z != NULL) && (z->aff_a != 1.0F || z->aff_b != 0.0F || z->aff_c != 0.0F || z->aff_d != 1.0F || z->aff_tx != 0.0F || z->aff_ty != 0.0F);
     if (z_has_xform) {
         nt_sprite_renderer_set_material(ctx->sprite_material);
 
-        /* Zone carries both visual and padded bboxes; project both. */
         int16_t pad[4] = {0, 0, 0, 0};
         const bool has_pad = nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0);
 
@@ -179,7 +168,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, pad_corners, 1.0F, 0xFF00FFFFU);
         }
 
-        /* Visual bbox: translucent fill + opaque outline. */
         float vis_corners[4][2] = {
             {z->visual_l, z->visual_t},
             {z->visual_r, z->visual_t},
@@ -192,7 +180,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, vis_corners, 0x641C42A8U);
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, 0xFFFFFFFFU);
 
-        /* Label at the GL-Y-up TOP corner of the projected quad. */
+        /* Label at corner with max y (GL-Y-up TOP of projected quad). */
         if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
             float top_x = vis_corners[0][0];
             float top_y = vis_corners[0][1];
@@ -220,16 +208,14 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
             nt_text_renderer_flush();
         }
-        /* Restore disabled scissor (walker exit invariant). Flush BEFORE disable
-         * so the panel-clipped staging actually carries the scissor. */
+        /* Flush BEFORE disable so panel-clipped staging carries the scissor. */
         if (scissor_w > 0 && scissor_h > 0) {
             nt_gfx_set_scissor_enabled(false);
         }
         return;
     }
 
-    /* Fallback: axis-aligned bbox in layout space.
-     * Clay Y-down → GL Y-up: world_y(top) = vy+vh - clay_y(top). */
+    /* Fallback path: Clay Y-down → GL Y-up. */
     const float gl_x = info.bbox_x;
     const float gl_y_top = vy + vh - info.bbox_y;
     const float w = info.bbox_w;
@@ -237,8 +223,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
 
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* When the widget has registered hit-zone padding, draw the padded fill
-     * UNDER the visual bbox so both are visible. */
+    /* Padded fill drawn UNDER the visual bbox so both are visible. */
     int16_t pad[4] = {0, 0, 0, 0};
     if (nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0)) {
         const float pl = (float)pad[0];
@@ -246,19 +231,17 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         const float pt = (float)pad[2];
         const float pb = (float)pad[3];
         const float pad_x = gl_x - pl;
-        const float pad_y_top = gl_y_top + pt; /* GL Y-up: top edge moves UP by pt */
+        /* GL Y-up: top edge moves UP by pt. */
+        const float pad_y_top = gl_y_top + pt;
         const float pad_w = w + pl + pr;
         const float pad_h = h + pt + pb;
-        /* Translucent cyan fill (matches debug overlay idle color). */
         overlay_emit_rect(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 0x6033FFFFU);
-        /* Thin yellow outline for the touch-target edge. */
         overlay_emit_outline(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 1.0F, 0xFF00FFFFU);
     }
-    /* Translucent fill (matches Clay__debugViewHighlightColor) + opaque outline. */
+    /* Matches Clay__debugViewHighlightColor. */
     overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 0x641C42A8U);
     overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, 0xFFFFFFFFU);
 
-    /* Id label at the top-left corner; GPU scissor clips it against the panel. */
     if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
         char buf[80];
         int n;
@@ -270,7 +253,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         }
         if (n > 0) {
             const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-            /* GL Y-up: baseline sits just inside the top edge. */
             overlay_draw_text(ctx->text_material, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, color, buf, (size_t)n);
         }
     }
@@ -279,7 +261,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
         nt_text_renderer_flush();
     }
-    /* Restore disabled scissor (walker exit invariant). */
     if (scissor_w > 0 && scissor_h > 0) {
         nt_gfx_set_scissor_enabled(false);
     }

@@ -1,5 +1,4 @@
-/* Exclusive CLAY_IMPLEMENTATION TU. Owns Clay's static globals + private-typed
- * bodies that the inspector port needs. Other TUs include clay.h header-only. */
+/* Owns CLAY_IMPLEMENTATION + private-typed bodies; other TUs include clay.h header-only. */
 
 /* clang-format off */
 #define CLAY_IMPLEMENTATION
@@ -107,14 +106,12 @@ bool nt_ui_clay_priv_bbox_for_id(Clay_Context *clay, uint32_t id, float *x, floa
 // #endregion
 
 // #region inspector_internal_accessors
-/* Inspector accessors that touch Clay private types (Clay_Context fields, Clay__* statics). */
 
 uint32_t nt_ui_internal_current_open_element_id(void) {
     nt_ui_context_t *ctx = nt_ui_internal_get_inframe_ctx();
     if (ctx == NULL || ctx->clay == NULL) {
         return 0U;
     }
-    /* Top of openLayoutElementStack indexes layoutElements; ->id is Clay-assigned. */
     Clay_Context *cc = ctx->clay;
     if (cc->openLayoutElementStack.length <= 0) {
         return 0U;
@@ -129,9 +126,7 @@ uint32_t nt_ui_internal_last_emitted_element_id(void) {
     if (ctx == NULL || ctx->clay == NULL) {
         return 0U;
     }
-    /* Clay__OpenTextElement appends to layoutElements but does NOT push on
-     * openLayoutElementStack — call this immediately after CLAY_TEXT to read
-     * the freshly-added text leaf at layoutElements.length-1. */
+    /* CLAY_TEXT appends to layoutElements but does NOT push on openLayoutElementStack. */
     Clay_Context *cc = ctx->clay;
     if (cc->layoutElements.length <= 0) {
         return 0U;
@@ -140,7 +135,6 @@ uint32_t nt_ui_internal_last_emitted_element_id(void) {
     return el->id;
 }
 
-/* Thin accessors so the inspector TU stays Clay-agnostic. */
 int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_get_layout_element_count: ctx must be non-NULL");
     if (ctx->clay == NULL) {
@@ -157,7 +151,7 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
     }
     Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, index);
     v.id = el->id;
-    /* Clay_GetElementData needs current context set; restore on exit. */
+    /* Clay_GetElementData reads from the current context. */
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
     Clay_ElementData ed = Clay_GetElementData((Clay_ElementId){.id = el->id});
@@ -176,7 +170,7 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
     return v;
 }
 
-/* Map Clay's CLAY__ELEMENT_CONFIG_TYPE_* bitmask to our exposed 8-bit mask. */
+/* Map CLAY__ELEMENT_CONFIG_TYPE_* to our exposed 8-bit mask. */
 static uint8_t inspector_element_config_mask(Clay_LayoutElement *el) {
     uint8_t mask = 0U;
     for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
@@ -213,7 +207,6 @@ static uint8_t inspector_element_config_mask(Clay_LayoutElement *el) {
     return mask;
 }
 
-/* DFS pre-order walk into flat caller-owned rows. Depth tracked via explicit stack. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspector_tree_row_t *out, int32_t out_cap) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_collect_tree_rows: ctx must be non-NULL");
@@ -228,7 +221,6 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
     int32_t written = 0;
     const int32_t roots = ctx->clay->layoutElementTreeRoots.length;
 
-    /* Explicit DFS stack; cap matches Clay's depth budget. Overflow stops gracefully. */
     enum { STACK_CAP = 256 };
     struct {
         int32_t elem_idx;
@@ -251,7 +243,6 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
             int32_t top = sp - 1;
             Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[top].elem_idx);
             if (stack[top].child_cursor < 0) {
-                /* First visit -- emit row. */
                 nt_ui_inspector_tree_row_t *row = &out[written++];
                 memset(row, 0, sizeof *row);
                 row->id = el->id;
@@ -278,23 +269,19 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
                 }
                 stack[top].child_cursor = 0;
                 if (row->is_text) {
-                    /* TEXT element has no recursable children -- pop now. */
                     sp--;
                     continue;
                 }
             }
-            /* Push next child or pop. */
             const int32_t childCount = el->childrenOrTextContent.children.length;
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
                 if (sp >= STACK_CAP) {
-                    /* Stack overflow -- stop walking. */
                     sp = 0;
                     break;
                 }
                 if (stack[top].depth >= UINT8_MAX - 1U) {
-                    /* Skip pushing -- depth would overflow. */
                     continue;
                 }
                 stack[sp].elem_idx = child_idx;
@@ -369,12 +356,10 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
 // #endregion
 
 // #region build_tree
-/* Post-EndLayout pass: composed affine + opacity inherited from ancestors into
- * tree_baked. Floating roots seed from tree_baked[parentId-resolved index].
+/* Post-EndLayout pass: composes ancestor affine + opacity into tree_baked.
  * Declaration order iteration is sufficient — Clay rejects forward parentIds. */
 
-/* Reads SHARED or TEXT userData on the element. Text leaves have only TEXT
- * config (clay.h:2018-2021); non-text elements never attach TEXT. Mutex-asserted. */
+/* Mutex-asserted: text leaves only carry TEXT config; non-text only carry SHARED. */
 static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
     nt_ui_element_data_t *shared_ud = NULL;
     nt_ui_element_data_t *text_ud = NULL;
@@ -390,12 +375,7 @@ static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
     return shared_ud ? shared_ud : text_ud;
 }
 
-/* Compose ONE transform level (scale S, rotation θ, center C, offset O) into
- * the accumulated affine. Local = T(O)·T(C)·R(θ)·S·T(-C); new = accum · local.
- * Scene-graph standard: a child's transform applies in its parent's already-
- * transformed frame (world_point = accum_parent · L_child · local_point).
- * Pure Clay Y-down math: NO Y-flip, NO rotation negation — render-only
- * conversions are applied in walker dispatch_command. */
+/* Local = T(O)·T(C)·R(θ)·S·T(-C); new = accum · local. Pure Clay Y-down (Y-flip lives in walker). */
 static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
     const float sx = t->scale_x;
     const float sy = t->scale_y;
@@ -421,11 +401,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
     *ty = nty;
 }
 
-/* Iterative DFS of an element subtree, propagating accum + opacity from seed to
- * every descendant's tree_baked entry. Floating descendants are skipped — Clay
- * strips them from lexical children, so the outer iterate-roots loop handles
- * them. Text leaves skip child iteration (their .children union slot aliases
- * textElementData pointer). */
+/* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
@@ -448,7 +424,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
         Clay_LayoutElement *elem = Clay_LayoutElementArray_Get(&cc->layoutElements, f->elem_idx);
 
         if (f->children_cursor == 0) {
-            /* First visit: compose this element's xform/opacity, write tree_baked. */
             nt_ui_element_data_t *ad = bt_scan_userdata(elem);
             float a = f->a;
             float b = f->b;
@@ -489,7 +464,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             f->opacity = op;
         }
 
-        /* Text leaves don't have .children — guard before dereferencing. */
+        /* Text leaves have no .children — guard before deref. */
         const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
         const int32_t child_count = is_text ? 0 : elem->childrenOrTextContent.children.length;
 
@@ -523,21 +498,17 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     const int32_t N = cc->layoutElements.length;
     const int32_t R = cc->layoutElementTreeRoots.length;
 
-    /* Identity-init for every live element. Covers: elements not visited by any
-     * DFS (R==0 path, maxElementsExceeded), and walker reads of stale-index
-     * error-path commands. */
+    /* Covers unvisited elements (R==0, maxElementsExceeded, walker reads of stale-index errors). */
     const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_baked[i] = identity;
     }
     if (R == 0) {
-        /* No tree this frame. Bump generation so hit-test rejects every
-         * stale id this frame would otherwise still match. */
+        /* Bump generation so hit-test rejects stale ids that would still match. */
         ctx->current_generation++;
         return;
     }
 
-    /* Step 1: element_idx → root_idx map. */
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_root_for_elem[i] = -1;
     }
@@ -546,8 +517,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         ctx->tree_root_for_elem[root->layoutElementIndex] = k;
     }
 
-    /* Step 2: iterate layoutElements in declaration order. Each tree root's
-     * seed = identity (root_idx == 0) OR tree_baked[parentId-resolved index]. */
+    /* Each tree root's seed = identity (root 0) or tree_baked[parentId-resolved index]. */
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         const int32_t root_idx = ctx->tree_root_for_elem[elem_idx];
         if (root_idx < 0) {
@@ -569,10 +539,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                     NT_ASSERT(false && "build_tree: parent elem_idx out of bounds");
                     seed = identity;
                 } else {
-                    /* Clay invariant: a floating root's parentId resolves to an element
-                     * declared BEFORE the floating root in layoutElements. Without this
-                     * tree_baked[p_elem_idx] would be the identity-init from step 1, not
-                     * the parent's composed affine — silent seed corruption. */
+                    /* Floating parent must precede child in declaration order or seed would be identity. */
                     NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must precede child in declaration order (Clay invariant broken)");
                     seed = ctx->tree_baked[p_elem_idx];
                 }
@@ -581,12 +548,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         bt_dfs_subtree(ctx, cc, elem_idx, &seed);
     }
 
-    /* Step 3: snapshot per-id data into hashmap-slot-indexed arrays. Hit-test
-     * reads these instead of tree_baked / layoutElementClipElementIds because
-     * Clay's layout arrays are ephemeral (length=0 at next BeginLayout, slots
-     * may shift between frames) while its hashmap is persistent — slot index is
-     * stable across frames for a given id. hit_generation rejects stale ids
-     * Clay still holds in its hashmap but that weren't re-declared this frame. */
+    /* Snapshot per-id into hashmap-slot-indexed arrays (Clay's hashmap is persistent across frames). */
     ctx->current_generation++;
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&cc->layoutElements, elem_idx);
@@ -604,9 +566,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         ctx->hit_generation[slot] = ctx->current_generation;
     }
 
-    /* Mark synthetic SCISSOR_START commands. Per-element SCISSOR_START emits
-     * with cmd.id == elem.id (clay.h:2807); synthetic root-wrap (clay.h:2709)
-     * emits with a derived hash. id mismatch is our only signal without patching. */
+    /* Id mismatch flags synthetic root-wrap SCISSOR_START vs per-element SCISSOR_START. */
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
         Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
         if (c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
@@ -621,7 +581,6 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             c->nt_layout_index = -1;
         }
     }
-    /* SCISSOR_END pops only — no transform. Error-path TEXT reads tree_baked[stale]=identity. */
 }
 // #endregion
 
@@ -650,11 +609,7 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 
 #if NT_UI_DEBUG_TOOLS
 // #region inspector_emit_layout
-/* Verbatim port of Clay__RenderDebugView, run inside the user layout pass so it
- * can read Clay private types. Sidebar width + row metrics are runtime config
- * via ctx->inspector_metrics (defaults match Clay's literals).
- * Entire region excluded when NT_UI_DEBUG_TOOLS=OFF — production drops the
- * sidebar emit + cdv_int/hex_bufs (16 KB BSS) and the inspector ctx state. */
+/* Port of Clay__RenderDebugView, run inside the user layout pass so it can read Clay private types. */
 
 static const Clay_Color CDV_COLOR_1 = {58, 56, 52, 255};
 static const Clay_Color CDV_COLOR_2 = {62, 60, 58, 255};
@@ -663,8 +618,7 @@ static const Clay_Color CDV_COLOR_4 = {238, 226, 231, 255};
 static const Clay_Color CDV_COLOR_SELECTED_ROW = {102, 80, 78, 255};
 static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100};
 
-/* Inspector-owned element ids — filtered out of the viewport-hover scan so the
- * floating highlight rect can't self-feedback as its own hover target. */
+/* Filtered out of the viewport-hover scan to prevent self-feedback on the highlight rect. */
 enum { CDV_OWNED_ID_COUNT = 7 };
 static uint32_t s_cdv_owned_ids[CDV_OWNED_ID_COUNT];
 static bool s_cdv_owned_ids_init = false;
@@ -679,7 +633,7 @@ static void cdv_init_owned_ids_once(void) {
     s_cdv_owned_ids[3] = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0).id;
     s_cdv_owned_ids[4] = Clay__HashString(CLAY_STRING("ntInsp_ElementHighlight"), 0, 0).id;
     s_cdv_owned_ids[5] = Clay__HashString(CLAY_STRING("ntInsp_ElementHighlightRectangle"), 0, 0).id;
-    /* Skip Clay's auto-emitted root so propagation picks a real user element. */
+    /* Skip Clay's auto root so propagation picks a real user element. */
     s_cdv_owned_ids[6] = Clay__HashString(CLAY_STRING("Clay__RootContainer"), 0, 0).id;
     s_cdv_owned_ids_init = true;
 }
@@ -739,7 +693,7 @@ static Clay_Color cdv_config_color(uint8_t type) {
     }
 }
 
-/* Widget descriptor pill color — unpacks the nt_ui 0xAABBGGRR style format. */
+/* Unpacks 0xAABBGGRR. */
 static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
     Clay_Color c;
     c.r = (float)(packed & 0xFFU);
@@ -749,9 +703,7 @@ static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
     return c;
 }
 
-/* Layer column from nt_ui_element_data_t.userData. Returns -1 if no userData.
- * Reads BOTH SHARED and TEXT configs — CLAY_TEXT routes userData to the TEXT
- * config, every other path routes to SHARED. */
+/* CLAY_TEXT routes userData to TEXT; everything else routes to SHARED. */
 static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement *el) {
     (void)ctx;
     for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
@@ -774,8 +726,7 @@ static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement 
     return -1;
 }
 
-/* 512-slot ring buffer of int-to-string scratch — must outlive Clay_String
- * pointers through the layout solve (consumer count >> 16). */
+/* Ring buffer of int-to-string scratch — must outlive Clay_String pointers through layout solve. */
 #ifndef NT_UI_INSPECTOR_INT_BUFS
 #define NT_UI_INSPECTOR_INT_BUFS 512
 #endif
@@ -789,7 +740,7 @@ static Clay_String cdv_int_to_string(int32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* Same ring strategy for hex IDs; separate ring so hex and decimal don't compete. */
+/* Separate ring so hex and decimal cursors don't compete. */
 static char cdv_hex_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
 static uint32_t cdv_hex_buf_cursor = 0U;
 static Clay_String cdv_hex_id_to_string(uint32_t v) {
@@ -799,7 +750,7 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* "#RRGGBBAA" color strings — shares the hex ring's cursor space (reset per frame). */
+/* Shares the hex ring's cursor space (reset per frame). */
 static Clay_String cdv_color_hex_to_string(Clay_Color c) {
     char *buf = cdv_hex_bufs[cdv_hex_buf_cursor];
     cdv_hex_buf_cursor = (cdv_hex_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
@@ -811,7 +762,6 @@ static Clay_String cdv_color_hex_to_string(Clay_Color c) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* Collapsed-id set helpers — linear scan, N <= NT_UI_INSPECTOR_COLLAPSED_CAP. */
 static bool cdv_is_collapsed(const nt_ui_context_t *ctx, uint32_t id) {
     for (uint32_t i = 0; i < ctx->inspector_collapsed_count; ++i) {
         if (ctx->inspector_collapsed_ids[i] == id) {
@@ -827,7 +777,7 @@ static void cdv_toggle_collapsed(nt_ui_context_t *ctx, uint32_t id) {
     }
     for (uint32_t i = 0; i < ctx->inspector_collapsed_count; ++i) {
         if (ctx->inspector_collapsed_ids[i] == id) {
-            /* Swap-with-last; order-independent set. */
+            /* Order-independent set. */
             ctx->inspector_collapsed_ids[i] = ctx->inspector_collapsed_ids[ctx->inspector_collapsed_count - 1U];
             ctx->inspector_collapsed_count--;
             return;
@@ -843,13 +793,11 @@ typedef struct {
     int32_t selected_element_row_index;
 } cdv_layout_data_t;
 
-/* Port of Clay__RenderDebugLayoutElementsList. Adds engine widget-tag pill +
- * layer column per row; hover routes to ctx->inspector_highlight_id, click
- * routes to ctx->inspector_selected_id. */
+/* Hover → ctx->inspector_highlight_id; click → ctx->inspector_selected_id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-no-recursion)
 static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, int32_t initial_roots_length, int32_t highlighted_row_index) {
     Clay_Context *context = ctx->clay;
-    /* Cached at entry so cast types match Clay structs (uint16_t for Clay_Padding / fontSize). */
+    /* Cast types match Clay struct fields (uint16_t for Padding / fontSize). */
     const float row_h = ctx->inspector_metrics.row_height;
     const uint16_t font_sz = ctx->inspector_metrics.font_size;
     const uint16_t indent_w = (uint16_t)ctx->inspector_metrics.indent_width;
@@ -857,15 +805,13 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     enum { CDV_DFS_CAP = 256 };
     int32_t dfs_elems[CDV_DFS_CAP];
     bool dfs_visited[CDV_DFS_CAP];
-    /* Track whether this frame opened the 3 indent wrappers — filtered (no-identity)
-     * frames skip the open and must skip the close. */
+    /* Filtered (no-identity) frames skip the open and must skip the close. */
     bool dfs_opened_wrappers[CDV_DFS_CAP];
     int32_t dfs_length = 0;
     Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(row_h)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
     cdv_layout_data_t layoutData = {0};
     uint32_t highlightedElementId = 0U;
-    /* BG (250) for CLAY containers, TEXT (251) for CLAY_TEXT — ascending-layer
-     * walk batches all inspector rects before all inspector texts per segment. */
+    /* BG/TEXT split keeps walker batching one BG->TEXT boundary per segment. */
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
     void *const debug_text_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_TEXT);
     Clay_TextElementConfig debug_text_name_cfg_storage = Clay__DebugView_TextNameConfig;
@@ -896,7 +842,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             int32_t currentElementIndex = dfs_elems[dfs_length - 1];
             Clay_LayoutElement *currentElement = Clay_LayoutElementArray_Get(&context->layoutElements, (int)currentElementIndex);
             if (dfs_visited[dfs_length - 1]) {
-                /* Close the 3 indent wrappers only when this frame opened them. */
                 if (dfs_opened_wrappers[dfs_length - 1]) {
                     Clay__CloseElement();
                     Clay__CloseElement();
@@ -911,8 +856,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             const int32_t layer = cdv_element_layer(ctx, currentElement);
             const nt_ui_widget_def_t *wdef = nt_ui_widget_lookup(ctx, currentElement->id);
             Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
-            /* Only emit a row for elements with identity (string id, widget tag, or
-             * any attached config). Truly anonymous wrappers descend silently. */
+            /* Anonymous wrappers descend silently. */
             const bool has_identity = (idString.length > 0) || (wdef != NULL) || (currentElement->elementConfigs.length > 0);
             if (has_identity) {
                 if (highlighted_row_index == layoutData.row_count) {
@@ -927,8 +871,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
             if (has_identity) {
                 CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig, .userData = debug_bg_data}) {
-                    /* Collapse dot — click toggles collapsed-set; collapsed rows
-                     * paint brighter (CDV_COLOR_4) with sharp corner radius. */
                     const bool currently_collapsed = cdv_is_collapsed(ctx, currentElement->id);
                     const Clay_ElementId dotId = Clay__HashString(CLAY_STRING("ntInsp_CollapseDot"), 0, currentElement->id);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
@@ -938,7 +880,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                               .backgroundColor = currently_collapsed ? CDV_COLOR_4 : CDV_COLOR_3,
                               .cornerRadius = currently_collapsed ? CLAY_CORNER_RADIUS(0) : CLAY_CORNER_RADIUS(2)}) {}
                     }
-                    /* Pressed-this-frame + pointer-over-dot id = toggle. */
                     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
                         for (int32_t pi = 0; pi < context->pointerOverIds.length; ++pi) {
                             const Clay_ElementId *over = Clay_ElementIdArray_Get(&context->pointerOverIds, pi);
@@ -953,17 +894,14 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                             CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}));
                         }
                     }
-                    /* Fall back to hex element id when stringId is empty so unnamed
-                     * elements (CLAY_IDI / auto-anonymous) stay identifiable. */
+                    /* Fall back to hex id so unnamed CLAY_IDI / auto-anonymous stay identifiable. */
                     if (idString.length > 0) {
                         CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg);
                     } else {
                         CLAY_TEXT(cdv_hex_id_to_string(currentElement->id),
                                   offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg);
                     }
-                    /* Inline SHARED bg-color swatch + hex right after the id text
-                     * so the color reads as part of the row identity. Only when
-                     * a SHARED config with non-zero alpha is attached. */
+                    /* Swatch only when a SHARED config with non-zero alpha is attached. */
                     for (int32_t cfgScan = 0; cfgScan < currentElement->elementConfigs.length; ++cfgScan) {
                         Clay_ElementConfig *sc = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, cfgScan);
                         if (sc->type != CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
@@ -973,7 +911,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         if (bg.a <= 0) {
                             break;
                         }
-                        /* 16x16 swatch + hex text in a row sharing the id's vertical center. */
                         CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(row_h - 8.0F)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
                             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}},
                                   .backgroundColor = bg,
@@ -984,13 +921,10 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         }
                         break;
                     }
-                    /* No pill backgrounds — render each label in the config color
-                     * directly so the row collapses to one BG->TEXT boundary
-                     * (was per-pill, ~6 alternations per row). */
+                    /* No pill backgrounds — row collapses to one BG->TEXT boundary. */
                     for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
-                            /* Radius marker — orange-ish text, no rect background. */
                             Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
                             if (radius.bottomLeft > 0) {
                                 CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = {243, 134, 48, 255}, .fontSize = font_sz, .userData = debug_text_data}));
@@ -1013,9 +947,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 }
             } /* if (has_identity) */
 
-            /* Text-content row shares its parent's Clay id — mirror the row-N
-             * hit-test against row N+1 so clicking the text row selects the
-             * same widget the parent row would. */
+            /* Text-row hit-test is offset by 1 so clicking it selects the parent widget. */
             if (Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
                 layoutData.row_count++;
                 if (highlighted_row_index == layoutData.row_count) {
@@ -1038,8 +970,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
                 }
             } else if (has_identity && currentElement->childrenOrTextContent.children.length > 0 && !cdv_is_collapsed(ctx, currentElement->id)) {
-                /* Open 3 indent wrappers only when a row was emitted and not collapsed —
-                 * hidden subtrees descend silently with no indent step. */
+                /* Hidden subtrees descend silently with no indent step. */
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = 8}}, .userData = debug_bg_data});
                 Clay__OpenElement();
@@ -1049,18 +980,14 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 dfs_opened_wrappers[dfs_length - 1] = true;
             }
 
-            /* row_count tracks VISIBLE rows so highlighted_row_index from
-             * pointer-Y math keeps mapping correctly across filtered frames. */
+            /* row_count tracks VISIBLE rows so pointer-Y → row mapping stays correct across filters. */
             if (has_identity) {
                 layoutData.row_count++;
             }
-            /* Collapsed subtrees skip their children entirely. */
             if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT) && !cdv_is_collapsed(ctx, currentElement->id)) {
                 const int32_t childLen = currentElement->childrenOrTextContent.children.length;
                 int32_t *childElems = currentElement->childrenOrTextContent.children.elements;
-                /* Clay__RootContainer (element 0) is still OPEN when we run
-                 * (before Clay_EndLayout) — its children live in the in-flight
-                 * layoutElementChildrenBuffer, not children.elements. */
+                /* Clay__RootContainer (element 0) is still open here; children live in the in-flight buffer. */
                 if (childLen > 0 && childElems == NULL && currentElementIndex == 0) {
                     childElems = context->layoutElementChildrenBuffer.internalArray;
                 }
@@ -1079,14 +1006,11 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         }
     }
 
-    /* Viewport-hover propagation — when no sidebar row was picked, scan for a
-     * user element under the cursor and adopt it as the highlight target. */
+    /* No sidebar row picked → scan viewport for a user element under the cursor. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
-        /* Transform-aware: zones carry composed affine, inverse-mapped here.
-         * LAST hit wins (deepest in declaration order). Panel-area filter uses
-         * the SCREEN-SPACE forward-transformed center, not the raw bbox. */
+        /* Transform-aware; LAST hit wins (deepest in declaration order). */
         const float px = context->pointerInfo.position.x;
         const float py = context->pointerInfo.position.y;
         for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
@@ -1094,7 +1018,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (z->id == 0U) {
                 continue;
             }
-            /* Forward-transform the visual center to screen space for the panel filter. */
+            /* Forward-transform the visual center; panel filter operates in screen space. */
             const float a = z->aff_a;
             const float b = z->aff_b;
             const float c = z->aff_c;
@@ -1105,7 +1029,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (screen_cx >= panel_left_x) {
                 continue;
             }
-            /* Inverse-affine pointer into zone's untransformed frame, then point-in-rect. */
             const float det = (a * dd) - (b * c);
             if (det == 0.0F) {
                 continue;
@@ -1124,10 +1047,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
         }
 
-        /* Scan pointerOverIds back-to-front so the deepest hovered element wins.
-         * Prefer a REGISTERED WIDGET id first (panel/group/image/label do not
-         * query interaction and so have no debug_zone — without this pass we
-         * would surface their anonymous child wrapper instead of the widget). */
+        /* Prefer a registered-widget id so panel/group/image/label surface over their wrappers. */
         if (highlightedElementId == 0U) {
             uint32_t fallback_id = 0U;
             for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
@@ -1139,8 +1059,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 if (item == NULL) {
                     continue;
                 }
-                /* Skip anything inside the panel footprint (row backgrounds, indent
-                 * wrappers, etc. — the named-id set doesn't enumerate them all). */
+                /* Skip anything inside the panel footprint — the named-id set is not exhaustive. */
                 if (item->boundingBox.x >= panel_left_x) {
                     continue;
                 }
@@ -1159,8 +1078,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     }
 
     if (highlightedElementId) {
-        /* Floating highlight rect attached to the hovered element. LAYER_DEBUG_HIGHLIGHT
-         * (240) + zIndex 32764 keep it above game UI but strictly under the panel root. */
+        /* zIndex 32764 keeps it above game UI but strictly under the panel root. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
@@ -1172,27 +1090,23 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         }
         ctx->inspector_highlight_id = highlightedElementId;
     } else if (ctx->inspector_selected_id != 0U) {
-        /* No hover — overlay focuses the last clicked sidebar row. */
+        /* No hover — focus the last clicked sidebar row. */
         ctx->inspector_highlight_id = ctx->inspector_selected_id;
     }
     return layoutData;
 }
 
-/* Port of Clay__RenderDebugView. Close button toggles ctx->inspector_active
- * (Clay's debugModeEnabled is unwired here). Info pane is a condensed body
- * for SHARED/TEXT/IMAGE/CLIP/BORDER; other configs render header-only. */
+/* Close button toggles ctx->inspector_active. Info pane carries condensed bodies for SHARED/TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     NT_ASSERT(ctx->in_frame);
     NT_ASSERT(ctx->clay != NULL);
 
-    /* Reset both string rings so the cursor starts at 0 each frame —
-     * gives a deterministic 512-slot window for stable Clay_String pointers. */
+    /* Deterministic 512-slot window per frame for stable Clay_String pointers. */
     cdv_int_buf_cursor = 0U;
     cdv_hex_buf_cursor = 0U;
 
-    /* Cached metrics; casts match Clay struct types (uint16 for Padding / fontSize). */
     const float panel_w = ctx->inspector_metrics.panel_width;
     const float row_h = ctx->inspector_metrics.row_height;
     const uint16_t font_sz = ctx->inspector_metrics.font_size;
@@ -1213,8 +1127,6 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
 
     uint32_t initialRootsLength = (uint32_t)context->layoutElementTreeRoots.length;
     uint32_t initialElementsLength = (uint32_t)context->layoutElements.length;
-    /* Split BG (250) / TEXT (251) layers so the walker batches inspector
-     * rects then texts per zIndex/scissor segment. */
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
     void *const debug_text_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_TEXT);
     Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
@@ -1238,8 +1150,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         highlightedRow = -1;
     }
     cdv_layout_data_t layoutData = {0};
-    /* RIGHT_CENTER/RIGHT_CENTER (overlay) — engine root is full-width so Clay's
-     * side-by-side attach would land off-screen. */
+    /* RIGHT_CENTER overlay attach — engine root is full-width so side-by-side would land off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG),
@@ -1248,7 +1159,6 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                        .attachTo = CLAY_ATTACH_TO_ROOT,
                        .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},
           .border = {.color = CDV_COLOR_3, .width = {.bottom = 1}}}) {
-        /* Header bar. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = CDV_COLOR_2,
               .userData = debug_bg_data}) {
@@ -1317,7 +1227,6 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                     }
                     Clay_Padding attributeConfigPadding = {outer_pad, outer_pad, 8, 8};
                     CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {
-                        /* Engine rows (Widget + Layer) surfaced at top of info pane. */
                         const nt_ui_widget_def_t *sel_def = nt_ui_widget_lookup(ctx, ctx->inspector_selected_id);
                         const char *sel_w_tag = (sel_def != NULL && sel_def->name != NULL) ? sel_def->name : "-";
                         CLAY_TEXT(CLAY_STRING("Widget"), infoTitleConfig);
@@ -1379,7 +1288,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                             CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
                         }
                     }
-                    /* Per-config headers + condensed bodies; SHARED/TEXT only carry full bodies. */
+                    /* SHARED/TEXT carry full bodies; other configs are header-only. */
                     for (int32_t cfgIdx = 0; cfgIdx < selectedItem->layoutElement->elementConfigs.length; ++cfgIdx) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&selectedItem->layoutElement->elementConfigs, cfgIdx);
                         Clay_Color hdr_color = cdv_config_color((uint8_t)elementConfig->type);
@@ -1419,7 +1328,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     }
 }
 
-/* External entry forwarded from nt_ui_inspector.c (no Clay private types there). */
+/* Forwarded from nt_ui_inspector.c (no Clay private types there). */
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_internal_emit_inspector_layout(ctx); }
 // #endregion
 #endif /* NT_UI_DEBUG_TOOLS */

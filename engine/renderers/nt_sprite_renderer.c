@@ -543,8 +543,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             fb = st;
         }
 
-        /* DST corner size = src × per-entity slice9_scale. sprite_comp setter
-         * asserts > 0 and _add inits to 1.0F; this is the last-line tripwire. */
+        /* DST corner size = src × per-entity slice9_scale; last-line tripwire. */
         NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
         const float s9_scale = sv->slice9_scale[s_idx];
 
@@ -824,10 +823,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #endregion
 
 // #region emit_slice9
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-/* Internal: emit a slice9 quad with SEPARATE src (UV) and dst (destination
- * border size in source pixels) splits. Source borders pick the UV cut into
- * the atlas region; destination borders set the rendered corner/edge size. */
+/* src borders pick UV cut; dst borders set rendered corner/edge size. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb, uint16_t dst_sl,
                                  uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]) {
@@ -859,7 +855,7 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
         return;
     }
 
-    /* Flip swap applies symmetrically to src AND dst so UV and position stay consistent. */
+    /* Symmetric swap keeps UV and position consistent under flip. */
     uint16_t fsrc_l = src_sl;
     uint16_t fsrc_r = src_sr;
     uint16_t fsrc_t = src_st;
@@ -880,7 +876,6 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
         fdst_t = dst_sb;
         fdst_b = dst_st;
     }
-    /* Aliases so existing code below reads cleanly. */
     const uint16_t fl = fsrc_l;
     const uint16_t fr = fsrc_r;
     const uint16_t ft = fsrc_t;
@@ -909,7 +904,7 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
     }
 
     // #region position_and_uv_splits
-    /* Positions use DST borders (visual corner size). UV cuts use SRC borders. */
+    /* Positions use DST borders; UV cuts use SRC borders. */
     float fl_w = (float)fdst_l * ipu;
     float fr_w = (float)fdst_r * ipu;
     float ft_w = (float)fdst_t * ipu;
@@ -1016,8 +1011,7 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
         }
     }
 
-    /* Apply 2×3 affine to all 16 grid vertices: p' = (a·x + b·y + tx, c·x + d·y + ty).
-     * Identity aff = {1,0,0,1,0,0}; skip to save 16 multiplies × 2 adds. */
+    /* Skip identity aff to save 16 mul × 2 adds per vertex. */
     if (aff[0] != 1.0F || aff[1] != 0.0F || aff[2] != 0.0F || aff[3] != 1.0F || aff[4] != 0.0F || aff[5] != 0.0F) {
         for (uint32_t vi = 0; vi < 16U; vi++) {
             nt_sprite_vertex_t *v = &s_sprite.vertices[base + vi];
@@ -1044,8 +1038,7 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
 // #endregion
 
 // #region emit_slice9 (public; src == dst)
-/* Build the 2×3 affine corresponding to rotate-around-(x+w/2, y+h/2).
- * Layout: aff = {a, b, c, d, tx, ty} where p' = (a·x + b·y + tx, c·x + d·y + ty). */
+/* Encodes rotate-around-(x+w/2, y+h/2). */
 static inline void slice9_build_rotate_aff(float x, float y, float w, float h, float rotation, float out_aff[6]) {
     if (rotation == 0.0F) {
         out_aff[0] = 1.0F;
@@ -1094,9 +1087,7 @@ void nt_sprite_renderer_emit_slice9_explicit_affine(nt_resource_t atlas, uint32_
 // #endregion
 
 // #region emit_slice9_from_region
-/* Atlas region's baked slice9 borders drive UV. Destination corner size =
- * atlas_border × slice9_scale → corners look bigger/smaller WITHOUT changing
- * which atlas pixels feed the corner. */
+/* slice9_scale resizes corners visually without changing which atlas pixels feed them. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_slice9_from_region_impl(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
                                          const float aff[6]) {

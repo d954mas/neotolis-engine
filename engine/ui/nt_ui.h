@@ -1,13 +1,9 @@
 #ifndef NT_UI_H
 #define NT_UI_H
 
-/* Immediate-mode UI bridge over Clay v0.14. Only one ctx may be in-frame at
- * a time; caller owns the Globals UBO -- walker writes viewport + scissor. */
+/* Immediate-mode UI bridge over Clay v0.14. Only one ctx may be in-frame at a time. */
 
-/* PUBLIC build flag propagated via nt_ui target. Consumers must reach this
- * header via target_link_libraries(... nt_ui) for the define to resolve;
- * without it, #if NT_UI_DEBUG_TOOLS would silently pick the stubs and
- * mismatch the linked library's ABI. */
+/* Must come from the nt_ui target compile-defines; consumers without the link see stubs that mismatch ABI. */
 #ifndef NT_UI_DEBUG_TOOLS
 #error "NT_UI_DEBUG_TOOLS not defined — link against nt_ui via target_link_libraries(<target> PUBLIC|PRIVATE nt_ui)"
 #endif
@@ -27,8 +23,7 @@
 #define NT_UI_MAX_FONTS 8
 #endif
 
-/* Walker's scissor stack capacity. Asserts on overflow. Real UIs nest 1-4
- * levels; cap is 16x that headroom. */
+/* Walker scissor stack cap; real UIs nest 1-4 levels, asserts on overflow. */
 #define NT_UI_WALKER_SCISSOR_DEPTH_CAP 64
 
 /* Clay places its Clay_Context at the arena head via raw cast. */
@@ -38,24 +33,22 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Bare uint8_t[N] has 1-byte alignment -- create_context would assert. */
+/* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Caller owns framebuffer binding; walker writes only viewport + scissor.
- *   fb_size[0] == 0: viewport[] = GL physical px {x, y, w, h}. Direct mode.
- *   fb_size[0] > 0:  viewport[] = LOGICAL Clay-space; fb_size = PHYSICAL fb;
- *                     fb_offset = PHYSICAL letterbox margin (negative in CROP).
- * Build via nt_ui_scale_make_target() or zero-init for direct mode. */
+/* Walker writes only viewport + scissor; caller owns framebuffer binding.
+ *   fb_size[0] == 0: viewport[] is GL physical px (direct mode).
+ *   fb_size[0]  > 0: viewport[] is LOGICAL Clay-space; fb_size + fb_offset are PHYSICAL. */
 typedef struct {
     float viewport[4];
     float fb_size[2];
     float fb_offset[2];
 } nt_ui_target_t;
 
-/* Pointed to by Clay_ImageElementConfig.imageData; lifetime must extend
- * through the matching nt_ui_walk. cornerRadius must be 0 (pre-bake into atlas). */
+/* Pointed to by Clay_ImageElementConfig.imageData; must outlive the matching nt_ui_walk.
+ * cornerRadius must be 0 (pre-bake into atlas). */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
@@ -64,14 +57,12 @@ typedef struct {
     float origin_y;
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
-    uint8_t flags; /* copied from style (NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE) */
+    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
     uint8_t _reserved[2];
 } nt_ui_image_payload_t;
 _Static_assert(sizeof(nt_ui_image_payload_t) == 32, "nt_ui_image_payload_t stable ABI");
 
-/* Typed wrapper for Clay CUSTOM element data. Engine and game share the
- * same customData slot; type tag distinguishes engine anchors from game
- * handlers. Allocate from nt_mem_scratch (frame arena). */
+/* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {
     uint8_t type;
     void *data;
@@ -82,19 +73,15 @@ typedef struct {
 
 /* Frame snapshot passed to the CUSTOM handler.
  *   clay_cmd  — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
- *   world_aff — 2x3 affine, LAYOUT point -> GL world (bakes parent chain + Y-flip).
- *                 gl_x = aff[0]*x + aff[1]*y + aff[4]
- *                 gl_y = aff[2]*x + aff[3]*y + aff[5]
- *   opacity   — accumulated [0..1] from ancestor chain; multiply into alpha. */
+ *   world_aff — 2x3 affine taking LAYOUT point → GL world (parent chain + Y-flip baked in).
+ *   opacity   — accumulated [0..1]; multiply into alpha. */
 typedef struct {
     const void *clay_cmd;
     float world_aff[6];
     float opacity;
 } nt_ui_custom_frame_t;
 
-/* Handler owns the GL state it touches: if you change viewport or scissor,
- * restore them before returning. Walker only rebinds the sprite material
- * (its own flush invariant) -- everything else is the handler's mess. */
+/* Handler owns any GL state it touches; walker only rebinds sprite material on return. */
 typedef void (*nt_ui_custom_handler_t)(const nt_ui_custom_frame_t *frame, void *userdata);
 
 /* Render-time transform — no layout effect. */
@@ -106,28 +93,17 @@ typedef struct {
     float scale_y;  /* 1.0 = default, multiplicative */
 } nt_ui_transform_t;
 
-/* Identity transform (MUST use this, not zero-init -- scale must be positive; use opacity=0 to hide). */
+/* MUST use this, not zero-init — scale must be positive; use opacity=0 to hide. */
 static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
 
-/* Flag bits for nt_ui_element_data_t.flags. Set when transform/opacity is
- * carried on this element; cleared bit means "ignore the field" (build pass
- * skips composition, walker reads identity from tree_baked seed). */
+/* Cleared bit = "ignore the field" — build pass skips composition; walker reads identity. */
 #define NT_UI_ELEM_FLAG_HAS_TRANSFORM (1U << 0)
 #define NT_UI_ELEM_FLAG_HAS_OPACITY (1U << 1)
 
-/* Attached via Clay's userData slot. Engine owns the wire format -- ANY
- * non-NULL userData MUST be nt_ui_element_data_t* (walker casts blindly).
- * Game pointers go into the user_data field, not directly into Clay's slot.
+/* Attached via Clay's userData slot. ANY non-NULL userData MUST be nt_ui_element_data_t*
+ * (walker casts blindly); game pointers go into the user_data field.
  *
- * Layer sort applies to RECT/BORDER/IMAGE/TEXT; SCISSOR/CUSTOM are barriers.
- * transform/opacity attach declaratively per element; the post-EndLayout tree
- * build composes them down the children chain into ctx->tree_baked.
- *
- * Composition is standard scene-graph (CSS / Unity / Cocos): a child's local
- * transform applies in the parent's already-transformed frame
- *   world_point = accum_parent * L_child * local_point
- * so e.g. parent rotate(90deg) + child translate(10, 0) moves the child 10
- * units along parent's rotated X, not along world X.
+ * Composition is scene-graph standard: world_point = accum_parent · L_child · local_point.
  *
  *   CLAY({ .userData = NT_UI_DATA_LAYER(LAYER_BG), ... })
  *   CLAY({ .userData = NT_UI_DATA_FULL(LAYER_HUD, &my_button), ... })
@@ -146,30 +122,21 @@ _Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 40 : 32), 
 _Static_assert(sizeof(nt_ui_transform_t) == 20, "nt_ui_transform_t — fail loudly if extended");
 
 #if NT_UI_DEBUG_TOOLS
-/* Well-known debug layers for nt_ui_inspector. Engine reserves 240-255; game
- * code MUST use <= 239. BG (250) and TEXT (251) split so the walker batches
- * inspector rects before texts per zIndex/scissor segment (collapses per-row
- * pipeline alternations to one BG->TEXT boundary).
- * When NT_UI_DEBUG_TOOLS=OFF the engine never reserves these layers and the
- * full 0..255 range is available to game code. */
+/* Reserved 240-255 when tools ON; full 0..255 is free for game code when OFF.
+ * BG/TEXT split keeps the walker batching one BG->TEXT boundary per segment. */
 #define NT_UI_LAYER_DEBUG_HIGHLIGHT ((nt_ui_layer_t)240)
 #define NT_UI_LAYER_DEBUG_PANEL_BG ((nt_ui_layer_t)250)
 #define NT_UI_LAYER_DEBUG_PANEL_TEXT ((nt_ui_layer_t)251)
 _Static_assert(NT_UI_LAYER_DEBUG_HIGHLIGHT >= 240 && NT_UI_LAYER_DEBUG_PANEL_BG >= 240 && NT_UI_LAYER_DEBUG_PANEL_TEXT >= 240, "debug layers must be in engine-reserved range 240-255");
 #endif /* NT_UI_DEBUG_TOOLS */
 
-/* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
- * across helper-function returns until the next nt_mem_scratch_reset. Game
- * MUST init scratch before any CLAY({...}) declaration.
- * Typed return; auto-converts to void* for Clay's .userData slot. */
+/* Allocates from nt_mem_scratch — game MUST init scratch before any CLAY({...}) declaration. */
 const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
 
-/* Scratch-alloc + set HAS_TRANSFORM | HAS_OPACITY. Transform copied by value
- * (struct, 20 B) so caller's stack-local is safe across frames. */
+/* Scratch-alloc + sets HAS_TRANSFORM | HAS_OPACITY. Transform copied by value. */
 const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, void *user_data, const nt_ui_transform_t *transform, float opacity);
 
-/* Returns const — element_data is immutable after creation.
- * For Clay's .userData (void*), use NT_UI_CLAY_DATA() wrapper. */
+/* For Clay's .userData (void*), use NT_UI_CLAY_DATA() wrapper. */
 #define NT_UI_DATA_LAYER(layer_value) nt_ui_make_element_data((layer_value), NULL)
 #define NT_UI_DATA_FULL(layer_value, user_ptr) nt_ui_make_element_data((layer_value), (user_ptr))
 #define NT_UI_DATA_XFORM(layer_value, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), NULL, (t_ptr), (opacity_value))
@@ -202,29 +169,17 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-/* dt drives Clay scroll-container momentum. pointers[0..count) is the full
- * per-frame pointer list (multitouch-ready); v1.8 drives only pointers[0]. */
+/* pointers[0..count) is multitouch-ready; v1.8 drives only pointers[0]. */
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
 void nt_ui_end(nt_ui_context_t *ctx);
 
-/* Debug view: use nt_ui_inspector_set_active (engine/ui/nt_ui_inspector.h).
- * Clay's built-in debug view is not wired. */
-
-/* Extensible widget descriptor for the inspector. Every engine widget AND any
- * GAME widget (inventory_slot, dialogue_choice, ...) registers its element id
- * + descriptor pointer in a per-frame direct-mapped registry so the inspector
- * shows the widget's name + pill color. Plain Clay elements fall through to
- * NULL. Registry resets each nt_ui_begin; id 0 is silently dropped.
- *
- * Descriptors must be pointer-stable for the registering module's lifetime
- * (static const is the canonical pattern). Engine descriptors live in each
- * widget header (NT_UI_BUTTON_DEF / NT_UI_IMAGE_DEF / ...). Game example:
+/* Extensible widget descriptor for the inspector. Descriptors must be pointer-stable
+ * for the registering module's lifetime (static const is the canonical pattern).
  *
  *   static const nt_ui_widget_def_t INV_SLOT_DEF = {
  *       .name = "inv_slot", .pill_color = 0xFFB060A0,
  *   };
- *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL);
- */
+ *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL); */
 typedef struct nt_ui_widget_def_t {
     const char *name;    /* shown in inspector pill; e.g. "button" */
     uint32_t pill_color; /* 0xAABBGGRR */
@@ -232,20 +187,11 @@ typedef struct nt_ui_widget_def_t {
     uint32_t _reserved;
 } nt_ui_widget_def_t;
 
-/* Register the widget at `id` with the descriptor `def`. Optional
- * `pad_lrtb` records the touch-target inflation so the inspector overlay can
- * outline the padded hit zone distinctly; pass NULL for none. def must outlive
- * the frame (static const is the canonical pattern). id 0 is silently dropped
- * (sentinel). def NULL is silently dropped.
- *
- * Storage is a 1024-slot direct-mapped table; first collisions expected
- * around 40 widgets (birthday-paradox), replace-on-collision. Observability-
- * only — losing a tag for one of two colliding widgets is acceptable. */
+/* `pad_lrtb` (optional) is the touch-target inflation; pass NULL for none.
+ * Storage is direct-mapped, replace-on-collision (observability-only). */
 #if NT_UI_DEBUG_TOOLS
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
 #else
-/* Release build: registry exists only for the inspector; collapse to no-op so
- * widget begin/end pay nothing. Asserts remain inline. */
 static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     (void)ctx;
     (void)id;
@@ -254,85 +200,63 @@ static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, cons
 }
 #endif
 
-/* Return the descriptor registered for `id` this frame, or NULL when no
- * widget is registered at that id. The returned pointer is the same one
- * passed to nt_ui_widget_register (caller-owned lifetime). */
+/* Returns NULL when no widget is registered at that id; pointer is caller-owned. */
 const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id);
 
-/* Read back the registered hit-zone padding for id. Returns true and writes
- * {l,r,t,b} into out_lrtb when the id has a recorded padding; returns false
- * (out untouched) when the id is not registered OR was registered with a
- * NULL hit_padding_lrtb. */
+/* Returns false (out untouched) when the id is unregistered or has no recorded padding. */
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
 
-/* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
- * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are
- * hard barriers and never reordered. */
+/* Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are hard barriers. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* Window delta over the walk; includes CUSTOM-handler draws. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
-/* Total Clay commands incl. SCISSOR/CUSTOM/NONE (non-drawing barriers). */
+/* Total Clay commands incl. SCISSOR/CUSTOM/NONE. */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
-/* CPU timing (ms); both reset to 0 on early-out walks. */
-/* layout_ms = the Clay_EndLayout solve only, not the whole begin->end span. */
+/* CPU timings (ms); each reset to 0 on early-out walks. */
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx);
-/* build_tree_ms covers only the post-EndLayout pass, not surrounding work. */
 float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx);
-/* walk_ms = walk dispatch, timed from AFTER the entry flush -- excludes
- * draining the caller's pending geometry (same scope as draw_calls). */
+/* Excludes draining the caller's pending geometry (same scope as draw_calls). */
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
-/* Monotonic since ctx creation. Increments every time nt_ui_anim's probe chain
- * fails (all NT_UI_ANIM_PROBE_MAX slots taken by other ids -> base evicted,
- * snap-reseed each frame -> easing lost for one id). Sample as a delta across
- * frames; nonzero means raise NT_UI_ANIM_SLOTS. */
+/* Monotonic; nonzero delta across frames means raise NT_UI_ANIM_SLOTS. */
 uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx);
-/* Per-type command counts (pre-emit, not pixels — use draw_calls for GPU cost). */
+/* Per-type command counts (pre-emit; use draw_calls for GPU cost). */
 uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_text_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_border_command_count(const nt_ui_context_t *ctx);
-/* Scissor counts. Reset each walk. */
 uint32_t nt_ui_get_last_walk_scissor_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx);
 
 // #region transform_opacity_api
 /* Transforms/opacity attach via Clay's userData (NT_UI_DATA_XFORM / _FULL);
- * build_tree composes them into tree_baked. Clipping uses Clay's native
- * `.clip = {...}` element config. Renderer and hit-test share tree_baked. */
+ * build_tree composes them into tree_baked. Clipping uses Clay's `.clip = {...}`. */
 
-/* Emit a game CUSTOM element. data is passed through to the custom handler
- * registered via nt_ui_set_custom_handler. Allocates nt_ui_custom_data_t
- * wrapper from scratch arena. */
+/* data is passed through to the handler registered via nt_ui_set_custom_handler. */
 void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data);
 
 // #region interaction_api
-/* Engine-owned, transform-aware: inverse-affine via prev-frame tree_baked, then
- * point-in-bbox against Clay's persistent prev-frame layout bbox. */
+/* Engine-owned, transform-aware: inverse-affine via prev-frame tree_baked,
+ * then point-in-bbox against Clay's persistent layout bbox. */
 
-/* Precompute once per id (game caches): wraps Clay_GetElementId, returns the
- * uint32 hash (never 0 -- Clay returns hash+1). Asserts s != NULL. */
+/* Wraps Clay_GetElementId; result is never 0. Asserts s != NULL. */
 uint32_t nt_ui_id(const char *s);
 
-/* Prev-frame LAYOUT bbox (Y-down). `found == false` if the id was not declared
- * in the immediately preceding frame — first-frame ids, ids dropped from this
- * frame's layout, and ids Clay's hashmap still holds but that weren't
- * re-declared all read false. Same generation pinning as hit-test. */
+/* `found == false` if id was not declared the immediately preceding frame. */
 typedef struct {
     float x, y, width, height;
     bool found;
 } nt_ui_bbox_t;
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
 
-/* Per-pointer capture state. v1.8 iterates pointer 0; array is multitouch-ready. */
+/* v1.8 iterates pointer 0; array is multitouch-ready. */
 typedef struct {
     uint32_t active_id; /* widget this pointer captured; 0 = none */
     float press_pos[2]; /* UI-space press origin */
     float pos[2];       /* current UI-space pos; drag = pos - press_pos */
 } nt_ui_capture_t;
 
-/* Per-widget interaction state. Computed lazily: this-frame pointer vs
- * PREVIOUS-frame bbox (1-frame IM lag). */
+/* Computed lazily: this-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
     bool hovered;           /* pointer over bbox (transform-aware) */
     bool pressed;           /* currently captured (held) */
@@ -345,39 +269,19 @@ typedef struct {
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
 } nt_ui_interaction_t;
 
-/* CQS split: PURE query returns state as if the state machine advanced for
- * this id; does NOT mutate ctx->capture. Safe to call N times per frame —
- * every call returns the same struct. Use for state-dependent content
- * (label/icon swap on press), tooltips, previews. Pair with step in begin.
- *
- * Reads PREV-frame composed affine + clip chain via Clay's persistent hashmap
- * slot — safe to call anywhere (in-frame before or after the matching CLAY,
- * or outside frame). First frame an id is seen returns hovered=false.
- *
- * step is strictly in-frame — mutating cap on stale frame_pointers fires
- * spurious transitions. */
+/* PURE query (no mutation). Safe to call N times per frame; safe outside begin/end. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
-/* Padded variant: inflates layout bbox by {left,right,top,bottom} BEFORE the
- * inverse-affine. Use for mobile touch-friendly hit areas without changing
- * visual size. Asserts each component >= 0. NULL = unpadded. */
+/* Inflates bbox BEFORE the inverse-affine for mobile touch-friendly hit areas.
+ * Asserts each component >= 0; NULL = unpadded. */
 nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* MUTATING: same compute as the query, then commits state-machine writes
- * (capture transitions, cap->pos, capture_seen, pointer_over_any, debug zone).
- * Call ONCE per widget per frame from the widget's begin.
- *
- * When NT_UI_DEBUG_TOOLS is ON AND nt_ui_inspector_pointer_consumed() is true,
- * BOTH query and step return a zeroed struct (sidebar swallows the click).
- * Game code that needs to know SHOULD check nt_ui_inspector_pointer_consumed
- * before reacting to a "no interaction" result. */
+/* MUTATING — call ONCE per widget per frame from the widget's begin.
+ * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
-
-/* MUTATING padded variant — same touch-target inflation as query_padded. */
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* True when any capture is active OR a pointer is over a widget this frame
- * (~ ImGui io.WantCaptureMouse). The game gates its own world input on this. */
+/* True when any capture is active OR a pointer is over a widget this frame. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 // #endregion
 
@@ -406,7 +310,6 @@ int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif
 // #endregion
 
-/* Widget headers NOT re-exported — keeps clay.h out of public umbrella
- * (Windows ucrt stdlib.h __declspec(noreturn) breaks in release otherwise). */
+/* Widget headers NOT re-exported — keeps clay.h out of the public umbrella. */
 
 #endif /* NT_UI_H */

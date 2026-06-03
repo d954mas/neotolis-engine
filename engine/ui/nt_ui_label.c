@@ -8,7 +8,6 @@
 #include "font/nt_font.h"
 #include "ui/nt_ui_internal.h"
 
-/* Inspector descriptor; blue pill. */
 const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
     .name = "nt_label",
     .pill_color = 0xFFC88C5AU,
@@ -37,8 +36,7 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
                      .textAlignment = (Clay_TextAlignment)style->align,
                  }));
 
-    /* CLAY_TEXT doesn't push on the open stack — use last_emitted_element_id
-     * to tag the freshly-appended text leaf. id 0 is dropped by widget_register. */
+    /* CLAY_TEXT doesn't push on the open stack — use last_emitted_element_id. */
     nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL);
 }
 

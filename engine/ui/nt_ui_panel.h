@@ -1,8 +1,7 @@
 #ifndef NT_UI_PANEL_H
 #define NT_UI_PANEL_H
 
-/* Panel (IMAGE bg) and group (invisible) containers. Game wraps with
- * CLAY({.userData = NT_UI_DATA_XFORM(...)}) when transforms are needed. */
+/* Panel (IMAGE bg) and group (invisible) containers. Game wraps with NT_UI_DATA_XFORM for transforms. */
 
 #include <stdint.h>
 
@@ -12,16 +11,14 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Inspector descriptors. */
 extern const nt_ui_widget_def_t NT_UI_PANEL_DEF;
 extern const nt_ui_widget_def_t NT_UI_GROUP_DEF;
 
-/* Image-background container. `decl` optional (NULL = FIT default).
- * Engine OWNS .image / .backgroundColor / .userData — caller leaves them NULL. */
+/* Engine OWNS .image / .backgroundColor / .userData on the decl. */
 void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 void nt_ui_panel_end(nt_ui_context_t *ctx);
 
-/* Invisible container (no image). Engine OWNS .custom (anchor) + .userData. */
+/* Engine OWNS .custom (anchor) + .userData on the decl. */
 void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const Clay_ElementDeclaration *decl);
 void nt_ui_group_end(nt_ui_context_t *ctx);
 

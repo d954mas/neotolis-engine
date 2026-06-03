@@ -1,63 +1,48 @@
 #ifndef NT_UI_INSPECTOR_H
 #define NT_UI_INSPECTOR_H
 
-/* nt_ui_inspector: post-walk overlay + sidebar (Clay debug view port).
- *
- * Build flag: NT_UI_DEBUG_TOOLS (CMake option, default OFF).
- *   OFF: this entire surface is no-op stubs; production excludes the TU
- *        and ctx state (~30 KB binary, ~9 KB ctx savings).
- *   ON:  cmake -DNT_UI_DEBUG_TOOLS=ON. */
+/* Post-walk overlay + sidebar (Clay debug view port). Gated by NT_UI_DEBUG_TOOLS. */
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "font/nt_font.h"
-#include "ui/nt_ui.h" /* nt_ui_target_t */
+#include "ui/nt_ui.h"
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Runtime-tunable inspector sizing. Visible in both modes so callers may
- * keep a local instance even when stubs are no-op. */
+/* Visible in both modes so callers keep a local instance even when stubs are no-op. */
 typedef struct nt_ui_inspector_metrics_t {
-    float panel_width;     /* sidebar width in layout pixels (default 400) */
-    float row_height;      /* element-row height (default 30) */
-    uint16_t font_size;    /* text font size for all inspector labels (default 16) */
-    uint8_t outer_padding; /* panel content outer padding (default 10) */
-    uint8_t indent_width;  /* per-depth indent step (default 16) */
+    float panel_width;     /* default 400 */
+    float row_height;      /* default 30 */
+    uint16_t font_size;    /* default 16 */
+    uint8_t outer_padding; /* default 10 */
+    uint8_t indent_width;  /* default 16 */
 } nt_ui_inspector_metrics_t;
 
 #if NT_UI_DEBUG_TOOLS
 
-/* Toggle the inspector. Default off; zero overhead when off. */
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
-/* True when the inspector is active AND the pointer is inside the sidebar.
- * Games rolling their own click logic should query this to suppress it
- * (step_interaction already honors it internally). Stable across the frame. */
+/* True when active AND pointer is inside the sidebar. step_interaction honors this internally. */
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx);
 
 extern const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT;
 
-/* Asserts panel_width / row_height / font_size > 0. */
 void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics);
 
-/* Engine-internal — called by nt_ui_end if active. Game code does not call this. */
+/* Called by nt_ui_end if active; not for game code. */
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
 
-/* Paints highlight + id label for the focused element. Call AFTER nt_ui_walk,
- * BEFORE nt_gfx_end_pass. `target` MUST be the one passed to nt_ui_walk.
- * label_size <= 0 skips the label; rect still drawn. Silent skip when inactive,
- * when ctx is missing bindings, or when no element is focused. */
+/* Call AFTER nt_ui_walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label. */
 void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
 
 #else /* NT_UI_DEBUG_TOOLS */
 
 #include "log/nt_log.h"
 
-/* No-op stubs — game code compiles unchanged; debug calls vanish in release.
- * set_active(true) warns once so users running release builds see in the log
- * why their toggle does nothing. */
+/* set_active(true) warns once so release-build users see why the toggle does nothing. */
 static inline void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     (void)ctx;
     if (on) {

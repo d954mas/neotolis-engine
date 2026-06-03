@@ -12,6 +12,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
@@ -423,11 +424,7 @@ static void test_dispatch_image_nonzero_radius_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
-/* Vertex pin for the non-slice9 IMAGE path. Polygon region (source 16×16) into
- * a 64×64 bbox at (100, 100): atlas vertex (0, 8) — left edge, mid-height in
- * atlas-Y-up — must land at layout (bb.x, bb.y + bb.h/2) = (100, 132); after
- * world_aff's Y-flip (vy + vh = 600): GL (100, 600 - 132) = (100, 468).
- * Catches double-scale or wrong Y-axis composition in emit_image. */
+/* Default origin (atlas 0.5,0.5) -> bbox-fill: atlas (0,8) at bbox left-mid -> GL (100,468). */
 static void test_dispatch_image_non_slice9_vertex_positions(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.polygon_region_idx;
@@ -443,19 +440,47 @@ static void test_dispatch_image_non_slice9_vertex_positions(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Polygon vertex 0 lives at atlas-local (0, 8); expected GL (100, 468). */
     float v0[3];
     nt_sprite_renderer_test_last_emit_position(0U, v0);
     TEST_ASSERT_EQUAL_INT(100, (int)v0[0]);
     TEST_ASSERT_EQUAL_INT(468, (int)v0[1]);
 
-    /* Polygon vertex 3 at atlas-local (16, 16) — atlas top-right in Y-up — must
-     * land at bbox top-right in Y-down layout (164, 100), then GL (164, 500)
-     * via world_aff Y-flip. Catches a wrong-sign Y composition. */
     float v3[3];
     nt_sprite_renderer_test_last_emit_position(3U, v3);
     TEST_ASSERT_EQUAL_INT(164, (int)v3[0]);
     TEST_ASSERT_EQUAL_INT(500, (int)v3[1]);
+}
+
+/* ORIGIN_OVERRIDE(0.25, 0.75): pivot_src=(4, 12). m_lin sx_f=sy_f=4 with Y-flip
+ * baked twice -> m[5]=+4. emit_region: m_translate' = (132-16, 468-48) = (116, 420).
+ * v0 (0, 8): (116, 4*8+420) = (116, 452). v3 (16, 16): (180, 484). */
+static void test_dispatch_image_origin_override_shifts_anchor(void) {
+    s_image_payload.atlas = s_fx.atlas.handle;
+    s_image_payload.region_index = s_fx.atlas.polygon_region_idx;
+    s_image_payload.flip_bits = 0;
+    s_image_payload.flags = NT_UI_IMAGE_ORIGIN_OVERRIDE;
+    s_image_payload.origin_x = 0.25F;
+    s_image_payload.origin_y = 0.75F;
+
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    c->boundingBox = (Clay_BoundingBox){.x = 100.0F, .y = 100.0F, .width = 64.0F, .height = 64.0F};
+    c->renderData.image.backgroundColor = (Clay_Color){0};
+    c->renderData.image.imageData = &s_image_payload;
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    float v0[3];
+    nt_sprite_renderer_test_last_emit_position(0U, v0);
+    TEST_ASSERT_EQUAL_INT(116, (int)v0[0]);
+    TEST_ASSERT_EQUAL_INT(452, (int)v0[1]);
+
+    float v3[3];
+    nt_sprite_renderer_test_last_emit_position(3U, v3);
+    TEST_ASSERT_EQUAL_INT(180, (int)v3[0]);
+    TEST_ASSERT_EQUAL_INT(484, (int)v3[1]);
 }
 
 /* Vertex-equivalent pin for emit_text. Fixture's stub font has units_per_em=0,
@@ -535,6 +560,7 @@ int main(void) {
     RUN_TEST(test_dispatch_none_silent_skip);
     RUN_TEST(test_dispatch_image_tinted_packs_color);
     RUN_TEST(test_dispatch_image_non_slice9_vertex_positions);
+    RUN_TEST(test_dispatch_image_origin_override_shifts_anchor);
     RUN_TEST(test_dispatch_text_model_matrix_preserves_y_up);
     RUN_TEST(test_dispatch_image_not_ready_silent);
     return UNITY_END();

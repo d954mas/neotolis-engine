@@ -13,9 +13,7 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
     NT_ASSERT(isfinite(transition_speed) && transition_speed >= 0.0F && "nt_ui_anim: transition_speed must be finite >= 0");
     NT_ASSERT(isfinite(t->scale) && isfinite(t->opacity) && "nt_ui_anim: target scale/opacity must be finite");
     // #region slot-map + lerp
-    /* id is already a hash; no rehash. Linear probe up to MAX from base; on
-     * empty OR matching id, take it. All MAX slots occupied by other ids →
-     * evict the base slot (snap reseed). */
+    /* Linear probe from base; full probe chain → evict base (snap reseed). */
     const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
     nt_ui_anim_interaction_t *a = NULL;
     for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
@@ -26,13 +24,11 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
         }
     }
     if (a == NULL) {
-        /* All NT_UI_ANIM_PROBE_MAX slots taken by other ids. Evicting the base
-         * snap-reseeds this id every frame -> animation loses easing silently.
-         * Counter surfaces the degradation so games can dial NT_UI_ANIM_SLOTS. */
+        /* Counter surfaces the lost-easing degradation so games can dial NT_UI_ANIM_SLOTS. */
         ctx->anim_collision_count++;
         a = &ctx->anim[base];
     }
-    const bool fresh = (!a->valid) || (a->id != id); /* empty OR evicted → re-seed */
+    const bool fresh = (!a->valid) || (a->id != id);
     if (fresh) {
         /* First-touch / replace-on-collision: snap cur=target, no flash. */
         a->id = id;
@@ -51,7 +47,7 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
         a->opacity = t->opacity;
         a->tint_t = t->tint_t;
     } else {
-        /* dt can be 0 on the first frame; k clamped to 1 caps overshoot. */
+        /* k clamped to 1 caps overshoot (dt can be 0 on the first frame). */
         float k = transition_speed * ctx->frame_dt;
         if (k > 1.0F) {
             k = 1.0F;

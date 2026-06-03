@@ -8,18 +8,16 @@
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_internal.h"
-#include "ui/nt_ui_debug.h" /* record-only debug zone for disabled buttons */
+#include "ui/nt_ui_debug.h"
 #include "ui/nt_ui_internal.h"
 
-/* Inspector descriptor; green pill (R=112,G=208,B=96). */
 const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {
     .name = "nt_button",
     .pill_color = 0xFF60D070U,
     ._reserved = 0U,
 };
 
-/* Each per-state visual must be in render-safe ranges; caller bugs surface as
- * "almost works" without these. Fail-early per AGENTS.md. */
+/* Fail early on out-of-range style values — silent "almost works" would otherwise leak. */
 static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
     (void)which;
     NT_ASSERT(isfinite(st->scale) && st->scale > 0.0F && "nt_ui_button_begin: style.scale must be finite and > 0");
@@ -48,16 +46,13 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_button_begin: decl->backgroundColor must be zero (style->bg_tint controls)");
         NT_ASSERT(decl->userData == NULL && "nt_ui_button_begin: decl->userData must be NULL (data param controls)");
     }
-    /* Button owns transform + opacity (anim eases per-state). Caller may pass
-     * layer/user_data in `data` but transform/opacity flags must be clear. */
+    /* Button owns transform/opacity; caller may pass layer/user_data in data. */
     if (data != NULL) {
         NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U &&
                   "nt_ui_button_begin: data->flags must not set HAS_TRANSFORM/HAS_OPACITY (button owns these via style); wrap with a CLAY xform parent instead");
     }
     // #region state-pick + ease
-    /* Disabled skips hit-test/capture but still records a debug zone so the
-     * overlay can surface "why didn't this respond?". Recording is gated by
-     * ctx->debug_recording (zero overhead when off). */
+    /* Disabled skips hit-test but still records a zone so the overlay can show why. */
     nt_ui_interaction_t in;
     if (enabled) {
         in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
@@ -76,7 +71,6 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         st = &style->hover;
     }
 
-    /* Ease the picked state's visual toward the cached anim target. */
     nt_ui_anim_target_t tgt = {
         .scale = st->scale,
         .off_x = st->offset_x,
@@ -87,8 +81,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->transition_speed);
     // #endregion
     // #region build_element_data
-    /* Button replaces transform/opacity on its own userData. For a parent xform,
-     * wrap with a CLAY block — build_tree composes ancestors through children. */
+    /* Parent xform requires wrapping with a CLAY block — build_tree composes downward. */
     nt_ui_element_data_t *btn_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     NT_ASSERT(btn_data != NULL && "nt_ui_button_begin: scratch alloc failed (element_data)");
     *btn_data = (nt_ui_element_data_t){
@@ -100,7 +93,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     };
     // #endregion
     // #region open_clay_image
-    /* bg_region 0 = same as idle. */
+    /* bg_region 0 falls back to idle. */
     const uint32_t region = (st->bg_region != 0U) ? st->bg_region : style->idle.bg_region;
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
@@ -110,9 +103,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .region_index = region,
         .slice9_scale = style->slice9_scale,
     };
-    /* slice9 from atlas default (no override); origin/flip default. */
 
-    /* Unpack bg_tint (0xAABBGGRR) like panel unpacks color_packed. */
     Clay_Color tint = {0};
     if (st->bg_tint != 0xFFFFFFFF) {
         tint.r = (float)(st->bg_tint & 0xFFU);
@@ -130,7 +121,6 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     nt_ui_clay_priv_configure_open_element(final);
     // #endregion
 
-    /* Tag for the inspector tree + outline of the padded hit zone. */
     nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb);
 
     ctx->pending_button.active = true;

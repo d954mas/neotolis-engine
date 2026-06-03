@@ -7,15 +7,13 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "core/nt_builtins.h" /* sinf/cosf/sqrtf → __builtin_* (CRT dllimport fix) */
+#include "core/nt_builtins.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_internal.h"
 
-/* Hit-zone debug overlay. Recording: per-frame ctx state, filled inside
- * nt_ui_step_interaction_padded when ctx->debug_recording. Drawing: called
- * by the game after nt_ui_walk. */
+/* Recording filled inside step_interaction_padded; drawing called by game after nt_ui_walk. */
 
 // #region toggle + getters
 void nt_ui_debug_set_recording(nt_ui_context_t *ctx, bool on) {
@@ -60,15 +58,15 @@ static uint32_t color_for_state(uint16_t flags) {
 }
 // #endregion
 
-/* Project Clay-space → world via the zone's composed affine + walker Y-flip. */
+/* Composed affine + walker Y-flip into world space. */
 void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y) {
     const float wx = (z->aff_a * x) + (z->aff_b * y) + z->aff_tx;
     const float wy = (z->aff_c * x) + (z->aff_d * y) + z->aff_ty;
     *out_x = wx;
-    *out_y = vy + vh - wy; /* Clay Y-down → GL Y-up */
+    *out_y = vy + vh - wy;
 }
 
-/* Linear-scan lookup; faster than a hash at the 64-zone cap. */
+/* Linear scan beats a hash at the 64-zone cap. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id) {
     if (ctx == NULL || id == 0U) {
         return NULL;
@@ -82,20 +80,19 @@ const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *
 }
 // #endregion
 
-// #region polygon emit helpers (exposed via nt_ui_internal.h for inspector reuse)
+// #region polygon emit helpers
 static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
-/* Filled quad (4 verts, 2 tris). Vertices already in world space. */
+/* Vertices already in world space. */
 void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color) {
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_emit_geometry(atlas, region, v, 4U, indices, 6U, s_identity_mat, color);
 }
 
-/* Thin rotated-rect outline as 4 inset quads; inset direction = unit perpendicular toward centroid. */
+/* 4 inset quads; inset direction = unit perpendicular toward centroid. */
 void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color) {
-    /* Polygon centroid for direction-flip test. */
     float cx = 0.0F;
     float cy = 0.0F;
     for (uint32_t i = 0; i < 4U; ++i) {
@@ -111,7 +108,7 @@ void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const flo
         const float ay = c[i][1];
         const float bx = c[j][0];
         const float by = c[j][1];
-        /* Edge perpendicular (CCW rotation). */
+        /* CCW perpendicular. */
         float nx = -(by - ay);
         float ny = bx - ax;
         const float len = sqrtf((nx * nx) + (ny * ny));
@@ -120,7 +117,7 @@ void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const flo
         }
         nx /= len;
         ny /= len;
-        /* Flip to point inward (toward centroid). */
+        /* Flip inward. */
         const float mx = (ax + bx) * 0.5F;
         const float my = (ay + by) * 0.5F;
         if (((cx - mx) * nx) + ((cy - my) * ny) < 0.0F) {
@@ -157,7 +154,6 @@ static bool zone_passes_mode(const nt_ui_debug_zone_t *z, nt_ui_debug_hit_mode_t
 // #endregion
 
 // #region label rendering
-/* Status label drawn at the GL-Y-up top-left corner; size <= 0 skips. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void draw_zone_label(const nt_ui_debug_zone_t *z, const float corner[2], nt_material_t text_mat, nt_font_t font, float size) {
     if (size <= 0.0F) {
@@ -178,7 +174,7 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float corner[2], 
     if (n <= 0) {
         return;
     }
-    /* GL Y-up: baseline sits inside the top edge; text grows up. */
+    /* GL Y-up: baseline sits inside the top edge. */
     const float baseline_y = corner[1] - size - 2.0F;
     const float model[16] = {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, corner[0] + 2.0F, baseline_y, 0.0F, 1.0F,
@@ -198,7 +194,7 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
     if (mode == NT_UI_DEBUG_HIT_OFF || ctx->debug_zone_count == 0U) {
         return;
     }
-    /* Atlas + sprite mat required; missing text mat / font degrades to rects only. */
+    /* Missing text mat / font degrades to rects only. */
     if (ctx->atlas.id == 0U || ctx->sprite_material.id == 0U) {
         return;
     }
@@ -208,7 +204,6 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
     const bool can_label = (ctx->text_material.id != 0U) && (font.id != 0U) && (label_size > 0.0F);
-    /* Walker's viewport drives the per-point Y-flip: world_y = vy + vh - clay_y. */
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
@@ -217,7 +212,6 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
         if (!zone_passes_mode(z, mode)) {
             continue;
         }
-        /* Project the four padded-bbox corners through the snapshot accum + Y-flip. */
         float pad_corners[4][2] = {
             {z->layout_l, z->layout_t},
             {z->layout_r, z->layout_t},
@@ -227,11 +221,10 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
         for (uint32_t k = 0; k < 4U; ++k) {
             nt_ui_internal_project_layout_to_world(z, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
         }
-        /* Filled fill for the padded zone. */
         const uint32_t fill = color_for_state(z->state_flags);
         nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, pad_corners, fill);
 
-        /* Outline the EXACT visual bbox so padding is visually distinct. */
+        /* Outline visual bbox so padding is visually distinct. */
         float vis_corners[4][2] = {
             {z->visual_l, z->visual_t},
             {z->visual_r, z->visual_t},
@@ -243,7 +236,7 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
         }
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, DEBUG_OUTLINE_COLOR);
 
-        /* Label at the GL-Y-up top-left corner — corner with max y after Y-flip. */
+        /* Label at corner with max y after Y-flip (GL-Y-up top-left). */
         if (can_label) {
             float top_x = pad_corners[0][0];
             float top_y = pad_corners[0][1];
@@ -257,7 +250,6 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
             draw_zone_label(z, label_corner, ctx->text_material, font, label_size);
         }
     }
-    /* Flush so the overlay lands in the current pass. */
     nt_sprite_renderer_flush();
     if (can_label) {
         nt_text_renderer_flush();
