@@ -40,4 +40,7 @@ typedef struct {
 void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
 
+/* Content-less button (slice9 bg only). Returns clicked. Same args as begin. */
+bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
+
 #endif /* NT_UI_BUTTON_H */

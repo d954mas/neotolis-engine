@@ -144,3 +144,8 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
     ctx->pending_button.clicked = false;
     return clicked;
 }
+
+bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
+    nt_ui_button_begin(ctx, data, id, style, decl, enabled);
+    return nt_ui_button_end(ctx);
+}
