@@ -54,7 +54,6 @@ size_t nt_mem_scratch_used(void);
 #define NT_MEM_SCRATCH_ALLOC_ARRAY(T, count) ((T *)nt_mem_scratch_alloc_array(sizeof(T), (size_t)(count), _Alignof(T)))
 
 #ifdef NT_TEST_ACCESS
-size_t nt_mem_scratch_test_used(void);
 size_t nt_mem_scratch_test_size(void);
 #endif
 

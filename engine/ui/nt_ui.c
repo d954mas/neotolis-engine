@@ -996,6 +996,10 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
+    /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
+    if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
+        return;
+    }
 
     /* Both-axes-false is reserved for Clay's floating clipTo=ATTACHED_PARENT marker;
      * user code must always set at least one axis true (asserted below). */
@@ -1631,7 +1635,9 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
-/* PURE compute — safe to call N times per frame; state-machine writes live in step_interaction_padded. */
+/* Compute-pure: same returned struct N calls per frame. The only side effect
+ * is an idempotent OR of pointer_over_any (observability for nt_ui_wants_pointer);
+ * state-machine writes (capture, button edges) live in step_interaction_padded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
@@ -1672,6 +1678,11 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         out.hovered = over;
         if (over && btn.is_pressed) {
             out.pressed_now = true;
+        }
+        /* wants_pointer observability — idempotent OR write so read-only games
+         * (query-only, no step) still gate world input correctly. */
+        if (over) {
+            ctx->pointer_over_any = true;
         }
     }
 

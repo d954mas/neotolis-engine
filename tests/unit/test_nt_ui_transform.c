@@ -151,7 +151,7 @@ static void test_walker_no_scratch_alloc(void) {
     /* Frame 1 emits & walks so any one-shot init paths fire upfront. */
     walk_with_xform(&t, 0.9F, 50.0F, 50.0F, 80.0F, 40.0F, (Clay_Color){.r = 200, .g = 100, .b = 50, .a = 255});
     nt_mem_scratch_reset();
-    const size_t baseline = nt_mem_scratch_test_used();
+    const size_t baseline = nt_mem_scratch_used();
     /* Frame 2: declare + walk, then assert scratch wasn't touched by the walk. */
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -161,10 +161,10 @@ static void test_walker_no_scratch_alloc(void) {
           .backgroundColor = {200.0F, 100.0F, 50.0F, 255.0F},
           .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 0.9F)}) {}
     nt_ui_end(s_fx.ctx);
-    const size_t before_walk = nt_mem_scratch_test_used();
+    const size_t before_walk = nt_mem_scratch_used();
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_size_t_MESSAGE(before_walk, nt_mem_scratch_test_used(), "walker hot path allocated from scratch arena");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(before_walk, nt_mem_scratch_used(), "walker hot path allocated from scratch arena");
     (void)baseline;
 }
 

@@ -71,6 +71,5 @@ void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align) {
 size_t nt_mem_scratch_used(void) { return s_scratch.used; }
 
 #ifdef NT_TEST_ACCESS
-size_t nt_mem_scratch_test_used(void) { return s_scratch.used; }
 size_t nt_mem_scratch_test_size(void) { return s_scratch.size; }
 #endif

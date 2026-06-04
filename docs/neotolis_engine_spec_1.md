@@ -169,10 +169,13 @@ If a decision can be deferred without loss of base architecture — it is deferr
 
   **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
   visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
-  default 64); 4-probe chain; full-chain collision evicts the base
-  slot (snap-reseed, easing lost for one id). The `anim_collision_count`
-  monotonic counter surfaces this degradation; game polls the delta to
-  size `NT_UI_ANIM_SLOTS`.
+  default 64); 4-probe chain; full-chain collision evicts the LAST
+  probed slot (snap-reseed, easing lost for one id). Tail eviction
+  spreads pressure across the probe window — evicting the base would
+  let the very next caller hashing to the same bucket re-evict the new
+  entry, thrashing the cache. The `anim_collision_count` monotonic
+  counter surfaces this degradation; game polls the delta to size
+  `NT_UI_ANIM_SLOTS`.
 
   **Scissor limitation.** GL scissor is axis-aligned in framebuffer
   space. A rotated scroll container is clipped by the AABB of its

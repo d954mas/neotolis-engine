@@ -479,6 +479,10 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             const int32_t child_idx = elem->childrenOrTextContent.children.elements[f->children_cursor];
             f->children_cursor++;
             NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP && "build_tree: DFS stack overflow; raise NT_UI_TREE_DFS_DEPTH_CAP or restructure UI");
+            /* Fail-closed in OFF builds — assert vanishes, but a pop-back would corrupt the stack. */
+            if (sp >= NT_UI_TREE_DFS_DEPTH_CAP) {
+                break;
+            }
             S[sp++] = (nt_ui_dfs_frame_t){
                 .elem_idx = child_idx,
                 .a = f->a,

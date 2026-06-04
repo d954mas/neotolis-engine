@@ -254,7 +254,13 @@ typedef struct {
 } nt_ui_bbox_t;
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
 
-/* v1.8 iterates pointer 0; array is multitouch-ready. */
+/* Multitouch contract is RESERVED, not implemented. v1.8 drives only frame_pointers[0]:
+ * step/query/hit-test all hard-code pidx=0; captures[1..] storage exists but is never
+ * read or written by the engine, and active_id is not yet keyed by pointer_id (so the
+ * same finger lifting and pressing again on a different OS pointer slot would not be
+ * recognized as the same gesture). The 4-element capture array shape is preserved so
+ * future multitouch can land without ABI break. Games doing per-pointer logic must
+ * call nt_ui only for pointer 0 today. */
 typedef struct {
     uint32_t active_id; /* widget this pointer captured; 0 = none */
     float press_pos[2]; /* UI-space press origin */
