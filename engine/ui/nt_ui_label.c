@@ -7,7 +7,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
-#include "ui/nt_ui_clay_internal.h"
+#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
 const nt_ui_widget_def_t NT_UI_LABEL_DEF = {

@@ -39,7 +39,7 @@
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
-#include "ui/nt_ui_debug.h"
+#include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"

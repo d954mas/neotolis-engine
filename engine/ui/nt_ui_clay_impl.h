@@ -1,8 +1,10 @@
-#ifndef NT_UI_CLAY_INTERNAL_H
-#define NT_UI_CLAY_INTERNAL_H
+#ifndef NT_UI_CLAY_IMPL_H
+#define NT_UI_CLAY_IMPL_H
 
-/* Owns CLAY_IMPLEMENTATION; everywhere else uses Clay's public API.
- * Inspector emit body lives here too (touches Clay private symbols). */
+/* Public API of nt_ui_clay_impl.c — the TU that owns CLAY_IMPLEMENTATION.
+ * Anything touching Clay private types (Clay_LayoutElement, hashmap items,
+ * tree roots) physically lives in that TU because those types are only
+ * defined inside #ifdef CLAY_IMPLEMENTATION in clay.h. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -55,4 +57,4 @@ void nt_ui_internal_inspector_strings_release(const nt_ui_context_t *ctx);
 }
 #endif
 
-#endif /* NT_UI_CLAY_INTERNAL_H */
+#endif /* NT_UI_CLAY_IMPL_H */

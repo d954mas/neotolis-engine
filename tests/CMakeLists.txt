@@ -452,10 +452,10 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_tree_build
     )
     # Inspector + hit-zone tests exercise the optional subsystem; only built
-    # when nt_ui_inspector.c + nt_ui_debug.c are compiled in.
+    # when nt_ui_inspector.c + nt_ui_debug_hit_zones.c are compiled in.
     if(NT_UI_DEBUG_TOOLS)
         list(APPEND _nt_ui_test_names
-            test_nt_ui_debug
+            test_nt_ui_debug_hit_zones
             test_nt_ui_inspector
         )
     endif()

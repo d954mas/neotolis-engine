@@ -31,14 +31,15 @@ set(_clay_major "${CMAKE_MATCH_1}")
 set(_clay_minor "${CMAKE_MATCH_2}")
 
 # --- Module declaration ---
-# nt_ui_inspector.c + nt_ui_debug.c are gated by NT_UI_DEBUG_TOOLS (default OFF);
-# nt_ui_clay_internal.c always built (owns CLAY_IMPLEMENTATION).
+# nt_ui_inspector.c + nt_ui_debug_hit_zones.c are gated by NT_UI_DEBUG_TOOLS
+# (default OFF); nt_ui_clay_impl.c always built (owns CLAY_IMPLEMENTATION
+# + every consumer of Clay private types — see file header).
 set(NT_UI_SOURCES
     nt_ui.c
     nt_ui.h
     nt_ui_internal.h
-    nt_ui_clay_internal.c
-    nt_ui_clay_internal.h
+    nt_ui_clay_impl.c
+    nt_ui_clay_impl.h
     nt_ui_label.c
     nt_ui_label.h
     nt_ui_scale.c
@@ -53,13 +54,13 @@ set(NT_UI_SOURCES
     nt_ui_anim.h
     nt_ui_button.c
     nt_ui_button.h
-    nt_ui_debug.h
+    nt_ui_debug_hit_zones.h
     nt_ui_inspector.h
 )
 if(NT_UI_DEBUG_TOOLS)
     list(APPEND NT_UI_SOURCES
         nt_ui_inspector.c
-        nt_ui_debug.c
+        nt_ui_debug_hit_zones.c
     )
 endif()
 

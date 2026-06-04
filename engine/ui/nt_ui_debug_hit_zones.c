@@ -1,4 +1,4 @@
-#include "ui/nt_ui_debug.h"
+#include "ui/nt_ui_debug_hit_zones.h"
 
 #if NT_UI_DEBUG_TOOLS
 

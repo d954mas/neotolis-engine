@@ -8,7 +8,7 @@
 #include "renderers/nt_text_renderer.h"
 #include "time/nt_time.h"
 
-/* Clay private surface lives in nt_ui_clay_internal.c. */
+/* Clay private surface lives in nt_ui_clay_impl.c. */
 
 #if !defined(CLAY_PINNED_MAJOR) || !defined(CLAY_PINNED_MINOR)
 #error "nt_ui: CLAY_PINNED_MAJOR / CLAY_PINNED_MINOR must be defined by CMake"
@@ -30,8 +30,8 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
-#include "ui/nt_ui_clay_internal.h"
-#include "ui/nt_ui_debug.h"
+#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 

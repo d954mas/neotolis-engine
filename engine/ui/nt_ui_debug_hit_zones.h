@@ -1,7 +1,7 @@
-#ifndef NT_UI_DEBUG_H
-#define NT_UI_DEBUG_H
+#ifndef NT_UI_DEBUG_HIT_ZONES_H
+#define NT_UI_DEBUG_HIT_ZONES_H
 
-/* Hit-zone recording + draw helper. Gated by NT_UI_DEBUG_TOOLS (CMake option, default OFF). */
+/* Hit-zone recording + debug overlay. Gated by NT_UI_DEBUG_TOOLS (CMake option, default OFF). */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -61,4 +61,4 @@ static inline void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_
 
 #endif /* NT_UI_DEBUG_TOOLS */
 
-#endif /* NT_UI_DEBUG_H */
+#endif /* NT_UI_DEBUG_HIT_ZONES_H */

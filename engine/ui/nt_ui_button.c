@@ -7,8 +7,8 @@
 #include "memory/nt_mem_scratch.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_anim.h"
-#include "ui/nt_ui_clay_internal.h"
-#include "ui/nt_ui_debug.h"
+#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_internal.h"
 
 const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {

@@ -13,7 +13,7 @@
 
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
-#include "ui/nt_ui_clay_internal.h"
+#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
 // #region clay module-level access (thin forwarders)

@@ -1,4 +1,4 @@
-/* Public API + post-walk overlay; emit_layout body lives in nt_ui_clay_internal.c. */
+/* Public API + post-walk overlay; emit_layout body lives in nt_ui_clay_impl.c. */
 
 #include "ui/nt_ui_inspector.h"
 
@@ -14,7 +14,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "ui/nt_ui_clay_internal.h"
+#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
 // #region metrics

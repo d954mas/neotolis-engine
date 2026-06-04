@@ -23,7 +23,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_debug.h"
+#include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
