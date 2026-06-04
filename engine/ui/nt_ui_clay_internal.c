@@ -209,6 +209,7 @@ static uint8_t inspector_element_config_mask(Clay_LayoutElement *el) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspector_tree_row_t *out, int32_t out_cap) {
+    // #region stack-init
     NT_ASSERT(ctx != NULL && "nt_ui_internal_collect_tree_rows: ctx must be non-NULL");
     NT_ASSERT(out != NULL && "nt_ui_internal_collect_tree_rows: out must be non-NULL");
     NT_ASSERT(out_cap >= 0 && "nt_ui_internal_collect_tree_rows: out_cap must be >= 0");
@@ -228,6 +229,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
         int32_t child_cursor;
     } stack[STACK_CAP];
     int32_t sp = 0;
+    // #endregion
 
     for (int32_t r = 0; r < roots && written < out_cap; ++r) {
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&ctx->clay->layoutElementTreeRoots, r);
@@ -243,6 +245,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
             int32_t top = sp - 1;
             Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[top].elem_idx);
             if (stack[top].child_cursor < 0) {
+                // #region row-fill
                 nt_ui_inspector_tree_row_t *row = &out[written++];
                 memset(row, 0, sizeof *row);
                 row->id = el->id;
@@ -272,7 +275,9 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
                     sp--;
                     continue;
                 }
+                // #endregion
             }
+            // #region child-push
             const int32_t childCount = el->childrenOrTextContent.children.length;
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
@@ -291,6 +296,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
             } else {
                 sp--;
             }
+            // #endregion
         }
     }
 
@@ -498,6 +504,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     const int32_t N = cc->layoutElements.length;
     const int32_t R = cc->layoutElementTreeRoots.length;
 
+    // #region init + degenerate-early-out
     /* Covers unvisited elements (R==0, maxElementsExceeded, walker reads of stale-index errors). */
     const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
     for (int32_t i = 0; i < N; ++i) {
@@ -508,7 +515,9 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         ctx->current_generation++;
         return;
     }
+    // #endregion
 
+    // #region elem-to-root-map
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_root_for_elem[i] = -1;
     }
@@ -516,7 +525,9 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, k);
         ctx->tree_root_for_elem[root->layoutElementIndex] = k;
     }
+    // #endregion
 
+    // #region seed-and-dfs
     /* Each tree root's seed = identity (root 0) or tree_baked[parentId-resolved index]. */
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         const int32_t root_idx = ctx->tree_root_for_elem[elem_idx];
@@ -547,7 +558,9 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         }
         bt_dfs_subtree(ctx, cc, elem_idx, &seed);
     }
+    // #endregion
 
+    // #region snapshot-per-id (hit_baked)
     /* Snapshot per-id into hashmap-slot-indexed arrays (Clay's hashmap is persistent across frames). */
     ctx->current_generation++;
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
@@ -565,7 +578,9 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         ctx->hit_clip_parent_id[slot] = (uint32_t)clip_id;
         ctx->hit_generation[slot] = ctx->current_generation;
     }
+    // #endregion
 
+    // #region synthetic-scissor-fixup
     /* Id mismatch flags synthetic root-wrap SCISSOR_START vs per-element SCISSOR_START. */
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
         Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
@@ -581,6 +596,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             c->nt_layout_index = -1;
         }
     }
+    // #endregion
 }
 // #endregion
 
@@ -797,6 +813,7 @@ typedef struct {
 /* Hover → ctx->inspector_highlight_id; click → ctx->inspector_selected_id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-no-recursion)
 static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, int32_t initial_roots_length, int32_t highlighted_row_index) {
+    // #region dfs-setup
     Clay_Context *context = ctx->clay;
     /* Cast types match Clay struct fields (uint16_t for Padding / fontSize). */
     const float row_h = ctx->inspector_metrics.row_height;
@@ -818,7 +835,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     Clay_TextElementConfig debug_text_name_cfg_storage = Clay__DebugView_TextNameConfig;
     debug_text_name_cfg_storage.userData = debug_text_data;
     Clay_TextElementConfig *const debug_text_name_cfg = Clay__StoreTextElementConfig(debug_text_name_cfg_storage);
+    // #endregion
 
+    // #region row-emit
     for (int32_t rootIndex = 0; rootIndex < initial_roots_length; ++rootIndex) {
         dfs_length = 0;
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex);
@@ -1006,7 +1025,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
         }
     }
+    // #endregion
 
+    // #region viewport-hover-scan
     /* No sidebar row picked → scan viewport for a user element under the cursor. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
@@ -1077,7 +1098,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
         }
     }
+    // #endregion
 
+    // #region highlight-emit
     if (highlightedElementId) {
         /* zIndex 32764 keeps it above game UI but strictly under the panel root. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
@@ -1095,11 +1118,13 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         ctx->inspector_highlight_id = ctx->inspector_selected_id;
     }
     return layoutData;
+    // #endregion
 }
 
 /* Close button toggles ctx->inspector_active. Info pane carries condensed bodies for SHARED/TEXT. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
+    // #region close-button
     NT_ASSERT(ctx != NULL);
     NT_ASSERT(ctx->in_frame);
     NT_ASSERT(ctx->clay != NULL);
@@ -1125,7 +1150,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
             }
         }
     }
+    // #endregion
 
+    // #region scroll-setup
     uint32_t initialRootsLength = (uint32_t)context->layoutElementTreeRoots.length;
     uint32_t initialElementsLength = (uint32_t)context->layoutElements.length;
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
@@ -1151,6 +1178,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         highlightedRow = -1;
     }
     cdv_layout_data_t layoutData = {0};
+    // #endregion
+    // #region row-list
     /* RIGHT_CENTER overlay attach — engine root is full-width so side-by-side would land off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
@@ -1209,6 +1238,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                 }
             }
         }
+        // #endregion
+        // #region selected-info-pane
         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         if (ctx->inspector_selected_id != 0U) {
             Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
@@ -1326,6 +1357,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                 }
             }
         }
+        // #endregion
     }
 }
 

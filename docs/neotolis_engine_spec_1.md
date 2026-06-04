@@ -141,7 +141,49 @@ If a decision can be deferred without loss of base architecture — it is deferr
   With `NT_UI_DEBUG_TOOLS=ON` this expands by ~30 more Clay private
   symbols for the verbatim Clay debug-view port (the inspector body
   lives in the same TU). Either way, bumping Clay can require
-  coordinated nt_ui-side changes.)
+  coordinated nt_ui-side changes.
+
+  **Render-time pipeline (Phase 57).** `nt_ui` composes a per-element
+  2×3 affine + opacity in a post-`Clay_EndLayout` build pass
+  (`nt_ui_internal_build_tree`). Composition follows standard
+  scene-graph order: `world = accum_parent · L_child · local_point`,
+  where `L = T(O)·T(C)·R(θ)·S·T(-C)` is built around the element's
+  layout-space bbox center. The walker reads the composed affine from
+  `tree_baked[layout_idx]` (hot path, no hashmap lookup); the Y-flip
+  for GL is folded into a `world_aff[6]` once per command in
+  `dispatch_command` (d → -d, ty → vy+vh-ty); every emit_* applies
+  it uniformly. Hit-test reads the same affine via the per-id
+  hashmap-slot mirror `hit_baked[slot]` (Clay's hashmap is persistent
+  across frames; `hit_generation[slot]` rejects stale ids). Opacity
+  is a separate `float` accumulator on the same struct.
+
+  **Interaction model.** Game ids interact via `nt_ui_query_interaction`
+  (pure, multiple calls per frame OK) and `nt_ui_step_interaction`
+  (mutating, exactly one call per id per frame). Capture is per-pointer:
+  a press records `active_id`; release clears. Other widgets are
+  `exclusive_gated` while one holds capture. **Orphan cleanup** at
+  `nt_ui_begin` drops `active_id` if the widget didn't call step last
+  frame — covers scene switches, conditional disable, and widget hide.
+  Result: 1-frame IM-lag is intrinsic (current frame reads previous
+  frame's bbox); no stuck input on widget disappearance.
+
+  **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
+  visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
+  default 64); 4-probe chain; full-chain collision evicts the base
+  slot (snap-reseed, easing lost for one id). The `anim_collision_count`
+  monotonic counter surfaces this degradation; game polls the delta to
+  size `NT_UI_ANIM_SLOTS`.
+
+  **Scissor limitation.** GL scissor is axis-aligned in framebuffer
+  space. A rotated scroll container is clipped by the AABB of its
+  rotated corners, so content can poke past the visual corners.
+  Stencil-mask fix is out of scope for v1.
+
+  **Text-under-non-uniform-scale.** Font atlas em-size is picked from
+  the X-column magnitude of the composed affine (`sqrt(a²+c²)`). Under
+  uniform scale or pure rotation, glyph rasterisation stays crisp;
+  under `sx ≠ sy` the quad stretches but the rasteriser samples one
+  axis, blurring the other.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support

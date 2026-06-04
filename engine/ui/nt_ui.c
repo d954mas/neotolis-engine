@@ -631,6 +631,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
 // #region helper_emit_border
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float aff[6]) {
+    // #region axis-aligned-fast-path
     const float top = (float)widths.top;
     const float bot = (float)widths.bottom;
     const float lft = (float)widths.left;
@@ -652,6 +653,8 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
         }
         return;
     }
+    // #endregion
+    // #region mesh-build
     /* Build 4 quads as one geometry mesh through the affine. */
     float positions[16][2];
     uint16_t indices[24];
@@ -747,6 +750,7 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
     float mat[16];
     build_affine_mat4(aff, mat);
     nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, col);
+    // #endregion
 }
 
 static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radius, float cx, float cy, float w_perp_x, float w_perp_y, float sharp_x, float sharp_y, float sign_x, float sign_y,
@@ -1201,7 +1205,10 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
-        /* Scissor wants a GL-Y-up AABB; transform 4 corners through world_aff and pick min/max. */
+        /* Scissor wants a GL-Y-up AABB; transform 4 corners through world_aff and pick min/max.
+         * Known limitation: GL scissor is axis-aligned in framebuffer space; a rotated scroll
+         * container clips by its bounding-AABB, so content can poke past visual corners. Stencil
+         * mask would fix it but isn't worth it for the demo set. */
         const float bx = c->boundingBox.x;
         const float by = c->boundingBox.y;
         const float bw = c->boundingBox.width;
@@ -1244,6 +1251,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
+    // #region preconditions
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
@@ -1251,17 +1259,18 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
-    /* Caller reset scratch between nt_ui_end and nt_ui_walk -> payload pointers
-     * Clay still holds are now stale. used can only grow, never shrink, between
-     * end and walk (game may scratch_alloc for own reasons in that window). */
+    /* Caller reset scratch between nt_ui_end and nt_ui_walk → dangling payload pointers. */
     NT_ASSERT(nt_mem_scratch_used() >= ctx->scratch_used_at_end && "nt_ui_walk: nt_mem_scratch_reset called between nt_ui_end and nt_ui_walk -> dangling payload pointers");
+    // #endregion
 
-    /* Walker owns GL scissor state across nt_ui_walk; caller's scissor is not preserved.
-     * Drain BEFORE the zero-viewport early return so leaked staging dies with the frame. */
+    // #region entry-flush
+    /* Walker owns GL scissor across the call; drain BEFORE early returns so leaked staging dies with the frame. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
+    // #endregion
 
+    // #region degenerate-early-out
     /* Zero viewport or degenerate fb (minimized tab, orientation change): no-op. */
     const bool scaled = target->fb_size[0] > 0.0F;
     if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F || (scaled && target->fb_size[1] == 0.0F)) {
@@ -1279,9 +1288,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #endif
         return;
     }
+    // #endregion
+
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
     NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
 
+    // #region atlas-not-ready-early-out
     /* Async-friendly: skip walk silently if atlas not yet bound or still loading. */
     if (ctx->atlas.id == 0 || !nt_resource_is_ready(ctx->atlas)) {
         ctx->last_walk_draw_call_delta = 0;
@@ -1298,7 +1310,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #endif
         return;
     }
+    // #endregion
 
+    // #region walker-state-init
     /* After entry flush so walk_ms excludes draining the caller's pending geometry. */
     const double walk_t0 = nt_time_now();
 
@@ -1312,7 +1326,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
+    // #endregion
 
+    // #region viewport-bind
     /* glViewport needs PHYSICAL pixels. */
     if (scaled) {
         /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
@@ -1327,7 +1343,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
     bool sprite_pipeline_dirty = false;
+    // #endregion
 
+    // #region segment-scan + layer-dispatch
     /* Bitmask layer dispatch + ctz: O(L_active × N) per segment, 32 B stack vs ~2 KB counting sort. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
     const int32_t N_elements = nt_ui_clay_priv_layout_elements_length(ctx->clay);
@@ -1399,7 +1417,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         }
         i = seg_end;
     }
+    // #endregion
 
+    // #region exit-flush + metrics
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
@@ -1420,6 +1440,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #ifdef NT_TEST_ACCESS
     ctx->test_last_walk_unlayered_count = unlayered_count;
 #endif
+    // #endregion
 }
 // #endregion
 

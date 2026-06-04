@@ -84,7 +84,11 @@ typedef struct {
 /* Handler owns any GL state it touches; walker only rebinds sprite material on return. */
 typedef void (*nt_ui_custom_handler_t)(const nt_ui_custom_frame_t *frame, void *userdata);
 
-/* Render-time transform — no layout effect. */
+/* Render-time transform — no layout effect.
+ * Text caveat: glyph atlas font size is picked from the X-column magnitude
+ * (sqrtf(a²+c²)); under sx ≠ sy the text quad still stretches via the matrix,
+ * but rasterisation samples at the X-derived em-size — Y axis blurs. Use
+ * uniform scale or rotation for crisp text. */
 typedef struct {
     float offset_x; /* slide-in/out, additive */
     float offset_y;
