@@ -31,9 +31,11 @@ set(_clay_major "${CMAKE_MATCH_1}")
 set(_clay_minor "${CMAKE_MATCH_2}")
 
 # --- Module declaration ---
-# nt_ui_inspector.c + nt_ui_debug_hit_zones.c are gated by NT_UI_DEBUG_TOOLS
-# (default OFF); nt_ui_clay_impl.c always built (owns CLAY_IMPLEMENTATION
-# + every consumer of Clay private types — see file header).
+# All sources unconditional. Inspector + hit-zone .c are guarded internally
+# by `#if NT_UI_DEBUG_TOOLS` and compile to empty TUs when the option is off
+# — keeps compile_commands.json complete so clang-tidy lints both configs.
+# nt_ui_clay_impl.c owns CLAY_IMPLEMENTATION + every consumer of Clay
+# private types — see file header.
 set(NT_UI_SOURCES
     nt_ui.c
     nt_ui.h
@@ -54,15 +56,11 @@ set(NT_UI_SOURCES
     nt_ui_anim.h
     nt_ui_button.c
     nt_ui_button.h
+    nt_ui_debug_hit_zones.c
     nt_ui_debug_hit_zones.h
+    nt_ui_inspector.c
     nt_ui_inspector.h
 )
-if(NT_UI_DEBUG_TOOLS)
-    list(APPEND NT_UI_SOURCES
-        nt_ui_inspector.c
-        nt_ui_debug_hit_zones.c
-    )
-endif()
 
 nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
 

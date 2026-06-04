@@ -23,6 +23,8 @@
 #include "ui/nt_ui_panel.h"
 #include "unity.h"
 
+#if NT_UI_DEBUG_TOOLS
+
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
@@ -1897,3 +1899,14 @@ int main(void) {
     RUN_TEST(test_inspector_metrics_set_changes_overlay_scissor);
     return UNITY_END();
 }
+
+#else  /* NT_UI_DEBUG_TOOLS */
+
+/* When debug tools are off the file still compiles for compile_commands.json
+ * coverage; tidy lints the same TU in both configurations. Unity's link
+ * pulls setUp/tearDown unconditionally so stubs stay even without RUN_TEST. */
+void setUp(void) {}
+void tearDown(void) {}
+int main(void) { return 0; }
+
+#endif /* NT_UI_DEBUG_TOOLS */

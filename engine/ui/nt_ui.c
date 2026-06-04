@@ -137,6 +137,7 @@ void nt_ui_module_shutdown(void) {
 /* ctx struct gets padded to cache line so Clay's arena starts on a clean boundary. */
 #define NT_UI_CACHE_LINE ((size_t)64U)
 
+#if NT_UI_DEBUG_TOOLS
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 /* Smallest power of 2 ≥ x (assumes x ≥ 1). */
 static inline uint32_t nt_ui_next_pow2_u32(uint32_t x) {
@@ -151,6 +152,7 @@ static inline uint32_t nt_ui_next_pow2_u32(uint32_t x) {
     x |= x >> 16;
     return x + 1U;
 }
+#endif
 
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");

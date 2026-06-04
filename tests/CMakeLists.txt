@@ -451,14 +451,13 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_button
         test_nt_ui_tree_build
     )
-    # Inspector + hit-zone tests exercise the optional subsystem; only built
-    # when nt_ui_inspector.c + nt_ui_debug_hit_zones.c are compiled in.
-    if(NT_UI_DEBUG_TOOLS)
-        list(APPEND _nt_ui_test_names
-            test_nt_ui_debug_hit_zones
-            test_nt_ui_inspector
-        )
-    endif()
+    # Inspector + hit-zone tests are always compiled; their bodies are guarded
+    # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub
+    # main returning 0. Keeps compile_commands.json complete for tidy.
+    list(APPEND _nt_ui_test_names
+        test_nt_ui_debug_hit_zones
+        test_nt_ui_inspector
+    )
 
     foreach(_t IN LISTS _nt_ui_test_names)
         add_executable(${_t}
