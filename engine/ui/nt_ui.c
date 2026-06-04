@@ -138,6 +138,20 @@ void nt_ui_module_shutdown(void) {
 #define NT_UI_CACHE_LINE ((size_t)64U)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Smallest power of 2 ≥ x (assumes x ≥ 1). */
+static inline uint32_t nt_ui_next_pow2_u32(uint32_t x) {
+    if (x <= 1U) {
+        return 1U;
+    }
+    --x;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    return x + 1U;
+}
+
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
@@ -156,7 +170,18 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + clay_bytes;
+#if NT_UI_DEBUG_TOOLS
+    const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
+    const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * widget_cap, NT_UI_CACHE_LINE);
+    const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+#else
+    const size_t widget_registry_bytes = 0U;
+    const size_t debug_zones_bytes = 0U;
+    const size_t inspector_collapsed_bytes = 0U;
+#endif
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes +
+           widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -191,8 +216,23 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
     ctx->current_generation = 0U;
     const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes;
-    void *clay_mem = (char *)arena + after_tree;
-    const size_t clay_size = arena_size - after_tree;
+#if NT_UI_DEBUG_TOOLS
+    ctx->widget_registry_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
+    ctx->widget_registry_mask = ctx->widget_registry_cap - 1U;
+    ctx->debug_zone_cap = desc->max_elements;
+    ctx->inspector_collapsed_cap = desc->max_elements;
+    const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap, NT_UI_CACHE_LINE);
+    const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_tree);
+    ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_tree + widget_registry_bytes);
+    ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_tree + widget_registry_bytes + debug_zones_bytes);
+    const size_t after_debug = after_tree + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes;
+#else
+    const size_t after_debug = after_tree;
+#endif
+    void *clay_mem = (char *)arena + after_debug;
+    const size_t clay_size = arena_size - after_debug;
 
     /* SetMaxElementCount writes per-ctx if current is non-NULL — null it first to stage the global. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
@@ -276,7 +316,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->pending_button.active = false;
 
 #if NT_UI_DEBUG_TOOLS
-    memset(ctx->widget_registry, 0, sizeof(ctx->widget_registry));
+    memset(ctx->widget_registry, 0, sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap);
     /* highlight_id is per-frame; selected_id persists across frames. */
     ctx->inspector_highlight_id = 0U;
 #endif
@@ -385,14 +425,28 @@ nt_ui_context_t *nt_ui_internal_get_inframe_ctx(void) { return g_nt_ui_inframe_c
 
 // #region widget_registry
 #if NT_UI_DEBUG_TOOLS
-/* Direct-mapped per-frame table; replace-on-collision (observability path). */
+/* Linear probe at 50% load; returns slot for register (empty or matching) or
+ * the same slot for lookup (caller checks slot->id == id). */
+static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, uint32_t cap, uint32_t mask, uint32_t id) {
+    const uint32_t start = id & mask;
+    for (uint32_t step = 0U; step < cap; ++step) {
+        const uint32_t slot = (start + step) & mask;
+        const uint32_t s_id = registry[slot].id;
+        if (s_id == 0U || s_id == id) {
+            return slot;
+        }
+    }
+    NT_ASSERT(0 && "widget_registry full — load factor exceeded (raise max_elements)");
+    return 0U;
+}
+
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
     if (id == 0U || def == NULL) {
         return;
     }
-    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
     nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
     s->id = id;
     s->def = def;
@@ -418,7 +472,7 @@ const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32
     if (id == 0U) {
         return NULL;
     }
-    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
     const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
     return (s->id == id) ? s->def : NULL;
 #else
@@ -437,7 +491,7 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
     if (id == 0U) {
         return false;
     }
-    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
     const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
     if (s->id != id || !s->has_padding) {
         return false;
@@ -1753,7 +1807,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
 #if NT_UI_DEBUG_TOOLS
     /* inspector_active also enables recording so its post-walk overlay can project the snapshot. */
-    if ((ctx->debug_recording || ctx->inspector_active) && ctx->debug_zone_count < NT_UI_DEBUG_ZONE_CAP) {
+    if ((ctx->debug_recording || ctx->inspector_active) && ctx->debug_zone_count < ctx->debug_zone_cap) {
         nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
         const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
         const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
@@ -1817,7 +1871,7 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_debug_record_disabled_zone: pad_lrtb components must be >= 0");
 
     /* Zero-overhead fast path. */
-    if ((!ctx->debug_recording && !ctx->inspector_active) || ctx->debug_zone_count >= NT_UI_DEBUG_ZONE_CAP) {
+    if ((!ctx->debug_recording && !ctx->inspector_active) || ctx->debug_zone_count >= ctx->debug_zone_cap) {
         return;
     }
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});

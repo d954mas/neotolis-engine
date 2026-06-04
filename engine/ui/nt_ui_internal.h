@@ -13,22 +13,7 @@
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
 
-/* At-cap is silently saturated (observability path). */
-#ifndef NT_UI_DEBUG_ZONE_CAP
-#define NT_UI_DEBUG_ZONE_CAP 64
-#endif
-
-/* Direct-mapped (id mod cap); power-of-two for the cheap modulo. */
-#ifndef NT_UI_WIDGET_REGISTRY_CAP
-#define NT_UI_WIDGET_REGISTRY_CAP 1024
-#endif
-_Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 0, "NT_UI_WIDGET_REGISTRY_CAP must be a power of two");
-
-/* Persistent across frames; linear scan. */
-#ifndef NT_UI_INSPECTOR_COLLAPSED_CAP
-#define NT_UI_INSPECTOR_COLLAPSED_CAP 128
-#endif
-
+/* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
 #define NT_UI_TREE_DFS_DEPTH_CAP 256
 #endif
@@ -173,12 +158,17 @@ struct nt_ui_context {
     uint32_t anim_collision_count;
 
 #if NT_UI_DEBUG_TOOLS
-    /* At-cap pushes silently dropped (observability). */
-    nt_ui_debug_zone_t debug_zones[NT_UI_DEBUG_ZONE_CAP];
+    /* Arena-allocated, cap = max_elements (worst-case = all interactive). */
+    nt_ui_debug_zone_t *debug_zones;
+    uint32_t debug_zone_cap;
     uint32_t debug_zone_count;
     bool debug_recording;
 
-    nt_ui_widget_slot_t widget_registry[NT_UI_WIDGET_REGISTRY_CAP];
+    /* Arena-allocated, cap = next_pow2(max_elements * 2) for linear-probing hash
+     * (50% load factor). mask = cap - 1; bucket = id & mask + linear probe. */
+    nt_ui_widget_slot_t *widget_registry;
+    uint32_t widget_registry_cap;
+    uint32_t widget_registry_mask;
 
     /* highlight_id resets each begin; selected_id persists across frames. */
     bool inspector_active;
@@ -187,7 +177,9 @@ struct nt_ui_context {
     /* Pointer inside sidebar footprint — gates step_interaction to zeroed return. */
     bool inspector_pointer_consumed;
 
-    uint32_t inspector_collapsed_ids[NT_UI_INSPECTOR_COLLAPSED_CAP];
+    /* Arena-allocated, cap = max_elements (user can't collapse more nodes than exist). */
+    uint32_t *inspector_collapsed_ids;
+    uint32_t inspector_collapsed_cap;
     uint32_t inspector_collapsed_count;
 
     nt_ui_inspector_metrics_t inspector_metrics;

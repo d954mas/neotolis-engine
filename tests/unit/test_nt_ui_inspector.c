@@ -89,22 +89,18 @@ static void test_registry_resets_each_begin(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 3: slot collision -> latest write wins (documented policy) ---- */
-static void test_registry_replace_on_collision(void) {
+/* ---- Test 3: linear probing resolves bucket collisions correctly ---- */
+static void test_registry_collision_linear_probe(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    /* Two distinct ids that land in the same bucket. We synthesize this by
-     * using raw ids that differ by exactly NT_UI_WIDGET_REGISTRY_CAP, so
-     * id & (CAP-1) is identical for both. CAP is power-of-two by _Static_assert. */
+    /* Synthesize two ids landing in the same bucket: id_b = id_a + cap → same id & mask. */
     const uint32_t base_id = nt_ui_id("collide_a");
-    const uint32_t collide_id = base_id + (uint32_t)NT_UI_WIDGET_REGISTRY_CAP;
+    const uint32_t collide_id = base_id + s_fx.ctx->widget_registry_cap;
     nt_ui_widget_register(s_fx.ctx, base_id, &NT_UI_BUTTON_DEF, NULL);
-    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, base_id));
-    /* Collide -- new write must overwrite the slot. */
     nt_ui_widget_register(s_fx.ctx, collide_id, &NT_UI_IMAGE_DEF, NULL);
+    /* Linear probe resolves both — no replacement. */
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, base_id));
     TEST_ASSERT_EQUAL_PTR(&NT_UI_IMAGE_DEF, nt_ui_widget_lookup(s_fx.ctx, collide_id));
-    /* The original id now misses (replace-on-collision policy). */
-    TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, base_id));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -172,7 +168,7 @@ static void test_panel_widget_tagged(void) {
     }
     /* Scan the registry for any slot pointing at NT_UI_PANEL_DEF. */
     uint32_t panel_count = 0U;
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
+    for (uint32_t i = 0; i < s_fx.ctx->widget_registry_cap; ++i) {
         if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_PANEL_DEF) {
             panel_count++;
         }
@@ -187,7 +183,7 @@ static void test_image_widget_tagged(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL); }
     uint32_t image_count = 0U;
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
+    for (uint32_t i = 0; i < s_fx.ctx->widget_registry_cap; ++i) {
         if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_IMAGE_DEF) {
             image_count++;
         }
@@ -205,7 +201,7 @@ static void test_label_widget_tagged_on_text_leaf(void) {
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
     /* Scan the registry for a slot pointing at NT_UI_LABEL_DEF. */
     uint32_t label_count = 0U;
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
+    for (uint32_t i = 0; i < s_fx.ctx->widget_registry_cap; ++i) {
         if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_LABEL_DEF) {
             label_count++;
         }
@@ -228,7 +224,7 @@ static void test_label_does_not_clobber_parent_widget(void) {
     /* Both tags coexist: PANEL on the container, LABEL on the TEXT leaf. */
     uint32_t panel_count = 0U;
     uint32_t label_count = 0U;
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
+    for (uint32_t i = 0; i < s_fx.ctx->widget_registry_cap; ++i) {
         if (s_fx.ctx->widget_registry[i].id == 0U) {
             continue;
         }
@@ -626,7 +622,7 @@ static void test_inspector_emits_hex_for_unnamed_widget(void) {
 }
 
 /* Collapsed-set storage: unseen toggle ADDS, seen toggle REMOVES, and
- * NT_UI_INSPECTOR_COLLAPSED_CAP saturates cleanly. */
+ * inspector_collapsed_cap saturates cleanly. */
 static void test_inspector_collapsed_storage(void) {
     /* Initial empty. */
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_collapsed_count);
@@ -642,15 +638,15 @@ static void test_inspector_collapsed_storage(void) {
     /* Saturate: push CAP distinct ids directly into the array (mirrors the
      * "toggle each in turn" path's add branch). Use the public-equivalent
      * test entry: directly poke the storage (visible via internal header). */
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_INSPECTOR_COLLAPSED_CAP; ++i) {
+    for (uint32_t i = 0; i < s_fx.ctx->inspector_collapsed_cap; ++i) {
         s_fx.ctx->inspector_collapsed_ids[i] = i + 100U; /* arbitrary nonzero ids */
     }
-    s_fx.ctx->inspector_collapsed_count = (uint32_t)NT_UI_INSPECTOR_COLLAPSED_CAP;
+    s_fx.ctx->inspector_collapsed_count = s_fx.ctx->inspector_collapsed_cap;
 
     /* At cap, the next attempted add through the public toggle path would
      * be silently dropped. Verify the storage stays consistent (count
      * equals cap, no overflow). */
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_UI_INSPECTOR_COLLAPSED_CAP, s_fx.ctx->inspector_collapsed_count);
+    TEST_ASSERT_EQUAL_UINT32(s_fx.ctx->inspector_collapsed_cap, s_fx.ctx->inspector_collapsed_count);
 
     /* Disable inspector -> set is cleared. */
     nt_ui_inspector_set_active(s_fx.ctx, false);
@@ -1848,7 +1844,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
     RUN_TEST(test_registry_resets_each_begin);
-    RUN_TEST(test_registry_replace_on_collision);
+    RUN_TEST(test_registry_collision_linear_probe);
     RUN_TEST(test_registry_id_zero_dropped);
     RUN_TEST(test_registry_engine_and_game_defs_coexist);
     RUN_TEST(test_button_widget_auto_tagged);

@@ -808,7 +808,7 @@ static void cdv_toggle_collapsed(nt_ui_context_t *ctx, uint32_t id) {
             return;
         }
     }
-    if (ctx->inspector_collapsed_count < NT_UI_INSPECTOR_COLLAPSED_CAP) {
+    if (ctx->inspector_collapsed_count < ctx->inspector_collapsed_cap) {
         ctx->inspector_collapsed_ids[ctx->inspector_collapsed_count++] = id;
     }
 }

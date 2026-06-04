@@ -29,6 +29,27 @@
 /* Clay places its Clay_Context at the arena head via raw cast. */
 #define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
 
+/* ---- Tunables ----
+ *
+ * `max_elements` (in nt_ui_create_desc_t) is the single per-ctx knob that
+ * sizes all layout-bound storage:
+ *   - Clay arena (sized via Clay's own formula)
+ *   - tree/hit baked-xform + index arrays (production)
+ *   - debug_zones, widget_registry, inspector_collapsed_ids (DEBUG_TOOLS only)
+ *
+ * Memory cost per ctx (production-only / +debug):
+ *   max_elements=1024  → ~110 KB / ~270 KB
+ *   max_elements=4096  → ~430 KB / ~1.0 MB
+ *   max_elements=8192  → ~940 KB / ~2.0 MB
+ *
+ * Override the default via `target_compile_definitions(my_game PRIVATE
+ * NT_UI_DEFAULT_MAX_ELEMENT_COUNT=4096)` or set `desc.max_elements` directly.
+ *
+ * Other compile-time caps (rare to need overriding):
+ *   NT_UI_TREE_DFS_DEPTH_CAP (256) — max UI nesting depth (independent of
+ *                                    element count). Set via -D if you nest
+ *                                    deeper than ~50 levels in one frame.
+ *   NT_UI_DEFAULT_MAX_ELEMENT_COUNT — default for desc.max_elements. */
 #ifndef NT_UI_DEFAULT_MAX_ELEMENT_COUNT
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
