@@ -1211,10 +1211,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
-        /* Scissor wants a GL-Y-up AABB; transform 4 corners through world_aff and pick min/max.
-         * Known limitation: GL scissor is axis-aligned in framebuffer space; a rotated scroll
-         * container clips by its bounding-AABB, so content can poke past visual corners. Stencil
-         * mask would fix it but isn't worth it for the demo set. */
+        /* GL scissor is axis-aligned in fb space; rotated clip emits the
+         * bounding-AABB of the 4 transformed corners. */
         const float bx = c->boundingBox.x;
         const float by = c->boundingBox.y;
         const float bw = c->boundingBox.width;
