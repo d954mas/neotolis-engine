@@ -22,6 +22,9 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
     NT_ASSERT(style != NULL && "nt_ui_image: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_image: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_image: style.slice9_scale must be finite > 0");
+    if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
+        NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
+    }
     if (decl != NULL) {
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image: decl->image.imageData must be NULL (atlas+region controls image)");
         NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_image: decl->backgroundColor must be zero (style->color_packed controls)");

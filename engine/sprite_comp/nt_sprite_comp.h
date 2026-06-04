@@ -62,7 +62,12 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity);
 
 /* ---- Slice9 override (mirrors origin override pattern) ---- */
 
-/* Per-entity slice9 override. Passing all zeros clears the override to atlas default. */
+/* Per-entity slice9 override. Passing all zeros clears the override to atlas default.
+ * Asymmetry with nt_ui_image_style_t: the UI image payload has a separate
+ * NT_UI_IMAGE_SLICE9_OVERRIDE flag so a game can explicitly DISABLE slice9 (force
+ * non-slice9 stretch) by overriding with zeros and setting the flag. Sprite_comp
+ * has no equivalent — there is no use case yet for sprites to opt out of atlas
+ * slice9. Reuse the UI flag pattern if/when sprites need this. */
 void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b);
 void nt_sprite_comp_reset_slice9(nt_entity_t entity);
 

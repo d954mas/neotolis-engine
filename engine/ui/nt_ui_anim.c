@@ -11,7 +11,10 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
     NT_ASSERT(t != NULL && "nt_ui_anim: target must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_anim: id 0 is the no-widget sentinel");
     NT_ASSERT(isfinite(transition_speed) && transition_speed >= 0.0F && "nt_ui_anim: transition_speed must be finite >= 0");
-    NT_ASSERT(isfinite(t->scale) && isfinite(t->opacity) && "nt_ui_anim: target scale/opacity must be finite");
+    NT_ASSERT(isfinite(t->scale) && t->scale > 0.0F && "nt_ui_anim: target.scale must be finite > 0");
+    NT_ASSERT(isfinite(t->off_x) && isfinite(t->off_y) && "nt_ui_anim: target.offset must be finite");
+    NT_ASSERT(isfinite(t->opacity) && t->opacity >= 0.0F && t->opacity <= 1.0F && "nt_ui_anim: target.opacity must be finite in [0,1]");
+    NT_ASSERT(isfinite(t->tint_t) && t->tint_t >= 0.0F && t->tint_t <= 1.0F && "nt_ui_anim: target.tint_t must be finite in [0,1]");
     // #region slot-map + lerp
     /* Linear probe from base; full probe chain → evict base (snap reseed). */
     const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);

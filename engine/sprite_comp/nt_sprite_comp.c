@@ -275,6 +275,7 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
 void nt_sprite_comp_set_origin(nt_entity_t entity, float origin_x, float origin_y) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(isfinite(origin_x) && isfinite(origin_y) && "nt_sprite_comp_set_origin: origin must be finite");
     s_origin[idx][0] = origin_x;
     s_origin[idx][1] = origin_y;
     s_flags[idx] |= (uint8_t)NT_SPRITE_FLAG_ORIGIN_OV;

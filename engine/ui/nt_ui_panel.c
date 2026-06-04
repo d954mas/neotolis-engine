@@ -27,6 +27,9 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_panel_begin: style.slice9_scale must be finite > 0");
+    if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
+        NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_panel_begin: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
+    }
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_panel_begin: decl->id must be 0 (panel id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_panel_begin: decl->image.imageData must be NULL (atlas+region controls image)");
