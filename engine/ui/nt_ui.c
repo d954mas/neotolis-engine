@@ -218,6 +218,9 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx) {
     if (Clay_GetCurrentContext() == ctx->clay) {
         Clay_SetCurrentContext(NULL);
     }
+#if NT_UI_DEBUG_TOOLS
+    nt_ui_internal_inspector_strings_release(ctx);
+#endif
     memset(ctx, 0, sizeof(*ctx));
 }
 // #endregion
@@ -1441,6 +1444,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
 #ifdef NT_TEST_ACCESS
     ctx->test_last_walk_unlayered_count = unlayered_count;
+#endif
+#if NT_UI_DEBUG_TOOLS
+    /* Inspector strings backed by module-level rings are now consumed; release ownership. */
+    nt_ui_internal_inspector_strings_release(ctx);
 #endif
     // #endregion
 }

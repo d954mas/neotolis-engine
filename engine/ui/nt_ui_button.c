@@ -18,11 +18,15 @@ const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {
 };
 
 /* Fail early on out-of-range style values — silent "almost works" would otherwise leak. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
     (void)which;
     NT_ASSERT(isfinite(st->scale) && st->scale > 0.0F && "nt_ui_button_begin: style.scale must be finite and > 0");
     NT_ASSERT(isfinite(st->offset_x) && isfinite(st->offset_y) && "nt_ui_button_begin: style.offset must be finite");
     NT_ASSERT(isfinite(st->opacity) && st->opacity >= 0.0F && st->opacity <= 1.0F && "nt_ui_button_begin: style.opacity must be finite in [0,1]");
+    /* bg_tint with alpha=0 silently renders an invisible button (white RGB clipped by tint mul).
+     * Game wanting fade-to-invisible should use opacity, not tint alpha. 0xFFFFFFFFU = no tint. */
+    NT_ASSERT((st->bg_tint == 0xFFFFFFFFU || (st->bg_tint & 0xFF000000U) != 0U) && "nt_ui_button_begin: style.bg_tint alpha=0 hides the button; use 0xFFFFFFFFU for no tint or set opacity instead");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -130,6 +134,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 
 bool nt_ui_button_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_end: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_button_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(ctx->pending_button.active && "nt_ui_button_end without begin");
 
     nt_ui_clay_priv_close_element();

@@ -282,6 +282,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
             if (stack[top].child_cursor < childCount) {
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
+                NT_ASSERT(sp < STACK_CAP && "inspector collect_tree_rows DFS stack overflow; raise STACK_CAP");
                 if (sp >= STACK_CAP) {
                     sp = 0;
                     break;
@@ -747,6 +748,10 @@ static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement 
 #ifndef NT_UI_INSPECTOR_INT_BUFS
 #define NT_UI_INSPECTOR_INT_BUFS 512
 #endif
+/* Module-level rings are SHARED across ctxs; cdv_strings_owner pins them to
+ * the inspector's ctx between emit_inspector_layout and the matching walk so a
+ * second ctx's emit can't overwrite still-live Clay_String pointers. */
+static const nt_ui_context_t *cdv_strings_owner = NULL;
 static char cdv_int_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
 static uint32_t cdv_int_buf_cursor = 0U;
 static Clay_String cdv_int_to_string(int32_t v) {
@@ -1127,6 +1132,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     NT_ASSERT(ctx->in_frame);
     NT_ASSERT(ctx->clay != NULL);
+    /* Claim the shared cdv rings — fail loud if another ctx still holds them. */
+    NT_ASSERT((cdv_strings_owner == NULL || cdv_strings_owner == ctx) && "inspector string rings owned by another ctx; complete its nt_ui_walk before opening a second inspector");
+    cdv_strings_owner = ctx;
 
     /* Deterministic 512-slot window per frame for stable Clay_String pointers. */
     cdv_int_buf_cursor = 0U;
@@ -1362,5 +1370,11 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
 
 /* Forwarded from nt_ui_inspector.c (no Clay private types there). */
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_internal_emit_inspector_layout(ctx); }
+
+void nt_ui_internal_inspector_strings_release(const nt_ui_context_t *ctx) {
+    if (cdv_strings_owner == ctx) {
+        cdv_strings_owner = NULL;
+    }
+}
 // #endregion
 #endif /* NT_UI_DEBUG_TOOLS */

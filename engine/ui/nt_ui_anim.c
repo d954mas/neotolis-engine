@@ -16,7 +16,10 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
     NT_ASSERT(isfinite(t->opacity) && t->opacity >= 0.0F && t->opacity <= 1.0F && "nt_ui_anim: target.opacity must be finite in [0,1]");
     NT_ASSERT(isfinite(t->tint_t) && t->tint_t >= 0.0F && t->tint_t <= 1.0F && "nt_ui_anim: target.tint_t must be finite in [0,1]");
     // #region slot-map + lerp
-    /* Linear probe from base; full probe chain → evict base (snap reseed). */
+    /* Linear probe from base; full probe chain → evict the LAST-probed slot
+     * (not base): evicting base would make the very next caller hashing to
+     * the same bucket re-evict the new entry, thrashing the cache between
+     * 2+ competing ids each frame. Evicting the tail spreads pressure. */
     const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
     nt_ui_anim_interaction_t *a = NULL;
     for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
@@ -29,7 +32,7 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
     if (a == NULL) {
         /* Counter surfaces the lost-easing degradation so games can dial NT_UI_ANIM_SLOTS. */
         ctx->anim_collision_count++;
-        a = &ctx->anim[base];
+        a = &ctx->anim[(base + NT_UI_ANIM_PROBE_MAX - 1U) & (uint32_t)(NT_UI_ANIM_SLOTS - 1)];
     }
     const bool fresh = (!a->valid) || (a->id != id);
     if (fresh) {

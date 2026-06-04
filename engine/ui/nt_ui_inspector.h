@@ -42,15 +42,12 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
 
 #include "log/nt_log.h"
 
-/* set_active(true) warns once so release-build users see why the toggle does nothing. */
+/* set_active(true) warns every call — release-build users see why the toggle does nothing.
+ * Earlier "once" guards lived in per-TU statics and lied (fired once per TU, not per process). */
 static inline void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     (void)ctx;
     if (on) {
-        static bool s_warned = false;
-        if (!s_warned) {
-            nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — inspector excluded; toggle is a no-op. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
-            s_warned = true;
-        }
+        nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — inspector excluded; toggle is a no-op. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
     }
 }
 static inline bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
@@ -64,11 +61,7 @@ static inline bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) 
 static inline void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics) {
     (void)ctx;
     (void)metrics;
-    static bool s_metrics_warned = false;
-    if (!s_metrics_warned) {
-        nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — metrics ignored. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
-        s_metrics_warned = true;
-    }
+    nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — metrics ignored. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
 }
 static inline void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) { (void)ctx; }
 static inline void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size) {

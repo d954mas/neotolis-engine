@@ -71,8 +71,8 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
 
 void nt_ui_panel_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_end: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_panel_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     nt_ui_clay_priv_close_element();
-    (void)ctx;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -100,6 +100,6 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
 
 void nt_ui_group_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_end: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_group_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     nt_ui_clay_priv_close_element();
-    (void)ctx;
 }

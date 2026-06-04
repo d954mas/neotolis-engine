@@ -26,6 +26,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }
     if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_image: decl->id must be 0 (image id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image: decl->image.imageData must be NULL (atlas+region controls image)");
         NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_image: decl->backgroundColor must be zero (style->color_packed controls)");
         NT_ASSERT(decl->userData == NULL && "nt_ui_image: decl->userData must be NULL (data param controls)");

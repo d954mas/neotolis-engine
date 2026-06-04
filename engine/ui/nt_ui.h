@@ -190,6 +190,7 @@ typedef struct nt_ui_widget_def_t {
     /* Reserved for future extension (icon region, tooltip, ...). */
     uint32_t _reserved;
 } nt_ui_widget_def_t;
+_Static_assert(sizeof(nt_ui_widget_def_t) == (sizeof(void *) == 8 ? 16 : 12), "nt_ui_widget_def_t stable ABI (ptr + 2 u32, padded to ptr alignment)");
 
 /* `pad_lrtb` (optional) is the touch-target inflation; pass NULL for none.
  * Storage is direct-mapped, replace-on-collision (observability-only). */

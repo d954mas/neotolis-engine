@@ -133,10 +133,11 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
 
-    /* GPU scissor over the game area so both overlay paths clip uniformly. */
+    /* GPU scissor over the game area so both overlay paths clip uniformly.
+     * apply_scissor_logical_to_physical adds vx/vy itself — pass 0,0 relative. */
     const float panel_left_x = vx + vw - ctx->inspector_metrics.panel_width;
-    const int scissor_x = (int)vx;
-    const int scissor_y = (int)vy;
+    const int scissor_x = 0;
+    const int scissor_y = 0;
     const int scissor_w = (int)(panel_left_x - vx);
     const int scissor_h = (int)vh;
     if (scissor_w > 0 && scissor_h > 0) {
