@@ -492,6 +492,94 @@ static void test_query_outside_frame_returns_prev_frame_state(void) {
     TEST_ASSERT_TRUE_MESSAGE(in.hovered, "query outside frame must read prev-frame bbox");
 }
 
+/* ---- Multitouch (α-semantics: single capture per widget) ---- */
+
+/* Two-pointer frame helper. */
+static nt_ui_interaction_t step_btn_2p(const nt_pointer_t *a, const nt_pointer_t *b) {
+    const nt_pointer_t ptrs[2] = {*a, *b};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, ptrs, 2);
+    declare_btn_element();
+    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    return in;
+}
+
+static void declare_btn_2p(const nt_pointer_t *a, const nt_pointer_t *b) {
+    const nt_pointer_t ptrs[2] = {*a, *b};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, ptrs, 2);
+    declare_btn_element();
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Test M1: finger 0 captures, finger 1's press on same widget is ignored.
+ * Only finger 0's release fires clicked. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_multitouch_first_finger_wins_capture(void) {
+    /* Frame 1: declare (no input) so bbox lands in Clay's hashmap. */
+    nt_pointer_t idle = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    declare_btn_2p(&idle, &idle);
+
+    /* Frame 2: finger 0 presses inside; finger 1 idle off-widget. */
+    nt_pointer_t f0_press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_pointer_t f1_off = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_ui_interaction_t in2 = step_btn_2p(&f0_press, &f1_off);
+    TEST_ASSERT_TRUE(in2.pressed);
+    TEST_ASSERT_TRUE(in2.pressed_now);
+    /* captures[0] holds the widget; captures[1] empty. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
+
+    /* Frame 3: finger 0 holds; finger 1 ALSO presses inside the widget.
+     * α: second finger ignored, captures[1] stays empty. */
+    nt_pointer_t f0_hold = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_pointer_t f1_press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_ui_interaction_t in3 = step_btn_2p(&f0_hold, &f1_press);
+    TEST_ASSERT_TRUE(in3.pressed);
+    TEST_ASSERT_FALSE(in3.pressed_now); /* no NEW capture this frame */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
+
+    /* Frame 4: finger 0 releases over widget; finger 1 still pressing.
+     * Click fires from finger 0; captures[0] cleared. captures[1] stays empty. */
+    nt_pointer_t f0_release = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    nt_pointer_t f1_hold = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_ui_interaction_t in4 = step_btn_2p(&f0_release, &f1_hold);
+    TEST_ASSERT_TRUE(in4.clicked);
+    TEST_ASSERT_TRUE(in4.released_now);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
+
+    /* Frame 5: only finger 1 still pressed-down (no new edge). No second click. */
+    nt_pointer_t f0_idle = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    nt_pointer_t f1_still = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_ui_interaction_t in5 = step_btn_2p(&f0_idle, &f1_still);
+    TEST_ASSERT_FALSE(in5.clicked);
+    /* No edge on finger 1 (is_pressed = false), so no new capture either. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
+}
+
+/* Test M2: finger 1 presses widget while finger 0 holds NOTHING — finger 1 captures. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_multitouch_secondary_finger_captures_when_primary_idle(void) {
+    nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
+    declare_btn_2p(&idle, &idle);
+
+    /* Frame 2: finger 0 off, finger 1 presses inside widget → captures[1] holds. */
+    nt_pointer_t f0_off = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_pointer_t f1_press = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_ui_interaction_t in2 = step_btn_2p(&f0_off, &f1_press);
+    TEST_ASSERT_TRUE(in2.pressed_now);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 1));
+
+    /* Frame 3: finger 1 releases over widget → clicked, captures[1] cleared. */
+    nt_pointer_t f1_release = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    nt_ui_interaction_t in3 = step_btn_2p(&f0_off, &f1_release);
+    TEST_ASSERT_TRUE(in3.clicked);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_interaction_click_on_release_within_bounds);
@@ -507,5 +595,7 @@ int main(void) {
     RUN_TEST(test_query_step_under_rotation);
     RUN_TEST(test_step_outside_frame_asserts);
     RUN_TEST(test_query_outside_frame_returns_prev_frame_state);
+    RUN_TEST(test_multitouch_first_finger_wins_capture);
+    RUN_TEST(test_multitouch_secondary_finger_captures_when_primary_idle);
     return UNITY_END();
 }

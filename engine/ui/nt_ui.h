@@ -195,7 +195,7 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-/* pointers[0..count) is multitouch-ready; v1.8 drives only pointers[0]. */
+/* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. */
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
 void nt_ui_end(nt_ui_context_t *ctx);
 
@@ -276,13 +276,15 @@ typedef struct {
 } nt_ui_bbox_t;
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
 
-/* Multitouch contract is RESERVED, not implemented. v1.8 drives only frame_pointers[0]:
- * step/query/hit-test all hard-code pidx=0; captures[1..] storage exists but is never
- * read or written by the engine, and active_id is not yet keyed by pointer_id (so the
- * same finger lifting and pressing again on a different OS pointer slot would not be
- * recognized as the same gesture). The 4-element capture array shape is preserved so
- * future multitouch can land without ABI break. Games doing per-pointer logic must
- * call nt_ui only for pointer 0 today. */
+/* Multitouch (α-semantics: single capture per widget). step/query iterate all
+ * frame_pointers[0..count) and resolve the pointer that "owns" each widget:
+ *   - if a pidx is already holding the id, it stays the owner
+ *   - else the first pressed_now pointer over the widget captures it
+ *   - additional fingers landing on a captured widget are silently ignored
+ *   - a pointer bound to one widget is invisible to all other widgets
+ * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
+ * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
+ * owning (or first hovering) pointer. */
 typedef struct {
     uint32_t active_id; /* widget this pointer captured; 0 = none */
     float press_pos[2]; /* UI-space press origin */

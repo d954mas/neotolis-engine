@@ -1669,6 +1669,59 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
+/* Resolves the single pidx that "owns" a widget for this frame under α-semantics:
+ *   - a pointer holding this id wins (already captured)
+ *   - else first pidx with empty capture that's pressed_now over the widget
+ *   - else -1 (widget not owned this frame)
+ * Also aggregates any_hovered and the first hovering pidx (used for pos/id when
+ * widget is hovered but not owned). Pointers holding OTHER widgets are skipped
+ * — they are exclusively bound and shouldn't drive this widget's interaction. */
+typedef struct {
+    int32_t effective_pidx;   /* holder or new-capture candidate; -1 if neither */
+    int32_t first_hover_pidx; /* fallback for pos/id when no owner */
+    bool any_hovered;
+    bool new_capture; /* effective_pidx is a fresh press_now capture (no prior holder) */
+} nt_ui_widget_pidx_state_t;
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    nt_ui_widget_pidx_state_t s = {.effective_pidx = -1, .first_hover_pidx = -1, .any_hovered = false, .new_capture = false};
+    int32_t holder = -1;
+    int32_t candidate = -1;
+    /* Pass 1: existing holder. */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (ctx->captures[i].active_id == id) {
+            holder = (int32_t)i;
+            break;
+        }
+    }
+    /* Pass 2: hover aggregation + first free-pidx press candidate (only if no holder). */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const nt_ui_capture_t *cap = &ctx->captures[i];
+        if (cap->active_id != 0U && cap->active_id != id) {
+            continue; /* α: pointer bound elsewhere, invisible to this widget */
+        }
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
+        if (!over) {
+            continue;
+        }
+        if (s.first_hover_pidx < 0) {
+            s.first_hover_pidx = (int32_t)i;
+        }
+        s.any_hovered = true;
+        if (holder < 0 && candidate < 0 && cap->active_id == 0U) {
+            const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+            if (btn.is_pressed) {
+                candidate = (int32_t)i;
+            }
+        }
+    }
+    s.effective_pidx = (holder >= 0) ? holder : candidate;
+    s.new_capture = (holder < 0 && candidate >= 0);
+    return s;
+}
+
 /* Compute-pure: same returned struct N calls per frame. The only side effect
  * is an idempotent OR of pointer_over_any (observability for nt_ui_wants_pointer);
  * state-machine writes (capture, button edges) live in step_interaction_padded. */
@@ -1698,37 +1751,24 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         return out;
     }
 
-    const uint32_t pidx = 0U;
-    const nt_pointer_t *p = &ctx->frame_pointers[pidx];
-    const nt_ui_capture_t *cap = &ctx->captures[pidx];
-    const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
-
-    /* Exclusive capture: another widget holding the pointer hides this one from input. */
-    const bool exclusive_gated = (cap->active_id != 0U) && (cap->active_id != id);
-
-    bool over = false;
-    if (!exclusive_gated) {
-        over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
-        out.hovered = over;
-        if (over && btn.is_pressed) {
-            out.pressed_now = true;
-        }
-        /* wants_pointer observability — idempotent OR write so read-only games
-         * (query-only, no step) still gate world input correctly. */
-        if (over) {
-            ctx->pointer_over_any = true;
-        }
+    const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
+    out.hovered = s.any_hovered;
+    if (s.any_hovered) {
+        ctx->pointer_over_any = true;
     }
 
-    /* "This id owns capture after step commits" — already, or pressed_now will assign it. */
-    const bool mine = !exclusive_gated && ((cap->active_id == id) || out.pressed_now);
-    if (mine) {
+    if (s.effective_pidx >= 0) {
+        const uint32_t pidx = (uint32_t)s.effective_pidx;
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        const nt_ui_capture_t *cap = &ctx->captures[pidx];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
-        /* clicked = release OVER widget; off-widget release cancels. */
+        out.pressed_now = s.new_capture;
         out.clicked = btn.is_released && over;
         out.pointer_id = p->id;
-        if (out.pressed_now) {
+        if (s.new_capture) {
             out.press_pos[0] = p->x;
             out.press_pos[1] = p->y;
         } else {
@@ -1740,11 +1780,14 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         out.drag_dx = p->x - out.press_pos[0];
         out.drag_dy = p->y - out.press_pos[1];
     } else {
+        /* No owner — fall back to first hover pidx (if any), else primary pidx=0. */
+        const uint32_t pidx = (s.first_hover_pidx >= 0) ? (uint32_t)s.first_hover_pidx : 0U;
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        out.pointer_id = p->id;
         out.press_pos[0] = p->x;
         out.press_pos[1] = p->y;
         out.pos[0] = p->x;
         out.pos[1] = p->y;
-        out.pointer_id = p->id;
     }
 
     Clay_SetCurrentContext(saved_clay);
@@ -1776,28 +1819,18 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         return out;
     }
 
-    const uint32_t pidx = 0U;
-    const nt_pointer_t *p = &ctx->frame_pointers[pidx];
-    nt_ui_capture_t *cap = &ctx->captures[pidx];
-    const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
-
-    const bool exclusive_gated = (cap->active_id != 0U) && (cap->active_id != id);
-
-    if (!exclusive_gated) {
-        if (out.hovered) {
-            ctx->pointer_over_any = true;
-        }
-        if (out.pressed_now) {
+    /* Re-resolve under α: find the effective pidx for this widget after query. */
+    const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
+    if (s.effective_pidx >= 0) {
+        const uint32_t pidx = (uint32_t)s.effective_pidx;
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        nt_ui_capture_t *cap = &ctx->captures[pidx];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        if (s.new_capture) {
             cap->active_id = id;
             cap->press_pos[0] = p->x;
             cap->press_pos[1] = p->y;
-            cap->pos[0] = p->x;
-            cap->pos[1] = p->y;
         }
-    }
-
-    const bool mine = !exclusive_gated && (cap->active_id == id);
-    if (mine) {
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
         /* Marks not-orphan for next begin's cleanup. */
@@ -1852,8 +1885,12 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         if (out.pressed) {
             flags |= (uint16_t)NT_UI_DEBUG_FLAG_PRESSED;
         }
-        if (cap->active_id == id) {
-            flags |= (uint16_t)NT_UI_DEBUG_FLAG_CAPTURED;
+        /* Captured by ANY pidx (α: single pidx, but scan for safety). */
+        for (uint32_t pi = 0; pi < ctx->frame_pointer_count; ++pi) {
+            if (ctx->captures[pi].active_id == id) {
+                flags |= (uint16_t)NT_UI_DEBUG_FLAG_CAPTURED;
+                break;
+            }
         }
         z->state_flags = flags;
     }
