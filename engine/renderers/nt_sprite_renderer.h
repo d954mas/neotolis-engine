@@ -109,8 +109,9 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *   x, y, w, h          - target rect in caller's coordinate space.
  *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
  *                         atlas-baked borders for this region.
- *   slice9_scale        - dst corner size = src × scale. 1.0 = pixel-perfect.
- *                         Corners are proportionally shrunk if total > w/h.
+ *   slice9_scale        - dst corner size = src × scale (always). Pass 1.0F
+ *                         for src verbatim. Corners proportionally shrunk if
+ *                         total > w/h.
  *   color_packed        - 0xAABBGGRR.
  *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
  *   world_matrix        - 16-float column-major mat4 (same convention as
@@ -120,15 +121,6 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  * internally. Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
                                     uint8_t flip_bits, const float *world_matrix);
-
-#include "core/nt_assert.h"
-
-/* Production scales are 0.1..10; overflow asserts at scale > ~4096 for a 16 px border. */
-static inline uint16_t nt_sprite_renderer_scale_slice9_border(uint16_t base, float scale) {
-    const float f = ((float)base * scale) + 0.5F;
-    NT_ASSERT(f >= 0.0F && f <= 65535.0F && "slice9 border × scale overflows uint16_t");
-    return (uint16_t)f;
-}
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a

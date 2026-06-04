@@ -786,7 +786,7 @@ void test_sprite_renderer_sampler_override_does_not_stick(void) {
     TEST_ASSERT_EQUAL_UINT32(default_backend, last);
 }
 
-/* ---- emit_slice9_from_region tests ---- */
+/* ---- emit_slice9 NULL-src (atlas-baked borders) tests ---- */
 
 /* Helper: resolve the rs9 region's runtime index in the registered atlas. */
 static uint32_t find_rs9_region_index(nt_resource_t atlas) {
@@ -802,7 +802,7 @@ static uint32_t find_rs9_region_index(nt_resource_t atlas) {
 }
 
 /* scale=1.0F → atlas borders unchanged → grid x_inner == x + 16; matches emit_slice9. */
-void test_emit_slice9_from_region_scale_one_matches_atlas(void) {
+void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
@@ -831,7 +831,7 @@ void test_emit_slice9_from_region_scale_one_matches_atlas(void) {
 /* scale=2.0F → DST borders doubled (positions 32/68) BUT SRC borders unchanged
  * → UV cut stays at atlas src_l/source_w. Guards the user-caught bug where the
  * earlier impl scaled src too and corners sampled edge content. */
-void test_emit_slice9_from_region_scale_two_doubles_borders(void) {
+void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
 
@@ -904,8 +904,8 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);
     RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
-    RUN_TEST(test_emit_slice9_from_region_scale_one_matches_atlas);
-    RUN_TEST(test_emit_slice9_from_region_scale_two_doubles_borders);
+    RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
+    RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     return UNITY_END();
 }

@@ -669,6 +669,81 @@ static void test_slice9_tombstone_noop(void) {
     nt_sprite_renderer_flush();
 }
 
+/* Pins m[12]/m[13] translation handling — every grid vertex shifted (+50, +30). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_slice9_mat4_translation(void) {
+    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
+
+    nt_resource_t atlas = register_slice9_atlas(0xC7ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    float m[16];
+    glm_mat4_identity((vec4 *)m);
+    m[12] = 50.0F;
+    m[13] = 30.0F;
+
+    const uint16_t b4[4] = {4, 4, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, m);
+
+    /* Vertex 0 (bbox top-left in layout) = (0, 0) → (50, 30). */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0, pos);
+    TEST_ASSERT_TRUE(pos[0] == 50.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 30.0F); /* NOLINT */
+    /* Vertex 15 (bbox bottom-right) = (100, 80) → (150, 110). */
+    nt_sprite_renderer_test_last_emit_position(15, pos);
+    TEST_ASSERT_TRUE(pos[0] == 150.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 110.0F); /* NOLINT */
+
+    nt_sprite_renderer_flush();
+}
+
+/* 90° rotation around Z (column-major). Catches m[1]↔m[4] swap (row-major confusion). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_slice9_mat4_rotation_90(void) {
+    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
+
+    nt_resource_t atlas = register_slice9_atlas(0xC8ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    /* col 0 = [0, 1, 0, 0], col 1 = [-1, 0, 0, 0]:
+     * v.x = m[0]·px + m[4]·py + m[12] =  0·px + -1·py = -py
+     * v.y = m[1]·px + m[5]·py + m[13] =  1·px +  0·py =  px */
+    float m[16];
+    glm_mat4_identity((vec4 *)m);
+    m[0] = 0.0F;
+    m[1] = 1.0F;
+    m[4] = -1.0F;
+    m[5] = 0.0F;
+
+    const uint16_t b4[4] = {4, 4, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, m);
+
+    float pos[3];
+    /* Vertex 0 = layout (0, 0) → (0, 0). */
+    nt_sprite_renderer_test_last_emit_position(0, pos);
+    TEST_ASSERT_TRUE(pos[0] == 0.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 0.0F); /* NOLINT */
+    /* Vertex 3 = layout (100, 0) → (-0, 100). */
+    nt_sprite_renderer_test_last_emit_position(3, pos);
+    TEST_ASSERT_TRUE(pos[0] == 0.0F);   /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 100.0F); /* NOLINT */
+    /* Vertex 12 = layout (0, 80) → (-80, 0). */
+    nt_sprite_renderer_test_last_emit_position(12, pos);
+    TEST_ASSERT_TRUE(pos[0] == -80.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 0.0F);   /* NOLINT */
+    /* Vertex 15 = layout (100, 80) → (-80, 100). */
+    nt_sprite_renderer_test_last_emit_position(15, pos);
+    TEST_ASSERT_TRUE(pos[0] == -80.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 100.0F); /* NOLINT */
+
+    nt_sprite_renderer_flush();
+}
+
 // #endregion
 
 int main(void) {
@@ -682,5 +757,7 @@ int main(void) {
     RUN_TEST(test_slice9_flip_x);
     RUN_TEST(test_slice9_flip_y);
     RUN_TEST(test_slice9_tombstone_noop);
+    RUN_TEST(test_slice9_mat4_translation);
+    RUN_TEST(test_slice9_mat4_rotation_90);
     return UNITY_END();
 }

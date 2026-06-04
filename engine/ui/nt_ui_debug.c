@@ -59,6 +59,7 @@ static uint32_t color_for_state(uint16_t flags) {
 }
 // #endregion
 
+// #region zone helpers
 /* Composed affine + walker Y-flip into world space. */
 void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y) {
     const float wx = (z->aff_a * x) + (z->aff_b * y) + z->aff_tx;

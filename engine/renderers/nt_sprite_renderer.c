@@ -823,6 +823,13 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #endregion
 
 // #region emit_slice9
+/* Production scales 0.1..10; overflow asserts at scale > ~4096 for a 16 px border. */
+static inline uint16_t scale_slice9_border(uint16_t base, float scale) {
+    const float f = ((float)base * scale) + 0.5F;
+    NT_ASSERT(f >= 0.0F && f <= 65535.0F && "slice9 border × scale overflows uint16_t");
+    return (uint16_t)f;
+}
+
 /* src borders pick UV cut; dst borders set rendered corner/edge size. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
@@ -849,10 +856,10 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     const uint16_t src_sr = (src_lrtb != NULL) ? src_lrtb[1] : rh.region->slice9_lrtb[1];
     const uint16_t src_st = (src_lrtb != NULL) ? src_lrtb[2] : rh.region->slice9_lrtb[2];
     const uint16_t src_sb = (src_lrtb != NULL) ? src_lrtb[3] : rh.region->slice9_lrtb[3];
-    const uint16_t dst_sl = nt_sprite_renderer_scale_slice9_border(src_sl, slice9_scale);
-    const uint16_t dst_sr = nt_sprite_renderer_scale_slice9_border(src_sr, slice9_scale);
-    const uint16_t dst_st = nt_sprite_renderer_scale_slice9_border(src_st, slice9_scale);
-    const uint16_t dst_sb = nt_sprite_renderer_scale_slice9_border(src_sb, slice9_scale);
+    const uint16_t dst_sl = scale_slice9_border(src_sl, slice9_scale);
+    const uint16_t dst_sr = scale_slice9_border(src_sr, slice9_scale);
+    const uint16_t dst_st = scale_slice9_border(src_st, slice9_scale);
+    const uint16_t dst_sb = scale_slice9_border(src_sb, slice9_scale);
 
     NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
     NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed");
