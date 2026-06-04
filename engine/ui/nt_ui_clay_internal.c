@@ -726,16 +726,17 @@ static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement 
     return -1;
 }
 
-/* Ring buffer of int-to-string scratch — must outlive Clay_String pointers through layout solve. */
+/* Per-frame scratch — Clay_String pointers must outlive layout solve, so we
+ * never wrap; assert on overflow because wrapping would overwrite still-live
+ * strings and corrupt the inspector text. Raise NT_UI_INSPECTOR_INT_BUFS if hit. */
 #ifndef NT_UI_INSPECTOR_INT_BUFS
 #define NT_UI_INSPECTOR_INT_BUFS 512
 #endif
-_Static_assert((NT_UI_INSPECTOR_INT_BUFS & (NT_UI_INSPECTOR_INT_BUFS - 1)) == 0, "NT_UI_INSPECTOR_INT_BUFS must be a power of two");
 static char cdv_int_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
 static uint32_t cdv_int_buf_cursor = 0U;
 static Clay_String cdv_int_to_string(int32_t v) {
-    char *buf = cdv_int_bufs[cdv_int_buf_cursor];
-    cdv_int_buf_cursor = (cdv_int_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
+    NT_ASSERT(cdv_int_buf_cursor < NT_UI_INSPECTOR_INT_BUFS && "inspector int-string scratch overflow; raise NT_UI_INSPECTOR_INT_BUFS");
+    char *buf = cdv_int_bufs[cdv_int_buf_cursor++];
     const int n = snprintf(buf, sizeof cdv_int_bufs[0], "%d", v);
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
@@ -744,16 +745,16 @@ static Clay_String cdv_int_to_string(int32_t v) {
 static char cdv_hex_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
 static uint32_t cdv_hex_buf_cursor = 0U;
 static Clay_String cdv_hex_id_to_string(uint32_t v) {
-    char *buf = cdv_hex_bufs[cdv_hex_buf_cursor];
-    cdv_hex_buf_cursor = (cdv_hex_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
+    NT_ASSERT(cdv_hex_buf_cursor < NT_UI_INSPECTOR_INT_BUFS && "inspector hex-string scratch overflow; raise NT_UI_INSPECTOR_INT_BUFS");
+    char *buf = cdv_hex_bufs[cdv_hex_buf_cursor++];
     const int n = snprintf(buf, sizeof cdv_hex_bufs[0], "#%08X", v);
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
 /* Shares the hex ring's cursor space (reset per frame). */
 static Clay_String cdv_color_hex_to_string(Clay_Color c) {
-    char *buf = cdv_hex_bufs[cdv_hex_buf_cursor];
-    cdv_hex_buf_cursor = (cdv_hex_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
+    NT_ASSERT(cdv_hex_buf_cursor < NT_UI_INSPECTOR_INT_BUFS && "inspector hex-string scratch overflow; raise NT_UI_INSPECTOR_INT_BUFS");
+    char *buf = cdv_hex_bufs[cdv_hex_buf_cursor++];
     const uint8_t r = nt_clamp_f_to_u8(c.r);
     const uint8_t g = nt_clamp_f_to_u8(c.g);
     const uint8_t b = nt_clamp_f_to_u8(c.b);

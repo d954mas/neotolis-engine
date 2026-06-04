@@ -321,6 +321,9 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     nt_ui_internal_build_tree(ctx);
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
 
+    /* Pin scratch high-water so walk can assert no reset happened in between. */
+    ctx->scratch_used_at_end = nt_mem_scratch_used();
+
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
     /* Stray CLAY_* between end and next begin NULL-derefs instead of corrupting. */
@@ -1184,10 +1187,12 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         if (ws->accum_opacity < 1.0F) {
             Clay_Color tint = local.renderData.image.backgroundColor;
             const bool untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
+            /* Round-to-nearest to match RECT's apply_opacity; truncation would
+             * give image/rect a 1-LSB alpha mismatch at equal accum_opacity. */
             if (untinted) {
-                local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F * ws->accum_opacity};
+                local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = (float)lrintf(255.0F * ws->accum_opacity)};
             } else {
-                local.renderData.image.backgroundColor.a *= ws->accum_opacity;
+                local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
         emit_image(&local, world_aff);
@@ -1246,6 +1251,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
+    /* Caller reset scratch between nt_ui_end and nt_ui_walk -> payload pointers
+     * Clay still holds are now stale. used can only grow, never shrink, between
+     * end and walk (game may scratch_alloc for own reasons in that window). */
+    NT_ASSERT(nt_mem_scratch_used() >= ctx->scratch_used_at_end && "nt_ui_walk: nt_mem_scratch_reset called between nt_ui_end and nt_ui_walk -> dangling payload pointers");
 
     /* Walker owns GL scissor state across nt_ui_walk; caller's scissor is not preserved.
      * Drain BEFORE the zero-viewport early return so leaked staging dies with the frame. */
@@ -1931,12 +1940,20 @@ uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t point
 
 bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit: ctx must be non-NULL");
-    return ui_hit_test(ctx, id, px, py, NULL);
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool hit = ui_hit_test(ctx, id, px, py, NULL);
+    Clay_SetCurrentContext(saved);
+    return hit;
 }
 
 bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit_padded: ctx must be non-NULL");
-    return ui_hit_test(ctx, id, px, py, pad_lrtb);
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb);
+    Clay_SetCurrentContext(saved);
+    return hit;
 }
 #endif
 // #endregion

@@ -44,6 +44,11 @@ void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align);
 /* Peak `used` since init. Survives resets so callers can size scratch budget. */
 size_t nt_mem_scratch_high_water_mark(void);
 
+/* Current `used` byte count (resets to 0 each frame). Subsystems that hand out
+ * scratch pointers across function boundaries can pin this at handoff and assert
+ * the value at the consumer side hasn't shrunk (i.e. no reset interleaved). */
+size_t nt_mem_scratch_used(void);
+
 #define NT_MEM_SCRATCH_ALLOC(T) ((T *)nt_mem_scratch_alloc(sizeof(T), _Alignof(T)))
 
 #define NT_MEM_SCRATCH_ALLOC_ARRAY(T, count) ((T *)nt_mem_scratch_alloc_array(sizeof(T), (size_t)(count), _Alignof(T)))

@@ -166,6 +166,10 @@ struct nt_ui_context {
 
     uint32_t max_elements;
 
+    /* nt_mem_scratch_used snapshot at nt_ui_end; nt_ui_walk asserts it hasn't shrunk
+     * (caller reset scratch between end and walk → dangling payloads in Clay). */
+    size_t scratch_used_at_end;
+
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];
