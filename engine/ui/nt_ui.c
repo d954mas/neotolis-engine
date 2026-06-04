@@ -1171,7 +1171,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->border_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.renderData.border.color.a *= ws->accum_opacity;
+        /* Round-to-nearest to match RECT's apply_opacity. */
+        local.renderData.border.color.a = (float)lrintf(local.renderData.border.color.a * ws->accum_opacity);
         emit_border(ctx, &local, world_aff);
         return;
     }
@@ -1180,7 +1181,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
         Clay_RenderCommand local = *c;
-        local.renderData.text.textColor.a *= ws->accum_opacity;
+        /* Round-to-nearest to match RECT's apply_opacity. */
+        local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
         emit_text(ctx, &local, text_scale, world_aff);
         return;
     }
@@ -1395,7 +1397,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
             uint32_t mask = active_layers[word_idx];
             while (mask != 0U) {
-                const uint32_t bit_idx = (uint32_t)__builtin_ctz(mask);
+                const uint32_t bit_idx = nt_ctz32(mask);
                 mask &= mask - 1U;
                 const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
                 for (int32_t j = i; j < seg_end; ++j) {
@@ -1527,7 +1529,10 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py) {
     uint32_t cur_id = start_clip_id;
+    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang. */
+    uint32_t guard = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
     while (cur_id != 0U) {
+        NT_ASSERT(guard-- > 0U && "hit_clip_chain: parent chain exceeded scissor depth cap (cycle or runaway nesting)");
         float cx;
         float cy;
         float cw;

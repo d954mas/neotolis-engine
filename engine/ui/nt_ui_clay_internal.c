@@ -509,6 +509,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     const nt_ui_baked_xform_t identity = nt_ui_internal_identity_baked();
     for (int32_t i = 0; i < N; ++i) {
         ctx->tree_baked[i] = identity;
+        /* Reset BEFORE R==0 early-return so test/debug readers don't see stale data. */
+        ctx->tree_root_for_elem[i] = -1;
     }
     if (R == 0) {
         /* Bump generation so hit-test rejects stale ids that would still match. */
@@ -518,9 +520,6 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     // #endregion
 
     // #region elem-to-root-map
-    for (int32_t i = 0; i < N; ++i) {
-        ctx->tree_root_for_elem[i] = -1;
-    }
     for (int32_t k = 0; k < R; ++k) {
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, k);
         ctx->tree_root_for_elem[root->layoutElementIndex] = k;

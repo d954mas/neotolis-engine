@@ -11,6 +11,7 @@
  */
 
 #include <math.h>
+#include <stdint.h>
 
 #define sinf(x) __builtin_sinf(x)
 #define cosf(x) __builtin_cosf(x)
@@ -22,5 +23,17 @@
 #define powf(x, y) __builtin_powf(x, y)
 #define fminf(x, y) __builtin_fminf(x, y)
 #define fmaxf(x, y) __builtin_fmaxf(x, y)
+
+/* Count trailing zeros (lowest set bit position). UB if v == 0. */
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+static inline uint32_t nt_ctz32(uint32_t v) {
+    unsigned long i;
+    _BitScanForward(&i, v);
+    return (uint32_t)i;
+}
+#else
+#define nt_ctz32(v) ((uint32_t)__builtin_ctz(v))
+#endif
 
 #endif /* NT_BUILTINS_H */
