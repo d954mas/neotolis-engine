@@ -45,14 +45,10 @@ bool nt_sprite_comp_is_resolved(nt_entity_t entity);
 
 /* ---- Region binding ---- */
 
-/* Strict fast path: atlas must already be READY. Resolves immediately and sets
- * RESOLVED. Does NOT raise s_sync_dirty — there is nothing to sync. If the
- * atlas later republishes, the next sync_resources() catches it via the cached
- * atlas_revision gate inside resolve_dense, so callers do not need to re-bind. */
+/* Atlas must be READY; resolves immediately. */
 void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t region_index);
 
-/* Async-friendly path: stores atlas + region hash, then resolves explicitly in
- * nt_sprite_comp_sync_resources(). */
+/* Stores atlas + hash; resolves on next sync_resources(). */
 void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash);
 
 /* ---- Origin override ---- */
@@ -60,25 +56,17 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
 void nt_sprite_comp_set_origin(nt_entity_t entity, float origin_x, float origin_y);
 void nt_sprite_comp_reset_origin(nt_entity_t entity);
 
-/* ---- Slice9 override (mirrors origin override pattern) ---- */
+/* ---- Slice9 override ---- */
 
-/* Per-entity slice9 override. Passing all zeros clears the override to atlas default.
- * Asymmetry with nt_ui_image_style_t: the UI image payload has a separate
- * NT_UI_IMAGE_SLICE9_OVERRIDE flag so a game can explicitly DISABLE slice9 (force
- * non-slice9 stretch) by overriding with zeros and setting the flag. Sprite_comp
- * has no equivalent — there is no use case yet for sprites to opt out of atlas
- * slice9. Reuse the UI flag pattern if/when sprites need this. */
+/* Sets override (sets SLICE9_OV flag). Zeros are a valid override — render
+ * as plain stretched quad without slice9 cells. Use reset_slice9 to clear. */
 void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b);
 void nt_sprite_comp_reset_slice9(nt_entity_t entity);
 
-/* Read back current effective slice9 (override if set, else zero).
- * Returns pointer to 4-element uint16 [l,r,t,b] in SoA storage. */
 const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity);
 bool nt_sprite_comp_has_slice9_override(nt_entity_t entity);
 
-/* Per-entity slice9 scale multiplier. Default 1.0F at add; multiplies the
- * atlas region's baked slice9 borders at render. Reset via set(entity, 1.0F).
- * Asserts isfinite(scale) && scale > 0.0F. */
+/* Multiplies borders at render. Asserts isfinite(scale) && scale > 0. */
 void nt_sprite_comp_set_slice9_scale(nt_entity_t entity, float scale);
 float nt_sprite_comp_slice9_scale(nt_entity_t entity);
 
