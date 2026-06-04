@@ -218,6 +218,12 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx) {
     if (Clay_GetCurrentContext() == ctx->clay) {
         Clay_SetCurrentContext(NULL);
     }
+    /* Unconditional even in OFF builds: if ctx was destroyed mid-frame the assert
+     * vanishes, but leaving g_nt_ui_inframe_ctx pointing into zeroed memory would
+     * wedge the next nt_ui_begin silently. */
+    if (g_nt_ui_inframe_ctx == ctx) {
+        g_nt_ui_inframe_ctx = NULL;
+    }
 #if NT_UI_DEBUG_TOOLS
     nt_ui_internal_inspector_strings_release(ctx);
 #endif
@@ -1291,6 +1297,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #ifdef NT_TEST_ACCESS
         ctx->test_last_walk_unlayered_count = 0;
 #endif
+#if NT_UI_DEBUG_TOOLS
+        nt_ui_internal_inspector_strings_release(ctx);
+#endif
         return;
     }
     // #endregion
@@ -1312,6 +1321,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         ctx->last_walk_max_scissor_depth = 0;
 #ifdef NT_TEST_ACCESS
         ctx->test_last_walk_unlayered_count = 0;
+#endif
+#if NT_UI_DEBUG_TOOLS
+        nt_ui_internal_inspector_strings_release(ctx);
 #endif
         return;
     }
@@ -1536,10 +1548,15 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py) {
     uint32_t cur_id = start_clip_id;
-    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang. */
+    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang.
+     * Decrement + bail are UNCONDITIONAL (NT_ASSERT vanishes in OFF builds). */
     uint32_t guard = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
     while (cur_id != 0U) {
-        NT_ASSERT(guard-- > 0U && "hit_clip_chain: parent chain exceeded scissor depth cap (cycle or runaway nesting)");
+        NT_ASSERT(guard > 0U && "hit_clip_chain: parent chain exceeded scissor depth cap (cycle or runaway nesting)");
+        if (guard == 0U) {
+            return false;
+        }
+        guard--;
         float cx;
         float cy;
         float cw;
