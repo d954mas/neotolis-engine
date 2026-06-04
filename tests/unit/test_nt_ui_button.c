@@ -25,7 +25,7 @@ static ui_walker_fixture_t s_fx;
 
 /* Non-degenerate per-state visuals; transition_speed 0 = instant (deterministic
  * for a 1-frame test). idle/hover opaque; pressed shrinks; disabled dims. */
-static const nt_ui_button_style_t s_btn_style = {
+static nt_ui_button_style_t s_btn_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .opacity = 1.0F},
     .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .opacity = 1.0F},
@@ -50,6 +50,7 @@ static const nt_ui_image_style_t s_img_style = {
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
+    s_btn_style.idle.atlas = s_fx.atlas.handle;
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -90,7 +91,7 @@ static void test_button_text_only_children(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         bool clicked = nt_ui_button_end(s_fx.ctx);
         TEST_ASSERT_FALSE(clicked); /* no input -> no click */
@@ -108,7 +109,7 @@ static void test_button_icon_only_children(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -124,7 +125,7 @@ static void test_button_icon_and_text_children(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
         nt_ui_label(s_fx.ctx, NULL, "Save", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
@@ -140,7 +141,7 @@ static void test_button_stack_balanced(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "Balance", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -154,7 +155,7 @@ static void test_button_disabled_path_balanced(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, false);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, false);
         nt_ui_label(s_fx.ctx, NULL, "Off", &s_label_style);
         bool clicked = nt_ui_button_end(s_fx.ctx);
         TEST_ASSERT_FALSE(clicked); /* disabled never clicks */
@@ -170,7 +171,7 @@ static void test_button_begin_label_end_inline(void) {
     bool clicked = true;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "Go", &s_label_style);
         clicked = nt_ui_button_end(s_fx.ctx);
     }
@@ -189,7 +190,7 @@ static void test_button_slice9_scale_propagates_to_payload(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_s9"), s_fx.atlas.handle, &styled, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_s9"), &styled, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "x", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -212,17 +213,17 @@ static void test_button_slice9_scale_asserts_negative(void) {
 
     bad.slice9_scale = -1.0F;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &bad, NULL, true)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 
     bad.slice9_scale = 0.0F;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &bad, NULL, true)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 
     bad.slice9_scale = NAN;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &bad, NULL, true)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -230,7 +231,7 @@ static void test_button_slice9_scale_asserts_negative(void) {
 static void try_bad_state(const nt_ui_button_style_t *bad) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, bad, NULL, true)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -262,7 +263,7 @@ static void test_button_asserts_bad_state_values(void) {
 static void test_button_id_zero_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, 0U, s_fx.atlas.handle, &s_btn_style, NULL, true)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, 0U, &s_btn_style, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -276,7 +277,7 @@ static void test_button_decl_asserts_caller_clean(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         Clay_ElementDeclaration bad_id = {.id = (Clay_ElementId){.id = 0x1234U}};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, &bad_id, true));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_id, true));
     }
     nt_ui_end(s_fx.ctx);
 
@@ -285,7 +286,7 @@ static void test_button_decl_asserts_caller_clean(void) {
     CLAY({.id = CLAY_ID("root")}) {
         int dummy = 0;
         Clay_ElementDeclaration bad_img = {.image = {.imageData = &dummy}};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, &bad_img, true));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_img, true));
     }
     nt_ui_end(s_fx.ctx);
 
@@ -293,7 +294,7 @@ static void test_button_decl_asserts_caller_clean(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         Clay_ElementDeclaration bad_bg = {.backgroundColor = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 255.0F}};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, &bad_bg, true));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_bg, true));
     }
     nt_ui_end(s_fx.ctx);
 
@@ -302,7 +303,7 @@ static void test_button_decl_asserts_caller_clean(void) {
     CLAY({.id = CLAY_ID("root")}) {
         int dummy = 0;
         Clay_ElementDeclaration bad_user = {.userData = &dummy};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, &bad_user, true));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_user, true));
     }
     nt_ui_end(s_fx.ctx);
 }
@@ -324,7 +325,7 @@ static void test_button_decl_fixed_size_hit_test(void) {
     nt_pointer_t f1 = {.x = 0.0F, .y = 0.0F, .active = true};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), s_fx.atlas.handle, &s_btn_style, &fixed_decl, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true);
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -334,7 +335,7 @@ static void test_button_decl_fixed_size_hit_test(void) {
     nt_pointer_t f2 = {.x = 200.0F, .y = 100.0F, .active = true};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), s_fx.atlas.handle, &s_btn_style, &fixed_decl, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true);
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -346,7 +347,7 @@ static void test_button_decl_fixed_size_hit_test(void) {
     nt_pointer_t f3 = {.x = 400.0F, .y = 100.0F, .active = true};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), s_fx.atlas.handle, &s_btn_style, &fixed_decl, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true);
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -368,7 +369,7 @@ static void test_button_recovers_after_simulated_mid_button_state(void) {
 
     /* And a normal begin/end must not assert. */
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }

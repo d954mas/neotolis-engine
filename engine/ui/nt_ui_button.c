@@ -30,12 +30,11 @@ static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl,
-                        bool enabled) {
+void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_button_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_button_begin: style must be non-NULL");
-    NT_ASSERT(atlas.id != 0 && "nt_ui_button_begin: invalid atlas handle");
+    NT_ASSERT(style->idle.atlas.id != 0 && "nt_ui_button_begin: style.idle.atlas must be valid (other states inherit when their atlas.id == 0)");
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
     NT_ASSERT(isfinite(style->transition_speed) && style->transition_speed >= 0.0F && "nt_ui_button_begin: style.transition_speed must be finite >= 0");
@@ -98,13 +97,14 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     };
     // #endregion
     // #region open_clay_image
-    /* bg_region 0 falls back to idle. */
+    /* atlas/bg_region 0 falls back to idle. */
+    const nt_resource_t st_atlas = (st->atlas.id != 0U) ? st->atlas : style->idle.atlas;
     const uint32_t region = (st->bg_region != 0U) ? st->bg_region : style->idle.bg_region;
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed (image_payload)");
     *p = (nt_ui_image_payload_t){
-        .atlas = atlas,
+        .atlas = st_atlas,
         .region_index = region,
         .slice9_scale = style->slice9_scale,
     };

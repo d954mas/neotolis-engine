@@ -327,6 +327,15 @@ static void try_bind_resources(void) {
         s_btn_s9_four.disabled.bg_region = s_button_blue_idx;
         s_btn_s9_four.slice9_scale = 4.0F;
 
+        /* All 7 styles share the demo atlas; per-state atlas inherits idle. */
+        s_btn_standard.idle.atlas = s_atlas_handle;
+        s_btn_scale.idle.atlas = s_atlas_handle;
+        s_btn_swap.idle.atlas = s_atlas_handle;
+        s_btn_nopad.idle.atlas = s_atlas_handle;
+        s_btn_s9_quarter.idle.atlas = s_atlas_handle;
+        s_btn_s9_one.idle.atlas = s_atlas_handle;
+        s_btn_s9_four.idle.atlas = s_atlas_handle;
+
         s_atlas_bound = true;
         nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white + icon_bunny)");
     }
@@ -422,7 +431,7 @@ static void declare_reference_buttons(void) {
                     /* PURE query before begin so label content reacts to press.
                      * button_begin internally calls step; query is idempotent. */
                     nt_ui_interaction_t in_std = nt_ui_query_interaction(s_ctx, s_id_std);
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, &s_btn_standard, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), in_std.pressed ? "pressed" : "click me", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_std++;
@@ -435,7 +444,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("SCALE 0.80<->1.20", "+16 px touch padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, s_atlas_handle, &s_btn_scale, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, &s_btn_scale, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boom", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_scale++;
@@ -448,7 +457,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("VISUAL SWAP", "blue idle / green hover / red pressed");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, &s_btn_swap, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, &s_btn_swap, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Swap", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_swap++;
@@ -466,7 +475,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("ICON ONLY", "no padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_nopad, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, &s_btn_nopad, &s_btn_decl, true);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
                         nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style, NULL);
                     }
@@ -493,7 +502,7 @@ static void declare_reference_buttons(void) {
                                 .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
                             },
                     };
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_nopad, &s_btn_decl_icontext, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, &s_btn_nopad, &s_btn_decl_icontext, true);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
                         nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style, NULL);
                     }
@@ -509,7 +518,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("DISABLED (enabled=false)", "+16 px (no hover)");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, &s_btn_standard, &s_btn_decl, false);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, &s_btn_standard, &s_btn_decl, false);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Locked", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_disabled++; /* unreachable while disabled -- proves the gate */
@@ -543,7 +552,7 @@ static void declare_reference_buttons(void) {
                     .scale_y = 0.85F,
                 };
                 CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, &s_btn_standard, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_baked++;
@@ -561,7 +570,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("SCALE 0.25", "tiny corners");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_quarter, s_atlas_handle, &s_btn_s9_quarter, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_quarter, &s_btn_s9_quarter, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "0.25x", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_s9_quarter++;
@@ -571,7 +580,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("SCALE 1.0", "atlas default");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_one, s_atlas_handle, &s_btn_s9_one, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_one, &s_btn_s9_one, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1.0x", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_s9_one++;
@@ -581,7 +590,7 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("SCALE 4.0", "chunky corners");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_four, s_atlas_handle, &s_btn_s9_four, &s_btn_decl, true);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_four, &s_btn_s9_four, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "4.0x", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_s9_four++;
