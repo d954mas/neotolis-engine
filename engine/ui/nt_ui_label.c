@@ -47,7 +47,8 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
 void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, float font_size_override) {
     NT_ASSERT(ctx != NULL && "nt_ui_label_sized: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_label_sized: style must be non-NULL");
-    NT_ASSERT(isfinite(font_size_override) && font_size_override > 0.0F && font_size_override <= (float)UINT16_MAX - 0.5F && "nt_ui_label_sized: font_size_override must be finite in (0, UINT16_MAX - 0.5]");
+    NT_ASSERT(isfinite(font_size_override) && font_size_override > 0.0F && font_size_override <= (float)UINT16_MAX - 0.5F &&
+              "nt_ui_label_sized: font_size_override must be finite in (0, UINT16_MAX - 0.5]");
     nt_ui_label_style_t local = *style;
     local.font_size = font_size_override;
     nt_ui_label(ctx, data, text, &local);
