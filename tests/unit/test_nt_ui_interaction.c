@@ -353,8 +353,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     TEST_ASSERT_FALSE(inB_idle.pressed);
 }
 
-/* ---- Test 9: query is idempotent on the release frame ----
- * Query is pure — N calls return the SAME struct AND cap->active_id is unchanged. */
+/* Query is pure — N calls return the SAME struct AND cap->active_id is unchanged. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_query_is_idempotent(void) {
     /* Frame 1: declare. */
@@ -379,7 +378,7 @@ static void test_query_is_idempotent(void) {
 
     /* All five returns are byte-identical. */
     for (int i = 1; i < 5; ++i) {
-        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&calls[0], &calls[i], sizeof(nt_ui_interaction_t), "query is not idempotent (the bug)");
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&calls[0], &calls[i], sizeof(nt_ui_interaction_t), "query is not idempotent");
     }
     /* All 5 must report clicked=true on the release frame. */
     TEST_ASSERT_TRUE(calls[0].clicked);

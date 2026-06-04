@@ -309,13 +309,8 @@ static void test_button_decl_asserts_caller_clean(void) {
 
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
-/* ---- Test: decl with FIXED sizing drives the hit-test bbox.
- *      Without the decl param, button_begin opens FIT IMAGE which shrinks to
- *      the label (~50x20). With decl.layout.sizing = FIXED(320, 180), Clay
- *      lays the button out at 320x180 and the hit-test honors that bbox.
- *      Two-frame setup: frame 1 declares so Clay has a prev-frame bbox;
- *      frame 2 calls query_interaction (pure read) for verification --
- *      button_begin already stepped the state machine for this id. ---- */
+/* decl.layout.sizing FIXED(320,180) drives the hit-test bbox; frame 1 declares
+ * so Clay caches it, frame 2 verifies hover via pure query_interaction. */
 static void test_button_decl_fixed_size_hit_test(void) {
     static const Clay_ElementDeclaration fixed_decl = {
         .layout =
@@ -360,13 +355,10 @@ static void test_button_decl_fixed_size_hit_test(void) {
     TEST_ASSERT_FALSE_MESSAGE(outside.hovered, "decl.layout.sizing FIXED(320,180) -- point (400,100) outside bbox must NOT hover");
 }
 
-/* ---- Test 8: nt_ui_begin clears pending_button.active (dev-mode recovery).
- *      Simulates the dev-build scenario where a previous frame asserted
- *      mid-button (leaving the field true). Without the reset every subsequent
- *      button_begin would assert "nested buttons unsupported". Pins the
- *      review §2 fix. ---- */
+/* nt_ui_begin clears pending_button.active so a dev session that asserted
+ * mid-button (field left true) recovers on the next frame. */
 static void test_button_recovers_after_simulated_mid_button_state(void) {
-    /* Wedge the field manually -- mimic the post-assert leftover state. */
+    /* Wedge the field manually to mimic post-assert leftover state. */
     s_fx.ctx->pending_button.active = true;
 
     nt_pointer_t mouse = {0};

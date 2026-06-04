@@ -6,6 +6,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
+#include "ui/nt_ui_clay_internal.h"
 #include "ui/nt_ui_internal.h"
 
 const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
@@ -17,6 +18,7 @@ const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_label: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_label: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_label: style must be non-NULL");
     NT_ASSERT(text != NULL && "nt_ui_label: text must be non-NULL (use \"\" for empty)");
     NT_ASSERT(style->font_id < NT_UI_MAX_FONTS && "nt_ui_label: font_id out of registry range");

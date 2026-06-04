@@ -339,11 +339,9 @@ static void test_dispatch_rect_asymmetric_radii_no_over_clamp(void) {
     /* 1 center + 4 * 7 arc points = 29 verts. */
     TEST_ASSERT_EQUAL_UINT32(29U, nt_sprite_renderer_test_last_emit_vertex_count());
 
-    /* Walker's world_aff carries the GL Y-flip directly — no corner swap in
-     * dispatch. Vertex 1 is the TL arc west point with the unswapped TL radius
-     * (input.topLeft=40). Expected py = vh - (y + tl) = 600 - 0 - 40 = 560.
-     * The non-clamp invariant (radii kept asymmetric, never halved) is what's
-     * under test; the precise vertex pins which radius landed where. */
+    /* Vertex 1 = TL arc west point with the unswapped TL radius (input=40);
+     * py = vh - (y + tl) = 600 - 0 - 40 = 560. Pins both the non-clamp
+     * invariant and which radius landed where. */
     float pos[3];
     nt_sprite_renderer_test_last_emit_position(1U, pos);
     const int32_t px = (int32_t)pos[0];
@@ -483,12 +481,9 @@ static void test_dispatch_image_origin_override_shifts_anchor(void) {
     TEST_ASSERT_EQUAL_INT(484, (int)v3[1]);
 }
 
-/* Vertex-equivalent pin for emit_text. Fixture's stub font has units_per_em=0,
- * so nt_text_renderer_draw_n captures the model matrix and skips glyph emit.
- * We verify the matrix construction: m[5] = +1 (NOT -1) — proves the local
- * Y-flip composes correctly with world_aff's Y-flip so glyph local Y-up isn't
- * inverted on screen. m[13] = vy+vh - baseline_y_layout puts text baseline at
- * the right GL coordinate. */
+/* Stub font has units_per_em=0, so draw_n captures the model matrix without
+ * emitting glyphs. m[5] = +1 (local Y-flip composes with world_aff's Y-flip);
+ * m[13] = vy+vh - baseline_y_layout puts baseline at the right GL coord. */
 static void test_dispatch_text_model_matrix_preserves_y_up(void) {
     nt_text_renderer_test_reset_call_counters();
 
@@ -508,9 +503,8 @@ static void test_dispatch_text_model_matrix_preserves_y_up(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
     float m[16];
     memcpy(m, nt_text_renderer_test_last_model(), sizeof m);
-    /* Linear part: m[0]=1, m[5]=+1 (Y-up preserved). m[5] = -1 would render
-     * glyphs upside-down — the bug this test pins against. Promote to scaled
-     * int so Unity's no-float assertions can compare. */
+    /* Linear part: m[0]=1, m[5]=+1 (Y-up preserved); scaled-int compare since
+     * Unity's float asserts are excluded. */
     TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[0] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(0, (int)lrintf(m[1] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(0, (int)lrintf(m[4] * 1000.0F));

@@ -23,6 +23,7 @@ const nt_ui_widget_def_t NT_UI_GROUP_DEF = {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_begin: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_panel_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_panel_begin: style.slice9_scale must be finite > 0");
@@ -74,6 +75,7 @@ void nt_ui_panel_end(nt_ui_context_t *ctx) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_begin: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_group_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_group_begin: decl->id must be 0 (group id auto-assigned by Clay)");
         NT_ASSERT(decl->userData == NULL && "nt_ui_group_begin: decl->userData must be NULL (data param controls)");

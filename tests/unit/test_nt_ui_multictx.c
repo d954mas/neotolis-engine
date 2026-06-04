@@ -185,10 +185,8 @@ static void test_get_bbox_reads_from_passed_ctx_not_current(void) {
     nt_ui_bbox_t bb_a = nt_ui_get_bbox(a, abox_id);
     TEST_ASSERT_TRUE(bb_a.found);
 
-    /* Now the meat: ask B for the same id while A is current. With the
-     * snapshot/set/restore pattern in place, Clay_GetElementData runs against
-     * B's clay (empty hashmap) -> found=false. Without the pattern, it would
-     * have run against A's clay and returned found=true (the bug). */
+    /* Ask B for the same id while A is current: the snapshot/set/restore in
+     * nt_ui_get_bbox routes the read to B's clay (empty) → found=false. */
     Clay_SetCurrentContext(a->clay);
     nt_ui_bbox_t bb_b = nt_ui_get_bbox(b, abox_id);
     TEST_ASSERT_FALSE_MESSAGE(bb_b.found, "nt_ui_get_bbox(B, id) returned data from A's clay -- snapshot/restore missing");

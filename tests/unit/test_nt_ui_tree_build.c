@@ -37,8 +37,7 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 // #region helpers
 /* Tests probe tree_baked by scanning all entries and matching on rotation /
- * opacity values (one-to-one because each test uses distinct, non-colliding
- * non-identity values). No need for an id→elem_idx accessor. */
+ * opacity values (each test uses distinct non-identity values). */
 static bool near_eq(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
 static bool baked_is_identity(const nt_ui_baked_xform_t *bk) {
@@ -164,12 +163,8 @@ static void test_opacity_inheritance_2level(void) {
     TEST_ASSERT_TRUE_MESSAGE(found_inner, "inner opacity 0.5*0.4=0.2 not found");
 }
 
-/* ---- 5. Floating ATTACH_TO_ROOT → identity seed (parent rotation NOT inherited).
- *
- *  Also verifies the lexical parent `wrap` DID compose its own 45deg into
- *  tree_baked — guards against a regression that disables non-floating subtree
- *  DFS (would let floating identity pass while breaking main-tree composition).
- */
+/* Floating ATTACH_TO_ROOT seeds identity (parent rotation NOT inherited); the
+ * lexical parent `wrap` still composes its own 45° via main-tree DFS. */
 static void test_floating_attach_to_root_identity_seed(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -381,12 +376,8 @@ static void test_singleton_opacity_default(void) {
     TEST_ASSERT_EQUAL_UINT8(0, d255->flags);
 }
 
-/* ---- 13. Synthetic SCISSOR_START marked with nt_layout_index = -1. ----
- *
- * Setup: parent with clip config, child floating with clipTo=ATTACHED_PARENT.
- * Clay emits a synthetic SCISSOR_START at root scope (clay.h:2709-2715) before
- * the floating subtree's render. Build pass's post-process detects mismatch
- * (cmd.id != layoutElements[idx].id) and sets nt_layout_index = -1. */
+/* Synthetic SCISSOR_START (root-scope clip wrap for a floating child with
+ * clipTo=ATTACHED_PARENT) is marked with nt_layout_index = -1. */
 static void test_synthetic_scissor_start_marked(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -397,11 +388,9 @@ static void test_synthetic_scissor_start_marked(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Scan SCISSOR_START commands. There should be BOTH:
-     *  (a) at least one synthetic (root-wrap, marked nt_layout_index = -1)
-     *  (b) at least one per-element (clip_parent's own clip, nt_layout_index >= 0)
-     * Catches a regression that inverts the heuristic and marks ALL scissors
-     * as synthetic. */
+    /* Both kinds must coexist:
+     *  (a) synthetic root-wrap (nt_layout_index = -1)
+     *  (b) per-element from clip_parent's own clip (nt_layout_index >= 0). */
     int32_t synthetic_count = 0;
     int32_t per_element_count = 0;
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
@@ -434,14 +423,9 @@ static void test_tree_baked_identity_init_on_empty_layout(void) {
     }
 }
 
-/* ---- 15. min_arena_size includes tree storage — tight delta check.
- *
- *  Compare min_arena_size at two `max_elements` values. The delta must include
- *  per-element growth for tree_baked (40B) + tree_root_for_elem (4B), times the
- *  element count difference. tree_dfs_stack is fixed-size and doesn't scale.
- *
- *  A regression that drops one of these arrays from min_arena_size would shrink
- *  the delta below this lower bound and fire the assert. */
+/* min_arena_size delta between two max_elements values must include per-element
+ * growth for tree_baked (40B) + tree_root_for_elem (4B) + hit_baked (40B) +
+ * hit_clip_parent_id (4B). tree_dfs_stack is fixed-size and excluded. */
 static void test_min_arena_size_includes_tree_storage(void) {
     nt_ui_create_desc_t desc_small = nt_ui_create_desc_defaults();
     desc_small.max_elements = 256U;
@@ -459,12 +443,8 @@ static void test_min_arena_size_includes_tree_storage(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_size_t(expected_delta_floor, sz_large - sz_small);
 }
 
-/* ---- 17. Multi-ctx: each ctx gets its own tree storage pointers (no aliasing). ----
- *
- *  Creates a second nt_ui_context_t in a separate arena and verifies that the
- *  test-access accessors return baked entries that diverge once one ctx runs a
- *  layout with HAS_TRANSFORM while the other stays empty. If storage aliased,
- *  both ctxes would observe the same baked values. */
+/* Each ctx owns its tree storage (no aliasing): two ctxs side-by-side produce
+ * divergent baked entries when only one runs a HAS_TRANSFORM layout. */
 static void test_multi_ctx_tree_storage_isolated(void) {
     /* Spin up a second ctx without re-running the fixture (which would shut
      * down the modules s_fx depends on). Use a separate arena slot. */
@@ -514,11 +494,8 @@ static void test_multi_ctx_tree_storage_isolated(void) {
     nt_ui_destroy_context(ctx_b);
 }
 
-/* ---- 16. last_build_tree_ms records timing + perf budget. ----
- *
- *  Builds a layout with ~100 elements (well within typical UI complexity) and
- *  asserts the build pass completes under 5 ms on native-debug. A regression
- *  that re-introduces an O(N²) walk or radix sort would fire this alarm. */
+/* last_build_tree_ms is populated and stays under 5 ms for ~100 elements
+ * on native-debug (catches O(N²) build-tree blowups). */
 static void test_build_tree_ms_recorded_and_under_budget(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -541,14 +518,8 @@ static void test_build_tree_ms_recorded_and_under_budget(void) {
 #if NT_UI_DEBUG_TOOLS
 // #region inspector_active tests
 
-/* ---- 18. Inspector-active layout: build_tree completes without crashing,
- *         and every inspector-emitted element has identity baked.
- *
- *  Inspector emit_layout adds dozens of CLAY blocks with
- *  NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_*) — singleton element_data with flags=0.
- *  Build pass should write identity to all of them. This guards a regression
- *  where inspector elements somehow pick up a composed transform (e.g. a stray
- *  XFORM on an inspector wrapper). */
+/* Inspector-emitted elements use NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_*) singletons
+ * with flags=0; every entry must end up with identity baked. */
 static void test_inspector_subtree_baked_identity(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = {0};
@@ -572,11 +543,9 @@ static void test_inspector_subtree_baked_identity(void) {
     TEST_ASSERT_EQUAL_INT32_MESSAGE(0, non_identity, "every inspector-emitted element should have identity baked");
 }
 
-/* ---- 19. Inspector-active synthetic SCISSOR handling: inspector's scroll panel
- *         uses ATTACH_TO_PARENT + CLIP_TO_ATTACHED_PARENT inside a CLIP scope,
- *         producing real synthetic SCISSOR_START commands. Build pass must mark
- *         them with nt_layout_index = -1 without crashing or corrupting other
- *         commands. */
+/* Inspector's scroll panel emits real synthetic SCISSOR_START commands; build
+ * pass marks them with nt_layout_index = -1 without disturbing real per-element
+ * scissors. */
 static void test_inspector_active_synthetic_scissor_handled(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = {0};
@@ -610,9 +579,7 @@ static void test_inspector_active_synthetic_scissor_handled(void) {
 // #region tests_shear_composition
 /* Outer non-uniform scale + inner rotation produces shear in the composed
  * affine. Scene-graph order: accum_inner = accum_outer · L_inner = S(2,1) · R(30°).
- * The pre-affine pipeline decomposed this via atan2(c,a) and lost the shear
- * component, silently diverging from the hit-test (which used the full 2×3).
- * The refactor keeps all four coefficients exact. */
+ * All four affine coefficients must round-trip exactly (no atan2 decomposition). */
 static void test_shear_composition_nonuniform_scale_then_rotation(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -634,10 +601,7 @@ static void test_shear_composition_nonuniform_scale_then_rotation(void) {
      *   S(2,1) · R(30°) = [[2,0],[0,1]] · [[cos30,-sin30],[sin30,cos30]]
      *                   = [[2cos30, -2sin30], [sin30, cos30]]
      *                   ~ [[1.732, -1.000], [0.500, 0.866]]
-     * Columns: col0=(1.732, 0.5), col1=(-1.0, 0.866).
-     *   col0.col1 = -1.732 + 0.433 = -1.299 != 0 -> genuine shear.
-     * Decomposed atan2(c,a) = atan2(0.5, 1.732) ~ 16.1deg (NOT the input 30deg)
-     * — proves why the old decomposition was lossy. */
+     * Columns col0=(1.732, 0.5), col1=(-1.0, 0.866); col0·col1 ≈ -1.299 != 0 = shear. */
     const float exp_a = 2.0F * cosf(DEG2RAD(30.0F));
     const float exp_b = -2.0F * sinf(DEG2RAD(30.0F));
     const float exp_c = sinf(DEG2RAD(30.0F));

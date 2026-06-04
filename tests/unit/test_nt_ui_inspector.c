@@ -117,10 +117,8 @@ static void test_registry_id_zero_dropped(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 4b: register two widgets with distinct defs (engine + game) ----
- * Pins the descriptor-pointer refactor: a game-side static const def must
- * coexist with an engine def in the same registry, and lookup must return
- * the exact pointer per id (pill name + color flow from def->name / pill_color). */
+/* Engine + game-side widget defs coexist in the same registry; lookup returns
+ * the exact pointer per id (pill name + color via def->name / pill_color). */
 static const nt_ui_widget_def_t TEST_GAME_INV_SLOT_DEF = {
     .name = "inv_slot",
     .pill_color = 0xFFB060A0U,
@@ -205,10 +203,7 @@ static void test_label_widget_tagged_on_text_leaf(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
-    /* Scan the registry for a slot pointing at NT_UI_LABEL_DEF -- proves the
-     * label registered itself (the previous behavior would have left zero
-     * label tags in the registry, since the path used to be a comment
-     * acknowledging "no auto-register today"). */
+    /* Scan the registry for a slot pointing at NT_UI_LABEL_DEF. */
     uint32_t label_count = 0U;
     for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
         if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_LABEL_DEF) {
@@ -219,9 +214,7 @@ static void test_label_widget_tagged_on_text_leaf(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 7c: label tag binds the TEXT leaf id, not the parent id ----
- * A panel wrapping a label resolves to NT_UI_PANEL_DEF; the label's register
- * must NOT clobber the parent container's tag. */
+/* Label tag binds the TEXT leaf id; a wrapping panel keeps NT_UI_PANEL_DEF. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_label_does_not_clobber_parent_widget(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -358,9 +351,8 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: pointer over the button center (which is also inside the
-     * sidebar) WITH left-button pressed_now -- the bug would have returned
-     * hovered + pressed_now + capture active. The fix returns zeroed. */
+    /* Frame 2: pointer over button center (inside sidebar) with left pressed_now;
+     * step_interaction must return zeroed (sidebar gate consumes the pointer). */
     nt_pointer_t f2 = {0};
     f2.x = btn_cx; /* 680 -- well past sidebar left edge at 400 */
     f2.y = btn_cy;
@@ -374,8 +366,8 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     /* The flag is set in nt_ui_begin (coord-based, frame-1 safe). */
     TEST_ASSERT_TRUE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
 
-    /* Both the unpadded and padded query MUST return zeroed -- no hover, no
-     * press, no clicked, no capture (the bug pinned here). */
+    /* Both the unpadded and padded query MUST return zeroed: no hover, no
+     * press, no clicked, no capture. */
     nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hidden_btn"));
     TEST_ASSERT_FALSE(in.hovered);
     TEST_ASSERT_FALSE(in.pressed);
@@ -484,10 +476,8 @@ static void test_inspector_walker_enumerates_user_tree(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(empty_inspector_grew + 5, full_inspector_grew);
 }
 
-/* ---- Test 15c: register with padding round-trip + get_hit_padding returns padding ----
- * Pin for the inspector-overlay padded fill: the button's hit_padding_lrtb
- * must survive into the inspector's widget_registry slot so the overlay can
- * outline the touch-target distinct from the visual bbox. */
+/* hit_padding_lrtb survives into the registry slot so the overlay can outline
+ * the touch-target distinct from the visual bbox. */
 static void test_widget_register_padded_roundtrip(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -505,9 +495,8 @@ static void test_widget_register_padded_roundtrip(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 15d: NULL-padding register reports false from get_hit_padding ----
- * Plain image/panel widgets register with NULL pad_lrtb and must NOT
- * accidentally show a padded hit zone in the inspector overlay. */
+/* Plain image/panel register with NULL pad_lrtb and must NOT show a padded
+ * hit zone in the inspector overlay. */
 static void test_widget_unpadded_no_hit_padding(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -522,9 +511,8 @@ static void test_widget_unpadded_no_hit_padding(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 15e: nt_ui_button auto-records hit_padding via the padded form ----
- * End-to-end: declaring a button with non-zero style.hit_padding_lrtb must
- * make the inspector see the padding via the widget_registry. */
+/* Declaring a button with non-zero style.hit_padding_lrtb makes the inspector
+ * see the padding via the widget_registry. */
 static void test_button_auto_records_hit_padding(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -547,9 +535,8 @@ static void test_button_auto_records_hit_padding(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 15f: inspector filter hides anonymous (no-id, no-widget) elements ----
- * Anonymous Clay containers must NOT emit an inspector tree row — named-only
- * tree and anonymous-wrapped tree should produce similar element-count growth. */
+/* Anonymous Clay containers must NOT emit an inspector tree row — named-only
+ * tree and anonymous-wrapped tree produce similar element-count growth. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_filter_skips_anonymous(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -620,13 +607,8 @@ static void test_inspector_filter_keeps_text_leaves(void) {
     TEST_ASSERT_GREATER_THAN_INT32(a_growth, b_growth);
 }
 
-/* ---- Test 15g: inspector emits a hex fallback for unnamed widgets ----
- * Pin for the empty-stringId fallback: when an element has no string id but
- * IS a registered widget (so it survives the filter), the inspector tree row
- * must show the element's hex id rather than nothing. We pin by emitting a
- * panel (unnamed, but widget_registry tagged PANEL) and asserting the
- * inspector layout element count grew -- the alternative implementation
- * (drop the row) would not change the count. */
+/* Unnamed but widget-registered element produces an inspector tree row (hex id
+ * fallback); the layout element count must grow. */
 static void test_inspector_emits_hex_for_unnamed_widget(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -643,12 +625,8 @@ static void test_inspector_emits_hex_for_unnamed_widget(void) {
     TEST_ASSERT_GREATER_THAN_INT32(before + 4, after);
 }
 
-/* ---- Test 15h: collapsed-set toggle add/remove + cap saturation ----
- * Pins the storage helpers: an unseen id toggle ADDS, a seen id toggle
- * REMOVES, and the cap NT_UI_INSPECTOR_COLLAPSED_CAP saturates cleanly
- * (no crash, no overflow). The collapsed-set state is observed via
- * ctx->inspector_collapsed_count (test-only access through the internal
- * header). */
+/* Collapsed-set storage: unseen toggle ADDS, seen toggle REMOVES, and
+ * NT_UI_INSPECTOR_COLLAPSED_CAP saturates cleanly. */
 static void test_inspector_collapsed_storage(void) {
     /* Initial empty. */
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_collapsed_count);
@@ -679,13 +657,8 @@ static void test_inspector_collapsed_storage(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_collapsed_count);
 }
 
-/* ---- Test 15i: collapse hides children in the inspector tree ----
- * Pin for the click-to-collapse behavior. Method: emit a parent+children
- * tree, walk normally (record inspector growth), poke the collapsed-set
- * to add the parent's id, walk again (inspector growth must be smaller
- * because children are skipped), clear the set, walk again (growth must
- * return to the original). All driving is via the internal storage; the
- * click pathway itself is exercised in the demo. */
+/* Adding a parent id to the collapsed-set hides its children's inspector
+ * rows; clearing the set restores them. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_collapse_hides_children(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -854,8 +827,8 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     TEST_ASSERT_EQUAL_UINT32(text_leaf_id, s_fx.ctx->inspector_selected_id);
 }
 
-/* ---- Test 15m: persistent selection drives highlight_id next frame ----
- * Pins the selected_id → highlight_id fallback chain for the overlay. */
+/* Persistent selected_id propagates to highlight_id on the next frame via the
+ * overlay fallback chain. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_overlay_fallback_chain_with_padded_button(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1180,8 +1153,8 @@ static void test_inspector_highlight_zero_when_no_pointer_over(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0).id, hl);
 }
 
-/* ---- Test 15w: viewport hover prefers REGISTERED WIDGET over anonymous child ----
- * Two-pass scan: prefer first id in pointerOverIds with widget_registry entry. */
+/* Viewport hover prefers a registered widget over its anonymous child via a
+ * two-pass scan of pointerOverIds. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1219,7 +1192,7 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Pin: highlight is the registered widget id, NOT the anonymous child. */
+    /* Highlight is the registered widget id, NOT the anonymous child. */
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("widget_floater"), s_fx.ctx->inspector_highlight_id);
 }
 
@@ -1644,31 +1617,11 @@ static void test_inspector_hover_transformed_widget(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: place the pointer at a coord that's INSIDE the rotated visual
-     * but OUTSIDE the axis-aligned layout bbox. The visual bbox is rotated
-     * around (btn_cx, btn_cy) by 25 deg. A point at (btn_cx + 75, btn_cy + 30)
-     * is OUTSIDE the layout bbox right edge (260) but the rotation pulls a
-     * corner near it. Strongest pin: a coord SO close to one edge of the
-     * rotated bbox that any axis-aligned check would miss it.
-     *
-     * Use a pointer at the layout TOP-RIGHT CORNER (btn_x + btn_w, btn_y).
-     * Layout bbox AABB only just contains it. After 25 deg rotation that
-     * point lies OUTSIDE the rotated quad on the layout's solved bbox but
-     * INSIDE the layout bbox itself -- the inverse-affine UN-rotates the
-     * pointer, landing it back near the corner ON the visual quad.
-     *
-     * To make the pin unambiguous: pick a point clearly outside the layout
-     * AABB but inside the rotation-aware test. Use the FORWARD-rotated
-     * corner of the layout bbox: rotate (btn_cx + btn_w/2, btn_cy) around
-     * (btn_cx, btn_cy) by 25 deg -> a point off the layout AABB. The
-     * inverse-affine reverses the rotation, landing back at the layout
-     * right-center -- exactly ON the visual edge.
-     *
-     * cos(25 deg) ~= 0.9063, sin(25 deg) ~= 0.4226.
-     * dx = btn_w/2 = 80, dy = 0.
-     * rx = btn_cx + 0.9063 * 80 = 180 + 72.5 = 252.5
-     * ry = btn_cy + 0.4226 * 80 = 224 + 33.8 = 257.8
-     * Layout AABB y-range is [200, 248]; ry=257.8 is OUTSIDE the AABB. */
+    /* Pointer = forward-rotated layout right-center: clearly outside the
+     * axis-aligned AABB but ON the rotated visual edge after inverse-affine.
+     * cos(25°) ≈ 0.9063, sin(25°) ≈ 0.4226, dx = btn_w/2 = 80.
+     * rx = 180 + 0.9063·80 = 252.5; ry = 224 + 0.4226·80 = 257.8.
+     * Layout AABB y-range [200, 248] → ry=257.8 is outside. */
     const float rot = 25.0F * 0.017453292F;
     const float c = cosf(rot);
     const float s = sinf(rot);

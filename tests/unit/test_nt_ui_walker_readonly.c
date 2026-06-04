@@ -55,9 +55,7 @@ static void test_second_walk_identical(void) {
     int vp1[4];
     nt_gfx_test_viewport_rect(vp1);
     const uint32_t elements1 = nt_ui_get_last_walk_command_count(s_fx.ctx);
-    /* Read but don't compare draw-call delta -- walking once already
-     * incurs draw calls; a second walk will too, so the EXACT delta-
-     * to-delta count is what we compare. */
+    /* Compare delta-to-delta, not raw counts, since both walks incur draws. */
     const uint32_t delta1 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
 
     nt_ui_walk(s_fx.ctx, &target);

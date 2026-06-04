@@ -211,16 +211,10 @@ static void test_debug_mode_filter(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 7: coordinate-space convention -- recorded zone projects to walker space ----
- *
- * This pins the Y-flip convention so the original bug (overlay drawn at
- * Clay Y-down while sprites went through the walker's GL Y-up) cannot
- * silently return. Strategy: record a zone with NO accum transform; draw
- * the overlay; read back the emit vertex positions via the sprite
- * renderer's NT_TEST_ACCESS probe. Each emitted corner must equal
- *   world_y = vy + vh - clay_y (Y-flip)
- *   world_x = clay_x (unchanged)
- * matching the walker's dispatch_command convention. */
+/* Overlay vertices project Clay Y-down to walker GL Y-up:
+ *   world_y = vy + vh - clay_y
+ *   world_x = clay_x
+ * matching dispatch_command. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_emit_matches_walker_coord_space(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
@@ -245,13 +239,9 @@ static void test_debug_emit_matches_walker_coord_space(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_ALL, NT_FONT_INVALID, 0.0F);
 
-    /* The padded fill quad is emitted FIRST per zone; its 4 verts are at
-     * (visual_l, visual_t), (visual_r, visual_t), (visual_r, visual_b),
-     * (visual_l, visual_b) -- all Y-flipped. After 4 outline edges (each a
-     * thin quad), the LAST emit is one outline edge. We instead use last_emit_*
-     * which captures the MOST RECENT emit -- one outline edge quad. Both fill
-     * and outline pass through project_to_world; check the LAST emit's vertex Y
-     * values fall in the Y-flipped range [vy+vh - visual_b, vy+vh - visual_t]. */
+    /* last_emit_* captures the final outline edge (4-vert thin quad). Fill and
+     * outline both go through project_to_world; verify Y falls in the flipped
+     * band [vy+vh - visual_b, vy+vh - visual_t]. */
     const uint32_t v_count = nt_sprite_renderer_test_last_emit_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(4U, v_count); /* outline edge = thin quad */
 
@@ -264,19 +254,15 @@ static void test_debug_emit_matches_walker_coord_space(void) {
         float pos[3];
         nt_sprite_renderer_test_last_emit_position(v, pos);
         const float y = pos[1];
-        TEST_ASSERT_TRUE_MESSAGE(y >= gl_bot - 3.0F && y <= gl_top + 3.0F, "overlay vertex Y out of Y-flipped band (Pitfall 2 regressed?)");
-        /* Y must NOT be in the un-flipped band [BTN_Y, BTN_Y+BTN_H] = [240, 300]
-         * EXCEPT for narrow overlap (300 is in both since 600-300=300). We
-         * specifically reject y around BTN_Y=240 -- that was the bug. */
+        TEST_ASSERT_TRUE_MESSAGE(y >= gl_bot - 3.0F && y <= gl_top + 3.0F, "overlay vertex Y out of Y-flipped band");
+        /* Reject y around BTN_Y=240 (un-flipped position). The 300 boundary
+         * coincides because 600-300=300. */
         TEST_ASSERT_TRUE_MESSAGE(y < BTN_Y || y > BTN_Y + BTN_H + 3.0F || y >= gl_bot - 3.0F, "overlay vertex landed in Clay Y-down position (Y-flip missing)");
     }
 }
 
-/* ---- Test 8: disabled-record helper drops a DISABLED zone ----
- * The disabled path skips the hit-test but must still record a zone so the
- * overlay surfaces it. Helper must not touch capture state. Button wiring
- * regression-protected by
- * test_nt_ui_button + the disabled-button visual in ui_buttons_demo. */
+/* Disabled-record helper drops a DISABLED zone without touching capture
+ * state — the disabled path skips hit-test but must still surface in the overlay. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_disabled_helper_records_zone(void) {
     /* Frame 1: declare so Clay has a prev-frame bbox. */
@@ -300,8 +286,8 @@ static void test_debug_disabled_helper_records_zone(void) {
     const nt_ui_debug_zone_t *z = &s_fx.ctx->debug_zones[0];
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn_disabled"), z->id);
 
-    /* DISABLED flag set; hover/pressed/captured all CLEAR (the helper records
-     * intent, not state -- it never runs hit-test or capture). */
+    /* DISABLED flag set; hover/pressed/captured all CLEAR — helper records
+     * intent, not state. */
     TEST_ASSERT_TRUE((z->state_flags & NT_UI_DEBUG_FLAG_DISABLED) != 0U);
     TEST_ASSERT_FALSE((z->state_flags & NT_UI_DEBUG_FLAG_HOVERED) != 0U);
     TEST_ASSERT_FALSE((z->state_flags & NT_UI_DEBUG_FLAG_PRESSED) != 0U);
