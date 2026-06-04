@@ -218,12 +218,6 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx) {
     if (Clay_GetCurrentContext() == ctx->clay) {
         Clay_SetCurrentContext(NULL);
     }
-    /* Unconditional even in OFF builds: if ctx was destroyed mid-frame the assert
-     * vanishes, but leaving g_nt_ui_inframe_ctx pointing into zeroed memory would
-     * wedge the next nt_ui_begin silently. */
-    if (g_nt_ui_inframe_ctx == ctx) {
-        g_nt_ui_inframe_ctx = NULL;
-    }
 #if NT_UI_DEBUG_TOOLS
     nt_ui_internal_inspector_strings_release(ctx);
 #endif
@@ -329,9 +323,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     const double build_t0 = nt_time_now();
     nt_ui_internal_build_tree(ctx);
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
-
-    /* Pin scratch high-water so walk can assert no reset happened in between. */
-    ctx->scratch_used_at_end = nt_mem_scratch_used();
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
@@ -1274,8 +1265,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
-    /* Caller reset scratch between nt_ui_end and nt_ui_walk → dangling payload pointers. */
-    NT_ASSERT(nt_mem_scratch_used() >= ctx->scratch_used_at_end && "nt_ui_walk: nt_mem_scratch_reset called between nt_ui_end and nt_ui_walk -> dangling payload pointers");
     // #endregion
 
     // #region entry-flush

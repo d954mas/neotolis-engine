@@ -68,7 +68,8 @@ void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float v
 
 /* Linear scan beats a hash at the 64-zone cap. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id) {
-    if (ctx == NULL || id == 0U) {
+    NT_ASSERT(ctx != NULL && "find_debug_zone: ctx must be non-NULL");
+    if (id == 0U) {
         return NULL;
     }
     for (uint32_t i = 0; i < ctx->debug_zone_count; ++i) {
