@@ -74,26 +74,16 @@ float nt_sprite_comp_slice9_scale(nt_entity_t entity);
 
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y);
 
-/* ---- Read accessors (return const pointer into dense SoA array) ----
+/* ---- Read accessors ----
  *
- * Note on const: unlike drawable_comp / material_comp which return mutable
- * pointers, sprite_comp accessors are strictly read-only. Sprite fields are
- * coupled through resolve (atlas/region_hash drive the cached region_index,
- * authored origin, and RESOLVED flag) — direct mutation would silently break
- * those invariants. Use the dedicated set_region / bind_by_hash / set_origin /
- * set_flip entry points to mutate state. */
+ * Read-only — fields are coupled through resolve; mutate via the dedicated
+ * setters above. */
 
 const nt_resource_t *nt_sprite_comp_atlas(nt_entity_t entity);
 const uint64_t *nt_sprite_comp_region_hash(nt_entity_t entity);
-/* Cached region index. Undefined when nt_sprite_comp_is_resolved() is false —
- * callers MUST gate reads on is_resolved(). The stored value is not a sentinel;
- * 0 is a valid region index for a resolved sprite. */
+/* Undefined unless is_resolved() — 0 is a valid index, not a sentinel. */
 const uint16_t *nt_sprite_comp_region_index(nt_entity_t entity);
-/* Effective origin (float[2]). Invariant: when ORIGIN_OV is set, returns the
- * value stored by set_origin(). Otherwise origin reflects the resolved region's
- * authored origin, or (0, 0) when not resolved. The renderer should only read
- * origin for resolved sprites; non-resolved (0, 0) is a safety default, not a
- * meaningful position. */
+/* ORIGIN_OV → set_origin value; else region's authored origin; (0,0) if not resolved. */
 const float *nt_sprite_comp_origin(nt_entity_t entity);
 const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
 

@@ -1061,8 +1061,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 // #endregion
 
 // #region draw_list
-/* Phase 1: open a cmd per batch_key, stream verts into staging via
- * emit_one. Phase 2 = nt_sprite_renderer_flush. */
+/* Emit pass: stream verts into staging per batch_key; flush() does the upload. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
@@ -1107,7 +1106,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
 // #endregion
 
 // #region flush
-/* Phase 2: upload staging, replay cmds, rebind state only on delta. */
+/* Upload staging, replay cmds; rebind state only on delta. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_flush(void) {
     close_current_cmd();
