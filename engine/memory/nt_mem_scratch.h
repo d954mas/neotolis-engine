@@ -44,9 +44,14 @@ void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align);
 /* Peak `used` since init. Survives resets so callers can size scratch budget. */
 size_t nt_mem_scratch_high_water_mark(void);
 
-/* Current `used` byte count (resets to 0 each frame). Subsystems that hand out
- * scratch pointers across function boundaries can pin this at handoff and assert
- * the value at the consumer side hasn't shrunk (i.e. no reset interleaved). */
+/* Current `used` byte count — bytes allocated since the last nt_mem_scratch_reset.
+ *
+ * Lifetime-safety pattern: a subsystem (e.g. nt_ui) that allocates payloads from
+ * scratch and reads them later in the same frame can snapshot `used` at producer
+ * time and assert at consumer time that the snapshot is still <= current `used`.
+ * If something called nt_mem_scratch_reset() between them, `used` shrunk to 0 and
+ * the held pointers are dangling — the assert fires loud instead of dereferencing
+ * stale memory. See nt_ui_end (snapshot) and nt_ui_walk (assert). */
 size_t nt_mem_scratch_used(void);
 
 #define NT_MEM_SCRATCH_ALLOC(T) ((T *)nt_mem_scratch_alloc(sizeof(T), _Alignof(T)))
