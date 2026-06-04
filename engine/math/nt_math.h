@@ -33,6 +33,12 @@
 
 #define NT_PI GLM_PIf
 
+/* Column-major identity mat4 as `const float *`. Pass to renderer APIs that
+ * want a `const float *world_matrix` for the no-transform case. Wraps cglm's
+ * GLM_MAT4_IDENTITY with the 2D→1D cast applied. For a mutable starting point
+ * use glm_mat4_identity(out). */
+#define NT_MATH_MAT4_IDENTITY ((const float *)GLM_MAT4_IDENTITY)
+
 /* ---- Float16 conversion ---- */
 
 static inline uint16_t nt_float32_to_float16(float value) {

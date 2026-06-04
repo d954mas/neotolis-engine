@@ -10,6 +10,7 @@
 
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "math/nt_math.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -69,10 +70,6 @@ void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region overlay_draw helpers
-static const float s_identity_mat[16] = {
-    1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-};
-
 /* GL Y-up; (x, y_top) is the top-left. */
 static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, uint32_t color) {
     if (w <= 0.0F || h <= 0.0F) {
@@ -85,7 +82,7 @@ static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, flo
         {x, y_top - h},
     };
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, s_identity_mat, color);
+    nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, NT_MATH_MAT4_IDENTITY, color);
 }
 
 static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, uint32_t color) {

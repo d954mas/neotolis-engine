@@ -879,19 +879,10 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
     const float s9_scale = p->slice9_scale;
 
     if (has_s9_override || region_slice9) {
-        if (has_s9_override) {
-            const uint16_t src_l = p->slice9_override[0];
-            const uint16_t src_r = p->slice9_override[1];
-            const uint16_t src_t = p->slice9_override[2];
-            const uint16_t src_b = p->slice9_override[3];
-            const uint16_t dst_l = nt_sprite_renderer_scale_slice9_border(src_l, s9_scale);
-            const uint16_t dst_r = nt_sprite_renderer_scale_slice9_border(src_r, s9_scale);
-            const uint16_t dst_t = nt_sprite_renderer_scale_slice9_border(src_t, s9_scale);
-            const uint16_t dst_b = nt_sprite_renderer_scale_slice9_border(src_b, s9_scale);
-            nt_sprite_renderer_emit_slice9_explicit_affine(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, col, p->flip_bits, aff);
-        } else {
-            nt_sprite_renderer_emit_slice9_from_region_affine(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, s9_scale, col, p->flip_bits, aff);
-        }
+        float m[16];
+        build_affine_mat4(aff, m);
+        const uint16_t *src = has_s9_override ? p->slice9_override : NULL;
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src, s9_scale, col, p->flip_bits, m);
         return;
     }
 

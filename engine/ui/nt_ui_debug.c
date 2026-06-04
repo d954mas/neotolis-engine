@@ -8,6 +8,7 @@
 
 #include "core/nt_assert.h"
 #include "core/nt_builtins.h"
+#include "math/nt_math.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -82,14 +83,10 @@ const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *
 // #endregion
 
 // #region polygon emit helpers
-static const float s_identity_mat[16] = {
-    1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-};
-
 /* Vertices already in world space. */
 void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color) {
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(atlas, region, v, 4U, indices, 6U, s_identity_mat, color);
+    nt_sprite_renderer_emit_geometry(atlas, region, v, 4U, indices, 6U, NT_MATH_MAT4_IDENTITY, color);
 }
 
 /* 4 inset quads; inset direction = unit perpendicular toward centroid. */

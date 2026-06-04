@@ -15,6 +15,7 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
+#include "math/nt_math.h"
 #include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
@@ -814,7 +815,7 @@ void test_emit_slice9_from_region_scale_one_matches_atlas(void) {
     const float y = 0.0F;
     const float w = 100.0F;
     const float h = 100.0F;
-    nt_sprite_renderer_emit_slice9_from_region(s_atlas_res, rs9, x, y, w, h, 1.0F, 0xFFFFFFFFU, 0, 0.0F);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, w, h, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
 
     TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
     /* Inner column 1 = x + (16 * 1.0F) = 16. */
@@ -839,7 +840,7 @@ void test_emit_slice9_from_region_scale_two_doubles_borders(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
-    nt_sprite_renderer_emit_slice9_from_region(s_atlas_res, rs9, 0.0F, 0.0F, 100.0F, 100.0F, 2.0F, 0xFFFFFFFFU, 0, 0.0F);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, 0.0F, 0.0F, 100.0F, 100.0F, NULL, 2.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
 
     TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
     /* Positions reflect DST (= src*scale = 32). */

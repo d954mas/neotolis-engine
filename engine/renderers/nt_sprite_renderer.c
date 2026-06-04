@@ -825,15 +825,15 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #region emit_slice9
 /* src borders pick UV cut; dst borders set rendered corner/edge size. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb, uint16_t dst_sl,
-                                 uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]) {
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
+                                    uint8_t flip_bits, const float *world_matrix) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "emit_slice9: atlas must be READY");
     NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9: call nt_sprite_renderer_set_material first");
-    NT_ASSERT(aff != NULL && "emit_slice9: aff must be non-NULL");
+    NT_ASSERT(world_matrix != NULL && "emit_slice9: world_matrix must be non-NULL (pass NT_MATH_MAT4_IDENTITY for none)");
     NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h));
-    NT_ASSERT(isfinite(aff[0]) && isfinite(aff[1]) && isfinite(aff[2]) && isfinite(aff[3]) && isfinite(aff[4]) && isfinite(aff[5]) && "emit_slice9: aff must be finite");
+    NT_ASSERT(isfinite(slice9_scale) && slice9_scale > 0.0F && "emit_slice9: slice9_scale must be finite > 0");
     NT_ASSERT(w >= 0.0F && h >= 0.0F && "slice9 target dimensions must be non-negative");
 
     nt_atlas_region_handles_t rh;
@@ -843,6 +843,16 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
     }
 
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+
+    /* NULL src_lrtb → atlas-baked borders for this region. */
+    const uint16_t src_sl = (src_lrtb != NULL) ? src_lrtb[0] : rh.region->slice9_lrtb[0];
+    const uint16_t src_sr = (src_lrtb != NULL) ? src_lrtb[1] : rh.region->slice9_lrtb[1];
+    const uint16_t src_st = (src_lrtb != NULL) ? src_lrtb[2] : rh.region->slice9_lrtb[2];
+    const uint16_t src_sb = (src_lrtb != NULL) ? src_lrtb[3] : rh.region->slice9_lrtb[3];
+    const uint16_t dst_sl = nt_sprite_renderer_scale_slice9_border(src_sl, slice9_scale);
+    const uint16_t dst_sr = nt_sprite_renderer_scale_slice9_border(src_sr, slice9_scale);
+    const uint16_t dst_st = nt_sprite_renderer_scale_slice9_border(src_st, slice9_scale);
+    const uint16_t dst_sb = nt_sprite_renderer_scale_slice9_border(src_sb, slice9_scale);
 
     NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
     NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed");
@@ -1011,14 +1021,18 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
         }
     }
 
-    /* Skip identity aff to save 16 mul × 2 adds per vertex. */
-    if (aff[0] != 1.0F || aff[1] != 0.0F || aff[2] != 0.0F || aff[3] != 1.0F || aff[4] != 0.0F || aff[5] != 0.0F) {
+    /* Skip identity mat4 to save the transform pass; same 9-float subset as
+     * emit_region_resolved (m[0,1,2,4,5,6,12,13,14]). */
+    const float *m = world_matrix;
+    const bool is_identity = m[0] == 1.0F && m[1] == 0.0F && m[2] == 0.0F && m[4] == 0.0F && m[5] == 1.0F && m[6] == 0.0F && m[12] == 0.0F && m[13] == 0.0F && m[14] == 0.0F;
+    if (!is_identity) {
         for (uint32_t vi = 0; vi < 16U; vi++) {
             nt_sprite_vertex_t *v = &s_sprite.vertices[base + vi];
             const float px = v->position[0];
             const float py = v->position[1];
-            v->position[0] = (aff[0] * px) + (aff[1] * py) + aff[4];
-            v->position[1] = (aff[2] * px) + (aff[3] * py) + aff[5];
+            v->position[0] = (m[0] * px) + (m[4] * py) + m[12];
+            v->position[1] = (m[1] * px) + (m[5] * py) + m[13];
+            v->position[2] = (m[2] * px) + (m[6] * py) + m[14];
         }
     }
 
@@ -1037,91 +1051,6 @@ static void emit_slice9_internal(nt_resource_t atlas, uint32_t region_index, flo
 }
 // #endregion
 
-// #region emit_slice9 (public; src == dst)
-/* Encodes rotate-around-(x+w/2, y+h/2). */
-static inline void slice9_build_rotate_aff(float x, float y, float w, float h, float rotation, float out_aff[6]) {
-    if (rotation == 0.0F) {
-        out_aff[0] = 1.0F;
-        out_aff[1] = 0.0F;
-        out_aff[2] = 0.0F;
-        out_aff[3] = 1.0F;
-        out_aff[4] = 0.0F;
-        out_aff[5] = 0.0F;
-        return;
-    }
-    const float cx = x + (w * 0.5F);
-    const float cy = y + (h * 0.5F);
-    const float cs = cosf(rotation);
-    const float sn = sinf(rotation);
-    out_aff[0] = cs;
-    out_aff[1] = -sn;
-    out_aff[2] = sn;
-    out_aff[3] = cs;
-    out_aff[4] = cx - (cs * cx) + (sn * cy);
-    out_aff[5] = cy - (sn * cx) - (cs * cy);
-}
-
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation) {
-    float aff[6];
-    slice9_build_rotate_aff(x, y, w, h, rotation, aff);
-    emit_slice9_internal(atlas, region_index, x, y, w, h, sl, sr, st, sb, sl, sr, st, sb, color_packed, flip_bits, aff);
-}
-
-void nt_sprite_renderer_emit_slice9_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                           uint8_t flip_bits, const float aff[6]) {
-    emit_slice9_internal(atlas, region_index, x, y, w, h, sl, sr, st, sb, sl, sr, st, sb, color_packed, flip_bits, aff);
-}
-
-void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
-                                             uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation) {
-    float aff[6];
-    slice9_build_rotate_aff(x, y, w, h, rotation, aff);
-    emit_slice9_internal(atlas, region_index, x, y, w, h, src_sl, src_sr, src_st, src_sb, dst_sl, dst_sr, dst_st, dst_sb, color_packed, flip_bits, aff);
-}
-
-void nt_sprite_renderer_emit_slice9_explicit_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
-                                                    uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]) {
-    emit_slice9_internal(atlas, region_index, x, y, w, h, src_sl, src_sr, src_st, src_sb, dst_sl, dst_sr, dst_st, dst_sb, color_packed, flip_bits, aff);
-}
-// #endregion
-
-// #region emit_slice9_from_region
-/* slice9_scale resizes corners visually without changing which atlas pixels feed them. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_slice9_from_region_impl(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
-                                         const float aff[6]) {
-    NT_ASSERT(s_sprite.initialized);
-    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9_from_region: invalid atlas handle");
-    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9_from_region: atlas must be READY");
-    NT_ASSERT(isfinite(slice9_scale) && slice9_scale > 0.0F && "nt_sprite_renderer_emit_slice9_from_region: slice9_scale must be finite > 0");
-
-    const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
-    if (r->vertex_count == 0U) {
-        return;
-    }
-    const uint16_t src_l = r->slice9_lrtb[0];
-    const uint16_t src_r = r->slice9_lrtb[1];
-    const uint16_t src_t = r->slice9_lrtb[2];
-    const uint16_t src_b = r->slice9_lrtb[3];
-    const uint16_t dst_l = nt_sprite_renderer_scale_slice9_border(src_l, slice9_scale);
-    const uint16_t dst_r = nt_sprite_renderer_scale_slice9_border(src_r, slice9_scale);
-    const uint16_t dst_t = nt_sprite_renderer_scale_slice9_border(src_t, slice9_scale);
-    const uint16_t dst_b = nt_sprite_renderer_scale_slice9_border(src_b, slice9_scale);
-    emit_slice9_internal(atlas, region_index, x, y, w, h, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, color_packed, flip_bits, aff);
-}
-
-void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
-                                                float rotation) {
-    float aff[6];
-    slice9_build_rotate_aff(x, y, w, h, rotation, aff);
-    emit_slice9_from_region_impl(atlas, region_index, x, y, w, h, slice9_scale, color_packed, flip_bits, aff);
-}
-
-void nt_sprite_renderer_emit_slice9_from_region_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
-                                                       const float aff[6]) {
-    emit_slice9_from_region_impl(atlas, region_index, x, y, w, h, slice9_scale, color_packed, flip_bits, aff);
-}
 // #endregion
 
 // #region draw_list

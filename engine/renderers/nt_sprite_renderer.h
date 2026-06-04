@@ -103,41 +103,23 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
-/* Emit a 9-quad slice9 image. Same vertex format as emit_region (no new pipeline).
+/* Emit a 9-quad slice9 image. Same vertex format and pipeline as emit_region.
  *
  *   atlas, region_index - must be READY; tombstones no-op.
- *   x, y, w, h          - target rect in caller's coordinate space (UI passes GL Y-up world coords).
- *   sl, sr, st, sb       - slice9 borders in source pixels (left, right, top, bottom).
- *   color_packed          - 0xAABBGGRR.
- *   flip_bits             - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *   x, y, w, h          - target rect in caller's coordinate space.
+ *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
+ *                         atlas-baked borders for this region.
+ *   slice9_scale        - dst corner size = src × scale. 1.0 = pixel-perfect.
+ *                         Corners are proportionally shrunk if total > w/h.
+ *   color_packed        - 0xAABBGGRR.
+ *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *   world_matrix        - 16-float column-major mat4 (same convention as
+ *                         emit_region). Pass NT_MATH_MAT4_IDENTITY for none.
  *
- * ipu (1/pixels_per_unit) is computed internally from the atlas handle.
- * Emits 16 vertices + 54 indices (4x4 shared grid). Handles staging overflow internally.
- * Caller MUST have called set_material first. */
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation);
-
-/* Read atlas region's baked slice9 borders, multiply by slice9_scale, emit.
- * scale=1.0 → atlas borders verbatim. scale > 1 enlarges corners, scale < 1
- * shrinks. Caller is responsible that scaled corners fit (w, h); excess is
- * proportionally clamped inside emit_slice9 (same path as the override). */
-void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
-                                                float rotation);
-
-/* Separate src (UV cut into atlas) and dst (destination corner size) borders.
- * Use when game has its own borders (override) but wants visual zoom decoupled
- * from UV. emit_slice9 = src==dst; emit_slice9_from_region = src=atlas, dst=src*scale. */
-void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
-                                             uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation);
-
-/* aff = {a,b,c,d,tx,ty} applied to each of the 16 grid vertices.
- * Use for composed affines (UI walker, custom anim) that the rotation API can't represent. */
-void nt_sprite_renderer_emit_slice9_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                           uint8_t flip_bits, const float aff[6]);
-void nt_sprite_renderer_emit_slice9_from_region_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
-                                                       const float aff[6]);
-void nt_sprite_renderer_emit_slice9_explicit_affine(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
-                                                    uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, const float aff[6]);
+ * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
+ * internally. Caller MUST have called set_material first. */
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
+                                    uint8_t flip_bits, const float *world_matrix);
 
 #include "core/nt_assert.h"
 
