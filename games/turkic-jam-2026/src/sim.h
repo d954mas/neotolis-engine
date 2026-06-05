@@ -13,8 +13,17 @@
 #define TJ_MAX_GLOBAL 8 /* passive (global-scope) desert objects active per circle */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
+/* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
+typedef enum {
+    TJ_PHASE_AUL_EXIT = 0, /* walking from the aul out to the road (no loop tick) */
+    TJ_PHASE_ROAD_ENTRY,   /* standing on the first road cell */
+    TJ_PHASE_WALK,         /* normal auto-walk around the loop */
+} tj_phase_t;
+
 typedef struct {
     int heir_index;
+    tj_phase_t phase;
+    float intro_t; /* seconds elapsed in the current intro phase */
     int body, mind, spirit;
     int stamina;
     int circle;     /* 1-based */

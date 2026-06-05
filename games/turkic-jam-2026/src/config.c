@@ -97,6 +97,8 @@ static void set_defaults(void) {
     g_config.laps_to_win = 10;
     g_config.start_stamina = 10;
     g_config.move_seconds_per_cell = 0.6F;
+    g_config.aul_exit_seconds = 2.0F;
+    g_config.road_entry_seconds = 0.7F;
     g_config.start_in_game = 1;
     g_config.path_cells_growth = 1;
     g_config.path_cells_jitter = 1;
@@ -135,6 +137,8 @@ static void apply_ini(const char *k, const char *v) {
         {"laps_to_win", &g_config.laps_to_win, NULL},
         {"start_stamina", &g_config.start_stamina, NULL},
         {"move_seconds_per_cell", NULL, &g_config.move_seconds_per_cell},
+        {"aul_exit_seconds", NULL, &g_config.aul_exit_seconds},
+        {"road_entry_seconds", NULL, &g_config.road_entry_seconds},
         {"start_in_game", &g_config.start_in_game, NULL},
         {"path_cells_growth", &g_config.path_cells_growth, NULL},
         {"path_cells_jitter", &g_config.path_cells_jitter, NULL},

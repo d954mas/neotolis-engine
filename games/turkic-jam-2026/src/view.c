@@ -180,11 +180,12 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
     }
 }
 
-static void draw_hero(const tj_run_t *run, float pitch) {
+/* Hero position while walking the loop: lerp between the current and next cell. */
+static void hero_walk_pos(const tj_run_t *run, float pitch, float *hx, float *hy) {
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
     const int n = (run->path_cells > 0) ? run->path_cells : 1;
-    float per = g_config.move_seconds_per_cell;
+    const float per = g_config.move_seconds_per_cell;
     float frac = (per > 0.0F) ? (run->move_t / per) : 0.0F;
     if (frac < 0.0F) {
         frac = 0.0F;
@@ -198,8 +199,37 @@ static void draw_hero(const tj_run_t *run, float pitch) {
     const int i1 = (i0 + 1) % n;
     const float x0 = grid_x(run->path_gx[i0], cols, pitch);
     const float y0 = grid_y(run->path_gy[i0], rows, pitch);
-    const float hx = x0 + ((grid_x(run->path_gx[i1], cols, pitch) - x0) * frac);
-    const float hy = y0 + ((grid_y(run->path_gy[i1], rows, pitch) - y0) * frac);
+    *hx = x0 + ((grid_x(run->path_gx[i1], cols, pitch) - x0) * frac);
+    *hy = y0 + ((grid_y(run->path_gy[i1], rows, pitch) - y0) * frac);
+}
+
+/* Hero position during the FTUE intro: lerp from the aul centre to road cell 0. */
+static void hero_exit_pos(const tj_run_t *run, float pitch, float *hx, float *hy) {
+    const float dur = (g_config.aul_exit_seconds > 0.0F) ? g_config.aul_exit_seconds : 2.0F;
+    float f = run->intro_t / dur;
+    if (f < 0.0F) {
+        f = 0.0F;
+    } else if (f > 1.0F) {
+        f = 1.0F;
+    }
+    const float acx = (float)run->aul_x0 + ((float)(run->aul_w - 1) * 0.5F);
+    const float acy = (float)run->aul_y0 + ((float)(run->aul_h - 1) * 0.5F);
+    const float ax = (acx - ((float)(run->grid_cols - 1) * 0.5F)) * pitch;
+    const float ay = (acy - ((float)(run->grid_rows - 1) * 0.5F)) * pitch;
+    const float c0x = grid_x(run->path_gx[0], run->grid_cols, pitch);
+    const float c0y = grid_y(run->path_gy[0], run->grid_rows, pitch);
+    *hx = ax + ((c0x - ax) * f);
+    *hy = ay + ((c0y - ay) * f);
+}
+
+static void draw_hero(const tj_run_t *run, float pitch) {
+    float hx;
+    float hy;
+    if (run->phase == TJ_PHASE_AUL_EXIT) {
+        hero_exit_pos(run, pitch, &hx, &hy);
+    } else {
+        hero_walk_pos(run, pitch, &hx, &hy);
+    }
     const float hs = pitch * 0.40F;
     CLAY(MAP_RECT(hs, hs, ((Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}), hs * 0.5F, hx, hy, 3)) {}
 }

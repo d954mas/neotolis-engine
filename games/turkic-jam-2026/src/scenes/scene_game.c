@@ -32,8 +32,9 @@ static int ep_run(int c, char **v, char *o, int cap, void *u) {
     (void)c;
     (void)v;
     (void)u;
-    return snprintf(o, (size_t)cap, "{\"circle\":%d,\"cell\":%d,\"path_cells\":%d,\"hand\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,\"glory\":%d,\"alive\":%s,\"won\":%s}", s_run.circle,
-                    s_run.cell, s_run.path_cells, s_run.hand, s_run.stamina, s_run.supplies, s_run.wisdom, s_run.glory, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
+    return snprintf(o, (size_t)cap, "{\"circle\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"hand\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,\"glory\":%d,\"alive\":%s,\"won\":%s}",
+                    s_run.circle, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.hand, s_run.stamina, s_run.supplies, s_run.wisdom, s_run.glory, s_run.alive ? "true" : "false",
+                    s_run.won ? "true" : "false");
 }
 
 /* devapi: recent event-log lines (newest last), for reading the run narrative. */

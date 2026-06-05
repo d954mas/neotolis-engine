@@ -77,10 +77,12 @@ typedef struct {
 typedef struct {
     int path_cells, laps_to_win, start_stamina;
     float move_seconds_per_cell;
-    int start_in_game;       /* 1 = boot straight into the run, 0 = main menu */
-    int path_cells_growth;   /* DEPRECATED (loop length now from map_* below) */
-    int path_cells_jitter;   /* DEPRECATED (loop length now from map_* below) */
-    int debug_random_desert; /* 1 = auto-fill cells with random tiles (debug); 0 = empty (player places) */
+    float aul_exit_seconds;   /* FTUE intro: hero walks out of the aul to the road */
+    float road_entry_seconds; /* FTUE intro: hero stands on the first road cell */
+    int start_in_game;        /* 1 = boot straight into the run, 0 = main menu */
+    int path_cells_growth;    /* DEPRECATED (loop length now from map_* below) */
+    int path_cells_jitter;    /* DEPRECATED (loop length now from map_* below) */
+    int debug_random_desert;  /* 1 = auto-fill cells with random tiles (debug); 0 = empty (player places) */
     /* Map/loop geometry: aul reserved in the centre, a winding closed loop of
      * road cells around it, varied per circle via random outward bends. */
     int map_zone_cols, map_zone_rows; /* play-zone size in cells */

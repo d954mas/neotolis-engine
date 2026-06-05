@@ -336,6 +336,35 @@ static void gen_loop(tj_run_t *r) {
 }
 // #endregion
 
+// #region intro (FTUE: a new heir leaves the aul before the loop starts)
+static const char *heir_name(const tj_run_t *r) {
+    if (r->heir_index >= 0 && r->heir_index < g_config.heir_count) {
+        return g_config.heirs[r->heir_index].name;
+    }
+    return "Наследник";
+}
+
+/* Advance the pre-loop intro: aul_exit -> road_entry -> walk. No loop tick here,
+ * so the loading-settle dt never drifts the hero onto the loop. */
+static void tick_intro(tj_run_t *r, float dt) {
+    r->intro_t += dt;
+    if (r->phase == TJ_PHASE_AUL_EXIT) {
+        const float dur = (g_config.aul_exit_seconds > 0.0F) ? g_config.aul_exit_seconds : 2.0F;
+        if (r->intro_t >= dur) {
+            r->intro_t = 0.0F;
+            r->phase = TJ_PHASE_ROAD_ENTRY;
+            tj_journal_push(TJ_LOG_PLAIN, "%s вступает на кольцевую дорогу.", heir_name(r));
+        }
+        return;
+    }
+    const float dur = (g_config.road_entry_seconds > 0.0F) ? g_config.road_entry_seconds : 0.7F;
+    if (r->intro_t >= dur) {
+        r->intro_t = 0.0F;
+        r->phase = TJ_PHASE_WALK;
+    }
+}
+// #endregion
+
 void tj_run_start(tj_run_t *r, int heir_index) {
     memset(r, 0, sizeof *r);
     if (heir_index < 0 || heir_index >= g_config.heir_count) {
@@ -352,8 +381,10 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     }
     r->circle = 1;
     r->alive = true;
+    r->phase = TJ_PHASE_AUL_EXIT;
+    r->intro_t = 0.0F;
     tj_journal_clear();
-    tj_journal_push(TJ_LOG_BIG, "Новый наследник выходит из аула.");
+    tj_journal_push(TJ_LOG_BIG, "%s выходит из стойбища. Костёр остаётся за спиной.", heir_name(r));
     gen_loop(r);                             /* generates the loop and populates this circle (may log global effects) */
     r->hand = tj_config_tile_index("oasis"); /* FTUE: start holding a guaranteed Oasis card */
     (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
@@ -446,6 +477,10 @@ void tj_run_tick(tj_run_t *r, float dt) {
     }
     if (dt > 0.1F) {
         dt = 0.1F; /* max frame time: a slow load/hitch frame can't lurch the hero, no spiral */
+    }
+    if (r->phase != TJ_PHASE_WALK) {
+        tick_intro(r, dt); /* still leaving the aul: don't tick the loop yet */
+        return;
     }
     r->move_t += dt;
     int guard = 0;
