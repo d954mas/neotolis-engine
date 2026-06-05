@@ -1,1010 +1,347 @@
-/* UI Buttons Demo — 2x3 grid of button variants showing transform-aware hit-test,
- * touch-target padding, state swaps, and a baked-transform proof button below.
+/* ui_3d_demo — walkable space with a central rotating primitive. Phase 1 of the 3D-UI demo
+ * (no UI panels yet; keys cycle shape/speed). Validates FPS camera + shape renderer + future
+ * groundwork for two world-mounted UI panels (Phase 2) and a 2D-vs-3D input bench (Phase 3).
  *
- *   (a) STANDARD (eased)
- *   (b) SCALE (exaggerated)
- *   (c) VISUAL SWAP (bg_region swap per state)
- *   (d) ICON ONLY
- *   (e) ICON + TEXT
- *   (f) DISABLED (short-circuit gate)
+ * Scene: 20×10×20 room (floor grid + 4 walls + ceiling). One primitive rotating at the
+ * room center. Shape and speed cycle through keyboard for now; UI follows.
  *
- * Keys:
- *   Esc          quit (native)
- *   D            toggle inspector
- *   arrows       translate transform
- *   PgUp/Dn      scale (clamp 0.5..2.0)
- *   Q / E        rotate
- *   R            reset
- *
- * Build packs: build_ui_buttons_demo_packs build/examples/ui_buttons_demo */
+ * Controls:
+ *   WASD            walk (forward/back, strafe) along yaw
+ *   RMB-drag        mouselook (yaw + pitch)
+ *   Q / E           yaw left / right (when RMB unavailable)
+ *   R               reset player + shape rotation
+ *   1 / 2 / 3       shape = cube / sphere / capsule
+ *   4 / 5 / 6 / 7   speed = stop / slow / medium / fast
+ *   Esc             quit (native) */
 
 // #region includes
 #include "app/nt_app.h"
-#include "atlas/nt_atlas.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
-#include "font/nt_font.h"
-#include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
-#include "hash/nt_hash.h"
-#include "http/nt_http.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
-#include "material/nt_material.h"
-#include "render/nt_render_defs.h"
-#include "renderers/nt_sprite_renderer.h"
-#include "renderers/nt_text_renderer.h"
-#include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
-#include "ui/nt_ui.h"
-#include "ui/nt_ui_button.h"
-#include "ui/nt_ui_debug_hit_zones.h"
-#include "ui/nt_ui_image.h"
-#include "ui/nt_ui_inspector.h"
-#include "ui/nt_ui_label.h"
-#include "ui/nt_ui_scale.h"
+#include "math/nt_math.h"
+#include "renderers/nt_shape_renderer.h"
 #include "window/nt_window.h"
 
-#include "math/nt_math.h"
-#include "memory/nt_mem_scratch.h"
-#include "nt_pack_format.h"
-
-#include "ui_buttons_demo_assets.h"
-
+#include <math.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
 #endif
-
-#include "clay.h"
 // #endregion
 
-// #region styles
-static const nt_ui_label_style_t g_status_style = {
-    .font_id = 0,
-    .font_size = 24,
-    .color = {200.0F, 200.0F, 210.0F, 255.0F},
-};
+// #region constants
+#define ROOM_W 20.0F
+#define ROOM_H 10.0F
+#define ROOM_D 20.0F
+#define GRID_STEP 1.0F
 
-static const nt_ui_label_style_t g_help_style = {
-    .font_id = 0,
-    .font_size = 18,
-    .color = {160.0F, 170.0F, 180.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_CENTER,
-};
+#define MOVE_SPEED 5.0F
+#define ROT_SPEED 1.8F
+#define MOUSE_SENS 0.005F
+#define PITCH_LIMIT 1.2F
+#define FOV_DEG 65.0F
+#define EYE_HEIGHT 1.7F
 
-/* Per-cell variant title (above each button); bigger than help/status for legibility. */
-static const nt_ui_label_style_t g_cell_title_style = {
-    .font_id = 0,
-    .font_size = 26,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_CENTER,
-};
-
-/* Sub-line under the title for padding annotation. */
-static const nt_ui_label_style_t g_cell_sub_style = {
-    .font_id = 0,
-    .font_size = 16,
-    .color = {180.0F, 180.0F, 190.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_CENTER,
-};
-
-/* Reference button label (centered white text inside the slice9 bg). Bumped
- * to 34 px so the labels are legible at the bigger 320x120 button size on
- * HiDPI Windows. */
-static const nt_ui_label_style_t g_btn_label_style = {
-    .font_id = 0,
-    .font_size = 34,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_CENTER,
-};
-
-/* Icon child = the icon_bunny region. Untinted (0xFFFFFFFF) so the bunny
- * renders in its natural blue. Opacity inherits from the button's eased state. */
-static const nt_ui_image_style_t g_btn_icon_style = {
-    .color_packed = 0xFFFFFFFF, /* no tint (0xAABBGGRR) -- show natural art */
-    .origin_x = 0.5F,
-    .origin_y = 0.5F,
-    .slice9_scale = 1.0F,
-};
+enum { SHAPE_CUBE = 0, SHAPE_SPHERE, SHAPE_CAPSULE, SHAPE_COUNT };
+enum { SPEED_STOP = 0, SPEED_SLOW, SPEED_MED, SPEED_FAST, SPEED_COUNT };
 // #endregion
 
-// #region button style templates
-
-/* (a) STANDARD: eased baseline. */
-static const nt_ui_button_style_t g_btn_standard_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F,
-    .hit_padding_lrtb = {16, 16, 16, 16},
-    .slice9_scale = 1.0F,
+// #region tables
+/* clang-format off */
+static const float s_speed_table[SPEED_COUNT] = { 0.0F, 0.4F, 1.2F, 3.5F };
+static const float s_shape_colors[SHAPE_COUNT][4] = {
+    {0.25F, 0.85F, 0.95F, 1.0F},
+    {0.95F, 0.45F, 1.00F, 1.0F},
+    {1.00F, 0.75F, 0.20F, 1.0F},
 };
-
-/* (b) SCALE: exaggerated scale per state. */
-static const nt_ui_button_style_t g_btn_scale_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.20F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.80F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F,
-    .hit_padding_lrtb = {16, 16, 16, 16},
-    .slice9_scale = 1.0F,
-};
-
-/* (c) VISUAL SWAP: bg_region differs per state (blue/green/red); bg_region 0
- * in the const = sentinel, patched at runtime once atlas indices are known. */
-static const nt_ui_button_style_t g_btn_swap_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F,
-    .hit_padding_lrtb = {16, 16, 16, 16},
-    .slice9_scale = 1.0F,
-};
-
-/* Variant (d)(e) ICON / ICON+TEXT: same shape as STANDARD but NO touch padding,
- * so the difference visual=hit (no pad) vs visual<hit (pad) is plain. */
-static const nt_ui_button_style_t g_btn_nopad_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F,
-    .hit_padding_lrtb = {0, 0, 0, 0},
-    .slice9_scale = 1.0F,
-};
-
-/* Row (g) SLICE9_SCALE knob — 3 buttons with identical art + size but slice9_scale
- * 0.25 / 1.0 / 4.0 so the user can see baked atlas border (~16 px) scale to
- * 4 / 16 / 64 px. Base template shared; per-cell copies patch slice9_scale. */
-static const nt_ui_button_style_t g_btn_s9_base = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F,
-    .hit_padding_lrtb = {16, 16, 16, 16},
-    .slice9_scale = 1.0F, /* template; patched per-cell. */
-};
+/* clang-format on */
 // #endregion
 
-// #region engine state
-/* 2 MB: Phase 3 baked mat4 (80 B/elem × 2 arrays) lifts min_arena_size above 1 MB at default 1024 max_elements. */
-#define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
-#define SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
+// #region state
+static float s_player_pos[3] = {0.0F, EYE_HEIGHT, 7.0F};
+static float s_player_yaw;
+static float s_player_pitch;
 
-static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
-
-static nt_ui_context_t *s_ctx;
-static nt_buffer_t s_frame_ubo;
-
-static nt_hash32_t s_pack_id;
-static nt_resource_t s_atlas_handle;
-static nt_resource_t s_atlas_tex_handle;
-static nt_resource_t s_sprite_vs_handle;
-static nt_resource_t s_sprite_fs_handle;
-static nt_resource_t s_text_vs_handle;
-static nt_resource_t s_text_fs_handle;
-static nt_resource_t s_font_resource;
-
-static nt_material_t s_sprite_material;
-static nt_material_t s_text_material;
-static nt_font_t s_font;
-
-static bool s_atlas_bound;
-static bool s_font_bound;
-static uint32_t s_white_region_idx;
-static uint32_t s_button_blue_idx;
-static uint32_t s_button_green_idx;
-static uint32_t s_button_red_idx;
-static uint32_t s_icon_bunny_idx;
-
-/* Reference-button runtime styles: const templates copied + bg_region patched
- * once the atlas binds. ids precomputed via nt_ui_id on the first Clay frame. */
-static nt_ui_button_style_t s_btn_standard;
-static nt_ui_button_style_t s_btn_scale;
-static nt_ui_button_style_t s_btn_swap;
-static nt_ui_button_style_t s_btn_nopad;
-static nt_ui_button_style_t s_btn_s9_quarter;
-static nt_ui_button_style_t s_btn_s9_one;
-static nt_ui_button_style_t s_btn_s9_four;
-static uint32_t s_id_std;
-static uint32_t s_id_scale;
-static uint32_t s_id_swap;
-static uint32_t s_id_icon;
-static uint32_t s_id_icontext;
-static uint32_t s_id_disabled;
-static uint32_t s_id_baked;
-static uint32_t s_id_s9_quarter;
-static uint32_t s_id_s9_one;
-static uint32_t s_id_s9_four;
-static bool s_btn_ids_ready;
-/* Per-variant click counters. */
-static uint32_t s_clicks_std;
-static uint32_t s_clicks_scale;
-static uint32_t s_clicks_swap;
-static uint32_t s_clicks_icon;
-static uint32_t s_clicks_icontext;
-static uint32_t s_clicks_disabled; /* should always stay 0 */
-static uint32_t s_clicks_baked;
-static uint32_t s_clicks_s9_quarter;
-static uint32_t s_clicks_s9_one;
-static uint32_t s_clicks_s9_four;
-
-/* Runtime transform around the reference button grid (kept from 2D template for the BAKED button). */
-static float s_xform_tx;
-static float s_xform_ty;
-static float s_xform_scale = 1.0F;
-static float s_xform_deg;
-
-/* Orbit camera state for the perspective view_proj that drives the 3D hit-test path. */
-static float s_cam_yaw;
-static float s_cam_pitch;
-static float s_cam_dist = 1.0F; /* 1.0 = base perspective fitting the panel; <1 zoom in, >1 out */
-
-/* Debug overlay state. ONE master toggle (D) drives the inspector.
- * The hit-zone overlay paints for the single focused element. */
-
-#define LAYER_IMG 1
-#define LAYER_TEXT 2
-
-/* 1600x1200 logical: 6-cell grid + BAKED TRANSFORM section + help bar. */
-#define UI_REF_W 1600.0F
-#define UI_REF_H 1200.0F
+static int s_shape_kind = SHAPE_CUBE;
+static int s_speed_kind = SPEED_SLOW;
+static float s_shape_yaw;
 // #endregion
 
-// #region binding
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void try_bind_resources(void) {
-    if (s_atlas_bound && s_font_bound) {
-        return;
+// #region helpers
+static void player_reset(void) {
+    s_player_pos[0] = 0.0F;
+    s_player_pos[1] = EYE_HEIGHT;
+    s_player_pos[2] = 7.0F;
+    s_player_yaw = 0.0F;
+    s_player_pitch = 0.0F;
+    s_shape_yaw = 0.0F;
+}
+
+static void player_update(float dt) {
+    /* Mouselook on RMB; cursor stays free so future UI clicks still work. */
+    if (nt_input_mouse_is_down(NT_BUTTON_RIGHT)) {
+        s_player_yaw += g_nt_input.pointers[0].dx * MOUSE_SENS;
+        s_player_pitch -= g_nt_input.pointers[0].dy * MOUSE_SENS;
+    }
+    if (nt_input_key_is_down(NT_KEY_Q)) {
+        s_player_yaw -= ROT_SPEED * dt;
+    }
+    if (nt_input_key_is_down(NT_KEY_E)) {
+        s_player_yaw += ROT_SPEED * dt;
+    }
+    if (s_player_pitch > PITCH_LIMIT) {
+        s_player_pitch = PITCH_LIMIT;
+    }
+    if (s_player_pitch < -PITCH_LIMIT) {
+        s_player_pitch = -PITCH_LIMIT;
     }
 
-    if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
-        s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS__WHITE.value);
-        NT_ASSERT(s_white_region_idx != NT_ATLAS_INVALID_REGION);
+    const float cy = cosf(s_player_yaw);
+    const float sy = sinf(s_player_yaw);
+    const float fwd_x = sy;
+    const float fwd_z = -cy;
+    const float right_x = cy;
+    const float right_z = sy;
 
-        s_button_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value);
-        NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
-
-        s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
-        NT_ASSERT(s_button_green_idx != NT_ATLAS_INVALID_REGION);
-
-        s_button_red_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_RED.value);
-        NT_ASSERT(s_button_red_idx != NT_ATLAS_INVALID_REGION);
-
-        s_icon_bunny_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_ICON_BUNNY.value);
-        NT_ASSERT(s_icon_bunny_idx != NT_ATLAS_INVALID_REGION);
-
-        nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
-
-        /* Patch each variant's bg_region from the templates. */
-        s_btn_standard = g_btn_standard_style;
-        s_btn_standard.idle.bg_region = s_button_blue_idx;
-        s_btn_standard.hover.bg_region = s_button_blue_idx;
-        s_btn_standard.pressed.bg_region = s_button_blue_idx;
-        s_btn_standard.disabled.bg_region = s_button_blue_idx;
-
-        s_btn_scale = g_btn_scale_style;
-        s_btn_scale.idle.bg_region = s_button_blue_idx;
-        s_btn_scale.hover.bg_region = s_button_blue_idx;
-        s_btn_scale.pressed.bg_region = s_button_blue_idx;
-        s_btn_scale.disabled.bg_region = s_button_blue_idx;
-
-        /* VISUAL-SWAP: blue idle/disabled, green hover/pressed. */
-        s_btn_swap = g_btn_swap_style;
-        s_btn_swap.idle.bg_region = s_button_blue_idx;
-        s_btn_swap.hover.bg_region = s_button_green_idx;
-        s_btn_swap.pressed.bg_region = s_button_red_idx;
-        s_btn_swap.disabled.bg_region = s_button_blue_idx;
-
-        s_btn_nopad = g_btn_nopad_style;
-        s_btn_nopad.idle.bg_region = s_button_blue_idx;
-        s_btn_nopad.hover.bg_region = s_button_blue_idx;
-        s_btn_nopad.pressed.bg_region = s_button_blue_idx;
-        s_btn_nopad.disabled.bg_region = s_button_blue_idx;
-
-        /* (g) SLICE9_SCALE row — same blue art, only slice9_scale differs. */
-        s_btn_s9_quarter = g_btn_s9_base;
-        s_btn_s9_quarter.idle.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.hover.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.pressed.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.disabled.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.slice9_scale = 0.25F;
-
-        s_btn_s9_one = g_btn_s9_base;
-        s_btn_s9_one.idle.bg_region = s_button_blue_idx;
-        s_btn_s9_one.hover.bg_region = s_button_blue_idx;
-        s_btn_s9_one.pressed.bg_region = s_button_blue_idx;
-        s_btn_s9_one.disabled.bg_region = s_button_blue_idx;
-        s_btn_s9_one.slice9_scale = 1.0F;
-
-        s_btn_s9_four = g_btn_s9_base;
-        s_btn_s9_four.idle.bg_region = s_button_blue_idx;
-        s_btn_s9_four.hover.bg_region = s_button_blue_idx;
-        s_btn_s9_four.pressed.bg_region = s_button_blue_idx;
-        s_btn_s9_four.disabled.bg_region = s_button_blue_idx;
-        s_btn_s9_four.slice9_scale = 4.0F;
-
-        /* All 7 styles share the demo atlas; per-state atlas inherits idle. */
-        s_btn_standard.idle.atlas = s_atlas_handle;
-        s_btn_scale.idle.atlas = s_atlas_handle;
-        s_btn_swap.idle.atlas = s_atlas_handle;
-        s_btn_nopad.idle.atlas = s_atlas_handle;
-        s_btn_s9_quarter.idle.atlas = s_atlas_handle;
-        s_btn_s9_one.idle.atlas = s_atlas_handle;
-        s_btn_s9_four.idle.atlas = s_atlas_handle;
-
-        s_atlas_bound = true;
-        nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white + icon_bunny)");
+    float mx = 0.0F;
+    float mz = 0.0F;
+    if (nt_input_key_is_down(NT_KEY_W)) {
+        mx += fwd_x;
+        mz += fwd_z;
+    }
+    if (nt_input_key_is_down(NT_KEY_S)) {
+        mx -= fwd_x;
+        mz -= fwd_z;
+    }
+    if (nt_input_key_is_down(NT_KEY_A)) {
+        mx -= right_x;
+        mz -= right_z;
+    }
+    if (nt_input_key_is_down(NT_KEY_D)) {
+        mx += right_x;
+        mz += right_z;
+    }
+    const float len = sqrtf((mx * mx) + (mz * mz));
+    if (len > 0.0001F) {
+        mx /= len;
+        mz /= len;
+        const float step = MOVE_SPEED * dt;
+        s_player_pos[0] += mx * step;
+        s_player_pos[2] += mz * step;
     }
 
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
-        nt_ui_set_font(s_ctx, 0U, s_font);
-        s_font_bound = true;
-        nt_log_info("ui_buttons_demo: font bound at slot 0");
+    /* Clamp inside the room with a small inset. */
+    const float inset = 0.5F;
+    const float hw = (ROOM_W * 0.5F) - inset;
+    const float hd = (ROOM_D * 0.5F) - inset;
+    if (s_player_pos[0] < -hw) {
+        s_player_pos[0] = -hw;
     }
+    if (s_player_pos[0] > hw) {
+        s_player_pos[0] = hw;
+    }
+    if (s_player_pos[2] < -hd) {
+        s_player_pos[2] = -hd;
+    }
+    if (s_player_pos[2] > hd) {
+        s_player_pos[2] = hd;
+    }
+}
+
+static void compute_vp(mat4 out_vp, float aspect) {
+    const float cy = cosf(s_player_yaw);
+    const float sy = sinf(s_player_yaw);
+    const float cp = cosf(s_player_pitch);
+    const float sp = sinf(s_player_pitch);
+    vec3 eye = {s_player_pos[0], s_player_pos[1], s_player_pos[2]};
+    vec3 fwd = {sy * cp, sp, -cy * cp};
+    vec3 center = {eye[0] + fwd[0], eye[1] + fwd[1], eye[2] + fwd[2]};
+    vec3 up = {0.0F, 1.0F, 0.0F};
+    mat4 view;
+    mat4 proj;
+    glm_lookat(eye, center, up, view);
+    glm_perspective(glm_rad(FOV_DEG), aspect, 0.1F, 100.0F, proj);
+    glm_mat4_mul(proj, view, out_vp);
 }
 // #endregion
 
-// #region grid cell sizing
-/* Each cell = vertical stack of title + sub + button. */
-#define CELL_W 360
-#define CELL_H 240
-#define BTN_W 320
-#define BTN_H 140
+// #region drawing
+static void draw_room(void) {
+    const float hw = ROOM_W * 0.5F;
+    const float hd = ROOM_D * 0.5F;
+    const float floor_col[4] = {0.13F, 0.13F, 0.16F, 1.0F};
+    const float ceil_col[4] = {0.10F, 0.10F, 0.16F, 1.0F};
+    const float wall_col[4] = {0.20F, 0.18F, 0.16F, 1.0F};
+    const float grid_col[4] = {0.30F, 0.30F, 0.36F, 1.0F};
+    const float floor_pos[3] = {0.0F, 0.0F, 0.0F};
+    const float floor_sz[2] = {ROOM_W, ROOM_D};
+    const float floor_rot[4] = {0.7071068F, 0.0F, 0.0F, 0.7071068F};
+    const float ceil_pos[3] = {0.0F, ROOM_H, 0.0F};
+    nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
+    nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
 
-/* Macro to declare the title + sub strip of a cell (callable inside a CLAY block).
- * The cell itself + the button slot are declared inline in the caller. */
-#define CELL_LABELS(title_str, sub_str)                                                                                                                                                                \
-    do {                                                                                                                                                                                               \
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {                                                        \
-            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), (title_str), &g_cell_title_style);                                                                                                        \
-        }                                                                                                                                                                                              \
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {                                                        \
-            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), (sub_str), &g_cell_sub_style);                                                                                                            \
-        }                                                                                                                                                                                              \
-    } while (0)
-
-/* Common layout for the per-cell column. */
-#define CELL_LAYOUT                                                                                                                                                                                    \
-    {                                                                                                                                                                                                  \
-        .layout = {                                                                                                                                                                                    \
-            .sizing = {CLAY_SIZING_FIXED(CELL_W), CLAY_SIZING_FIXED(CELL_H)},                                                                                                                          \
-            .padding = CLAY_PADDING_ALL(8),                                                                                                                                                            \
-            .layoutDirection = CLAY_TOP_TO_BOTTOM,                                                                                                                                                     \
-            .childGap = 6,                                                                                                                                                                             \
-            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}                                                                                                                                  \
-        }                                                                                                                                                                                              \
+    const int nx = (int)(ROOM_W / GRID_STEP) + 1;
+    const int nz = (int)(ROOM_D / GRID_STEP) + 1;
+    for (int ix = 0; ix < nx; ++ix) {
+        const float x = -hw + ((float)ix * GRID_STEP);
+        const float a[3] = {x, 0.002F, -hd};
+        const float b[3] = {x, 0.002F, hd};
+        nt_shape_renderer_line(a, b, grid_col);
+    }
+    for (int iz = 0; iz < nz; ++iz) {
+        const float z = -hd + ((float)iz * GRID_STEP);
+        const float a[3] = {-hw, 0.002F, z};
+        const float b[3] = {hw, 0.002F, z};
+        nt_shape_renderer_line(a, b, grid_col);
     }
 
-/* Common layout for the button slot inside a cell (centers the button). */
-#define BTN_SLOT_LAYOUT                                                                                                                                                                                \
-    {                                                                                                                                                                                                  \
-        .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER} }                      \
-    }
+    /* Front wall (-Z) — facing inside via +Z normal. */
+    const float wall_sz_fb[2] = {ROOM_W, ROOM_H};
+    const float front_pos[3] = {0.0F, ROOM_H * 0.5F, -hd};
+    nt_shape_renderer_rect(front_pos, wall_sz_fb, wall_col);
+    const float back_pos[3] = {0.0F, ROOM_H * 0.5F, hd};
+    nt_shape_renderer_rect(back_pos, wall_sz_fb, wall_col);
 
-/* Layout decl for button-begin — FIXED sizing without an inner CLAY wrap.
- * For clipping, attach .clip on a wrapping CLAY. */
-static const Clay_ElementDeclaration s_btn_decl = {
-    .layout =
-        {
-            .sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)},
-            .padding = CLAY_PADDING_ALL(8),
-            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
-        },
-};
-// #endregion
-
-// #region declare_reference_buttons (2 x 3 GRID)
-/* 6-variant grid (2x3). Each cell shows its title above the button. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void declare_reference_buttons(void) {
-    if (!s_btn_ids_ready) {
-        s_id_std = nt_ui_id("btn_standard");
-        s_id_scale = nt_ui_id("btn_scale");
-        s_id_swap = nt_ui_id("btn_swap");
-        s_id_icon = nt_ui_id("btn_icon");
-        s_id_icontext = nt_ui_id("btn_icontext");
-        s_id_disabled = nt_ui_id("btn_disabled");
-        s_id_baked = nt_ui_id("btn_baked");
-        s_id_s9_quarter = nt_ui_id("btn_s9_quarter");
-        s_id_s9_one = nt_ui_id("btn_s9_one");
-        s_id_s9_four = nt_ui_id("btn_s9_four");
-        s_btn_ids_ready = true;
-    }
-
-    /* Outer container = grid: TOP_TO_BOTTOM, two rows each LEFT_TO_RIGHT. */
-    CLAY({.id = CLAY_ID("ref-btn-grid"),
-          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 30, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-
-        /* ===== ROW 1: (a) STANDARD | (b) SCALE | (c) VISUAL SWAP ===== */
-        CLAY({.id = CLAY_ID("ref-btn-row1"),
-              .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-
-            // #region (a) STANDARD
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("STANDARD (eased)", "label swaps on press");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    /* PURE query before begin so label content reacts to press.
-                     * button_begin internally calls step; query is idempotent. */
-                    nt_ui_interaction_t in_std = nt_ui_query_interaction(s_ctx, s_id_std);
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, &s_btn_standard, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), in_std.pressed ? "pressed" : "click me", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_std++;
-                    }
-                }
-            }
-            // #endregion
-
-            // #region (b) SCALE
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("SCALE 0.80<->1.20", "+16 px touch padding");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, &s_btn_scale, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boom", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_scale++;
-                    }
-                }
-            }
-            // #endregion
-
-            // #region (c) VISUAL SWAP
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("VISUAL SWAP", "blue idle / green hover / red pressed");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, &s_btn_swap, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Swap", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_swap++;
-                    }
-                }
-            }
-            // #endregion
-        }
-
-        /* ===== ROW 2: (d) ICON ONLY | (e) ICON + TEXT | (f) DISABLED ===== */
-        CLAY({.id = CLAY_ID("ref-btn-row2"),
-              .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-
-            // #region (d) ICON ONLY
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("ICON ONLY", "no padding");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, &s_btn_nopad, &s_btn_decl, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
-                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style, NULL);
-                    }
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_icon++;
-                    }
-                }
-            }
-            // #endregion
-
-            // #region (e) ICON + TEXT
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("ICON + TEXT", "no padding");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    /* Inline ICON + TEXT decl: same sizing as s_btn_decl but
-                     * LEFT_TO_RIGHT with childGap so icon and label sit side-by-side. */
-                    static const Clay_ElementDeclaration s_btn_decl_icontext = {
-                        .layout =
-                            {
-                                .sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)},
-                                .padding = CLAY_PADDING_ALL(8),
-                                .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                                .childGap = 16,
-                                .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
-                            },
-                    };
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, &s_btn_nopad, &s_btn_decl_icontext, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
-                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style, NULL);
-                    }
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_icontext++;
-                    }
-                }
-            }
-            // #endregion
-
-            // #region (f) DISABLED
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("DISABLED (enabled=false)", "+16 px (no hover)");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, &s_btn_standard, &s_btn_decl, false);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Locked", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_disabled++; /* unreachable while disabled -- proves the gate */
-                    }
-                }
-            }
-            // #endregion
-        }
-
-        // #region (g) BAKED TRANSFORM
-        /* Baked offset/rotation/scale — proves inverse-affine hit-test on a
-         * statically transformed widget. 80 px outer padding avoids overlap. */
-        CLAY({.id = CLAY_ID("ref-btn-baked-section"),
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
-                         .padding = {.left = 0, .right = 0, .top = 30, .bottom = 30},
-                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 12,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "BAKED TRANSFORM (idle has offset+rotation+scale; click should still work)", &g_cell_title_style);
-            }
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "offset=(+60,-20) rotation=25 deg scale=(1.15,0.85)", &g_cell_sub_style);
-            }
-            CLAY(BTN_SLOT_LAYOUT) {
-                const nt_ui_transform_t baked = {
-                    .offset_x = 60.0F,
-                    .offset_y = -20.0F,
-                    .rotation_z = 25.0F * 0.017453292F,
-                    .scale_x = 1.15F,
-                    .scale_y = 0.85F,
-                    .scale_z = 1.0F,
-                };
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, &s_btn_standard, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_baked++;
-                    }
-                }
-            }
-        }
-        // #endregion
-
-        // #region (g) SLICE9_SCALE row (0.25 / 1.0 / 4.0)
-        /* Identical size + art; only slice9_scale differs: 0.25 → tiny corners,
-         * 1.0 → atlas default, 4.0 → chunky corners. */
-        CLAY({.id = CLAY_ID("ref-btn-row-s9"),
-              .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("SCALE 0.25", "tiny corners");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_quarter, &s_btn_s9_quarter, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "0.25x", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_s9_quarter++;
-                    }
-                }
-            }
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("SCALE 1.0", "atlas default");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_one, &s_btn_s9_one, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1.0x", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_s9_one++;
-                    }
-                }
-            }
-            CLAY(CELL_LAYOUT) {
-                CELL_LABELS("SCALE 4.0", "chunky corners");
-                CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_four, &s_btn_s9_four, &s_btn_decl, true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "4.0x", &g_btn_label_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_clicks_s9_four++;
-                    }
-                }
-            }
-        }
-        // #endregion
-    }
+    const float side_rot[4] = {0.0F, 0.7071068F, 0.0F, 0.7071068F};
+    const float wall_sz_lr[2] = {ROOM_D, ROOM_H};
+    const float left_pos[3] = {-hw, ROOM_H * 0.5F, 0.0F};
+    nt_shape_renderer_rect_rot(left_pos, wall_sz_lr, side_rot, wall_col);
+    const float right_pos[3] = {hw, ROOM_H * 0.5F, 0.0F};
+    nt_shape_renderer_rect_rot(right_pos, wall_sz_lr, side_rot, wall_col);
 }
-// #endregion
 
-// #region input_handling
-/* Per-frame: arrows translate, PageUp/Dn scale, Q/E rotate, R reset,
- * D toggles the inspector (single master debug key).
- * Press-edge for one-shots; held for continuous arrows. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void handle_transform_and_debug_input(void) {
-#ifndef NT_PLATFORM_WEB
-    /* Translation (continuous). 8 px/frame is brisk but controllable. */
-    const float tstep = 8.0F;
-    if (nt_input_key_is_down(NT_KEY_ARROW_LEFT)) {
-        s_xform_tx -= tstep;
+static void draw_shape(void) {
+    const float pos[3] = {0.0F, ROOM_H * 0.5F, 0.0F};
+    versor q;
+    vec3 axis = {0.0F, 1.0F, 0.0F};
+    glm_quatv(q, s_shape_yaw, axis);
+    const float rot[4] = {q[0], q[1], q[2], q[3]};
+    const float *col = s_shape_colors[s_shape_kind];
+    const float wire_col[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+    switch (s_shape_kind) {
+    case SHAPE_CUBE: {
+        const float sz[3] = {1.6F, 1.6F, 1.6F};
+        nt_shape_renderer_cube_rot(pos, sz, rot, col);
+        nt_shape_renderer_cube_wire_rot(pos, sz, rot, wire_col);
+        break;
     }
-    if (nt_input_key_is_down(NT_KEY_ARROW_RIGHT)) {
-        s_xform_tx += tstep;
-    }
-    if (nt_input_key_is_down(NT_KEY_ARROW_UP)) {
-        s_xform_ty -= tstep;
-    }
-    if (nt_input_key_is_down(NT_KEY_ARROW_DOWN)) {
-        s_xform_ty += tstep;
-    }
-    /* Scale (one-shot press edge: PageUp / PageDown). 0.05 step, clamp 0.5..2.0. */
-    if (nt_input_key_is_pressed(NT_KEY_PAGE_UP)) {
-        s_xform_scale += 0.05F;
-    }
-    if (nt_input_key_is_pressed(NT_KEY_PAGE_DOWN)) {
-        s_xform_scale -= 0.05F;
-    }
-    if (s_xform_scale < 0.5F) {
-        s_xform_scale = 0.5F;
-    }
-    if (s_xform_scale > 2.0F) {
-        s_xform_scale = 2.0F;
-    }
-    /* Rotation (one-shot, 5 deg). */
-    if (nt_input_key_is_pressed(NT_KEY_Q)) {
-        s_xform_deg -= 5.0F;
-    }
-    if (nt_input_key_is_pressed(NT_KEY_E)) {
-        s_xform_deg += 5.0F;
-    }
-    /* Reset. */
-    if (nt_input_key_is_pressed(NT_KEY_R)) {
-        s_xform_tx = 0.0F;
-        s_xform_ty = 0.0F;
-        s_xform_scale = 1.0F;
-        s_xform_deg = 0.0F;
-    }
-#endif
-    /* D toggles the inspector. Available on web too — arrow/page/Q/E above are
-     * native-only because they conflict with browser scroll/navigation, D doesn't.
-     * No-op when NT_UI_DEBUG_TOOLS=OFF (header inline stub). */
-    if (nt_input_key_is_pressed(NT_KEY_D)) {
-        const bool now_on = !nt_ui_inspector_is_active(s_ctx);
-        nt_ui_inspector_set_active(s_ctx, now_on);
-        nt_log_info("ui_buttons_demo: inspector %s", now_on ? "ON" : "OFF");
+    case SHAPE_SPHERE:
+        nt_shape_renderer_sphere_rot(pos, 1.0F, rot, col);
+        nt_shape_renderer_sphere_wire_rot(pos, 1.0F, rot, wire_col);
+        break;
+    case SHAPE_CAPSULE:
+        nt_shape_renderer_capsule_rot(pos, 0.5F, 2.0F, rot, col);
+        nt_shape_renderer_capsule_wire_rot(pos, 0.5F, 2.0F, rot, wire_col);
+        break;
+    default:
+        break;
     }
 }
 // #endregion
 
 // #region frame
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_stats_frame_begin();
     nt_window_poll();
     nt_input_poll();
-    nt_mem_scratch_reset();
+    const float dt = g_nt_app.dt;
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif
-
-    handle_transform_and_debug_input();
-
-    /* Orbit camera: RIGHT-mouse drag (LEFT is reserved for UI buttons), wheel = zoom. */
-    if (nt_input_mouse_is_down(NT_BUTTON_RIGHT)) {
-        s_cam_yaw += g_nt_input.pointers[0].dx * 0.005F;
-        s_cam_pitch += g_nt_input.pointers[0].dy * 0.005F;
-        if (s_cam_pitch > 1.2F) {
-            s_cam_pitch = 1.2F;
-        }
-        if (s_cam_pitch < -1.2F) {
-            s_cam_pitch = -1.2F;
-        }
+    if (nt_input_key_is_pressed(NT_KEY_R)) {
+        player_reset();
     }
-    const float wheel = g_nt_input.pointers[0].wheel_dy;
-    if (fabsf(wheel) > 0.001F) {
-        s_cam_dist *= (1.0F - wheel * 0.05F);
-        if (s_cam_dist < 0.3F) {
-            s_cam_dist = 0.3F;
-        }
-        if (s_cam_dist > 4.0F) {
-            s_cam_dist = 4.0F;
-        }
+    if (nt_input_key_is_pressed(NT_KEY_1)) {
+        s_shape_kind = SHAPE_CUBE;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_2)) {
+        s_shape_kind = SHAPE_SPHERE;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_3)) {
+        s_shape_kind = SHAPE_CAPSULE;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_4)) {
+        s_speed_kind = SPEED_STOP;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_5)) {
+        s_speed_kind = SPEED_SLOW;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_6)) {
+        s_speed_kind = SPEED_MED;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_7)) {
+        s_speed_kind = SPEED_FAST;
     }
 
-    nt_resource_step();
-    nt_material_step();
-
-    try_bind_resources();
+    player_update(dt);
+    s_shape_yaw += s_speed_table[s_speed_kind] * dt;
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
-
-    /* 3D camera: orbit around the UI panel. View origin (0,0,0) is the Clay-layout (0,0) corner.
-     * UI lives on the Y=0..fb_h, X=0..fb_w plane in world space (Clay Y-down). For a 60° vertical
-     * FOV looking at the panel center, distance ≈ (fb_h/2) / tan(30°) ≈ fb_h × 0.866. */
-    const float panel_cx = fb_w * 0.5F;
-    const float panel_cy = fb_h * 0.5F;
-    /* tan(30°) ≈ 0.577 → at distance = fb_h/(2·tan(30°)) ≈ fb_h·0.866 the panel fills view. */
-    const float base_dist = fb_h * 0.866F;
-    const float cam_dist_world = base_dist * s_cam_dist;
-    const float cam_x = panel_cx + (cam_dist_world * cosf(s_cam_pitch) * sinf(s_cam_yaw));
-    const float cam_y = panel_cy + (cam_dist_world * sinf(s_cam_pitch));
-    const float cam_z = -cam_dist_world * cosf(s_cam_pitch) * cosf(s_cam_yaw);
-    vec3 eye = {cam_x, cam_y, cam_z};
-    vec3 center = {panel_cx, panel_cy, 0.0F};
-    vec3 up = {0.0F, -1.0F, 0.0F}; /* Clay Y-down: world +Y is screen down → camera "up" is -Y. */
-
     const float aspect = (fb_h > 0.0F) ? (fb_w / fb_h) : 1.0F;
-    mat4 view_m;
-    mat4 proj_m;
-    mat4 vp;
-    glm_lookat(eye, center, up, view_m);
-    glm_perspective(glm_rad(60.0F), aspect, 1.0F, base_dist * 10.0F, proj_m);
-    glm_mat4_mul(proj_m, view_m, vp);
 
-    nt_frame_uniforms_t uniforms = {0};
-    memcpy(uniforms.view_proj, vp, 64);
-    memcpy(uniforms.view, view_m, 64);
-    memcpy(uniforms.proj, proj_m, 64);
-    uniforms.resolution[0] = fb_w;
-    uniforms.resolution[1] = fb_h;
-    uniforms.resolution[2] = (fb_w > 0.0F) ? (1.0F / fb_w) : 0.0F;
-    uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
-    uniforms.near_far[0] = -1.0F;
-    uniforms.near_far[1] = 1.0F;
+    mat4 vp;
+    compute_vp(vp, aspect);
 
     nt_gfx_begin_frame();
-    nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        nt_sprite_renderer_restore_gpu();
-        nt_text_renderer_restore_gpu();
-        s_atlas_bound = false;
-        s_font_bound = false;
+        nt_shape_renderer_restore_gpu();
     }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {0.07F, 0.07F, 0.09F, 1.0F},
-        .clear_depth = 1.0F,
-    });
+    const float cam_pos[3] = {s_player_pos[0], s_player_pos[1], s_player_pos[2]};
+    nt_shape_renderer_set_vp((const float *)vp);
+    nt_shape_renderer_set_cam_pos(cam_pos);
+    nt_shape_renderer_set_depth(true);
 
-    nt_font_step();
-
-    const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
-    const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
-
-    if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
-        /* 3D ctx skips the 2D scale-pointer step — walker raycasts using physical screen coords. */
-        const nt_pointer_t mouse_phys = g_nt_input.pointers[0];
-        nt_ui_begin(s_ctx, fb_w, fb_h, g_nt_app.dt, &mouse_phys, 1);
-        /* Per-frame view_proj setter is mandatory in use_raycast_input mode. */
-        nt_ui_set_view_proj(s_ctx, (const float *)vp);
-
-        // #region status + help text
-        char status_text[360];
-        const uint32_t total_clicks = s_clicks_std + s_clicks_scale + s_clicks_swap + s_clicks_icon + s_clicks_icontext + s_clicks_baked;
-        (void)snprintf(status_text, sizeof status_text, "clicks: Std=%u Scale=%u Swap=%u Icon=%u IconTxt=%u Disabled=%u Baked=%u (total=%u)   tx=%.0f ty=%.0f s=%.2f deg=%.0f   inspector=%s",
-                       s_clicks_std, s_clicks_scale, s_clicks_swap, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, s_clicks_baked, total_clicks, (double)s_xform_tx, (double)s_xform_ty,
-                       (double)s_xform_scale, (double)s_xform_deg, nt_ui_inspector_is_active(s_ctx) ? "ON" : "off");
-        const char *help_text = "D = debug  |  arrows/PgUp-Dn/Q-E/R transform  |  Esc quit";
-        // #endregion
-
-        // #region clay declaration
-        const nt_ui_transform_t row_xform = {
-            .offset_x = s_xform_tx,
-            .offset_y = s_xform_ty,
-            .rotation_z = s_xform_deg * 0.017453292F, /* deg -> rad */
-            .scale_x = s_xform_scale,
-            .scale_y = s_xform_scale,
-            .scale_z = 1.0F,
-        };
-
-        /* Y_CENTER alignment so a portrait-resized window keeps content
-         * vertically centered instead of clamping to the top edge. */
-        CLAY({.id = CLAY_ID("root"),
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
-                         .padding = CLAY_PADDING_ALL(20),
-                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 18,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {18.0F, 18.0F, 22.0F, 255.0F}}) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
-            }
-
-            /* Runtime transform around the grid — declarative on a wrapping
-             * CLAY block. build_tree composes it into every descendant's
-             * tree_baked, so both renderer and inverse-affine hit-test see it. */
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .userData = (void *)NT_UI_DATA_XFORM(0U, &row_xform, 1.0F)}) {
-                declare_reference_buttons();
-            }
-
-            /* Help bar pinned at the bottom. */
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), help_text, &g_help_style);
-            }
-        }
-        // #endregion
-
-        nt_ui_end(s_ctx);
-
-        /* 3D ctx renders to physical viewport; game's view_proj already maps Clay → clip. */
-        nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
-        nt_ui_walk(s_ctx, &target);
-
-        // #region nt_ui_inspector overlay
-        /* Panel emit happened in nt_ui_end; this paints the single-element hit-zone. */
-        nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
-        // #endregion
-
-        // #region stats overlay
-        {
-            mat4 stats_model;
-            glm_mat4_identity(stats_model);
-            glm_translate(stats_model, (vec3){10.0F, fb_h - 20.0F, 0.0F});
-            const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
-            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
-            nt_text_renderer_flush();
-        }
-        // #endregion
-    }
+    draw_room();
+    draw_shape();
+    nt_shape_renderer_flush();
 
     nt_gfx_end_pass();
-    nt_gfx_end_segment();
     nt_gfx_end_frame();
-    nt_stats_frame_end();
-
     nt_window_swap_buffers();
 }
 // #endregion
 
-// #region main + init
+// #region main
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
     nt_engine_config_t config = {0};
-    config.app_name = "ui_buttons_demo";
+    config.app_name = "ui_3d_demo";
     config.version = 1;
-
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
     }
 
-    /* Bigger logical window: 1600x1200 so the 2 x 3 grid + BAKED TRANSFORM
-     * section + status/help bars all fit without scaling. */
-    g_nt_window.width = 1600;
-    g_nt_window.height = 1200;
+    g_nt_window.width = 1280;
+    g_nt_window.height = 800;
     nt_window_init();
     nt_input_init();
-
-    nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    nt_gfx_init(&gfx_desc);
-    nt_gfx_register_global_block("Globals", 0);
-
-    nt_http_init();
-    nt_fs_init();
-    nt_hash_init(&(nt_hash_desc_t){0});
-    nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
-
-    nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
-    nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
-    nt_atlas_init();
-
-    nt_material_init(&(nt_material_desc_t){.max_materials = 4});
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
-
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
-    nt_text_renderer_init();
-
-    nt_ui_module_init();
-    /* Phase 5 switch: walker raycasts pointer through the game-supplied perspective view_proj
-     * instead of 2D inverse-affine. Per-frame nt_ui_set_view_proj is mandatory before walk. */
-    nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
-    ui_desc.use_raycast_input = true;
-    s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
-    NT_ASSERT(s_ctx != NULL && "ui_3d_demo: failed to create UI context");
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .depth = true});
+    nt_shape_renderer_init();
 
     g_nt_app.target_dt = 0.0F;
-
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
-
-    s_pack_id = nt_hash32_str("ui_buttons_demo");
-    nt_resource_mount(s_pack_id, 100);
-#ifdef NT_CDN_URL
-    nt_resource_load_auto(s_pack_id, NT_CDN_URL "/ui_buttons_demo/ui_buttons_demo.ntpack");
-#else
-    nt_resource_load_auto(s_pack_id, "assets/ui_buttons_demo.ntpack");
-#endif
-
-    s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
-    s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
-    s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
-    s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
-    s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_BUTTONS_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
-
-    s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
-        .blend_mode = NT_BLEND_MODE_ALPHA,
-        .depth_test = false,
-        .depth_write = false,
-        .cull_mode = NT_CULL_NONE,
-        .label = "ui_buttons_demo_sprite",
-    });
-    s_text_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_text_vs_handle,
-        .fs = s_text_fs_handle,
-        .blend_mode = NT_BLEND_MODE_ALPHA,
-        .depth_test = false,
-        .depth_write = false,
-        .cull_mode = NT_CULL_NONE,
-        .label = "ui_buttons_demo_text",
-    });
-
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
-
-    s_font = nt_font_create(&(nt_font_create_desc_t){
-        .curve_texture_width = 1024,
-        .curve_texture_height = 512,
-        .band_texture_height = 256,
-        .band_count = 8,
-        .measure_cache_size = 256,
-    });
-
-    nt_resource_set_activate_time_budget(0);
-
-    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
-    nt_stats_init(&stats_desc);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif
 
-    nt_log_info("ui_buttons_demo: starting (D=inspector, arrows/PgUp-Dn/Q-E/R transform, Esc quit)");
+    nt_log_info("ui_3d_demo: PASS 1 — WASD walk, RMB look, Q/E yaw, 1-3 shape, 4-7 speed, R reset, Esc quit");
 
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_ui_destroy_context(s_ctx);
-    nt_ui_module_shutdown();
-    nt_text_renderer_shutdown();
-    nt_sprite_renderer_shutdown();
-    nt_font_destroy(s_font);
-    nt_font_shutdown();
-    nt_material_destroy(s_sprite_material);
-    nt_material_destroy(s_text_material);
-    nt_material_shutdown();
-    nt_stats_shutdown();
-    nt_mem_scratch_shutdown();
-    nt_resource_shutdown();
-    nt_fs_shutdown();
-    nt_http_shutdown();
-    nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
+    nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();
