@@ -318,11 +318,17 @@ static void draw_hud(float fb_w, float fb_h) {
         y -= HUD_SIZE + 2.0F;
     }
 
-    /* Top-right: current shape + speed status. */
+    /* Top-right: FPS + current shape + speed status (stacked, top down). */
+    const float right_x = fb_w - 360.0F;
+    float ry = fb_h - HUD_SIZE - 6.0F;
+    char fps_line[64];
+    (void)snprintf(fps_line, sizeof fps_line, "fps: %5.1f   cpu: %.2f ms", (double)nt_stats_get_fps(), (double)nt_stats_get_cpu_ms());
+    draw_hud_block(fps_line, right_x, ry, HUD_SIZE, white);
+    ry -= HUD_SIZE + 2.0F;
+
     char status[64];
     (void)snprintf(status, sizeof status, "shape: %-7s   speed: %s", s_shape_labels[s_shape_kind], s_speed_labels[s_speed_kind]);
-    /* Right-align approximation: place at fixed x near right edge. */
-    draw_hud_block(status, fb_w - 360.0F, fb_h - HUD_SIZE - 6.0F, HUD_SIZE, accent);
+    draw_hud_block(status, right_x, ry, HUD_SIZE, accent);
 
     /* Bottom-left: debug overlay when toggled. */
     if (s_debug_overlay) {
