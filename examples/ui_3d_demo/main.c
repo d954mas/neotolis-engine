@@ -39,6 +39,7 @@
 #include "time/nt_time.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "window/nt_window.h"
 
@@ -412,11 +413,11 @@ static void declare_panels(void) {
     ensure_ids();
     /* Wall anchor world coords. Inset 0.05 m from wall so panels don't z-fight. */
     const float hw = ROOM_W * 0.5F;
-    const float wall_y = ROOM_H * 0.55F;
-    /* Default panel face normal is +Z. Left wall sits at world -X with face toward +X (room
-     * interior), so yaw +π/2. Right wall is opposite (yaw -π/2). */
-    const nt_ui_transform_t xform_left = make_wall_xform(-hw + 0.05F, wall_y, 0.0F, NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
-    const nt_ui_transform_t xform_right = make_wall_xform(hw - 0.05F, wall_y, 0.0F, -NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
+    const float wall_y = 2.5F; /* slightly above eye level (1.7 m) so player can read both panels */
+    /* After rotation_x=π the panel's normal points -Z. Left wall (world -X side) needs the
+     * face toward +X, so yaw -π/2 maps -Z to +X. Right wall is mirrored. */
+    const nt_ui_transform_t xform_left = make_wall_xform(-hw + 0.05F, wall_y, 0.0F, -NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
+    const nt_ui_transform_t xform_right = make_wall_xform(hw - 0.05F, wall_y, 0.0F, NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
 
     /* Root: full-fb invisible group hosting both panels. Sizing GROW so Clay knows screen extent. */
     CLAY({.id = CLAY_ID("ui3d-root"),
@@ -504,7 +505,8 @@ static void draw_hud(float fb_w, float fb_h) {
         "R             reset position",
         "1 / 2 / 3     shape  (cube / sphere / capsule)",
         "4 / 5 / 6 / 7 speed  (stop / slow / medium / fast)",
-        "F1            debug overlay",
+        "F1            debug overlay (pos / fps)",
+        "F2            UI inspector (sidebar)",
         "Esc           quit",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
@@ -525,15 +527,17 @@ static void draw_hud(float fb_w, float fb_h) {
     draw_hud_block(status, right_x, ry, HUD_SIZE, accent);
 
     if (s_debug_overlay) {
+        /* Anchor the debug block ABOVE the bottom; nt_stats is ~6 lines so allow ~110 px. */
+        const float dbg_y_top = 130.0F;
         char dbg[256];
         const float yaw_deg = s_player_yaw * 57.29578F;
         const float pitch_deg = s_player_pitch * 57.29578F;
         (void)snprintf(dbg, sizeof dbg, "pos: (%+.2f, %+.2f, %+.2f)   yaw: %+.1f°   pitch: %+.1f°", (double)s_player_pos[0], (double)s_player_pos[1], (double)s_player_pos[2], (double)yaw_deg,
                        (double)pitch_deg);
-        draw_hud_block(dbg, left_x, 32.0F, HUD_SIZE, dim);
+        draw_hud_block(dbg, left_x, dbg_y_top, HUD_SIZE, dim);
         mat4 stats_model;
         glm_mat4_identity(stats_model);
-        glm_translate(stats_model, (vec3){left_x, 12.0F, 0.0F});
+        glm_translate(stats_model, (vec3){left_x, dbg_y_top - HUD_SIZE - 6.0F, 0.0F});
         const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
         nt_stats_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
     }
@@ -562,6 +566,9 @@ static void frame(void) {
     }
     if (nt_input_key_is_pressed(NT_KEY_F1)) {
         s_debug_overlay = !s_debug_overlay;
+    }
+    if (nt_input_key_is_pressed(NT_KEY_F2)) {
+        nt_ui_inspector_set_active(s_ctx, !nt_ui_inspector_is_active(s_ctx));
     }
     if (nt_input_key_is_pressed(NT_KEY_1)) {
         s_shape_kind = SHAPE_CUBE;
@@ -672,6 +679,10 @@ static void frame(void) {
 
         const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
         nt_ui_walk(s_ctx, &target);
+        /* Flush UI draws under VP_3D BEFORE switching uniforms; otherwise labels emitted
+         * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
+        nt_sprite_renderer_flush();
+        nt_text_renderer_flush();
     }
 
     /* HUD: ortho VP. */
