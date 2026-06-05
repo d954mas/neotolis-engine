@@ -30,6 +30,7 @@
 #include "nt_pack_format.h"
 #include "turkic_jam_assets.h"
 
+#include "aul.h"
 #include "config.h"
 #include "game.h"
 #include "i18n.h"
@@ -374,6 +375,7 @@ int main(int argc, char *argv[]) {
 
     tj_config_load(config_dir);
     nt_log_info("turkic_jam: config '%s' -> %d tiles, %d heirs, %d cells", config_dir, g_config.tile_count, g_config.heir_count, g_config.path_cells);
+    tj_aul_load();
 
     /* Debug/automation command bus (no-op unless NT_DEVAPI_ENABLED). */
     nt_devapi_init();

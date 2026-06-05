@@ -174,6 +174,10 @@ void tj_run_tick(tj_run_t *r, float dt) {
             }
             tj_journal_push(TJ_LOG_BIG, "Круг %d пройден.", r->circle - 1);
             roll_circle(r);
+            if (r->hand < 0 && g_config.tile_count > 0) {
+                r->hand = rng_range_int(0, g_config.tile_count - 1);
+                tj_journal_push(TJ_LOG_GOOD, "Найдена карта: %s", g_config.tiles[r->hand].name);
+            }
         }
         resolve_cell(r);
     }

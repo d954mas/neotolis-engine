@@ -10,11 +10,13 @@
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
 
+#include "aul.h"
 #include "config.h"
 #include "game.h"
 #include "i18n.h"
 #include "journal.h"
 #include "sim.h"
+#include "ui/nt_ui_label.h"
 #include "ui_kit.h"
 #include "view.h"
 
@@ -102,8 +104,12 @@ static void on_update(game_ctx_t *g, float dt) {
     if (tj_button(g, "game_give_up", i18n(T_LOSE), 240, 58, TJ_BTN_DANGER)) {
         s_run.alive = false;
     }
+    if (s_run.hand >= 0) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "В руке карта — кликни свободный слот, чтобы её поставить", &TJ_STYLE_HINT);
+    }
 
     if (!s_run.alive) {
+        tj_aul_add_from_run(s_run.supplies, s_run.wisdom, s_run.glory); /* bank into the aul (meta) */
         g->score = s_run.circle;
         if (g->score > g->best) {
             g->best = g->score;
