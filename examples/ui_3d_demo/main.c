@@ -70,7 +70,7 @@
 #define EYE_HEIGHT 1.7F
 
 #define SCRATCH_ARENA_SIZE ((size_t)256 * 1024)
-#define UI_ARENA_SIZE ((size_t)512 * 1024)
+#define UI_ARENA_SIZE ((size_t)4 * 1024 * 1024)
 
 #define HUD_SIZE 16.0F
 #define HUD_TITLE_SIZE 20.0F
@@ -376,8 +376,8 @@ static void try_bind_resources(void) {
 
 // #region UI panels
 /* Wall-mount XFORM: panel local Clay-bbox center (cx,cy,0) maps to world `wx,wy,wz`.
- * Y-axis scale is negated to flip Clay's Y-down into world Y-up. Rotation rotates the panel
- * face around world Y so it faces the room interior. */
+ * Engine asserts positive scale, so Y-flip (Clay Y-down → world Y-up) goes through rotation_x=π.
+ * Yaw rotates the panel face around world Y to face the room interior. */
 static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw, float panel_w_px, float panel_h_px) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     const float cx = panel_w_px * 0.5F;
@@ -385,9 +385,10 @@ static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw
     t.offset_x = wx - cx;
     t.offset_y = wy - cy;
     t.offset_z = wz;
+    t.rotation_x = NT_PI;
     t.rotation_y = yaw;
     t.scale_x = PANEL_SCALE;
-    t.scale_y = -PANEL_SCALE; /* flip Clay Y-down → world Y-up */
+    t.scale_y = PANEL_SCALE;
     t.scale_z = PANEL_SCALE;
     return t;
 }
@@ -412,10 +413,10 @@ static void declare_panels(void) {
     /* Wall anchor world coords. Inset 0.05 m from wall so panels don't z-fight. */
     const float hw = ROOM_W * 0.5F;
     const float wall_y = ROOM_H * 0.55F;
-    /* Left wall: panel face normal points +X; rotate -90° around Y so Clay +X (panel-right)
-     * maps to world +Z. Right wall: opposite. */
-    const nt_ui_transform_t xform_left = make_wall_xform(-hw + 0.05F, wall_y, 0.0F, -NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
-    const nt_ui_transform_t xform_right = make_wall_xform(hw - 0.05F, wall_y, 0.0F, NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
+    /* Default panel face normal is +Z. Left wall sits at world -X with face toward +X (room
+     * interior), so yaw +π/2. Right wall is opposite (yaw -π/2). */
+    const nt_ui_transform_t xform_left = make_wall_xform(-hw + 0.05F, wall_y, 0.0F, NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
+    const nt_ui_transform_t xform_right = make_wall_xform(hw - 0.05F, wall_y, 0.0F, -NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
 
     /* Root: full-fb invisible group hosting both panels. Sizing GROW so Clay knows screen extent. */
     CLAY({.id = CLAY_ID("ui3d-root"),
@@ -731,6 +732,7 @@ int main(int argc, char *argv[]) {
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     ui_desc.use_raycast_input = true;
+    nt_log_info("ui_3d_demo: UI arena %zu KB, min required %zu KB", sizeof s_ui_arena / 1024U, nt_ui_min_arena_size(&ui_desc) / 1024U);
     s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ctx != NULL && "ui_3d_demo: failed to create UI context");
 
