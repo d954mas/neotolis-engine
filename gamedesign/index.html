@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Neotolis GDD Editor</title>
-    <link rel="stylesheet" href="styles.css?v=20260606-ftue-production-2" />
+    <link rel="stylesheet" href="styles.css?v=20260606-narrative-baseline-1" />
   </head>
   <body>
     <div id="app" class="app">
@@ -83,6 +83,31 @@
                 <span><i class="legend-slot"></i>пустыня</span>
                 <span><i class="legend-memory"></i>Тамга</span>
               </div>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">После ревью документов</p>
+              <h2>Актуально сейчас</h2>
+            </div>
+            <div class="layer-grid">
+              <article>
+                <strong>FTUE baseline</strong>
+                <p>“Песок стирает следы.” → “Путь ждет первого путника.” → “Отправиться в путь.”</p>
+              </article>
+              <article>
+                <strong>Дорога и field</strong>
+                <p>Тайлы игрока сохраняют смысл внутри забега. Дорога не должна ломать причинность карт каждый круг.</p>
+              </article>
+              <article>
+                <strong>Следующий Code-приоритет</strong>
+                <p>Road buffer, field build, подсветка зон, invalid feedback, затем log.tsv, камера и battle bubble.</p>
+              </article>
+              <article>
+                <strong>Источник правды</strong>
+                <p>Короткий контракт: gamedesign/docs/28_current_source_of_truth.md. Старые спорящие заметки считаются устаревшими.</p>
+              </article>
             </div>
           </section>
 
@@ -408,8 +433,8 @@
               </article>
               <article class="tile-card risk-card">
                 <span>roadside</span>
-                <h3>Волчий след</h3>
-                <p>Ближний риск на маршруте. Body-проверка, потеря Сил при провале, Слава за риск.</p>
+                <h3>Звериная тропа</h3>
+                <p>Ближний риск на маршруте. Игрок ставит опасную тропу, а на дороге проявляется волчий след: Body-проверка, Слава за риск.</p>
               </article>
               <article class="tile-card field-risk">
                 <span>field</span>
@@ -426,6 +451,34 @@
 
           <section class="visual-section">
             <div class="section-title">
+              <p class="eyebrow">Narrative baseline</p>
+              <h2>Тексты P0 для карт и событий</h2>
+            </div>
+            <div class="layer-grid">
+              <article>
+                <strong>Саксаул</strong>
+                <p>Тень и хворост у пути. Силы +1. Запасы +1.</p>
+              </article>
+              <article>
+                <strong>Юрта</strong>
+                <p>Малая стоянка в пустыне. Запасы аула +2 за круг.</p>
+              </article>
+              <article>
+                <strong>Камень Тамги</strong>
+                <p>Знак памяти в песке. Мудрость +2.</p>
+              </article>
+              <article>
+                <strong>Звериная тропа</strong>
+                <p>Опасный след у дороги. Проверка Body. Слава +2. Волчий след показываем как маркер срабатывания, а не как название карты.</p>
+              </article>
+            </div>
+            <div class="callout-line">
+              Рабочий источник текстов: gamedesign/docs/30_narrative_content_baseline.md
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
               <p class="eyebrow">Первые синергии</p>
               <h2>Делаем похоже по функции, но в нашей теме</h2>
             </div>
@@ -433,10 +486,10 @@
               <div><strong>Саксаул + Юрта</strong><span>Малая стоянка: немного Запасов и Силы.</span></div>
               <div><strong>Оазис + Юрта</strong><span>Стоянка: больше Запасов и восстановление.</span></div>
               <div><strong>Камень Тамги + Юрта</strong><span>Родовой знак: Мудрость и шанс карты памяти.</span></div>
-              <div><strong>Волчий след + Сторожевая вышка</strong><span>Охотничья тропа: Слава, ниже потеря Сил.</span></div>
+              <div><strong>Звериная тропа + Сторожевая вышка</strong><span>Охотничья тропа: Слава, ниже потеря Сил.</span></div>
               <div><strong>Мираж + Камень Тамги</strong><span>Видение: Mind-риск, шанс редкой карты.</span></div>
               <div><strong>Песчаная буря + Оазис</strong><span>Засыпанный источник: опасность Spirit, большая награда.</span></div>
-              <div><strong>2 Волчьих следа рядом</strong><span>Стая: плохая синергия от жадности.</span></div>
+              <div><strong>2 Звериные тропы рядом</strong><span>Стая: плохая синергия от жадности.</span></div>
             </div>
           </section>
         </section>
@@ -453,25 +506,149 @@
                 <span class="fire"></span>
               </div>
               <span class="first-traveler"></span>
-              <p class="intro-caption">Песок стирает следы. Род хранит имена.</p>
+              <p class="intro-caption">Песок стирает следы. Путь ждет первого путника.</p>
             </div>
             <div class="hero-copy">
               <p class="eyebrow">Первый опыт игрока</p>
-              <h2>Темный экран, короткая песнь, костер, первый путник.</h2>
+              <h2>Сначала доказываем один кусок: герой вышел, Саксаул поставлен, эффект сработал позже.</h2>
               <p>
-                FTUE начинается не с меню систем, а с настроения. Игрок видит пустыню,
-                маленький аул и костер. От костра выходит первый наследник, доходит до
-                первой клетки дороги и только потом начинает круг.
+                Текущий фокус FTUE - Segment A-B. Не учим всю игру сразу. Сначала игрок
+                должен без объяснений понять: герой из аула, идет сам, игрок ставит знак
+                в пустыне, знак помогает на будущем проходе.
               </p>
               <div class="callout-line">
-                Первые 60 секунд должны объяснить: герой идет сам, игрок строит судьбу в пустыне вокруг пути.
+                Пока этот кусок не читается, не расширяем FTUE на выбор из 3, риск, смерть и Тамгу.
               </div>
             </div>
           </section>
 
           <section class="visual-section">
             <div class="section-title">
-              <p class="eyebrow">Сценарий старта</p>
+              <p class="eyebrow">Current FTUE decision</p>
+              <h2>Работаем по шагам: сначала Segment A-B</h2>
+            </div>
+            <div class="ftue-focus-board" aria-label="Текущий план улучшения FTUE">
+              <article class="focus-primary">
+                <span>Сейчас</span>
+                <h3>Доказать первый интерактив</h3>
+                <p>
+                  Игрок видит выход из аула, автодвижение, получает Саксаул, ставит его
+                  в видимый roadside-слот и позже видит эффект. Это главный тест FTUE.
+                </p>
+              </article>
+              <article>
+                <span>Не сейчас</span>
+                <h3>Не грузим системами</h3>
+                <p>
+                  Не объясняем field, синергии, прокачку аула, реликты и полную смерть
+                  до того, как понятна причинность карты.
+                </p>
+              </article>
+              <article>
+                <span>Критерий</span>
+                <h3>Игрок говорит сам</h3>
+                <p>
+                  “Герой идет сам. Я ставлю знак рядом с дорогой. Он помогает, когда
+                  герой вернется к этой клетке.”
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Discussion steps</p>
+              <h2>Обсуждаем и делаем последовательно</h2>
+            </div>
+            <div class="ftue-step-lane" aria-label="Пошаговый план обсуждения FTUE">
+              <article class="is-current">
+                <span>1</span>
+                <h3>Segment A-B</h3>
+                <p>Выход из аула, автодвижение, первый ресурс, карта Саксаул, постановка, отложенный эффект.</p>
+                <strong>Статус: делаем сейчас</strong>
+              </article>
+              <article>
+                <span>2</span>
+                <h3>Первый выбор</h3>
+                <p>Юрта / Камень Тамги / Звериная тропа. Разные роли и разные placement-зоны.</p>
+                <strong>Статус: после проверки A-B</strong>
+              </article>
+              <article>
+                <span>3</span>
+                <h3>Риск второго круга</h3>
+                <p>Показать угрозу так, чтобы безопасный выбор не ощущался отмененным.</p>
+                <strong>Статус: следующий дизайн-разбор</strong>
+              </article>
+              <article>
+                <span>4</span>
+                <h3>Тамга и наследник</h3>
+                <p>Смерть/почти смерть, результат забега, новый герой, подбор Тамги прошлого.</p>
+                <strong>Статус: финал FTUE MVP</strong>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Segment A-B storyboard</p>
+              <h2>Первый кусок, который нужно сделать понятным</h2>
+            </div>
+            <div class="ftue-ab-story" aria-label="Storyboard Segment A-B">
+              <article>
+                <div class="ab-shot ab-aul" aria-hidden="true">
+                  <span class="ab-fire"></span>
+                  <span class="ab-yurt y1"></span>
+                  <span class="ab-yurt y2"></span>
+                  <span class="ab-hero"></span>
+                  <span class="ab-road"></span>
+                  <span class="ab-pointer">☝</span>
+                  <span class="ab-cta">Отправиться в путь</span>
+                </div>
+                <h3>1. Игрок готовит путь</h3>
+                <p>Над аулом появляется палец и подпись. Игрок нажимает костер/аул, чтобы отправиться в путь.</p>
+                <small>Цель: подтвердить готовность, не управлять путником.</small>
+              </article>
+              <article>
+                <div class="ab-shot ab-walk" aria-hidden="true">
+                  <span class="ab-road-cell c1"></span>
+                  <span class="ab-road-cell c2"></span>
+                  <span class="ab-road-cell c3"></span>
+                  <span class="ab-hero on-road"></span>
+                  <span class="ab-pop">Запасы +1</span>
+                </div>
+                <h3>2. Герой идет сам</h3>
+                <p>2-3 клетки без input. Ресурс появляется как обычное событие, без паузы.</p>
+                <small>Цель: понять автодвижение.</small>
+              </article>
+              <article>
+                <div class="ab-shot ab-place" aria-hidden="true">
+                  <span class="ab-card">Саксаул</span>
+                  <span class="ab-road-cell blocked"></span>
+                  <span class="ab-buffer"></span>
+                  <span class="ab-slot valid"></span>
+                  <span class="ab-slot muted"></span>
+                </div>
+                <h3>3. Игрок ставит</h3>
+                <p>Подсвечен только видимый roadside-слот. Road и buffer не активны.</p>
+                <small>Цель: поставить Саксаул без скролла.</small>
+              </article>
+              <article>
+                <div class="ab-shot ab-effect" aria-hidden="true">
+                  <span class="ab-saxaul"></span>
+                  <span class="ab-link"></span>
+                  <span class="ab-hero on-road"></span>
+                  <span class="ab-pop">Силы +1</span>
+                </div>
+                <h3>4. Помог позже</h3>
+                <p>Герой дошел до связанной клетки, линия вспыхнула, Саксаул дал помощь.</p>
+                <small>Цель: увидеть причинность.</small>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section secondary-section">
+            <div class="section-title">
+              <p class="eyebrow">Старый скелет</p>
               <h2>От интро к первому решению</h2>
             </div>
             <div class="ftue-timeline">
@@ -513,7 +690,7 @@
             </div>
           </section>
 
-          <section class="visual-section">
+          <section class="visual-section secondary-section">
             <div class="section-title">
               <p class="eyebrow">Ключевой вопрос</p>
               <h2>Выбираем ли мы события во время пути?</h2>
@@ -544,10 +721,10 @@
             </div>
           </section>
 
-          <section class="visual-section">
+          <section class="visual-section secondary-section">
             <div class="section-title">
-              <p class="eyebrow">FTUE MVP</p>
-              <h2>Пошаговый сценарий для реализации</h2>
+              <p class="eyebrow">Production detail archive</p>
+              <h2>Подробные карточки сценария ниже, но текущий фокус - Segment A-B</h2>
             </div>
             <div class="ftue-path" aria-label="Первые шаги FTUE как путь">
               <article class="path-card">
@@ -563,7 +740,7 @@
                     две короткие строки и ощущение, что род держится за память.
                   </p>
                   <div class="path-spec">
-                    <p><strong>Финальный текст:</strong> “Песок стирает следы.” → “Род хранит имена.”</p>
+                    <p><strong>Финальный текст:</strong> “Песок стирает следы.” → “Путь ждет первого путника.”</p>
                     <p><strong>Арт:</strong> почти черный экран, редкие светлые частицы песка, без UI, без карты, без героя.</p>
                     <p><strong>Анимация:</strong> строка появляется за 0.6 сек, держится 1.4 сек, растворяется; песок движется слева направо.</p>
                     <p><strong>Игрок:</strong> может нажать `Space`/клик, чтобы пропустить. Других действий нет.</p>
@@ -591,7 +768,7 @@
                     вокруг дорога-loop, за дорогой живая пустыня без пустых клеток.
                   </p>
                   <div class="path-spec">
-                    <p><strong>Финальный текст в логе:</strong> “У костра просыпается имя: Арын.”</p>
+                    <p><strong>Финальный текст в логе:</strong> “Путь ждет первого путника.”</p>
                     <p><strong>Арт:</strong> теплый костер в центре, юрты с тканью и деревянными стойками, песок с камнями, травой, следами, сухими ветками.</p>
                     <p><strong>Правило уровня:</strong> не занятый слот не выглядит пустым. Это “дюна”, “камни”, “сухая трава”, “следы”, “кость”, “бархан”.</p>
                     <p><strong>Анимация:</strong> fade-in карты 1 сек; костер мерцает; мелкий песок движется по всем клеткам.</p>
@@ -617,7 +794,7 @@
                     короткий путь через аул и становится на первую дорожную клетку.
                   </p>
                   <div class="path-spec">
-                    <p><strong>Финальный текст:</strong> “Арын выходит из стойбища. Костер остается за спиной.”</p>
+                    <p><strong>Финальный текст:</strong> “Первый путник выходит из аула.”</p>
                     <p><strong>Арт:</strong> маленькая фигурка в простой дорожной одежде, тюбетейка/капюшон, мешок за плечом, теплый свет костра позади.</p>
                     <p><strong>Анимация:</strong> 6-8 шагов от костра к дороге; за героем на 1 сек остаются следы, потом песок их стирает.</p>
                     <p><strong>Игрок:</strong> не управляет. Это обучение через сцену: герой сам идет из дома к пути.</p>
@@ -644,7 +821,7 @@
                     он не двигает героя, он меняет мир вокруг будущего маршрута.
                   </p>
                   <div class="path-spec">
-                    <p><strong>Финальный текст:</strong> “Круг 1 начат.” → “Путь ведет наследника сам.”</p>
+                    <p><strong>Финальный текст:</strong> “Круг 1 начат.” → “Путь ведет его сам.”</p>
                     <p><strong>Арт уровня:</strong> каждая дорожная клетка имеет деталь: трещины, колеи, пыль, мелкие камни. Вокруг нет плоского пустого песка.</p>
                     <p><strong>Анимация:</strong> герой идет по клеткам, камера мягко следует или держит аул и путь в кадре; текущая клетка слегка подсвечена.</p>
                     <p><strong>UI:</strong> справа панель героя, слева чат-лог, снизу рука карт пока неактивна.</p>
@@ -771,12 +948,146 @@
                     <p><strong>Финальный текст:</strong> “Круг 1 завершен. Аул снова впереди.”</p>
                     <p><strong>Арт:</strong> камера снова показывает аул как точку возврата; костер заметнее, чем в начале.</p>
                     <p><strong>Анимация:</strong> герой входит к аулу, экран мягко притормаживает, три карты поднимаются снизу.</p>
-                    <p><strong>Игрок:</strong> выбирает 1 из 3: `Юрта` безопасность, `Камень Тамги` память, `Волчий след` риск/слава.</p>
-                    <p><strong>Placement:</strong> Юрта/Камень Тамги подсвечивают `field`, Волчий след подсвечивает `roadside` за road buffer.</p>
+                    <p><strong>Игрок:</strong> выбирает 1 из 3: `Юрта` безопасность, `Камень Тамги` память, `Звериная тропа` риск/слава.</p>
+                    <p><strong>Placement:</strong> Юрта/Камень Тамги подсвечивают `field`, Звериная тропа подсвечивает `roadside` за road buffer.</p>
                     <p><strong>UI:</strong> выбор карт крупный, с коротким описанием результата и зоны постановки на каждой карте.</p>
                     <p><strong>Готово:</strong> выбранная карта добавлена в руку; начинается второй круг.</p>
                   </div>
                 </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">FTUE analysis</p>
+              <h2>Учим по одному слою, иначе игрок теряет причинность</h2>
+            </div>
+            <div class="ftue-analysis-grid" aria-label="Анализ и улучшения FTUE">
+              <article class="analysis-card strong">
+                <span>P0</span>
+                <h3>Первые 3 минуты</h3>
+                <p>
+                  Учим только: аул, герой идет сам, карта Саксаул, valid roadside slot,
+                  отложенный эффект. `field`, смерть и аул-экономику пока не объясняем.
+                </p>
+              </article>
+              <article class="analysis-card">
+                <span>Risk</span>
+                <h3>Перегруз системами</h3>
+                <p>
+                  Если одновременно объяснить road buffer, roadside, field, лог, смерть,
+                  Тамгу и наследников, игрок запомнит шум, а не loop.
+                </p>
+              </article>
+              <article class="analysis-card">
+                <span>Fix</span>
+                <h3>Одна цель на экран</h3>
+                <p>
+                  В каждый момент есть одна короткая задача: выбрать Саксаул, поставить
+                  в подсветку, дождаться эффекта, выбрать карту после круга.
+                </p>
+              </article>
+              <article class="analysis-card">
+                <span>Rule</span>
+                <h3>Ошибки без модалок</h3>
+                <p>
+                  Клик по дороге или buffer дает маленький bubble у клетки:
+                  “Кромка пути: строить нельзя.” Игра не ломает поток.
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Teaching budget</p>
+              <h2>Что учим и что не трогаем по фазам</h2>
+            </div>
+            <div class="teaching-budget" aria-label="Бюджет обучения FTUE">
+              <article>
+                <header><span>A</span><strong>Дом и путь</strong></header>
+                <p><b>Учим:</b> аул, герой, автодвижение.</p>
+                <p><b>Фоном:</b> дорога и пустыня.</p>
+                <p><b>Не учим:</b> карты, field, смерть.</p>
+              </article>
+              <article>
+                <header><span>B</span><strong>Первое влияние</strong></header>
+                <p><b>Учим:</b> Саксаул, roadside, эффект позже.</p>
+                <p><b>Фоном:</b> road buffer как запрет.</p>
+                <p><b>Не учим:</b> выбор из 3, риск, field.</p>
+              </article>
+              <article>
+                <header><span>C</span><strong>Первый выбор</strong></header>
+                <p><b>Учим:</b> безопасность, память, риск.</p>
+                <p><b>Фоном:</b> большой field и скролл.</p>
+                <p><b>Не учим:</b> синергии и экономику аула.</p>
+              </article>
+              <article>
+                <header><span>D</span><strong>Риск и наследие</strong></header>
+                <p><b>Учим:</b> проверка, Тамга, новый наследник.</p>
+                <p><b>Фоном:</b> сохранение ресурсов в аул.</p>
+                <p><b>Не учим:</b> полное дерево меты.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Placement teaching</p>
+              <h2>Первый Саксаул без скролла, field раскрываем позже</h2>
+            </div>
+            <div class="placement-teach-grid" aria-label="Обучение размещению тайлов">
+              <article class="teach-shot first-placement">
+                <h3>1. Выбран Саксаул</h3>
+                <div class="teach-map" aria-hidden="true">
+                  <span class="teach-cell field muted"></span>
+                  <span class="teach-cell buffer blocked"></span>
+                  <span class="teach-cell road blocked"></span>
+                  <span class="teach-cell buffer blocked"></span>
+                  <span class="teach-cell roadside valid"></span>
+                  <span class="teach-cell field muted"></span>
+                  <span class="teach-cell road hero"></span>
+                  <span class="teach-cell roadside valid"></span>
+                  <span class="teach-cell field muted"></span>
+                </div>
+                <p>
+                  Подсвечены только ближние `roadside_build`. Дорога и buffer затемнены.
+                  Игрок не обязан двигать камеру.
+                </p>
+              </article>
+              <article class="teach-shot wrong-click">
+                <h3>2. Клик по buffer</h3>
+                <div class="teach-map" aria-hidden="true">
+                  <span class="teach-cell field muted"></span>
+                  <span class="teach-cell buffer denied">!</span>
+                  <span class="teach-cell road blocked"></span>
+                  <span class="teach-cell buffer blocked"></span>
+                  <span class="teach-cell roadside valid"></span>
+                  <span class="teach-bubble">Кромка пути: строить нельзя.</span>
+                </div>
+                <p>
+                  Ошибка объясняется bubble рядом с клеткой, без модалки и без сброса
+                  выбранной карты.
+                </p>
+              </article>
+              <article class="teach-shot field-later">
+                <h3>3. После первого круга</h3>
+                <div class="teach-map wide" aria-hidden="true">
+                  <span class="teach-cell field valid"></span>
+                  <span class="teach-cell field valid"></span>
+                  <span class="teach-cell field valid"></span>
+                  <span class="teach-cell buffer blocked"></span>
+                  <span class="teach-cell road blocked"></span>
+                  <span class="teach-cell roadside muted"></span>
+                  <span class="teach-cell field valid"></span>
+                  <span class="teach-cell field valid"></span>
+                  <span class="teach-cell field valid"></span>
+                </div>
+                <p>
+                  Юрта и Камень Тамги раскрывают `field_build`: камера чуть отъезжает,
+                  и игрок видит большой мир со скроллом.
+                </p>
               </article>
             </div>
           </section>
@@ -802,8 +1113,8 @@
                   <p><b>Выход:</b> 1.8 сек или skip.</p>
                 </div>
                 <div class="state-card">
-                  <strong>ftue_01_intro_line_2</strong>
-                  <p><b>Текст:</b> “Род хранит имена.”</p>
+                  <strong>ftue_01_campfire_line</strong>
+                  <p><b>Текст:</b> “Путь ждет первого путника.”</p>
                   <p><b>UI:</b> все скрыто, без меню правил.</p>
                   <p><b>Выход:</b> fade к пустыне.</p>
                 </div>
@@ -816,13 +1127,13 @@
                 <div class="state-card">
                   <strong>ftue_03_aul_reveal</strong>
                   <p><b>Видим:</b> аул, костер, 2-3 юрты.</p>
-                  <p><b>Лог:</b> “У костра просыпается имя: Арын.”</p>
+                  <p><b>Лог:</b> “Путь ждет первого путника.”</p>
                   <p><b>Данные:</b> создать героя.</p>
                 </div>
                 <div class="state-card important">
                   <strong>ftue_04_aul_exit</strong>
-                  <p><b>Анимация:</b> Арын выходит от костра к дороге.</p>
-                  <p><b>Лог:</b> “Арын выходит из аула...”</p>
+                  <p><b>Анимация:</b> первый путник выходит от костра к дороге.</p>
+                  <p><b>Лог:</b> “Первый путник выходит из аула.”</p>
                   <p><b>Важно:</b> герой не появляется сразу на дороге.</p>
                 </div>
               </article>
@@ -844,7 +1155,7 @@
                 <div class="state-card">
                   <strong>ftue_06_autowalk_hint</strong>
                   <p><b>Игрок:</b> ничего не нажимает.</p>
-                  <p><b>Лог:</b> “Путь ведет наследника сам.”</p>
+                  <p><b>Лог:</b> “Путь ведет его сам.”</p>
                   <p><b>Смысл:</b> герой идет сам.</p>
                 </div>
                 <div class="state-card">
@@ -889,7 +1200,7 @@
                 </div>
                 <div class="state-card important">
                   <strong>ftue_13_first_choice_opened</strong>
-                  <p><b>Карты:</b> Юрта / Камень Тамги / Волчий след.</p>
+                  <p><b>Карты:</b> Юрта / Камень Тамги / Звериная тропа.</p>
                   <p><b>Смысл:</b> безопасность, память или риск.</p>
                   <p><b>UI:</b> крупные карты, не таблица.</p>
                 </div>
@@ -906,7 +1217,7 @@
                   <p><b>Обещание:</b> память и синергии.</p>
                 </div>
                 <div class="state-card">
-                  <strong>Волчий след</strong>
+                  <strong>Звериная тропа</strong>
                   <p><b>Placement:</b> `roadside_build`.</p>
                   <p><b>Текст:</b> “Риск Body, Слава +2.”</p>
                   <p><b>Обещание:</b> опасность ради славы.</p>
@@ -949,7 +1260,7 @@
                   <strong>ftue_20/21_result_heir</strong>
                   <p><b>Результат:</b> часть ресурсов уходит в аул.</p>
                   <p><b>Кнопка:</b> “Новый наследник”.</p>
-                  <p><b>Саян:</b> снова выходит из аула.</p>
+                  <p><b>Новый путник:</b> снова выходит из аула.</p>
                 </div>
                 <div class="state-card important">
                   <strong>ftue_22_last_tamga_pickup</strong>
@@ -1040,7 +1351,7 @@
             <div class="placement-grid">
               <article>
                 <h3>Roadside</h3>
-                <p>Ближние тайлы за кромкой дороги. Работают при проходе связанной дорожной клетки: Саксаул, Волчий след, малые находки.</p>
+                <p>Ближние тайлы за кромкой дороги. Работают при проходе связанной дорожной клетки: Саксаул, Звериная тропа, малые находки.</p>
               </article>
               <article>
                 <h3>Field</h3>
@@ -1113,7 +1424,7 @@
               <p><strong>2.</strong> Рука карт: гарантированный `Саксаул`, выбор карты, постановка в слот.</p>
               <p><strong>3.</strong> Эффект тайла: Саксаул срабатывает на будущем проходе, игрок видит лог.</p>
               <p><strong>4.</strong> Конец круга: выбор 1 из 3 карт и старт следующего круга.</p>
-              <p><strong>5.</strong> Первый риск: `Волчий след` или scripted road event на втором круге.</p>
+              <p><strong>5.</strong> Первый риск: `Звериная тропа` или scripted road event на втором круге; на дороге проявляется волчий след.</p>
               <p><strong>6.</strong> Смерть: Последняя Тамга, ресурсы аула, кнопка нового наследника.</p>
               <p><strong>7.</strong> Новый герой: старт из аула и подбор Тамги прошлого героя.</p>
             </div>
@@ -1211,7 +1522,7 @@
                   <span class="bp-slot field"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot field"></span>
                 </div>
                 <div class="battle-bubble">
-                  <strong>Волчий след</strong>
+                  <strong>Звериная тропа</strong>
                   <span>Body fail · Силы -2</span>
                 </div>
               </div>
@@ -1228,7 +1539,7 @@
                 </div>
                 <div class="fight-strip">
                   <strong>Текущая клетка</strong>
-                  <span>Волчий след · Body check · риск Силы -2</span>
+                  <span>Звериная тропа · Body check · риск Силы -2</span>
                 </div>
               </div>
               <div class="bp-zone bp-log">
@@ -1250,7 +1561,7 @@
                   <span class="picked">Саксаул<small>помощь</small></span>
                   <span>Юрта<small>запасы</small></span>
                   <span>Тамга<small>память</small></span>
-                  <span>След<small>риск</small></span>
+                  <span>Тропа<small>риск</small></span>
                   <span class="empty">пусто</span>
                 </div>
               </div>
@@ -1275,7 +1586,7 @@
                   <span class="cw-left">Chat log<br />автоход · находки · проверки</span>
                   <span class="cw-map">Карта + камера<br />аул · дорога · герой · bubble</span>
                   <span class="cw-side">Герой<br />кукла · статы · экипировка</span>
-                  <span class="cw-log">Card hand<br />Саксаул · Юрта · Тамга · След · Оазис</span>
+                  <span class="cw-log">Card hand<br />Саксаул · Юрта · Тамга · Тропа · Оазис</span>
                 </div>
                 <p>Игрок наблюдает автодвижение героя, двигает камеру, читает лог слева и держит карты снизу.</p>
               </article>
@@ -1298,7 +1609,7 @@
                   <span class="cw-top">Силы заметны</span>
                   <span class="cw-left">Body check провален.<br />Одежда снизила урон.</span>
                   <span class="cw-map">Battle bubble<br />над клеткой боя</span>
-                  <span class="cw-side">Волчий след<br />Body 2 vs 4 · fail · урон -2</span>
+                  <span class="cw-side">Звериная тропа<br />Body 2 vs 4 · fail · урон -2</span>
                   <span class="cw-log">Карты снизу ждут</span>
                 </div>
                 <p>Бой происходит на карте, детали справа, история результата в логе. Отдельная боевая сцена не нужна.</p>
@@ -1427,7 +1738,7 @@
                 <div class="choice-cards">
                   <span>Юрта<small>Запасы</small></span>
                   <span>Камень Тамги<small>Мудрость</small></span>
-                  <span>Волчий след<small>Риск</small></span>
+                  <span>Звериная тропа<small>Риск</small></span>
                 </div>
                 <h3>Выбор карты</h3>
                 <p>Безопасность, память или риск. Решение короткое и понятное.</p>

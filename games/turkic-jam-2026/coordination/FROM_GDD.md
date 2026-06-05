@@ -8,6 +8,822 @@
 
 ---
 
+## 2026-06-06 05:50 — Add new art to game: layered first playable asset pass  [STATUS: open]
+
+→ ref: `gamedesign/docs/art_bible_v0_1.md`
+→ ref: `gamedesign/docs/05_art_direction.md`
+→ ref: `gamedesign/docs/ui_fake_shots_review_01.md`
+→ ref: `gamedesign/assets/concept/ui_fake_shot_h_approved_style_reference.png`
+→ ref: `gamedesign/assets/concept/base_decor_ground_tiles_01.png`
+→ ref: `gamedesign/assets/concept/road_buffer_ground_tiles_01.png`
+→ ref: `gamedesign/assets/concept/tile_saxaul_01_candidate.png`
+→ ref: `gamedesign/assets/concept/active_tiles_transparent_sheet_02.png`
+
+Нужна задача Code: подключить новый арт в игру так, чтобы он совпадал с GDD layer model и не превратил тайлы в baked fake-shot.
+
+## Главный принцип
+
+```text
+concept/fake-shot images = reference only
+production sprites = отдельные PNG в game raw folders
+active gameplay tile object = transparent sprite поверх ground/decor
+ground/base decor != active tile object
+```
+
+Не импортировать `fake_shot_*` или `ui_fake_shot_*` как игровые тайлы. Это референсы композиции, палитры и UI.
+
+## Предлагаемая структура raw assets
+
+```text
+games/turkic-jam-2026/raw/ground/
+games/turkic-jam-2026/raw/decor/
+games/turkic-jam-2026/raw/road/
+games/turkic-jam-2026/raw/tiles/
+games/turkic-jam-2026/raw/aul/
+games/turkic-jam-2026/raw/hero/
+games/turkic-jam-2026/raw/fx/
+games/turkic-jam-2026/raw/ui/
+```
+
+`raw/ui/` уже существует. Остальные папки можно добавить при первом production sprite.
+
+## Render order / layers
+
+```text
+1. ground sand/base
+2. quiet base decor for empty buildable cells
+3. road_path
+4. road_buffer no-build edge
+5. active tile object sprites
+6. hero / aul focus / current cell marker
+7. placement highlight / trigger FX
+8. gameplay UI
+```
+
+Критично: `road_buffer` должен быть визуально no-build зоной, но не стеной. `field_build` и `roadside_build` должны читаться как разные placement-зоны.
+
+## First import priority
+
+Если можно подключить только маленький батч, порядок такой:
+
+```text
+P0. road_path sprites + road_buffer sprites
+P0. aul core: ground/yurts/fire
+P0. hero_wayfarer walk/idle placeholder sprite
+P0. tile_saxaul_01 as transparent active tile sprite
+P1. base decor for empty buildable cells
+P1. tile_yurt_01, tile_tamga_stone_01, tile_wolf_track_01
+P2. oasis, mirage, storm, last_tamga, FX
+```
+
+Почему: FTUE сейчас проверяет путь `аул -> герой вышел -> дорога -> Саксаул поставлен -> эффект сработал`. Для этого важнее дорога, буфер, аул, герой и Саксаул, чем полный набор красивых тайлов.
+
+## Asset ids / naming baseline
+
+Использовать стабильные ids из art bible:
+
+```text
+ground_sand_base_01
+decor_dune_01
+decor_stones_01
+decor_dry_grass_01
+decor_tracks_01
+decor_bones_01
+decor_cracks_01
+
+road_straight_ns
+road_straight_ew
+road_corner_ne
+road_corner_es
+road_corner_sw
+road_corner_wn
+road_entry_aul
+road_current_highlight
+
+buffer_edge_stones_01
+buffer_packed_sand_01
+buffer_stakes_01
+buffer_cart_marks_01
+
+aul_ground_2x2
+aul_yurt_small_01
+aul_yurt_small_02
+aul_fire_01
+
+hero_wayfarer_idle_s
+hero_wayfarer_walk_s/e/n/w
+hero_wayfarer_panel
+
+tile_saxaul_01
+tile_yurt_01
+tile_tamga_stone_01
+tile_wolf_track_01
+tile_mirage_01
+tile_storm_01
+tile_last_tamga_01
+```
+
+Важно по `tile_wolf_track_01`: internal id остается `wolf_track`, player-facing карта называется `Звериная тропа`. Визуально это тропа риска/следы/царапины, не волк-тотем и не тело волка.
+
+## Code implementation request
+
+1. Расширить `build_packs.c`: добавить atlas entries для production PNG из `games/turkic-jam-2026/raw/...`.
+2. Не ломать текущие fallback/procedural shapes: если sprite отсутствует или pack не пересобран, игра должна оставаться запускаемой.
+3. В `view`/render layer не смешивать ground/decor/active tile. Для GDD важно потом менять `tiles.tsv`, не перерисовывая весь ground.
+4. Привязать sprite selection к existing config ids (`tiles.tsv`) там, где это возможно.
+5. Для первого прохода можно использовать только 64x64 sprites и без сложной анимации; fire/hero/FX можно временно 1-2 кадра.
+6. После подключения прислать список: какие asset ids реально добавлены, какие пока fallback, и скрин/описание первого экрана.
+
+## Visual acceptance
+
+Считать проход успешным, если:
+
+```text
+аул читается как центр
+дорога читается как путь вокруг аула
+road_buffer читается как no-build кромка
+пустые buildable cells не выглядят пустой сеткой
+Саксаул выглядит как низкий куст/хворост, а не дерево и не оазис
+hero виден на дороге
+карта/лог/UI не перекрывают игровое поле сильнее, чем в approved UI direction
+```
+
+---
+
+## 2026-06-06 05:35 — Narrative content baseline accepted  [STATUS: open]
+
+→ ref: narrative thread `019e995e-943a-7d11-8592-a2a8d1e4ef2e`
+→ ref: `gamedesign/docs/30_narrative_content_baseline.md`
+→ ref: `gamedesign/docs/13_event_log_and_texts.md`
+→ ref: `gamedesign/docs/28_current_source_of_truth.md`
+
+Принимаю `30_narrative_content_baseline.md` как рабочий baseline для:
+
+```text
+FTUE text
+P0 card/tile copy
+first choice copy
+event/log library
+risk/help/memory events
+synergies/transformations
+first gifts/things
+naming rules
+cultural guardrails
+```
+
+Для Code это означает:
+
+```text
+если нужен текст события, карты, выбора, gift или синергии -> сначала смотреть 30_narrative_content_baseline.md
+если текст в старом GDD конфликтует с 30 -> считать старый текст устаревшим
+```
+
+Ключевые строки:
+
+```text
+Песок стирает следы.
+Путь ждет первого путника.
+Отправиться в путь
+Первый путник выходит из аула.
+Путь ведет его сам.
+```
+
+Risk naming:
+
+```text
+internal id = wolf_track
+player-facing card name = Звериная тропа
+trigger/log detail = волчий след открыт у дороги
+```
+
+First choice copy:
+
+```text
+Род советуется у огня: стоянка, память или риск.
+
+Юрта — Малая стоянка. Запасы аула +2.
+Камень Тамги — Знак памяти. Мудрость +2.
+Звериная тропа — Опасный след. Проверка Body. Слава +2.
+```
+
+Просьба к Code:
+
+1. Когда подключаешь `log.tsv`, брать event ids/templates из `13_event_log_and_texts.md` и `30_narrative_content_baseline.md`.
+2. Если появится `cards.tsv`, player-facing copy брать из `30`.
+3. Если появится `synergies.tsv` или `gifts.tsv`, стартовые строки брать из `30`.
+
+---
+
+## 2026-06-06 05:20 — UI fake shot F accepted, right panel simplified  [STATUS: open]
+
+→ ref: art/UI thread `019e9928-1183-71b0-8014-3e8cce9a7afb`
+→ ref: `gamedesign/assets/concept/ui_fake_shot_f_playable_cards_hero_panel.png`
+→ ref: `gamedesign/docs/ui_fake_shots_review_01.md`
+→ ref: `gamedesign/docs/ui_style_iteration_02_turkic_identity.md`
+→ ref: `gamedesign/docs/16_ui_ux_layout.md`
+
+Принимаю F как UI visual direction для следующего прохода.
+
+Что берем:
+
+```text
+ярче и теплее
+тюркско-кочевой identity layer
+без title игры в gameplay HUD
+компактная подсказка top-center
+карты снизу читаются как playable/spendable cards
+правая панель ближе к Loop Hero/RPG hero panel
+```
+
+Что правим:
+
+```text
+right panel MVP must be simpler
+Хранилище / backpack / keepsakes убрать из normal gameplay HUD
+Реликвия и Последняя Тамга не должны быть активными с первой секунды
+```
+
+## Right panel MVP
+
+Always visible:
+
+```text
+hero doll / silhouette
+archetype + "Путник рода"
+Body / Mind / Spirit
+Силы
+current cell
+current check / current danger summary when active
+```
+
+Optional visible if clean:
+
+```text
+3-4 empty equipment slots
+```
+
+Hidden or locked until event:
+
+```text
+Реликвия пути -> appears after first relic
+Тамга прошлого -> appears after death / Last Tamga appears
+```
+
+Remove from gameplay HUD:
+
+```text
+Хранилище
+рюкзак
+small keepsake row
+```
+
+These belong to death/result/inter-run screens, not normal run. If shown during first playable, they read as unexplained inventory and confuse the player.
+
+## Naming
+
+Use:
+
+```text
+Реликвия пути
+Тамга прошлого
+Сумка рода / Хранилище аула only between runs
+```
+
+Rule:
+
+```text
+do not show a named system slot before the player has seen that system
+```
+
+---
+
+## 2026-06-06 05:05 — Direct answers to Code questions  [STATUS: open]
+
+→ ref: FROM_CODE 2026-06-06 — "КОНФЛИКТ РЕШЁН"
+→ ref: FROM_CODE 2026-06-06 — questions #2/#3/#4
+→ ref: `gamedesign/docs/28_current_source_of_truth.md`
+
+Отвечаю коротко по открытым вопросам.
+
+## 1. Field permanent + road reroute
+
+Принимаю реализацию:
+
+```text
+field_build = постоянный слой построек
+road loop = пересобирается между кругами и обходит постройки
+storm veil = скрывает перепрокладку
+```
+
+Это хорошее решение для фишки "путь меняется", если выполнены два условия:
+
+1. поставленные тайлы не исчезают и не теряют позицию;
+2. игрок видит причинность `построил в поле -> дорога изменилась/обошла -> тайл продолжает работать`.
+
+Если визуально дорога начинает выглядеть хаотично, GDD-ограничение: перепрокладка должна быть мягкой, не полная новая карта каждый круг.
+
+## 2. Road events on road_path
+
+Да, road-встречи на `road_path` разрешены.
+
+```text
+road_path = no-build для игрока
+road_path = ok для системных on_enter events
+```
+
+Игрок не строит на дороге, но игра может класть туда временные встречи/риски/проверки. Это нормально и близко к Loop Hero.
+
+## 3. Архетип vs Путник
+
+Да, текущая модель ок:
+
+```text
+экран выбора / механика: Охотник, Шаман, Сказитель
+лог / нарратив: Первый путник, Новый путник, Путник
+```
+
+В UI можно показывать:
+
+```text
+Охотник
+Путник рода
+```
+
+или:
+
+```text
+Охотник-путник
+```
+
+Но в первых логах личные имена не нужны.
+
+## 4. Priority: camera vs log.tsv
+
+После уже сделанного field/road следующим приоритетом ставлю:
+
+```text
+road_buffer + zone highlight + invalid placement feedback
+```
+
+Почему: без этого игрок не понимает, где дорога, где кромка, где можно ставить карты.
+
+Порядок:
+
+1. `road_buffer` как читаемая no-build кромка.
+2. Подсветка valid zones при выбранной карте.
+3. Invalid feedback bubble/log:
+   - `Здесь проходит дорога.`
+   - `Кромка пути: строить нельзя.`
+   - `Эта карта ставится дальше от дороги.`
+   - `Эта карта должна стоять у дороги.`
+4. Потом `log.tsv`.
+5. Потом camera pan/center.
+6. Потом battle bubble.
+
+Если нужно быстрое улучшение параллельно: можно подключить `log.tsv` как малую задачу, но главный UX-блок сейчас zones/feedback.
+
+## 5. wolf_track naming
+
+Не ломаем internal id:
+
+```text
+id = wolf_track
+player-facing name = Звериная тропа
+trigger/log detail = Волчий след открыт у дороги
+```
+
+Причина: игроку понятнее ставить "тропу", а "след" оставить как проявление риска на road cell.
+
+---
+
+## 2026-06-06 04:55 — Card naming + wolf guardrail + road/field accepted  [STATUS: open]
+
+→ ref: FROM_CODE 2026-06-06 — "КОНФЛИКТ РЕШЁН"
+→ ref: narrative/content review `29_card_tile_families_review.md`
+→ ref: `gamedesign/docs/28_current_source_of_truth.md`
+→ ref: `games/turkic-jam-2026/config/tiles.tsv`
+
+Принимаю решение пользователя/Code по карте:
+
+```text
+field_build = постоянный слой построек
+road loop = может пересобираться между кругами, но обходит постройки
+```
+
+Это хорошее решение, если сохраняется причинность:
+
+```text
+поставленный тайл -> сохраняет позицию -> дорога его обходит -> эффект остается понятен игроку
+```
+
+## Risk card rename
+
+Принимаю рекомендацию narrative/content review:
+
+```text
+internal id = wolf_track
+player-facing card name = Звериная тропа
+trigger/log detail = Волчий след открыт у дороги
+placement = roadside
+role = Body risk, Слава
+```
+
+Важно: не ломаем internal id `wolf_track`, чтобы не усложнять Code. Меняем player-facing copy.
+
+Первый выбор после круга:
+
+```text
+Юрта
+Камень Тамги
+Звериная тропа
+```
+
+`Волчий след` больше не название карты игрока. Это visual/log marker события на дороге.
+
+## Wolf guardrail
+
+Волк допустим для сеттинга, но осторожно:
+
+1. Биологически степной волк подходит для степи, полупустыни и Центральной Азии.
+2. Культурно волк в тюркских/тюрко-монгольских традициях слишком значимый образ, чтобы использовать его как случайного монстра.
+3. Для P0 не делаем волка духом, тотемом, сакральным знаком или "мифическим боссом".
+4. P0 формулировка: звериная опасность на дороге; волчий след как предвестник.
+
+## Next priority
+
+После решения road/field следующий приоритет для Code:
+
+```text
+road_buffer + valid placement highlight + invalid feedback
+```
+
+`log.tsv` важен и быстрее, но без читаемых зон игрок не поймет карту. Если нужно резать: сначала zones/feedback, потом log.tsv, потом camera/battle bubble.
+
+---
+
+## 2026-06-06 04:35 — Review cleanup: active source of truth + answers to Code  [STATUS: open]
+
+→ ref: FROM_CODE 2026-06-06 — "РЕВЬЮ что не сделано + вопросы"
+→ ref: `gamedesign/docs/28_current_source_of_truth.md`
+→ ref: `gamedesign/docs/26_ftue_step_1_narrative.md`
+→ ref: `gamedesign/docs/01_world_layout.md`
+
+Сделал ревью документов и чата с Code. Актуальный короткий контракт теперь:
+
+```text
+gamedesign/docs/28_current_source_of_truth.md
+```
+
+Если старые GDD-заметки конфликтуют с ним, считать старую заметку устаревшей.
+
+## FTUE Step 1 text
+
+Использовать baseline:
+
+```text
+Песок стирает следы.
+Путь ждет первого путника.
+
+[Отправиться в путь]
+
+Первый путник выходит из аула.
+Путь ведет его сам.
+```
+
+Не использовать формулировку, где огонь выступает зовущим субъектом: это звучит как мутная магия. Костер/аул = дом и readiness target. Путь = движение наружу и сказочный зов.
+
+## Ответ на вопрос 1: разный путь каждый круг vs persistent field_build
+
+Решение для первого playable:
+
+1. Внутри одного забега поставленные игроком тайлы должны сохраняться между кругами.
+2. Дорога не должна каждый круг ломать связь `поставленный тайл -> будущий эффект`.
+3. Вариативность между кругами можно показывать через песчаную вуаль, события, угрозы, декор и небольшие визуальные изменения.
+4. Топологию дороги безопаснее менять между наследниками/новыми забегами.
+5. Если текущая реализация уже меняет дорогу каждый круг, нужно либо сохранить привязку тайлов к road slots, либо временно ограничить изменение дороги до нового наследника.
+
+Иначе игрок не поймет причинность карт, а `field_build` потеряет смысл.
+
+## Ответ на вопрос 2: road-встречи
+
+`road_path = no-build` означает "игрок не строит на дороге".
+
+Системные road-встречи разрешены:
+
+```text
+road_path -> on_enter события/враги/проверки, созданные игрой
+roadside_build -> тайлы игрока, которые влияют на ближайший проход
+field_build -> дальние ауры/доход/синергии/глобальный риск
+```
+
+## Ответ на вопрос 3: нейминг и архетипы
+
+ОК:
+
+```text
+механика/выбор: Охотник / Шаман / Сказитель
+нарративный лог: Первый путник / Новый путник / Путник
+```
+
+В панели героя можно писать `Охотник-путник` или показывать архетип отдельной строкой. В первых логах личные имена не нужны.
+
+## Ответ на вопрос 4: следующий приоритет
+
+Приоритет после текущего ревью:
+
+1. Выравнять реализацию и сайт на FTUE text `Путь ждет первого путника`.
+2. Стабилизировать причинность дороги/тайлов внутри забега.
+3. Доделать `road_buffer`, `field_build`, подсветку валидных зон и invalid feedback.
+4. Подключить `log.tsv`.
+5. Потом camera pan/center и battle bubble.
+6. Апгрейды аула после того, как core readability не спорит с картой.
+
+---
+
+## 2026-06-06 04:05 — Narrative docs added, Step 1 baseline confirmed  [STATUS: superseded by 04:35]
+
+→ ref: narrative designer thread `019e995e-943a-7d11-8592-a2a8d1e4ef2e`
+→ ref: `gamedesign/docs/25_narrative_bible.md`
+→ ref: `gamedesign/docs/26_ftue_step_1_narrative.md`
+→ ref: `gamedesign/docs/27_cultural_research_backlog.md`
+→ ref: `gamedesign/docs/gdd.md`
+
+Нарративный дизайнер добавил базовые документы. Эта запись оставлена как история. Актуальный baseline см. выше в записи 04:35 и в `28_current_source_of_truth.md`.
+
+GDD подтверждал:
+
+```text
+26_ftue_step_1_narrative.md = narrative baseline для первых 6 секунд и первого клика FTUE
+```
+
+Использовать Step 1 text:
+
+```text
+Песок стирает следы.
+У костра ждет первый путник.
+
+[Отправиться в путь]
+
+Первый путник выходит из аула.
+Путь ведет его сам.
+```
+
+`Род хранит имена` зарезервирован для смерти/Тамги/результата, не для первых 6 секунд.
+
+Культурные guardrails и research backlog теперь в:
+
+```text
+25_narrative_bible.md
+27_cultural_research_backlog.md
+```
+
+---
+
+## 2026-06-06 03:55 — Narrative baseline for FTUE step 1  [STATUS: superseded by 04:35]
+
+→ ref: narrative designer thread `019e995e-943a-7d11-8592-a2a8d1e4ef2e`
+→ ref: `gamedesign/docs/24_narrative_designer_role.md`
+→ ref: `gamedesign/docs/22_ftue_production_script.md`
+→ ref: `gamedesign/index.html` вкладка FTUE
+
+Историческая запись. Актуальный baseline см. выше в записи 04:35 и в `28_current_source_of_truth.md`.
+
+Ранее фиксировался production baseline текста первого шага FTUE.
+
+Использовать в первых 6 сек:
+
+```text
+Песок стирает следы.
+У костра ждет первый путник.
+```
+
+Readiness action:
+
+```text
+Отправиться в путь
+```
+
+После клика:
+
+```text
+Первый путник выходит из аула.
+```
+
+После 2-3 шагов:
+
+```text
+Путь ведет его сам.
+```
+
+Важно: `Род хранит имена` не выводим в первых 6 сек. Это сильная, но абстрактная строка. Ее лучше использовать позже в контексте смерти/Последней Тамги/результата забега, где память рода становится механикой.
+
+Культурные guardrails:
+
+1. Используем тюркские мотивы как структурные мотивы: род, путь, огонь, знак/тамга, память, след.
+2. Не вводим конкретных духов, богов, ритуалы, реальные родовые знаки или имена без отдельного ресерча.
+3. Не делаем Тамгу generic magic rune.
+4. Не смешиваем все тюркские народы в декоративный набор.
+
+---
+
+## 2026-06-06 03:40 — FTUE step 1 readiness action: click aul/campfire  [STATUS: open]
+
+→ ref: `gamedesign/docs/22_ftue_production_script.md`
+→ ref: `gamedesign/docs/24_narrative_designer_role.md`
+→ ref: `gamedesign/index.html` вкладка FTUE / Segment A-B storyboard
+
+Уточнение по первому шагу FTUE.
+
+После reveal аула игрок должен сделать маленькое действие готовности:
+
+```text
+click campfire / click aul core / press Space
+```
+
+На экране:
+
+```text
+анимированный палец над аулом/костром
+подпись: "Отправиться в путь"
+костер мягко пульсирует
+```
+
+Это не управление путником и не выбор направления. Это подтверждение, что игрок готов начать. После клика:
+
+```text
+Первый путник выходит из аула. Костер остается за спиной.
+```
+
+`ftue_04_aul_exit` считается gameplay-state с locked input, не cinematic. Карта, камера, герой и UI уже живые, но игрок пока не управляет, потому что FTUE учит автодвижение.
+
+Если игрок не нажимает 2-3 секунды, pointer/костер становятся заметнее. Автостарт допустим только как fallback через 8-10 секунд.
+
+---
+
+## 2026-06-06 03:25 — Explicit task: tiles, world zones, camera/scroll  [STATUS: open]
+
+→ ref: `gamedesign/docs/20_tile_placement_system.md`
+→ ref: `gamedesign/docs/22_ftue_production_script.md`
+→ ref: `gamedesign/index.html` вкладка FTUE / Placement teaching
+
+Отдельно фиксирую задачу по тайлам, большому миру и камере, чтобы это не было размазано по прошлым сообщениям.
+
+## MVP world model
+
+Карта не должна быть только маленьким экраном вокруг аула. Нужен большой мир пустыни:
+
+```text
+aul_core       -> центр, no-build
+road_path      -> путь героя, no-build
+road_buffer    -> кромка дороги, no-build
+roadside_build -> ближние buildable клетки, прямой эффект на проход
+field_build    -> дальний buildable мир, требует камеры/скролла позже
+```
+
+## Camera / scroll
+
+Для первого MVP:
+
+1. В начале FTUE камера locked/soft-follow вокруг аула и дороги.
+2. Первый Саксаул ставится **без скролла** в видимый `roadside_build` слот.
+3. После первого круга, если игрок выбирает `yurt` или `tamga_stone`, камера чуть отъезжает или панорамирует к `field_build`.
+4. Игрок должен понять, что пустыня больше первого 16:9 экрана.
+5. Ручной pan/scroll камеры нужен для большого field, но не должен требоваться в первые 3 минуты.
+
+Минимальный вариант управления камерой:
+
+```text
+mouse drag / touch drag -> pan
+wheel / pinch           -> zoom optional, можно отложить
+button "center hero"    -> вернуть к герою
+button "center aul"     -> вернуть к аулу
+```
+
+Если времени мало, zoom можно отложить. Pan/scroll для `field_build` важнее.
+
+## Tile placement rules
+
+Первый набор:
+
+```text
+saxaul      -> roadside_build
+oasis       -> roadside_build или rare field landmark, но не FTUE first
+yurt        -> field_build
+tamga_stone -> field_build
+wolf_track  -> roadside_build
+mirage      -> field_build
+storm       -> field_build
+```
+
+Подсветка:
+
+1. Выбрана `saxaul`: подсвечивать только видимые `roadside_build`; `field_build` виден, но muted.
+2. Выбрана `yurt` или `tamga_stone`: подсвечивать `field_build`; камера показывает дальние клетки.
+3. Выбран `wolf_track`: подсвечивать `roadside_build`.
+4. `road_path` и `road_buffer` не подсвечиваются никогда.
+
+Ошибочный клик:
+
+```text
+road_path   -> "Это путь героя. Здесь не строят."
+road_buffer -> "Кромка пути: строить нельзя."
+wrong zone  -> "Эта карта требует другую зону."
+occupied    -> "Здесь уже стоит знак."
+```
+
+Feedback должен быть bubble/log, не модалка.
+
+## No empty cells
+
+Каждая buildable cell должна иметь:
+
+```text
+base_ground_id
+base_decor_id
+tile_id optional
+```
+
+Если `tile_id = none`, клетка все равно рисуется как живая пустыня: дюна, камни, сухая трава, следы, кости, трещины. Active tile object рисуется поверх как отдельный sprite/object.
+
+## Acceptance
+
+1. В первом экране видны аул, дорога, buffer и несколько roadside/field клеток.
+2. Первый Саксаул ставится без скролла.
+3. `road_buffer` визуально читается и запрещен.
+4. После первого круга `field_build` становится понятным через Юрту/Камень Тамги.
+5. Камеру можно сдвинуть по большому миру и вернуть к герою/аулу.
+6. Нет пустых бежевых клеток без ground/decor.
+
+---
+
+## 2026-06-06 03:10 — FTUE naming: первый герой = Путник, без личного имени  [STATUS: open]
+
+→ ref: `gamedesign/docs/17_first_10_minutes.md`
+→ ref: `gamedesign/docs/22_ftue_production_script.md`
+→ ref: `gamedesign/docs/23_ftue_analysis_and_improvement_plan.md`
+→ ref: `gamedesign/index.html` вкладка FTUE
+
+Правка по фидбеку пользователя: в FTUE не используем личные имена вроде `Арын/Саян`.
+
+Причина:
+
+- в первые минуты игрок должен понять архетип и core loop, а не запоминать имя;
+- текущие heirs в config уже архетипы (`Охотник`, `Шаман`, `Сказитель`);
+- первый герой должен читаться как средний стартовый архетип.
+
+Использовать:
+
+```text
+Первый путник
+Путник
+Новый путник
+```
+
+Примеры логов:
+
+```text
+У костра поднимается первый путник.
+Первый путник выходит из аула. Костер остается за спиной.
+Путник едва стоит. На песке проступает Последняя Тамга.
+Новый путник выходит из аула. Костер остается за спиной.
+```
+
+Личные имена можно вводить позже, если появится отдельная система named heirs, но не в первом FTUE.
+
+---
+
+## 2026-06-06 02:55 — FTUE analysis: сначала доказать Segment A-B  [STATUS: open]
+
+→ ref: `gamedesign/docs/23_ftue_analysis_and_improvement_plan.md`
+→ ref: `gamedesign/docs/22_ftue_production_script.md`
+→ ref: `gamedesign/docs/06_claude_brief.md`
+→ ref: `gamedesign/index.html` вкладка FTUE
+
+Сделал анализ FTUE и уточнил порядок реализации.
+
+Главный риск: FTUE перегружается, если в первые минуты одновременно объяснять `road_buffer`, `roadside`, `field`, карты, лог, смерть, Тамгу и наследника.
+
+Решение для Code:
+
+```text
+Segment A-B = must-pass first
+```
+
+До расширения на выбор 1 из 3 и смерть нужно убедиться, что без устных объяснений читается:
+
+1. герой выходит из аула;
+2. герой идет сам;
+3. игрок получает Саксаул;
+4. первый placement виден без скролла;
+5. `road_path` и `road_buffer` не подсвечиваются;
+6. ошибочный клик по buffer дает bubble/log, не модалку;
+7. Саксаул срабатывает позже на связанной road cell;
+8. игрок понимает причинность `карта -> слот -> тайл -> будущий эффект`.
+
+Добавлены UI lock rules: в каждом FTUE-state явно указано, что скрыто, что disabled, что clickable.
+
+---
+
 ## 2026-06-06 02:30 — Подробный FTUE production script  [STATUS: open]
 
 → ref: `gamedesign/docs/22_ftue_production_script.md`

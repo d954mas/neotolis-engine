@@ -30,6 +30,14 @@
 20. [20_tile_placement_system.md](20_tile_placement_system.md) - зоны карты, placement и правила тайлов.
 21. [21_ftue_best_practices_research.md](21_ftue_best_practices_research.md) - исследование хороших практик FTUE и ревью текущего сценария.
 22. [22_ftue_production_script.md](22_ftue_production_script.md) - подробный production-script FTUE по состояниям для реализации.
+23. [23_ftue_analysis_and_improvement_plan.md](23_ftue_analysis_and_improvement_plan.md) - анализ перегруза FTUE и план улучшений по фазам.
+24. [24_narrative_designer_role.md](24_narrative_designer_role.md) - роль нарративного дизайнера и правила работы с текстом.
+25. [25_narrative_bible.md](25_narrative_bible.md) - базовая нарративная библия: темы, тон, словарь, guardrails.
+26. [26_ftue_step_1_narrative.md](26_ftue_step_1_narrative.md) - нарративный baseline первых 6 секунд и первого клика FTUE.
+27. [27_cultural_research_backlog.md](27_cultural_research_backlog.md) - backlog культурного ресерча и красные зоны до источников.
+28. [28_current_source_of_truth.md](28_current_source_of_truth.md) - актуальный короткий контракт после ревью документов и чата с Code.
+29. [29_card_tile_families_review.md](29_card_tile_families_review.md) - ревью карт-тайлов, семейств и player-facing решения для `wolf_track`.
+30. [30_narrative_content_baseline.md](30_narrative_content_baseline.md) - нарративный baseline FTUE, карт, событий, синергий и первых вещей.
 
 Исходные материалы сохранены отдельно:
 
@@ -39,7 +47,7 @@
 
 ## Одно предложение
 
-**Песнь Тамги** - roguelite loop-builder в духе Loop Hero: аул стоит в центре, герой сам идет по кольцевой дороге вокруг него, а игрок занимает ближние и дальние ячейки пустыни тайлами, чтобы провести одного наследника через 10 кругов.
+**Песнь Тамги** - тюркско-кочевая игра-сказка и roguelite loop-builder в духе Loop Hero: аул стоит в центре, герой сам идет по кольцевой дороге вокруг него, а игрок занимает ближние и дальние ячейки пустыни тайлами, чтобы провести одного наследника через 10 кругов.
 
 ## Главные решения
 
@@ -53,6 +61,8 @@
 | Прогресс | Стойбище/аул и знания рода постоянные. Пустыня текущего забега временная. |
 | Мета-дуга | Стойбище рода растет до аула, укрепленного поселения, степного города, восточной столицы и ханства/султаната/каганата. |
 | Баланс | Числа живут в `games/turkic-jam-2026/config/*.ini/*.tsv`. GDD описывает смысл и правила. |
+
+Актуальные решения после ревью собраны в [28_current_source_of_truth.md](28_current_source_of_truth.md). Если старые заметки спорят с ним, считать старую заметку устаревшей.
 
 ## Что важно не потерять
 

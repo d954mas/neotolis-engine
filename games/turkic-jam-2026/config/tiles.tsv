@@ -12,6 +12,6 @@ saxaul      | Саксаул       | safe    | none   | 0 | 0 | 1 | 0 | 0 | 0 | 
 oasis       | Оазис         | safe    | none   | 0 | 0 | 3 | 0 | 0 | 0 | 2 | roadside
 yurt        | Юрта          | support | none   | 0 | 0 | 2 | 0 | 0 | 0 | 0 | field
 tamga_stone | Камень Тамги  | safe    | none   | 0 | 0 | 0 | 2 | 0 | 0 | 0 | field
-wolf_track  | Волчий след   | check   | body   | 2 | 1 | 0 | 0 | 2 | 0 | 0 | roadside
+wolf_track  | Звериная тропа | check   | body   | 2 | 1 | 0 | 0 | 2 | 0 | 0 | roadside
 mirage      | Мираж         | check   | mind   | 2 | 1 | 0 | 1 | 1 | 0 | 0 | field
 storm       | Песчаная буря | check   | spirit | 3 | 1 | 0 | 0 | 3 | 0 | 0 | field

@@ -10,7 +10,7 @@
 
 ```text
 Саксаул: путник находит тень и хворост. Силы +1, Запасы +1
-Волчий след: проверка Body провалена, Силы -2, часть Славы
+Звериная тропа: проверка Body провалена. Силы -2. Слава +1.
 Круг завершен. Аул виден в дымке.
 ```
 
@@ -86,19 +86,31 @@ event_id | tone | template
 
 | event_id | tone | template |
 | --- | --- | --- |
-| `run_start` | info | `{hero} выходит из аула. Костер остается за спиной.` |
-| `resource_gain` | gain | `Путь дает родy: Запасы +{supplies}, Мудрость +{wisdom}, Слава +{glory}.` |
+| `intro_line_1` | info | `Песок стирает следы.` |
+| `path_line` | info | `Путь ждет первого путника.` |
+| `start_prompt` | info | `Отправиться в путь.` |
+| `run_start` | info | `{hero} выходит из аула.` |
+| `autowalk_hint` | info | `Путь ведет его сам.` |
+| `resource_gain` | gain | `Путь дает роду: Запасы +{supplies}, Мудрость +{wisdom}, Слава +{glory}.` |
 | `tile_saxaul` | gain | `Саксаул: путник находит тень и хворост. Силы +{stamina}, Запасы +{supplies}.` |
 | `tile_safe` | gain | `{tile}: путник находит помощь. Силы +{stamina}.` |
-| `field_income` | gain | `{tile}: род получает Запасы +{supplies} за круг.` |
+| `tile_yurt` | gain | `Юрта: стоянка поддерживает род. Запасы аула +{supplies}.` |
+| `tile_tamga_stone` | memory | `Камень Тамги: знак держит память пути. Мудрость +{wisdom}.` |
+| `field_income` | gain | `{tile}: стоянка поддерживает род. Запасы +{supplies}.` |
 | `field_aura` | memory | `{tile}: знак в пустыне меняет путь. Мудрость +{wisdom}.` |
+| `risk_reveal` | danger | `Песок темнеет впереди: {tile} открыт на дороге.` |
+| `beast_trail_reveal` | danger | `Песок темнеет впереди: волчий след открыт у дороги.` |
 | `check_success` | success | `{tile}: проверка {stat} пройдена. Род получает Славу +{glory}.` |
 | `check_fail` | danger | `{tile}: проверка {stat} провалена. Силы {stamina}.` |
 | `card_gain` | card | `Песок открывает знак: {tile}.` |
 | `card_placed` | card | `Игрок оставляет след в пустыне: {tile}.` |
 | `lap_complete` | circle | `Круг {circle} завершен. Аул снова впереди.` |
+| `choice_prompt` | card | `Род советуется у огня: стоянка, память или риск.` |
 | `death` | death | `Силы иссякли. Путь окончен, но имя осталось.` |
 | `tamga_spawn` | memory | `На песке проступает Последняя Тамга.` |
+| `near_death` | danger | `{hero} едва стоит. На песке проступает Последняя Тамга.` |
+| `aul_bank` | gain | `Аул сохраняет: Запасы аула +{supplies}, Память рода +{memory}.` |
+| `clan_remembers` | memory | `Род хранит имя у огня. Память рода +{memory}.` |
 | `tamga_pickup` | memory | `Путник поднимает Тамгу прошлого. Мудрость +{wisdom}, Слава +{glory}.` |
 | `new_heir` | info | `Новый наследник выходит к дороге.` |
 
