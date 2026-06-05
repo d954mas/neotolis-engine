@@ -166,8 +166,8 @@ static void test_raycast_hit_perspective(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2 probe. Widget at world (0, 0) → projects to screen center (400, 300).
-     * Per-frame set_view_proj for symmetry with documented API contract — actual hit-test
-     * reads ctx->inv_view_proj which persists across frames; the call is defensive. */
+     * Mandatory per-frame setter after begin — nt_ui_begin resets view_proj_set, so hit-test
+     * asserts if the call is omitted. */
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_set_view_proj(s_fx.ctx, vp);
     const uint32_t id = nt_ui_id("persp");

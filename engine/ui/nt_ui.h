@@ -197,9 +197,9 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
-    /* true = raycast hit-test against game's view_proj (3D ctx); the game populates view_proj on the
-     * ctx (Phase 5 introduces nt_ui_set_view_proj) before each walk. false (default) = inverse-affine
-     * 2D hit-test against baked screen-space transform. */
+    /* true = raycast hit-test against game's view_proj (3D ctx); the game must populate view_proj
+     * via nt_ui_set_view_proj after each nt_ui_begin (per-frame reset). false (default) =
+     * inverse-affine 2D hit-test against baked screen-space transform. */
     bool use_raycast_input;
 } nt_ui_create_desc_t;
 
@@ -214,14 +214,21 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc);
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_ui_create_desc_t *desc);
 void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
-/* REQUIRED for ctx with use_raycast_input=true; call once per frame before nt_ui_walk.
- * view_proj is column-major mat4 (cglm convention); engine caches inverse for hit-test raycast.
- * Asserts ctx is non-NULL, use_raycast_input is true, and view_proj is finite + non-singular.
+/* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
+ * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
+ * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the
+ * view_proj_set flag so a forgotten setter trips the per-frame assert instead of silently
+ * raycasting through last frame's stale camera. ctx is non-NULL, use_raycast_input is true,
+ * view_proj is finite + non-singular.
  *
- * Coord convention: baked.m for 3D ctx carries NO implicit Y-flip (Phase 4 decision); game's
- * view_proj must map LAYOUT-space input (Y-down, matching Clay) → clip space directly. For
- * screen-fit 3D UI use `glm_ortho(0, w, h, 0, near, far)` (flipped top/bottom). For perspective
- * 3D world UI, the game's MVP × world_mat4 chain handles the convention. */
+ * Coord convention: baked.m for 3D ctx carries NO implicit Y-flip; game's view_proj must map
+ * LAYOUT-space input (Y-down, matching Clay) → clip space directly. For screen-fit 3D UI use
+ * `glm_ortho(0, w, h, 0, near, far)` (flipped top/bottom). For perspective 3D world UI, set up
+ * lookAt with up = (0, -1, 0) so screen-down aligns with Clay layout-down.
+ *
+ * Render-side contract: this setter only feeds the hit-test path. The sprite/text materials
+ * must receive the SAME view_proj via the game's frame-uniforms UBO before nt_ui_walk, or the
+ * rendered geometry will not match where hit-test thinks the widgets are. */
 void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);

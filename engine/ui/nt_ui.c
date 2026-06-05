@@ -328,6 +328,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Reset so a button begin that asserted mid-flight can't wedge subsequent frames. */
     ctx->pending_button.active = false;
 
+    /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
+     * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
+    if (ctx->use_raycast_input) {
+        ctx->view_proj_set = false;
+    }
+
 #if NT_UI_DEBUG_TOOLS
     memset(ctx->widget_registry, 0, sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap);
     /* highlight_id is per-frame; selected_id persists across frames. */

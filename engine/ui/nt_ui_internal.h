@@ -134,8 +134,8 @@ struct nt_ui_context {
 
     /* 3D-mode flag — copied from create_desc; gates raycast vs inverse-affine hit-test. */
     bool use_raycast_input;
-    /* Only valid when use_raycast_input AND view_proj_set; populated by the game before walk
-     * (Phase 5 introduces the nt_ui_set_view_proj setter that caches inv_view_proj alongside). */
+    /* Set by nt_ui_set_view_proj; reset by nt_ui_begin so a forgotten setter trips the assert
+     * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
     float view_proj[16];
     float inv_view_proj[16];

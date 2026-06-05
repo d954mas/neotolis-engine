@@ -721,10 +721,12 @@ static void frame(void) {
      * FOV looking at the panel center, distance ≈ (fb_h/2) / tan(30°) ≈ fb_h × 0.866. */
     const float panel_cx = fb_w * 0.5F;
     const float panel_cy = fb_h * 0.5F;
+    /* tan(30°) ≈ 0.577 → at distance = fb_h/(2·tan(30°)) ≈ fb_h·0.866 the panel fills view. */
     const float base_dist = fb_h * 0.866F;
-    const float cam_x = panel_cx + (s_cam_dist * cosf(s_cam_pitch) * sinf(s_cam_yaw));
-    const float cam_y = panel_cy + (s_cam_dist * sinf(s_cam_pitch));
-    const float cam_z = -base_dist * cosf(s_cam_pitch) * cosf(s_cam_yaw) * (s_cam_dist / base_dist);
+    const float cam_dist_world = base_dist * s_cam_dist;
+    const float cam_x = panel_cx + (cam_dist_world * cosf(s_cam_pitch) * sinf(s_cam_yaw));
+    const float cam_y = panel_cy + (cam_dist_world * sinf(s_cam_pitch));
+    const float cam_z = -cam_dist_world * cosf(s_cam_pitch) * cosf(s_cam_yaw);
     vec3 eye = {cam_x, cam_y, cam_z};
     vec3 center = {panel_cx, panel_cy, 0.0F};
     vec3 up = {0.0F, -1.0F, 0.0F}; /* Clay Y-down: world +Y is screen down → camera "up" is -Y. */
