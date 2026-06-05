@@ -112,6 +112,7 @@ struct nt_ui_context {
     nt_ui_baked_xform_t *hit_baked;
     uint32_t *hit_clip_parent_id;
     uint32_t *hit_generation;
+    uint8_t *hit_layer; /* per-slot layer cache for 3D ctx → inspector vs game view_proj branch in hit-test. */
     uint32_t current_generation;
 
     /* Per-walk metrics. */

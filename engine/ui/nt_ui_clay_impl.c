@@ -566,6 +566,10 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         const int32_t clip_id = (elem_idx < cc->layoutElementClipElementIds.length) ? Clay__int32_tArray_GetValue(&cc->layoutElementClipElementIds, elem_idx) : 0;
         ctx->hit_clip_parent_id[slot] = (uint32_t)clip_id;
         ctx->hit_generation[slot] = ctx->current_generation;
+        /* Cache element's layer for hit-test inspector branching (Phase 6). Default 0 if no userData. */
+        Clay_LayoutElement *e = Clay_LayoutElementArray_Get(&cc->layoutElements, elem_idx);
+        const nt_ui_element_data_t *ad = bt_scan_userdata(e);
+        ctx->hit_layer[slot] = (ad != NULL) ? ad->layer : 0U;
     }
     // #endregion
 

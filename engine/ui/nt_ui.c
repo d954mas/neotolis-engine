@@ -173,6 +173,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
 #if NT_UI_DEBUG_TOOLS
     const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * widget_cap, NT_UI_CACHE_LINE);
@@ -183,7 +184,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t debug_zones_bytes = 0U;
     const size_t inspector_collapsed_bytes = 0U;
 #endif
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes +
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes +
            widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + clay_bytes;
 }
 
@@ -213,14 +214,16 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
     ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size);
     ctx->tree_root_for_elem = (int32_t *)((char *)arena + ctx_size + tree_baked_bytes);
     ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes);
     ctx->hit_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes);
     ctx->hit_clip_parent_id = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes);
     ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
+    ctx->hit_layer = (uint8_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes);
     ctx->current_generation = 0U;
-    const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes;
+    const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes;
 #if NT_UI_DEBUG_TOOLS
     ctx->widget_registry_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
     ctx->widget_registry_mask = ctx->widget_registry_cap - 1U;
@@ -324,6 +327,17 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     memset(ctx->widget_registry, 0, sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap);
     /* highlight_id is per-frame; selected_id persists across frames. */
     ctx->inspector_highlight_id = 0U;
+
+    /* 3D ctx: rebuild inspector's own Y-down ortho per frame from screen dims so the inspector
+     * overlay raycasts against screen-pixel coords regardless of the game's view_proj (perspective). */
+    if (ctx->use_raycast_input && screen_w > 0.0F && screen_h > 0.0F) {
+        mat4 m;
+        glm_ortho(0.0F, screen_w, screen_h, 0.0F, -1.0F, 1.0F, m);
+        memcpy(ctx->inspector_view_proj, m, sizeof ctx->inspector_view_proj);
+        mat4 m_inv;
+        glm_mat4_inv(m, m_inv);
+        memcpy(ctx->inv_inspector_view_proj, m_inv, sizeof ctx->inv_inspector_view_proj);
+    }
 #endif
 
     const nt_pointer_t *primary = &pointers[0];
@@ -1623,18 +1637,19 @@ static void mat4_inv_trs(const float m[16], float out[16]) {
     out[15] = 1.0F;
 }
 
-/* 3D hit-test: unproject screen (px, py) → near/far world points via inv(view_proj),
+/* 3D hit-test: unproject screen (px, py) → near/far world points via inv_view_proj,
  * intersect the resulting ray with the widget's local Z=0 plane (in world space),
  * then inverse-transform the hit point into widget-local Clay coords for bbox check.
- * Returns local hit (lx, ly) in widget-local space; caller pads + bbox-tests against Clay bbox. */
-static bool raycast_hit(const nt_ui_context_t *ctx, const nt_ui_baked_xform_t *baked, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly) {
+ * Returns local hit (lx, ly) in widget-local space; caller pads + bbox-tests against Clay bbox.
+ * inv_view_proj caller-chosen: game view_proj for layer < 240, inspector ortho for inspector layers. */
+static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t *baked, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly) {
     /* Screen → NDC: (-1..1, -1..1). Note Clay px is Y-down; NDC Y is up — flip. */
     const float px_ndc = ((px / screen_w) * 2.0F) - 1.0F;
     const float py_ndc = 1.0F - ((py / screen_h) * 2.0F);
     const float p_near[4] = {px_ndc, py_ndc, -1.0F, 1.0F};
     const float p_far[4] = {px_ndc, py_ndc, 1.0F, 1.0F};
-    /* Unproject via inv_view_proj. */
-    const float *iv = ctx->inv_view_proj;
+    /* Unproject via caller-provided inv_view_proj. */
+    const float *iv = inv_view_proj;
     float wn[4];
     float wf[4];
     for (int i = 0; i < 4; ++i) {
@@ -1709,7 +1724,14 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
         float clx;
         float cly;
         if (ctx->use_raycast_input) {
-            if (!raycast_hit(ctx, &cb, px, py, screen_w, screen_h, &clx, &cly)) {
+            /* Inspector ancestor uses ortho overlay's inverse; game widgets use the user view_proj. */
+            const float *iv = ctx->inv_view_proj;
+#if NT_UI_DEBUG_TOOLS
+            if (ctx->hit_layer[cur_slot] >= 240U) {
+                iv = ctx->inv_inspector_view_proj;
+            }
+#endif
+            if (!raycast_hit(iv, &cb, px, py, screen_w, screen_h, &clx, &cly)) {
                 return false;
             }
         } else {
@@ -1768,7 +1790,15 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     float lx;
     float ly;
     if (ctx->use_raycast_input) {
-        if (!raycast_hit(ctx, &b, px, py, screen_w, screen_h, &lx, &ly)) {
+        /* Inspector widgets (layer 240-255) hit-test against the ortho overlay so they hit at
+         * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
+        const float *iv = ctx->inv_view_proj;
+#if NT_UI_DEBUG_TOOLS
+        if (ctx->hit_layer[slot] >= 240U) {
+            iv = ctx->inv_inspector_view_proj;
+        }
+#endif
+        if (!raycast_hit(iv, &b, px, py, screen_w, screen_h, &lx, &ly)) {
             return false;
         }
     } else {
