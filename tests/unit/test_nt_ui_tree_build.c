@@ -642,7 +642,7 @@ static void test_transform_3d_rotation_y_compose(void) {
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
         /* R_y produces: col0 = (cos, 0, -sin, 0); col2 = (sin, 0, cos, 0). m[0] = cos, m[10] = cos. */
-        if (fabsf(bk->m[0] - expected_cos) < 1e-3F && fabsf(bk->m[10] - expected_cos) < 1e-3F) {
+        if (fabsf(bk->m[0] - expected_cos) < 1e-5F && fabsf(bk->m[10] - expected_cos) < 1e-5F) {
             found = true;
             break;
         }

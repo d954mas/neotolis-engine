@@ -165,7 +165,9 @@ static void test_raycast_hit_perspective(void) {
     CLAY({.id = CLAY_ID("persp"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = NULL}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2 probe. Widget at world (0, 0) → projects to screen center (400, 300). */
+    /* Frame 2 probe. Widget at world (0, 0) → projects to screen center (400, 300).
+     * Per-frame set_view_proj for symmetry with documented API contract — actual hit-test
+     * reads ctx->inv_view_proj which persists across frames; the call is defensive. */
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_set_view_proj(s_fx.ctx, vp);
     const uint32_t id = nt_ui_id("persp");
