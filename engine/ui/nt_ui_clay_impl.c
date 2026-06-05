@@ -37,6 +37,16 @@ int32_t nt_ui_clay_priv_layout_elements_length(Clay_Context *clay) {
     return clay->layoutElements.length;
 }
 
+float nt_ui_clay_priv_layout_width(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_layout_width: clay must be non-NULL");
+    return clay->layoutDimensions.width;
+}
+
+float nt_ui_clay_priv_layout_height(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_layout_height: clay must be non-NULL");
+    return clay->layoutDimensions.height;
+}
+
 float nt_ui_clay_priv_pointer_x(Clay_Context *clay) {
     NT_ASSERT(clay != NULL && "nt_ui_clay_priv_pointer_x: clay must be non-NULL");
     return clay->pointerInfo.position.x;

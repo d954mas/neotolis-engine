@@ -29,6 +29,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "core/nt_clamp.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
+#include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_debug_hit_zones.h"
@@ -1518,6 +1519,27 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
     ctx->custom_fn = fn;
     ctx->custom_user = userdata;
 }
+
+/* Cache inv_view_proj alongside view_proj so per-pointer hit-tests don't re-invert per call. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_view_proj: ctx must be non-NULL");
+    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_view_proj: only valid when desc.use_raycast_input=true");
+    NT_ASSERT(view_proj != NULL && "nt_ui_set_view_proj: view_proj must be non-NULL");
+    for (int i = 0; i < 16; ++i) {
+        NT_ASSERT(isfinite(view_proj[i]) && "nt_ui_set_view_proj: view_proj must be finite");
+    }
+    memcpy(ctx->view_proj, view_proj, sizeof ctx->view_proj);
+    mat4 m_in;
+    mat4 m_inv;
+    memcpy(m_in, view_proj, sizeof m_in);
+    glm_mat4_inv(m_in, m_inv);
+    memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
+    /* Singular check: an inverted singular matrix produces inf/nan — surface it eagerly. */
+    NT_ASSERT(isfinite(ctx->inv_view_proj[0]) && isfinite(ctx->inv_view_proj[5]) && isfinite(ctx->inv_view_proj[10]) && isfinite(ctx->inv_view_proj[15]) &&
+              "nt_ui_set_view_proj: view_proj is singular (det == 0)");
+    ctx->view_proj_set = true;
+}
 // #endregion
 
 // #region nt_ui_custom
@@ -1560,9 +1582,104 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = true};
 }
 
+/* TRS-fast mat4 inverse: assumes m is composed of T·R·S (no shear/perspective), ~30 ops.
+ * inv(T·R·S) = inv(S) · inv(R) · inv(T) = S⁻¹ · Rᵀ · -T. Columns 0..2 of m are scaled rotation
+ * axes; their squared lengths give scale²; inverse columns are m.col / scale². */
+static void mat4_inv_trs(const float m[16], float out[16]) {
+    const float r00 = m[0];
+    const float r01 = m[4];
+    const float r02 = m[8];
+    const float r10 = m[1];
+    const float r11 = m[5];
+    const float r12 = m[9];
+    const float r20 = m[2];
+    const float r21 = m[6];
+    const float r22 = m[10];
+    const float tx = m[12];
+    const float ty = m[13];
+    const float tz = m[14];
+    const float s0_sq = (r00 * r00) + (r10 * r10) + (r20 * r20);
+    const float s1_sq = (r01 * r01) + (r11 * r11) + (r21 * r21);
+    const float s2_sq = (r02 * r02) + (r12 * r12) + (r22 * r22);
+    const float inv_s0 = (s0_sq > 0.0F) ? (1.0F / s0_sq) : 0.0F;
+    const float inv_s1 = (s1_sq > 0.0F) ? (1.0F / s1_sq) : 0.0F;
+    const float inv_s2 = (s2_sq > 0.0F) ? (1.0F / s2_sq) : 0.0F;
+    out[0] = r00 * inv_s0;
+    out[1] = r01 * inv_s1;
+    out[2] = r02 * inv_s2;
+    out[3] = 0.0F;
+    out[4] = r10 * inv_s0;
+    out[5] = r11 * inv_s1;
+    out[6] = r12 * inv_s2;
+    out[7] = 0.0F;
+    out[8] = r20 * inv_s0;
+    out[9] = r21 * inv_s1;
+    out[10] = r22 * inv_s2;
+    out[11] = 0.0F;
+    out[12] = -((out[0] * tx) + (out[4] * ty) + (out[8] * tz));
+    out[13] = -((out[1] * tx) + (out[5] * ty) + (out[9] * tz));
+    out[14] = -((out[2] * tx) + (out[6] * ty) + (out[10] * tz));
+    out[15] = 1.0F;
+}
+
+/* 3D hit-test: unproject screen (px, py) → near/far world points via inv(view_proj),
+ * intersect the resulting ray with the widget's local Z=0 plane (in world space),
+ * then inverse-transform the hit point into widget-local Clay coords for bbox check.
+ * Returns local hit (lx, ly) in widget-local space; caller pads + bbox-tests against Clay bbox. */
+static bool raycast_hit(const nt_ui_context_t *ctx, const nt_ui_baked_xform_t *baked, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly) {
+    /* Screen → NDC: (-1..1, -1..1). Note Clay px is Y-down; NDC Y is up — flip. */
+    const float px_ndc = ((px / screen_w) * 2.0F) - 1.0F;
+    const float py_ndc = 1.0F - ((py / screen_h) * 2.0F);
+    const float p_near[4] = {px_ndc, py_ndc, -1.0F, 1.0F};
+    const float p_far[4] = {px_ndc, py_ndc, 1.0F, 1.0F};
+    /* Unproject via inv_view_proj. */
+    const float *iv = ctx->inv_view_proj;
+    float wn[4];
+    float wf[4];
+    for (int i = 0; i < 4; ++i) {
+        wn[i] = (iv[i] * p_near[0]) + (iv[i + 4] * p_near[1]) + (iv[i + 8] * p_near[2]) + (iv[i + 12] * p_near[3]);
+        wf[i] = (iv[i] * p_far[0]) + (iv[i + 4] * p_far[1]) + (iv[i + 8] * p_far[2]) + (iv[i + 12] * p_far[3]);
+    }
+    if (wn[3] == 0.0F || wf[3] == 0.0F) {
+        return false;
+    }
+    const float inv_wn = 1.0F / wn[3];
+    const float inv_wf = 1.0F / wf[3];
+    const float ox = wn[0] * inv_wn;
+    const float oy = wn[1] * inv_wn;
+    const float oz = wn[2] * inv_wn;
+    const float dx = (wf[0] * inv_wf) - ox;
+    const float dy = (wf[1] * inv_wf) - oy;
+    const float dz = (wf[2] * inv_wf) - oz;
+    /* Widget plane in world: normal = baked Z column (m.col2 normalized direction), origin = baked translation. */
+    const float n_x = baked->m[8];
+    const float n_y = baked->m[9];
+    const float n_z = baked->m[10];
+    const float orig_x = baked->m[12];
+    const float orig_y = baked->m[13];
+    const float orig_z = baked->m[14];
+    const float denom = (n_x * dx) + (n_y * dy) + (n_z * dz);
+    if (denom == 0.0F) {
+        return false;
+    }
+    const float t = (((orig_x - ox) * n_x) + ((orig_y - oy) * n_y) + ((orig_z - oz) * n_z)) / denom;
+    if (t < 0.0F) {
+        return false;
+    }
+    const float hx = ox + (t * dx);
+    const float hy = oy + (t * dy);
+    const float hz = oz + (t * dz);
+    /* Inverse-transform hit point into widget-local coords. */
+    float inv[16];
+    mat4_inv_trs(baked->m, inv);
+    *out_lx = (inv[0] * hx) + (inv[4] * hy) + (inv[8] * hz) + inv[12];
+    *out_ly = (inv[1] * hx) + (inv[5] * hy) + (inv[9] * hz) + inv[13];
+    return true;
+}
+
 /* Hit-test reads PREV-frame data via Clay's persistent hashmap slot (stable across frames). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py) {
+static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py, float screen_w, float screen_h) {
     uint32_t cur_id = start_clip_id;
     /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang.
      * Decrement + bail are UNCONDITIONAL (NT_ASSERT vanishes in OFF builds). */
@@ -1588,16 +1705,24 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
             return false;
         }
         const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
-        const float cdet = (cb.m[0] * cb.m[5]) - (cb.m[4] * cb.m[1]);
-        NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip ancestor has singular affine");
-        const float cinv_a = cb.m[5] / cdet;
-        const float cinv_b = -cb.m[4] / cdet;
-        const float cinv_c = -cb.m[1] / cdet;
-        const float cinv_d = cb.m[0] / cdet;
-        const float crx = px - cb.m[12];
-        const float cry = py - cb.m[13];
-        const float clx = (cinv_a * crx) + (cinv_b * cry);
-        const float cly = (cinv_c * crx) + (cinv_d * cry);
+        float clx;
+        float cly;
+        if (ctx->use_raycast_input) {
+            if (!raycast_hit(ctx, &cb, px, py, screen_w, screen_h, &clx, &cly)) {
+                return false;
+            }
+        } else {
+            const float cdet = (cb.m[0] * cb.m[5]) - (cb.m[4] * cb.m[1]);
+            NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip ancestor has singular affine");
+            const float cinv_a = cb.m[5] / cdet;
+            const float cinv_b = -cb.m[4] / cdet;
+            const float cinv_c = -cb.m[1] / cdet;
+            const float cinv_d = cb.m[0] / cdet;
+            const float crx = px - cb.m[12];
+            const float cry = py - cb.m[13];
+            clx = (cinv_a * crx) + (cinv_b * cry);
+            cly = (cinv_c * crx) + (cinv_d * cry);
+        }
         if (clx < cx || clx > cx + cw || cly < cy || cly > cy + ch) {
             return false;
         }
@@ -1606,6 +1731,7 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
     return true;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
     if (id == 0U) {
         return false;
@@ -1623,22 +1749,37 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
         return false;
     }
 
-    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py)) {
+    /* 3D ctx requires nt_ui_set_view_proj before walk; 2D ctx ignores view_proj. */
+    const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+    const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
+    if (ctx->use_raycast_input) {
+        NT_ASSERT(ctx->view_proj_set && "ui_hit_test: ctx is 3D mode but nt_ui_set_view_proj was not called this frame");
+    }
+
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {
         return false;
     }
 
     const Clay_BoundingBox box = d.boundingBox;
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
-    const float det = (b.m[0] * b.m[5]) - (b.m[4] * b.m[1]);
-    NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
-    const float inv_a = b.m[5] / det;
-    const float inv_b = -b.m[4] / det;
-    const float inv_c = -b.m[1] / det;
-    const float inv_d = b.m[0] / det;
-    const float rx = px - b.m[12];
-    const float ry = py - b.m[13];
-    const float lx = (inv_a * rx) + (inv_b * ry);
-    const float ly = (inv_c * rx) + (inv_d * ry);
+    float lx;
+    float ly;
+    if (ctx->use_raycast_input) {
+        if (!raycast_hit(ctx, &b, px, py, screen_w, screen_h, &lx, &ly)) {
+            return false;
+        }
+    } else {
+        const float det = (b.m[0] * b.m[5]) - (b.m[4] * b.m[1]);
+        NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
+        const float inv_a = b.m[5] / det;
+        const float inv_b = -b.m[4] / det;
+        const float inv_c = -b.m[1] / det;
+        const float inv_d = b.m[0] / det;
+        const float rx = px - b.m[12];
+        const float ry = py - b.m[13];
+        lx = (inv_a * rx) + (inv_b * ry);
+        ly = (inv_c * rx) + (inv_d * ry);
+    }
 
     const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
     const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;

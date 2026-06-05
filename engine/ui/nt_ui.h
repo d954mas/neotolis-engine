@@ -207,6 +207,11 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc);
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_ui_create_desc_t *desc);
 void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
+/* REQUIRED for ctx with use_raycast_input=true; call once per frame before nt_ui_walk.
+ * view_proj is column-major mat4 (cglm convention); engine caches inverse for hit-test raycast.
+ * Asserts ctx is non-NULL, use_raycast_input is true, and view_proj is finite + non-singular. */
+void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
+
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
 /* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. */

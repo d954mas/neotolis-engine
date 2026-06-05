@@ -40,6 +40,9 @@ int32_t nt_ui_clay_priv_hashmap_slot_for_id(Clay_Context *clay, uint32_t id);
 int32_t nt_ui_clay_priv_layout_index_for_id(Clay_Context *clay, uint32_t id);
 /* Persistent hashmap survives BeginLayout's ephemeral reset. */
 bool nt_ui_clay_priv_bbox_for_id(Clay_Context *clay, uint32_t id, float *x, float *y, float *w, float *h);
+/* Layout dimensions set by last nt_ui_begin. Hit-test reads these for NDC conversion. */
+float nt_ui_clay_priv_layout_width(Clay_Context *clay);
+float nt_ui_clay_priv_layout_height(Clay_Context *clay);
 // #endregion
 
 // #region in-frame ctx getter

@@ -453,6 +453,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_transform
         test_nt_ui_interaction
         test_nt_ui_hittest
+        test_nt_ui_3d_hittest
         test_nt_ui_clip_hittest
         test_nt_ui_anim
         test_nt_ui_button
