@@ -238,8 +238,20 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
     }
 }
 
-/* Click anywhere on the map that is not a buildable slot (while holding a card)
- * -> short "can't build here" feedback in the log (no modal). */
+/* A fully-transparent click button (for invalid-placement feedback catchers). */
+static nt_ui_button_style_t invisible_button(game_ctx_t *g) {
+    return (nt_ui_button_style_t){
+        .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
+        .hover = {.bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
+        .pressed = {.bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
+        .disabled = {.bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
+        .transition_speed = 1.0F,
+        .slice9_scale = 1.0F,
+    };
+}
+
+/* Generic no-build catcher behind everything: clicking off a buildable cell while
+ * holding a card -> "place farther, at a highlighted cell" feedback. */
 static void draw_build_catcher(game_ctx_t *g, tj_run_t *run) {
     if (run->hand < 0) {
         return;
@@ -248,20 +260,39 @@ static void draw_build_catcher(game_ctx_t *g, tj_run_t *run) {
     if (cid == 0U) {
         cid = nt_ui_id("tj_nobuild");
     }
-    const nt_ui_button_style_t st = {
-        .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
-        .hover = {.bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
-        .pressed = {.bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
-        .disabled = {.bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
-        .transition_speed = 1.0F,
-        .slice9_scale = 1.0F,
-    };
+    const nt_ui_button_style_t st = invisible_button(g);
     const Clay_ElementDeclaration decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(MAP_SIZE), CLAY_SIZING_FIXED(MAP_SIZE)}},
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, 0.0F}, .zIndex = 4},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, 0.0F}, .zIndex = 3},
     };
     if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), cid, &st, &decl, true)) {
-        tj_journal_push(TJ_LOG_BAD, "Здесь не строят. Ставь в подсвеченные клетки у дороги.");
+        tj_journal_push(TJ_LOG_BAD, "Эта карта ставится у дороги, в подсвеченную клетку.");
+    }
+}
+
+/* Per-road-cell catchers (above the generic one): clicking the road -> its message. */
+static void draw_road_catchers(game_ctx_t *g, tj_run_t *run, float pitch) {
+    if (run->hand < 0) {
+        return;
+    }
+    static uint32_t rbase = 0U;
+    if (rbase == 0U) {
+        rbase = nt_ui_id("tj_roadcatch");
+    }
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const nt_ui_button_style_t st = invisible_button(g);
+    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
+        const Clay_ElementDeclaration decl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(pitch), CLAY_SIZING_FIXED(pitch)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                         .offset = {grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch)},
+                         .zIndex = 4},
+        };
+        if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), rbase + (uint32_t)i, &st, &decl, true)) {
+            tj_journal_push(TJ_LOG_BAD, "Здесь проходит дорога.");
+        }
     }
 }
 
@@ -398,6 +429,7 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
         draw_field(run, pitch, tile);
         draw_tamga(run, pitch);
         draw_build_catcher(g, run);
+        draw_road_catchers(g, run, pitch);
         draw_slots(g, run, pitch, tile);
         draw_hero(run, pitch);
         draw_storm(run);
