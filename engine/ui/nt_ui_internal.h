@@ -44,51 +44,39 @@ typedef struct {
 #define NT_UI_DEBUG_FLAG_CAPTURED (1U << 2)
 #define NT_UI_DEBUG_FLAG_DISABLED (1U << 3)
 
-/* If this grows, nt_ui_min_arena_size + create_context's offset cascade must update together. */
+/* Column-major mat4 storage. 2D consumers extract a/b/c/d/tx/ty via the helpers below
+ * (Phase 4 walker rewrite passes m[16] directly; helpers vanish then). If this grows,
+ * nt_ui_min_arena_size + create_context's offset cascade must update together. */
 typedef struct {
-    float a, b, c, d, tx, ty;
+    float m[16];
     float opacity;
-    float _pad;
+    float _pad[3];
 } nt_ui_baked_xform_t;
-_Static_assert(sizeof(nt_ui_baked_xform_t) == 32, "nt_ui_baked_xform_t fixed at 32B");
+_Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
 
 typedef struct {
     int32_t elem_idx;
-    float a, b, c, d, tx, ty;
+    float m[16];
     float opacity;
     int32_t children_cursor;
 } nt_ui_dfs_frame_t;
-_Static_assert(sizeof(nt_ui_dfs_frame_t) == 36, "nt_ui_dfs_frame_t fixed at 36B");
+_Static_assert(sizeof(nt_ui_dfs_frame_t) == 76, "nt_ui_dfs_frame_t fixed at 76B");
+
+/* 2D affine extraction from column-major mat4: point' = m · point with point.z=0.
+ *   new_x = m[0]·x + m[4]·y + m[12]
+ *   new_y = m[1]·x + m[5]·y + m[13]
+ * → matches [a b tx; c d ty] · [x; y; 1] with a=m[0] b=m[4] c=m[1] d=m[5] tx=m[12] ty=m[13]. */
+static inline float nt_ui_baked_aff_a(const nt_ui_baked_xform_t *b) { return b->m[0]; }
+static inline float nt_ui_baked_aff_b(const nt_ui_baked_xform_t *b) { return b->m[4]; }
+static inline float nt_ui_baked_aff_c(const nt_ui_baked_xform_t *b) { return b->m[1]; }
+static inline float nt_ui_baked_aff_d(const nt_ui_baked_xform_t *b) { return b->m[5]; }
+static inline float nt_ui_baked_aff_tx(const nt_ui_baked_xform_t *b) { return b->m[12]; }
+static inline float nt_ui_baked_aff_ty(const nt_ui_baked_xform_t *b) { return b->m[13]; }
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    return (nt_ui_baked_xform_t){
-        .a = 1.0F,
-        .b = 0.0F,
-        .c = 0.0F,
-        .d = 1.0F,
-        .tx = 0.0F,
-        .ty = 0.0F,
-        .opacity = 1.0F,
-        ._pad = 0.0F,
-    };
-}
-
-/* Returns false on singular affine (det == 0). */
-static inline bool nt_ui_internal_point_in_inverse_transformed_bbox(float px, float py, float a, float b, float c, float d, float tx, float ty, const Clay_BoundingBox *bbox) {
-    const float det = (a * d) - (b * c);
-    if (det == 0.0F) {
-        return false;
-    }
-    const float inv_a = d / det;
-    const float inv_b = -b / det;
-    const float inv_c = -c / det;
-    const float inv_d = a / det;
-    const float rx = px - tx;
-    const float ry = py - ty;
-    const float lx = (inv_a * rx) + (inv_b * ry);
-    const float ly = (inv_c * rx) + (inv_d * ry);
-    return (lx >= bbox->x) && (lx < bbox->x + bbox->width) && (ly >= bbox->y) && (ly < bbox->y + bbox->height);
+    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, ._pad = {0.0F, 0.0F, 0.0F}};
+    return bx;
 }
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */

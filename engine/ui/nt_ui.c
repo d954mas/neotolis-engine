@@ -1415,12 +1415,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
             const nt_ui_baked_xform_t b = (c->nt_layout_index < 0 || c->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[c->nt_layout_index];
-            ws.aff_a = b.a;
-            ws.aff_b = b.b;
-            ws.aff_c = b.c;
-            ws.aff_d = b.d;
-            ws.aff_tx = b.tx;
-            ws.aff_ty = b.ty;
+            ws.aff_a = b.m[0];
+            ws.aff_b = b.m[4];
+            ws.aff_c = b.m[1];
+            ws.aff_d = b.m[5];
+            ws.aff_tx = b.m[12];
+            ws.aff_ty = b.m[13];
             ws.accum_opacity = b.opacity;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
             ++i;
@@ -1461,12 +1461,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
                         const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
-                        ws.aff_a = b.a;
-                        ws.aff_b = b.b;
-                        ws.aff_c = b.c;
-                        ws.aff_d = b.d;
-                        ws.aff_tx = b.tx;
-                        ws.aff_ty = b.ty;
+                        ws.aff_a = b.m[0];
+                        ws.aff_b = b.m[4];
+                        ws.aff_c = b.m[1];
+                        ws.aff_d = b.m[5];
+                        ws.aff_tx = b.m[12];
+                        ws.aff_ty = b.m[13];
                         ws.accum_opacity = b.opacity;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
                     }
@@ -1613,14 +1613,14 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
             return false;
         }
         const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
-        const float cdet = (cb.a * cb.d) - (cb.b * cb.c);
+        const float cdet = (cb.m[0] * cb.m[5]) - (cb.m[4] * cb.m[1]);
         NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip ancestor has singular affine");
-        const float cinv_a = cb.d / cdet;
-        const float cinv_b = -cb.b / cdet;
-        const float cinv_c = -cb.c / cdet;
-        const float cinv_d = cb.a / cdet;
-        const float crx = px - cb.tx;
-        const float cry = py - cb.ty;
+        const float cinv_a = cb.m[5] / cdet;
+        const float cinv_b = -cb.m[4] / cdet;
+        const float cinv_c = -cb.m[1] / cdet;
+        const float cinv_d = cb.m[0] / cdet;
+        const float crx = px - cb.m[12];
+        const float cry = py - cb.m[13];
         const float clx = (cinv_a * crx) + (cinv_b * cry);
         const float cly = (cinv_c * crx) + (cinv_d * cry);
         if (clx < cx || clx > cx + cw || cly < cy || cly > cy + ch) {
@@ -1654,14 +1654,14 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
 
     const Clay_BoundingBox box = d.boundingBox;
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
-    const float det = (b.a * b.d) - (b.b * b.c);
+    const float det = (b.m[0] * b.m[5]) - (b.m[4] * b.m[1]);
     NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
-    const float inv_a = b.d / det;
-    const float inv_b = -b.b / det;
-    const float inv_c = -b.c / det;
-    const float inv_d = b.a / det;
-    const float rx = px - b.tx;
-    const float ry = py - b.ty;
+    const float inv_a = b.m[5] / det;
+    const float inv_b = -b.m[4] / det;
+    const float inv_c = -b.m[1] / det;
+    const float inv_d = b.m[0] / det;
+    const float rx = px - b.m[12];
+    const float ry = py - b.m[13];
     const float lx = (inv_a * rx) + (inv_b * ry);
     const float ly = (inv_c * rx) + (inv_d * ry);
 
@@ -1866,20 +1866,20 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
         if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
             const nt_ui_baked_xform_t b = ctx->hit_baked[e_slot];
-            z->aff_a = b.a;
-            z->aff_b = b.b;
-            z->aff_c = b.c;
-            z->aff_d = b.d;
-            z->aff_tx = b.tx;
-            z->aff_ty = b.ty;
+            z->aff_a = b.m[0];
+            z->aff_b = b.m[4];
+            z->aff_c = b.m[1];
+            z->aff_d = b.m[5];
+            z->aff_tx = b.m[12];
+            z->aff_ty = b.m[13];
         } else {
             const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-            z->aff_a = b.a;
-            z->aff_b = b.b;
-            z->aff_c = b.c;
-            z->aff_d = b.d;
-            z->aff_tx = b.tx;
-            z->aff_ty = b.ty;
+            z->aff_a = b.m[0];
+            z->aff_b = b.m[4];
+            z->aff_c = b.m[1];
+            z->aff_d = b.m[5];
+            z->aff_tx = b.m[12];
+            z->aff_ty = b.m[13];
         }
         uint16_t flags = 0U;
         if (out.hovered) {
@@ -1940,20 +1940,20 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
     if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
         const nt_ui_baked_xform_t b = ctx->hit_baked[e_slot];
-        z->aff_a = b.a;
-        z->aff_b = b.b;
-        z->aff_c = b.c;
-        z->aff_d = b.d;
-        z->aff_tx = b.tx;
-        z->aff_ty = b.ty;
+        z->aff_a = b.m[0];
+        z->aff_b = b.m[4];
+        z->aff_c = b.m[1];
+        z->aff_d = b.m[5];
+        z->aff_tx = b.m[12];
+        z->aff_ty = b.m[13];
     } else {
         const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-        z->aff_a = b.a;
-        z->aff_b = b.b;
-        z->aff_c = b.c;
-        z->aff_d = b.d;
-        z->aff_tx = b.tx;
-        z->aff_ty = b.ty;
+        z->aff_a = b.m[0];
+        z->aff_b = b.m[4];
+        z->aff_c = b.m[1];
+        z->aff_d = b.m[5];
+        z->aff_tx = b.m[12];
+        z->aff_ty = b.m[13];
     }
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }

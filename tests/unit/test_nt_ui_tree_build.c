@@ -44,23 +44,23 @@ static bool baked_is_identity(const nt_ui_baked_xform_t *bk) {
     if (bk == NULL) {
         return false;
     }
-    return near_eq(bk->a, 1.0F, 1e-5F) && near_eq(bk->b, 0.0F, 1e-5F) && near_eq(bk->c, 0.0F, 1e-5F) && near_eq(bk->d, 1.0F, 1e-5F) && near_eq(bk->tx, 0.0F, 1e-5F) && near_eq(bk->ty, 0.0F, 1e-5F) &&
-           near_eq(bk->opacity, 1.0F, 1e-5F);
+    return near_eq(bk->m[0], 1.0F, 1e-5F) && near_eq(bk->m[4], 0.0F, 1e-5F) && near_eq(bk->m[1], 0.0F, 1e-5F) && near_eq(bk->m[5], 1.0F, 1e-5F) && near_eq(bk->m[12], 0.0F, 1e-5F) &&
+           near_eq(bk->m[13], 0.0F, 1e-5F) && near_eq(bk->opacity, 1.0F, 1e-5F);
 }
 
 /* Decompose the rotation from the composed affine. Sound ONLY for rotate-then-uniform-scale
  * compositions (columns orthogonal, equal length). Asserts to fail loud if the caller
  * accidentally introduces shear or non-uniform scale — atan2f(c, a) lies in those cases. */
 static float baked_rotation(const nt_ui_baked_xform_t *bk) {
-    const float col0_len = sqrtf((bk->a * bk->a) + (bk->c * bk->c));
-    const float col1_len = sqrtf((bk->b * bk->b) + (bk->d * bk->d));
-    const float ortho = (bk->a * bk->b) + (bk->c * bk->d);
+    const float col0_len = sqrtf((bk->m[0] * bk->m[0]) + (bk->m[1] * bk->m[1]));
+    const float col1_len = sqrtf((bk->m[4] * bk->m[4]) + (bk->m[5] * bk->m[5]));
+    const float ortho = (bk->m[0] * bk->m[4]) + (bk->m[1] * bk->m[5]);
     NT_ASSERT(fabsf(ortho) < 1e-3F && "baked_rotation: composed affine has shear; helper unsound");
     NT_ASSERT(fabsf(col0_len - col1_len) < 1e-3F && "baked_rotation: composed affine has non-uniform scale; helper unsound");
     (void)col0_len;
     (void)col1_len;
     (void)ortho;
-    return atan2f(bk->c, bk->a);
+    return atan2f(bk->m[1], bk->m[0]);
 }
 
 // #endregion
@@ -437,8 +437,8 @@ static void test_min_arena_size_includes_tree_storage(void) {
     TEST_ASSERT_GREATER_THAN_size_t(sz_small, sz_large);
 
     /* Per-element bytes that grow with max_elements:
-     *   tree_baked (40) + tree_root_for_elem (4) + hit_baked (40) + hit_clip_parent_id (4) = 88. */
-    const size_t per_elem_bytes = 40U + 4U + 40U + 4U;
+     *   tree_baked (80) + tree_root_for_elem (4) + hit_baked (80) + hit_clip_parent_id (4) = 168. */
+    const size_t per_elem_bytes = 80U + 4U + 80U + 4U;
     const size_t expected_delta_floor = per_elem_bytes * (1024U - 256U);
     TEST_ASSERT_GREATER_OR_EQUAL_size_t(expected_delta_floor, sz_large - sz_small);
 }
@@ -611,10 +611,10 @@ static void test_shear_composition_nonuniform_scale_then_rotation(void) {
     bool found_inner = false;
     for (int32_t i = 0; i < N; ++i) {
         const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
-        if (fabsf(bk->a - exp_a) < 1e-3F && fabsf(bk->b - exp_b) < 1e-3F && fabsf(bk->c - exp_c) < 1e-3F && fabsf(bk->d - exp_d) < 1e-3F) {
+        if (fabsf(bk->m[0] - exp_a) < 1e-3F && fabsf(bk->m[4] - exp_b) < 1e-3F && fabsf(bk->m[1] - exp_c) < 1e-3F && fabsf(bk->m[5] - exp_d) < 1e-3F) {
             found_inner = true;
             /* Sanity: columns are non-orthogonal — shear is what we wanted. */
-            const float ortho = (bk->a * bk->b) + (bk->c * bk->d);
+            const float ortho = (bk->m[0] * bk->m[4]) + (bk->m[1] * bk->m[5]);
             TEST_ASSERT_TRUE_MESSAGE(fabsf(ortho) > 0.1F, "composed affine should carry shear (col0.col1 != 0)");
             break;
         }

@@ -13,6 +13,7 @@
 
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
+#include "math/nt_math.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
@@ -382,30 +383,35 @@ static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
     return shared_ud ? shared_ud : text_ud;
 }
 
-/* Local = T(O)·T(C)·R(θ)·S·T(-C); new = accum · local. Pure Clay Y-down (Y-flip lives in walker). */
-static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
-    const float sx = t->scale_x;
-    const float sy = t->scale_y;
-    const float cr = cosf(t->rotation_z);
-    const float sr = sinf(t->rotation_z);
-    const float la = cr * sx;
-    const float lb = -(sr * sy);
-    const float lc = sr * sx;
-    const float ld = cr * sy;
-    const float ltx = cx - (la * cx) - (lb * cy) + t->offset_x;
-    const float lty = cy - (lc * cx) - (ld * cy) + t->offset_y;
-    const float na = (*a * la) + (*b * lc);
-    const float nb = (*a * lb) + (*b * ld);
-    const float nc = (*c * la) + (*d * lc);
-    const float nd = (*c * lb) + (*d * ld);
-    const float ntx = (*a * ltx) + (*b * lty) + *tx;
-    const float nty = (*c * ltx) + (*d * lty) + *ty;
-    *a = na;
-    *b = nb;
-    *c = nc;
-    *d = nd;
-    *tx = ntx;
-    *ty = nty;
+/* Local = T(O)·T(C)·R(rot_xyz Euler)·S·T(-C); new = accum · local.
+ * Pivot is bbox center (cx, cy, 0). Pure Clay Y-down (Y-flip lives in walker). */
+static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, const float accum[16], float out[16]) {
+    mat4 m_pivot_pos;
+    glm_mat4_identity(m_pivot_pos);
+    glm_translate(m_pivot_pos, (vec3){cx + t->offset_x, cy + t->offset_y, t->offset_z});
+
+    mat4 m_rot;
+    glm_euler_xyz((vec3){t->rotation_x, t->rotation_y, t->rotation_z}, m_rot);
+
+    mat4 m_scale;
+    glm_mat4_identity(m_scale);
+    glm_scale(m_scale, (vec3){t->scale_x, t->scale_y, t->scale_z});
+
+    mat4 m_pivot_neg;
+    glm_mat4_identity(m_pivot_neg);
+    glm_translate(m_pivot_neg, (vec3){-cx, -cy, 0.0F});
+
+    mat4 m_local;
+    mat4 m_tmp;
+    glm_mat4_mul(m_pivot_pos, m_rot, m_tmp);
+    glm_mat4_mul(m_tmp, m_scale, m_local);
+    glm_mat4_mul(m_local, m_pivot_neg, m_local);
+
+    mat4 m_accum;
+    memcpy(m_accum, accum, sizeof m_accum);
+    mat4 m_out;
+    glm_mat4_mul(m_accum, m_local, m_out);
+    memcpy(out, m_out, sizeof m_out);
 }
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
@@ -414,17 +420,11 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
-    S[sp++] = (nt_ui_dfs_frame_t){
-        .elem_idx = root_elem_idx,
-        .a = seed->a,
-        .b = seed->b,
-        .c = seed->c,
-        .d = seed->d,
-        .tx = seed->tx,
-        .ty = seed->ty,
-        .opacity = seed->opacity,
-        .children_cursor = 0,
-    };
+    S[sp].elem_idx = root_elem_idx;
+    memcpy(S[sp].m, seed->m, sizeof seed->m);
+    S[sp].opacity = seed->opacity;
+    S[sp].children_cursor = 0;
+    sp++;
 
     while (sp > 0) {
         nt_ui_dfs_frame_t *f = &S[sp - 1];
@@ -432,12 +432,8 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
 
         if (f->children_cursor == 0) {
             nt_ui_element_data_t *ad = bt_scan_userdata(elem);
-            float a = f->a;
-            float b = f->b;
-            float c = f->c;
-            float d = f->d;
-            float tx = f->tx;
-            float ty = f->ty;
+            float m_cur[16];
+            memcpy(m_cur, f->m, sizeof m_cur);
             float op = f->opacity;
 
             if (ad != NULL) {
@@ -446,28 +442,17 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                     NT_ASSERT(item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: element's own hashmap lookup failed");
                     const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
                     const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
-                    compose_transform_level(&ad->transform, cx, cy, &a, &b, &c, &d, &tx, &ty);
+                    float m_new[16];
+                    compose_transform_level(&ad->transform, cx, cy, m_cur, m_new);
+                    memcpy(m_cur, m_new, sizeof m_cur);
                 }
                 if ((ad->flags & NT_UI_ELEM_FLAG_HAS_OPACITY) != 0U) {
                     op *= ad->opacity;
                 }
             }
-            ctx->tree_baked[f->elem_idx] = (nt_ui_baked_xform_t){
-                .a = a,
-                .b = b,
-                .c = c,
-                .d = d,
-                .tx = tx,
-                .ty = ty,
-                .opacity = op,
-                ._pad = 0.0F,
-            };
-            f->a = a;
-            f->b = b;
-            f->c = c;
-            f->d = d;
-            f->tx = tx;
-            f->ty = ty;
+            memcpy(ctx->tree_baked[f->elem_idx].m, m_cur, sizeof m_cur);
+            ctx->tree_baked[f->elem_idx].opacity = op;
+            memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
 
@@ -483,17 +468,11 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             if (sp >= NT_UI_TREE_DFS_DEPTH_CAP) {
                 break;
             }
-            S[sp++] = (nt_ui_dfs_frame_t){
-                .elem_idx = child_idx,
-                .a = f->a,
-                .b = f->b,
-                .c = f->c,
-                .d = f->d,
-                .tx = f->tx,
-                .ty = f->ty,
-                .opacity = f->opacity,
-                .children_cursor = 0,
-            };
+            S[sp].elem_idx = child_idx;
+            memcpy(S[sp].m, f->m, sizeof f->m);
+            S[sp].opacity = f->opacity;
+            S[sp].children_cursor = 0;
+            sp++;
         } else {
             sp--;
         }

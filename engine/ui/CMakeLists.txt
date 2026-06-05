@@ -111,6 +111,7 @@ target_link_libraries(nt_ui
         nt_text_renderer
         nt_atlas
         nt_time
+        nt_math
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.
