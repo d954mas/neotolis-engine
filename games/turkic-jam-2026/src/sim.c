@@ -342,6 +342,9 @@ void tj_run_tick(tj_run_t *r, float dt) {
     if (per <= 0.0F) {
         per = 0.5F;
     }
+    if (dt > 0.1F) {
+        dt = 0.1F; /* max frame time: a slow load/hitch frame can't lurch the hero, no spiral */
+    }
     r->move_t += dt;
     int guard = 0;
     while (r->move_t >= per && r->alive && !r->won && guard < TJ_MAX_PATH) {
