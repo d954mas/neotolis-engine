@@ -144,11 +144,44 @@ static void test_set_view_proj_asserts_on_2d_ctx(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_set_view_proj(s_fx.ctx, vp));
 }
 
+/* ---- Test 5: perspective view_proj — widget in front of camera should still hit at center pixel.
+ *      Validates the ray-plane math path independent of ortho convention. ---- */
+static void test_raycast_hit_perspective(void) {
+    /* Use the same test bbox but with a perspective camera looking down -Z at a widget on z=0 plane.
+     * Camera at z=+5 looking toward origin. Wrap the widget in a transform that places it at world (0, 0, 0). */
+    mat4 view;
+    mat4 proj;
+    glm_lookat((vec3){0.0F, 0.0F, 5.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
+    glm_perspective(glm_rad(60.0F), SCREEN_W / SCREEN_H, 0.1F, 100.0F, proj);
+    mat4 vp_mat;
+    glm_mat4_mul(proj, view, vp_mat);
+    float vp[16];
+    memcpy(vp, vp_mat, sizeof vp);
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+
+    /* Widget at Clay layout-space (0, 0, 100x100) with no transform → world position at (0, 0). */
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("persp"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = NULL}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2 probe. Widget at world (0, 0) → projects to screen center (400, 300). */
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+    const uint32_t id = nt_ui_id("persp");
+    const bool h_center = nt_ui_test_hit(s_fx.ctx, id, SCREEN_W * 0.5F, SCREEN_H * 0.5F);
+    const bool h_corner = nt_ui_test_hit(s_fx.ctx, id, 10.0F, 10.0F);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(h_center, "perspective camera: screen-center pixel must hit widget projected to origin");
+    TEST_ASSERT_FALSE_MESSAGE(h_corner, "perspective camera: top-left pixel must miss widget at world origin");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_view_proj_set_caches_inverse);
     RUN_TEST(test_raycast_hit_accept_and_reject);
     RUN_TEST(test_hit_test_asserts_when_view_proj_not_set);
     RUN_TEST(test_set_view_proj_asserts_on_2d_ctx);
+    RUN_TEST(test_raycast_hit_perspective);
     return UNITY_END();
 }

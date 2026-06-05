@@ -136,6 +136,34 @@ static void test_anim_evicts_when_probes_exhausted(void) {
     TEST_ASSERT_TRUE(float_near(r->scale_x, 0.25F, 1e-6F));
 }
 
+/* ---- Test 6: 3D rotation_y eased convergence (single-axis dodges gimbal lock per nt_ui_anim.h doc). ---- */
+static void test_anim_rot_y_eases_to_target(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    const uint32_t id = 0x4444U;
+    nt_ui_anim_target_t seed = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
+    (void)nt_ui_anim(s_fx.ctx, id, &seed, 10.0F);
+    /* Drive rot_y toward π/2 (card-flip half-turn). */
+    nt_ui_anim_target_t flip = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .rot_y = 1.5707963F, .opacity = 1.0F};
+    float prev = 0.0F;
+    for (int i = 0; i < 40; ++i) {
+        const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &flip, 10.0F);
+        TEST_ASSERT_TRUE(r->rot_y >= prev - 1e-6F);       /* monotonic increasing */
+        TEST_ASSERT_TRUE(r->rot_y <= 1.5707963F + 1e-3F); /* no overshoot */
+        prev = r->rot_y;
+    }
+    TEST_ASSERT_TRUE(float_near(prev, 1.5707963F, 0.05F));
+}
+
+/* ---- Test 7: 3D off_z + scale_z snap on instant + read back. ---- */
+static void test_anim_z_axis_fields_snap(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    const uint32_t id = 0x5555U;
+    nt_ui_anim_target_t t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 2.5F, .off_z = -5.0F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &t, 0.0F);
+    TEST_ASSERT_TRUE(float_near(r->scale_z, 2.5F, 1e-6F));
+    TEST_ASSERT_TRUE(float_near(r->off_z, -5.0F, 1e-6F));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_anim_instant_when_speed_zero);
@@ -143,5 +171,7 @@ int main(void) {
     RUN_TEST(test_anim_first_touch_no_flash);
     RUN_TEST(test_anim_open_address_coexists);
     RUN_TEST(test_anim_evicts_when_probes_exhausted);
+    RUN_TEST(test_anim_rot_y_eases_to_target);
+    RUN_TEST(test_anim_z_axis_fields_snap);
     return UNITY_END();
 }

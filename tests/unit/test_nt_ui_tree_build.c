@@ -621,6 +621,34 @@ static void test_shear_composition_nonuniform_scale_then_rotation(void) {
     }
     TEST_ASSERT_TRUE_MESSAGE(found_inner, "expected inner baked = S(2,1).R(30deg) exact (no atan2 decomposition)");
 }
+
+/* ---- 3D compose: rotation_y on a CLAY parent composes into the baked mat4's col0 X (cos(rot_y))
+ *      and col2 Z (cos(rot_y)). Validates that the cglm euler_xyz pipeline survives single-axis
+ *      Y rotation, which is the card-flip use case driving the 3D refactor. ---- */
+static void test_transform_3d_rotation_y_compose(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_transform_t t = nt_ui_transform_defaults();
+    t.rotation_y = DEG2RAD(60.0F);
+    CLAY({.id = CLAY_ID("rot_y_card"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0, &t, 1.0F)}) {}
+    nt_ui_end(s_fx.ctx);
+
+    const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    bool found = false;
+    const float expected_cos = cosf(DEG2RAD(60.0F)); /* 0.5 */
+    for (int32_t i = 0; i < N; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        /* R_y produces: col0 = (cos, 0, -sin, 0); col2 = (sin, 0, cos, 0). m[0] = cos, m[10] = cos. */
+        if (fabsf(bk->m[0] - expected_cos) < 1e-3F && fabsf(bk->m[10] - expected_cos) < 1e-3F) {
+            found = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found, "expected baked entry with rot_y=60deg producing m[0]=m[10]=cos(60)=0.5");
+}
 // #endregion
 
 int main(void) {
@@ -642,6 +670,7 @@ int main(void) {
     RUN_TEST(test_min_arena_size_includes_tree_storage);
     RUN_TEST(test_multi_ctx_tree_storage_isolated);
     RUN_TEST(test_build_tree_ms_recorded_and_under_budget);
+    RUN_TEST(test_transform_3d_rotation_y_compose);
     RUN_TEST(test_shear_composition_nonuniform_scale_then_rotation);
 #if NT_UI_DEBUG_TOOLS
     RUN_TEST(test_inspector_subtree_baked_identity);
