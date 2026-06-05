@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "aul.h"
 #include "journal.h"
 #include "rng.h"
 
@@ -388,6 +389,13 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     tj_journal_push(TJ_LOG_BIG, "%s выходит из стойбища. Костёр остаётся за спиной.", heir_name(r));
     gen_loop(r);                              /* generates the loop and populates this circle (may log global effects) */
     r->hand = tj_config_tile_index("saxaul"); /* FTUE: start holding a guaranteed Saxaul card (GDD: small, common) */
+    r->tamga_cell = -1;
+    if (g_aul.tamga_pending && r->path_cells > 0) {
+        r->tamga_cell = g_aul.tamga_cell % r->path_cells; /* wrap a prior loop's cell into this loop */
+        r->tamga_wisdom = g_aul.tamga_wisdom;
+        r->tamga_glory = g_aul.tamga_glory;
+        tj_journal_push(TJ_LOG_BIG, "На песке проступает Последняя Тамга предка.");
+    }
     (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
 }
 
@@ -451,6 +459,13 @@ static void apply_tile(tj_run_t *r, int idx) {
 static void resolve_cell(tj_run_t *r) {
     if (r->cell < 0 || r->cell >= TJ_MAX_PATH) {
         return;
+    }
+    if (r->cell == r->tamga_cell) {
+        r->wisdom += r->tamga_wisdom;
+        r->glory += r->tamga_glory;
+        tj_journal_push(TJ_LOG_BIG, "Подобрана Последняя Тамга: +%d мудрости, +%d славы.", r->tamga_wisdom, r->tamga_glory);
+        r->tamga_cell = -1;
+        tj_tamga_clear();
     }
     const int road = r->tile_at[r->cell];
     const int side = r->roadside[r->cell];

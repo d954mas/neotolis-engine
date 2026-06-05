@@ -32,11 +32,11 @@ static int ep_run(int c, char **v, char *o, int cap, void *u) {
     (void)c;
     (void)v;
     (void)u;
-    return snprintf(
-        o, (size_t)cap,
-        "{\"circle\":%d,\"day\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"choosing\":%s,\"hand\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,\"glory\":%d,\"alive\":%s,\"won\":%s}",
-        s_run.circle, s_run.day, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.choosing ? "true" : "false", s_run.hand, s_run.stamina, s_run.supplies, s_run.wisdom, s_run.glory,
-        s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
+    return snprintf(o, (size_t)cap,
+                    "{\"circle\":%d,\"day\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"choosing\":%s,\"hand\":%d,\"tamga_cell\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,\"glory\":%d,"
+                    "\"alive\":%s,\"won\":%s}",
+                    s_run.circle, s_run.day, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.choosing ? "true" : "false", s_run.hand, s_run.tamga_cell, s_run.stamina, s_run.supplies,
+                    s_run.wisdom, s_run.glory, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
 }
 
 /* devapi: recent event-log lines (newest last), for reading the run narrative. */
@@ -165,6 +165,7 @@ static void on_update(game_ctx_t *g, float dt) {
     tj_view_card_choice(g, &s_run); /* end-of-circle modal (floats over the layout) */
 
     if (!s_run.alive) {
+        tj_tamga_spawn(s_run.cell, s_run.circle);                       /* leave the Last Tamga where the heir fell */
         tj_aul_add_from_run(s_run.supplies, s_run.wisdom, s_run.glory); /* bank into the aul (meta) */
         g->score = s_run.circle;
         if (g->score > g->best) {

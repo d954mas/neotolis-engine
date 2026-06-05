@@ -52,6 +52,8 @@ typedef struct {
     uint8_t global_gx[TJ_MAX_GLOBAL];
     uint8_t global_gy[TJ_MAX_GLOBAL];
     int global_count;
+    int tamga_cell;                /* loop cell holding an ancestor's Last Tamga (-1 = none) */
+    int tamga_wisdom, tamga_glory; /* reward when the hero reaches tamga_cell */
     char last_event[96];
 } tj_run_t;
 

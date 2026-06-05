@@ -186,6 +186,17 @@ static void draw_global(const tj_run_t *run, float pitch, float tile) {
     }
 }
 
+/* The ancestor's Last Tamga: a bright gold mark on a road cell, collected on pass. */
+static void draw_tamga(const tj_run_t *run, float pitch) {
+    if (run->tamga_cell < 0 || run->tamga_cell >= run->path_cells) {
+        return;
+    }
+    const float x = grid_x(run->path_gx[run->tamga_cell], run->grid_cols, pitch);
+    const float y = grid_y(run->path_gy[run->tamga_cell], run->grid_rows, pitch);
+    const float m = pitch * 0.56F;
+    CLAY(MAP_RECT(m, m, ((Clay_Color){255.0F, 226.0F, 130.0F, 255.0F}), m * 0.5F, x, y, 2)) {}
+}
+
 /* Build slots (the outward empty cell beside each road cell). Filled = marker;
  * empty = clickable button that places the held card. */
 static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
@@ -291,6 +302,7 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
         draw_road(run, pitch);
         draw_road_events(run, pitch);
         draw_global(run, pitch, tile);
+        draw_tamga(run, pitch);
         draw_slots(g, run, pitch, tile);
         draw_hero(run, pitch);
     }
