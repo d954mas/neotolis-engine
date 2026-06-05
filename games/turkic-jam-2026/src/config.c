@@ -67,6 +67,8 @@ static void set_defaults(void) {
     g_config.start_stamina = 10;
     g_config.move_seconds_per_cell = 0.6F;
     g_config.start_in_game = 1;
+    g_config.path_cells_growth = 1;
+    g_config.path_cells_jitter = 1;
     g_config.check_base_difficulty = 1;
     g_config.check_difficulty_per_circle = 1;
     g_config.check_fail_stamina_loss = 2;
@@ -96,6 +98,8 @@ static void apply_ini(const char *k, const char *v) {
         {"start_stamina", &g_config.start_stamina, NULL},
         {"move_seconds_per_cell", NULL, &g_config.move_seconds_per_cell},
         {"start_in_game", &g_config.start_in_game, NULL},
+        {"path_cells_growth", &g_config.path_cells_growth, NULL},
+        {"path_cells_jitter", &g_config.path_cells_jitter, NULL},
         {"check_base_difficulty", &g_config.check_base_difficulty, NULL},
         {"check_difficulty_per_circle", &g_config.check_difficulty_per_circle, NULL},
         {"check_fail_stamina_loss", &g_config.check_fail_stamina_loss, NULL},

@@ -44,7 +44,9 @@ typedef struct {
 typedef struct {
     int path_cells, laps_to_win, start_stamina;
     float move_seconds_per_cell;
-    int start_in_game; /* 1 = boot straight into the run, 0 = main menu */
+    int start_in_game;     /* 1 = boot straight into the run, 0 = main menu */
+    int path_cells_growth; /* extra cells per circle beyond the first */
+    int path_cells_jitter; /* random 0..jitter extra cells per circle (>circle 1) */
     int check_base_difficulty, check_difficulty_per_circle, check_fail_stamina_loss, check_fail_reward_pct;
     int tamga_wisdom_base, tamga_wisdom_per_circle, tamga_wisdom_slot_div, tamga_glory_div, tamga_max_active;
     int death_keep_supplies_pct, death_keep_wisdom_pct, death_keep_glory_pct;

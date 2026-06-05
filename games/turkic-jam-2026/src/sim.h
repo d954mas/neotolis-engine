@@ -14,8 +14,9 @@ typedef struct {
     int heir_index;
     int body, mind, spirit;
     int stamina;
-    int circle; /* 1-based */
-    int cell;   /* 0-based, current cell on the ring */
+    int circle;     /* 1-based */
+    int cell;       /* 0-based, current cell on the ring */
+    int path_cells; /* cells in this circle's ring (varies per circle/heir) */
     float move_t;
     int supplies, wisdom, glory;
     int tile_at[TJ_MAX_PATH]; /* tile def index per cell, -1 = empty */

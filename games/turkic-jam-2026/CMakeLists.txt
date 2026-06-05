@@ -14,6 +14,8 @@ add_executable(turkic_jam
     src/juice.c
     src/config.c
     src/sim.c
+    src/journal.c
+    src/view.c
     src/ui_kit.c
     src/scenes/scene_menu.c
     src/scenes/scene_game.c
