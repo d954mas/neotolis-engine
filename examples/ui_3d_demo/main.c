@@ -149,13 +149,13 @@ static const Clay_ElementDeclaration s_btn_decl = {
 };
 static nt_ui_label_style_t s_panel_title_style = {
     .font_id = 0,
-    .font_size = 28,
+    .font_size = 40,
     .color = {255.0F, 240.0F, 180.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static nt_ui_label_style_t s_btn_label_style = {
     .font_id = 0,
-    .font_size = 22,
+    .font_size = 34,
     .color = {245.0F, 245.0F, 250.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
@@ -411,13 +411,15 @@ static void ensure_ids(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_panels(void) {
     ensure_ids();
-    /* Wall anchor world coords. Inset 0.05 m from wall so panels don't z-fight. */
-    const float hw = ROOM_W * 0.5F;
-    const float wall_y = 2.5F; /* slightly above eye level (1.7 m) so player can read both panels */
-    /* After rotation_x=π the panel's normal points -Z. Left wall (world -X side) needs the
-     * face toward +X, so yaw -π/2 maps -Z to +X. Right wall is mirrored. */
-    const nt_ui_transform_t xform_left = make_wall_xform(-hw + 0.05F, wall_y, 0.0F, -NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
-    const nt_ui_transform_t xform_right = make_wall_xform(hw - 0.05F, wall_y, 0.0F, NT_PI * 0.5F, (float)PANEL_W, (float)PANEL_H);
+    /* Both panels mount on the FRONT wall (-Z) side-by-side. Player starts at (0, 1.7, 7)
+     * facing -Z so both are in view immediately — no need to look around to find them. */
+    const float hd = ROOM_D * 0.5F;
+    const float wall_y = 2.8F; /* slightly above eye level (1.7 m); avoids floor-grid clutter */
+    const float wall_z = -hd + 0.05F;
+    /* After rotation_x=π the panel's normal points -Z (away from the room). Add rotation_y=π
+     * (180° around Y) to flip the normal back to +Z so the front face looks at the player. */
+    const nt_ui_transform_t xform_left = make_wall_xform(-4.5F, wall_y, wall_z, NT_PI, (float)PANEL_W, (float)PANEL_H);
+    const nt_ui_transform_t xform_right = make_wall_xform(4.5F, wall_y, wall_z, NT_PI, (float)PANEL_W, (float)PANEL_H);
 
     /* Root: full-fb invisible group hosting both panels. Sizing GROW so Clay knows screen extent. */
     CLAY({.id = CLAY_ID("ui3d-root"),
@@ -506,7 +508,7 @@ static void draw_hud(float fb_w, float fb_h) {
         "1 / 2 / 3     shape  (cube / sphere / capsule)",
         "4 / 5 / 6 / 7 speed  (stop / slow / medium / fast)",
         "F1            debug overlay (pos / fps)",
-        "F2            UI inspector (sidebar)",
+        "F2            UI inspector (sidebar; WIP in 3D)",
         "Esc           quit",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
