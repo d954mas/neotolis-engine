@@ -10,6 +10,7 @@
 #include "config.h"
 
 #define TJ_MAX_PATH 32
+#define TJ_MAX_GLOBAL 8 /* passive (global-scope) desert objects active per circle */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
 typedef struct {
@@ -34,6 +35,11 @@ typedef struct {
     uint8_t path_gy[TJ_MAX_PATH];     /* loop cell y in walk order */
     uint8_t slot_gx[TJ_MAX_PATH];     /* build-slot cell x for road cell i (TJ_NO_SLOT = none) */
     uint8_t slot_gy[TJ_MAX_PATH];     /* build-slot cell y for road cell i (TJ_NO_SLOT = none) */
+    /* Passive (global-scope) desert objects: applied once per circle, drawn in field. */
+    int global_tile[TJ_MAX_GLOBAL];
+    uint8_t global_gx[TJ_MAX_GLOBAL];
+    uint8_t global_gy[TJ_MAX_GLOBAL];
+    int global_count;
     char last_event[96];
 } tj_run_t;
 

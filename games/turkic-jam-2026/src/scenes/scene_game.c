@@ -71,6 +71,18 @@ static int ep_path(int c, char **v, char *o, int cap, void *u) {
     for (int i = 0; i < s_run.path_cells && len < cap - 24; i++) {
         len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d]", i ? "," : "", s_run.slot_gx[i], s_run.slot_gy[i]);
     }
+    len += snprintf(o + len, (size_t)(cap - len), "],\"road_ev\":[");
+    for (int i = 0; i < s_run.path_cells && len < cap - 12; i++) {
+        len += snprintf(o + len, (size_t)(cap - len), "%s%d", i ? "," : "", s_run.tile_at[i]);
+    }
+    len += snprintf(o + len, (size_t)(cap - len), "],\"side\":[");
+    for (int i = 0; i < s_run.path_cells && len < cap - 12; i++) {
+        len += snprintf(o + len, (size_t)(cap - len), "%s%d", i ? "," : "", s_run.roadside[i]);
+    }
+    len += snprintf(o + len, (size_t)(cap - len), "],\"global\":[");
+    for (int i = 0; i < s_run.global_count && len < cap - 24; i++) {
+        len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d,%d]", i ? "," : "", s_run.global_gx[i], s_run.global_gy[i], s_run.global_tile[i]);
+    }
     len += snprintf(o + len, (size_t)(cap - len), "]}");
     return len;
 }

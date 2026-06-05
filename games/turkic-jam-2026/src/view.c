@@ -115,8 +115,30 @@ static void draw_road(const tj_run_t *run, float pitch) {
         CLAY(MAP_RECT(horiz ? pitch : w, horiz ? w : pitch, trail, 0.0F, (xi + xj) * 0.5F, (yi + yj) * 0.5F, 1)) {}
     }
     for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
-        const Clay_Color col = (run->tile_at[i] >= 0) ? cell_color(run->tile_at[i]) : trail;
-        CLAY(MAP_RECT(w, w, col, 0.0F, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 1)) {}
+        CLAY(MAP_RECT(w, w, trail, 0.0F, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 1)) {}
+    }
+}
+
+/* Road events (scope on_enter): a kind-coloured marker sitting on the trail. */
+static void draw_road_events(const tj_run_t *run, float pitch) {
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const float m = pitch * 0.5F;
+    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
+        if (run->tile_at[i] >= 0) {
+            CLAY(MAP_RECT(m, m, cell_color(run->tile_at[i]), 4.0F, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 2)) {}
+        }
+    }
+}
+
+/* Global desert objects (scope global): functional landmarks out in the field. */
+static void draw_global(const tj_run_t *run, float pitch, float tile) {
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    for (int i = 0; i < run->global_count && i < TJ_MAX_GLOBAL; i++) {
+        const float x = grid_x(run->global_gx[i], cols, pitch);
+        const float y = grid_y(run->global_gy[i], rows, pitch);
+        CLAY(MAP_RECT(tile, tile, cell_color(run->global_tile[i]), 8.0F, x, y, 1)) {}
     }
 }
 
@@ -193,6 +215,8 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
     CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_FIXED(MAP_SIZE), CLAY_SIZING_FIXED(MAP_SIZE)}}}) {
         draw_aul(g, run, pitch);
         draw_road(run, pitch);
+        draw_road_events(run, pitch);
+        draw_global(run, pitch, tile);
         draw_slots(g, run, pitch, tile);
         draw_hero(run, pitch);
     }

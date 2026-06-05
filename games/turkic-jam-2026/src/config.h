@@ -9,6 +9,7 @@
 
 #define TJ_MAX_TILES 32
 #define TJ_MAX_HEIRS 8
+#define TJ_MAX_SPAWNS 64
 #define TJ_ID_LEN 24
 #define TJ_NAME_LEN 48
 
@@ -50,6 +51,29 @@ typedef struct {
     int body, mind, spirit, stamina_bonus;
 } tj_heir_def_t;
 
+/* Where a spawned object sits, and how its effect fires (Loop Hero is not only
+ * road-adjacency: objects can be on the road, beside it, or passive/global). */
+typedef enum {
+    TJ_SPAWN_ROAD = 0, /* on a road cell */
+    TJ_SPAWN_FIELD,    /* in a desert cell beside/around the road */
+} tj_spawn_layer_t;
+
+typedef enum {
+    TJ_SCOPE_ON_ENTER = 0, /* fires when the hero steps on the cell (road) */
+    TJ_SCOPE_ADJACENT,     /* fires when the hero passes the adjacent road cell */
+    TJ_SCOPE_GLOBAL,       /* passive: applies once per circle, position-independent */
+} tj_scope_t;
+
+/* One per-circle spawn-pool row (spawns.tsv): place `count` of `tile` on `layer`
+ * this circle, firing by `scope`. Pools differ per circle; counts do not scale. */
+typedef struct {
+    int circle;
+    tj_spawn_layer_t layer;
+    tj_scope_t scope;
+    int tile_index; /* resolved from tile id at load (-1 = unknown, skipped) */
+    int count;
+} tj_spawn_t;
+
 typedef struct {
     int path_cells, laps_to_win, start_stamina;
     float move_seconds_per_cell;
@@ -71,6 +95,8 @@ typedef struct {
     int tile_count;
     tj_heir_def_t heirs[TJ_MAX_HEIRS];
     int heir_count;
+    tj_spawn_t spawns[TJ_MAX_SPAWNS];
+    int spawn_count;
 } tj_config_t;
 
 extern tj_config_t g_config;

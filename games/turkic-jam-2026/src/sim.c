@@ -27,7 +27,7 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index) {
 
 // #region loop generation (winding closed loop around the central aul)
 #define TJ_ZONE_MAX 12
-enum { OCC_EMPTY = 0, OCC_AUL = 1, OCC_ROAD = 2, OCC_SLOT = 3 };
+enum { OCC_EMPTY = 0, OCC_AUL = 1, OCC_ROAD = 2, OCC_SLOT = 3, OCC_GLOBAL = 4 };
 
 typedef struct {
     int cols, rows;
@@ -187,6 +187,115 @@ static void compute_slots(zone_t *z, tj_run_t *r) {
     }
 }
 
+// #region per-circle population (events on the road, functional objects in the field)
+/* Largest pool circle <= this circle (so the GDD need not define every circle). */
+static int best_spawn_circle(int circle) {
+    int best = -1;
+    for (int s = 0; s < g_config.spawn_count; s++) {
+        const int c = g_config.spawns[s].circle;
+        if (c <= circle && c > best) {
+            best = c;
+        }
+    }
+    return best;
+}
+
+/* Road event (scope on_enter): a random empty road cell. */
+static void spawn_road(tj_run_t *r, int tile, int count) {
+    for (int c = 0; c < count; c++) {
+        for (int attempt = 0; attempt < 40; attempt++) {
+            const int i = rng_range_int(0, r->path_cells - 1);
+            if (r->tile_at[i] < 0) {
+                r->tile_at[i] = tile;
+                break;
+            }
+        }
+    }
+}
+
+/* Field object (scope adjacent): a free build-slot beside the road, fires on pass. */
+static void spawn_field_adjacent(tj_run_t *r, int tile, int count) {
+    for (int c = 0; c < count; c++) {
+        for (int attempt = 0; attempt < 40; attempt++) {
+            const int i = rng_range_int(0, r->path_cells - 1);
+            if (r->slot_gx[i] != TJ_NO_SLOT && r->roadside[i] < 0) {
+                r->roadside[i] = tile;
+                break;
+            }
+        }
+    }
+}
+
+/* Field object (scope global): a free desert cell; effect is applied per circle. */
+static void spawn_global(zone_t *z, tj_run_t *r, int tile, int count) {
+    for (int c = 0; c < count && r->global_count < TJ_MAX_GLOBAL; c++) {
+        uint8_t fx[TJ_ZONE_MAX * TJ_ZONE_MAX];
+        uint8_t fy[TJ_ZONE_MAX * TJ_ZONE_MAX];
+        int fn = 0;
+        for (int y = 0; y < z->rows; y++) {
+            for (int x = 0; x < z->cols; x++) {
+                if (*zocc(z, x, y) == OCC_EMPTY) {
+                    fx[fn] = (uint8_t)x;
+                    fy[fn] = (uint8_t)y;
+                    fn++;
+                }
+            }
+        }
+        if (fn == 0) {
+            return; /* no open desert left */
+        }
+        const int pick = rng_range_int(0, fn - 1);
+        *zocc(z, fx[pick], fy[pick]) = OCC_GLOBAL;
+        const int g = r->global_count++;
+        r->global_tile[g] = tile;
+        r->global_gx[g] = fx[pick];
+        r->global_gy[g] = fy[pick];
+    }
+}
+
+/* Global object effect: passive resources once per circle (no cost, no check). */
+static void apply_global(tj_run_t *r, int idx) {
+    const tj_tile_def_t *t = &g_config.tiles[idx];
+    r->supplies += t->supplies;
+    r->wisdom += t->wisdom;
+    r->glory += t->glory;
+    r->stamina += t->stamina_restore;
+    tj_journal_push(TJ_LOG_GOOD, "%s питает род [з%+d м%+d с%+d]", t->name, t->supplies, t->wisdom, t->glory);
+}
+
+/* Fill this circle's pool: road events + field objects, from spawns.tsv. */
+static void populate_circle(zone_t *z, tj_run_t *r) {
+    for (int i = 0; i < TJ_MAX_PATH; i++) {
+        r->tile_at[i] = -1;
+        r->roadside[i] = -1;
+    }
+    r->global_count = 0;
+    if (g_config.debug_random_desert) {
+        for (int i = 0; i < r->path_cells; i++) {
+            r->tile_at[i] = (g_config.tile_count > 0) ? rng_range_int(0, g_config.tile_count - 1) : -1;
+        }
+        return;
+    }
+    const int target = best_spawn_circle(r->circle);
+    for (int s = 0; s < g_config.spawn_count; s++) {
+        const tj_spawn_t *sp = &g_config.spawns[s];
+        if (sp->circle != target || sp->tile_index < 0 || sp->count <= 0) {
+            continue;
+        }
+        if (sp->layer == TJ_SPAWN_ROAD) {
+            spawn_road(r, sp->tile_index, sp->count);
+        } else if (sp->scope == TJ_SCOPE_GLOBAL) {
+            spawn_global(z, r, sp->tile_index, sp->count);
+        } else {
+            spawn_field_adjacent(r, sp->tile_index, sp->count);
+        }
+    }
+    for (int g = 0; g < r->global_count; g++) {
+        apply_global(r, r->global_tile[g]);
+    }
+}
+// #endregion
+
 /* Per-circle, per-heir variety: deterministic seed, a tight base ring around the
  * aul, then random outward bends -> a different winding loop each circle. */
 static void gen_loop(tj_run_t *r) {
@@ -223,11 +332,7 @@ static void gen_loop(tj_run_t *r) {
         }
     }
     compute_slots(&z, r);
-    /* Default: empty road (player builds via roadside cards). Random fill is debug only. */
-    for (int i = 0; i < TJ_MAX_PATH; i++) {
-        const bool fill = g_config.debug_random_desert && (i < r->path_cells) && (g_config.tile_count > 0);
-        r->tile_at[i] = fill ? rng_range_int(0, g_config.tile_count - 1) : -1;
-    }
+    populate_circle(&z, r); /* road events + field objects from this circle's pool */
 }
 // #endregion
 
@@ -247,14 +352,11 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     }
     r->circle = 1;
     r->alive = true;
-    gen_loop(r);
-    for (int i = 0; i < TJ_MAX_PATH; i++) {
-        r->roadside[i] = -1;
-    }
-    r->hand = tj_config_tile_index("oasis"); /* FTUE: start holding a guaranteed Oasis card */
-    (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
     tj_journal_clear();
     tj_journal_push(TJ_LOG_BIG, "Новый наследник выходит из аула.");
+    gen_loop(r);                             /* generates the loop and populates this circle (may log global effects) */
+    r->hand = tj_config_tile_index("oasis"); /* FTUE: start holding a guaranteed Oasis card */
+    (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
 }
 
 static const char *stat_name(tj_stat_t s) {

@@ -67,6 +67,27 @@ static tj_placement_t placement_from(const char *s) {
     }
     return TJ_PLACE_ROADSIDE;
 }
+
+static tj_spawn_layer_t layer_from(const char *s) {
+    if (strcmp(s, "field") == 0) {
+        return TJ_SPAWN_FIELD;
+    }
+    return TJ_SPAWN_ROAD;
+}
+
+static tj_scope_t scope_from(const char *s, tj_spawn_layer_t layer) {
+    if (strcmp(s, "on_enter") == 0) {
+        return TJ_SCOPE_ON_ENTER;
+    }
+    if (strcmp(s, "adjacent") == 0) {
+        return TJ_SCOPE_ADJACENT;
+    }
+    if (strcmp(s, "global") == 0) {
+        return TJ_SCOPE_GLOBAL;
+    }
+    /* Default by layer: road events fire on entry, field objects by adjacency. */
+    return (layer == TJ_SPAWN_FIELD) ? TJ_SCOPE_ADJACENT : TJ_SCOPE_ON_ENTER;
+}
 // #endregion
 
 // #region defaults
@@ -232,6 +253,33 @@ static void parse_tiles(const char *path) {
     }
     (void)fclose(f);
 }
+
+/* spawns.tsv: per-circle pool. circle | layer | tile_id | count | scope(optional) */
+static void parse_spawns(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return;
+    }
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        char *t = trim(line);
+        if (*t == '\0' || *t == '#') {
+            continue;
+        }
+        char *fld[8];
+        int n = split_pipe(t, fld, 8);
+        if (n < 4 || g_config.spawn_count >= TJ_MAX_SPAWNS) {
+            continue;
+        }
+        tj_spawn_t *s = &g_config.spawns[g_config.spawn_count++];
+        s->circle = to_int(fld[0]);
+        s->layer = layer_from(fld[1]);
+        s->tile_index = tj_config_tile_index(fld[2]);
+        s->count = to_int(fld[3]);
+        s->scope = (n >= 5) ? scope_from(fld[4], s->layer) : scope_from("", s->layer);
+    }
+    (void)fclose(f);
+}
 // #endregion
 
 bool tj_config_load(const char *dir) {
@@ -243,6 +291,8 @@ bool tj_config_load(const char *dir) {
     parse_heirs(path);
     (void)snprintf(path, sizeof path, "%s/tiles.tsv", dir);
     parse_tiles(path);
+    (void)snprintf(path, sizeof path, "%s/spawns.tsv", dir);
+    parse_spawns(path); /* after tiles: spawn rows resolve tile ids to indices */
     return true;
 }
 
