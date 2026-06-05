@@ -496,6 +496,16 @@
             "webRoot": "${workspaceFolder}/build/games/turkic-jam-2026/wasm-debug-paired",
             "preLaunchTask": "Build & Serve turkic_jam (debug)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Build Turkic Jam Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/games/turkic-jam-2026/native-release/build_turkic_jam_packs.exe",
+            "args": ["build/games/turkic-jam-2026"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build & run turkic_jam packs (release)"
         }
     ]
 }

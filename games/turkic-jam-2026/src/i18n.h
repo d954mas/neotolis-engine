@@ -21,6 +21,14 @@ typedef enum {
     T_TAP,
     T_BACK,
     T_HINT,
+    T_SETTINGS,
+    T_MENU,
+    T_PAUSED,
+    T_RESUME,
+    T_GAMEOVER,
+    T_RETRY,
+    T_LOSE,
+    T_RESET,
     T_COUNT,
 } i18n_key_t;
 

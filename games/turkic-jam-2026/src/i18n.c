@@ -14,6 +14,14 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_TAP] = "TAP +1",
             [T_BACK] = "BACK",
             [T_HINT] = "L = language    Esc = quit",
+            [T_SETTINGS] = "Settings",
+            [T_MENU] = "Menu",
+            [T_PAUSED] = "Paused",
+            [T_RESUME] = "Resume",
+            [T_GAMEOVER] = "Game Over",
+            [T_RETRY] = "Retry",
+            [T_LOSE] = "Lose",
+            [T_RESET] = "Reset progress",
         },
     [LANG_RU] =
         {
@@ -26,6 +34,14 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_TAP] = "ТАП +1",
             [T_BACK] = "НАЗАД",
             [T_HINT] = "L = язык    Esc = выход",
+            [T_SETTINGS] = "Настройки",
+            [T_MENU] = "Меню",
+            [T_PAUSED] = "Пауза",
+            [T_RESUME] = "Продолжить",
+            [T_GAMEOVER] = "Игра окончена",
+            [T_RETRY] = "Заново",
+            [T_LOSE] = "Проиграть",
+            [T_RESET] = "Сбросить прогресс",
         },
     [LANG_TR] =
         {
@@ -38,6 +54,14 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_TAP] = "DOKUN +1",
             [T_BACK] = "GERİ",
             [T_HINT] = "L = dil    Esc = çıkış",
+            [T_SETTINGS] = "Ayarlar",
+            [T_MENU] = "Menü",
+            [T_PAUSED] = "Duraklatıldı",
+            [T_RESUME] = "Devam",
+            [T_GAMEOVER] = "Oyun Bitti",
+            [T_RETRY] = "Tekrar",
+            [T_LOSE] = "Kaybet",
+            [T_RESET] = "İlerlemeyi sıfırla",
         },
 };
 

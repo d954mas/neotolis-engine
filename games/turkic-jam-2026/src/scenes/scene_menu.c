@@ -28,7 +28,12 @@ static void on_update(game_ctx_t *g, float dt) {
     nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), i18n(T_SUBTITLE), &TJ_STYLE_BODY);
 
     if (tj_button(g, "menu_start", i18n(T_START), 460, 120, TJ_BTN_PRIMARY)) {
+        g->score = 0;
         game_goto(g, &SCENE_GAME);
+    }
+
+    if (tj_button(g, "menu_settings", i18n(T_SETTINGS), 340, 80, TJ_BTN_SECONDARY)) {
+        game_goto(g, &SCENE_SETTINGS);
     }
 
     if (tj_button(g, "menu_lang", i18n_lang_label(i18n_get()), 340, 80, TJ_BTN_SECONDARY)) {

@@ -1,0 +1,37 @@
+/* Game over: final score + best, retry or back to menu. */
+
+#include <stdio.h>
+
+#include "clay.h"
+
+#include "ui/nt_ui.h"
+#include "ui/nt_ui_label.h"
+
+#include "game.h"
+#include "i18n.h"
+#include "ui_kit.h"
+
+static void on_update(game_ctx_t *g, float dt) {
+    (void)dt;
+
+    static char buf[96];
+    (void)snprintf(buf, sizeof buf, "%s: %d   (best %d)", i18n(T_SCORE), g->score, g->best);
+
+    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), i18n(T_GAMEOVER), &TJ_STYLE_TITLE);
+    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), buf, &TJ_STYLE_BODY);
+
+    if (tj_button(g, "go_retry", i18n(T_RETRY), 360, 100, TJ_BTN_PRIMARY)) {
+        g->score = 0;
+        game_goto(g, &SCENE_GAME);
+    }
+    if (tj_button(g, "go_menu", i18n(T_MENU), 300, 80, TJ_BTN_SECONDARY)) {
+        game_goto(g, &SCENE_MENU);
+    }
+}
+
+const scene_t SCENE_GAMEOVER = {
+    .name = "gameover",
+    .on_enter = NULL,
+    .on_update = on_update,
+    .on_exit = NULL,
+};

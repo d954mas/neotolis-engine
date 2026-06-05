@@ -884,6 +884,14 @@
             ],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Package turkic_jam web (zip)",
+            "type": "shell",
+            "command": "bash scripts/package_game_web.sh wasm-release-paired",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": []
         }
     ]
 }

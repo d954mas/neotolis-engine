@@ -10,6 +10,7 @@
 #include "font/nt_font.h"
 #include "resource/nt_resource.h"
 
+#include "juice.h"
 #include "scene.h"
 
 /* Clay userData layer tags (debug-walker layer sort). */
@@ -32,6 +33,9 @@ typedef struct game_ctx {
     uint32_t btn_red;
     float logical_w, logical_h;
     bool resources_ready;
+    int score;
+    int best;
+    tj_shake_t shake;
     const scene_t *scene;
     const scene_t *next; /* pending transition, applied at frame boundary */
 } game_ctx_t;
@@ -41,5 +45,8 @@ void game_goto(game_ctx_t *g, const scene_t *next);
 
 extern const scene_t SCENE_MENU;
 extern const scene_t SCENE_GAME;
+extern const scene_t SCENE_SETTINGS;
+extern const scene_t SCENE_GAMEOVER;
+extern const scene_t SCENE_PAUSE;
 
 #endif /* TJ_GAME_H */
