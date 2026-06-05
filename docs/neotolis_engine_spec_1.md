@@ -159,28 +159,27 @@ If a decision can be deferred without loss of base architecture — it is deferr
     add `vy+vh` to m[13]). Hit-test reverses through the top-left 2×2 +
     col3 of the same mat4 (closed-form inverse-affine).
   - **3D ctx** (`use_raycast_input=true`): walker leaves `world_mat4`
-    unflipped;
-the game owns the screen mapping via `nt_ui_set_view_proj`.Hit - test raycasts pointer → NDC(Clay Y - down to NDC Y - up) → world ray via `inv_view_proj` → ray
-    - plane at widget Z = 0 → `mat4_inv_trs(baked.m)` back to widget -
-                              local → bbox check.
-    Optional `element_depth_bias_ndc` is render-only: positive values move deeper
-    hierarchy levels slightly closer in projected depth to avoid z-fighting. Hit-test
-    stays on the unbiased widget plane.
-    Debug inspector render commands are excluded from the regular 3D walk and
-    drawn by `nt_ui_debug_inspector_walk` as a separate final screen-space pass.
-    The game binds a 2D UI projection first; `nt_ui_make_screen_view_proj(w,h,...)`
-    provides the standard Y-up orthographic matrix used by 2D demos.
+    unflipped; the game owns the screen mapping via `nt_ui_set_view_proj`.
+    Hit-test raycasts pointer → NDC (Clay Y-down to NDC Y-up) → world ray
+    via `inv_view_proj` → ray-plane at widget Z=0 → `mat4_inv_trs(baked.m)`
+    back to widget-local → bbox check. Optional `element_depth_bias_ndc`
+    is render-only: positive values move deeper hierarchy levels slightly
+    closer in projected depth to avoid z-fighting. Hit-test stays on the
+    unbiased widget plane. Debug inspector render commands are excluded
+    from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
+    a separate final screen-space pass. The game binds a 2D UI projection
+    first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard
+    Y-up orthographic matrix used by 2D demos.
 
-                              Both modes use the same `tree_baked[layout_idx]` +
-                              per -
-                              id mirror
+  Both modes use the same `tree_baked[layout_idx]` + per-id mirror
   `hit_baked[slot]` (Clay's hashmap is persistent across frames;
-  `hit_generation[slot]` rejects stale ids).Opacity is a separate
+  `hit_generation[slot]` rejects stale ids). Opacity is a separate
   `float` accumulator on the same struct.
 
-                                  * *Interaction model.**Game ids interact via `nt_ui_query_interaction` (
-                                                            pure, multiple calls per frame OK) and `nt_ui_step_interaction` (mutating, exactly one call per id per frame).Capture is per - pointer
-    : a press records `active_id`; release clears. Other widgets are
+  **Interaction model.** Game ids interact via `nt_ui_query_interaction`
+  (pure, multiple calls per frame OK) and `nt_ui_step_interaction`
+  (mutating, exactly one call per id per frame). Capture is per-pointer:
+  a press records `active_id`; release clears. Other widgets are
   `exclusive_gated` while one holds capture. **Orphan cleanup** at
   `nt_ui_begin` drops `active_id` if the widget didn't call step last
   frame — covers scene switches, conditional disable, and widget hide.

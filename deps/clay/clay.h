@@ -5,7 +5,7 @@
 //      in Clay_Context. Stores source layout element index on every render
 //      command. Used by nt_ui's build_tree pass to map each render command
 //      back to its source element. Search "nt_" for patch sites (4 total).
-// NT DEPENDENCY: nt_ui_clay_internal.c wraps Clay__OpenElement /
+// NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
 

@@ -1,4 +1,4 @@
-/* 3D raycast hit-test (Phase 5).
+/* 3D raycast hit-test.
  *
  * Validates use_raycast_input=true path: nt_ui_set_view_proj caches inverse,
  * ui_hit_test unprojects pixel → world ray → widget local → bbox.

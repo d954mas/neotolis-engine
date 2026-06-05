@@ -176,7 +176,7 @@ static const nt_ui_button_style_t g_btn_s9_base = {
 // #endregion
 
 // #region engine state
-/* 2 MB: Phase 3 baked mat4 (80 B/elem × 2 arrays) lifts min_arena_size above 1 MB at default 1024 max_elements. */
+/* 2 MB: baked mat4 (80 B/elem × 2 arrays) lifts min_arena_size above 1 MB at default 1024 max_elements. */
 #define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 #define SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
 

@@ -49,9 +49,8 @@ typedef struct {
 #define NT_UI_DEBUG_FLAG_CAPTURED (1U << 2)
 #define NT_UI_DEBUG_FLAG_DISABLED (1U << 3)
 
-/* Column-major mat4 storage. 2D consumers extract a/b/c/d/tx/ty via the helpers below
- * (Phase 4 walker rewrite passes m[16] directly; helpers vanish then). If this grows,
- * nt_ui_min_arena_size + create_context's offset cascade must update together. */
+/* Column-major mat4 storage. 2D consumers extract a/b/c/d/tx/ty via the helpers below.
+ * If this grows, nt_ui_min_arena_size + create_context's offset cascade must update together. */
 typedef struct {
     float m[16];
     float opacity;
