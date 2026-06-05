@@ -30,6 +30,34 @@
 
 **Проверено:** native-debug → `turkic_jam.exe` ✅, wasm-debug → `index.html` ✅, clang-format ✅, clang-tidy ✅.
 
+### Слой 2 (добавлено далее, после ресёрча гайдов)
+
+| Компонент | Файл(ы) | Что даёт |
+|-----------|---------|----------|
+| RNG (seeded) | `src/rng.{h,c}` | xorshift32: `rng_u32/float/range/range_int/chance` + explicit-state |
+| Juice | `src/juice.{h,c}` | easing (`out_quad/in_out_quad/out_back`) + trauma screen-shake; шейк применяется к «card» через XFORM |
+| Сцена Settings | `src/scenes/scene_settings.c` | выбор языка (подсветка текущего) + сброс прогресса |
+| Сцена Pause | `src/scenes/scene_pause.c` | `P`/Resume → игра, Menu → меню (счёт сохраняется в `game_ctx`) |
+| Сцена GameOver | `src/scenes/scene_gameover.c` | финальный счёт + Retry/Menu |
+| README + GDD | `README.md`, `GDD.md` | архитектура/как добавить сцену+строку; шаблон ГДД на одну страницу |
+| Web-пакет | `scripts/package_game_web.sh` + задача `Package turkic_jam web (zip)` | zip релизной web-сборки для itch.io |
+| Launch паков | `.vscode/launch.json` → `Build Turkic Jam Packs` | запуск/отладка билдера паков |
+
+Геймплей-демо: Game-сцена — тап (+1, screen-shake), best сохраняется, `P` = пауза, Lose → game-over. Меню: START / Settings / язык.
+
+### Слой 3 — devapi (нужен API для общения с движком)
+
+Нужен **движковый модуль `nt_devapi`** — канал общения с игрой для **тестов и работы ботов** (live introspection + эмуляция инпута). Архитектура: **реестр эндпоинтов** (подсистемы регистрируют `ui.tree`, `entity.list`, `input.*`), единый `dispatch(line)->json`. Протокол — console-style `key=value` (`input.click x=640 y=360`), ответ — строка JSON (в движке нет JSON-парсера, только пишем).
+
+- **ПК (сейчас):** TCP-сокет на `127.0.0.1` (Winsock/posix, non-blocking, опрос в кадре). Низкая задержка, бот = цикл recv/send, драйв из Bash.
+- **Браузер (потом):** экспорт C-функции + Playwright (`page.evaluate(Module.ccall)`) — тот же реестр.
+- Гейт компиляции `NT_DEVAPI_ENABLED` (как `NT_UI_DEBUG_TOOLS`); ON в пресете `native-debug`.
+- Эндпоинты v1: `ping`, `endpoints`, `view`, `ui.tree`, `ui.element id=`, `entity.list`, `input.key key=P mode=tap`, `input.move`, `input.click x= y=`, `input.click_ui id=`, `input.button`.
+- Файлы: `engine/devapi/nt_devapi.{h,c}` + `nt_devapi_net.c`; клиент `tools/devapi/devapi_cli.py` + бот `devapi_bot_demo.py`; скилл `.claude/skills/drive-game/SKILL.md`.
+- **Статус: ✅ сделано и проверено на ПК.** Запуск: `turkic_jam.exe --devapi 9123`. Прогон бота: прочитал `ui.tree` (меню), кликнул START через `input.click`, сцена сменилась на игровую (`Playing/Score/TAP +1/Lose`). Бот реально может играть.
+- Находки: `-Wformat-nonliteral` на vsnprintf-обёртке → атрибут `format(printf,…)`; `bugprone-narrowing-conversions` int→char → ci-compare без сужения; `readability-non-const-parameter` на хендлерах фикс-ABI → NOLINT; PowerShell-пайп строки добавляет BOM в первую строку (драйвить Python-клиентом, не пайпом).
+- Браузер (потом): экспорт C-функции + Playwright (тот же реестр/протокол).
+
 ---
 
 ## Сложности / трудности в движке и тулчейне
@@ -42,6 +70,10 @@
 | 2026-06-05 | lint | `scripts/tidy.sh` не сканировал `games/` — добавил папку в `find`. | ✅ решено |
 | 2026-06-05 | lint | Проектный `.clang-tidy` строгий: cognitive-complexity ≤ 25 (разбил `try_bind_resources`), запрещены избыточные касты (enum-константа в C уже `int`). | ✅ учтено |
 | 2026-06-05 | font/i18n | Шрифт по умолчанию — Roboto, **есть** кириллица и турецкий. Charset расширен в `build_packs.c`. Движок UTF-8-aware (`engine/utf8`). | ✅ работает |
+| 2026-06-05 | warnings | WASM-пресет строже native: `-Wsign-conversion` ловит enum-**переменную** → `int` (enum-**константа** по C — уже `int`, потому в `main.c` не всплыло). Каст `(int)lang`. | ✅ решено |
+| 2026-06-05 | lint | Проектный `.clang-tidy`: `readability-math-missing-parentheses` требует скобки вокруг `*` среди `+`/`-` (поправлено в `rng/juice`). | ✅ учтено |
+| 2026-06-05 | vscode | В `launch.json` не было конфига билдера паков → добавлен `Build Turkic Jam Packs`. | ✅ решено |
+| 2026-06-05 | engine | **Аудио-модуля в движке нет** (`engine/` без audio/sound). Топ-эссеншл джема — требует platform-слоя (web: WebAudio/OpenAL). | ⏳ отдельная сессия |
 
 ---
 
@@ -58,10 +90,13 @@
 
 ## Отложено (важное, но не сейчас)
 
-- [ ] Реальный арт: набор Kenney UI целиком + абстрактные фоны (нужен интернет/ассеты). Сейчас фон — тёмный «card», кнопки — 3 Kenney-кнопки.
-- [ ] Звук/музыка (если движок поддержит — проверить).
-- [ ] Больше сцен (settings, pause, game-over), анимации переходов.
-- [ ] Кнопка «НАЧАТЬ» на кириллице в самом меню (i18n уже умеет — просто язык RU).
+- [ ] **Аудио** (музыка + SFX): в движке нет модуля — нужен platform-слой (web: WebAudio/OpenAL). Самый весомый пробел.
+- [ ] Реальный арт: полный набор Kenney UI + абстрактные фоны (нужен интернет/ассеты). Сейчас фон — тёмный «card», кнопки — 3 Kenney-кнопки.
+- [ ] Анимации переходов между сценами (fade), частицы/«поп» на событиях.
+- [ ] Игровой «actor»-слой поверх sprite_comp/transform_comp для 2D-объектов.
+- [x] Сцены Settings / Pause / Game-over — сделано (слой 2).
+- [x] RNG, juice (easing + shake) — сделано (слой 2).
+- [x] Web-пакет для сабмита, GDD-шаблон — сделано (слой 2).
 
 ---
 

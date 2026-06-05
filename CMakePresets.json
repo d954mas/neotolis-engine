@@ -75,7 +75,8 @@
                 "CMAKE_C_STANDARD_REQUIRED": "ON",
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "NT_UI_DEBUG_TOOLS": "ON"
+                "NT_UI_DEBUG_TOOLS": "ON",
+                "NT_DEVAPI_ENABLED": "ON"
             }
         },
         {

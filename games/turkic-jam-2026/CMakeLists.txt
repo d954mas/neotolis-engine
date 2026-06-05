@@ -7,15 +7,20 @@ add_executable(turkic_jam
     main.c
     src/i18n.c
     src/save.c
+    src/rng.c
+    src/juice.c
     src/ui_kit.c
     src/scenes/scene_menu.c
     src/scenes/scene_game.c
+    src/scenes/scene_settings.c
+    src/scenes/scene_gameover.c
+    src/scenes/scene_pause.c
 )
 target_link_libraries(turkic_jam PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
-    nt_render nt_hash nt_mem_scratch
+    nt_render nt_hash nt_mem_scratch nt_devapi
 )
 # Generated asset headers from builder + game headers in src/.
 target_include_directories(turkic_jam PRIVATE

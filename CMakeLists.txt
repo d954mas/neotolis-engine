@@ -18,6 +18,7 @@ set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected in
 # The 0/1 define is attached PUBLIC to the nt_ui target inside engine/ui/CMakeLists.txt
 # so external consumers see the same value via target_link_libraries.
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
+option(NT_DEVAPI_ENABLED "Build nt_devapi debug command-bus + TCP transport (live introspection + input emulation)." OFF)
 set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap; OFF only via explicit override for final production).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})

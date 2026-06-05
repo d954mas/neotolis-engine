@@ -8,6 +8,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "devapi/nt_devapi.h"
 #include "font/nt_font.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
@@ -31,9 +32,11 @@
 
 #include "game.h"
 #include "i18n.h"
+#include "rng.h"
 #include "save.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef NT_PLATFORM_WEB
@@ -115,6 +118,8 @@ static void try_bind_resources(void) {
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
+    nt_devapi_apply_pending(); /* inject queued synthetic input (no-op unless devapi on) */
+    nt_devapi_net_poll();      /* serve debug/bot commands */
     nt_mem_scratch_reset();
 
 #ifndef NT_PLATFORM_WEB
@@ -129,6 +134,8 @@ static void frame(void) {
     nt_material_step();
     try_bind_resources();
 
+    tj_shake_update(&g.shake, g_nt_app.dt);
+
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
 
@@ -137,6 +144,7 @@ static void frame(void) {
     nt_ui_scale_ortho_t ortho = nt_ui_scale_ortho(&scale);
     g.logical_w = scale.logical_w;
     g.logical_h = scale.logical_h;
+    nt_devapi_set_view(fb_w, fb_h, scale.logical_w, scale.logical_h);
 
     mat4 view_m;
     mat4 proj_m;
@@ -193,6 +201,18 @@ static void frame(void) {
         const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
         nt_ui_begin(g.ui, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
+        /* Screen-shake (juice): trauma -> small offset+rotation on the card. */
+        nt_ui_transform_t shake_xform = nt_ui_transform_defaults();
+        {
+            float sdx;
+            float sdy;
+            float sdeg;
+            tj_shake_sample(&g.shake, 14.0F, 1.5F, &sdx, &sdy, &sdeg);
+            shake_xform.offset_x = sdx;
+            shake_xform.offset_y = sdy;
+            shake_xform.rotation_z = sdeg * 0.017453292F; /* deg -> rad */
+        }
+
         /* Shared shell: dark backdrop + centered card. Scenes fill the card. */
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(24), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
@@ -204,7 +224,8 @@ static void frame(void) {
                              .childGap = 22,
                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                   .backgroundColor = {26.0F, 30.0F, 46.0F, 240.0F},
-                  .cornerRadius = CLAY_CORNER_RADIUS(28)}) {
+                  .cornerRadius = CLAY_CORNER_RADIUS(28),
+                  .userData = (void *)NT_UI_DATA_XFORM(0U, &shake_xform, 1.0F)}) {
                 if (g.scene && g.scene->on_update) {
                     g.scene->on_update(&g, g_nt_app.dt);
                 }
@@ -226,8 +247,12 @@ static void frame(void) {
 
 // #region main + init
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
+    int devapi_port = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--devapi") == 0 && i + 1 < argc) {
+            devapi_port = (int)strtol(argv[i + 1], NULL, 10);
+        }
+    }
 
     nt_engine_config_t config = {0};
     config.app_name = "turkic_jam";
@@ -327,12 +352,22 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activate_time_budget(0);
 
     /* Persistence + restore last language before the first frame. */
+    rng_seed(0xC0FFEEU);
     save_init();
     i18n_set((i18n_lang_t)save_get_int("lang", LANG_EN));
 
     g.scene = &SCENE_MENU;
     if (g.scene->on_enter) {
         g.scene->on_enter(&g);
+    }
+
+    /* Debug/automation command bus (no-op unless NT_DEVAPI_ENABLED). Start the
+     * TCP server only when --devapi <port> is passed. */
+    nt_devapi_init();
+    nt_devapi_register_builtins();
+    nt_devapi_set_ui_context(g.ui);
+    if (devapi_port > 0) {
+        nt_devapi_net_start((uint16_t)devapi_port);
     }
 
 #ifdef NT_PLATFORM_WEB
@@ -344,6 +379,8 @@ int main(int argc, char *argv[]) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_devapi_net_stop();
+    nt_devapi_shutdown();
     nt_ui_destroy_context(g.ui);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();
