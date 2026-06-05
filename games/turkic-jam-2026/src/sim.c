@@ -26,6 +26,99 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index) {
     }
 }
 
+// #region event log (templated lines from log.tsv; GDD owns the wording)
+typedef struct {
+    const char *tile;
+    const char *stat;
+    const char *hero;
+    int diff, supplies, wisdom, glory, stamina, circle;
+} tj_log_ctx_t;
+
+static tj_log_kind_t tone_to_kind(const char *tone) {
+    if (strcmp(tone, "gain") == 0 || strcmp(tone, "success") == 0 || strcmp(tone, "card") == 0) {
+        return TJ_LOG_GOOD;
+    }
+    if (strcmp(tone, "danger") == 0) {
+        return TJ_LOG_BAD;
+    }
+    if (strcmp(tone, "circle") == 0 || strcmp(tone, "death") == 0 || strcmp(tone, "memory") == 0) {
+        return TJ_LOG_BIG;
+    }
+    return TJ_LOG_PLAIN;
+}
+
+static const char *ph_value(const char *name, const tj_log_ctx_t *c, char *num, size_t numcap) {
+    if (strcmp(name, "tile") == 0) {
+        return c->tile ? c->tile : "";
+    }
+    if (strcmp(name, "stat") == 0) {
+        return c->stat ? c->stat : "";
+    }
+    if (strcmp(name, "hero") == 0) {
+        return c->hero ? c->hero : "";
+    }
+    int v = 0;
+    if (strcmp(name, "supplies") == 0) {
+        v = c->supplies;
+    } else if (strcmp(name, "wisdom") == 0) {
+        v = c->wisdom;
+    } else if (strcmp(name, "glory") == 0) {
+        v = c->glory;
+    } else if (strcmp(name, "stamina") == 0) {
+        v = c->stamina;
+    } else if (strcmp(name, "circle") == 0) {
+        v = c->circle;
+    } else if (strcmp(name, "diff") == 0) {
+        v = c->diff;
+    } else {
+        return "";
+    }
+    (void)snprintf(num, numcap, "%d", v);
+    return num;
+}
+
+/* Expand {placeholders} in `tmpl` into `out` using ctx values (raw-byte copy, UTF-8 safe). */
+static void log_subst(char *out, size_t cap, const char *tmpl, const tj_log_ctx_t *c) {
+    size_t o = 0;
+    size_t i = 0;
+    while (tmpl[i] != '\0' && o + 1 < cap) {
+        if (tmpl[i] != '{') {
+            out[o++] = tmpl[i++];
+            continue;
+        }
+        char name[16];
+        size_t n = 0;
+        size_t j = i + 1;
+        while (tmpl[j] != '\0' && tmpl[j] != '}' && n + 1 < sizeof name) {
+            name[n++] = tmpl[j++];
+        }
+        name[n] = '\0';
+        if (tmpl[j] == '}') {
+            j++;
+        }
+        char num[16];
+        const char *rep = ph_value(name, c, num, sizeof num);
+        for (size_t k = 0; rep[k] != '\0' && o + 1 < cap; k++) {
+            out[o++] = rep[k];
+        }
+        i = j;
+    }
+    out[o] = '\0';
+}
+
+/* Push a log line from log.tsv by event id, filling placeholders from ctx. */
+static void log_event(const char *id, const tj_log_ctx_t *ctx) {
+    const tj_log_event_t *e = tj_config_log_event(id);
+    if (e == NULL) {
+        return; /* GDD has not defined this event yet */
+    }
+    const tj_log_ctx_t empty = {0};
+    char buf[TJ_JOURNAL_LINE];
+    log_subst(buf, sizeof buf, e->tmpl, ctx ? ctx : &empty);
+    tj_journal_push(tone_to_kind(e->tone), "%s", buf);
+}
+// #endregion
+
 // #region loop generation (winding closed loop around the central aul)
 enum { OCC_EMPTY = 0, OCC_AUL = 1, OCC_ROAD = 2, OCC_SLOT = 3, OCC_GLOBAL = 4, OCC_FIELD = 5 };
 
@@ -241,13 +334,13 @@ static void spawn_global(zone_t *z, tj_run_t *r, int tile, int count) {
 }
 
 /* A field tile's effect: passive resources once per circle (no cost, no check). */
-static void apply_tile_income(tj_run_t *r, int idx, const char *via) {
+static void apply_tile_income(tj_run_t *r, int idx) {
     const tj_tile_def_t *t = &g_config.tiles[idx];
     r->supplies += t->supplies;
     r->wisdom += t->wisdom;
     r->glory += t->glory;
     r->stamina += t->stamina_restore;
-    tj_journal_push(TJ_LOG_GOOD, "%s %s [з%+d м%+d с%+d]", t->name, via, t->supplies, t->wisdom, t->glory);
+    log_event("resource_gain", &(tj_log_ctx_t){.supplies = t->supplies, .wisdom = t->wisdom, .glory = t->glory});
 }
 
 /* Apply the player's persistent field builds (global income) for this circle. */
@@ -255,7 +348,7 @@ static void apply_field(tj_run_t *r) {
     const int n = r->grid_cols * r->grid_rows;
     for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
         if (r->field_tile[i] >= 0 && r->field_tile[i] < g_config.tile_count) {
-            apply_tile_income(r, r->field_tile[i], "(поле) питает род");
+            apply_tile_income(r, r->field_tile[i]);
         }
     }
 }
@@ -285,7 +378,7 @@ static void populate_circle(zone_t *z, tj_run_t *r) {
         }
     }
     for (int g = 0; g < r->global_count; g++) {
-        apply_tile_income(r, r->global_tile[g], "питает род");
+        apply_tile_income(r, r->global_tile[g]);
     }
     apply_field(r); /* player's persistent builds pay out too */
 }
@@ -386,8 +479,11 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     }
     tj_journal_clear();
     /* FTUE: a heir is read as a generic "путник", not a personal name (GDD). */
-    const char *who = (g_aul.deaths == 0) ? "Первый путник" : "Новый путник";
-    tj_journal_push(TJ_LOG_BIG, "%s выходит из стойбища. Костёр остаётся за спиной.", who);
+    if (g_aul.deaths == 0) {
+        log_event("run_start", &(tj_log_ctx_t){.hero = "Первый путник"});
+    } else {
+        log_event("new_heir", NULL);
+    }
     gen_loop(r);                              /* generates the loop and populates this circle (may log global effects) */
     r->hand = tj_config_tile_index("saxaul"); /* FTUE: start holding a guaranteed Saxaul card (GDD: small, common) */
     r->tamga_cell = -1;
@@ -395,7 +491,7 @@ void tj_run_start(tj_run_t *r, int heir_index) {
         r->tamga_cell = g_aul.tamga_cell % r->path_cells; /* wrap a prior loop's cell into this loop */
         r->tamga_wisdom = g_aul.tamga_wisdom;
         r->tamga_glory = g_aul.tamga_glory;
-        tj_journal_push(TJ_LOG_BIG, "На песке проступает Последняя Тамга предка.");
+        log_event("tamga_spawn", NULL);
     }
     (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
 }
@@ -419,21 +515,17 @@ static void apply_tile(tj_run_t *r, int idx) {
     int wisdom = t->wisdom;
     int glory = t->glory;
     int stam = t->stamina_restore - t->stamina_cost;
+    const bool is_check = (t->kind == TJ_TILE_CHECK && t->check != TJ_STAT_NONE);
     bool failed = false;
-    char check[56] = "";
 
-    if (t->kind == TJ_TILE_CHECK && t->check != TJ_STAT_NONE) {
-        int diff = g_config.check_base_difficulty + (g_config.check_difficulty_per_circle * r->circle);
-        int stat = tj_hero_stat(r, t->check);
-        if (stat >= diff) {
-            (void)snprintf(check, sizeof check, "  (%s %d>=%d, успех)", stat_name(t->check), stat, diff);
-        } else {
+    if (is_check) {
+        const int diff = g_config.check_base_difficulty + (g_config.check_difficulty_per_circle * r->circle);
+        if (tj_hero_stat(r, t->check) < diff) {
             failed = true;
             supplies = supplies * g_config.check_fail_reward_pct / 100;
             wisdom = wisdom * g_config.check_fail_reward_pct / 100;
             glory = glory * g_config.check_fail_reward_pct / 100;
             stam -= g_config.check_fail_stamina_loss;
-            (void)snprintf(check, sizeof check, "  (%s %d<%d, провал)", stat_name(t->check), stat, diff);
         }
     }
 
@@ -442,18 +534,17 @@ static void apply_tile(tj_run_t *r, int idx) {
     r->glory += glory;
     r->stamina += stam;
 
-    tj_log_kind_t kind = TJ_LOG_PLAIN;
-    if (failed) {
-        kind = TJ_LOG_BAD;
-    } else if (supplies || wisdom || glory || t->stamina_restore) {
-        kind = TJ_LOG_GOOD;
+    const tj_log_ctx_t ctx = {.tile = t->name, .stat = stat_name(t->check), .supplies = supplies, .wisdom = wisdom, .glory = glory, .stamina = stam};
+    if (is_check) {
+        log_event(failed ? "check_fail" : "check_success", &ctx);
+    } else {
+        log_event("tile_safe", &ctx);
     }
-    tj_journal_push(kind, "%s%s  [з%+d м%+d с%+d Силы%+d]", t->name, check, supplies, wisdom, glory, stam);
 
     if (r->stamina <= 0) {
         r->stamina = 0;
         r->alive = false;
-        tj_journal_push(TJ_LOG_BIG, "Силы иссякли. Путь окончен.");
+        log_event("death", NULL);
     }
 }
 
@@ -464,7 +555,7 @@ static void resolve_cell(tj_run_t *r) {
     if (r->cell == r->tamga_cell) {
         r->wisdom += r->tamga_wisdom;
         r->glory += r->tamga_glory;
-        tj_journal_push(TJ_LOG_BIG, "Подобрана Последняя Тамга: +%d мудрости, +%d славы.", r->tamga_wisdom, r->tamga_glory);
+        log_event("tamga_pickup", &(tj_log_ctx_t){.wisdom = r->tamga_wisdom, .glory = r->tamga_glory});
         r->tamga_cell = -1;
         tj_tamga_clear();
     }
@@ -514,7 +605,7 @@ void tj_run_choose_card(tj_run_t *r, int idx) {
     r->packs--;
     r->pack_open = (r->packs > 0); /* keep the chooser up if more packs queued */
     if (r->hand >= 0 && r->hand < g_config.tile_count) {
-        tj_journal_push(TJ_LOG_GOOD, "Взята карта: %s", g_config.tiles[r->hand].name);
+        log_event("card_gain", &(tj_log_ctx_t){.tile = g_config.tiles[r->hand].name});
     }
 }
 
@@ -576,7 +667,7 @@ void tj_run_tick(tj_run_t *r, float dt) {
                 tj_journal_push(TJ_LOG_BIG, "Кольцо разорвано! Род свободен.");
                 return;
             }
-            tj_journal_push(TJ_LOG_BIG, "Круг %d пройден. Песчаная буря заметает путь...", r->circle - 1);
+            log_event("lap_complete", &(tj_log_ctx_t){.circle = r->circle - 1});
             r->storm_t = (g_config.storm_seconds > 0.0F) ? g_config.storm_seconds : 1.3F; /* veil the reshuffle */
             gen_loop(r);
             push_pack(r);  /* grant a reward pack; the hero keeps walking */
@@ -611,7 +702,7 @@ bool tj_run_place_field(tj_run_t *r, int gx, int gy) {
         return false; /* out of range or already built */
     }
     r->field_tile[idx] = r->hand;
-    tj_journal_push(TJ_LOG_GOOD, "Постройка в пустыне: %s", g_config.tiles[r->hand].name);
+    log_event("card_placed", &(tj_log_ctx_t){.tile = g_config.tiles[r->hand].name});
     r->hand = -1;
     return true;
 }

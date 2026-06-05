@@ -306,6 +306,31 @@ static void parse_spawns(const char *path) {
 }
 // #endregion
 
+/* log.tsv: event_id | tone | template (template may contain spaces/{placeholders}). */
+static void parse_log_events(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return;
+    }
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        char *t = trim(line);
+        if (*t == '\0' || *t == '#') {
+            continue;
+        }
+        char *fld[4];
+        int n = split_pipe(t, fld, 4);
+        if (n < 3 || g_config.log_event_count >= TJ_MAX_LOG_EVENTS) {
+            continue;
+        }
+        tj_log_event_t *e = &g_config.log_events[g_config.log_event_count++];
+        (void)snprintf(e->id, sizeof e->id, "%s", fld[0]);
+        (void)snprintf(e->tone, sizeof e->tone, "%s", fld[1]);
+        (void)snprintf(e->tmpl, sizeof e->tmpl, "%s", fld[2]);
+    }
+    (void)fclose(f);
+}
+
 bool tj_config_load(const char *dir) {
     set_defaults();
     char path[512];
@@ -317,7 +342,18 @@ bool tj_config_load(const char *dir) {
     parse_tiles(path);
     (void)snprintf(path, sizeof path, "%s/spawns.tsv", dir);
     parse_spawns(path); /* after tiles: spawn rows resolve tile ids to indices */
+    (void)snprintf(path, sizeof path, "%s/log.tsv", dir);
+    parse_log_events(path);
     return true;
+}
+
+const tj_log_event_t *tj_config_log_event(const char *id) {
+    for (int i = 0; i < g_config.log_event_count; i++) {
+        if (strcmp(g_config.log_events[i].id, id) == 0) {
+            return &g_config.log_events[i];
+        }
+    }
+    return NULL;
 }
 
 int tj_config_tile_index(const char *id) {

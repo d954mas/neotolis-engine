@@ -10,8 +10,10 @@
 #define TJ_MAX_TILES 32
 #define TJ_MAX_HEIRS 8
 #define TJ_MAX_SPAWNS 64
+#define TJ_MAX_LOG_EVENTS 24
 #define TJ_ID_LEN 24
 #define TJ_NAME_LEN 48
+#define TJ_LOG_TMPL_LEN 160
 
 typedef enum {
     TJ_TILE_SAFE = 0,
@@ -86,6 +88,15 @@ typedef struct {
     int count;
 } tj_spawn_t;
 
+/* Event-log line template (log.tsv): event_id | tone | template. Placeholders
+ * {tile}{stat}{hero}{supplies}{wisdom}{glory}{stamina}{circle}{diff} are filled
+ * at push time. Lets the GDD own the run narrative without code edits. */
+typedef struct {
+    char id[TJ_ID_LEN];
+    char tone[12];
+    char tmpl[TJ_LOG_TMPL_LEN];
+} tj_log_event_t;
+
 typedef struct {
     int path_cells, laps_to_win, start_stamina;
     float move_seconds_per_cell;
@@ -112,6 +123,8 @@ typedef struct {
     int heir_count;
     tj_spawn_t spawns[TJ_MAX_SPAWNS];
     int spawn_count;
+    tj_log_event_t log_events[TJ_MAX_LOG_EVENTS];
+    int log_event_count;
 } tj_config_t;
 
 extern tj_config_t g_config;
@@ -120,6 +133,7 @@ extern tj_config_t g_config;
  * Missing files keep defaults. Returns true if the directory was usable. */
 bool tj_config_load(const char *dir);
 
-int tj_config_tile_index(const char *id); /* -1 if absent */
+int tj_config_tile_index(const char *id);                  /* -1 if absent */
+const tj_log_event_t *tj_config_log_event(const char *id); /* NULL if absent */
 
 #endif /* TJ_CONFIG_H */
