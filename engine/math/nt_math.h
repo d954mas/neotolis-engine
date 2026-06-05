@@ -33,6 +33,12 @@
 
 #define NT_PI GLM_PIf
 
+/* Column-major identity mat4 as `const float *`. Wraps cglm's
+ * GLM_MAT4_IDENTITY (a `float[4][4]` compound literal) with the 2D→1D cast.
+ * Lifetime is the enclosing statement — safe to pass to any call. For a
+ * mutable starting point use glm_mat4_identity(out). */
+#define NT_MATH_MAT4_IDENTITY ((const float *)GLM_MAT4_IDENTITY)
+
 /* ---- Float16 conversion ---- */
 
 static inline uint16_t nt_float32_to_float16(float value) {

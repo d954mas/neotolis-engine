@@ -38,6 +38,9 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 
 ## Code style
 
+- **Comments: short WHY only.** Single-line preferred, never more than 2-3. Explain a non-obvious decision or hidden constraint — not what the code does (identifiers do that). If you need more than 2-3 lines, the code probably needs refactoring, not commenting.
+  - **Do not write**: historical context (`Pre-fix the X was Y, then commit ab6d235 moved it…`), Phase/REVIEW/CHUNK tags, commit SHAs, PR numbers, issue numbers, test-name pins (`pin: test_X`), user quotes, "what changed and why" narratives, `EXPERIMENTAL` boilerplate paragraphs. Those belong in commit messages, PR descriptions, or the changelog — not in source.
+  - **Do write**: one-line invariants the reader can't derive from the code (`Walker layer-sort relies on debug layers being >= 240.`), short safety notes (`Pointer must outlive the layout solve.`), or a brief WHY where a non-obvious choice was made (`Direct-map avoids hash-table realloc in hot path.`).
 - Use `// #region name` / `// #endregion` to mark logical sections inside long functions (VS Code foldable regions). No blank line after `// #region` or before `// #endregion`. Do not remove existing short inline comments when adding regions — regions group, comments explain.
 
 ## Before adding a new subsystem
@@ -67,7 +70,7 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 
 1. Build affected targets: `cmake --build build/_cmake/native-debug`
 2. Tests: `ctest --test-dir build/_cmake/native-debug --output-on-failure`
-3. Formatting: `clang-format --dry-run --Werror <affected .c/.h files>`
+3. Formatting: `clang-format --dry-run --Werror <affected .c/.h files>` — vendored deps (`deps/clay`, `deps/cglm`, `deps/unity`, `deps/basisu`, `deps/glfw`) follow upstream style and are excluded from the formatting check; review patches to them separately.
 4. Static analysis: `bash scripts/tidy.sh build/_cmake/native-debug`
 
 If any check fails — fix before committing. Do not commit code that hasn't passed all four checks.

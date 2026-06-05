@@ -49,6 +49,11 @@ static struct {
      * nt_stats tests can prove explicit calls. */
     uint32_t test_set_material_calls;
     uint32_t test_set_font_calls;
+    /* Captures the model matrix passed to draw_n on every call, even when the
+     * font has no glyph data (units_per_em == 0). Lets walker tests pin the
+     * matrix construction without needing a real font fixture. */
+    float test_last_model[16];
+    uint32_t test_draw_n_calls;
 #endif
 } s_text;
 
@@ -319,6 +324,10 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     NT_ASSERT(s_text.initialized);
+#ifdef NT_TEST_ACCESS
+    memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
+    s_text.test_draw_n_calls++;
+#endif
     if (len == 0U || utf8 == NULL) {
         return;
     }
@@ -459,6 +468,9 @@ uint32_t nt_text_renderer_test_set_font_calls(void) { return s_text.test_set_fon
 void nt_text_renderer_test_reset_call_counters(void) {
     s_text.test_set_material_calls = 0;
     s_text.test_set_font_calls = 0;
+    s_text.test_draw_n_calls = 0;
 }
+const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
+uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 #endif
 // #endregion

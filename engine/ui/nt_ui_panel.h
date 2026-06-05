@@ -1,9 +1,7 @@
 #ifndef NT_UI_PANEL_H
 #define NT_UI_PANEL_H
 
-/* Panel and group container widgets. Panel has an IMAGE background; group is
- * invisible. Game code uses explicit push_transform/push_opacity around these
- * when transforms are needed (explicit over implicit). */
+/* Panel (IMAGE bg) and group (invisible) containers. Game wraps with NT_UI_DATA_XFORM for transforms. */
 
 #include <stdint.h>
 
@@ -13,16 +11,15 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Panel: image background container.
- * Internally: Clay IMAGE container. No transform/opacity -- use explicit
- * push_transform/push_opacity around panel_begin/end when needed. */
-void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style);
+extern const nt_ui_widget_def_t NT_UI_PANEL_DEF;
+extern const nt_ui_widget_def_t NT_UI_GROUP_DEF;
+
+/* Engine OWNS .image / .backgroundColor / .userData on the decl. */
+void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 void nt_ui_panel_end(nt_ui_context_t *ctx);
 
-/* Group: invisible container WITHOUT image.
- * Internally: Clay container with transparent bg. No transform/opacity --
- * use explicit push_transform/push_opacity when needed. */
-void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data);
+/* Engine OWNS .custom (anchor) + .userData on the decl. */
+void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const Clay_ElementDeclaration *decl);
 void nt_ui_group_end(nt_ui_context_t *ctx);
 
 #endif /* NT_UI_PANEL_H */

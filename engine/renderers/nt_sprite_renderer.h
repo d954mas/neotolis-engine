@@ -56,19 +56,10 @@ void nt_sprite_renderer_shutdown(void);
 void nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
- *   1. Atlas page texture always binds to slot 0. Material may declare a
- *      slot-0 binding to override sampler / set uniform name.
- *   2. Caller must pre-filter `items` by visibility — the renderer draws
- *      every entry unconditionally and does not consult drawable_comp's
- *      visible flag, color alpha, or entity-enabled state. Use
- *      nt_render_is_visible() (engine/render/nt_render_util.h) as the
- *      canonical filter when building the items array.
- *   3. Frame uniforms (e.g. view_proj) are shader-specific — the renderer
- *      doesn't bind any UBOs. Caller must:
- *        - register the shader's UBO blocks via nt_gfx_register_global_block,
- *        - update + bind the matching nt_buffer_t to the registered slot
- *      before draw_list. The game-shipped sprite shader uses the conventional
- *      "Globals" block at slot 0; check your shader for its actual bindings. */
+ *   1. Atlas page texture binds to slot 0; material may override sampler.
+ *   2. Caller pre-filters items by visibility; renderer draws every entry.
+ *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
+ *      them before draw_list; renderer does not touch UBOs. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 /* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears
@@ -103,19 +94,24 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
-/* Emit a 9-quad slice9 image. Same vertex format as emit_region (no new pipeline).
+/* Emit a 9-quad slice9 image. Same vertex format and pipeline as emit_region.
  *
  *   atlas, region_index - must be READY; tombstones no-op.
- *   x, y, w, h          - target rect in caller's coordinate space (UI passes GL Y-up world coords).
- *   sl, sr, st, sb       - slice9 borders in source pixels (left, right, top, bottom).
- *   color_packed          - 0xAABBGGRR.
- *   flip_bits             - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *   x, y, w, h          - target rect in caller's coordinate space.
+ *   src_lrtb            - src borders {l,r,t,b} in source pixels; NULL = read
+ *                         atlas-baked borders for this region.
+ *   slice9_scale        - dst corner size = src × scale (always). Pass 1.0F
+ *                         for src verbatim. Corners proportionally shrunk if
+ *                         total > w/h.
+ *   color_packed        - 0xAABBGGRR.
+ *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *   world_matrix        - 16-float column-major mat4 (same convention as
+ *                         emit_region). Pass NT_MATH_MAT4_IDENTITY for none.
  *
- * ipu (1/pixels_per_unit) is computed internally from the atlas handle.
- * Emits 16 vertices + 54 indices (4x4 shared grid). Handles staging overflow internally.
- * Caller MUST have called set_material first. */
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation);
+ * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
+ * internally. Caller MUST have called set_material first. */
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
+                                    uint8_t flip_bits, const float *world_matrix);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a

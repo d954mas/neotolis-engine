@@ -32,7 +32,7 @@
 void nt_mem_scratch_init(size_t size_bytes);
 void nt_mem_scratch_shutdown(void);
 
-/* Reset usage to 0. Pointers handed out before the reset become stale. */
+/* Pointers handed out before the reset become stale. */
 void nt_mem_scratch_reset(void);
 
 /* align: power of 2, <= _Alignof(max_align_t). Asserts on overflow / out-of-space. */
@@ -48,8 +48,10 @@ size_t nt_mem_scratch_high_water_mark(void);
 
 #define NT_MEM_SCRATCH_ALLOC_ARRAY(T, count) ((T *)nt_mem_scratch_alloc_array(sizeof(T), (size_t)(count), _Alignof(T)))
 
+/* Current `used` byte count; resets each frame. */
+size_t nt_mem_scratch_used(void);
+
 #ifdef NT_TEST_ACCESS
-size_t nt_mem_scratch_test_used(void);
 size_t nt_mem_scratch_test_size(void);
 #endif
 

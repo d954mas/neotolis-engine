@@ -56,8 +56,8 @@ static void make_text(int idx, int16_t z, float x) {
 }
 
 static int s_custom_calls;
-static void custom_cb(const void *cmd, void *user) {
-    (void)cmd;
+static void custom_cb(const nt_ui_custom_frame_t *frame, void *user) {
+    (void)frame;
     (void)user;
     /* Callback may bind its own pipeline -- sprite staging must be empty. */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_sprite_renderer_test_vertex_count());

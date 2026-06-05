@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "atlas/nt_atlas.h"
+#include "clay.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
@@ -19,10 +20,12 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-/* Per-binary counter so multiple ui_walker_fixture_make_material() calls
- * inside the same test process do not collide on virtual-pack ids. */
+/* Per-fixture counter so multiple ui_walker_fixture_make_material() calls
+ * inside one test do not collide on virtual-pack ids. Reset to 0 by init
+ * since tearDown destroys all materials and frees their packs. */
 static uint32_t s_vpack_counter;
 
 nt_material_t ui_walker_fixture_make_material(void) {
@@ -128,6 +131,13 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     NT_ASSERT(fx != NULL);
     if (fx->ctx != NULL) {
+        /* If a Unity TEST_ASSERT longjmp'd out of a frame, the ctx is mid-frame
+         * and destroy_context would trap. Close the frame defensively so tearDown
+         * surfaces the real failure (Unity output) instead of a SIGILL on cleanup. */
+        if (fx->ctx->in_frame) {
+            fx->ctx->in_frame = false;
+            Clay_SetCurrentContext(NULL);
+        }
         nt_ui_destroy_context(fx->ctx);
         fx->ctx = NULL;
     }

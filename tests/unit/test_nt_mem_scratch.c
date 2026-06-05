@@ -19,7 +19,7 @@ static void teardown_if_init(void) {
 static void test_init_then_shutdown(void) {
     nt_mem_scratch_init(4096U);
     TEST_ASSERT_EQUAL_UINT64(4096U, (uint64_t)nt_mem_scratch_test_size());
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
     nt_mem_scratch_shutdown();
     TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_test_size());
 }
@@ -28,10 +28,10 @@ static void test_alloc_advances_used(void) {
     nt_mem_scratch_init(4096U);
     void *a = nt_mem_scratch_alloc(16U, 8U);
     TEST_ASSERT_NOT_NULL(a);
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_used());
     void *b = nt_mem_scratch_alloc(32U, 8U);
     TEST_ASSERT_NOT_NULL(b);
-    TEST_ASSERT_EQUAL_UINT64(48U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(48U, (uint64_t)nt_mem_scratch_used());
     TEST_ASSERT_TRUE((uint8_t *)b == (uint8_t *)a + 16);
     nt_mem_scratch_shutdown();
 }
@@ -40,24 +40,24 @@ static void test_alloc_advances_used(void) {
 static void test_alloc_aligns_up(void) {
     nt_mem_scratch_init(4096U);
     (void)nt_mem_scratch_alloc(3U, 1U); /* leave used at 3 */
-    TEST_ASSERT_EQUAL_UINT64(3U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(3U, (uint64_t)nt_mem_scratch_used());
     uint8_t *p = (uint8_t *)nt_mem_scratch_alloc(8U, 8U);
     /* p's address must be 8-aligned. */
     TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)((uintptr_t)p & 7U));
     /* used jumped from 3 to 8 (padding) then +8 alloc => 16. */
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_used());
     nt_mem_scratch_shutdown();
 }
 
 static void test_reset_clears_used(void) {
     nt_mem_scratch_init(4096U);
     (void)nt_mem_scratch_alloc(128U, 8U);
-    TEST_ASSERT_EQUAL_UINT64(128U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(128U, (uint64_t)nt_mem_scratch_used());
     nt_mem_scratch_reset();
-    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_used());
     /* Next alloc starts from the base again. */
     void *p = nt_mem_scratch_alloc(16U, 8U);
-    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_test_used());
+    TEST_ASSERT_EQUAL_UINT64(16U, (uint64_t)nt_mem_scratch_used());
     (void)p;
     nt_mem_scratch_shutdown();
 }

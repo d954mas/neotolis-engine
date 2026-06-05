@@ -1,4 +1,4 @@
-/* Unit tests for nt_ui_scale math (Phase 53 Plan 05 adaptive UI helper).
+/* Unit tests for nt_ui_scale math.
  *
  * Note on floats: Unity is compiled with UNITY_EXCLUDE_FLOAT (see
  * deps/unity/CMakeLists.txt). All values here are integer-valued or
@@ -18,6 +18,15 @@ void tearDown(void) {}
 static void assert_int_eq_scaled(int32_t expected_x1000, float actual, int32_t tolerance) {
     int32_t actual_x1000 = (int32_t)((actual * 1000.0F) + (actual >= 0.0F ? 0.5F : -0.5F));
     int32_t diff = actual_x1000 - expected_x1000;
+    if (diff < 0) {
+        diff = -diff;
+    }
+    TEST_ASSERT_LESS_OR_EQUAL_INT32(tolerance, diff);
+}
+
+static void assert_int_eq_scaled_1m(int32_t expected_x1000000, float actual, int32_t tolerance) {
+    int32_t actual_x1000000 = (int32_t)((actual * 1000000.0F) + (actual >= 0.0F ? 0.5F : -0.5F));
+    int32_t diff = actual_x1000000 - expected_x1000000;
     if (diff < 0) {
         diff = -diff;
     }
@@ -220,6 +229,17 @@ static void test_ortho_stretch(void) {
     assert_int_eq_scaled(600000, o.top, 1);
 }
 
+static void test_make_screen_view_proj(void) {
+    float m[16];
+    nt_ui_make_screen_view_proj(800.0F, 600.0F, m);
+    assert_int_eq_scaled_1m(2500, m[0], 1);
+    assert_int_eq_scaled_1m(3333, m[5], 1);
+    assert_int_eq_scaled_1m(-1000000, m[10], 1);
+    assert_int_eq_scaled_1m(-1000000, m[12], 1);
+    assert_int_eq_scaled_1m(-1000000, m[13], 1);
+    assert_int_eq_scaled_1m(1000000, m[15], 1);
+}
+
 /* === make_target === */
 
 /* EXPAND target: viewport = logical, fb_size = physical, offset = 0. */
@@ -306,6 +326,7 @@ int main(void) {
     RUN_TEST(test_ortho_letterbox);
     RUN_TEST(test_ortho_crop);
     RUN_TEST(test_ortho_stretch);
+    RUN_TEST(test_make_screen_view_proj);
     RUN_TEST(test_target_expand);
     RUN_TEST(test_target_letterbox);
     RUN_TEST(test_target_crop);

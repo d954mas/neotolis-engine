@@ -8,14 +8,12 @@
 #include "renderers/nt_text_renderer.h"
 #include "time/nt_time.h"
 
-/* This is the single CLAY_IMPLEMENTATION TU. CMake parses deps/clay/VERSION
- * into CLAY_PINNED_*; the assert below catches version drift. */
+/* Clay private surface lives in nt_ui_clay_impl.c. */
 
 #if !defined(CLAY_PINNED_MAJOR) || !defined(CLAY_PINNED_MINOR)
 #error "nt_ui: CLAY_PINNED_MAJOR / CLAY_PINNED_MINOR must be defined by CMake"
 #endif
 
-#define CLAY_IMPLEMENTATION
 #include "clay.h"
 
 _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 required");
@@ -23,37 +21,33 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core/nt_align.h"
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
+#include "input/nt_input.h"
 #include "log/nt_log.h"
+#include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
-#include "ui/nt_ui_image.h" /* NT_UI_IMAGE_*_OVERRIDE flags */
+#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_debug_hit_zones.h"
+#include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
-
-// #region marker_types
-enum {
-    NT_UI_MARKER_PUSH_TRANSFORM = 1,
-    NT_UI_MARKER_POP_TRANSFORM = 2,
-    NT_UI_MARKER_PUSH_OPACITY = 3,
-    NT_UI_MARKER_POP_OPACITY = 4,
-};
-// #endregion
 
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
-/* Set true between nt_ui_module_init / nt_ui_module_shutdown. */
 static bool s_nt_ui_module_initialized = false;
 
-/* Pre-built element_data for each layer (user_data=NULL). Avoids scratch alloc. */
+/* Pre-built element_data for each layer (user_data=NULL) — avoids scratch alloc. */
 static nt_ui_element_data_t s_default_element_data[256];
+_Static_assert(sizeof(s_default_element_data) == 256 * sizeof(nt_ui_element_data_t), "s_default_element_data sized 256 x element_data");
 // #endregion
 
 // #region clay_error_handler
-/* All Clay errors are fatal -- assert compiles out in NT_ASSERT_OFF production. */
+/* All Clay errors are fatal; assert compiles out in NT_ASSERT_OFF builds. */
 static void nt_ui_clay_error_cb(Clay_ErrorData err) {
     /* errorText is .length + .chars, NOT NUL-terminated. */
     const int len = err.errorText.length;
@@ -78,8 +72,7 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
     NT_ASSERT(nt_font_valid(font) && "nt_ui measure_cb: font slot empty; call nt_ui_set_font before declaring TEXT with this fontId");
     const float ls = (float)config->letterSpacing;
     nt_text_size_t s = nt_font_measure_n(font, text.chars, (size_t)text.length, (float)config->fontSize, ls);
-    /* Clay's MeasureTextCached subtracts one trailing letterSpacing per line
-     * (clay.h:1677); add it back so bbox matches the renderer's (N-1)*ls width. */
+    /* Clay's MeasureTextCached subtracts one trailing letterSpacing per line; add it back. */
     if (s.width > 0.0F && ls != 0.0F) {
         s.width += ls;
     }
@@ -111,20 +104,30 @@ static void nt_ui_init_arc_lut(void) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_module_init(void) {
     NT_ASSERT(!s_nt_ui_module_initialized && "nt_ui_module_init: already initialized; call nt_ui_module_shutdown first");
-    Clay__MeasureText = nt_ui_measure_text_cb;
+    nt_ui_clay_priv_set_measure_text_cb(nt_ui_measure_text_cb);
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
     nt_ui_init_arc_lut();
+    /* opacity=1.0F is the safe sentinel — stray read past the flag guard composes to no-op. */
     for (uint32_t i = 0; i < 256U; i++) {
-        s_default_element_data[i].layer = (nt_ui_layer_t)i;
+        s_default_element_data[i] = (nt_ui_element_data_t){
+            .layer = (nt_ui_layer_t)i,
+            .flags = 0U,
+            .opacity = 1.0F,
+            .transform = nt_ui_transform_defaults(),
+            .user_data = NULL,
+        };
+        NT_ASSERT(s_default_element_data[i].opacity == 1.0F);
+        NT_ASSERT(s_default_element_data[i].flags == 0U);
     }
     s_nt_ui_module_initialized = true;
 }
 void nt_ui_module_shutdown(void) {
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_module_shutdown: not initialized");
-    Clay__MeasureText = NULL;
+    nt_ui_clay_priv_set_measure_text_cb(NULL);
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
     s_nt_ui_module_initialized = false;
@@ -135,23 +138,55 @@ void nt_ui_module_shutdown(void) {
 /* ctx struct gets padded to cache line so Clay's arena starts on a clean boundary. */
 #define NT_UI_CACHE_LINE ((size_t)64U)
 
+#if NT_UI_DEBUG_TOOLS
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Smallest power of 2 ≥ x (assumes x ≥ 1). */
+static inline uint32_t nt_ui_next_pow2_u32(uint32_t x) {
+    if (x <= 1U) {
+        return 1U;
+    }
+    --x;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    return x + 1U;
+}
+#endif
+
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
     NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
-    /* Clay_SetMaxElementCount(N) also writes defaultMaxMeasureTextWordCacheCount
-     * = N*2 (clay.h:4332); restore via the same call so both come back. */
+    /* SetMaxElementCount also writes word_cache_count = N*2; restore via the same call. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
-    const int32_t saved_default = Clay__defaultMaxElementCount;
+    const int32_t saved_default = nt_ui_clay_priv_default_max_element_count();
     Clay_SetCurrentContext(NULL);
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
     Clay_SetMaxElementCount(saved_default);
     Clay_SetCurrentContext(saved_ctx);
-    const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
-    const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + clay_bytes;
+    const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
+    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+#if NT_UI_DEBUG_TOOLS
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
+    const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
+    const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * widget_cap, NT_UI_CACHE_LINE);
+    const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+#else
+    const size_t hit_layer_bytes = 0U;
+    const size_t widget_registry_bytes = 0U;
+    const size_t debug_zones_bytes = 0U;
+    const size_t inspector_collapsed_bytes = 0U;
+#endif
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes +
+           widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -165,22 +200,59 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
     memset(ctx, 0, sizeof(*ctx));
 
-    const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
-    /* Layout: [ctx struct][markers][Clay arena]. */
-    ctx->max_elements = desc->max_elements;
-    const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
-    const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
-    ctx->markers = (nt_ui_marker_t *)((char *)arena + ctx_size);
-    ctx->max_markers = max_m;
-    ctx->marker_count = 0;
-    void *clay_mem = (char *)arena + ctx_size + marker_bytes;
-    const size_t clay_size = arena_size - ctx_size - marker_bytes;
+#if NT_UI_DEBUG_TOOLS
+    /* memset zero above would leave panel_width=0; restore defaults. */
+    ctx->inspector_metrics = NT_UI_INSPECTOR_METRICS_DEFAULT;
+#endif
 
-    /* Stage max_elements into Clay's globals so Clay_Initialize inherits it;
-     * re-null current before restore -- Clay_SetMaxElementCount writes
-     * per-ctx when current is non-NULL. */
+    const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
+    ctx->max_elements = desc->max_elements;
+    ctx->use_raycast_input = desc->use_raycast_input;
+    ctx->view_proj_set = false;
+    NT_ASSERT(isfinite(desc->element_depth_bias_ndc) && desc->element_depth_bias_ndc >= 0.0F && "nt_ui_create_context: element_depth_bias_ndc must be finite and non-negative");
+    NT_ASSERT((desc->element_depth_bias_ndc == 0.0F || desc->use_raycast_input) && "nt_ui_create_context: element_depth_bias_ndc requires use_raycast_input=true");
+    ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
+    const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
+    const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size);
+    ctx->tree_root_for_elem = (int32_t *)((char *)arena + ctx_size + tree_baked_bytes);
+    ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes);
+    ctx->hit_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes);
+    ctx->hit_clip_parent_id = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes);
+    ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
+    ctx->current_generation = 0U;
+#if NT_UI_DEBUG_TOOLS
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->hit_layer = (uint8_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes);
+#else
+    const size_t hit_layer_bytes = 0U;
+#endif
+    const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes;
+#if NT_UI_DEBUG_TOOLS
+    ctx->widget_registry_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
+    ctx->widget_registry_mask = ctx->widget_registry_cap - 1U;
+    ctx->debug_zone_cap = desc->max_elements;
+    ctx->inspector_collapsed_cap = desc->max_elements;
+    const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap, NT_UI_CACHE_LINE);
+    const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_tree);
+    ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_tree + widget_registry_bytes);
+    ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_tree + widget_registry_bytes + debug_zones_bytes);
+    const size_t after_debug = after_tree + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes;
+#else
+    const size_t after_debug = after_tree;
+#endif
+    void *clay_mem = (char *)arena + after_debug;
+    const size_t clay_size = arena_size - after_debug;
+
+    /* SetMaxElementCount writes per-ctx if current is non-NULL — null it first to stage the global. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
-    const int32_t saved_default = Clay__defaultMaxElementCount;
+    const int32_t saved_default = nt_ui_clay_priv_default_max_element_count();
     Clay_SetCurrentContext(NULL);
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
 
@@ -202,6 +274,9 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx) {
     if (Clay_GetCurrentContext() == ctx->clay) {
         Clay_SetCurrentContext(NULL);
     }
+#if NT_UI_DEBUG_TOOLS
+    nt_ui_internal_inspector_strings_release(ctx);
+#endif
     memset(ctx, 0, sizeof(*ctx));
 }
 // #endregion
@@ -217,10 +292,11 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse) {
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
-    NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
+    NT_ASSERT(pointers != NULL && "nt_ui_begin: pointers must be non-NULL");
+    NT_ASSERT(count > 0U && count <= NT_INPUT_MAX_POINTERS && "nt_ui_begin: count must be 1..NT_INPUT_MAX_POINTERS");
     /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
     NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
@@ -233,31 +309,72 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
-    ctx->marker_count = 0;
 
-    /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
-    Clay_SetDebugModeEnabled(ctx->debug_overlay);
+    /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. */
+    memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
+    ctx->frame_pointer_count = count;
+    ctx->frame_dt = dt;
+
+    /* Orphan cleanup — captures unqueried last frame would hold the pointer forever. */
+    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
+        if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
+            ctx->captures[i].active_id = 0U;
+        }
+        ctx->capture_seen[i] = 0U;
+    }
+    ctx->pointer_over_any = false;
+
+#if NT_UI_DEBUG_TOOLS
+    ctx->debug_zone_count = 0U;
+#endif
+
+    /* Reset so a button begin that asserted mid-flight can't wedge subsequent frames. */
+    ctx->pending_button.active = false;
+
+    /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
+     * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
+    if (ctx->use_raycast_input) {
+        ctx->view_proj_set = false;
+    }
+
+#if NT_UI_DEBUG_TOOLS
+    memset(ctx->widget_registry, 0, sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap);
+    /* highlight_id is per-frame; selected_id persists across frames. */
+    ctx->inspector_highlight_id = 0U;
+
+    /* 3D ctx: rebuild inspector's own Y-down ortho per frame from screen dims so the inspector
+     * overlay raycasts against screen-pixel coords regardless of the game's view_proj (perspective). */
+    if (ctx->use_raycast_input && screen_w > 0.0F && screen_h > 0.0F) {
+        mat4 m;
+        glm_ortho(0.0F, screen_w, screen_h, 0.0F, -1.0F, 1.0F, m);
+        memcpy(ctx->inspector_view_proj, m, sizeof ctx->inspector_view_proj);
+        mat4 m_inv;
+        glm_mat4_inv(m, m_inv);
+        memcpy(ctx->inv_inspector_view_proj, m_inv, sizeof ctx->inv_inspector_view_proj);
+    }
+#endif
+
+    const nt_pointer_t *primary = &pointers[0];
+
+#if NT_UI_DEBUG_TOOLS
+    /* Pure coord check — frame-1 safe, no layout solve required. */
+    ctx->inspector_pointer_consumed = false;
+    if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
+        ctx->inspector_pointer_consumed = true;
+    }
+#endif
+
+    /* nt_ui_inspector replaces Clay's built-in debug view. */
+    Clay_SetDebugModeEnabled(false);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
-    /* Left-button only; Clay v0.14 has no right/middle/wheel buttons. */
-    Clay_SetPointerState((Clay_Vector2){.x = mouse->x, .y = mouse->y}, mouse->buttons[NT_BUTTON_LEFT].is_down);
+    /* Clay v0.14 has no right/middle/wheel buttons; left only. */
+    Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
-    /* Forward wheel + enable touch/drag-scroll (mobile/web pointer drag inside
-     * a Clay clip scrolls it). Y inverted: Clay scroll opposite of typical wheel_dy. */
-    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = mouse->wheel_dx, .y = -mouse->wheel_dy}, dt);
+    /* Y inverted: Clay scroll opposite of typical wheel_dy. */
+    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = primary->wheel_dx, .y = -primary->wheel_dy}, dt);
 
     Clay_BeginLayout();
-}
-
-/* Takes effect on next nt_ui_begin (Clay needs the flag before BeginLayout). */
-void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_debug_overlay: ctx must be non-NULL");
-    ctx->debug_overlay = enabled;
-}
-
-bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_debug_overlay: ctx must be non-NULL");
-    return ctx->debug_overlay;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -265,17 +382,21 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
+#if NT_UI_DEBUG_TOOLS
+    if (ctx->inspector_active) {
+        nt_ui_internal_emit_inspector_layout_extern(ctx);
+    }
+#endif
 
-    /* layout_ms times the Clay layout solve (EndLayout), not the begin->end span. */
+    /* Times the Clay layout solve only, not the begin->end span. */
     const double layout_t0 = nt_time_now();
     ctx->frozen_cmds = Clay_EndLayout();
     ctx->last_layout_ms = (float)((nt_time_now() - layout_t0) * 1000.0);
 
-    /* Markers keep layout-element indices (before_clay_idx). The walker
-     * matches directly via nt_layout_index on each render command — no
-     * O(M×R) remap needed. */
+    const double build_t0 = nt_time_now();
+    nt_ui_internal_build_tree(ctx);
+    ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
 
-    ctx->debug_overlay = Clay_IsDebugModeEnabled();
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
     /* Stray CLAY_* between end and next begin NULL-derefs instead of corrupting. */
@@ -284,7 +405,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region helpers_color_pack
-/* Clay's RGBA floats are 0..255 unclamped; saturate via nt_clamp_f_to_u8. */
+/* Clay's RGBA floats are 0..255 unclamped. */
 static inline uint32_t nt_color_pack_clay(Clay_Color c) {
     uint32_t r = nt_clamp_f_to_u8(c.r);
     uint32_t g = nt_clamp_f_to_u8(c.g);
@@ -300,31 +421,152 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
         return &s_default_element_data[layer];
     }
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    d->layer = layer;
-    d->user_data = user_data;
+    NT_ASSERT(d != NULL && "nt_ui_make_element_data: scratch alloc failed");
+    *d = (nt_ui_element_data_t){
+        .layer = layer,
+        .user_data = user_data,
+        .flags = 0U,
+        .transform = nt_ui_transform_defaults(),
+        .opacity = 1.0F,
+    };
+    return d;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, void *user_data, const nt_ui_transform_t *transform, float opacity) {
+    NT_ASSERT(transform != NULL && "nt_ui_make_element_data_xform: transform must be non-NULL");
+    /* Non-zero, finite scale. Negative is allowed — needed in 3D ctx for Y-flip (Clay Y-down
+     * → world Y-up) when no rotation can satisfy face direction + Y-flip + no X-mirror. */
+    NT_ASSERT(transform->scale_x != 0.0F && transform->scale_y != 0.0F && transform->scale_z != 0.0F && "nt_ui_make_element_data_xform: scale must be non-zero; use opacity=0 to hide");
+    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && isfinite(transform->scale_z) && isfinite(transform->rotation_x) && isfinite(transform->rotation_y) &&
+              isfinite(transform->rotation_z) && isfinite(transform->offset_x) && isfinite(transform->offset_y) && isfinite(transform->offset_z) &&
+              "nt_ui_make_element_data_xform: transform fields must be finite");
+    NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_make_element_data_xform: opacity must be finite in [0,1]");
+    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(d != NULL && "nt_ui_make_element_data_xform: scratch alloc failed");
+    *d = (nt_ui_element_data_t){
+        .layer = layer,
+        .user_data = user_data,
+        .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
+        .transform = *transform,
+        .opacity = opacity,
+    };
     return d;
 }
 // #endregion
 
-// #region helper_emit_screen_rect
-static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, float rotation) {
-    if (rotation == 0.0F) {
-        const float m[16] = {
-            w, 0.0F, 0.0F, 0.0F, 0.0F, h, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, x, y, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
-    } else {
-        const float rcx = x + (w * 0.5F);
-        const float rcy = y + (h * 0.5F);
-        const float hw = w * 0.5F;
-        const float hh = h * 0.5F;
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float m[16] = {
-            w * rc, w * rs, 0, 0, h * (-rs), h * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
-        };
-        nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
+// #region inframe_ctx_getter
+nt_ui_context_t *nt_ui_internal_get_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
+// #endregion
+
+// #region widget_registry
+#if NT_UI_DEBUG_TOOLS
+/* Linear probe at 50% load; returns slot for register (empty or matching) or
+ * the same slot for lookup (caller checks slot->id == id). */
+static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, uint32_t cap, uint32_t mask, uint32_t id) {
+    const uint32_t start = id & mask;
+    for (uint32_t step = 0U; step < cap; ++step) {
+        const uint32_t slot = (start + step) & mask;
+        const uint32_t s_id = registry[slot].id;
+        if (s_id == 0U || s_id == id) {
+            return slot;
+        }
     }
+    NT_ASSERT(0 && "widget_registry full — load factor exceeded (raise max_elements)");
+    return 0U;
+}
+
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
+    if (id == 0U || def == NULL) {
+        return;
+    }
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
+    nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    s->id = id;
+    s->def = def;
+    if (pad_lrtb != NULL) {
+        s->has_padding = 1U;
+        s->hit_padding_lrtb[0] = pad_lrtb[0];
+        s->hit_padding_lrtb[1] = pad_lrtb[1];
+        s->hit_padding_lrtb[2] = pad_lrtb[2];
+        s->hit_padding_lrtb[3] = pad_lrtb[3];
+    } else {
+        s->has_padding = 0U;
+        s->hit_padding_lrtb[0] = 0;
+        s->hit_padding_lrtb[1] = 0;
+        s->hit_padding_lrtb[2] = 0;
+        s->hit_padding_lrtb[3] = 0;
+    }
+}
+#endif
+
+const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_lookup: ctx must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
+    if (id == 0U) {
+        return NULL;
+    }
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
+    const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    return (s->id == id) ? s->def : NULL;
+#else
+    (void)ctx;
+    (void)id;
+    return NULL;
+#endif
+}
+
+/* OFF body discards out_lrtb; signature is fixed by the header. */
+// NOLINTNEXTLINE(readability-non-const-parameter)
+bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_get_hit_padding: ctx must be non-NULL");
+    NT_ASSERT(out_lrtb != NULL && "nt_ui_widget_get_hit_padding: out_lrtb must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
+    if (id == 0U) {
+        return false;
+    }
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
+    const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    if (s->id != id || !s->has_padding) {
+        return false;
+    }
+    out_lrtb[0] = s->hit_padding_lrtb[0];
+    out_lrtb[1] = s->hit_padding_lrtb[1];
+    out_lrtb[2] = s->hit_padding_lrtb[2];
+    out_lrtb[3] = s->hit_padding_lrtb[3];
+    return true;
+#else
+    (void)ctx;
+    (void)id;
+    (void)out_lrtb;
+    return false;
+#endif
+}
+
+// #endregion
+
+// #region helper_emit_screen_rect
+/* sprite_mat4 = world · T(x, y+h) · S(w, -h, 1) maps unit (0,0..1,1) → world. The (x, y+h) origin
+ * and -h scale match the sprite renderer's unit-square convention (GL bottom-left at unit (0,0));
+ * with Y-flip baked into world, this lands the Clay bbox at the correct GL pixels.
+ * Math: out.col0 = w · world.col0; out.col1 = -h · world.col1; col2 unchanged; col3 = world · (x, y+h, 0, 1). */
+static inline void build_quad_mat4(const float world[16], float x, float y, float w, float h, float out_m[16]) {
+    const float ox = x;
+    const float oy = y + h;
+    for (int r = 0; r < 4; ++r) {
+        out_m[r] = w * world[r];
+        out_m[4 + r] = -h * world[4 + r];
+        out_m[8 + r] = world[8 + r];
+        out_m[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
+    }
+}
+
+static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
+    float m[16];
+    build_quad_mat4(world_mat4, x, y, w, h, m);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
 }
 // #endregion
 
@@ -359,7 +601,7 @@ static inline void clamp_radii_css3(float w, float h, float *tl, float *tr, floa
 
 // #region helper_emit_rounded_rect
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, float rotation) {
+static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, const float world_mat4[16]) {
     float tl = cr.topLeft;
     float tr = cr.topRight;
     float bl = cr.bottomLeft;
@@ -369,7 +611,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     const float half_h = h * 0.5F;
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, rotation);
+        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, world_mat4);
         return;
     }
 
@@ -443,50 +685,40 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         indices[ii++] = next;
     }
 
-    if (rotation == 0.0F) {
-        const float identity[16] = {
-            1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
-    } else {
-        /* Rotate around rect center: T(cx,cy) * R(rot) * T(-cx,-cy) */
-        const float rcx = x + half_w;
-        const float rcy = y + half_h;
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float mat[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
-    }
+    /* Vertices are in Clay layout-space; world_mat4 maps layout → world directly. */
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
 }
 // #endregion
 
 // #region helper_emit_border
-/* Top/bottom run full width; left/right inset to avoid corner overlap.
- * With rotation, emits all segments as one mesh rotated around border center. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, float rotation) {
+static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float world_mat4[16]) {
+    // #region axis-aligned-fast-path
     const float top = (float)widths.top;
     const float bot = (float)widths.bottom;
     const float lft = (float)widths.left;
     const float rgt = (float)widths.right;
-    if (rotation == 0.0F) {
+    /* Axis-aligned fast path: per-edge rect emit avoids the geometry mesh. Probe Clay X→Y and Y→X
+     * cross-coupling in world_mat4 (col0.y = m[1], col1.x = m[4]); zero ⇔ no rotation/shear. */
+    const bool axis_aligned = (world_mat4[1] == 0.0F && world_mat4[4] == 0.0F);
+    if (axis_aligned) {
         if (widths.top) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, world_mat4);
         }
         if (widths.bottom) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, world_mat4);
         }
         if (widths.left) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, world_mat4);
         }
         if (widths.right) {
-            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, 0.0F);
+            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, world_mat4);
         }
         return;
     }
-    /* Build quads as geometry; rotate around border center. Max 4 quads = 16 verts, 24 indices. */
+    // #endregion
+    // #region mesh-build
+    /* Build 4 quads as one geometry mesh through the affine. */
     float positions[16][2];
     uint16_t indices[24];
     uint32_t vi = 0;
@@ -578,14 +810,9 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
     if (vi == 0) {
         return;
     }
-    const float rcx = bb.x + (bb.width * 0.5F);
-    const float rcy = bb.y + (bb.height * 0.5F);
-    const float rc = cosf(rotation);
-    const float rs = sinf(rotation);
-    const float mat[16] = {
-        rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
-    };
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, col);
+    /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col);
+    // #endregion
 }
 
 static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radius, float cx, float cy, float w_perp_x, float w_perp_y, float sharp_x, float sharp_y, float sign_x, float sign_y,
@@ -618,7 +845,7 @@ static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radi
 /* Caller (emit_border) clamps radii and guarantees at least one is non-zero. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed,
-                                float rotation) {
+                                const float world_mat4[16]) {
     const float x = bb.x;
     const float y = bb.y;
     const float w = bb.width;
@@ -653,25 +880,11 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
         indices[ii++] = out_n;
     }
 
-    if (rotation == 0.0F) {
-        const float identity[16] = {
-            1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
-    } else {
-        /* Rotate around border center: T(cx,cy) * R(rot) * T(-cx,-cy) */
-        const float rcx = bb.x + (bb.width * 0.5F);
-        const float rcy = bb.y + (bb.height * 0.5F);
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float mat[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
-        };
-        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
-    }
+    /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
 }
 
-static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float rotation) {
+static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16]) {
     const Clay_BorderRenderData *b = &c->renderData.border;
     const Clay_BoundingBox bb = c->boundingBox;
     const float top = (float)b->width.top;
@@ -689,23 +902,23 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     clamp_radii_css3(bb.width, bb.height, &tl, &tr, &bl, &br);
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, rotation);
+        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, world_mat4);
         return;
     }
-    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, rotation);
+    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, world_mat4);
 }
 // #endregion
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, float rotation) {
+static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
     const Clay_CornerRadius cr = c->renderData.image.cornerRadius;
     NT_ASSERT(cr.topLeft == 0.0F && cr.topRight == 0.0F && cr.bottomLeft == 0.0F && cr.bottomRight == 0.0F && "nt_ui IMAGE: cornerRadius unsupported; pre-bake into atlas");
     if (!nt_resource_is_ready(p->atlas)) {
-        return; /* async-loading atlas */
+        return;
     }
 
     const Clay_BoundingBox bb = c->boundingBox;
@@ -717,36 +930,18 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
 
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
     if (r->vertex_count == 0U) {
-        return; /* tombstone */
+        return;
     }
 
-    /* UI rotation center: default center (0.5), override from style flag. */
-    const float ox = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F;
-    const float oy = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F;
-
-    /* Auto-slice9: flag OR non-zero lrtb = override; flag adds ability to
-     * override with zeros (disable slice9). Backward compat: non-zero lrtb
-     * works without flag. */
+    /* Flag bit OR non-zero lrtb selects override; flag allows override with zeros (disable slice9). */
     const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
     const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
+    NT_ASSERT(isfinite(p->slice9_scale) && p->slice9_scale > 0.0F && "nt_ui walker: payload.slice9_scale must be finite > 0");
+    const float s9_scale = p->slice9_scale;
 
     if (has_s9_override || region_slice9) {
-        uint16_t sl;
-        uint16_t sr;
-        uint16_t st;
-        uint16_t sb;
-        if (has_s9_override) {
-            sl = p->slice9_override[0];
-            sr = p->slice9_override[1];
-            st = p->slice9_override[2];
-            sb = p->slice9_override[3];
-        } else {
-            sl = r->slice9_lrtb[0];
-            sr = r->slice9_lrtb[1];
-            st = r->slice9_lrtb[2];
-            sb = r->slice9_lrtb[3];
-        }
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation);
+        const uint16_t *src = has_s9_override ? p->slice9_override : NULL;
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src, s9_scale, col, p->flip_bits, world_mat4);
         return;
     }
 
@@ -757,32 +952,26 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
 
-    /* UI images fill Clay bbox from top-left — origin (0,0) for positioning.
-     * ox/oy from atlas/override only affects rotation center, not position. */
-    if (rotation == 0.0F) {
-        const float m[16] = {
-            sx_f, 0.0F, 0.0F, 0.0F, 0.0F, sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
-        };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
-    } else {
-        const float rcx = bb.x + (ox * bb.width);
-        const float rcy = bb.y + (oy * bb.height);
-        const float hw = ox * bb.width;
-        const float hh = oy * bb.height;
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
-        const float m[16] = {
-            sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
-        };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+    /* Source's (origin, origin) point anchors at bbox center. Build sprite_mat4 = world × T(cx, cy) × S(sx, -sy, 1):
+     * source Y-up (image texels flow up) inverts before world maps to layout — col1 negates world.col1. */
+    const float cx = bb.x + (bb.width * 0.5F);
+    const float cy = bb.y + (bb.height * 0.5F);
+    float m[16];
+    for (int rr = 0; rr < 4; ++rr) {
+        m[rr] = sx_f * world_mat4[rr];
+        m[4 + rr] = -sy_f * world_mat4[4 + rr];
+        m[8 + rr] = world_mat4[8 + rr];
+        m[12 + rr] = (cx * world_mat4[rr]) + (cy * world_mat4[4 + rr]) + world_mat4[12 + rr];
     }
+    const float origin_x = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : r->origin_x;
+    const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : r->origin_y;
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
 // #endregion
 
 // #region helper_emit_text
-/* Pure text emit: no sprite renderer knowledge. dispatch_command handles
- * the sprite_flush before and the lazy sprite rebind after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, float text_rotation) {
+/* dispatch_command flushes sprite before and lazy-rebinds after. */
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16], bool force_screen_space) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -796,25 +985,22 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float scale = (metrics.units_per_em > 0) ? (font_size / (float)metrics.units_per_em) : 0.0F;
     const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
-    const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
+    /* Y-down: baseline = bbox.y(top) + center_offset + ascent*scale. */
+    const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * scale);
 
+    /* Text renderer local is Y-up. In 2D ctx the ortho VP carries an implicit screen Y-flip,
+     * so negating col1 cancels it and glyphs read upright. In 3D ctx (use_raycast_input) the
+     * baked world matrix has no implicit Y-flip — keeping the negate there leaves labels
+     * upside-down inside otherwise-correct panels. Sign chosen per-ctx. */
+    const float ox = c->boundingBox.x;
+    const float oy = baseline_y;
+    const float sign_y = (ctx->use_raycast_input && !force_screen_space) ? +1.0F : -1.0F;
     float m[16];
-    if (text_rotation == 0.0F) {
-        const float id[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, c->boundingBox.x, baseline_y, 0, 1};
-        memcpy(m, id, sizeof m);
-    } else {
-        /* M = T(center) * R(θ) * T(text_origin - center)
-         * text_origin = (bbox.x, baseline_y), center = bbox center */
-        const float bcx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-        const float bcy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-        const float dx = c->boundingBox.x - bcx;
-        const float dy = baseline_y - bcy;
-        const float rc = cosf(text_rotation);
-        const float rs = sinf(text_rotation);
-        const float rot[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, bcx + (rc * dx) - (rs * dy), bcy + (rs * dx) + (rc * dy), 0, 1,
-        };
-        memcpy(m, rot, sizeof m);
+    for (int rr = 0; rr < 4; ++rr) {
+        m[rr] = world_mat4[rr];
+        m[4 + rr] = sign_y * world_mat4[4 + rr];
+        m[8 + rr] = world_mat4[8 + rr];
+        m[12 + rr] = (ox * world_mat4[rr]) + (oy * world_mat4[4 + rr]) + world_mat4[12 + rr];
     }
     const float color[4] = {
         t->textColor.r / 255.0F,
@@ -834,10 +1020,9 @@ typedef struct {
     int h;
 } scissor_rect_t;
 
-/* DIRECT: viewport is GL physical; Y-flip inside viewport rect.
- * SCALED: viewport is logical (Y top-down); scale+shift to physical; Y-flip
- * against fb height for GL. Floor/ceil avoid 1-px sliver clipping. */
-static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
+/* DIRECT mode: viewport is GL physical, Y-flip inside the viewport rect.
+ * SCALED mode: viewport is logical; scale+shift to physical, Y-flip against fb height. */
+void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
     const float vx = target->viewport[0];
     const float vy = target->viewport[1];
     const float vw = target->viewport[2];
@@ -864,12 +1049,13 @@ static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
+    /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
+    if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
+        return;
+    }
 
-    /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite.
-     * Both axes false is RESERVED for Clay's floating clipTo=ATTACHED_PARENT marker
-     * (clay.h:2695-2701) -- bbox is the parent's clip area, applied to both axes.
-     * User code must always set at least one axis true; both-false with degenerate
-     * bbox is invalid use and trips the assert below. */
+    /* Both-axes-false is reserved for Clay's floating clipTo=ATTACHED_PARENT marker;
+     * user code must always set at least one axis true (asserted below). */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     const bool both_false = !clip->horizontal && !clip->vertical;
     NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) &&
@@ -899,7 +1085,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         hp = vh;
     }
 
-    /* Intersect with parent so inner widgets can't escape outer clip. */
+    /* Intersect with parent so inner widgets cannot escape outer clip. */
     if (*depth > 0) {
         scissor_rect_t t = stack[*depth - 1];
         int x2 = (x > t.x) ? x : t.x;
@@ -919,7 +1105,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
-    apply_scissor_logical_to_physical(target, x, y, wp, hp);
+    nt_ui_internal_apply_scissor_logical_to_physical(target, x, y, wp, hp);
     nt_gfx_set_scissor_enabled(true);
 }
 
@@ -933,110 +1119,24 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
         nt_gfx_set_scissor_enabled(false);
     } else {
         scissor_rect_t r = stack[*depth - 1];
-        apply_scissor_logical_to_physical(target, r.x, r.y, r.w, r.h);
+        nt_ui_internal_apply_scissor_logical_to_physical(target, r.x, r.y, r.w, r.h);
     }
 }
 // #endregion
 
-// #region helper_emit_custom
-/* Walker-local transform/opacity state passed through dispatch_command.
- * Transform is a 2D affine: pos' = pos * aff_s + (aff_tx, aff_ty).
- * Scale center is deferred: CUSTOM push marker has a zero-size bbox
- * (it's a sibling before the panel), so we capture the center from the
- * first renderable element (IMAGE/RECT) after the push. */
+// #region walker_state
+/* m carries the accumulated Clay-layout → world mat4 directly from tree_baked. */
 typedef struct {
-    nt_ui_transform_t transform_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    float push_center_x[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    float push_center_y[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    int transform_depth;
-    /* 2D affine: x'=x*a+y*b+tx, y'=x*c+y*d+ty */
-    float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
-    float accum_scale_x;
-    float accum_scale_y;
-    float accum_rotation;
-    int pending_center_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    int pending_center_count;
-    bool center_resolved[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
-    float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
-    int opacity_depth;
+    float m[16];
     float accum_opacity;
+    uint16_t hierarchy_depth;
 } nt_ui_walker_state_t;
 
 static void walker_state_init(nt_ui_walker_state_t *ws) {
-    ws->transform_depth = 0;
-    ws->aff_a = 1.0F;
-    ws->aff_b = 0;
-    ws->aff_c = 0;
-    ws->aff_d = 1.0F;
-    ws->aff_tx = 0;
-    ws->aff_ty = 0;
-    ws->accum_scale_x = 1.0F;
-    ws->accum_scale_y = 1.0F;
-    ws->accum_rotation = 0;
-    ws->pending_center_count = 0;
-    memset(ws->center_resolved, 0, sizeof(ws->center_resolved));
-    ws->opacity_depth = 0;
+    const nt_ui_baked_xform_t id = nt_ui_internal_identity_baked();
+    memcpy(ws->m, id.m, sizeof ws->m);
     ws->accum_opacity = 1.0F;
-}
-
-/* Compose local transform (scale S, rotation θ, center C, offset O) onto
- * accumulated affine. Local = T(O) * T(C) * R(θ)*S * T(-C). */
-static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
-    ws->aff_a = 1.0F;
-    ws->aff_b = 0;
-    ws->aff_c = 0;
-    ws->aff_d = 1.0F;
-    ws->aff_tx = 0;
-    ws->aff_ty = 0;
-    ws->accum_scale_x = 1.0F;
-    ws->accum_scale_y = 1.0F;
-    ws->accum_rotation = 0;
-    for (int k = 0; k < ws->transform_depth; ++k) {
-        const float sx = ws->transform_stack[k].scale_x;
-        const float sy = ws->transform_stack[k].scale_y;
-        const float r = ws->transform_stack[k].rotation;
-        const float cx = ws->push_center_x[k];
-        const float cy = ws->push_center_y[k];
-        const float ox = ws->transform_stack[k].offset_x;
-        const float oy = ws->transform_stack[k].offset_y;
-        const float cr = cosf(r);
-        const float sr = sinf(r);
-        /* Local 2x2: la=cr*sx, lb=-sr*sy, lc=sr*sx, ld=cr*sy */
-        const float la = cr * sx;
-        const float lb = -(sr * sy);
-        const float lc = sr * sx;
-        const float ld = cr * sy;
-        /* Local translate: ltx = cx - la*cx - lb*cy + ox
-         *                  lty = cy - lc*cx - ld*cy + oy */
-        const float ltx = cx - (la * cx) - (lb * cy) + ox;
-        const float lty = cy - (lc * cx) - (ld * cy) + oy;
-        /* Compose: new = local * accumulated */
-        const float na = (la * ws->aff_a) + (lb * ws->aff_c);
-        const float nb = (la * ws->aff_b) + (lb * ws->aff_d);
-        const float nc = (lc * ws->aff_a) + (ld * ws->aff_c);
-        const float nd = (lc * ws->aff_b) + (ld * ws->aff_d);
-        const float ntx = (la * ws->aff_tx) + (lb * ws->aff_ty) + ltx;
-        const float nty = (lc * ws->aff_tx) + (ld * ws->aff_ty) + lty;
-        ws->aff_a = na;
-        ws->aff_b = nb;
-        ws->aff_c = nc;
-        ws->aff_d = nd;
-        ws->aff_tx = ntx;
-        ws->aff_ty = nty;
-        ws->accum_scale_x *= sx;
-        ws->accum_scale_y *= sy;
-    }
-    /* Extract actual rotation from composed affine matrix.
-     * atan2(c,a) assumes positive scale; negative scale flips the angle. */
-    NT_ASSERT(ws->accum_scale_x > 0.0F && ws->accum_scale_y > 0.0F && "negative UI scale breaks atan2 rotation extraction");
-    ws->accum_rotation = atan2f(ws->aff_c, ws->aff_a);
-}
-
-static void walker_recompute_opacity(nt_ui_walker_state_t *ws) {
-    ws->accum_opacity = 1.0F;
-    for (int k = 0; k < ws->opacity_depth; ++k) {
-        ws->accum_opacity *= ws->opacity_stack[k];
-    }
+    ws->hierarchy_depth = 0U;
 }
 
 /* Apply accumulated opacity to a packed AABBGGRR color. */
@@ -1045,14 +1145,15 @@ static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
         return color_packed;
     }
     uint32_t a = (color_packed >> 24) & 0xFFU;
-    a = (uint32_t)((float)a * opacity);
+    /* lrintf rounds-to-nearest so 0.5 * 255 → 128, not truncate 127. */
+    a = (uint32_t)lrintf((float)a * opacity);
     if (a > 255U) {
         a = 255U;
     }
     return (color_packed & 0x00FFFFFFU) | (a << 24);
 }
 
-/* Phase 55: per-walk counters passed to dispatch helpers. */
+/* Per-walk counters passed to dispatch helpers. */
 typedef struct {
     uint32_t rect_command_count;
     uint32_t image_command_count;
@@ -1060,63 +1161,10 @@ typedef struct {
     uint32_t border_command_count;
     uint32_t scissor_command_count;
     uint32_t max_scissor_depth;
-    uint32_t transform_pushes;
-    uint32_t opacity_pushes;
 } nt_ui_walk_counters_t;
 
-/* Process a single side-channel marker into walker state. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
-    switch (marker->type) {
-    case NT_UI_MARKER_PUSH_TRANSFORM: {
-        counters->transform_pushes++;
-        NT_ASSERT(ws->transform_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform stack overflow");
-        const int d = ws->transform_depth;
-        ws->transform_stack[d] = marker->transform;
-        ws->push_center_x[d] = 0;
-        ws->push_center_y[d] = 0;
-        ws->center_resolved[d] = true;
-        ws->transform_depth = d + 1;
-        /* Offset applies immediately; scale/rotation center deferred. */
-        ws->aff_tx += marker->transform.offset_x;
-        ws->aff_ty += marker->transform.offset_y;
-        if (marker->transform.scale_x != 1.0F || marker->transform.scale_y != 1.0F || marker->transform.rotation != 0.0F) {
-            ws->center_resolved[d] = false;
-            NT_ASSERT(ws->pending_center_count < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "pending center stack overflow");
-            ws->pending_center_stack[ws->pending_center_count++] = d;
-        }
-        return;
-    }
-    case NT_UI_MARKER_POP_TRANSFORM:
-        NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
-        --ws->transform_depth;
-        /* Unresolved center uses (0,0) — acceptable for scale=0 (hide) or offset-only transforms. */
-        /* Remove any pending entries for this depth. */
-        while (ws->pending_center_count > 0 && ws->pending_center_stack[ws->pending_center_count - 1] >= ws->transform_depth) {
-            --ws->pending_center_count;
-        }
-        walker_recompute_transform(ws);
-        return;
-    case NT_UI_MARKER_PUSH_OPACITY:
-        counters->opacity_pushes++;
-        NT_ASSERT(ws->opacity_depth < NT_UI_OPACITY_STACK_DEPTH_CAP && "opacity stack overflow");
-        ws->opacity_stack[ws->opacity_depth++] = marker->opacity;
-        ws->accum_opacity *= marker->opacity;
-        return;
-    case NT_UI_MARKER_POP_OPACITY:
-        NT_ASSERT(ws->opacity_depth > 0 && "opacity stack underflow");
-        --ws->opacity_depth;
-        walker_recompute_opacity(ws);
-        return;
-    default:
-        NT_ASSERT(false && "unknown marker type");
-        return;
-    }
-}
-
-/* Typed CUSTOM dispatch: engine anchors (type=NONE) skip silently;
- * game handlers (type=GAME) flush and invoke the custom callback. */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty) {
+/* type=NONE = engine anchor (skip silently); type=GAME = invoke handler. */
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16], float opacity, bool *sprite_pipeline_dirty) {
     const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)c->renderData.custom.customData;
     NT_ASSERT(cd != NULL && "CUSTOM command must have nt_ui_custom_data_t");
     if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
@@ -1126,7 +1174,11 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     nt_text_renderer_flush();
     *sprite_pipeline_dirty = true;
     if (ctx->custom_fn != NULL) {
-        ctx->custom_fn((const void *)c, ctx->custom_user);
+        nt_ui_custom_frame_t frame;
+        frame.clay_cmd = (const void *)c;
+        memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
+        frame.opacity = opacity;
+        ctx->custom_fn(&frame, ctx->custom_user);
     }
 }
 // #endregion
@@ -1145,8 +1197,45 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     }
 }
 
-/* Sprite-backed dispatch: drain pending text, lazy-rebind sprite cmd if a
- * prior text/scissor/custom closed it. */
+#if NT_UI_DEBUG_TOOLS
+typedef enum {
+    NT_UI_WALK_MODE_MAIN,
+    NT_UI_WALK_MODE_DEBUG_INSPECTOR,
+} nt_ui_walk_mode_t;
+
+static bool command_is_debug_layer(const Clay_RenderCommand *c) {
+    const uint8_t layer = c->userData ? ((const nt_ui_element_data_t *)c->userData)->layer : 0U;
+    return layer >= NT_UI_LAYER_DEBUG_HIGHLIGHT;
+}
+
+static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode, const Clay_RenderCommand *c) {
+    const bool is_debug = command_is_debug_layer(c);
+    if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
+        return is_debug;
+    }
+    if (ctx->use_raycast_input) {
+        return !is_debug;
+    }
+    return true;
+}
+
+static bool should_release_inspector_strings(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode) {
+    return mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR || !ctx->use_raycast_input || !ctx->inspector_active;
+}
+#else
+typedef enum {
+    NT_UI_WALK_MODE_MAIN,
+} nt_ui_walk_mode_t;
+
+static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode, const Clay_RenderCommand *c) {
+    (void)ctx;
+    (void)mode;
+    (void)c;
+    return true;
+}
+#endif
+
+/* Drain pending text, lazy-rebind sprite if a prior text/scissor/custom closed it. */
 static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) {
     nt_text_renderer_flush();
     if (*sprite_pipeline_dirty) {
@@ -1155,28 +1244,64 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
-/* Clay bbox is top-left Y-down; engine renders GL bottom-left Y-up. Local-copy
- * bbox.y rewrite + corner-radii/border-width top<->bottom swap mirrors the
- * scissor_push flip. */
+static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
+    out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
+    out[1] = (m[1] * v[0]) + (m[5] * v[1]) + (m[9] * v[2]) + (m[13] * v[3]);
+    out[2] = (m[2] * v[0]) + (m[6] * v[1]) + (m[10] * v[2]) + (m[14] * v[3]);
+    out[3] = (m[3] * v[0]) + (m[7] * v[1]) + (m[11] * v[2]) + (m[15] * v[3]);
+}
+
+static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierarchy_depth, float world_mat4[16]) {
+    if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0U) {
+        return;
+    }
+    NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: element_depth_bias_ndc requires nt_ui_set_view_proj before nt_ui_walk");
+
+    const float origin[4] = {world_mat4[12], world_mat4[13], world_mat4[14], 1.0F};
+    float clip[4];
+    mat4_mul_vec4_flat(ctx->view_proj, origin, clip);
+    if (clip[3] == 0.0F) {
+        return;
+    }
+
+    clip[2] -= ((float)hierarchy_depth * ctx->element_depth_bias_ndc) * clip[3];
+
+    float biased[4];
+    mat4_mul_vec4_flat(ctx->inv_view_proj, clip, biased);
+    if (biased[3] == 0.0F) {
+        return;
+    }
+
+    const float inv_w = 1.0F / biased[3];
+    world_mat4[12] += (biased[0] * inv_w) - origin[0];
+    world_mat4[13] += (biased[1] * inv_w) - origin[1];
+    world_mat4[14] += (biased[2] * inv_w) - origin[2];
+}
+
+/* For 2D ctx: bake the screen Y-flip (Clay Y-down → GL Y-up) into world_mat4 = Y_flip · ws->m.
+ * For 3D ctx (use_raycast_input): world_mat4 = ws->m verbatim; the game's view_proj handles screen
+ * mapping, and the custom handler / sprite renderer composes view_proj × world_mat4 as needed.
+ * The closed-form below assumes ws->m is affine (row3 = (0,0,0,1)) — guaranteed by compose_transform_level. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
-                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
+                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters, bool force_screen_space) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
-    /* Apply accumulated 2D affine: pos' = pos * M + T.
-     * Position uses full affine; size uses accum_scale (uniform).
-     * Rotation negated for renderers: affine is Clay Y-down, GL is Y-up. */
-    const float scx = ws->accum_scale_x;
-    const float scy = ws->accum_scale_y;
-    const float orig_cx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-    const float orig_cy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-    const float tcx = (orig_cx * ws->aff_a) + (orig_cy * ws->aff_b) + ws->aff_tx;
-    const float tcy = (orig_cx * ws->aff_c) + (orig_cy * ws->aff_d) + ws->aff_ty;
-    const float sw = c->boundingBox.width * scx;
-    const float sh = c->boundingBox.height * scy;
-    Clay_BoundingBox sbb = {.x = tcx - (sw * 0.5F), .y = tcy - (sh * 0.5F), .width = sw, .height = sh};
-    const float world_y = vy + vh - sbb.y - sbb.height;
+    float world_mat4[16];
+    memcpy(world_mat4, ws->m, sizeof world_mat4);
+    if (!ctx->use_raycast_input || force_screen_space) {
+        /* Y_flip = [1 0 0 0; 0 -1 0 0; 0 0 1 0; 0 vy+vh 0 1] (column-major); applied to affine ws->m,
+         * the only changes are negating row 1 across all columns and adding (vy+vh) to m[13]. */
+        world_mat4[1] = -world_mat4[1];
+        world_mat4[5] = -world_mat4[5];
+        world_mat4[9] = -world_mat4[9];
+        world_mat4[13] = (vy + vh) - world_mat4[13];
+    } else {
+        apply_element_depth_bias(ctx, ws->hierarchy_depth, world_mat4);
+    }
+    /* X-column magnitude; Y dropped on purpose so glyph atlas stays crisp on the X axis. */
+    const float text_scale = sqrtf((ws->m[0] * ws->m[0]) + (ws->m[1] * ws->m[1]));
 
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
@@ -1187,104 +1312,82 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
         col = apply_opacity(col, ws->accum_opacity);
-        const Clay_CornerRadius cr = {
-            .topLeft = r->cornerRadius.bottomLeft,
-            .topRight = r->cornerRadius.bottomRight,
-            .bottomLeft = r->cornerRadius.topLeft,
-            .bottomRight = r->cornerRadius.topRight,
-        };
-        emit_rounded_rect(ctx->atlas, ctx->white_region, sbb.x, world_y, sbb.width, sbb.height, cr, col, -ws->accum_rotation);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         counters->border_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        Clay_BorderRenderData *b = &local.renderData.border;
-        const Clay_BorderWidth wo = b->width;
-        b->width.top = wo.bottom;
-        b->width.bottom = wo.top;
-        const Clay_CornerRadius cro = b->cornerRadius;
-        b->cornerRadius.topLeft = cro.bottomLeft;
-        b->cornerRadius.topRight = cro.bottomRight;
-        b->cornerRadius.bottomLeft = cro.topLeft;
-        b->cornerRadius.bottomRight = cro.topRight;
-        /* Apply opacity to border color */
-        b->color.a *= ws->accum_opacity;
-        emit_border(ctx, &local, -ws->accum_rotation);
+        /* Round-to-nearest to match RECT's apply_opacity. */
+        local.renderData.border.color.a = (float)lrintf(local.renderData.border.color.a * ws->accum_opacity);
+        emit_border(ctx, &local, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         counters->text_command_count++;
-        /* Drain sprite before switching to text pipeline; mark for lazy rebind. */
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        local.renderData.text.textColor.a *= ws->accum_opacity;
-        emit_text(ctx, &local, fmaxf(scx, scy), -ws->accum_rotation);
+        /* Round-to-nearest to match RECT's apply_opacity. */
+        local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
+        emit_text(ctx, &local, text_scale, world_mat4, force_screen_space);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         counters->image_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        /* Modify backgroundColor alpha for opacity -- emit_image reads it. */
         if (ws->accum_opacity < 1.0F) {
             Clay_Color tint = local.renderData.image.backgroundColor;
             const bool untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
+            /* Round-to-nearest to match RECT's apply_opacity; truncation would
+             * give image/rect a 1-LSB alpha mismatch at equal accum_opacity. */
             if (untinted) {
-                /* Default "untinted" maps to 0xFFFFFFFF; apply opacity. */
-                local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F * ws->accum_opacity};
+                local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = (float)lrintf(255.0F * ws->accum_opacity)};
             } else {
-                local.renderData.image.backgroundColor.a *= ws->accum_opacity;
+                local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
-        emit_image(&local, -ws->accum_rotation);
+        emit_image(&local, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
-        if (ws->accum_rotation != 0.0F) {
-            /* AABB of rotated scissor rect in Clay Y-down space */
-            const float cx = sbb.x + (sbb.width * 0.5F);
-            const float cy = sbb.y + (sbb.height * 0.5F);
-            const float hw = sbb.width * 0.5F;
-            const float hh = sbb.height * 0.5F;
-            const float rot = ws->accum_rotation;
-            const float rc = cosf(rot);
-            const float rs = sinf(rot);
-            const float corners[4][2] = {{cx - hw, cy - hh}, {cx + hw, cy - hh}, {cx + hw, cy + hh}, {cx - hw, cy + hh}};
-            float mn_x = corners[0][0];
-            float mn_y = corners[0][1];
-            float mx_x = corners[0][0];
-            float mx_y = corners[0][1];
-            for (int ci = 0; ci < 4; ci++) {
-                const float dx = corners[ci][0] - cx;
-                const float dy = corners[ci][1] - cy;
-                const float rx = (dx * rc) - (dy * rs) + cx;
-                const float ry = (dx * rs) + (dy * rc) + cy;
-                if (rx < mn_x) {
-                    mn_x = rx;
-                }
-                if (ry < mn_y) {
-                    mn_y = ry;
-                }
-                if (rx > mx_x) {
-                    mx_x = rx;
-                }
-                if (ry > mx_y) {
-                    mx_y = ry;
-                }
+        if (force_screen_space) {
+            scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
+            if ((uint32_t)*depth > counters->max_scissor_depth) {
+                counters->max_scissor_depth = (uint32_t)*depth;
             }
-            local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = mn_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
-        } else if (scx != 1.0F || scy != 1.0F || ws->aff_tx != 0.0F || ws->aff_ty != 0.0F) {
-            /* No rotation but has offset/scale: use transformed sbb directly */
-            local.boundingBox = sbb;
+            return;
         }
+        /* GL scissor is axis-aligned in fb space; rotated clip emits the bounding-AABB of the
+         * 4 transformed corners. world_mat4 maps Clay (x,y,0,1) → world. */
+        const float bx = c->boundingBox.x;
+        const float by = c->boundingBox.y;
+        const float bw = c->boundingBox.width;
+        const float bh = c->boundingBox.height;
+        const float corners[4][2] = {{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}};
+        float wx[4];
+        float wy[4];
+        for (int ci = 0; ci < 4; ++ci) {
+            wx[ci] = (world_mat4[0] * corners[ci][0]) + (world_mat4[4] * corners[ci][1]) + world_mat4[12];
+            wy[ci] = (world_mat4[1] * corners[ci][0]) + (world_mat4[5] * corners[ci][1]) + world_mat4[13];
+        }
+        float mn_x = wx[0];
+        float mx_x = wx[0];
+        float mn_y = wy[0];
+        float mx_y = wy[0];
+        for (int ci = 1; ci < 4; ++ci) {
+            mn_x = fminf(mn_x, wx[ci]);
+            mx_x = fmaxf(mx_x, wx[ci]);
+            mn_y = fminf(mn_y, wy[ci]);
+            mx_y = fmaxf(mx_y, wy[ci]);
+        }
+        /* scissor_push reads Clay-Y-down and flips internally — convert back. */
+        const float clay_top_y = vy + vh - mx_y;
+        local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = clay_top_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
         scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
         if ((uint32_t)*depth > counters->max_scissor_depth) {
             counters->max_scissor_depth = (uint32_t)*depth;
@@ -1294,17 +1397,16 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
-        Clay_RenderCommand local = *c;
-        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        emit_custom(ctx, &local, sprite_pipeline_dirty);
+    case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
+        /* Handler owns the transform math (LAYOUT bbox + world_mat4 + opacity passed through). */
+        emit_custom(ctx, c, world_mat4, ws->accum_opacity, sprite_pipeline_dirty);
         return;
-    }
     }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
+static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_ui_walk_mode_t mode) {
+    // #region preconditions
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
@@ -1312,63 +1414,70 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
+    // #endregion
+    const bool update_metrics = mode == NT_UI_WALK_MODE_MAIN;
 
-    /* Walker owns GL scissor state: disables on entry, manages via
-     * SCISSOR_START/END pushes, disables on exit. Caller's scissor is
-     * not preserved across nt_ui_walk(). Drains BEFORE zero-viewport
-     * early return so leaked staging doesn't survive a minimized frame. */
+    // #region entry-flush
+    /* Walker owns GL scissor across the call; drain BEFORE early returns so leaked staging dies with the frame. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
+    // #endregion
 
+    // #region degenerate-early-out
     /* Zero viewport or degenerate fb (minimized tab, orientation change): no-op. */
     const bool scaled = target->fb_size[0] > 0.0F;
     if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F || (scaled && target->fb_size[1] == 0.0F)) {
-        ctx->last_walk_draw_call_delta = 0;
-        ctx->last_walk_command_count = 0;
-        ctx->last_walk_ms = 0.0F;
-        ctx->last_walk_rect_command_count = 0;
-        ctx->last_walk_image_command_count = 0;
-        ctx->last_walk_text_command_count = 0;
-        ctx->last_walk_border_command_count = 0;
-        ctx->last_walk_scissor_command_count = 0;
-        ctx->last_walk_max_scissor_depth = 0;
-        ctx->last_walk_transform_pushes = 0;
-        ctx->last_walk_opacity_pushes = 0;
+        if (update_metrics) {
+            ctx->last_walk_draw_call_delta = 0;
+            ctx->last_walk_command_count = 0;
+            ctx->last_walk_ms = 0.0F;
+            ctx->last_walk_rect_command_count = 0;
+            ctx->last_walk_image_command_count = 0;
+            ctx->last_walk_text_command_count = 0;
+            ctx->last_walk_border_command_count = 0;
+            ctx->last_walk_scissor_command_count = 0;
+            ctx->last_walk_max_scissor_depth = 0;
 #ifdef NT_TEST_ACCESS
-        ctx->test_last_walk_unlayered_count = 0;
+            ctx->test_last_walk_unlayered_count = 0;
+#endif
+        }
+#if NT_UI_DEBUG_TOOLS
+        nt_ui_internal_inspector_strings_release(ctx);
 #endif
         return;
     }
+    // #endregion
+
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
     NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
 
-    /* Async-friendly: skip the walk silently if the ctx atlas is not
-     * yet bound or still loading. Same policy as IMAGE p->atlas. Game
-     * can start the main loop immediately; bind atlas once it reaches
-     * READY (set_atlas_white_region needs resolved region data), UI
-     * starts drawing on the next walk. */
+    // #region atlas-not-ready-early-out
+    /* Async-friendly: skip walk silently if atlas not yet bound or still loading. */
     if (ctx->atlas.id == 0 || !nt_resource_is_ready(ctx->atlas)) {
-        ctx->last_walk_draw_call_delta = 0;
-        ctx->last_walk_command_count = 0;
-        ctx->last_walk_ms = 0.0F;
-        ctx->last_walk_rect_command_count = 0;
-        ctx->last_walk_image_command_count = 0;
-        ctx->last_walk_text_command_count = 0;
-        ctx->last_walk_border_command_count = 0;
-        ctx->last_walk_scissor_command_count = 0;
-        ctx->last_walk_max_scissor_depth = 0;
-        ctx->last_walk_transform_pushes = 0;
-        ctx->last_walk_opacity_pushes = 0;
+        if (update_metrics) {
+            ctx->last_walk_draw_call_delta = 0;
+            ctx->last_walk_command_count = 0;
+            ctx->last_walk_ms = 0.0F;
+            ctx->last_walk_rect_command_count = 0;
+            ctx->last_walk_image_command_count = 0;
+            ctx->last_walk_text_command_count = 0;
+            ctx->last_walk_border_command_count = 0;
+            ctx->last_walk_scissor_command_count = 0;
+            ctx->last_walk_max_scissor_depth = 0;
 #ifdef NT_TEST_ACCESS
-        ctx->test_last_walk_unlayered_count = 0;
+            ctx->test_last_walk_unlayered_count = 0;
+#endif
+        }
+#if NT_UI_DEBUG_TOOLS
+        nt_ui_internal_inspector_strings_release(ctx);
 #endif
         return;
     }
+    // #endregion
 
-    /* Timed from here -- after the entry flush -- so walk_ms covers the UI walk's
-     * own dispatch, not draining the caller's pending geometry (same scope as
-     * last_walk_draw_call_delta below). */
+    // #region walker-state-init
+    /* After entry flush so walk_ms excludes draining the caller's pending geometry. */
     const double walk_t0 = nt_time_now();
 
     scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];
@@ -1381,9 +1490,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
+    // #endregion
 
-    /* glViewport needs PHYSICAL pixels. SCALED mode reads fb_size + fb_offset;
-     * DIRECT mode viewport[] is already in physical px. */
+    // #region viewport-bind
+    /* glViewport needs PHYSICAL pixels. */
     if (scaled) {
         /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
         const int ox = (int)roundf(target->fb_offset[0]);
@@ -1396,39 +1506,52 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* Sprite cmd open after set_material above; clean → no rebind needed. */
     bool sprite_pipeline_dirty = false;
+    // #endregion
 
-    /* Bitmask layer dispatch + ctz: O(L_active × N) per segment, only set
-     * bits visited (32 B stack vs ~2 KB for counting sort). */
+    // #region segment-scan + layer-dispatch
+    /* Bitmask layer dispatch + ctz: O(L_active × N) per segment, 32 B stack vs ~2 KB counting sort. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    const int32_t N_elements = nt_ui_clay_priv_layout_elements_length(ctx->clay);
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
 #endif
-    uint32_t mcur = 0U; /* side-channel marker cursor */
     int32_t i = 0;
+    int skip_scissor_depth = 0;
+#if NT_UI_DEBUG_TOOLS
+    const bool force_screen_space = mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR;
+#else
+    const bool force_screen_space = false;
+#endif
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (skip_scissor_depth > 0) {
+            if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+                ++skip_scissor_depth;
+            } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+                --skip_scissor_depth;
+            }
+            ++i;
+            continue;
+        }
         if (!is_segmentable(c->commandType)) {
-            /* Match markers by nt_layout_index — no remap needed. */
-            while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= c->nt_layout_index) {
-                process_marker(&ctx->markers[mcur], &ws, &counters);
-                ++mcur;
+            if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
+                dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
+                ++i;
+                continue;
             }
-            /* Resolve pending centers from non-segmentable commands too (SCISSOR_START has valid bbox). */
-            if (ws.pending_center_count > 0 && c->boundingBox.width > 0 && c->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-                const float rcx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-                const float rcy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-                for (int pi = 0; pi < ws.pending_center_count; ++pi) {
-                    const int pd = ws.pending_center_stack[pi];
-                    ws.push_center_x[pd] = rcx;
-                    ws.push_center_y[pd] = rcy;
-                    ws.center_resolved[pd] = true;
+            if (!command_matches_walk_mode(ctx, mode, c)) {
+                if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+                    skip_scissor_depth = 1;
                 }
-                ws.pending_center_count = 0;
-                walker_recompute_transform(&ws);
+                ++i;
+                continue;
             }
-            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
+            const nt_ui_baked_xform_t b = (c->nt_layout_index < 0 || c->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[c->nt_layout_index];
+            memcpy(ws.m, b.m, sizeof ws.m);
+            ws.accum_opacity = b.opacity;
+            ws.hierarchy_depth = b.hierarchy_depth;
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
             ++i;
             continue;
         }
@@ -1441,170 +1564,87 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
             ++seg_end;
         }
-        const int32_t seg_n = seg_end - i;
-        NT_ASSERT((uint32_t)seg_n <= ctx->max_elements && "nt_ui_walk: segment size exceeds ctx->max_elements; raise desc->max_elements or split via SCISSOR");
 
-        /* Pre-pass: interleave side-channel markers with Clay commands to
-         * bake transform/opacity per render-command index. Markers fire
-         * before the Clay command whose declaration index they precede.
-         * Skipped entirely when marker_count == 0 (identity transform). */
-        typedef struct {
-            float a, b, c, d, tx, ty;
-            float scale_x, scale_y, rotation, opacity;
-        } baked_xform_t;
-        baked_xform_t *baked = NULL;
-
+        /* Active-layer bitmask scan over this segment. */
         uint32_t active_layers[8] = {0U};
-        if (ctx->marker_count > 0) {
-            baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
-            /* Sort indices by nt_layout_index so marker drain sees declaration
-             * order regardless of Clay's z-sort on the render command array. */
-            int32_t *sorted = (int32_t *)nt_mem_scratch_alloc(sizeof(int32_t) * (size_t)seg_n, _Alignof(int32_t));
-            for (int32_t k = 0; k < seg_n; ++k) {
-                sorted[k] = k;
+        for (int32_t j = i; j < seg_end; ++j) {
+            const Clay_RenderCommand *cc = &arr->internalArray[j];
+            if (!command_matches_walk_mode(ctx, mode, cc)) {
+                continue;
             }
-            // #region insertion sort by nt_layout_index
-            for (int32_t k = 1; k < seg_n; ++k) {
-                const int32_t key = sorted[k];
-                const int32_t key_li = arr->internalArray[i + key].nt_layout_index;
-                int32_t p = k - 1;
-                while (p >= 0 && arr->internalArray[i + sorted[p]].nt_layout_index > key_li) {
-                    sorted[p + 1] = sorted[p];
-                    --p;
-                }
-                sorted[p + 1] = key;
-            }
-            // #endregion
-            for (int32_t k = 0; k < seg_n; ++k) {
-                const int32_t orig_idx = sorted[k];
-                const Clay_RenderCommand *cc = &arr->internalArray[i + orig_idx];
-                /* Match markers by nt_layout_index — sorted order restores declaration sequence. */
-                while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= cc->nt_layout_index) {
-                    process_marker(&ctx->markers[mcur], &ws, &counters);
-                    ++mcur;
-                }
-                /* Resolve ALL pending centers from first command with valid bbox.
-                 * SCISSOR_START has a bbox -- include it so transforms wrapping a
-                 * clip-only subtree still resolve their center. */
-                if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-                    const float rcx = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
-                    const float rcy = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
-                    for (int pi = 0; pi < ws.pending_center_count; ++pi) {
-                        const int pd = ws.pending_center_stack[pi];
-                        ws.push_center_x[pd] = rcx;
-                        ws.push_center_y[pd] = rcy;
-                        ws.center_resolved[pd] = true;
-                    }
-                    ws.pending_center_count = 0;
-                    walker_recompute_transform(&ws);
-                }
-                /* baked[] indexed by original array position for layer dispatch. */
-                baked[orig_idx] = (baked_xform_t){
-                    .a = ws.aff_a,
-                    .b = ws.aff_b,
-                    .c = ws.aff_c,
-                    .d = ws.aff_d,
-                    .tx = ws.aff_tx,
-                    .ty = ws.aff_ty,
-                    .scale_x = ws.accum_scale_x,
-                    .scale_y = ws.accum_scale_y,
-                    .rotation = ws.accum_rotation,
-                    .opacity = ws.accum_opacity,
-                };
-                const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-                active_layers[layer >> 5U] |= (1U << (layer & 31U));
+            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+            active_layers[layer >> 5U] |= (1U << (layer & 31U));
 #ifdef NT_TEST_ACCESS
-                if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                    ++unlayered_count;
-                }
-#endif
+            if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                ++unlayered_count;
             }
-        } else {
-            /* No markers: identity transform/opacity. Just collect layers. */
-            for (int32_t j = i; j < seg_end; ++j) {
-                const Clay_RenderCommand *cc = &arr->internalArray[j];
-                const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-                active_layers[layer >> 5U] |= (1U << (layer & 31U));
-#ifdef NT_TEST_ACCESS
-                if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                    ++unlayered_count;
-                }
 #endif
-            }
         }
 
-        /* Save walker state after pre-pass so layer passes (which overwrite
-         * ws fields with per-command baked state) don't leak into the next segment. */
-        nt_ui_walker_state_t ws_after_prepass = ws;
-
-        /* Layer passes: dispatch renderables with baked transform state. */
+        /* Layer passes ascending; counting-sort buys little when L_active < 10 in real UIs. */
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
             uint32_t mask = active_layers[word_idx];
             while (mask != 0U) {
-                const uint32_t bit_idx = (uint32_t)__builtin_ctz(mask);
+                const uint32_t bit_idx = nt_ctz32(mask);
                 mask &= mask - 1U;
                 const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
                 for (int32_t j = i; j < seg_end; ++j) {
                     const Clay_RenderCommand *cc = &arr->internalArray[j];
-                    if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                    if (!command_matches_walk_mode(ctx, mode, cc)) {
                         continue;
                     }
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
-                        if (baked != NULL) {
-                            const int32_t bi = j - i;
-                            ws.aff_a = baked[bi].a;
-                            ws.aff_b = baked[bi].b;
-                            ws.aff_c = baked[bi].c;
-                            ws.aff_d = baked[bi].d;
-                            ws.aff_tx = baked[bi].tx;
-                            ws.aff_ty = baked[bi].ty;
-                            ws.accum_scale_x = baked[bi].scale_x;
-                            ws.accum_scale_y = baked[bi].scale_y;
-                            ws.accum_rotation = baked[bi].rotation;
-                            ws.accum_opacity = baked[bi].opacity;
-                        }
-                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
+                        const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
+                        memcpy(ws.m, b.m, sizeof ws.m);
+                        ws.accum_opacity = b.opacity;
+                        ws.hierarchy_depth = b.hierarchy_depth;
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
                     }
                 }
             }
         }
-        /* Restore chronological state so next segment sees correct ws. */
-        ws = ws_after_prepass;
         i = seg_end;
     }
+    // #endregion
 
-    /* Drain remaining markers (pops at end of frame). */
-    while (mcur < ctx->marker_count) {
-        process_marker(&ctx->markers[mcur], &ws, &counters);
-        ++mcur;
-    }
-
+    // #region exit-flush + metrics
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
-    NT_ASSERT(ws.transform_depth == 0 && "unbalanced transform stack at walk exit");
-    NT_ASSERT(ws.opacity_depth == 0 && "unbalanced opacity stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 
-    /* Guard against CUSTOM handler resetting gfx counter -> unsigned wrap. */
+    /* Guard against a CUSTOM handler resetting the gfx counter → unsigned wrap. */
     const uint32_t calls_after = nt_gfx_get_frame_draw_calls();
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards");
-    ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
-    ctx->last_walk_command_count = (uint32_t)arr->length;
-    ctx->last_walk_rect_command_count = counters.rect_command_count;
-    ctx->last_walk_image_command_count = counters.image_command_count;
-    ctx->last_walk_text_command_count = counters.text_command_count;
-    ctx->last_walk_border_command_count = counters.border_command_count;
-    ctx->last_walk_scissor_command_count = counters.scissor_command_count;
-    ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
-    ctx->last_walk_transform_pushes = counters.transform_pushes;
-    ctx->last_walk_opacity_pushes = counters.opacity_pushes;
-    ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
+    if (update_metrics) {
+        ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
+        ctx->last_walk_command_count = (uint32_t)arr->length;
+        ctx->last_walk_rect_command_count = counters.rect_command_count;
+        ctx->last_walk_image_command_count = counters.image_command_count;
+        ctx->last_walk_text_command_count = counters.text_command_count;
+        ctx->last_walk_border_command_count = counters.border_command_count;
+        ctx->last_walk_scissor_command_count = counters.scissor_command_count;
+        ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
+        ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
 #ifdef NT_TEST_ACCESS
-    ctx->test_last_walk_unlayered_count = unlayered_count;
+        ctx->test_last_walk_unlayered_count = unlayered_count;
 #endif
+    }
+#if NT_UI_DEBUG_TOOLS
+    /* Inspector strings backed by module-level rings are now consumed; release ownership. */
+    if (should_release_inspector_strings(ctx, mode)) {
+        nt_ui_internal_inspector_strings_release(ctx);
+    }
+#endif
+    // #endregion
 }
+
+void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) { nt_ui_walk_impl(ctx, target, NT_UI_WALK_MODE_MAIN); }
+
+#if NT_UI_DEBUG_TOOLS
+void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) { nt_ui_walk_impl(ctx, target, NT_UI_WALK_MODE_DEBUG_INSPECTOR); }
+#endif
 // #endregion
 
 // #region setters
@@ -1618,6 +1658,7 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     NT_ASSERT(r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region tombstoned");
     /* mat4(w,h) needs cached_pos {0,1}x{0,1}: 1x1 source AND PPU=1. */
     NT_ASSERT(r->source_w == 1 && r->source_h == 1 && "nt_ui_set_atlas_white_region: white region must be 1x1 source");
+    /* mat4(w,h) needs cached_pos {0,1}x{0,1}: 1x1 source AND PPU=1. */
     NT_ASSERT(nt_atlas_get_inverse_pixels_per_unit(atlas) == 1.0F && "nt_ui_set_atlas_white_region: atlas must have PPU=1");
     ctx->atlas = atlas;
     ctx->white_region = white_region_idx;
@@ -1640,50 +1681,36 @@ void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material) 
 void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_custom_handler: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_custom_handler: must be called outside begin/end");
-    /* NULL fn legal: reserved-slot pattern. */
     ctx->custom_fn = fn;
     ctx->custom_user = userdata;
 }
-// #endregion
 
-// #region push_pop_transform_opacity
-static nt_ui_marker_t *emit_marker_base(nt_ui_context_t *ctx, uint8_t marker_type) {
-    NT_ASSERT(ctx->marker_count < ctx->max_markers && "marker array full; raise max_markers in nt_ui_create_desc_t");
-    nt_ui_marker_t *m = &ctx->markers[ctx->marker_count++];
-    m->type = marker_type;
-    m->before_clay_idx = (uint32_t)ctx->clay->layoutElements.length;
-    return m;
-}
-
+/* Cache inv_view_proj alongside view_proj so per-pointer hit-tests don't re-invert per call. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {
-    NT_ASSERT(ctx != NULL && "nt_ui_push_transform: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_push_transform: must be called inside begin/end");
-    NT_ASSERT(transform != NULL && "nt_ui_push_transform: transform must be non-NULL");
-    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && "nt_ui_push_transform: scale must be positive; use opacity=0 to hide");
-    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && "nt_ui_push_transform: scale must be finite");
-    NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
-    NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");
-    emit_marker_base(ctx, NT_UI_MARKER_PUSH_TRANSFORM)->transform = *transform;
+void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_view_proj: ctx must be non-NULL");
+    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_view_proj: only valid when desc.use_raycast_input=true");
+    NT_ASSERT(view_proj != NULL && "nt_ui_set_view_proj: view_proj must be non-NULL");
+    for (int i = 0; i < 16; ++i) {
+        NT_ASSERT(isfinite(view_proj[i]) && "nt_ui_set_view_proj: view_proj must be finite");
+    }
+    memcpy(ctx->view_proj, view_proj, sizeof ctx->view_proj);
+    mat4 m_in;
+    mat4 m_inv;
+    memcpy(m_in, view_proj, sizeof m_in);
+    /* Catch singular matrices before invert — bulletproof vs scanning post-invert diagonals which
+     * can leave the four checked entries finite while off-diagonals explode. */
+    NT_ASSERT(glm_mat4_det(m_in) != 0.0F && "nt_ui_set_view_proj: view_proj is singular (det == 0)");
+    glm_mat4_inv(m_in, m_inv);
+    memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
+    ctx->view_proj_set = true;
 }
 
-void nt_ui_pop_transform(nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
-    emit_marker_base(ctx, NT_UI_MARKER_POP_TRANSFORM);
-}
-
-void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
-    NT_ASSERT(ctx != NULL && "nt_ui_push_opacity: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_push_opacity: must be called inside begin/end");
-    NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_push_opacity: must be finite in [0,1]");
-    emit_marker_base(ctx, NT_UI_MARKER_PUSH_OPACITY)->opacity = opacity;
-}
-
-void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_pop_opacity: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_pop_opacity: must be called inside begin/end");
-    emit_marker_base(ctx, NT_UI_MARKER_POP_OPACITY);
+void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_element_depth_bias: ctx must be non-NULL");
+    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_element_depth_bias: only valid when desc.use_raycast_input=true");
+    NT_ASSERT(isfinite(ndc_per_element) && ndc_per_element >= 0.0F && "nt_ui_set_element_depth_bias: ndc_per_element must be finite and non-negative");
+    ctx->element_depth_bias_ndc = ndc_per_element;
 }
 // #endregion
 
@@ -1699,6 +1726,541 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
         .custom = {.customData = cd},
         .userData = (void *)elem_data,
     });
+}
+// #endregion
+
+// #region interaction_id_bbox_hittest
+uint32_t nt_ui_id(const char *s) {
+    NT_ASSERT(s != NULL && "nt_ui_id: string must be non-NULL");
+    /* Must use Clay's hash — a different one would miss Clay's hashmap. */
+    return Clay_GetElementId((Clay_String){.length = (int32_t)strlen(s), .chars = s}).id;
+}
+
+nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_bbox: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_get_bbox: id must be non-zero (0 = no widget)");
+    /* Same staleness contract as ui_hit_test (hit_generation rejects ids not re-declared). */
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    Clay_SetCurrentContext(saved);
+    if (!d.found) {
+        return (nt_ui_bbox_t){0};
+    }
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (slot < 0 || slot >= (int32_t)ctx->max_elements || ctx->hit_generation[slot] != ctx->current_generation) {
+        return (nt_ui_bbox_t){0};
+    }
+    return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = true};
+}
+
+/* TRS-fast mat4 inverse: assumes m is composed of T·R·S (no shear/perspective), ~30 ops.
+ * inv(T·R·S) = inv(S) · inv(R) · inv(T) = S⁻¹ · Rᵀ · -T. Columns 0..2 of m are scaled rotation
+ * axes; their squared lengths give scale²; inverse columns are m.col / scale². */
+static void mat4_inv_trs(const float m[16], float out[16]) {
+    const float r00 = m[0];
+    const float r01 = m[4];
+    const float r02 = m[8];
+    const float r10 = m[1];
+    const float r11 = m[5];
+    const float r12 = m[9];
+    const float r20 = m[2];
+    const float r21 = m[6];
+    const float r22 = m[10];
+    const float tx = m[12];
+    const float ty = m[13];
+    const float tz = m[14];
+    const float s0_sq = (r00 * r00) + (r10 * r10) + (r20 * r20);
+    const float s1_sq = (r01 * r01) + (r11 * r11) + (r21 * r21);
+    const float s2_sq = (r02 * r02) + (r12 * r12) + (r22 * r22);
+    NT_ASSERT(s0_sq > 0.0F && s1_sq > 0.0F && s2_sq > 0.0F && "mat4_inv_trs: zero-length scale column — singular widget transform");
+    const float inv_s0 = 1.0F / s0_sq;
+    const float inv_s1 = 1.0F / s1_sq;
+    const float inv_s2 = 1.0F / s2_sq;
+    out[0] = r00 * inv_s0;
+    out[1] = r01 * inv_s1;
+    out[2] = r02 * inv_s2;
+    out[3] = 0.0F;
+    out[4] = r10 * inv_s0;
+    out[5] = r11 * inv_s1;
+    out[6] = r12 * inv_s2;
+    out[7] = 0.0F;
+    out[8] = r20 * inv_s0;
+    out[9] = r21 * inv_s1;
+    out[10] = r22 * inv_s2;
+    out[11] = 0.0F;
+    out[12] = -((out[0] * tx) + (out[4] * ty) + (out[8] * tz));
+    out[13] = -((out[1] * tx) + (out[5] * ty) + (out[9] * tz));
+    out[14] = -((out[2] * tx) + (out[6] * ty) + (out[10] * tz));
+    out[15] = 1.0F;
+}
+
+/* 3D hit-test: unproject screen (px, py) → near/far world points via inv_view_proj,
+ * intersect the resulting ray with the widget's local Z=0 plane (in world space),
+ * then inverse-transform the hit point into widget-local Clay coords for bbox check.
+ * Returns local hit (lx, ly) in widget-local space; caller pads + bbox-tests against Clay bbox.
+ * inv_view_proj caller-chosen: game view_proj for layer < 240, inspector ortho for inspector layers. */
+static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t *baked, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly) {
+    /* Screen → NDC: (-1..1, -1..1). Note Clay px is Y-down; NDC Y is up — flip. */
+    const float px_ndc = ((px / screen_w) * 2.0F) - 1.0F;
+    const float py_ndc = 1.0F - ((py / screen_h) * 2.0F);
+    const float p_near[4] = {px_ndc, py_ndc, -1.0F, 1.0F};
+    const float p_far[4] = {px_ndc, py_ndc, 1.0F, 1.0F};
+    /* Unproject via caller-provided inv_view_proj. */
+    const float *iv = inv_view_proj;
+    float wn[4];
+    float wf[4];
+    for (int i = 0; i < 4; ++i) {
+        wn[i] = (iv[i] * p_near[0]) + (iv[i + 4] * p_near[1]) + (iv[i + 8] * p_near[2]) + (iv[i + 12] * p_near[3]);
+        wf[i] = (iv[i] * p_far[0]) + (iv[i + 4] * p_far[1]) + (iv[i + 8] * p_far[2]) + (iv[i + 12] * p_far[3]);
+    }
+    if (wn[3] == 0.0F || wf[3] == 0.0F) {
+        return false;
+    }
+    const float inv_wn = 1.0F / wn[3];
+    const float inv_wf = 1.0F / wf[3];
+    const float ox = wn[0] * inv_wn;
+    const float oy = wn[1] * inv_wn;
+    const float oz = wn[2] * inv_wn;
+    const float dx = (wf[0] * inv_wf) - ox;
+    const float dy = (wf[1] * inv_wf) - oy;
+    const float dz = (wf[2] * inv_wf) - oz;
+    /* Widget plane in world: normal = baked Z column (m.col2 normalized direction), origin = baked translation. */
+    const float n_x = baked->m[8];
+    const float n_y = baked->m[9];
+    const float n_z = baked->m[10];
+    const float orig_x = baked->m[12];
+    const float orig_y = baked->m[13];
+    const float orig_z = baked->m[14];
+    const float denom = (n_x * dx) + (n_y * dy) + (n_z * dz);
+    if (denom == 0.0F) {
+        return false;
+    }
+    const float t = (((orig_x - ox) * n_x) + ((orig_y - oy) * n_y) + ((orig_z - oz) * n_z)) / denom;
+    if (t < 0.0F) {
+        return false;
+    }
+    const float hx = ox + (t * dx);
+    const float hy = oy + (t * dy);
+    const float hz = oz + (t * dz);
+    /* Inverse-transform hit point into widget-local coords. */
+    float inv[16];
+    mat4_inv_trs(baked->m, inv);
+    *out_lx = (inv[0] * hx) + (inv[4] * hy) + (inv[8] * hz) + inv[12];
+    *out_ly = (inv[1] * hx) + (inv[5] * hy) + (inv[9] * hz) + inv[13];
+    return true;
+}
+
+/* Hit-test reads PREV-frame data via Clay's persistent hashmap slot (stable across frames). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py, float screen_w, float screen_h) {
+    uint32_t cur_id = start_clip_id;
+    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang.
+     * Decrement + bail are UNCONDITIONAL (NT_ASSERT vanishes in OFF builds). */
+    uint32_t guard = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
+    while (cur_id != 0U) {
+        NT_ASSERT(guard > 0U && "hit_clip_chain: parent chain exceeded scissor depth cap (cycle or runaway nesting)");
+        if (guard == 0U) {
+            return false;
+        }
+        guard--;
+        float cx;
+        float cy;
+        float cw;
+        float ch;
+        /* Fail-closed on invariant violation rather than letting input through. */
+        if (!nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch)) {
+            NT_ASSERT(false && "hit_clip_chain: clip ancestor missing from Clay hashmap");
+            return false;
+        }
+        const int32_t cur_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, cur_id);
+        if (cur_slot < 0 || cur_slot >= N) {
+            NT_ASSERT(false && "hit_clip_chain: clip ancestor slot OOB");
+            return false;
+        }
+        const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
+        float clx;
+        float cly;
+        if (ctx->use_raycast_input) {
+            /* Inspector ancestor uses ortho overlay's inverse; game widgets use the user view_proj. */
+            const float *iv = ctx->inv_view_proj;
+#if NT_UI_DEBUG_TOOLS
+            if (ctx->hit_layer[cur_slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
+                iv = ctx->inv_inspector_view_proj;
+            }
+#endif
+            if (!raycast_hit(iv, &cb, px, py, screen_w, screen_h, &clx, &cly)) {
+                return false;
+            }
+        } else {
+            const float cdet = (cb.m[0] * cb.m[5]) - (cb.m[4] * cb.m[1]);
+            NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip ancestor has singular affine");
+            const float cinv_a = cb.m[5] / cdet;
+            const float cinv_b = -cb.m[4] / cdet;
+            const float cinv_c = -cb.m[1] / cdet;
+            const float cinv_d = cb.m[0] / cdet;
+            const float crx = px - cb.m[12];
+            const float cry = py - cb.m[13];
+            clx = (cinv_a * crx) + (cinv_b * cry);
+            cly = (cinv_c * crx) + (cinv_d * cry);
+        }
+        if (clx < cx || clx > cx + cw || cly < cy || cly > cy + ch) {
+            return false;
+        }
+        cur_id = ctx->hit_clip_parent_id[cur_slot];
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
+    if (id == 0U) {
+        return false;
+    }
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return false;
+    }
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+        return false;
+    }
+    /* Reject ids Clay still holds in hashmap but that weren't re-declared this frame. */
+    if (ctx->hit_generation[slot] != ctx->current_generation) {
+        return false;
+    }
+
+    /* Screen dims only needed for raycast NDC conversion — skip the two getters on the 2D hot path. */
+    float screen_w = 0.0F;
+    float screen_h = 0.0F;
+    if (ctx->use_raycast_input) {
+        NT_ASSERT(ctx->view_proj_set && "ui_hit_test: ctx is 3D mode but nt_ui_set_view_proj was not called this frame");
+        screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+        screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
+    }
+
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {
+        return false;
+    }
+
+    const Clay_BoundingBox box = d.boundingBox;
+    const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
+    float lx;
+    float ly;
+    if (ctx->use_raycast_input) {
+        /* Inspector widgets (layer 240-255) hit-test against the ortho overlay so they hit at
+         * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
+        const float *iv = ctx->inv_view_proj;
+#if NT_UI_DEBUG_TOOLS
+        if (ctx->hit_layer[slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
+            iv = ctx->inv_inspector_view_proj;
+        }
+#endif
+        if (!raycast_hit(iv, &b, px, py, screen_w, screen_h, &lx, &ly)) {
+            return false;
+        }
+    } else {
+        const float det = (b.m[0] * b.m[5]) - (b.m[4] * b.m[1]);
+        NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
+        const float inv_a = b.m[5] / det;
+        const float inv_b = -b.m[4] / det;
+        const float inv_c = -b.m[1] / det;
+        const float inv_d = b.m[0] / det;
+        const float rx = px - b.m[12];
+        const float ry = py - b.m[13];
+        lx = (inv_a * rx) + (inv_b * ry);
+        ly = (inv_c * rx) + (inv_d * ry);
+    }
+
+    const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
+    const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
+    const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
+    const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
+    return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
+}
+
+/* Resolves the single pidx that "owns" a widget for this frame under α-semantics:
+ *   - a pointer holding this id wins (already captured)
+ *   - else first pidx with empty capture that's pressed_now over the widget
+ *   - else -1 (widget not owned this frame)
+ * Also aggregates any_hovered and the first hovering pidx (used for pos/id when
+ * widget is hovered but not owned). Pointers holding OTHER widgets are skipped
+ * — they are exclusively bound and shouldn't drive this widget's interaction. */
+typedef struct {
+    int32_t effective_pidx;   /* holder or new-capture candidate; -1 if neither */
+    int32_t first_hover_pidx; /* fallback for pos/id when no owner */
+    bool any_hovered;
+    bool new_capture; /* effective_pidx is a fresh press_now capture (no prior holder) */
+} nt_ui_widget_pidx_state_t;
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    nt_ui_widget_pidx_state_t s = {.effective_pidx = -1, .first_hover_pidx = -1, .any_hovered = false, .new_capture = false};
+    int32_t holder = -1;
+    int32_t candidate = -1;
+    /* Pass 1: existing holder. */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (ctx->captures[i].active_id == id) {
+            holder = (int32_t)i;
+            break;
+        }
+    }
+    /* Pass 2: hover aggregation + first free-pidx press candidate (only if no holder). */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const nt_ui_capture_t *cap = &ctx->captures[i];
+        if (cap->active_id != 0U && cap->active_id != id) {
+            continue; /* α: pointer bound elsewhere, invisible to this widget */
+        }
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
+        if (!over) {
+            continue;
+        }
+        if (s.first_hover_pidx < 0) {
+            s.first_hover_pidx = (int32_t)i;
+        }
+        s.any_hovered = true;
+        if (holder < 0 && candidate < 0 && cap->active_id == 0U) {
+            const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+            if (btn.is_pressed) {
+                candidate = (int32_t)i;
+            }
+        }
+    }
+    s.effective_pidx = (holder >= 0) ? holder : candidate;
+    s.new_capture = (holder < 0 && candidate >= 0);
+    return s;
+}
+
+/* Compute-pure: same returned struct N calls per frame. The only side effect
+ * is an idempotent OR of pointer_over_any (observability for nt_ui_wants_pointer);
+ * state-machine writes (capture, button edges) live in step_interaction_padded. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_query_interaction_padded: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction_padded: no frame pointer snapshot yet (call after first nt_ui_begin)");
+    /* Negative padding is a use error — size the widget smaller instead. */
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction_padded: pad_lrtb components must be >= 0");
+
+    nt_ui_interaction_t out = {0};
+
+#if NT_UI_DEBUG_TOOLS
+    /* Sidebar consumes the pointer; widgets behind it report no interaction. */
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return out;
+    }
+#endif
+
+    /* Multi-ctx safety: caller may be outside frame or have a different Clay ctx current. */
+    Clay_Context *saved_clay = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        Clay_SetCurrentContext(saved_clay);
+        return out;
+    }
+
+    const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
+    out.hovered = s.any_hovered;
+    if (s.any_hovered) {
+        ctx->pointer_over_any = true;
+    }
+
+    if (s.effective_pidx >= 0) {
+        const uint32_t pidx = (uint32_t)s.effective_pidx;
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        const nt_ui_capture_t *cap = &ctx->captures[pidx];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
+        out.pressed = btn.is_down;
+        out.released_now = btn.is_released;
+        out.pressed_now = s.new_capture;
+        out.clicked = btn.is_released && over;
+        out.pointer_id = p->id;
+        if (s.new_capture) {
+            out.press_pos[0] = p->x;
+            out.press_pos[1] = p->y;
+        } else {
+            out.press_pos[0] = cap->press_pos[0];
+            out.press_pos[1] = cap->press_pos[1];
+        }
+        out.pos[0] = p->x;
+        out.pos[1] = p->y;
+        out.drag_dx = p->x - out.press_pos[0];
+        out.drag_dy = p->y - out.press_pos[1];
+    } else {
+        /* No owner — fall back to first hover pidx (if any), else primary pidx=0. */
+        const uint32_t pidx = (s.first_hover_pidx >= 0) ? (uint32_t)s.first_hover_pidx : 0U;
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        out.pointer_id = p->id;
+        out.press_pos[0] = p->x;
+        out.press_pos[1] = p->y;
+        out.pos[0] = p->x;
+        out.pos[1] = p->y;
+    }
+
+    Clay_SetCurrentContext(saved_clay);
+    return out;
+}
+
+nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
+
+/* Same compute as query_padded plus state-machine commits; ONCE per widget per frame. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_step_interaction_padded: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_step_interaction_padded: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(id != 0U && "nt_ui_step_interaction_padded: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
+
+    const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
+
+#if NT_UI_DEBUG_TOOLS
+    /* capture_seen stays 0 so next begin's orphan cleanup wipes in-progress capture (no phantom drag). */
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return out;
+    }
+#endif
+
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return out;
+    }
+
+    /* Re-resolve under α: find the effective pidx for this widget after query. */
+    const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
+    if (s.effective_pidx >= 0) {
+        const uint32_t pidx = (uint32_t)s.effective_pidx;
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        nt_ui_capture_t *cap = &ctx->captures[pidx];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        if (s.new_capture) {
+            cap->active_id = id;
+            cap->press_pos[0] = p->x;
+            cap->press_pos[1] = p->y;
+        }
+        cap->pos[0] = p->x;
+        cap->pos[1] = p->y;
+        /* Marks not-orphan for next begin's cleanup. */
+        ctx->capture_seen[pidx] = 1U;
+        if (btn.is_released) {
+            cap->active_id = 0U;
+        }
+    }
+
+#if NT_UI_DEBUG_TOOLS
+    /* inspector_active also enables recording so its post-walk overlay can project the snapshot. */
+    if ((ctx->debug_recording || ctx->inspector_active) && ctx->debug_zone_count < ctx->debug_zone_cap) {
+        nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
+        const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
+        const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
+        const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
+        const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
+        z->id = id;
+        z->visual_l = d.boundingBox.x;
+        z->visual_t = d.boundingBox.y;
+        z->visual_r = d.boundingBox.x + d.boundingBox.width;
+        z->visual_b = d.boundingBox.y + d.boundingBox.height;
+        z->layout_l = z->visual_l - pl;
+        z->layout_t = z->visual_t - pt;
+        z->layout_r = z->visual_r + pr;
+        z->layout_b = z->visual_b + pb;
+        z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
+        z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
+        /* Snapshot composed mat4 — same source as walker/hit-test. */
+        const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+        if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
+            memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
+        } else {
+            const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
+            memcpy(z->m, b.m, sizeof z->m);
+        }
+        uint16_t flags = 0U;
+        if (out.hovered) {
+            flags |= (uint16_t)NT_UI_DEBUG_FLAG_HOVERED;
+        }
+        if (out.pressed) {
+            flags |= (uint16_t)NT_UI_DEBUG_FLAG_PRESSED;
+        }
+        /* Captured by ANY pidx (α: single pidx, but scan for safety). */
+        for (uint32_t pi = 0; pi < ctx->frame_pointer_count; ++pi) {
+            if (ctx->captures[pi].active_id == id) {
+                flags |= (uint16_t)NT_UI_DEBUG_FLAG_CAPTURED;
+                break;
+            }
+        }
+        z->state_flags = flags;
+    }
+#endif
+
+    return out;
+}
+
+nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
+
+#if NT_UI_DEBUG_TOOLS
+/* Record-only push for DISABLED widgets that skip hit-test; flag surfaces in mode=ALL. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_debug_record_disabled_zone: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_debug_record_disabled_zone: id must be non-zero (0 = no widget)");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_debug_record_disabled_zone: pad_lrtb components must be >= 0");
+
+    /* Zero-overhead fast path. */
+    if ((!ctx->debug_recording && !ctx->inspector_active) || ctx->debug_zone_count >= ctx->debug_zone_cap) {
+        return;
+    }
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return;
+    }
+
+    nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
+    const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
+    const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
+    const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
+    const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
+    z->id = id;
+    z->visual_l = d.boundingBox.x;
+    z->visual_t = d.boundingBox.y;
+    z->visual_r = d.boundingBox.x + d.boundingBox.width;
+    z->visual_b = d.boundingBox.y + d.boundingBox.height;
+    z->layout_l = z->visual_l - pl;
+    z->layout_t = z->visual_t - pt;
+    z->layout_r = z->visual_r + pr;
+    z->layout_b = z->visual_b + pb;
+    z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
+    z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
+    const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
+        memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
+    } else {
+        const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
+        memcpy(z->m, b.m, sizeof z->m);
+    }
+    z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
+}
+#endif /* NT_UI_DEBUG_TOOLS */
+
+bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
+    /* Sidebar counts as "engine wants pointer" so game world input is suppressed. */
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return true;
+    }
+#endif
+    if (ctx->pointer_over_any) {
+        return true;
+    }
+    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
+        if (ctx->captures[i].active_id != 0U) {
+            return true;
+        }
+    }
+    return false;
 }
 // #endregion
 
@@ -1718,9 +2280,19 @@ float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx) {
     return ctx->last_layout_ms;
 }
 
+float nt_ui_get_last_build_tree_ms(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_build_tree_ms: ctx must be non-NULL");
+    return ctx->last_build_tree_ms;
+}
+
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_ms: ctx must be non-NULL");
     return ctx->last_walk_ms;
+}
+
+uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_anim_collision_count: ctx must be non-NULL");
+    return ctx->anim_collision_count;
 }
 
 uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx) {
@@ -1753,43 +2325,55 @@ uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx) {
     return ctx->last_walk_max_scissor_depth;
 }
 
-uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_transform_pushes: ctx must be non-NULL");
-    return ctx->last_walk_transform_pushes;
-}
-
-uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_opacity_pushes: ctx must be non-NULL");
-    return ctx->last_walk_opacity_pushes;
-}
 // #endregion
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
 
-int32_t nt_ui_test_clay_default_max_element_count(void) { return Clay__defaultMaxElementCount; }
-int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void) { return Clay__defaultMaxMeasureTextWordCacheCount; }
+int32_t nt_ui_test_clay_default_max_element_count(void) { return nt_ui_clay_priv_default_max_element_count(); }
+int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void) { return nt_ui_clay_priv_default_max_measure_text_word_cache_count(); }
 
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     return ctx->test_last_walk_unlayered_count;
 }
 
-/* Clay_Context is only defined inside this TU (CLAY_IMPLEMENTATION),
- * so tests need these to read pointerInfo. */
 float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_x: ctx must be non-NULL");
-    return ctx->clay->pointerInfo.position.x;
+    return nt_ui_clay_priv_pointer_x(ctx->clay);
 }
 float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_y: ctx must be non-NULL");
-    return ctx->clay->pointerInfo.position.y;
+    return nt_ui_clay_priv_pointer_y(ctx->clay);
 }
 int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_down: ctx must be non-NULL");
-    const Clay_PointerDataInteractionState s = ctx->clay->pointerInfo.state;
-    return (s == CLAY_POINTER_DATA_PRESSED || s == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) ? 1 : 0;
+    return nt_ui_clay_priv_pointer_pressed(ctx->clay);
+}
+
+uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t pointer_index) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_capture_active_id: ctx must be non-NULL");
+    NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_test_capture_active_id: pointer_index out of range");
+    return ctx->captures[pointer_index].active_id;
+}
+
+bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_hit: ctx must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool hit = ui_hit_test(ctx, id, px, py, NULL);
+    Clay_SetCurrentContext(saved);
+    return hit;
+}
+
+bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_hit_padded: ctx must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb);
+    Clay_SetCurrentContext(saved);
+    return hit;
 }
 #endif
 // #endregion

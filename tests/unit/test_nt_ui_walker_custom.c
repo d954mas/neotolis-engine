@@ -21,9 +21,9 @@ static int s_custom_calls;
 static Clay_BoundingBox s_custom_received_bbox;
 static void *s_custom_received_user;
 
-static void test_custom_handler(const void *clay_cmd, void *userdata) {
+static void test_custom_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
     s_custom_calls++;
-    s_custom_received_bbox = ((const Clay_RenderCommand *)clay_cmd)->boundingBox;
+    s_custom_received_bbox = ((const Clay_RenderCommand *)frame->clay_cmd)->boundingBox;
     s_custom_received_user = userdata;
 }
 
@@ -62,10 +62,11 @@ static void test_custom_handler_invoked(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(1, s_custom_calls);
-    /* Handler receives a local copy with bbox.y Y-flipped to GL world space:
-     * world_y = vy + vh - bb.y - bb.h = 0 + 600 - 5 - 50 = 545. */
+    /* Handler receives the bbox in LAYOUT (Y-down) space; world_mat4 carries
+     * the Y-flip + composed parent chain, so a rotated CUSTOM viewport
+     * survives. Handler does the transform itself. */
     TEST_ASSERT_EQUAL_INT(5, (int)s_custom_received_bbox.x);
-    TEST_ASSERT_EQUAL_INT(545, (int)s_custom_received_bbox.y);
+    TEST_ASSERT_EQUAL_INT(5, (int)s_custom_received_bbox.y);
     TEST_ASSERT_EQUAL_INT(50, (int)s_custom_received_bbox.width);
     TEST_ASSERT_EQUAL_INT(50, (int)s_custom_received_bbox.height);
     TEST_ASSERT_EQUAL_PTR(&sentinel, s_custom_received_user);

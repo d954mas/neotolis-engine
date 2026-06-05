@@ -543,13 +543,17 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             fb = st;
         }
 
+        /* DST corner size = src × per-entity slice9_scale; last-line tripwire. */
+        NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
+        const float s9_scale = sv->slice9_scale[s_idx];
+
         /* Build 4x4 grid in local source space (ipu-scaled, origin at 0,0). */
         const float src_w = (float)r->source_w * ipu;
         const float src_h = (float)r->source_h * ipu;
-        float fl_w = (float)fl * ipu;
-        float fr_w = (float)fr * ipu;
-        float ft_w = (float)ft * ipu;
-        float fb_w = (float)fb * ipu;
+        float fl_w = (float)fl * ipu * s9_scale;
+        float fr_w = (float)fr * ipu * s9_scale;
+        float ft_w = (float)ft * ipu * s9_scale;
+        float fb_w = (float)fb * ipu * s9_scale;
         /* Proportionally shrink borders when source rect is smaller than total borders */
         if (fl_w + fr_w > src_w) {
             float ratio = src_w / (fl_w + fr_w);
@@ -819,14 +823,24 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #endregion
 
 // #region emit_slice9
+/* Production scales 0.1..10; overflow asserts at scale > ~4096 for a 16 px border. */
+static inline uint16_t scale_slice9_border(uint16_t base, float scale) {
+    const float f = ((float)base * scale) + 0.5F;
+    NT_ASSERT(f >= 0.0F && f <= 65535.0F && "slice9 border × scale overflows uint16_t");
+    return (uint16_t)f;
+}
+
+/* src borders pick UV cut; dst borders set rendered corner/edge size. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation) {
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, const uint16_t src_lrtb[4], float slice9_scale, uint32_t color_packed,
+                                    uint8_t flip_bits, const float *world_matrix) {
     NT_ASSERT(s_sprite.initialized);
-    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
-    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
-    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_slice9: call nt_sprite_renderer_set_material first");
-    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && isfinite(rotation));
+    NT_ASSERT(atlas.id != 0 && "emit_slice9: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "emit_slice9: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9: call nt_sprite_renderer_set_material first");
+    NT_ASSERT(world_matrix != NULL && "emit_slice9: world_matrix must be non-NULL (pass NT_MATH_MAT4_IDENTITY for none)");
+    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h));
+    NT_ASSERT(isfinite(slice9_scale) && slice9_scale > 0.0F && "emit_slice9: slice9_scale must be finite > 0");
     NT_ASSERT(w >= 0.0F && h >= 0.0F && "slice9 target dimensions must be non-negative");
 
     nt_atlas_region_handles_t rh;
@@ -837,11 +851,20 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
-    /* Slice9 regions must be non-rotated, untrimmed (RECT shape forces no trim). */
+    /* NULL src_lrtb → atlas-baked borders for this region. */
+    const uint16_t src_sl = (src_lrtb != NULL) ? src_lrtb[0] : rh.region->slice9_lrtb[0];
+    const uint16_t src_sr = (src_lrtb != NULL) ? src_lrtb[1] : rh.region->slice9_lrtb[1];
+    const uint16_t src_st = (src_lrtb != NULL) ? src_lrtb[2] : rh.region->slice9_lrtb[2];
+    const uint16_t src_sb = (src_lrtb != NULL) ? src_lrtb[3] : rh.region->slice9_lrtb[3];
+    const uint16_t dst_sl = scale_slice9_border(src_sl, slice9_scale);
+    const uint16_t dst_sr = scale_slice9_border(src_sr, slice9_scale);
+    const uint16_t dst_st = scale_slice9_border(src_st, slice9_scale);
+    const uint16_t dst_sb = scale_slice9_border(src_sb, slice9_scale);
+
     NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
-    NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed (builder should force RECT shape)");
+    NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed");
     NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
-    NT_ASSERT(sl + sr < rh.region->source_w && st + sb < rh.region->source_h && "slice9 borders exceed source dimensions (per-entity override invalid?)");
+    NT_ASSERT(src_sl + src_sr < rh.region->source_w && src_st + src_sb < rh.region->source_h && "slice9 src borders exceed source dimensions");
     NT_ASSERT(ipu > 0.0F && "slice9 ipu must be positive");
 
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
@@ -849,19 +872,31 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         return;
     }
 
-    /* Flip border swap (D-54-19): swap borders before computing splits. */
-    uint16_t fl = sl;
-    uint16_t fr = sr;
-    uint16_t ft = st;
-    uint16_t fb = sb;
+    /* Symmetric swap keeps UV and position consistent under flip. */
+    uint16_t fsrc_l = src_sl;
+    uint16_t fsrc_r = src_sr;
+    uint16_t fsrc_t = src_st;
+    uint16_t fsrc_b = src_sb;
+    uint16_t fdst_l = dst_sl;
+    uint16_t fdst_r = dst_sr;
+    uint16_t fdst_t = dst_st;
+    uint16_t fdst_b = dst_sb;
     if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
-        fl = sr;
-        fr = sl;
+        fsrc_l = src_sr;
+        fsrc_r = src_sl;
+        fdst_l = dst_sr;
+        fdst_r = dst_sl;
     }
     if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
-        ft = sb;
-        fb = st;
+        fsrc_t = src_sb;
+        fsrc_b = src_st;
+        fdst_t = dst_sb;
+        fdst_b = dst_st;
     }
+    const uint16_t fl = fsrc_l;
+    const uint16_t fr = fsrc_r;
+    const uint16_t ft = fsrc_t;
+    const uint16_t fb = fsrc_b;
 
     /* Extract bbox UVs from region vertices (u16 space). */
     uint16_t u_min = UINT16_MAX;
@@ -886,11 +921,12 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     }
 
     // #region position_and_uv_splits
-    float fl_w = (float)fl * ipu;
-    float fr_w = (float)fr * ipu;
-    float ft_w = (float)ft * ipu;
-    float fb_w = (float)fb * ipu;
-    /* Proportionally shrink borders when target rect is smaller than total borders */
+    /* Positions use DST borders; UV cuts use SRC borders. */
+    float fl_w = (float)fdst_l * ipu;
+    float fr_w = (float)fdst_r * ipu;
+    float ft_w = (float)fdst_t * ipu;
+    float fb_w = (float)fdst_b * ipu;
+    /* Proportionally shrink dst borders when target rect is smaller than total borders */
     if (fl_w + fr_w > w) {
         float ratio = w / (fl_w + fr_w);
         fl_w *= ratio;
@@ -992,18 +1028,18 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         }
     }
 
-    /* Rotate all 16 vertices around rect center if rotation != 0. */
-    if (rotation != 0.0F) {
-        const float rcx = x + (w * 0.5F);
-        const float rcy = y + (h * 0.5F);
-        const float rc = cosf(rotation);
-        const float rs = sinf(rotation);
+    /* Skip identity mat4 to save the transform pass; same 9-float subset as
+     * emit_region_resolved (m[0,1,2,4,5,6,12,13,14]). */
+    const float *m = world_matrix;
+    const bool is_identity = m[0] == 1.0F && m[1] == 0.0F && m[2] == 0.0F && m[4] == 0.0F && m[5] == 1.0F && m[6] == 0.0F && m[12] == 0.0F && m[13] == 0.0F && m[14] == 0.0F;
+    if (!is_identity) {
         for (uint32_t vi = 0; vi < 16U; vi++) {
             nt_sprite_vertex_t *v = &s_sprite.vertices[base + vi];
-            const float dx = v->position[0] - rcx;
-            const float dy = v->position[1] - rcy;
-            v->position[0] = (dx * rc) - (dy * rs) + rcx;
-            v->position[1] = (dx * rs) + (dy * rc) + rcy;
+            const float px = v->position[0];
+            const float py = v->position[1];
+            v->position[0] = (m[0] * px) + (m[4] * py) + m[12];
+            v->position[1] = (m[1] * px) + (m[5] * py) + m[13];
+            v->position[2] = (m[2] * px) + (m[6] * py) + m[14];
         }
     }
 
@@ -1022,9 +1058,10 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 }
 // #endregion
 
+// #endregion
+
 // #region draw_list
-/* Phase 1: open a cmd per batch_key, stream verts into staging via
- * emit_one. Phase 2 = nt_sprite_renderer_flush. */
+/* Emit pass: stream verts into staging per batch_key; flush() does the upload. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
@@ -1069,7 +1106,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
 // #endregion
 
 // #region flush
-/* Phase 2: upload staging, replay cmds, rebind state only on delta. */
+/* Upload staging, replay cmds; rebind state only on delta. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_flush(void) {
     close_current_cmd();

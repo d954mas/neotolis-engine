@@ -248,14 +248,8 @@ static void test_counters_reset_each_walk(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
 }
 
-/* walk_ms is written every walk: non-negative after a real walk (monotonic
- * clock), and reset to 0.0F on the zero-viewport early-return path. The reset
- * is the deterministic half -- it fails loudly if a future edit forgets to
- * zero walk_ms in that early-return. Scope: walk_ms times dispatch only; the
- * entry flush runs before the timer starts, so it is excluded (same scope as
- * the draw-call delta). (layout_ms is owned by nt_ui_end, which the walker
- * fixture never calls, so its timing is covered in test_nt_ui_begin_end.c
- * where a real begin/end cycle runs.) */
+/* walk_ms is non-negative after a real walk and reset to 0.0F on the
+ * zero-viewport early-return. Scope: dispatch only (entry flush excluded). */
 static void test_walk_ms_set_then_reset_on_early_return(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
@@ -265,7 +259,7 @@ static void test_walk_ms_set_then_reset_on_early_return(void) {
     }
     inject_frozen_cmds(3);
 
-    /* Sentinel: a removed walk-exit write leaves -1.0F and trips the assert. */
+    /* Sentinel: a missing walk-exit write leaves -1.0F and trips the assert. */
     s_fx.ctx->last_walk_ms = -1.0F;
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);

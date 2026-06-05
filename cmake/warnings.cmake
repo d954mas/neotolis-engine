@@ -22,14 +22,24 @@ endfunction()
 function(nt_set_sanitizer_flags target)
     # Sanitizer flags for Debug builds only.
     # MUST appear in both compile and link options (Pitfall 1 from research).
-    target_compile_options(${target} PRIVATE
-        $<$<CONFIG:Debug>:-fsanitize=address,undefined>
-        $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
-        $<$<CONFIG:Debug>:-fno-sanitize-recover=all>
-    )
-    target_link_options(${target} PRIVATE
-        $<$<CONFIG:Debug>:-fsanitize=address,undefined>
-    )
+    # Sanitizers disabled on Windows + clang: interception_win can't patch
+    # current UCRT short-prologue functions (memcpy / operator delete / etc.);
+    # both static and dynamic ASan runtimes trip at startup, and UBSan on
+    # Windows links against ASan-side runtime helpers that fail without ASan.
+    if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(${target} PRIVATE
+            $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
+        )
+    else()
+        target_compile_options(${target} PRIVATE
+            $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+            $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
+            $<$<CONFIG:Debug>:-fno-sanitize-recover=all>
+        )
+        target_link_options(${target} PRIVATE
+            $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+        )
+    endif()
     if(EMSCRIPTEN)
         # All WASM builds need growable memory (static data can exceed 16 MB default)
         target_link_options(${target} PRIVATE

@@ -407,6 +407,18 @@ jobs:
       - name: Run tests (debug)
         run: xvfb-run ctest --preset native-debug-test
 
+      # NT_UI_DEBUG_TOOLS=OFF coverage: inspector + debug overlay TUs excluded,
+      # core tests (60/62) still pass. Verifies the production-default path
+      # compiles + links + tests cleanly.
+      - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)
+        run: cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -G Ninja
+
+      - name: Build native debug (NT_UI_DEBUG_TOOLS=OFF)
+        run: cmake --build build/_cmake/native-debug-off
+
+      - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
+        run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
+
       - name: Upload textured_quad packs
         uses: actions/upload-artifact@v4
         with:

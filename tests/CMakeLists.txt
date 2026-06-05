@@ -38,20 +38,22 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_core COMMAND test_core)
 
     # --- Sanitizer proof test ---
-    # Intentionally triggers UB to prove ASan+UBSan are working.
-    # WILL_FAIL=TRUE: CTest expects this test to fail (sanitizer aborts it).
-    add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-    target_link_libraries(test_sanitizer_proof PRIVATE nt_core unity)
+    # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
+    # where sanitizers are disabled (clang interception_win can't patch UCRT).
+    if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"))
+        add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
+        target_link_libraries(test_sanitizer_proof PRIVATE nt_core unity)
 
-    nt_set_warning_flags(test_sanitizer_proof)
-    nt_set_sanitizer_flags(test_sanitizer_proof)
+        nt_set_warning_flags(test_sanitizer_proof)
+        nt_set_sanitizer_flags(test_sanitizer_proof)
 
-    set_target_properties(test_sanitizer_proof PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
+        set_target_properties(test_sanitizer_proof PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
 
-    add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
-    set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+        add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
+        set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+    endif()
 
     # --- Swap demo tests ---
     # Same source, different implementation linked.
@@ -257,6 +259,13 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
 
+    # --- UI 3D-vs-2D hit-test + compose benchmark ---
+    # Validates Plan A perf cost before engine refactor. Synthetic mat4 vs current 2D path.
+    add_executable(test_nt_ui_3d_bench unit/test_nt_ui_3d_bench.c)
+    target_link_libraries(test_nt_ui_3d_bench PRIVATE nt_math nt_time unity)
+    target_compile_definitions(test_nt_ui_3d_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_3d_bench)
+
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
@@ -300,10 +309,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_atlas)
 
     # --- Sprite component tests ---
-    add_executable(test_sprite_comp unit/test_sprite_comp.c)
+    add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE
         nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared unity
     )
+    target_include_directories(test_sprite_comp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_sprite_comp PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_sprite_comp)
 
@@ -441,6 +451,20 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_scale
         test_nt_ui_fit
         test_nt_ui_transform
+        test_nt_ui_interaction
+        test_nt_ui_hittest
+        test_nt_ui_3d_hittest
+        test_nt_ui_clip_hittest
+        test_nt_ui_anim
+        test_nt_ui_button
+        test_nt_ui_tree_build
+    )
+    # Inspector + hit-zone tests are always compiled; their bodies are guarded
+    # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub
+    # main returning 0. Keeps compile_commands.json complete for tidy.
+    list(APPEND _nt_ui_test_names
+        test_nt_ui_debug_hit_zones
+        test_nt_ui_inspector
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)

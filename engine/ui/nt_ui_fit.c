@@ -13,10 +13,8 @@ typedef struct {
     float max_line_w;
 } wrap_result_t;
 
-/* Mirrors Clay CLAY_TEXT_WRAP_WORDS: greedy-pack words to container_w, \n forces
- * break, leading whitespace on wrapped lines is stripped. Returns line count AND
- * max measured line width -- callers need both (long single word with no wrap
- * point still has a width that may exceed container_w). */
+/* Returns max line width too: a long unbreakable word can exceed container_w
+ * even when the line count fits. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static wrap_result_t simulate_wrap(nt_font_t font, const char *text, size_t len, float size, float letter_tracking, float container_w) {
     if (len == 0U || container_w <= 0.0F) {
@@ -96,8 +94,7 @@ uint16_t nt_ui_fit_width(nt_ui_context_t *ctx, uint16_t font_id, const char *tex
 
     const size_t len = strlen(text);
 
-    /* Fits single line at size_max means: no wrap point fired AND the single
-     * line's measured width is within container_w (catches long words too). */
+    /* Width check too — long unbreakable word can exceed container_w on one line. */
     const wrap_result_t r_max = simulate_wrap(font, text, len, (float)size_max, letter_tracking, container_w);
     if (r_max.lines <= 1U && r_max.max_line_w <= container_w) {
         return size_max;
@@ -137,8 +134,7 @@ uint16_t nt_ui_fit_box(nt_ui_context_t *ctx, uint16_t font_id, const char *text,
     }
     const size_t len = strlen(text);
 
-    /* Fits if: total height (lines * line_height) <= container_h AND every
-     * line is <= container_w (long unbreakable word can otherwise overflow). */
+    /* Width check too — unbreakable word can overflow even when height fits. */
     const wrap_result_t r_max = simulate_wrap(font, text, len, (float)size_max, letter_tracking, container_w);
     const float lh_at_max = (line_height > 0U) ? (float)line_height : ((float)fm.line_height * (float)size_max / (float)fm.units_per_em);
     if ((float)r_max.lines * lh_at_max <= container_h && r_max.max_line_w <= container_w) {

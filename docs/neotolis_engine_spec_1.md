@@ -1,4 +1,3 @@
-
 # Neotolis Engine — Technical Specification
 
 **Version:** v0.3-consolidated  
@@ -124,7 +123,89 @@ If a decision can be deferred without loss of base architecture — it is deferr
   Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
   `_Static_assert` in `nt_ui.c`) becomes part of the engine's
   publicly-promised surface; bumping Clay can require coordinated
-  game-side changes.)
+  game-side changes.
+
+  Even with `NT_UI_DEBUG_TOOLS=OFF`, nt_ui touches ~10 Clay **private**
+  symbols (`Clay__OpenElement` / `Clay__ConfigureOpenElement` /
+  `Clay__CloseElement`, the `Clay__MeasureText` callback hookup, a few
+  `Clay__default*` size constants) — all routed through thin wrappers in
+  `engine/ui/nt_ui_clay_impl.c`, the exclusive `CLAY_IMPLEMENTATION`
+  TU. The widget composition pattern (button / panel / group `_begin`)
+  splits Clay's `CLAY({...}) { body }` into separate `_begin`/`_end`
+  calls so widget code can run between them — Clay's public macro
+  bundles `Open` + `Configure` + scoped body into a single statement
+  and can't be split across function boundaries. The wrappers are the
+  smallest possible escape hatch.
+
+  With `NT_UI_DEBUG_TOOLS=ON` this expands by ~30 more Clay private
+  symbols for the verbatim Clay debug-view port (the inspector body
+  lives in the same TU). Either way, bumping Clay can require
+  coordinated nt_ui-side changes.
+
+  **Render-time pipeline.** `nt_ui` composes a per-element column-major
+  `mat4` + opacity in a post-`Clay_EndLayout` build pass
+  (`nt_ui_internal_build_tree`). The transform is `nt_ui_transform_t`
+  with 9 floats (offset_xyz, rotation_xyz Euler, scale_xyz). Composition
+  follows standard scene-graph order: `world = accum_parent · L_child`,
+  where `L = T(O+C) · R(rot_xyz) · S · T(-C)` is built around the element's
+  layout-space bbox center via cglm. The walker reads the composed mat4
+  from `tree_baked[layout_idx]` (hot path, no hashmap lookup) and ships
+  `world_mat4[16]` to every emit_*.
+
+  Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
+
+  - **2D ctx** (default): screen Y-flip (Clay layout Y-down → GL Y-up) is
+    folded into `world_mat4` once per dispatch (negate m[1]/m[5]/m[9],
+    add `vy+vh` to m[13]). Hit-test reverses through the top-left 2×2 +
+    col3 of the same mat4 (closed-form inverse-affine).
+  - **3D ctx** (`use_raycast_input=true`): walker leaves `world_mat4`
+    unflipped; the game owns the screen mapping via `nt_ui_set_view_proj`.
+    Hit-test raycasts pointer → NDC (Clay Y-down to NDC Y-up) → world ray
+    via `inv_view_proj` → ray-plane at widget Z=0 → `mat4_inv_trs(baked.m)`
+    back to widget-local → bbox check. Optional `element_depth_bias_ndc`
+    is render-only: positive values move deeper hierarchy levels slightly
+    closer in projected depth to avoid z-fighting. Hit-test stays on the
+    unbiased widget plane. Debug inspector render commands are excluded
+    from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
+    a separate final screen-space pass. The game binds a 2D UI projection
+    first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard
+    Y-up orthographic matrix used by 2D demos.
+
+  Both modes use the same `tree_baked[layout_idx]` + per-id mirror
+  `hit_baked[slot]` (Clay's hashmap is persistent across frames;
+  `hit_generation[slot]` rejects stale ids). Opacity is a separate
+  `float` accumulator on the same struct.
+
+  **Interaction model.** Game ids interact via `nt_ui_query_interaction`
+  (pure, multiple calls per frame OK) and `nt_ui_step_interaction`
+  (mutating, exactly one call per id per frame). Capture is per-pointer:
+  a press records `active_id`; release clears. Other widgets are
+  `exclusive_gated` while one holds capture. **Orphan cleanup** at
+  `nt_ui_begin` drops `active_id` if the widget didn't call step last
+  frame — covers scene switches, conditional disable, and widget hide.
+  Result: 1-frame IM-lag is intrinsic (current frame reads previous
+  frame's bbox); no stuck input on widget disappearance.
+
+  **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
+  visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
+  default 64); 4-probe chain; full-chain collision evicts the LAST
+  probed slot (snap-reseed, easing lost for one id). Tail eviction
+  spreads pressure across the probe window — evicting the base would
+  let the very next caller hashing to the same bucket re-evict the new
+  entry, thrashing the cache. The `anim_collision_count` monotonic
+  counter surfaces this degradation; game polls the delta to size
+  `NT_UI_ANIM_SLOTS`.
+
+  **Scissor limitation.** GL scissor is axis-aligned in framebuffer
+  space. A rotated scroll container is clipped by the AABB of its
+  rotated corners, so content can poke past the visual corners.
+  Stencil-mask fix is out of scope for v1.
+
+  **Text-under-non-uniform-scale.** Font atlas em-size is picked from
+  the X-column magnitude of the composed affine (`sqrt(a²+c²)`). Under
+  uniform scale or pure rotation, glyph rasterisation stays crisp;
+  under `sx ≠ sy` the quad stretches but the rasteriser samples one
+  axis, blurring the other.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
@@ -146,148 +227,144 @@ Meaning:
 - rendering through WebGL 2 backend
 - debugging via browser console and overlays
 
-WebGL 2 is the sole baseline. WebGL 1 is not supported. Rationale: WebGL 2 coverage is 95%+ of devices; the remaining 5% cannot run the target content (large 3D worlds) regardless; WebGL 2 gives native instancing, UBO, NPOT textures, gl_VertexID without extension management overhead; cleaner migration path to future WebGPU.
+WebGL 2 is the sole baseline. WebGL 1 is not supported. Rationale: WebGL 2 coverage is 95%+ of devices;
+the remaining 5 % cannot run the target content(large 3D worlds) regardless;
+WebGL 2 gives native instancing, UBO, NPOT textures, gl_VertexID without extension management overhead;
+cleaner migration path to future WebGPU.
 
-Windows / desktop platform is not required in v0.1 but architecture must allow adding `platform_win32` or other platform backends later. All platform-specific code (window creation, input, audio, etc.) works through engine abstractions.
+        Windows /
+        desktop platform is not required in v0.1 but architecture must allow adding `platform_win32` or
+    other platform backends later.All platform - specific code(window creation, input, audio, etc.) works through engine abstractions.
 
-## 3.2 Platform layer
+                                                     ##3.2 Platform layer
 
-Platform is a **subsystem/module**, not an ECS component.
+                                                         Platform is a *
+                                                     *subsystem / module **,
+    not an ECS component.
 
-```text
-platform/
-    platform.h
-    platform_web.c
-    platform_web.h
+```text platform /
+                platform.h platform_web.c platform_web
+                    .h
 ```
 
-Future optional additions:
+                Future optional additions :
 
-```text
-platform_win32.c
-platform_linux.c
+```text platform_win32.c platform_linux.c
 ```
 
-## 3.3 Platform responsibilities
+    ##3.3 Platform responsibilities
 
-Platform module handles:
+        Platform module handles :
 
-- application startup/shutdown hooks
-- canvas/window integration
-- timing and frame delta
-- input event forwarding
-- browser-specific bridges (JS interop)
-- file/network helpers (async fetch)
-- frame scheduling hook
-- canvas resize / device pixel ratio handling
-- orientation change handling
+    -application startup /
+                shutdown hooks -
+            canvas / window integration - timing and
+        frame delta - input event forwarding - browser - specific bridges(JS interop) - file / network helpers(async fetch) - frame scheduling hook - canvas resize / device pixel ratio handling -
+            orientation change handling
 
-Platform does **not** handle:
+                    Platform does *
+                *not *
+                *handle :
 
-- gameplay
-- scene logic
-- render passes
-- material logic
-- resource manifests
+    -gameplay -
+            scene logic - render passes - material logic -
+            resource manifests
 
-## 3.4 Canvas, DPR, and Viewport
+            ##3.4 Canvas,
+    DPR,
+    and Viewport
 
-Platform layer must handle:
+                Platform layer must handle :
 
-- **Device pixel ratio (DPR):** mobile devices may have DPR 2-3x. Rendering at native resolution on high-DPR is often prohibitive. Platform should expose current DPR and allow render resolution scaling.
-- **Canvas resize:** window/orientation changes must update framebuffer size. Platform detects resize events and notifies engine.
-- **Input coordinate mapping:** pointer positions arrive in CSS pixels, must be mapped to canvas/framebuffer coordinates.
+    -**Device pixel ratio(DPR)
+    : **mobile devices may have DPR 2 -
+            3x. Rendering at native resolution on high - DPR is often prohibitive.Platform should expose current DPR
+        and allow render resolution scaling.- **Canvas resize : **window / orientation changes must update framebuffer size.Platform detects resize events
+        and notifies engine.- **Input coordinate mapping : **pointer positions arrive in CSS pixels,
+    must be mapped to canvas / framebuffer coordinates.
 
-```c
-typedef struct PlatformDisplayInfo
-{
+```c typedef struct PlatformDisplayInfo {
     uint32_t canvas_width;      // CSS pixels
     uint32_t canvas_height;     // CSS pixels
     uint32_t framebuffer_width; // actual render pixels
     uint32_t framebuffer_height;
-    float dpr;                  // device pixel ratio
-    float render_scale;         // game-controlled quality scaling
+    float dpr;          // device pixel ratio
+    float render_scale; // game-controlled quality scaling
 } PlatformDisplayInfo;
 ```
 
----
+    -- -
 
 # 4. Frame Lifecycle
 
-The engine owns the top-level frame execution. The game provides callbacks.
+    The engine owns the top -
+    level frame execution.The game provides callbacks.
 
-## 4.1 Engine callbacks exposed to game
+    ##4.1 Engine callbacks exposed to game
 
-```c
-void game_init(void);
+```c void
+    game_init(void);
 void game_fixed_update(float dt);
 void game_update(float dt);
 void game_render(void);
 void game_shutdown(void);
 ```
 
-## 4.2 Engine frame order
+    ##4.2 Engine frame order
 
-```text
-platform_step
-input_begin_frame
-    → if pointer pressed && audio suspended → audio_try_resume()
-input_event_apply
-resource_step         ← async loading processing
-game-defined resource sync helpers
-    → e.g. sprite_comp_sync_resources() after resource publication changes
-audio_update          ← voice state management
-nt_mem_scratch_reset  ← frame scratch arena cleared (see §5.2)
-fixed_update loop
-game_update           ← CLAY layout, NT_UI_DATA_* allocations
-transform_update
-game_render           ← nt_ui_walk reads scratch pointers
+```text platform_step input_begin_frame
+    → if pointer pressed &&audio suspended → audio_try_resume() input_event_apply resource_step         ← async loading processing game
+    - defined resource sync helpers
+    → e.g.sprite_comp_sync_resources() after resource publication changes audio_update          ← voice state management nt_mem_scratch_reset  ← frame scratch arena
+      cleared(see §5.2) fixed_update loop game_update           ← CLAY layout,
+    NT_UI_DATA_ *allocations transform_update game_render           ← nt_ui_walk reads scratch pointers
 ```
 
-`nt_mem_scratch_reset()` MUST run before any scratch allocation in the
-current frame — typically right after `audio_update`. Allocating then
-resetting in the same frame invalidates pointers already handed to
-systems (e.g. `nt_ui` retains them through `nt_ui_walk`).
+`nt_mem_scratch_reset()` MUST run before any scratch allocation in the current frame — typically right after `audio_update`
+        .Allocating then resetting in the same frame invalidates pointers already handed to systems(e.g. `nt_ui` retains them through `nt_ui_walk`)
+        .
 
-## 4.3 Fixed update loop
+    ##4.3 Fixed update loop
 
-```c
-accumulator += frame_dt;
+```c accumulator
+    += frame_dt;
 int fixed_steps = 0;
 
-while (accumulator >= fixed_dt && fixed_steps < max_fixed_steps)
-{
+while (accumulator >= fixed_dt && fixed_steps < max_fixed_steps) {
     game_fixed_update(fixed_dt);
     accumulator -= fixed_dt;
     fixed_steps++;
 }
 ```
 
-Recommended defaults:
+    Recommended defaults :
 
-```c
-fixed_dt = 1.0f / 60.0f
-max_fixed_steps = 4
+```c fixed_dt = 1.0f / 60.0f max_fixed_steps = 4
 ```
 
-## 4.4 Update responsibilities
+    ##4.4 Update responsibilities
 
-### `game_fixed_update(dt)`
+    ## # `game_fixed_update(dt)`
 
-Stable simulation: movement, AI, combat, timers, deterministic logic, future physics.
+    Stable simulation : movement,
+      AI, combat, timers, deterministic logic,
+      future physics.
 
-### `game_update(dt)`
+          ## # `game_update(dt)`
 
-Frame-based logic: camera, UI logic, effect fades, interpolation inputs, render-state preparation.
+          Frame
+          - based logic : camera,
+      UI logic, effect fades, interpolation inputs,
+      render - state preparation.
 
-### `transform_update()`
+               ## # `transform_update()`
 
-Happens after gameplay movement, before render.
+               Happens after gameplay movement,
+      before render.
 
-## 4.5 Optional interpolation factor
+      ##4.5 Optional interpolation factor
 
-```c
-float alpha = accumulator / fixed_dt;
+```c float alpha = accumulator / fixed_dt;
 ```
 
 Can be used for render interpolation between previous/current transform state.
@@ -304,56 +381,63 @@ void game_fixed_update(float dt)
     combat_system_fixed(dt);
 }
 
-void game_update(float dt)
-{
+void game_update(float dt) {
     camera_system_update(dt);
     ui_system_update(dt);
 }
 ```
 
----
+    -- -
 
 # 5. Memory Policy
 
-## 5.1 High-level memory rules
+    ##5.1 High -
+    level memory rules
 
-- no heap allocation in hot path if avoidable
-- component storages preallocated
-- asset metadata always resident
-- pack blobs transient
-- frame temporary memory reset every frame
-- renderer staging/batch buffers explicitly sized
-- resource pools managed centrally
+    - no heap allocation in hot path if avoidable - component storages preallocated - asset metadata always resident - pack blobs transient - frame temporary memory reset every frame -
+    renderer staging / batch buffers explicitly sized -
+    resource pools managed centrally
 
-## 5.2 Memory categories
+        ##5.2 Memory categories
 
-### Permanent memory
+        ## #Permanent memory
 
-Lifetime ≈ engine/application lifetime.
+            Lifetime ≈ engine /
+        application lifetime.
 
-Examples: entity tables, component storages, asset metadata, shader metadata, persistent runtime pools.
+        Examples : entity tables,
+    component storages, asset metadata, shader metadata,
+    persistent runtime pools.
 
-### Pack/blob transient memory
+            ## #Pack /
+            blob transient memory
 
-Lifetime ≈ load operation or recent-use cache window.
+                Lifetime ≈ load operation or
+        recent - use cache window.
 
-Examples: loaded pack blob, manifest read buffer, temporary decompression buffer if ever needed.
+                 Examples : loaded pack blob,
+    manifest read buffer,
+    temporary decompression buffer if ever needed
+        .
 
-### Frame scratch memory
+    ## #Frame scratch memory
 
-Lifetime: from allocation until the next `nt_mem_scratch_reset()` (typically the start of the next frame, see §4.2).
+        Lifetime : from allocation until the next `nt_mem_scratch_reset()` (typically the start of the next frame, see §4.2)
+        .
 
-Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass, `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*` macros.
+                   Examples : render item arrays,
+    temporary sort arrays, transient CPU batch buffers, build temp lists in render pass, `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_ *` macros.
 
-The engine provides a global bump arena in `engine/memory/nt_mem_scratch`:
+                                                                                             The engine provides a global bump arena in `engine
+                                                                                             / memory /
+                                                                                             nt_mem_scratch`:
 
-```c
-nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES);  // boot, default 512 KB
+```c nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES); // boot, default 512 KB
 // per frame (see §4.2):
-nt_mem_scratch_reset();          // start of frame
-nt_mem_scratch_alloc(size, align);  // anywhere during the frame
+nt_mem_scratch_reset();            // start of frame
+nt_mem_scratch_alloc(size, align); // anywhere during the frame
 // pointers stay valid until the next nt_mem_scratch_reset()
-nt_mem_scratch_shutdown();       // exit
+nt_mem_scratch_shutdown(); // exit
 ```
 
 Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.
@@ -367,14 +451,14 @@ sparse table or fixed pool needs a known upper bound. Cannot be overridden
 without recompiling the engine.
 
 ```c
-#define NT_MAX_ENTITIES         65536  /* sparse side, generation tables */
-#define NT_MAX_PACKS            16
-#define NT_MAX_SLOTS            2048
-#define NT_MAX_ASSETS           2048
-#define NT_MAX_RENDER_ITEMS     16384
-#define NT_MAX_AUDIO_CLIPS      256
-#define NT_MAX_AUDIO_VOICES     32
-#define NT_MAX_POINTERS         8
+#define NT_MAX_ENTITIES 65536 /* sparse side, generation tables */
+#define NT_MAX_PACKS 16
+#define NT_MAX_SLOTS 2048
+#define NT_MAX_ASSETS 2048
+#define NT_MAX_RENDER_ITEMS 16384
+#define NT_MAX_AUDIO_CLIPS 256
+#define NT_MAX_AUDIO_VOICES 32
+#define NT_MAX_POINTERS 8
 ```
 
 **Init-time component capacities.** Each component module exposes a
@@ -414,22 +498,21 @@ typedef struct EngineSettings
 } EngineSettings;
 ```
 
-No full config system (JSON/YAML/ini) required at start.
+    No full config system(JSON / YAML / ini) required at start
+        .
 
----
+    -- -
 
 # 6. Entity System
 
-## 6.1 Entity identity
+    ##6.1 Entity identity
 
-Entities are lightweight IDs with generation validation.
+    Entities are lightweight IDs with generation validation.
 
-```c
-typedef uint16_t EntityIndex;
+```c typedef uint16_t EntityIndex;
 typedef uint16_t EntityGeneration;
 
-typedef struct EntityHandle
-{
+typedef struct EntityHandle {
     EntityIndex index;
     EntityGeneration generation;
 } EntityHandle;
@@ -505,29 +588,30 @@ typedef struct
 } ComponentStorage;
 ```
 
-Where:
+    Where :
 
-- `entity_to_index` maps entity → dense index
-- `index_to_entity` maps dense index → entity
-- `data` stores actual dense components
+    - `entity_to_index` maps entity → dense index - `index_to_entity` maps dense index → entity - `data` stores actual dense components
 
-Yes, sparse side is sized by max entities even if component capacity is smaller. This is correct and intentional.
+        Yes,
+    sparse side is sized by max entities even if component capacity is smaller.This is correct and intentional.
 
-## 7.3 Component index type
+    ##7.3 Component index type
 
-Default component indices = `uint16_t`. Only use `uint32_t` if truly needed later. Do not use odd-width runtime types like 12-bit indices.
+        Default component indices = `uint16_t`.Only use `uint32_t` if truly needed later.Do not use odd - width runtime types like 12 -
+                                    bit indices.
 
-## 7.4 Component API style
+                                    ##7.4 Component API style
 
-Typed APIs, not one generic mega-API. Each component module exposes its own
-init descriptor, lifecycle (`init`, `shutdown`), per-entity ops (`add`, `has`,
-`remove`), and per-field accessors. Components do not return a monolithic
-struct — fields live in parallel SoA arrays and are read/written one at a time.
+                                        Typed APIs,
+                          not one generic mega - API.Each component module exposes its own init descriptor, lifecycle(`init`, `shutdown`), per - entity ops(`add`, `has`,
+`remove`),
+                          and per - field accessors.Components do not return a monolithic struct — fields live in parallel SoA arrays
+                              and are read / written one at a time.
 
 ```c
-/* Lifecycle */
-nt_result_t  nt_transform_comp_init(const nt_transform_comp_desc_t *desc);
-void         nt_transform_comp_shutdown(void);
+                                             /* Lifecycle */
+                                             nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc);
+void nt_transform_comp_shutdown(void);
 
 /* Per-entity ops */
 bool nt_transform_comp_add(nt_entity_t e);
@@ -560,44 +644,59 @@ struct in the code. Each entity contributes one row across these dense fields:
 | local position | `vec3`   | mutable via `nt_transform_comp_position(e)`  |
 | local rotation | `vec4`   | quaternion, via `nt_transform_comp_rotation(e)`  |
 | local scale    | `vec3`   | via `nt_transform_comp_scale(e)`     |
-| world matrix   | `mat4`   | read-only via `nt_transform_comp_world_matrix(e)`; recomputed by `nt_transform_comp_update()` |
-| dirty          | `bool`   | mutable; set when locals change      |
+| world matrix   | `mat4`   | read-only via `nt_transform_comp_world_matrix(e)`;
+recomputed by `nt_transform_comp_update()` | | dirty | `bool` | mutable;
+set when locals change |
 
-API surface lives in `engine/transform_comp/nt_transform_comp.h`.
+    API surface lives in `engine / transform_comp /
+        nt_transform_comp.h`.
 
-Optional future additions: previous_world_matrix, decomposed world data, bounds dirty flag.
+        Optional future additions : previous_world_matrix,
+    decomposed world data,
+    bounds dirty
+                flag.
 
-## 8.2 Hierarchy source
+            ##8.2 Hierarchy source
 
-Transform inheritance reads from entity hierarchy. Transform does not own parent/child links.
+                Transform inheritance reads from entity hierarchy.Transform does not own parent /
+            child links.
 
-## 8.3 Update model
+            ##8.3 Update model
 
-Update top-down. Roots are entities with no parent. Traversal uses entity hierarchy.
+                Update top -
+        down.Roots are entities with no parent.Traversal uses entity hierarchy.
 
-## 8.4 Dirty propagation
+        ##8.4 Dirty propagation
 
-When local transform changes: mark this transform dirty, mark descendant transforms dirty. When parent changes: mark subtree dirty. Dirty only means world transform must be recomputed.
+            When local transform changes : mark this transform dirty,
+    mark descendant transforms dirty.When parent changes : mark subtree dirty.Dirty only means world transform must be recomputed.
 
-## 8.5 Non-transform nodes in hierarchy
+                                                           ##8.5 Non -
+        transform nodes in hierarchy
 
-Entities without Transform may still exist in hierarchy.
+            Entities without Transform may still exist in hierarchy.
 
-Traversal rule: walk entity tree; if node has transform, update world basis; if node has no transform, continue traversal with last valid inherited transform basis.
+        Traversal rule : walk entity tree;
+if node
+    has transform, update world basis;
+if node
+    has no transform,
+        continue traversal with last valid inherited transform basis.
 
----
+        -- -
 
-# 9. Render-Related Components
+# 9. Render - Related Components
 
-The architecture supports different renderable kinds via separate components, not one universal component.
+        The architecture supports different renderable kinds via separate components,
+        not one universal component
+                .
 
-## 9.1 Common render state
+            ##9.1 Common render state
 
-The drawable component is SoA. Fields:
+                The drawable component is SoA.Fields :
 
-| Field   | Type          | Default      | Notes                                |
-|---------|---------------|--------------|--------------------------------------|
-| tag     | `nt_hash32_t` | `{0}`        | pass/group filter; set via `nt_hash32_str("world")` etc. |
+            | Field | Type | Default | Notes | | -- -- -- -- -| -- -- -- -- -- -- -- -| -- -- -- -- -- -- --| -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --| | tag | `nt_hash32_t` | `{0}` |
+            pass / group filter; set via `nt_hash32_str("world")` etc. |
 | visible | `bool`        | `true`       | render visibility only               |
 | color   | `vec4`        | `(1,1,1,1)`  | object tint / alpha multiplier       |
 
@@ -611,23 +710,23 @@ Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add w
 ## 9.2 Mesh component
 
 Per-entity mesh handle. The component stores a single `nt_mesh_t` per entity
-(typed handle from the gfx module); accessor returns a mutable pointer:
+(typed handle from the gfx module);
+accessor returns a mutable pointer :
 
-```c
-nt_mesh_t *nt_mesh_comp_handle(nt_entity_t e);
+```c nt_mesh_t *nt_mesh_comp_handle(nt_entity_t e);
 ```
 
-API in `engine/mesh_comp/nt_mesh_comp.h`. There is no `MeshComponent` struct
-or `MeshAssetRef` wrapper — just one handle per entity.
+        API in `engine /
+        mesh_comp / nt_mesh_comp.h`.There is no `MeshComponent` struct
+    or `MeshAssetRef` wrapper — just one handle per entity.
 
-## 9.3 Material component
+           ##9.3 Material component
 
-Per-entity material handle. The component stores a single `nt_material_t`
-per entity (handle from the `nt_material` module); accessor returns a
-mutable pointer:
+               Per -
+           entity material handle.The component stores a single `nt_material_t` per entity(handle from the `nt_material` module);
+accessor returns a mutable pointer :
 
-```c
-nt_material_t *nt_material_comp_handle(nt_entity_t e);
+```c nt_material_t *nt_material_comp_handle(nt_entity_t e);
 ```
 
 API in `engine/material_comp/nt_material_comp.h`. There is no
@@ -680,43 +779,47 @@ Two ways to bind a sprite to a region, picked by what the game knows:
 
 Game code is free to read back the cached region index for animation logic
 (e.g. cycle to the next frame). It is stable across atlas republish for
-surviving regions; the only failure mode — tombstoning — is observable via
-`is_resolved()`.
+surviving regions;
+the only failure mode — tombstoning — is observable via
+`is_resolved()`
+    .
 
-### Origin override and flip
+    ## #Origin override and flip
 
-Each sprite carries an effective origin (`float[2]`). By default it tracks
-the region's authored origin from the atlas. The game may override it with
-`set_origin(x, y)`, which sets the `ORIGIN_OV` flag and pins the value across
-subsequent atlas republishes. `reset_origin()` clears the override and
-restores the authored value on the next sync.
+    Each sprite carries an effective origin(`float[2]`)
+    .By default it tracks the region's authored origin from the atlas. The game may override it with
+`set_origin(x, y)`,
+    which sets the `ORIGIN_OV` flag and pins the value across subsequent atlas republishes. `reset_origin()` clears the override and restores the authored value on the next sync
+        .
 
-Flip is a pair of flag bits (`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.
-They are pure state — no resolve, no atlas interaction.
+    Flip is a pair of flag bits(`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.They are pure state — no resolve,
+    no atlas interaction.
 
-### Lifecycle
+    ## #Lifecycle
 
-```c
-nt_sprite_comp_init(&(nt_sprite_comp_desc_t){ .capacity = 4096 });
+```c nt_sprite_comp_init(&(nt_sprite_comp_desc_t){.capacity = 4096});
 /* per-frame: */
 nt_resource_step();
-nt_sprite_comp_sync_resources();   /* explicit, after publication */
+nt_sprite_comp_sync_resources(); /* explicit, after publication */
 /* on shutdown: */
 nt_sprite_comp_shutdown();
 ```
 
-Capacity is set once at init (see §5.3). All SoA arrays are allocated up
-front and never grow.
+    Capacity is set once at init(see §5.3)
+        .All SoA arrays are allocated up front and never grow.
 
-### Resolution flow
+    ## #Resolution flow
 
-Resolution is explicit, not renderer-driven magic:
+    Resolution is explicit,
+    not renderer -
+            driven magic :
 
-- game code requests / mounts resources
-- `resource_step()` publishes winners
-- game code calls `nt_sprite_comp_sync_resources()` (or equivalent system)
-- sync iterates dense sprite rows when the resource publication epoch
-  advanced or any sprite was bound by hash since the last call; per-row
+    -game code requests
+    /
+    mounts resources
+            - `resource_step()` publishes winners
+            - game code calls `nt_sprite_comp_sync_resources()` (or equivalent system) - sync iterates dense sprite rows when the resource publication epoch advanced
+        or any sprite was bound by hash since the last call; per-row
   early-out via cached atlas revision keeps stable frames cheap
 - sprite render-item build skips unresolved sprites
 
@@ -725,57 +828,62 @@ Resolution is explicit, not renderer-driven magic:
 `nt_sprite_comp_view()` returns base pointers into the dense SoA arrays plus
 the live count and an `entity_indices` array (dense → entity index) for
 joining sprites with other components. Pointers are stable for the lifetime
-of the module; values shift on add/remove (swap-and-pop) so views must not
-be cached across mutations.
+of the module;
+values shift on add / remove(swap - and-pop) so views must not be cached across mutations.
 
-> **Status:** sprite_comp, atlas runtime data, explicit resource sync, and the
-> dedicated SpriteRenderer are implemented. Sprite render-item construction is
-> still game-side code: the engine consumes caller-provided render-item arrays
-> and does not introduce a hidden sprite scheduler.
+    > **Status : **sprite_comp,
+    atlas runtime data, explicit resource sync,
+    and the > dedicated SpriteRenderer are implemented.Sprite render - item construction is > still game - side code : the engine consumes caller - provided render - item arrays >
+        and does not introduce a hidden sprite scheduler.
 
-Sprite is a separate render kind, not a special mode of mesh.
+            Sprite is a separate render kind,
+    not a special mode of mesh.
 
-## 9.5 Text component
+                ##9.5 Text component
 
-> **Status:** the text component module does not exist yet — only the
-> `nt_font` module backing it is implemented (`engine/font/nt_font.h`).
-> The shape below describes the planned component.
+                > **Status : **the text component module does not exist yet — only the
+                > `nt_font` module backing it is implemented(`engine / font / nt_font.h`).> The shape below describes the planned component.
 
-```text
-text_comp fields (planned):
-  font   nt_font_t   /* handle from nt_font_create / nt_font_add */
-  text   StringId    /* intern-table reference, design TBD */
+```text text_comp fields(planned)
+    : font nt_font_t /* handle from nt_font_create / nt_font_add */
+      text StringId /* intern-table reference, design TBD */
 ```
 
-`nt_font_t` is a pool-backed handle to a font instance. A font instance owns GPU textures (curve + band) and a glyph cache. Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
+`nt_font_t` is a pool - backed handle to a font instance.A font instance owns GPU textures(curve + band) and
+            a glyph cache.Font data comes from one
+        or more `nt_resource_t` assets attached via `nt_font_add()`,
+allowing fallback chains(base font + CJK extension pack, etc.).Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
 
-StringId references a string in a string pool/intern table (detail deferred to implementation phase).
+                                                                                                                                   StringId references a string in a string pool
+                                                                                                                                   / intern table(detail deferred to implementation phase)
+                                                                                                                                         .
 
-## 9.6 Shadow component
+                                                                                                                                     ##9.6 Shadow component
 
-> **Status:** the shadow component module does not exist yet. The shape
-> below describes the planned component once a shadow pass lands.
+                                                                                                                               > **Status
+    : **the shadow component module does not exist yet.The shape > below describes the planned component once a shadow pass lands.
 
-```text
-shadow_comp fields (planned):
-  enabled            bool
-  mesh_override      nt_mesh_t       /* optional override; INVALID = use primary mesh */
-  material_override  nt_material_t   /* optional override; INVALID = use primary material */
+```text shadow_comp fields(planned)
+    : enabled bool mesh_override nt_mesh_t /* optional override; INVALID = use primary mesh */
+      material_override nt_material_t      /* optional override; INVALID = use primary material */
 ```
 
-If missing: object does not participate in shadow pass. If present and enabled: use override mesh/material if valid, otherwise use primary mesh/material or default shadow path.
+      If missing : object does not participate in shadow pass.If present and enabled : use override mesh / material if valid,
+    otherwise use primary mesh / material or default shadow path.
 
----
+                                                 -- -
 
 # 10. Render Tags
 
-## 10.1 RenderTag philosophy
+                                                 ##10.1 RenderTag philosophy
 
-Render tags are **game-defined**, not engine-enum-defined. Tags are `nt_hash32_t` values created via `nt_hash32_str()`.
+                                                 Render tags are **game
+                                                 - defined **,
+    not engine - enum -
+        defined.Tags are `nt_hash32_t` values created via `nt_hash32_str()`.
 
-```c
-nt_hash32_t TAG_WORLD = nt_hash32_str("world");
-nt_hash32_t TAG_UI    = nt_hash32_str("ui");
+```c nt_hash32_t TAG_WORLD = nt_hash32_str("world");
+nt_hash32_t TAG_UI = nt_hash32_str("ui");
 nt_hash32_t TAG_DEBUG = nt_hash32_str("debug");
 ```
 
@@ -829,9 +937,9 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
-## 11.3 Renderer complexity classes
+    ##11.3 Renderer complexity classes
 
-Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
+        Not all renderers carry the same weight.The engine ships three classes; copying patterns across classes is a common mistake.
 
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one draw call per item. Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal.
 
@@ -845,35 +953,38 @@ When adding a new renderer, classify first:
 - 1k+ items/frame with dynamic state → **batched dynamic** (study `nt_sprite_renderer`, but only copy what your throughput demands)
 - Domain-specific layout/data → **specialized**
 
-`nt_sprite_renderer.c` is not a renderer template. Its complexity earns its keep at 60k items/frame; a 100-item UI overlay doesn't need any of it.
+`nt_sprite_renderer.c` is not a renderer template. Its complexity earns its keep at 60k items/frame;
+a 100 -
+    item UI overlay doesn't need any of it.
 
----
+    -- -
 
 # 12. Render Items, Sort Keys, Batch Keys
 
-## 12.1 RenderItem concept
+    ##12.1 RenderItem concept
 
-A RenderItem is a **CPU-side prepared draw record**, not a GPU object.
+    A RenderItem is a **CPU -
+    side prepared draw record **,
+    not a GPU object.
 
-```text
-Entity/components
+```text Entity / components
     → RenderItem build
     → sort
     → renderer consumes
     → GPU draw calls
 ```
 
-## 12.2 RenderItem model
+        ##12.2 RenderItem model
 
-Minimal render item — sorted draw record, not a fat data carrier. Renderer reads per-entity data (world matrix, color) from components at draw time.
+            Minimal render item — sorted draw record,
+    not a fat data carrier.Renderer reads per - entity data(world matrix, color)
+from components at draw time.
 
-```c
-typedef struct nt_render_item_t
-{
-    uint64_t sort_key;    // 8 bytes — encodes material+mesh for opaque, depth for transparent
-    uint32_t entity;      // 4 bytes — raw entity id
-    uint32_t batch_key;   // 4 bytes — state compatibility (same material+mesh = same key)
-} nt_render_item_t;       // 16 bytes, naturally aligned
+```c typedef struct nt_render_item_t {
+    uint64_t sort_key;  // 8 bytes — encodes material+mesh for opaque, depth for transparent
+    uint32_t entity;    // 4 bytes — raw entity id
+    uint32_t batch_key; // 4 bytes — state compatibility (same material+mesh = same key)
+} nt_render_item_t;     // 16 bytes, naturally aligned
 ```
 
 **batch_key vs sort_key:** sort_key controls draw order (can be anything: material, depth, layer). batch_key controls instancing compatibility (same material+mesh). These are independent — depth-sorted items still batch by material+mesh.
@@ -891,13 +1002,13 @@ Sort key determines item order in the final draw sequence for a pass. It is pass
 
 ## 12.4 Batch key / run detection
 
-`batch_key` encodes state compatibility (same material+mesh = same key). `sort_key` controls draw order. These are independent concerns — sort order can be anything (material, depth, layer) without affecting batch detection.
+`batch_key` encodes state compatibility (same material+mesh = same key). `sort_key` controls draw order. These are independent concerns — sort order can be anything (material, depth, layer)
+without affecting batch detection
+    .
 
-Game fills `batch_key` via `nt_batch_key(material_id, mesh_id)`. Renderer compares consecutive batch_keys to detect instancing runs:
+    Game fills `batch_key` via `nt_batch_key(material_id, mesh_id)`.Renderer compares consecutive batch_keys to detect instancing runs :
 
-```c
-while (run_end < count && items[run_end].batch_key == items[run_start].batch_key)
-    run_end++;
+```c while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) run_end++;
 ```
 
 ---
@@ -950,22 +1061,21 @@ atlas page textures and splits commands when a run crosses pages.
 
 Rect and polygon sprites use the same generic dynamic IBO path. The renderer
 does not keep a separate static-quad fast path unless measurements show a clear
-win on the target workload; this keeps the sprite batching code small and makes
-draw splitting depend only on capacity and state changes.
+win on the target workload;
+this keeps the sprite batching code small and makes draw splitting depend only on capacity and state changes.
 
----
+    -- -
 
 # 15. Shader System
 
-## 15.1 ShaderAsset purpose
+    ##15.1 ShaderAsset purpose
 
-ShaderAsset defines interface, not values.
+        ShaderAsset defines interface,
+    not values.
 
-## 15.2 ShaderAsset fields
+        ##15.2 ShaderAsset fields
 
-```c
-typedef struct ShaderAsset
-{
+```c typedef struct ShaderAsset {
     ShaderCodeRef vs;
     ShaderCodeRef fs;
 
@@ -1028,13 +1138,12 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 > no `NT_ASSET_MATERIAL` activator and no pack-loadable material format yet.
 > The layout below describes the planned on-disk shape once material assets
 > become pack-loadable. `ShaderAssetRef` and `TextureAssetRef` are also
-> planned types; current shaders are loaded as `NT_ASSET_SHADER_CODE` blobs
-> referenced by `nt_resource_t` directly.
+> planned types;
+current shaders are loaded as `NT_ASSET_SHADER_CODE` blobs > referenced by `nt_resource_t` directly.
 
 ```c
-// In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented
-typedef struct MaterialAssetHeader
-{
+                                                             // In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented
+                                                             typedef struct MaterialAssetHeader {
     ShaderAssetRef vertex_shader;
     ShaderAssetRef fragment_shader;
 
@@ -1048,7 +1157,7 @@ typedef struct MaterialAssetHeader
 } MaterialAssetHeader;
 ```
 
-Binary layout in pack:
+    Binary layout in pack :
 
 ```text
 ┌─────────────────────────┐
@@ -1057,33 +1166,37 @@ Binary layout in pack:
 │ vec4 params[param_count] │
 ├─────────────────────────┤
 │ TextureAssetRef          │
-│   textures[texture_count]│
+│ textures[texture_count]│
 └─────────────────────────┘
 ```
 
-At runtime, params and textures are accessed via computed offset from header pointer:
+    At runtime,
+    params and textures are accessed via computed offset from header pointer :
 
-```c
-const vec4* material_get_params(const MaterialAssetHeader* h)
-{
-    return (const vec4*)((const uint8_t*)h + sizeof(MaterialAssetHeader));
+```c const vec4 *
+    material_get_params(const MaterialAssetHeader *h) {
+    return (const vec4 *)((const uint8_t *)h + sizeof(MaterialAssetHeader));
 }
 
-const TextureAssetRef* material_get_textures(const MaterialAssetHeader* h)
-{
-    return (const TextureAssetRef*)(material_get_params(h) + h->param_count);
-}
+const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { return (const TextureAssetRef *)(material_get_params(h) + h->param_count); }
 ```
 
-**Note:** C does not allow two flexible array members in one struct. The layout above uses computed offsets instead.
+    **Note : **C does not allow two flexible array members in one struct.The layout above uses computed offsets instead.
 
-## 16.4 One material, one copy
+             ##16.4 One material,
+    one copy
 
-No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle.
+            No duplicated material data.Material is created
+            once(either from code via descriptor or loaded from pack asset in the future) and
+        lives in a single pool slot.Multiple entities reference the same material handle.
 
-Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
+            Per
+            - entity variation(e.g.per - character color, dissolve progress) goes through entity param components,
+    not material mutation — each entity carries its own values,
+    the material stays shared.
 
-Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame; no version bump is needed. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
+        Material
+        - wide params(e.g.global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame; no version bump is needed. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
 ## 16.5 Render state and material
 
@@ -1144,50 +1257,49 @@ typedef struct {
     uint32_t runtime_handle; /* resolved handle, 0 = none */
     uint16_t format_version; /* per-type binary format version */
     uint16_t pack_index;     /* index into packs[] */
-    uint8_t  asset_type;     /* nt_asset_type_t */
-    uint8_t  state;          /* nt_asset_state_t */
-    uint8_t  is_dedup;       /* 1 = shares data with another asset in same pack */
-    uint8_t  _pad;
-    uint32_t meta_offset;    /* byte offset into pack's resident meta_data buffer (NT_NO_METADATA = no meta) */
+    uint8_t asset_type;      /* nt_asset_type_t */
+    uint8_t state;           /* nt_asset_state_t */
+    uint8_t is_dedup;        /* 1 = shares data with another asset in same pack */
+    uint8_t _pad;
+    uint32_t meta_offset; /* byte offset into pack's resident meta_data buffer (NT_NO_METADATA = no meta) */
 } NtAssetMeta;
 ```
 
-## 17.6 NtResourceSlot
+    ##17.6 NtResourceSlot
 
-Persistent per-slot state — survives across frames:
+        Persistent per -
+    slot state — survives across frames :
 
-```c
-typedef struct {
+```c typedef struct {
     uint64_t resource_id;            /* nt_hash64 value */
     uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
     uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
-    int16_t  resolve_prio;           /* priority of currently published winner */
+    int16_t resolve_prio;            /* priority of currently published winner */
     uint16_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
     uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
     uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
     uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
     uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
-    uint8_t  asset_type;             /* nt_asset_type_t */
-    uint8_t  state;                  /* nt_asset_state_t visible to game code */
-    void    *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
+    uint8_t asset_type;              /* nt_asset_type_t */
+    uint8_t state;                   /* nt_asset_state_t visible to game code */
+    void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 ```
 
 Transient per-pass state — allocated at the start of each resolve pass, freed at the end. Lives in a separate array to keep NtResourceSlot small for the common case (resolve runs only when `needs_resolve` is true):
 
-```c
-typedef struct {
+```c typedef struct {
     uint32_t target_runtime_handle;    /* best READY asset handle, even if blob is evicted */
     uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
-    int16_t  target_prio;              /* priority of target winner */
-    int16_t  candidate_prio;           /* priority of publishable candidate */
+    int16_t target_prio;               /* priority of target winner */
+    int16_t candidate_prio;            /* priority of publishable candidate */
     uint16_t target_seq;               /* mount_seq of target winner */
     uint16_t candidate_seq;            /* mount_seq of publishable candidate */
     uint16_t target_asset_idx;         /* assets[] index of target winner */
     uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
-    uint8_t  scan_state;               /* best nt_asset_state_t seen among all matching assets */
-    uint8_t  resolve_pending;          /* on_resolve fired for the published winner */
-    uint8_t  post_resolve_pending;     /* on_post_resolve should fire after the pass */
+    uint8_t scan_state;                /* best nt_asset_state_t seen among all matching assets */
+    uint8_t resolve_pending;           /* on_resolve fired for the published winner */
+    uint8_t post_resolve_pending;      /* on_post_resolve should fire after the pass */
 } NtResolveTemp;
 ```
 
@@ -1244,20 +1356,20 @@ nt_resource_register(pack_id, resource_id, asset_type, runtime_handle);
 nt_resource_unregister(pack_id, resource_id);
 ```
 
-## 17.8 Asset types
+    ##17.8 Asset types
 
-```c
-typedef enum {
-    NT_ASSET_MESH = 1,
-    NT_ASSET_TEXTURE = 2,
-    NT_ASSET_SHADER_CODE = 3,
-    NT_ASSET_BLOB = 4,        /* generic binary data (game-defined) */
-    NT_ASSET_FONT = 5,        /* font glyph data (Slug format) */
-    NT_ASSET_ATLAS = 6,       /* atlas region metadata (vertices + UVs + origin) */
-} nt_asset_type_t;
+```c typedef enum {
+        NT_ASSET_MESH = 1,
+        NT_ASSET_TEXTURE = 2,
+        NT_ASSET_SHADER_CODE = 3,
+        NT_ASSET_BLOB = 4,  /* generic binary data (game-defined) */
+        NT_ASSET_FONT = 5,  /* font glyph data (Slug format) */
+        NT_ASSET_ATLAS = 6, /* atlas region metadata (vertices + UVs + origin) */
+    } nt_asset_type_t;
 ```
 
-Additional types (material, audio) will be added as needed.
+    Additional
+    types(material, audio) will be added as needed.
 
 ### NT_ASSET_FONT binary format
 
@@ -1395,14 +1507,18 @@ The function automatically requests a slot for the placeholder resource_id if on
 Type-safe wrappers prevent accidental mixing of raw integers with hash values:
 
 ```c
-typedef struct { uint32_t value; } nt_hash32_t;
-typedef struct { uint64_t value; } nt_hash64_t;
+typedef struct {
+    uint32_t value;
+} nt_hash32_t;
+typedef struct {
+    uint64_t value;
+} nt_hash64_t;
 ```
 
-API:
+    API :
 
-```c
-nt_hash32_t nt_hash32(const void *data, uint32_t size);
+```c nt_hash32_t
+    nt_hash32(const void *data, uint32_t size);
 nt_hash64_t nt_hash64(const void *data, uint32_t size);
 
 static inline nt_hash32_t nt_hash32_str(const char *s);
@@ -1441,102 +1557,101 @@ typedef enum {
 } nt_pack_state_t;
 ```
 
-## 18.3 Asset state machine
+    ##18.3 Asset state machine
 
-```c
-typedef enum {
-    NT_ASSET_STATE_REGISTERED = 0, /* meta exists, data not loaded */
-    NT_ASSET_STATE_FAILED,         /* error, permanent, no retry */
-    NT_ASSET_STATE_LOADING,        /* being activated; slot state may also wait for publication */
-    NT_ASSET_STATE_READY,          /* runtime handle valid; for slots this means published winner fully usable */
-} nt_asset_state_t;
+```c typedef enum {
+        NT_ASSET_STATE_REGISTERED = 0, /* meta exists, data not loaded */
+        NT_ASSET_STATE_FAILED,         /* error, permanent, no retry */
+        NT_ASSET_STATE_LOADING,        /* being activated; slot state may also wait for publication */
+        NT_ASSET_STATE_READY,          /* runtime handle valid; for slots this means published winner fully usable */
+    } nt_asset_state_t;
 ```
 
-## 18.4 Pack loading flow
+    ##18.4 Pack loading flow
 
-```text
-game code: pack_request_load("world.pak")
+```text game code : pack_request_load("world.pak")
   → PackMeta.state = REQUESTED
   → platform_web calls fetch() via JS bridge
 
-... N frames pass ...
+                      ... N frames pass...
 
-JS callback → WASM: platform_on_fetch_complete(request_id, blob_ptr, blob_size, success)
+                      JS callback → WASM : platform_on_fetch_complete(request_id, blob_ptr, blob_size, success)
   → PackMeta.state = LOADED
   → PackMeta.blob = blob_ptr
 
-Next resource_step():
+                     Next resource_step()
+    :
   → sees LOADED pack
-  → parses header/manifest (NTPACK format, direct struct read)
-  → registers AssetMeta entries (state = REGISTERED)
+  → parses header / manifest(NTPACK format, direct struct read)
+  → registers AssetMeta entries(state = REGISTERED)
   → PackMeta.state = READY
 
-Asset activation (eager with rate-limit):
+                      Asset activation(eager with rate - limit)
+    :
   → resource_step() processes up to N assets per frame
-  → reads data from blob by offset/size
+  → reads data from blob by offset / size
   → parses runtime format
   → creates GPU resources / decodes audio
   → AssetState = READY
 
-Resolve/publication:
+                      Resolve
+                      / publication :
   → dirty slots run a resolve pass after activation / mount / unmount / priority change / invalidation
   → simple asset types publish immediately once the target winner is READY
-  → aux-backed asset types run on_resolve to build per-slot user_data before publication
-  → if the highest-priority target winner needs aux data but its blob is missing, the slot keeps the best usable fallback published or reports LOADING and schedules a reload
+  → aux - backed asset types run on_resolve to build per
+                  - slot user_data before publication
+  → if the highest - priority target winner needs aux data but its blob is missing,
+     the slot keeps the best usable fallback published or reports LOADING and schedules a reload
 ```
 
-## 18.5 Loading progress
+         ##18.5 Loading progress
 
-Current `NtPackMeta`:
+         Current `NtPackMeta`:
 
-```c
-typedef struct {
-    uint32_t pack_id;       /* nt_hash32 value */
-    int16_t  priority;      /* higher = wins on conflict */
-    uint8_t  pack_type;     /* NT_PACK_FILE or NT_PACK_VIRTUAL */
-    uint8_t  mounted;       /* 1 if slot occupied */
-    uint16_t mount_seq;     /* monotonic mount order tiebreak */
-    uint8_t  pack_state;    /* nt_pack_state_t */
-    uint8_t  blob_policy;   /* NT_BLOB_KEEP or NT_BLOB_AUTO */
-    const uint8_t *blob;    /* loaded pack bytes, may be NULL after eviction */
-    uint32_t blob_size;     /* original blob size */
-    uint8_t *meta_data;     /* resident metadata copy (survives blob eviction) */
+```c typedef struct {
+    uint32_t pack_id;    /* nt_hash32 value */
+    int16_t priority;    /* higher = wins on conflict */
+    uint8_t pack_type;   /* NT_PACK_FILE or NT_PACK_VIRTUAL */
+    uint8_t mounted;     /* 1 if slot occupied */
+    uint16_t mount_seq;  /* monotonic mount order tiebreak */
+    uint8_t pack_state;  /* nt_pack_state_t */
+    uint8_t blob_policy; /* NT_BLOB_KEEP or NT_BLOB_AUTO */
+    const uint8_t *blob; /* loaded pack bytes, may be NULL after eviction */
+    uint32_t blob_size;  /* original blob size */
+    uint8_t *meta_data;  /* resident metadata copy (survives blob eviction) */
     uint32_t meta_size;
     uint32_t meta_count;
     uint32_t bytes_received; /* async progress */
     uint32_t bytes_total;
     uint32_t io_request_id;
-    uint8_t  io_type;       /* NT_IO_NONE / NT_IO_FS / NT_IO_HTTP */
+    uint8_t io_type;        /* NT_IO_NONE / NT_IO_FS / NT_IO_HTTP */
     uint16_t attempt_count; /* retry state */
     uint32_t retry_delay_ms;
     uint32_t retry_time_ms;
     uint32_t blob_last_access_ms;
     uint32_t blob_ttl_ms;
-    char     load_path[256];
+    char load_path[256];
 } NtPackMeta;
 ```
 
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_ *`, `io_type`,
+    and `load_path` drive both normal retry / backoff and immediate aux - miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction.
 
-## 18.6 JS bridge — fetch contract
+                                                                                                                ##18.6 JS bridge — fetch contract
 
-C exports:
+                                                                                                                    C exports :
 
 ```c
-// Called from C → JS
-void platform_request_fetch(uint32_t request_id, const char* url);
+    // Called from C → JS
+    void
+    platform_request_fetch(uint32_t request_id, const char *url);
 
 // Called from JS → C
 EMSCRIPTEN_KEEPALIVE
-void platform_on_fetch_progress(uint32_t request_id,
-                                 uint32_t received,
-                                 uint32_t total);
+void platform_on_fetch_progress(uint32_t request_id, uint32_t received, uint32_t total);
 
 EMSCRIPTEN_KEEPALIVE
-void platform_on_fetch_complete(uint32_t request_id,
-                                 uint8_t* data,
-                                 uint32_t size,
-                                 uint32_t success);
+void platform_on_fetch_complete(uint32_t request_id, uint8_t *data, uint32_t size, uint32_t success);
 ```
 
 ## 18.7 Asset activation strategy
@@ -1559,7 +1674,7 @@ Peak memory during loading = 2x pack size (JS fetch buffer + WASM heap copy). Fo
 
 ---
 
-# 19. Pack Format (NTPACK)
+# 19. Pack Format(NTPACK)
 
 ## 19.1 Design rationale
 
@@ -1624,34 +1739,33 @@ Optional section after asset data. Contains variable-length entries (NtMetaEntry
 ```c
 NtMetaEntryHeader (20 bytes, packed):
     uint64_t resource_id;  /* which asset */
-    uint64_t kind;         /* hash64 of metadata type name */
-    uint32_t size;         /* payload bytes (max 256) */
-    /* uint8_t data[size] follows immediately */
+uint64_t kind;             /* hash64 of metadata type name */
+uint32_t size;             /* payload bytes (max 256) */
+/* uint8_t data[size] follows immediately */
 ```
 
-Query: `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — returns pointer to resident memory, NULL if absent.
+    Query : `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — returns pointer to resident memory,
+    NULL if absent.
 
-## 19.3 Runtime parsing
+    ##19.3 Runtime parsing
 
 ```c
-// Pseudocode — see nt_resource.c for actual implementation
-void parse_pack(const uint8_t* blob, uint32_t blob_size) {
-    const NtPackHeader* h = (const NtPackHeader*)blob;
+    // Pseudocode — see nt_resource.c for actual implementation
+    void parse_pack(const uint8_t *blob, uint32_t blob_size) {
+    const NtPackHeader *h = (const NtPackHeader *)blob;
 
     NT_ASSERT(h->magic == NT_PACK_MAGIC);
-    NT_ASSERT(h->version == NT_PACK_VERSION);  /* no backwards compat */
+    NT_ASSERT(h->version == NT_PACK_VERSION); /* no backwards compat */
 
-    const NtAssetEntry* entries = (const NtAssetEntry*)(blob + sizeof(NtPackHeader));
+    const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        NtAssetMeta* meta = asset_alloc();
+        NtAssetMeta *meta = asset_alloc();
         meta->resource_id = entries[i].resource_id;
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
         /* Convert per-asset meta_offset from absolute to meta_data-relative */
-        meta->meta_offset = (entries[i].meta_offset != 0)
-            ? entries[i].meta_offset - h->meta_offset
-            : NT_NO_METADATA;
+        meta->meta_offset = (entries[i].meta_offset != 0) ? entries[i].meta_offset - h->meta_offset : NT_NO_METADATA;
     }
 
     /* Copy meta section to resident memory (survives blob eviction) */
@@ -1663,67 +1777,76 @@ void parse_pack(const uint8_t* blob, uint32_t blob_size) {
 }
 ```
 
-## 19.4 Asset data access
+    ##19.4 Asset data access
 
-```c
-const uint8_t* pack_get_asset_data(const PackMeta* pack,
-                                    uint32_t offset,
-                                    uint32_t size)
-{
+```c const uint8_t *
+    pack_get_asset_data(const PackMeta *pack, uint32_t offset, uint32_t size) {
     return pack->blob_data + offset;
 }
 ```
 
-Zero copy. Data is already in WASM heap.
+    Zero copy.Data is already in WASM
+        heap.
 
-## 19.5 Debugging
+    ##19.5 Debugging
 
-Builder includes `pack_dump(filename)` utility command that prints pack contents to console. No external tool needed.
+        Builder includes `pack_dump(filename)` utility command that prints pack contents to console.No external tool needed.
 
-## 19.6 Future: partial loading
+    ##19.6 Future : partial loading
 
-Flat layout allows HTTP Range requests: load first `header_size` bytes to get manifest, then load individual assets by offset/size on demand.
+                    Flat layout allows HTTP Range requests : load first `header_size` bytes to get manifest,
+    then load individual assets by offset / size on demand
+                                                .
 
----
+                                            -- -
 
 # 20. Runtime Formats
 
-## 20.1 General rule
+                                            ##20.1 General rule
 
-Runtime reads only runtime formats. Builder converts from source formats to runtime formats.
+                                            Runtime reads only runtime formats.Builder converts from source formats to runtime formats
+                                                .
 
-Examples:
+                                            Examples :
 
-- source `.glb` → runtime mesh binary
-- source `.png` → runtime texture binary
-- source material description → runtime material binary
-- source `.wav`/`.ogg` → runtime audio binary (OGG Vorbis)
+    -source `.glb` → runtime mesh binary
+        - source `.png` → runtime texture binary - source material description → runtime material binary -
+        source `.wav`/`.ogg` → runtime audio binary(OGG Vorbis)
 
-## 20.2 Runtime format validation
+                          ##20.2 Runtime format validation
 
-Runtime must validate: magic, version, type, sizes/offsets, required vertex/material compatibility. Builder validation is primary. Runtime validation is safety net.
+                      Runtime must validate : magic,
+    version, type, sizes / offsets,
+    required vertex / material compatibility.Builder validation is primary.Runtime validation is safety net.
 
-## 20.3 Mesh format strategy
+                      ##20.3 Mesh format strategy
 
-Runtime mesh format should be: compact, near GPU-ready, not authoring-friendly.
+                      Runtime mesh format should be : compact,
+    near GPU - ready,
+    not authoring - friendly.
 
-Attributes: POSITION (required), NORMAL (optional), UV0 (optional), COLOR0 (optional).
+                    Attributes : POSITION(required),
+    NORMAL(optional), UV0(optional),
+    COLOR0(optional).
 
-Preferred data types: position float16 or float32, normals snorm8 packed, uv unorm16, colors uint8 normalized. Avoid runtime unpacking.
+        Preferred data types : position float16
+        or float32,
+    normals snorm8 packed, uv unorm16,
+    colors uint8 normalized.Avoid runtime unpacking.
 
----
+        -- -
 
 # 21. Input System
 
-## 21.1 Model
+        ##21.1 Model
 
-Input system is polling-based. Game queries state each frame, does not subscribe to callbacks.
+        Input system is polling
+        - based.Game queries state each frame,
+    does not subscribe to callbacks.
 
-## 21.2 Pointer state
+    ##21.2 Pointer state
 
-```c
-typedef struct InputPointer
-{
+```c typedef struct InputPointer {
     bool active;
     bool down;
     bool pressed;
@@ -1740,100 +1863,110 @@ typedef struct InputPointer
 } InputPointer;
 ```
 
-Mouse and touch unify under pointer model.
+    Mouse and touch unify under pointer model
+        .
 
-## 21.3 Input capture
+    ##21.3 Input capture
 
-Capture is stored centrally in input system.
+        Capture is stored centrally in input system.
 
-```c
-bool input_try_capture(int pointer, uint32_t owner);
+```c bool
+        input_try_capture(int pointer, uint32_t owner);
 void input_release_capture(int pointer, uint32_t owner);
 bool input_is_owner(int pointer, uint32_t owner);
 bool input_pointer_captured(int pointer);
 ```
 
-Raw input always exists; capture only affects processing ownership.
+    Raw input always exists;
+capture only affects processing ownership.
 
-Capture owner: not necessarily entity id, generic `uint32_t owner_id` chosen by game/systems. Auto-release on pointer release.
+    Capture owner : not necessarily entity id,
+    generic `uint32_t owner_id` chosen by game / systems.Auto - release on pointer release.
 
----
+                                                                -- -
 
 # 22. Audio System
 
-## 22.1 Architecture overview
+                                                                ##22.1 Architecture overview
 
-Audio is an **engine module**, analogous to input and platform. Not an ECS component, not game-side code.
+                                                                    Audio is an **engine module **,
+    analogous to input and platform.Not an ECS component,
+    not game -
+        side code.
 
-```text
-engine/
-    audio/
-        audio.h           // public API — single for all platforms
-        audio_types.h     // handles, enums, defines
-        audio_web.c       // Web Audio API via JS bridge
-        audio_desktop.c   // miniaudio or custom mixer (future)
+```text engine / audio /
+            audio
+                .h // public API — single for all platforms
+                    audio_types
+                .h // handles, enums, defines
+                    audio_web
+                .c // Web Audio API via JS bridge
+                    audio_desktop
+                .c // miniaudio or custom mixer (future)
 ```
 
-Build system compiles only one implementation file per platform.
+            Build system compiles only one implementation file per platform.
 
-## 22.2 Platform-agnostic design
+            ##22.2 Platform -
+        agnostic design
 
-**Public API contains zero platform-specific types.** Only handles, floats, and bools. Game code is identical across web and desktop.
+            * *Public API contains zero platform -
+        specific types.**Only handles,
+    floats,
+    and bools.Game code is identical across web and desktop.
 
-Key contracts:
+        Key contracts :
 
-- `audio_clip_create` is always potentially async (desktop may complete instantly, but game code does not rely on this)
-- `audio_try_resume()` exists on all platforms (no-op on desktop)
-- Audio format in packs is OGG Vorbis — both platforms can decode it
-- Internal structures are different per-platform, hidden from game code
+    - `audio_clip_create` is always potentially
+    async(desktop may complete instantly, but game code does not rely on this) - `audio_try_resume()` exists on all platforms(no - op on desktop) -
+        Audio format in packs is OGG Vorbis — both platforms can decode it - Internal structures are different per - platform,
+    hidden from game code
 
-## 22.3 Audio state
+    ##22.3 Audio state
 
-```c
-typedef enum AudioState
-{
-    AUDIO_SUSPENDED,    // before first user gesture (web) or init failure
-    AUDIO_RUNNING,      // ready to play
-    AUDIO_FAILED        // AudioContext/backend creation failed
-} AudioState;
+```c typedef enum AudioState {
+        AUDIO_SUSPENDED, // before first user gesture (web) or init failure
+        AUDIO_RUNNING,   // ready to play
+        AUDIO_FAILED     // AudioContext/backend creation failed
+    } AudioState;
 ```
 
-All `audio_play` calls in SUSPENDED state return `AUDIO_VOICE_INVALID` without error. Game code continues normally.
+    All `audio_play` calls in SUSPENDED state return `AUDIO_VOICE_INVALID` without error.Game code continues normally.
 
-## 22.4 Audio clips
+    ##22.4 Audio clips
 
-```c
-typedef struct AudioClipHandle { uint16_t index; } AudioClipHandle;
-#define AUDIO_CLIP_INVALID ((AudioClipHandle){ 0xFFFF })
+```c typedef struct AudioClipHandle {
+    uint16_t index;
+} AudioClipHandle;
+#define AUDIO_CLIP_INVALID ((AudioClipHandle){0xFFFF})
 
-typedef enum AudioClipState
-{
+typedef enum AudioClipState {
     AUDIO_CLIP_NONE,
-    AUDIO_CLIP_DECODING,   // decodeAudioData in progress (web) or decoding (desktop)
+    AUDIO_CLIP_DECODING, // decodeAudioData in progress (web) or decoding (desktop)
     AUDIO_CLIP_READY,
     AUDIO_CLIP_FAILED
 } AudioClipState;
 ```
 
-Internal storage (web):
+    Internal
+    storage(web)
+    :
 
-```c
-typedef struct AudioClipInternal
-{
+```c typedef struct AudioClipInternal {
     AudioClipState state;
-    uint32_t js_buffer_id;    // index into JS-side AudioBuffer array
+    uint32_t js_buffer_id; // index into JS-side AudioBuffer array
     float duration;
     uint16_t generation;
 } AudioClipInternal;
 ```
 
-Internal storage (desktop):
+    Internal
+    storage(desktop)
+    :
 
-```c
-typedef struct AudioClipInternal
-{
+```c typedef struct AudioClipInternal {
     AudioClipState state;
-    int16_t* pcm_data;        // decoded samples in C heap
+    int16_t *pcm_data; // decoded samples in C heap
     uint32_t sample_count;
     uint32_t sample_rate;
     uint8_t channels;
@@ -1842,27 +1975,26 @@ typedef struct AudioClipInternal
 } AudioClipInternal;
 ```
 
-## 22.5 Audio voices
+    ##22.5 Audio voices
 
-```c
-typedef struct AudioVoiceHandle { uint16_t index; } AudioVoiceHandle;
-#define AUDIO_VOICE_INVALID ((AudioVoiceHandle){ 0xFFFF })
+```c typedef struct AudioVoiceHandle {
+    uint16_t index;
+} AudioVoiceHandle;
+#define AUDIO_VOICE_INVALID ((AudioVoiceHandle){0xFFFF})
 
-typedef enum AudioVoiceState
-{
-    VOICE_FREE,
-    VOICE_PLAYING,
-    VOICE_STOPPING
-} AudioVoiceState;
+typedef enum AudioVoiceState { VOICE_FREE, VOICE_PLAYING, VOICE_STOPPING } AudioVoiceState;
 ```
 
-Voice pool with eviction: when all 32 voices are occupied, evict the oldest non-looping voice. If all voices are looping, do not play the new sound.
+    Voice pool with eviction : when all 32 voices are occupied,
+                               evict the oldest non - looping voice.If all voices are looping,
+                               do not play the new sound.
 
-## 22.6 Public API
+                               ##22.6 Public API
 
 ```c
-// === Lifecycle ===
-void audio_init(void);
+                               // === Lifecycle ===
+                               void
+                               audio_init(void);
 void audio_shutdown(void);
 void audio_update(void);
 AudioState audio_get_state(void);
@@ -1871,7 +2003,7 @@ AudioState audio_get_state(void);
 void audio_try_resume(void);
 
 // === Clips ===
-AudioClipHandle audio_clip_create(const uint8_t* encoded_data, uint32_t size);
+AudioClipHandle audio_clip_create(const uint8_t *encoded_data, uint32_t size);
 void audio_clip_destroy(AudioClipHandle clip);
 AudioClipState audio_clip_get_state(AudioClipHandle clip);
 float audio_clip_get_duration(AudioClipHandle clip);
@@ -1891,29 +2023,26 @@ void audio_set_master_volume(float volume);
 float audio_get_master_volume(void);
 ```
 
-## 22.7 JS bridge contract (web implementation)
+    ##22.7 JS bridge
+    contract(web implementation)
 
-C calls to JS:
+        C calls to JS :
 
-```c
-extern void js_audio_init(void);
+```c extern void js_audio_init(void);
 extern void js_audio_shutdown(void);
 extern void js_audio_resume(void);
-extern uint32_t js_audio_decode(uint16_t clip_index, const uint8_t* data, uint32_t size);
-extern uint32_t js_audio_play(uint32_t js_buffer_id, float volume, float pitch,
-                               bool loop, uint16_t voice_index);
+extern uint32_t js_audio_decode(uint16_t clip_index, const uint8_t *data, uint32_t size);
+extern uint32_t js_audio_play(uint32_t js_buffer_id, float volume, float pitch, bool loop, uint16_t voice_index);
 extern void js_audio_stop(uint32_t js_source_id);
 extern void js_audio_set_volume(uint32_t js_source_id, float volume);
 extern void js_audio_set_pitch(uint32_t js_source_id, float pitch);
 extern void js_audio_set_master_volume(float volume);
 ```
 
-JS calls to C:
+    JS calls to C :
 
-```c
-EMSCRIPTEN_KEEPALIVE
-void audio_on_clip_decoded(uint16_t clip_index, uint32_t js_buffer_id,
-                            float duration, uint32_t success);
+```c EMSCRIPTEN_KEEPALIVE void
+    audio_on_clip_decoded(uint16_t clip_index, uint32_t js_buffer_id, float duration, uint32_t success);
 
 EMSCRIPTEN_KEEPALIVE
 void audio_on_voice_ended(uint16_t voice_index);
@@ -1922,13 +2051,11 @@ EMSCRIPTEN_KEEPALIVE
 void audio_on_state_changed(uint32_t running);
 ```
 
-## 22.8 Integration with frame loop
+    ##22.8 Integration with frame loop
 
-In `input_begin_frame` or `platform_step`:
+        In `input_begin_frame` or `platform_step`:
 
-```c
-if (audio_get_state() == AUDIO_SUSPENDED && any_pointer_pressed)
-{
+```c if (audio_get_state() == AUDIO_SUSPENDED && any_pointer_pressed) {
     audio_try_resume();
 }
 ```
@@ -1986,51 +2113,44 @@ add_audio("assets/music/*.ogg");
 finish_pack();
 ```
 
-## 23.2 Why code-based builder
+    ##23.2 Why code -
+    based builder
 
-Explicit control, no DSL needed, powerful grouping logic, easy custom per-project rules, aligns with engine philosophy.
+        Explicit control,
+    no DSL needed, powerful grouping logic, easy custom per - project rules,
+    aligns with engine philosophy.
 
-## 23.3 Builder module layers
+        ##23.3 Builder module layers
 
-```text
-builder/
-    main_builder.c
-    builder_pack.c
-    builder_manifest.c
-    builder_import_mesh.c
-    builder_import_texture.c
-    builder_import_shader.c
-    builder_import_material.c
-    builder_import_audio.c
-    builder_project.c
+```text builder /
+        main_builder.c builder_pack.c builder_manifest.c builder_import_mesh.c builder_import_texture.c builder_import_shader.c builder_import_material.c builder_import_audio.c builder_project.c
 ```
 
-## 23.4 Core builder API
+        ##23.4 Core builder API
 
-```c
-start_pack(const char* name);
+```c start_pack(const char *name);
 finish_pack(void);
 
-add_mesh(const char* path);
-add_texture(const char* path);
-add_shader(const char* path);
-add_material(const char* path);
-add_audio(const char* path);
-add_font(const char* path);
+add_mesh(const char *path);
+add_texture(const char *path);
+add_shader(const char *path);
+add_material(const char *path);
+add_audio(const char *path);
+add_font(const char *path);
 
-add_meshes(const char* pattern);
-add_textures(const char* pattern);
-add_shaders(const char* pattern);
-add_materials(const char* pattern);
-add_audios(const char* pattern);
-add_fonts(const char* pattern);
+add_meshes(const char *pattern);
+add_textures(const char *pattern);
+add_shaders(const char *pattern);
+add_materials(const char *pattern);
+add_audios(const char *pattern);
+add_fonts(const char *pattern);
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
  * Per-sprite opts carry the name override and the pivot point (NULL = defaults). */
-begin_atlas(const char* name, const nt_atlas_opts_t* opts);
-atlas_add(const char* path, const nt_atlas_sprite_opts_t* opts);
-atlas_add_raw(const uint8_t* rgba, uint32_t w, uint32_t h, const nt_atlas_sprite_opts_t* opts);
-atlas_add_glob(const char* pattern, const nt_atlas_sprite_opts_t* opts);
+begin_atlas(const char *name, const nt_atlas_opts_t *opts);
+atlas_add(const char *path, const nt_atlas_sprite_opts_t *opts);
+atlas_add_raw(const uint8_t *rgba, uint32_t w, uint32_t h, const nt_atlas_sprite_opts_t *opts);
+atlas_add_glob(const char *pattern, const nt_atlas_sprite_opts_t *opts);
 end_atlas(void);
 ```
 
@@ -2056,14 +2176,16 @@ Builder must check: references between assets, resource types, mesh/material/sha
 
 ```c
 /* Auto-generated by nt_builder -- do not edit */
-#define ASSET_MESH_MESHES_CUBE_GLB   ((nt_hash64_t){0x...ULL}) /* meshes/cube.glb */
+#define ASSET_MESH_MESHES_CUBE_GLB ((nt_hash64_t){0x...ULL})     /* meshes/cube.glb */
 #define ASSET_SHADER_SHADERS_MESH_VERT ((nt_hash64_t){0x...ULL}) /* shaders/mesh.vert */
 ```
 
 Rules:
 - Constants are typed compound literals `((nt_hash64_t){...})` -- work with `nt_resource_request` without casts.
 - Hash values match `nt_hash64_str(normalized_path)` at runtime. The header is the single source of truth.
-- Identifier format: `ASSET_{TYPE}_{PATH}` where path includes file extension (`.vert`, `.frag`, `.glb` etc.) to avoid collisions between same-stem files. Slashes, dots, dashes become underscores, uppercased.
+- Identifier format: `ASSET_{TYPE}_{
+    PATH
+}` where path includes file extension (`.vert`, `.frag`, `.glb` etc.) to avoid collisions between same-stem files. Slashes, dots, dashes become underscores, uppercased.
 - Entries sorted alphabetically within each type group (MESH, TEXTURE, SHADER, BLOB) for deterministic, diffable output.
 - `register_labels()` function under `#if NT_HASH_LABELS` registers all paths for debug hash lookup.
 - Identifier collisions (two assets producing the same `#define` name) are a fatal builder error.
@@ -2078,7 +2200,7 @@ nt_builder_set_header_dir(ctx, "examples/myproject/generated");
 nt_builder_finish_pack(ctx);
 
 /* After all packs: merge into one combined header */
-const char *headers[] = { "generated/core.h", "generated/textures.h" };
+const char *headers[] = {"generated/core.h", "generated/textures.h"};
 nt_builder_merge_headers(headers, 2, "generated/assets.h");
 ```
 
@@ -2137,14 +2259,15 @@ nt_builder_atlas_add_glob(ctx, "assets/sprites/hero/idle_*.png", NULL);
 
 /* Walk cycle: override the pivot to bottom-centre for every matched frame. */
 nt_atlas_sprite_opts_t walk = nt_atlas_sprite_opts_defaults();
-walk.origin_y = 1.0F;  /* feet at bottom edge */
+walk.origin_y = 1.0F; /* feet at bottom edge */
 nt_builder_atlas_add_glob(ctx, "assets/sprites/hero/walk_*.png", &walk);
 
 /* Single sprite with a custom name override. */
 nt_builder_atlas_add(ctx, "assets/sprites/hero/portrait.png",
                      &(nt_atlas_sprite_opts_t){
                          .name = "hero_portrait",
-                         .origin_x = 0.5F, .origin_y = 0.5F,
+                         .origin_x = 0.5F,
+                         .origin_y = 0.5F,
                      });
 
 nt_builder_end_atlas(ctx);
@@ -2157,8 +2280,8 @@ nt_builder_end_atlas(ctx);
 `end_atlas` runs ten stages in order:
 
 1. **alpha_trim** — extract alpha plane, find tight bbox per sprite (rejects fully transparent inputs).
-2. **cache_check** — compute atlas-level cache key (per-sprite hashes + origins in add-order + pack-affecting opts + version), try loading cached placement+pages. Key is order-sensitive because cached placements reference sprites by add-order index. Post-pack fields (format, premultiplied, compress, debug_png) are excluded — they only affect the texture encode stage, which has its own cache.
-3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
+2. **cache_check** — compute atlas-level cache key (per-sprite hashes + origins in add-order + pack-affecting opts + version), try loading cached placement+pages. Key is order-sensitive because cached placements reference sprites by add-order index. Post-pack fields (format, premultiplied, compress, debug_png)
+are excluded — they only affect the texture encode stage, which has its own cache.3. * *dedup ** — hash + byte - level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
 4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
 5. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
 6. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
@@ -2174,42 +2297,47 @@ Stages 5–8 are skipped on cache hit; serialize/register always run.
 The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each candidate position the incoming polygon is tested against the union of No-Fit Polygons of all already-placed sprites. Properties:
 
 - **Sub-pixel exact** — no quantization to a tile grid.
-- **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
-- **8 D4 orientations** — flipH, flipV, diagonal flip and combinations. Identity-equivalent orientations are deduplicated.
-- **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
-- **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
-- **Page growth** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
+- **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs;
+rings are forbidden zones.- **8 D4 orientations ** — flipH, flipV,
+    diagonal flip and combinations.Identity - equivalent orientations are deduplicated.- **NFP cache ** — 8 - way set -
+        associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`.Lock - free reads via version counter,
+    CAS writes.Same shape pair across different sprites reuses the cached NFP.- **Parallel build ** — when `nt_builder_set_threads(ctx, N)` is called,
+    NFP construction and candidate scanning run on a thread pool.Per - thread stat accumulators merge into global stats deterministically.-
+        **Page growth ** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
 
-### 23.11.3 Atlas options
+         ## #23.11.3 Atlas options
 
 ```c
-/* Silhouette mode for atlas packing. Ordered by cost and density. */
-typedef enum {
-    NT_ATLAS_SHAPE_RECT = 0,             /* AABB trim rect — fastest, worst pack density */
-    NT_ATLAS_SHAPE_CONVEX_HULL = 1,      /* convex hull of opaque pixels — no contour trace */
-    NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2,  /* concave contour + multi-strategy — densest, slowest */
-} nt_atlas_shape_t;
+         /* Silhouette mode for atlas packing. Ordered by cost and density. */
+         typedef enum {
+             NT_ATLAS_SHAPE_RECT = 0,            /* AABB trim rect — fastest, worst pack density */
+             NT_ATLAS_SHAPE_CONVEX_HULL = 1,     /* convex hull of opaque pixels — no contour trace */
+             NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2, /* concave contour + multi-strategy — densest, slowest */
+         } nt_atlas_shape_t;
 
 typedef struct {
-    const nt_tex_compress_opts_t *compress;  /* NULL = raw RGBA */
-    nt_texture_pixel_format_t format;        /* RGBA8 default */
-    uint32_t max_size;       /* max atlas page dimension (default 2048) */
-    uint32_t padding;        /* extra spacing between sprites after extrude (default 2) */
-    uint32_t margin;         /* atlas edge margin (default 0) */
-    uint32_t extrude;        /* AABB edge pixel duplication count (default 0; must be 0 unless shape == NT_ATLAS_SHAPE_RECT) */
-    uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
-    uint8_t max_vertices;    /* max polygon vertices per region (default 8, hard cap 16) */
-    nt_atlas_shape_t shape;  /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
-    bool allow_transform;    /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
-    bool power_of_two;       /* round atlas dims to POT (default true) */
-    bool debug_png;          /* write debug atlas page PNGs (default false) */
-    bool premultiplied;      /* premultiply RGB by alpha during texture encode (default true) */
+    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA */
+    nt_texture_pixel_format_t format;       /* RGBA8 default */
+    uint32_t max_size;                      /* max atlas page dimension (default 2048) */
+    uint32_t padding;                       /* extra spacing between sprites after extrude (default 2) */
+    uint32_t margin;                        /* atlas edge margin (default 0) */
+    uint32_t extrude;                       /* AABB edge pixel duplication count (default 0; must be 0 unless shape == NT_ATLAS_SHAPE_RECT) */
+    uint8_t alpha_threshold;                /* alpha >= threshold = opaque (default 1) */
+    uint8_t max_vertices;                   /* max polygon vertices per region (default 8, hard cap 16) */
+    nt_atlas_shape_t shape;                 /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
+    bool allow_transform;                   /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
+    bool power_of_two;                      /* round atlas dims to POT (default true) */
+    bool debug_png;                         /* write debug atlas page PNGs (default false) */
+    bool premultiplied;                     /* premultiply RGB by alpha during texture encode (default true) */
 } nt_atlas_opts_t;
 ```
 
-**Silhouette modes (`nt_atlas_shape_t`):**
+        **Silhouette modes(`nt_atlas_shape_t`)
+    : **
 
-- `NT_ATLAS_SHAPE_RECT` — 4-vertex AABB of the trim rect. No contour tracing, no hull, no RDP. Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
+      - `NT_ATLAS_SHAPE_RECT` — 4 -
+      vertex AABB of the trim rect.No contour tracing,
+no hull, no RDP.Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
 - `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified to `max_vertices`. Skips morphological closing, contour tracing, RDP, and the 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
 - `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs RDP plus a multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull), Clipper2-inflates the chosen polygon, and post-verifies pixel coverage. Internally falls back to `binary_build_convex_polygon` for degenerate inputs (disjoint components that morphological closing cannot merge, degenerate contours, Clipper2 inflate failure). Densest packing, highest cost.
 
@@ -2226,18 +2354,18 @@ Each `atlas_add` / `atlas_add_raw` / `atlas_add_glob` call accepts an optional `
 
 ```c
 typedef struct {
-    const char *name;        /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
-    float origin_x;          /* pivot X, normalized over source_w (default 0.5) */
-    float origin_y;          /* pivot Y, normalized over source_h (default 0.5) */
-    uint16_t slice9_left;    /* slice9 borders in source pixels (0 = no slice9) */
+    const char *name;     /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
+    float origin_x;       /* pivot X, normalized over source_w (default 0.5) */
+    float origin_y;       /* pivot Y, normalized over source_h (default 0.5) */
+    uint16_t slice9_left; /* slice9 borders in source pixels (0 = no slice9) */
     uint16_t slice9_right;
     uint16_t slice9_top;
     uint16_t slice9_bottom;
-    uint8_t shape;           /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
-    uint8_t allow_rotate;    /* 0 = atlas default, 1 = NO */
-    uint8_t max_vertices;    /* 0 = atlas default, max 16 */
-    uint8_t margin;          /* 0 = atlas default, per-sprite packing margin */
-    uint8_t extrude;         /* 0 = atlas default, requires shape = RECT */
+    uint8_t shape;        /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
+    uint8_t allow_rotate; /* 0 = atlas default, 1 = NO */
+    uint8_t max_vertices; /* 0 = atlas default, max 16 */
+    uint8_t margin;       /* 0 = atlas default, per-sprite packing margin */
+    uint8_t extrude;      /* 0 = atlas default, requires shape = RECT */
 } nt_atlas_sprite_opts_t;
 ```
 
@@ -2256,7 +2384,11 @@ typedef struct {
 
 Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y + slice9_lrtb + shape + allow_rotate + max_vertices + margin + extrude) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Per-sprite overrides (slice9 borders, shape, allow_rotate, max_vertices, margin, extrude) are included because they affect packing geometry and tile placement. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y + slice9_lrtb + shape + allow_rotate + max_vertices + margin + extrude) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Per-sprite overrides (slice9 borders, shape, allow_rotate, max_vertices, margin, extrude)
+are included because they affect packing geometry and tile placement.Only pack / compose -
+    affecting opts are included(max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape);
+post - pack fields(format, premultiplied, compress, debug_png)
+are excluded — those affect the texture encode stage which has its own cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache hit, containing the placement table and the composed page pixels. On hit, the pipeline skips pack/compose/debug_png/cache_write entirely.
 
@@ -2308,7 +2440,7 @@ Recommended stats: frame time, fixed step count, draw call count, batch count, l
 
 ---
 
-# 25. Engine/Game Boundary
+# 25. Engine / Game Boundary
 
 This is one of the most important decisions.
 
@@ -2435,7 +2567,7 @@ These decisions are **locked** unless a strong reason appears:
 
 ---
 
-# 29. Open but Non-Critical Future Questions
+# 29. Open but Non - Critical Future Questions
 
 These do not block implementation:
 

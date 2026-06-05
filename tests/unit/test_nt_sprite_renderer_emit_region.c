@@ -15,6 +15,7 @@
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
+#include "math/nt_math.h"
 #include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
@@ -509,7 +510,8 @@ static void test_slice9_basic(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 4, 0xFFFFFFFFU, 0U, 0.0F);
+    const uint16_t b4[4] = {4, 4, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NT_MATH_MAT4_IDENTITY);
 
     TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_slice9_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_slice9_index_count());
@@ -529,7 +531,8 @@ static void test_slice9_positions(void) {
     nt_sprite_renderer_set_material(mat);
 
     /* Target: (0,0,100,80), borders: (4,4,4,4) */
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 4, 0xFFFFFFFFU, 0U, 0.0F);
+    const uint16_t b4[4] = {4, 4, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NT_MATH_MAT4_IDENTITY);
 
     /* Expected x splits: [0, 4, 96, 100] */
     /* Expected y splits: [0, 4, 76, 80]  */
@@ -579,7 +582,8 @@ static void test_slice9_flip_x(void) {
     nt_sprite_renderer_set_material(mat);
 
     /* Asymmetric borders: L=4, R=8 to detect swap */
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 8, 4, 4, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, 0.0F);
+    const uint16_t b_flipx[4] = {4, 8, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b_flipx, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, NT_MATH_MAT4_IDENTITY);
 
     /* With FLIP_X: fl=8, fr=4, so position splits become [0, 8, 96, 100] */
     float pos[3];
@@ -618,7 +622,8 @@ static void test_slice9_flip_y(void) {
     nt_sprite_renderer_set_material(mat);
 
     /* Asymmetric: T=4, B=8 */
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 8, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, 0.0F);
+    const uint16_t b_flipy[4] = {4, 4, 4, 8};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b_flipy, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, NT_MATH_MAT4_IDENTITY);
 
     /* FLIP_Y: ft=8, fb=4 -> y splits = [0, 4, 72, 80] */
     float pos[3];
@@ -657,8 +662,84 @@ static void test_slice9_tombstone_noop(void) {
 
     /* Emit a normal slice9 — should work and advance vertex_count by 16. */
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 50.0F, 50.0F, 2, 2, 2, 2, 0xFFFFFFFFU, 0U, 0.0F);
+    const uint16_t b2[4] = {2, 2, 2, 2};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 50.0F, 50.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NT_MATH_MAT4_IDENTITY);
     TEST_ASSERT_EQUAL_UINT32(vc_before + 16U, nt_sprite_renderer_test_vertex_count());
+
+    nt_sprite_renderer_flush();
+}
+
+/* Pins m[12]/m[13] translation handling — every grid vertex shifted (+50, +30). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_slice9_mat4_translation(void) {
+    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
+
+    nt_resource_t atlas = register_slice9_atlas(0xC7ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    float m[16];
+    glm_mat4_identity((vec4 *)m);
+    m[12] = 50.0F;
+    m[13] = 30.0F;
+
+    const uint16_t b4[4] = {4, 4, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, m);
+
+    /* Vertex 0 (bbox top-left in layout) = (0, 0) → (50, 30). */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0, pos);
+    TEST_ASSERT_TRUE(pos[0] == 50.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 30.0F); /* NOLINT */
+    /* Vertex 15 (bbox bottom-right) = (100, 80) → (150, 110). */
+    nt_sprite_renderer_test_last_emit_position(15, pos);
+    TEST_ASSERT_TRUE(pos[0] == 150.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 110.0F); /* NOLINT */
+
+    nt_sprite_renderer_flush();
+}
+
+/* 90° rotation around Z (column-major). Catches m[1]↔m[4] swap (row-major confusion). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_slice9_mat4_rotation_90(void) {
+    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
+
+    nt_resource_t atlas = register_slice9_atlas(0xC8ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    /* col 0 = [0, 1, 0, 0], col 1 = [-1, 0, 0, 0]:
+     * v.x = m[0]·px + m[4]·py + m[12] =  0·px + -1·py = -py
+     * v.y = m[1]·px + m[5]·py + m[13] =  1·px +  0·py =  px */
+    float m[16];
+    glm_mat4_identity((vec4 *)m);
+    m[0] = 0.0F;
+    m[1] = 1.0F;
+    m[4] = -1.0F;
+    m[5] = 0.0F;
+
+    const uint16_t b4[4] = {4, 4, 4, 4};
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, m);
+
+    float pos[3];
+    /* Vertex 0 = layout (0, 0) → (0, 0). */
+    nt_sprite_renderer_test_last_emit_position(0, pos);
+    TEST_ASSERT_TRUE(pos[0] == 0.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 0.0F); /* NOLINT */
+    /* Vertex 3 = layout (100, 0) → (-0, 100). */
+    nt_sprite_renderer_test_last_emit_position(3, pos);
+    TEST_ASSERT_TRUE(pos[0] == 0.0F);   /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 100.0F); /* NOLINT */
+    /* Vertex 12 = layout (0, 80) → (-80, 0). */
+    nt_sprite_renderer_test_last_emit_position(12, pos);
+    TEST_ASSERT_TRUE(pos[0] == -80.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 0.0F);   /* NOLINT */
+    /* Vertex 15 = layout (100, 80) → (-80, 100). */
+    nt_sprite_renderer_test_last_emit_position(15, pos);
+    TEST_ASSERT_TRUE(pos[0] == -80.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(pos[1] == 100.0F); /* NOLINT */
 
     nt_sprite_renderer_flush();
 }
@@ -676,5 +757,7 @@ int main(void) {
     RUN_TEST(test_slice9_flip_x);
     RUN_TEST(test_slice9_flip_y);
     RUN_TEST(test_slice9_tombstone_noop);
+    RUN_TEST(test_slice9_mat4_translation);
+    RUN_TEST(test_slice9_mat4_rotation_90);
     return UNITY_END();
 }

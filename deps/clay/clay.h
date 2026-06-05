@@ -3,12 +3,11 @@
 // NT PATCHES (reapply after Clay update):
 //   1. nt_layout_index in Clay_RenderCommand + nt_current_layout_index
 //      in Clay_Context. Stores source layout element index on every render
-//      command. Set in Clay__AddRenderCommand from context state, updated
-//      in DFS traversal. Used by nt_ui side-channel transform markers.
-//      Search "nt_" for all patch sites (4 total).
-// NT DEPENDENCY: nt_ui_panel.c uses Clay__OpenElement / Clay__CloseElement /
-//   Clay__ConfigureOpenElement directly for begin/end split pattern.
-//   Verify these internal APIs still exist after Clay update.
+//      command. Used by nt_ui's build_tree pass to map each render command
+//      back to its source element. Search "nt_" for patch sites (4 total).
+// NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
+//   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
+//   pattern used by nt_ui widgets. Verify these internals still exist on update.
 
 /*
     NOTE: In order to use this library you must define

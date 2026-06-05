@@ -13,7 +13,12 @@ include(cmake/nt_shell.cmake)
 
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
-set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug→2, release→0).")
+
+# Inspector + hit-zone overlay; OFF strips ~30 KB binary and ~9 KB ctx state.
+# The 0/1 define is attached PUBLIC to the nt_ui target inside engine/ui/CMakeLists.txt
+# so external consumers see the same value via target_link_libraries.
+option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
+set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap; OFF only via explicit override for final production).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()
@@ -113,6 +118,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/bunnymark)
     add_subdirectory(examples/ui_theme_demo)
     add_subdirectory(examples/slice9_demo)
+    add_subdirectory(examples/ui_buttons_demo)
+    add_subdirectory(examples/ui_3d_demo)
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)

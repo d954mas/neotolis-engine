@@ -17,6 +17,9 @@ if [ ! -f "$BUILD_DIR/compile_commands.json" ]; then
 fi
 
 # Find all engine .c source files (exclude vendored deps/ and web-only files).
+# Conditionally-gated TUs (e.g. NT_UI_DEBUG_TOOLS) are compiled unconditionally
+# with `#if` guards in the body, so compile_commands.json covers every .c
+# regardless of build options — no source-list filtering needed here.
 SOURCES=$(find engine shared tools examples tests \
     -name '*.c' | grep -v 'deps/\|/web/\|_web\.c\|tools/research/')
 

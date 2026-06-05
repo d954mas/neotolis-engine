@@ -31,10 +31,17 @@ set(_clay_major "${CMAKE_MATCH_1}")
 set(_clay_minor "${CMAKE_MATCH_2}")
 
 # --- Module declaration ---
-nt_add_module(nt_ui LOG_DOMAIN "ui"
+# All sources unconditional. Inspector + hit-zone .c are guarded internally
+# by `#if NT_UI_DEBUG_TOOLS` and compile to empty TUs when the option is off
+# — keeps compile_commands.json complete so clang-tidy lints both configs.
+# nt_ui_clay_impl.c owns CLAY_IMPLEMENTATION + every consumer of Clay
+# private types — see file header.
+set(NT_UI_SOURCES
     nt_ui.c
     nt_ui.h
     nt_ui_internal.h
+    nt_ui_clay_impl.c
+    nt_ui_clay_impl.h
     nt_ui_label.c
     nt_ui_label.h
     nt_ui_scale.c
@@ -45,7 +52,25 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui_image.h
     nt_ui_panel.c
     nt_ui_panel.h
+    nt_ui_anim.c
+    nt_ui_anim.h
+    nt_ui_button.c
+    nt_ui_button.h
+    nt_ui_debug_hit_zones.c
+    nt_ui_debug_hit_zones.h
+    nt_ui_inspector.c
+    nt_ui_inspector.h
 )
+
+nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
+
+# Propagate to consumers via target_link_libraries — public headers use
+# #if NT_UI_DEBUG_TOOLS. Always defined 0/1 to be -Wundef-safe.
+if(NT_UI_DEBUG_TOOLS)
+    target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=1)
+else()
+    target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=0)
+endif()
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
 # public surface: nt_ui wraps lifecycle (context, walker, themes) but
@@ -86,6 +111,7 @@ target_link_libraries(nt_ui
         nt_text_renderer
         nt_atlas
         nt_time
+        nt_math
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.

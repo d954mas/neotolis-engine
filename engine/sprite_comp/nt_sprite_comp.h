@@ -45,14 +45,10 @@ bool nt_sprite_comp_is_resolved(nt_entity_t entity);
 
 /* ---- Region binding ---- */
 
-/* Strict fast path: atlas must already be READY. Resolves immediately and sets
- * RESOLVED. Does NOT raise s_sync_dirty — there is nothing to sync. If the
- * atlas later republishes, the next sync_resources() catches it via the cached
- * atlas_revision gate inside resolve_dense, so callers do not need to re-bind. */
+/* Atlas must be READY; resolves immediately. */
 void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t region_index);
 
-/* Async-friendly path: stores atlas + region hash, then resolves explicitly in
- * nt_sprite_comp_sync_resources(). */
+/* Stores atlas + hash; resolves on next sync_resources(). */
 void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash);
 
 /* ---- Origin override ---- */
@@ -60,41 +56,34 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
 void nt_sprite_comp_set_origin(nt_entity_t entity, float origin_x, float origin_y);
 void nt_sprite_comp_reset_origin(nt_entity_t entity);
 
-/* ---- Slice9 override (mirrors origin override pattern) ---- */
+/* ---- Slice9 override ---- */
 
-/* Per-entity slice9 override. Passing all zeros clears the override to atlas default. */
+/* Sets override (sets SLICE9_OV flag). Zeros are a valid override — render
+ * as plain stretched quad without slice9 cells. Use reset_slice9 to clear. */
 void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b);
 void nt_sprite_comp_reset_slice9(nt_entity_t entity);
 
-/* Read back current effective slice9 (override if set, else zero).
- * Returns pointer to 4-element uint16 [l,r,t,b] in SoA storage. */
 const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity);
 bool nt_sprite_comp_has_slice9_override(nt_entity_t entity);
+
+/* Multiplies borders at render. Asserts isfinite(scale) && scale > 0. */
+void nt_sprite_comp_set_slice9_scale(nt_entity_t entity, float scale);
+float nt_sprite_comp_slice9_scale(nt_entity_t entity);
 
 /* ---- Flip control ---- */
 
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y);
 
-/* ---- Read accessors (return const pointer into dense SoA array) ----
+/* ---- Read accessors ----
  *
- * Note on const: unlike drawable_comp / material_comp which return mutable
- * pointers, sprite_comp accessors are strictly read-only. Sprite fields are
- * coupled through resolve (atlas/region_hash drive the cached region_index,
- * authored origin, and RESOLVED flag) — direct mutation would silently break
- * those invariants. Use the dedicated set_region / bind_by_hash / set_origin /
- * set_flip entry points to mutate state. */
+ * Read-only — fields are coupled through resolve; mutate via the dedicated
+ * setters above. */
 
 const nt_resource_t *nt_sprite_comp_atlas(nt_entity_t entity);
 const uint64_t *nt_sprite_comp_region_hash(nt_entity_t entity);
-/* Cached region index. Undefined when nt_sprite_comp_is_resolved() is false —
- * callers MUST gate reads on is_resolved(). The stored value is not a sentinel;
- * 0 is a valid region index for a resolved sprite. */
+/* Undefined unless is_resolved() — 0 is a valid index, not a sentinel. */
 const uint16_t *nt_sprite_comp_region_index(nt_entity_t entity);
-/* Effective origin (float[2]). Invariant: when ORIGIN_OV is set, returns the
- * value stored by set_origin(). Otherwise origin reflects the resolved region's
- * authored origin, or (0, 0) when not resolved. The renderer should only read
- * origin for resolved sprites; non-resolved (0, 0) is a safety default, not a
- * meaningful position. */
+/* ORIGIN_OV → set_origin value; else region's authored origin; (0,0) if not resolved. */
 const float *nt_sprite_comp_origin(nt_entity_t entity);
 const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
 
@@ -119,6 +108,7 @@ typedef struct {
     const nt_sprite_resolved_region_t *resolved;
     const float (*origin)[2];
     const uint16_t (*slice9_lrtb)[4];
+    const float *slice9_scale;
     const uint8_t *flags;
 } nt_sprite_comp_view_t;
 

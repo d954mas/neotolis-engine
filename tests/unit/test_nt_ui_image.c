@@ -1,7 +1,5 @@
-/* Unit tests for nt_ui_image widget (Phase 54 Plan 05).
- *
- * Tests follow the nt_ui_label test pattern: walker fixture with stub
- * backend, death tests gated to NT_ASSERT_FULL mode. */
+/* Unit tests for nt_ui_image. Walker fixture with stub backend; death tests
+ * gated to NT_ASSERT_FULL. */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -26,6 +24,7 @@ static const nt_ui_image_style_t s_style_default = {
     .color_packed = 0xFFFFFFFF,
     .flip_bits = 0,
     .slice9_lrtb = {0, 0, 0, 0},
+    .slice9_scale = 1.0F,
 };
 
 void setUp(void) {
@@ -49,8 +48,8 @@ static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx
 /* ---- Test 1: basic image emits IMAGE command ---- */
 static void test_image_basic(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -69,10 +68,11 @@ static void test_image_slice9_override(void) {
         .color_packed = 0xFFFFFFFF,
         .flip_bits = 0,
         .slice9_lrtb = {4, 4, 4, 4},
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -90,10 +90,11 @@ static void test_image_tint_color(void) {
         .color_packed = 0x80FF8040, /* A=0x80, B=0xFF, G=0x80, R=0x40 */
         .flip_bits = 0,
         .slice9_lrtb = {0, 0, 0, 0},
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -109,8 +110,8 @@ static void test_image_tint_color(void) {
 static void test_image_element_data_passthrough(void) {
     int marker = 77;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -127,10 +128,11 @@ static void test_image_flip_bits(void) {
         .color_packed = 0xFFFFFFFF,
         .flip_bits = 3, /* FLIP_X | FLIP_Y */
         .slice9_lrtb = {0, 0, 0, 0},
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -147,10 +149,11 @@ static void test_image_flags_origin(void) {
         .origin_y = 0.75F,
         .flip_bits = 0,
         .flags = NT_UI_IMAGE_ORIGIN_OVERRIDE | NT_UI_IMAGE_SLICE9_OVERRIDE,
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -177,8 +180,8 @@ static void test_image_style_defaults(void) {
 /* ---- Test 8: NULL style asserts ---- */
 static void test_image_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL)); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -186,8 +189,8 @@ static void test_image_null_style_asserts(void) {
 static void test_image_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, bad, 0, &s_style_default)); }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, bad, 0, &s_style_default, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
