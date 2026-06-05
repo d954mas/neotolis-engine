@@ -82,3 +82,6 @@ compile_*.log
 # Autoresearch perf-tuning experiment log (local dev artifact, regenerated
 # per run — never belongs in source control)
 autoresearch-results.tsv
+
+# Agent tooling/skills (per-agent infrastructure, like .claude/ — not project source)
+.agents/

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neotolis.local/gamedesign/gdd.schema.json",
+  "title": "Neotolis Game Design Data",
+  "type": "object",
+  "required": [
+    "version",
+    "project",
+    "pillars",
+    "coreLoop",
+    "controls",
+    "scope",
+    "visual",
+    "entityTypes"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "gameId",
+        "title",
+        "oneLiner",
+        "theme"
+      ]
+    },
+    "pillars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "body"
+        ]
+      }
+    },
+    "coreLoop": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "visual": {
+      "type": "object",
+      "required": [
+        "gridCell",
+        "palette"
+      ]
+    },
+    "entityTypes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "marker",
+          "color"
+        ]
+      }
+    }
+  }
+}

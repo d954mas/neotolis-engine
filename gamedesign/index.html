@@ -1,0 +1,1595 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Neotolis GDD Editor</title>
+    <link rel="stylesheet" href="styles.css?v=20260606-ftue-production-2" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">N</span>
+          <div>
+            <strong>Песнь Тамги</strong>
+            <small id="sourceStatus">loading</small>
+          </div>
+        </div>
+        <nav class="tabs" aria-label="Разделы редактора">
+          <button class="tab is-active" type="button" data-view="concept">Концепт</button>
+          <button class="tab" type="button" data-view="loop">Кор-loop</button>
+          <button class="tab" type="button" data-view="cards">Карты</button>
+          <button class="tab" type="button" data-view="ftue">FTUE</button>
+          <button class="tab" type="button" data-view="plan">План</button>
+          <button class="tab" type="button" data-view="ux">UI/UX</button>
+          <button class="tab" type="button" data-view="style">Стиль</button>
+          <button class="tab" type="button" data-view="gdd">GDD-данные</button>
+          <button class="tab" type="button" data-view="level">Редактор</button>
+          <button class="tab" type="button" data-view="data">JSON</button>
+        </nav>
+        <div class="sidebar-block">
+          <label for="levelSelect">Уровень</label>
+          <select id="levelSelect"></select>
+        </div>
+        <div class="sidebar-actions">
+          <button id="resetButton" type="button">Сбросить</button>
+          <button id="exportButton" type="button">Экспорт</button>
+          <label class="file-button">
+            Импорт
+            <input id="importInput" type="file" accept="application/json" />
+          </label>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section class="topbar">
+          <div>
+            <p class="eyebrow">games/turkic-jam-2026</p>
+            <h1 id="projectTitle">Песнь Тамги</h1>
+          </div>
+          <div class="status-row">
+            <span id="dirtyBadge" class="badge">saved</span>
+            <span id="levelSizeBadge" class="badge">0 x 0</span>
+          </div>
+        </section>
+
+        <section id="conceptView" class="view is-active" aria-label="Концепт">
+          <section class="hero-board">
+            <div class="hero-copy">
+              <p class="eyebrow">Loop Hero x кочевой род</p>
+              <h2>Аул в центре. Дорога вокруг. Пустыня как поле решений.</h2>
+              <p>
+                Герой идет сам по кольцевой дороге. Игрок занимает ближние и дальние
+                ячейки пустыни тайлами: Саксаулами, юртами, бурями, волчьими следами,
+                Оазисами и камнями Тамги.
+              </p>
+              <div class="callout-line">
+                Один герой должен пройти путь, но за его спиной стоят все, кто погиб до него.
+              </div>
+            </div>
+
+            <div class="world-viz" aria-label="Анимированная схема карты">
+              <div class="desert-grid">
+                <span></span><span></span><span class="slot oasis">О</span><span></span><span></span>
+                <span></span><span class="road"></span><span class="road hero-dot"></span><span class="road"></span><span class="slot storm">Б</span>
+                <span class="slot wolf">В</span><span class="road"></span><span class="aul">Аул</span><span class="road"></span><span></span>
+                <span></span><span class="road"></span><span class="road tamga-dot"></span><span class="road"></span><span></span>
+                <span></span><span></span><span class="slot tamga">Т</span><span></span><span></span>
+              </div>
+              <div class="viz-legend">
+                <span><i class="legend-aul"></i>аул</span>
+                <span><i class="legend-road"></i>дорога</span>
+                <span><i class="legend-slot"></i>пустыня</span>
+                <span><i class="legend-memory"></i>Тамга</span>
+              </div>
+            </div>
+          </section>
+
+          <div class="section-strip">
+            <article class="brief-card">
+              <span>01</span>
+              <h3>Что делает игрок</h3>
+              <p>Выбирает наследника, ставит тайлы в roadside/field-зоны, решает риск ради ресурсов.</p>
+            </article>
+            <article class="brief-card">
+              <span>02</span>
+              <h3>Что делает герой</h3>
+              <p>Автоматически проходит круг, активирует клетки, теряет или копит Силы.</p>
+            </article>
+            <article class="brief-card">
+              <span>03</span>
+              <h3>Что делает смерть</h3>
+              <p>Оставляет Последнюю Тамгу, новую цель для следующего наследника.</p>
+            </article>
+          </div>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Коротко по слоям</p>
+              <h2>От общего к частному</h2>
+            </div>
+            <div class="layer-grid">
+              <article>
+                <strong>Аул</strong>
+                <p>Постоянный центр, род, апгрейды, память.</p>
+              </article>
+              <article>
+                <strong>Дорога</strong>
+                <p>Кольцо вокруг аула. Герой идет сам, длина может расти по кругам.</p>
+              </article>
+              <article>
+                <strong>Пустыня</strong>
+                <p>Свободные build slots. Игрок занимает их картами.</p>
+              </article>
+              <article>
+                <strong>Тамга</strong>
+                <p>След смерти. Будущий герой может забрать знание.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Мок-скриншоты</p>
+              <h2>Как должны читаться состояния</h2>
+            </div>
+            <div class="mock-grid">
+              <article class="mock-screen">
+                <div class="mock-top"><span>Круг 3/10</span><span>Силы 7</span></div>
+                <div class="mock-map">
+                  <span class="m aul"></span><span class="m road"></span><span class="m road"></span><span class="m storm"></span>
+                  <span class="m road"></span><span class="m hero"></span><span class="m road"></span><span class="m"></span>
+                  <span class="m oasis"></span><span class="m road"></span><span class="m tamga"></span><span class="m"></span>
+                </div>
+                <h3>Проход круга</h3>
+                <p>Герой движется, игрок считывает следующий риск.</p>
+              </article>
+              <article class="mock-screen">
+                <div class="mock-top"><span>Выбор карты</span><span>3 варианта</span></div>
+                <div class="card-row">
+                  <span>Оазис</span><span>Камень Тамги</span><span>Буря</span>
+                </div>
+                <h3>Между кругами</h3>
+                <p>Короткое решение: безопасность, память или риск.</p>
+              </article>
+              <article class="mock-screen">
+                <div class="mock-top"><span>Смерть</span><span>Круг 6</span></div>
+                <div class="death-scene">
+                  <span class="last-tamga">Т</span>
+                </div>
+                <h3>Последняя Тамга</h3>
+                <p>Смерть превращается в цель на следующем забеге.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Референсы</p>
+              <h2>Что берем и что не берем</h2>
+            </div>
+            <div class="reference-grid">
+              <article>
+                <h3>Loop Hero</h3>
+                <p>Берем автодвижение, круг, тайлы вокруг пути и ритм выбора после круга.</p>
+              </article>
+              <article>
+                <h3>Кочевой аул</h3>
+                <p>Берем центр карты, юрты, костер, род и постоянную память.</p>
+              </article>
+              <article>
+                <h3>Тамга</h3>
+                <p>Берем знак как визуальный язык: память, смерть, знание, наследие.</p>
+              </article>
+              <article>
+                <h3>Не берем</h3>
+                <p>Не уходим в арабские дворцы, лампы, базары и декоративный шум.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section id="loopView" class="view" aria-label="Кор-loop">
+          <section class="loop-hero">
+            <div class="hero-copy">
+              <p class="eyebrow">Зафиксировано как core MVP</p>
+              <h2>Герой идет сам. Игрок помогает через карты, пустыню и аул.</h2>
+              <p>
+                Игрок не управляет шагами и боем. Он получает карты, занимает ближние
+                и дальние ячейки пустыни, дозирует риск и после смерти героя усиливает аул,
+                чтобы следующий наследник прошел дальше.
+              </p>
+              <div class="callout-line">
+                Это не idle-наблюдение: каждая карта меняет будущий проход по кругу.
+              </div>
+            </div>
+
+            <div class="loop-wheel" aria-label="Визуализация основного цикла">
+              <div class="loop-center">
+                <strong>Аул</strong>
+                <span>память рода</span>
+              </div>
+              <div class="loop-node n1">
+                <strong>1</strong>
+                <span>Выбрать наследника</span>
+              </div>
+              <div class="loop-node n2">
+                <strong>2</strong>
+                <span>Герой идет сам</span>
+              </div>
+              <div class="loop-node n3">
+                <strong>3</strong>
+                <span>Находит ресурсы и карты</span>
+              </div>
+              <div class="loop-node n4">
+                <strong>4</strong>
+                <span>Игрок ставит карты</span>
+              </div>
+              <div class="loop-node n5">
+                <strong>5</strong>
+                <span>Путь богаче и опаснее</span>
+              </div>
+              <div class="loop-node n6">
+                <strong>6</strong>
+                <span>Смерть или новый круг</span>
+              </div>
+              <span class="loop-runner"></span>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Ревью решения</p>
+              <h2>Можно фиксировать, но с точной границей</h2>
+            </div>
+            <div class="review-grid">
+              <article class="review-ok">
+                <h3>Ок</h3>
+                <p>
+                  Loop понятный: герой автономен, игрок меняет мир, смерть кормит аул,
+                  новый герой использует наследие прошлого.
+                </p>
+              </article>
+              <article>
+                <h3>Риск</h3>
+                <p>
+                  Если карты будут редкими, игрок будет просто смотреть. Нужно действие
+                  каждые 5-20 секунд: карта, постановка, оценка риска или выбор после круга.
+                </p>
+              </article>
+              <article>
+                <h3>Правило MVP</h3>
+                <p>
+                  Простые клетки срабатывают автоматически. Пауза только для карты,
+                  постановки тайла, конца круга, смерти и крупного события.
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Что делает игрок</p>
+              <h2>Активность без прямого управления героем</h2>
+            </div>
+            <div class="action-grid">
+              <article>
+                <span class="action-icon">К</span>
+                <h3>Получает карты</h3>
+                <p>После круга гарантированно, во время пути редко через события и проверки.</p>
+              </article>
+              <article>
+                <span class="action-icon">П</span>
+                <h3>Ставит в пустыню</h3>
+                <p>Занимает ячейки рядом с дорогой, чтобы изменить будущие проходы.</p>
+              </article>
+              <article>
+                <span class="action-icon">Р</span>
+                <h3>Дозирует риск</h3>
+                <p>Безопасный путь дает мало. Опасные тайлы дают Славу, Мудрость и карты.</p>
+              </article>
+              <article>
+                <span class="action-icon">А</span>
+                <h3>Прокачивает аул</h3>
+                <p>После смерти часть результата идет в род и помогает следующему наследнику.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Playable loop</p>
+              <h2>Первый реализуемый цикл</h2>
+            </div>
+            <div class="playable-flow">
+              <p><strong>Старт:</strong> наследник выходит из аула, входит на loop-дорогу и идет автоматически.</p>
+              <p><strong>Путь:</strong> клетки дают ресурсы, проверки, потерю/восстановление Сил и шанс карты.</p>
+              <p><strong>Карты:</strong> игрок ставит Саксаул, Юрту, Камень Тамги, Оазис или рискованные следы.</p>
+              <p><strong>Круг:</strong> после возвращения в аул игрок выбирает 1 карту из 3.</p>
+              <p><strong>Смерть:</strong> герой оставляет Последнюю Тамгу, часть ресурсов уходит в аул.</p>
+              <p><strong>Род:</strong> игрок улучшает аул и запускает нового наследника.</p>
+            </div>
+          </section>
+        </section>
+
+        <section id="cardsView" class="view" aria-label="Карты">
+          <section class="hero-board">
+            <div class="hero-copy">
+              <p class="eyebrow">Loop Hero reference</p>
+              <h2>Карта не кнопка. Карта становится частью мира.</h2>
+              <p>
+                В Loop Hero карты ставятся на дорогу, рядом с дорогой или в ландшафт.
+                Часть действует постоянно, часть срабатывает при прохождении, часть
+                создает врагов по времени, а часть превращается в новый тайл через соседство.
+              </p>
+              <div class="callout-line">
+                Для нас карта = след в пустыне, который меняет будущий проход путника.
+              </div>
+            </div>
+            <div class="card-model">
+              <article>
+                <strong>Постоянно</strong>
+                <span>статы, восстановление, фоновые бонусы</span>
+              </article>
+              <article>
+                <strong>При входе</strong>
+                <span>событие, проверка, награда, потеря Сил</span>
+              </article>
+              <article>
+                <strong>По времени</strong>
+                <span>спавн угрозы или накопление ресурса</span>
+              </article>
+              <article>
+                <strong>По соседству</strong>
+                <span>Оазис + Юрта = Стоянка</span>
+              </article>
+              <article>
+                <strong>По форме</strong>
+                <span>3 Тамги = Священный знак</span>
+              </article>
+              <article>
+                <strong>Жадность</strong>
+                <span>много риска создает новую опасность</span>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Типы карт</p>
+              <h2>Что берем из Loop Hero, но расширяем под большой мир</h2>
+            </div>
+            <div class="reference-grid">
+              <article>
+                <h3>Road</h3>
+                <p>Карта меняет клетку пути. У нас: событие на дороге путника.</p>
+              </article>
+              <article>
+                <h3>Roadside</h3>
+                <p>Ближняя карта за road buffer. Работает при проходе связанной дорожной клетки.</p>
+              </article>
+              <article>
+                <h3>Field</h3>
+                <p>Дальний тайл большого мира. Не обязан стоять рядом с дорогой: радиус, доход за круг, аура, синергия.</p>
+              </article>
+              <article>
+                <h3>Special</h3>
+                <p>Разовое удаление, реликт, песнь, особая Тамга или знак рода.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Tile catalog</p>
+              <h2>Первый набор тайлов</h2>
+            </div>
+            <div class="tile-catalog">
+              <article class="tile-card small-help">
+                <span>roadside</span>
+                <h3>Саксаул</h3>
+                <p>Первая карта. Маленькая помощь: тень и хворост. Силы +1, Запасы +1.</p>
+              </article>
+              <article class="tile-card oasis-card">
+                <span>roadside / rare field</span>
+                <h3>Оазис</h3>
+                <p>Сильная находка, не стартовая карта. Восстановление и Запасы, база для стоянок.</p>
+              </article>
+              <article class="tile-card field-card">
+                <span>field</span>
+                <h3>Юрта</h3>
+                <p>Стоянка рода. Доход за круг, экономика, синергии с Саксаулом, Оазисом и Тамгой.</p>
+              </article>
+              <article class="tile-card memory-card">
+                <span>field</span>
+                <h3>Камень Тамги</h3>
+                <p>Память и Мудрость. Работает как знак в пустыне, усиливает наследие и события памяти.</p>
+              </article>
+              <article class="tile-card risk-card">
+                <span>roadside</span>
+                <h3>Волчий след</h3>
+                <p>Ближний риск на маршруте. Body-проверка, потеря Сил при провале, Слава за риск.</p>
+              </article>
+              <article class="tile-card field-risk">
+                <span>field</span>
+                <h3>Мираж</h3>
+                <p>Дальняя Mind-аура. Искажает награды, дает знание и риск не прямо на дороге.</p>
+              </article>
+              <article class="tile-card storm-card">
+                <span>field</span>
+                <h3>Песчаная буря</h3>
+                <p>Зональная Spirit-угроза. Может накрывать несколько тайлов и превращать помощь в риск.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Первые синергии</p>
+              <h2>Делаем похоже по функции, но в нашей теме</h2>
+            </div>
+            <div class="synergy-table">
+              <div><strong>Саксаул + Юрта</strong><span>Малая стоянка: немного Запасов и Силы.</span></div>
+              <div><strong>Оазис + Юрта</strong><span>Стоянка: больше Запасов и восстановление.</span></div>
+              <div><strong>Камень Тамги + Юрта</strong><span>Родовой знак: Мудрость и шанс карты памяти.</span></div>
+              <div><strong>Волчий след + Сторожевая вышка</strong><span>Охотничья тропа: Слава, ниже потеря Сил.</span></div>
+              <div><strong>Мираж + Камень Тамги</strong><span>Видение: Mind-риск, шанс редкой карты.</span></div>
+              <div><strong>Песчаная буря + Оазис</strong><span>Засыпанный источник: опасность Spirit, большая награда.</span></div>
+              <div><strong>2 Волчьих следа рядом</strong><span>Стая: плохая синергия от жадности.</span></div>
+            </div>
+          </section>
+        </section>
+
+        <section id="ftueView" class="view" aria-label="FTUE">
+          <section class="ftue-hero">
+            <div class="ftue-stage" aria-label="Интро-сцена">
+              <div class="night-sky"></div>
+              <div class="dune dune-back"></div>
+              <div class="dune dune-front"></div>
+              <div class="intro-aul">
+                <span class="yurt y1"></span>
+                <span class="yurt y2"></span>
+                <span class="fire"></span>
+              </div>
+              <span class="first-traveler"></span>
+              <p class="intro-caption">Песок стирает следы. Род хранит имена.</p>
+            </div>
+            <div class="hero-copy">
+              <p class="eyebrow">Первый опыт игрока</p>
+              <h2>Темный экран, короткая песнь, костер, первый путник.</h2>
+              <p>
+                FTUE начинается не с меню систем, а с настроения. Игрок видит пустыню,
+                маленький аул и костер. От костра выходит первый наследник, доходит до
+                первой клетки дороги и только потом начинает круг.
+              </p>
+              <div class="callout-line">
+                Первые 60 секунд должны объяснить: герой идет сам, игрок строит судьбу в пустыне вокруг пути.
+              </div>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Сценарий старта</p>
+              <h2>От интро к первому решению</h2>
+            </div>
+            <div class="ftue-timeline">
+              <article>
+                <span>00</span>
+                <h3>Темный экран</h3>
+                <p>1-2 строки рассказчика: род заперт в кольце пустыни.</p>
+              </article>
+              <article>
+                <span>01</span>
+                <h3>Появляется пустыня</h3>
+                <p>Медленный fade-in: песок, ветер, почти пустой экран.</p>
+              </article>
+              <article>
+                <span>02</span>
+                <h3>Появляется аул</h3>
+                <p>В центре загорается костер, вокруг него 2-3 юрты.</p>
+              </article>
+              <article>
+                <span>03</span>
+                <h3>Выходит путник</h3>
+                <p>Первый наследник отходит от костра: игрок видит, что герой вышел из аула.</p>
+              </article>
+              <article>
+                <span>04</span>
+                <h3>Вход на дорогу</h3>
+                <p>Путник проходит короткий переход и встает на первую клетку loop.</p>
+              </article>
+              <article>
+                <span>05</span>
+                <h3>Первый круг</h3>
+                <p>Герой идет автоматически. Игрок пока только наблюдает ритм.</p>
+              </article>
+              <article>
+                <span>06</span>
+                <h3>Первая карта</h3>
+                <p>Игра ставит паузу и предлагает занять первую пустынную ячейку.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Ключевой вопрос</p>
+              <h2>Выбираем ли мы события во время пути?</h2>
+            </div>
+            <div class="choice-model">
+              <article class="choice-strong">
+                <h3>Рекомендуемая модель</h3>
+                <p>
+                  Герой идет сам. Большинство клеток срабатывает автоматически.
+                  Игра останавливается только на точках решения: найденная карта,
+                  выбор места для тайла, завершение круга, смерть, редкое крупное событие.
+                </p>
+              </article>
+              <article>
+                <h3>Почему не выбор на каждой клетке</h3>
+                <p>
+                  Постоянные диалоги ломают Loop Hero-ритм. Игрок должен читать маршрут
+                  и планировать, а не подтверждать каждый шаг.
+                </p>
+              </article>
+              <article>
+                <h3>Где нужен выбор</h3>
+                <p>
+                  Выбор нужен там, где меняется билд: какую карту взять, куда поставить
+                  тайл, какой апгрейд выбрать, какой реликт сохранить.
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">FTUE MVP</p>
+              <h2>Пошаговый сценарий для реализации</h2>
+            </div>
+            <div class="ftue-path" aria-label="Первые шаги FTUE как путь">
+              <article class="path-card">
+                <div class="path-marker"><span>01</span><small>00:00</small></div>
+                <div class="path-copy">
+                  <h3>Темный экран: песнь рода</h3>
+                  <div class="path-shot shot-dark" aria-hidden="true">
+                    <span class="shot-dust"></span>
+                    <span class="shot-text">Песок стирает следы.</span>
+                  </div>
+                  <p class="path-lead">
+                    Игра начинается без меню систем. Сначала только черный экран, ветер,
+                    две короткие строки и ощущение, что род держится за память.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “Песок стирает следы.” → “Род хранит имена.”</p>
+                    <p><strong>Арт:</strong> почти черный экран, редкие светлые частицы песка, без UI, без карты, без героя.</p>
+                    <p><strong>Анимация:</strong> строка появляется за 0.6 сек, держится 1.4 сек, растворяется; песок движется слева направо.</p>
+                    <p><strong>Игрок:</strong> может нажать `Space`/клик, чтобы пропустить. Других действий нет.</p>
+                    <p><strong>Лог:</strong> эти же две строки добавляются в чат после появления карты.</p>
+                    <p><strong>Готово:</strong> через 4-6 сек или после пропуска перейти к появлению пустыни.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>02</span><small>00:20</small></div>
+                <div class="path-copy">
+                  <h3>Появляется стойбище рода</h3>
+                  <div class="path-shot shot-aul" aria-hidden="true">
+                    <span class="shot-yurt a"></span>
+                    <span class="shot-yurt b"></span>
+                    <span class="shot-fire"></span>
+                    <span class="shot-road"></span>
+                    <span class="shot-fill f1"></span>
+                    <span class="shot-fill f2"></span>
+                    <span class="shot-fill f3"></span>
+                  </div>
+                  <p class="path-lead">
+                    Камера открывает карту. В центре маленький аул: костер, 2-3 юрты,
+                    вокруг дорога-loop, за дорогой живая пустыня без пустых клеток.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст в логе:</strong> “У костра просыпается имя: Арын.”</p>
+                    <p><strong>Арт:</strong> теплый костер в центре, юрты с тканью и деревянными стойками, песок с камнями, травой, следами, сухими ветками.</p>
+                    <p><strong>Правило уровня:</strong> не занятый слот не выглядит пустым. Это “дюна”, “камни”, “сухая трава”, “следы”, “кость”, “бархан”.</p>
+                    <p><strong>Анимация:</strong> fade-in карты 1 сек; костер мерцает; мелкий песок движется по всем клеткам.</p>
+                    <p><strong>Камера:</strong> центр на ауле, видны вход на дорогу и несколько клеток пустыни для будущих карт.</p>
+                    <p><strong>Готово:</strong> игрок за 2-3 сек понимает: аул = дом, дорога = путь, пустыня = поле решений.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>03</span><small>00:40</small></div>
+                <div class="path-copy">
+                  <h3>Первый путник выходит из аула</h3>
+                  <div class="path-shot shot-exit" aria-hidden="true">
+                    <span class="shot-fire"></span>
+                    <span class="shot-hero start"></span>
+                    <span class="shot-footprints"></span>
+                    <span class="shot-hero end"></span>
+                    <span class="shot-road-line"></span>
+                  </div>
+                  <p class="path-lead">
+                    Герой не появляется сразу на дороге. Он выходит от костра, проходит
+                    короткий путь через аул и становится на первую дорожную клетку.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “Арын выходит из стойбища. Костер остается за спиной.”</p>
+                    <p><strong>Арт:</strong> маленькая фигурка в простой дорожной одежде, тюбетейка/капюшон, мешок за плечом, теплый свет костра позади.</p>
+                    <p><strong>Анимация:</strong> 6-8 шагов от костра к дороге; за героем на 1 сек остаются следы, потом песок их стирает.</p>
+                    <p><strong>Игрок:</strong> не управляет. Это обучение через сцену: герой сам идет из дома к пути.</p>
+                    <p><strong>Техсостояния:</strong> `aul_exit -> road_entry -> loop_walk`.</p>
+                    <p><strong>Готово:</strong> герой достиг `road_entry_cell`, круг 1 стартует.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>04</span><small>01:00</small></div>
+                <div class="path-copy">
+                  <h3>Первые клетки: герой идет сам</h3>
+                  <div class="path-shot shot-walk" aria-hidden="true">
+                    <span class="shot-road-tile r1"></span>
+                    <span class="shot-road-tile r2"></span>
+                    <span class="shot-road-tile r3"></span>
+                    <span class="shot-hero walker"></span>
+                    <span class="shot-fill f1"></span>
+                    <span class="shot-fill f2"></span>
+                  </div>
+                  <p class="path-lead">
+                    Путник проходит 2-3 дорожные клетки без выбора. Игрок должен понять:
+                    он не двигает героя, он меняет мир вокруг будущего маршрута.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “Круг 1 начат.” → “Путь ведет наследника сам.”</p>
+                    <p><strong>Арт уровня:</strong> каждая дорожная клетка имеет деталь: трещины, колеи, пыль, мелкие камни. Вокруг нет плоского пустого песка.</p>
+                    <p><strong>Анимация:</strong> герой идет по клеткам, камера мягко следует или держит аул и путь в кадре; текущая клетка слегка подсвечена.</p>
+                    <p><strong>UI:</strong> справа панель героя, слева чат-лог, снизу рука карт пока неактивна.</p>
+                    <p><strong>Игрок:</strong> не кликает по клеткам и не управляет WASD.</p>
+                    <p><strong>Готово:</strong> после 2-3 клеток срабатывает первый ресурс.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>05</span><small>01:30</small></div>
+                <div class="path-copy">
+                  <h3>Первый ресурс на дороге</h3>
+                  <div class="path-shot shot-resource" aria-hidden="true">
+                    <span class="shot-road-tile r2"></span>
+                    <span class="shot-hero walker"></span>
+                    <span class="shot-pop">Запасы +1</span>
+                    <span class="shot-bag"></span>
+                  </div>
+                  <p class="path-lead">
+                    На дорожной клетке герой сам находит первый ресурс. Это маленькое событие,
+                    но оно показывает, что мир постоянно что-то сообщает игроку.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> чат: “Путь дает роду: Запасы +1.”</p>
+                    <p><strong>Арт:</strong> маленький мешок/связка припасов у края дороги, не как UI-иконка, а как предмет на земле.</p>
+                    <p><strong>Анимация:</strong> pop-up “+1” над клеткой 0.8 сек; мешок растворяется в песке; HUD “Запасы” коротко подсвечивается.</p>
+                    <p><strong>Игрок:</strong> ничего не нажимает. Паузы нет.</p>
+                    <p><strong>Данные:</strong> `run_supplies += 1`.</p>
+                    <p><strong>Готово:</strong> HUD и чат обновлены, герой продолжает движение.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>06</span><small>02:00</small></div>
+                <div class="path-copy">
+                  <h3>Герой находит карту “Саксаул”</h3>
+                  <div class="path-shot shot-card" aria-hidden="true">
+                    <span class="shot-card-ui">Саксаул<br /><small>помощь</small></span>
+                    <span class="shot-slot active"></span>
+                    <span class="shot-fill f1"></span>
+                    <span class="shot-road-line"></span>
+                  </div>
+                  <p class="path-lead">
+                    Первый настоящий интерактив. Герой находит маленькую карту помощи, игра ставит паузу,
+                    карта появляется в руке снизу, а допустимые клетки подсвечиваются.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “Песок открывает знак: Саксаул.”</p>
+                    <p><strong>Арт карты:</strong> низкий темный куст, сухие ветви, тень на песке. Это обычная помощь, не чудо и не редкий Оазис.</p>
+                    <p><strong>Анимация:</strong> карта выезжает снизу в руку; допустимые buildable-клетки за road buffer пульсируют бирюзовым контуром.</p>
+                    <p><strong>Игрок:</strong> выбирает карту и кликает по подсвеченной buildable-клетке.</p>
+                    <p><strong>Правило уровня:</strong> подсвечивается не “пустая” клетка, а декоративная пустынная клетка, которую можно занять.</p>
+                    <p><strong>Готово:</strong> выбран допустимый `roadside` слот за кромкой дороги; перейти к постановке.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>07</span><small>02:30</small></div>
+                <div class="path-copy">
+                  <h3>Игрок ставит Саксаул</h3>
+                  <div class="path-shot shot-place" aria-hidden="true">
+                    <span class="shot-saxaul"></span>
+                    <span class="shot-road-line"></span>
+                    <span class="shot-link"></span>
+                    <span class="shot-slot placed"></span>
+                  </div>
+                  <p class="path-lead">
+                    Игрок занимает buildable-клетку за кромкой дороги. Это первое главное действие:
+                    не приказ герою, а подготовка будущего прохода.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “В песке цепляется корнями Саксаул.”</p>
+                    <p><strong>Арт на поле:</strong> сухой куст, 2-3 ветки, маленькая тень, песок вокруг корней. Ячейка явно занята тайлом.</p>
+                    <p><strong>Анимация:</strong> карта летит в слот 0.35 сек; песок поднимается; из него проявляется куст; связанная дорожная клетка мигает.</p>
+                    <p><strong>Игрок:</strong> после постановки управление картой закрывается, игра снимает паузу.</p>
+                    <p><strong>Данные:</strong> `tile_id=saxaul`, `placement=roadside`, связь с ближайшей дорожной клеткой.</p>
+                    <p><strong>Готово:</strong> карта исчезла из руки, Саксаул стоит, герой снова идет.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>08</span><small>03:20</small></div>
+                <div class="path-copy">
+                  <h3>Саксаул срабатывает позже</h3>
+                  <div class="path-shot shot-saxaul-effect" aria-hidden="true">
+                    <span class="shot-saxaul"></span>
+                    <span class="shot-link active"></span>
+                    <span class="shot-hero walker"></span>
+                    <span class="shot-pop">Силы +1</span>
+                  </div>
+                  <p class="path-lead">
+                    Эффект не происходит в момент клика. Герой доходит до связанной клетки,
+                    и только тогда Саксаул помогает. Игрок понимает “ставлю сейчас, польза позже”.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “Саксаул: путник находит тень и хворост. Силы +1. Запасы +1.”</p>
+                    <p><strong>Арт:</strong> куст дает маленькую тень; рядом сухие ветки как топливо/припасы.</p>
+                    <p><strong>Анимация:</strong> линия связи от Саксаула к дороге 0.5 сек; pop-up “Силы +1”; HUD Сил подсвечивается.</p>
+                    <p><strong>Игрок:</strong> ничего не нажимает, но видит последствия своего прошлого решения.</p>
+                    <p><strong>Данные:</strong> `stamina += 1`, `run_supplies += 1`.</p>
+                    <p><strong>Готово:</strong> эффект применен один раз на проходе, герой продолжает круг.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="path-card">
+                <div class="path-marker"><span>09</span><small>04:30</small></div>
+                <div class="path-copy">
+                  <h3>Первый круг завершен у аула</h3>
+                  <div class="path-shot shot-choice" aria-hidden="true">
+                    <span class="shot-card-ui">Юрта</span>
+                    <span class="shot-card-ui mid">Камень<br />Тамги</span>
+                    <span class="shot-card-ui risk">Волчий<br />след</span>
+                  </div>
+                  <p class="path-lead">
+                    Герой возвращается к аулу. Теперь игрок видел полный мини-цикл:
+                    вышел из дома, пошел сам, получил карту, поставил тайл, увидел эффект позже.
+                  </p>
+                  <div class="path-spec">
+                    <p><strong>Финальный текст:</strong> “Круг 1 завершен. Аул снова впереди.”</p>
+                    <p><strong>Арт:</strong> камера снова показывает аул как точку возврата; костер заметнее, чем в начале.</p>
+                    <p><strong>Анимация:</strong> герой входит к аулу, экран мягко притормаживает, три карты поднимаются снизу.</p>
+                    <p><strong>Игрок:</strong> выбирает 1 из 3: `Юрта` безопасность, `Камень Тамги` память, `Волчий след` риск/слава.</p>
+                    <p><strong>Placement:</strong> Юрта/Камень Тамги подсвечивают `field`, Волчий след подсвечивает `roadside` за road buffer.</p>
+                    <p><strong>UI:</strong> выбор карт крупный, с коротким описанием результата и зоны постановки на каждой карте.</p>
+                    <p><strong>Готово:</strong> выбранная карта добавлена в руку; начинается второй круг.</p>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Production script</p>
+              <h2>FTUE как состояния для реализации</h2>
+            </div>
+            <div class="ftue-state-board" aria-label="Подробный FTUE production script">
+              <article class="state-phase">
+                <header>
+                  <span>A</span>
+                  <div>
+                    <h3>Дом и путь</h3>
+                    <p>0:00-1:00</p>
+                  </div>
+                </header>
+                <div class="state-card">
+                  <strong>ftue_00_boot</strong>
+                  <p><b>Видим:</b> черный экран и песок.</p>
+                  <p><b>Текст:</b> “Песок стирает следы.”</p>
+                  <p><b>Выход:</b> 1.8 сек или skip.</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_01_intro_line_2</strong>
+                  <p><b>Текст:</b> “Род хранит имена.”</p>
+                  <p><b>UI:</b> все скрыто, без меню правил.</p>
+                  <p><b>Выход:</b> fade к пустыне.</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_02_desert_reveal</strong>
+                  <p><b>Видим:</b> живой песок, decor cells.</p>
+                  <p><b>Правило:</b> пустых клеток нет.</p>
+                  <p><b>Выход:</b> карта читаема.</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_03_aul_reveal</strong>
+                  <p><b>Видим:</b> аул, костер, 2-3 юрты.</p>
+                  <p><b>Лог:</b> “У костра просыпается имя: Арын.”</p>
+                  <p><b>Данные:</b> создать героя.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_04_aul_exit</strong>
+                  <p><b>Анимация:</b> Арын выходит от костра к дороге.</p>
+                  <p><b>Лог:</b> “Арын выходит из аула...”</p>
+                  <p><b>Важно:</b> герой не появляется сразу на дороге.</p>
+                </div>
+              </article>
+
+              <article class="state-phase">
+                <header>
+                  <span>B</span>
+                  <div>
+                    <h3>Первое влияние</h3>
+                    <p>1:00-3:30</p>
+                  </div>
+                </header>
+                <div class="state-card">
+                  <strong>ftue_05_road_entry</strong>
+                  <p><b>Видим:</b> герой на первой road-cell.</p>
+                  <p><b>Лог:</b> “Круг 1 начат.”</p>
+                  <p><b>Данные:</b> `circle = 1`.</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_06_autowalk_hint</strong>
+                  <p><b>Игрок:</b> ничего не нажимает.</p>
+                  <p><b>Лог:</b> “Путь ведет наследника сам.”</p>
+                  <p><b>Смысл:</b> герой идет сам.</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_07_first_resource</strong>
+                  <p><b>Событие:</b> Запасы +1.</p>
+                  <p><b>Пауза:</b> нет.</p>
+                  <p><b>Данные:</b> `run_supplies += 1`.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_08_card_saxaul_found</strong>
+                  <p><b>Пауза:</b> да.</p>
+                  <p><b>Рука:</b> одна карта `Саксаул`.</p>
+                  <p><b>Лог:</b> “Песок открывает знак: Саксаул.”</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_09_saxaul_place_prompt</strong>
+                  <p><b>Подсветка:</b> только `roadside_build`.</p>
+                  <p><b>Запрет:</b> `road_path` и `road_buffer` затемнены.</p>
+                  <p><b>Клик:</b> только valid roadside slot.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_10/11_saxaul</strong>
+                  <p><b>Поставил:</b> куст появился, карта исчезла.</p>
+                  <p><b>Позже:</b> Силы +1, Запасы +1.</p>
+                  <p><b>Смысл:</b> польза приходит на будущем проходе.</p>
+                </div>
+              </article>
+
+              <article class="state-phase">
+                <header>
+                  <span>C</span>
+                  <div>
+                    <h3>Первый выбор</h3>
+                    <p>3:30-5:30</p>
+                  </div>
+                </header>
+                <div class="state-card">
+                  <strong>ftue_12_lap_1_complete</strong>
+                  <p><b>Видим:</b> герой возвращается к аулу.</p>
+                  <p><b>Лог:</b> “Круг 1 завершен. Аул снова впереди.”</p>
+                  <p><b>Пауза:</b> да, но после строки лога.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_13_first_choice_opened</strong>
+                  <p><b>Карты:</b> Юрта / Камень Тамги / Волчий след.</p>
+                  <p><b>Смысл:</b> безопасность, память или риск.</p>
+                  <p><b>UI:</b> крупные карты, не таблица.</p>
+                </div>
+                <div class="state-card">
+                  <strong>Юрта</strong>
+                  <p><b>Placement:</b> `field_build`.</p>
+                  <p><b>Текст:</b> “Запасы +2 за стоянку.”</p>
+                  <p><b>Обещание:</b> безопасная экономика.</p>
+                </div>
+                <div class="state-card">
+                  <strong>Камень Тамги</strong>
+                  <p><b>Placement:</b> `field_build`.</p>
+                  <p><b>Текст:</b> “Мудрость +2.”</p>
+                  <p><b>Обещание:</b> память и синергии.</p>
+                </div>
+                <div class="state-card">
+                  <strong>Волчий след</strong>
+                  <p><b>Placement:</b> `roadside_build`.</p>
+                  <p><b>Текст:</b> “Риск Body, Слава +2.”</p>
+                  <p><b>Обещание:</b> опасность ради славы.</p>
+                </div>
+              </article>
+
+              <article class="state-phase">
+                <header>
+                  <span>D</span>
+                  <div>
+                    <h3>Риск и наследие</h3>
+                    <p>5:30-10:00</p>
+                  </div>
+                </header>
+                <div class="state-card">
+                  <strong>ftue_15_second_loop_start</strong>
+                  <p><b>Движение:</b> герой снова идет сам.</p>
+                  <p><b>Карта:</b> поставленные тайлы остаются.</p>
+                  <p><b>Лог:</b> “Круг 2 начат.”</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_17_first_risk_reveal</strong>
+                  <p><b>Видим:</b> песок темнеет впереди.</p>
+                  <p><b>Лог:</b> “Волчий след открыт на дороге.”</p>
+                  <p><b>Важно:</b> безопасный выбор не отменен, мир тоже опасен.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_18_first_check_resolved</strong>
+                  <p><b>Успех:</b> Слава +2.</p>
+                  <p><b>Провал:</b> Силы -2, часть Славы.</p>
+                  <p><b>Бой:</b> bubble над клеткой, без отдельной сцены.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_19_death_or_near_death</strong>
+                  <p><b>Видим:</b> герой остановлен, на песке Тамга.</p>
+                  <p><b>Текст:</b> “Путь окончен, но имя осталось.”</p>
+                  <p><b>Данные:</b> создать `last_tamga`.</p>
+                </div>
+                <div class="state-card">
+                  <strong>ftue_20/21_result_heir</strong>
+                  <p><b>Результат:</b> часть ресурсов уходит в аул.</p>
+                  <p><b>Кнопка:</b> “Новый наследник”.</p>
+                  <p><b>Саян:</b> снова выходит из аула.</p>
+                </div>
+                <div class="state-card important">
+                  <strong>ftue_22_last_tamga_pickup</strong>
+                  <p><b>Событие:</b> новый герой подбирает Тамгу.</p>
+                  <p><b>Лог:</b> “Мудрость +1, Слава +1.”</p>
+                  <p><b>Смысл:</b> смерть прошлого стала целью нового.</p>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Level rule</p>
+              <h2>Пустых клеток на уровне быть не должно</h2>
+            </div>
+            <div class="level-fill-rule">
+              <article>
+                <h3>Реф по ощущению: Capybara Go</h3>
+                <p>
+                  Экран должен постоянно сообщать “что-то происходит”: маленькие находки,
+                  всплывающие числа, следы, микрособытия, понятный лог. Даже спокойная клетка
+                  не выглядит мертвой.
+                </p>
+              </article>
+              <article>
+                <h3>Свободная клетка ≠ пустая клетка</h3>
+                <p>
+                  До постановки карты слот выглядит как декоративная пустыня: дюна, камни,
+                  сухая трава, следы, кости, трещины, обломки, пыльный куст. Карта заменяет
+                  декор на активный тайл.
+                </p>
+              </article>
+              <article>
+                <h3>Что просить у Code</h3>
+                <p>
+                  Для каждой buildable-клетки хранить `base_decor_id`. Поверх него ставится
+                  `tile_id`. Если `tile_id` пустой, клетка все равно рисует декор и может быть
+                  подсвечена как доступная.
+                </p>
+              </article>
+            </div>
+            <div class="decor-strip" aria-label="Примеры заполнения свободных клеток">
+              <span class="decor-cell dune">дюна</span>
+              <span class="decor-cell stones">камни</span>
+              <span class="decor-cell grass">сухая трава</span>
+              <span class="decor-cell tracks">следы</span>
+              <span class="decor-cell bones">кости</span>
+              <span class="decor-cell cracks">трещины</span>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">World zones</p>
+              <h2>Дорога в центре, большой мир со скроллом вокруг</h2>
+            </div>
+            <div class="zone-map" aria-label="Зоны карты">
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell road">road path<br /><small>hero</small></div>
+              <div class="zone-cell road">road path<br /><small>hero</small></div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell road">road path<br /><small>hero</small></div>
+              <div class="zone-cell aul">аул<br /><small>no-build</small></div>
+              <div class="zone-cell road">road path<br /><small>hero</small></div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell road">road path<br /><small>hero</small></div>
+              <div class="zone-cell road">road path<br /><small>hero</small></div>
+              <div class="zone-cell buffer">road buffer<br /><small>no-build</small></div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell field">roadside / field</div>
+              <div class="zone-cell field">roadside / field</div>
+              <div class="zone-cell field">field build</div>
+              <div class="zone-cell field">field build</div>
+            </div>
+            <div class="placement-grid">
+              <article>
+                <h3>Roadside</h3>
+                <p>Ближние тайлы за кромкой дороги. Работают при проходе связанной дорожной клетки: Саксаул, Волчий след, малые находки.</p>
+              </article>
+              <article>
+                <h3>Field</h3>
+                <p>Дальние тайлы большого мира. Не обязаны стоять рядом с дорогой: Юрта, Камень Тамги, Мираж, Буря, будущие крупные постройки.</p>
+              </article>
+              <article>
+                <h3>Road Buffer</h3>
+                <p>Не строим. Это визуальная кромка и технический запас под дорогу, анимации, battle bubble и будущую генерацию изгибов.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Playable test</p>
+              <h2>Что нужно проверить первым</h2>
+            </div>
+            <div class="test-grid">
+              <article>
+                <span>01</span>
+                <h3>Первый круг</h3>
+                <p>Герой сам идет, получает ресурс, находит Саксаул, игрок ставит карту, Саксаул срабатывает.</p>
+              </article>
+              <article>
+                <span>02</span>
+                <h3>Второй круг</h3>
+                <p>Игрок выбирает карту из 3, ставит риск или полезный тайл, путь становится опаснее.</p>
+              </article>
+              <article>
+                <span>03</span>
+                <h3>Смерть и новый герой</h3>
+                <p>Герой умирает, остается Последняя Тамга, аул получает ресурсы, новый наследник выходит снова.</p>
+              </article>
+            </div>
+            <div class="acceptance-list">
+              <p><strong>Acceptance:</strong> пройти 1-2 круга, поставить карту, увидеть эффект тайла, умереть, получить ресурс аула, запустить нового героя и подобрать Тамгу.</p>
+            </div>
+          </section>
+        </section>
+
+        <section id="planView" class="view" aria-label="План разработки">
+          <section class="hero-board">
+            <div class="hero-copy">
+              <p class="eyebrow">Developer plan</p>
+              <h2>Цель: за 3-5 минут почувствовать геймплей.</h2>
+              <p>
+                План после ревью Code: не строим полный аул и не делаем большую экономику.
+                Сначала доказываем, что core loop играется: карта в руке, постановка в
+                пустыню, эффект на будущем проходе, риск, смерть, ресурсы аула и новый герой.
+              </p>
+              <div class="callout-line">
+                Готово только тогда, когда можно пройти 1-2 круга, умереть и сразу начать новым наследником.
+              </div>
+            </div>
+            <div class="dev-decisions">
+              <article><strong>Дорога</strong><span>квадратная loop-сетка, аул 2x2 в центре, изгибы через map_*</span></article>
+              <article><strong>Аул</strong><span>центр карты, no-build область</span></article>
+              <article><strong>Зоны</strong><span>road, road buffer no-build, roadside, field</span></article>
+              <article><strong>Placement</strong><span>roadside для прямого прохода, field для дальних тайлов</span></article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Порядок реализации</p>
+              <h2>От клика по карте до нового героя</h2>
+            </div>
+            <div class="roadmap-list">
+              <p><strong>1.</strong> Build-зоны: road buffer/no-build у дороги, ближние roadside-слоты и дальний field со скроллом.</p>
+              <p><strong>2.</strong> Рука карт: гарантированный `Саксаул`, выбор карты, постановка в слот.</p>
+              <p><strong>3.</strong> Эффект тайла: Саксаул срабатывает на будущем проходе, игрок видит лог.</p>
+              <p><strong>4.</strong> Конец круга: выбор 1 из 3 карт и старт следующего круга.</p>
+              <p><strong>5.</strong> Первый риск: `Волчий след` или scripted road event на втором круге.</p>
+              <p><strong>6.</strong> Смерть: Последняя Тамга, ресурсы аула, кнопка нового наследника.</p>
+              <p><strong>7.</strong> Новый герой: старт из аула и подбор Тамги прошлого героя.</p>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Мета-прогресс</p>
+              <h2>От стойбища рода до столицы</h2>
+            </div>
+            <div class="dev-decisions">
+              <article><strong>Стойбище рода</strong><span>костер, 2-3 юрты; смерть сохраняет часть ресурсов.</span></article>
+              <article><strong>Родовой аул</strong><span>старейшины и загон; открывается выбор наследника.</span></article>
+              <article><strong>Укрепленный аул</strong><span>вал, огни, мастерская; подготовка героя перед выходом.</span></article>
+              <article><strong>Торговое поселение</strong><span>караван и рынок; обмен ресурсов и замена карты.</span></article>
+              <article><strong>Степной город</strong><span>святилище Тамги; синергии тайлов и 2 реликта.</span></article>
+              <article><strong>Восточная столица</strong><span>архив рода и двор; школы наследников и крупные ветки карт.</span></article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Acceptance</p>
+              <h2>Ручной тест playable</h2>
+            </div>
+            <div class="manual-test">
+              <span>получить Саксаул</span>
+              <span>поставить в пустыню</span>
+              <span>увидеть эффект</span>
+              <span>закрыть круг</span>
+              <span>выбрать карту</span>
+              <span>получить риск</span>
+              <span>умереть</span>
+              <span>получить ресурс аула</span>
+              <span>запустить нового героя</span>
+              <span>подобрать Тамгу</span>
+            </div>
+          </section>
+        </section>
+
+        <section id="uxView" class="view" aria-label="UI UX">
+          <section class="hero-board">
+            <div class="hero-copy">
+              <p class="eyebrow">UI/UX blueprint</p>
+              <h2>Чат слева, карта в центре, герой справа, карты снизу.</h2>
+              <p>
+                Это ближе к Loop Hero и RPG: игрок действует картами снизу, читает
+                события в левом журнале, а справа видит героя, экипировку и текущую
+                схватку. Карта с камерой остается главным объектом.
+              </p>
+              <div class="callout-line">
+                Проверка: за 10 секунд игрок должен понять, где герой, какие карты есть, куда ставить и что произошло.
+              </div>
+            </div>
+            <div class="ux-rules">
+              <article><strong>Верх</strong><span>круг, Силы, ресурсы, скорость, boss/угроза позже</span></article>
+              <article><strong>Лево</strong><span>чат/боевой лог: автоход, проверки, урон, награды</span></article>
+              <article><strong>Центр</strong><span>большая карта с камерой и battle bubble над клеткой события</span></article>
+              <article><strong>Право</strong><span>крупная панель героя: кукла, статы, экипировка, бой</span></article>
+              <article><strong>Низ</strong><span>рука карт тайлов: 5 карт, выбор, постановка</span></article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Screen blueprint</p>
+              <h2>Базовая раскладка 16:9</h2>
+            </div>
+            <div class="ux-blueprint">
+              <div class="bp-zone bp-top">
+                <b>Transparent top HUD</b>
+                <div class="top-hud-wire">
+                  <span class="res-chip">Запасы 3</span>
+                  <span class="res-chip">Мудрость 0</span>
+                  <strong>Круг 1/10</strong>
+                  <span class="res-chip">Слава 0</span>
+                  <span class="res-chip danger">Силы 8</span>
+                  <button type="button">x1</button>
+                </div>
+                <i>48-64 px</i>
+              </div>
+              <div class="bp-zone bp-map">
+                <b>Camera viewport</b>
+                <span>игрок двигает камеру по растущей пустыне; герой сам идет по дороге</span>
+                <div class="camera-controls">
+                  <button type="button">−</button><button type="button">+</button><button type="button">⌂</button>
+                </div>
+                <div class="bp-map-wire">
+                  <span class="bp-slot field"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot field"></span>
+                  <span class="bp-slot"></span><span class="bp-road"></span><span class="bp-road"></span><span class="bp-road bp-hero"></span><span class="bp-road"></span><span class="bp-road"></span><span class="bp-slot"></span>
+                  <span class="bp-slot"></span><span class="bp-road"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-road"></span><span class="bp-slot"></span>
+                  <span class="bp-slot"></span><span class="bp-road"></span><span class="bp-slot"></span><span class="bp-aul">Аул</span><span class="bp-slot"></span><span class="bp-road"></span><span class="bp-slot"></span>
+                  <span class="bp-slot"></span><span class="bp-road"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-road bp-tamga"></span><span class="bp-slot"></span>
+                  <span class="bp-slot"></span><span class="bp-road"></span><span class="bp-road"></span><span class="bp-road"></span><span class="bp-road"></span><span class="bp-road"></span><span class="bp-slot"></span>
+                  <span class="bp-slot field"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot"></span><span class="bp-slot field"></span>
+                </div>
+                <div class="battle-bubble">
+                  <strong>Волчий след</strong>
+                  <span>Body fail · Силы -2</span>
+                </div>
+              </div>
+              <div class="bp-zone bp-side">
+                <b>Hero / Gear / Fight</b>
+                <span>кукла героя, экипировка поверх/вокруг, текущая схватка</span>
+                <i>300-360 px</i>
+                <div class="hero-paperdoll">
+                  <span class="gear-slot weapon">оружие</span>
+                  <span class="gear-slot charm">тамга</span>
+                  <span class="hero-doll">путник</span>
+                  <span class="gear-slot armor">одежда</span>
+                  <span class="gear-slot relic">реликт</span>
+                </div>
+                <div class="fight-strip">
+                  <strong>Текущая клетка</strong>
+                  <span>Волчий след · Body check · риск Силы -2</span>
+                </div>
+              </div>
+              <div class="bp-zone bp-log">
+                <b>Chat / combat log</b>
+                <span>важный постоянный лог: что сделал герой, что прошло хорошо, где был урон</span>
+                <i>left log</i>
+                <div class="compact-log">
+                  <p>Путник сам идет к восточной клетке.</p>
+                  <p>Волчий след: Body check провален, Силы -2.</p>
+                  <p>Одежда смягчила песчаный урон: -1 вместо -2.</p>
+                  <p>Саксаул впереди: можно поставить карту помощи.</p>
+                </div>
+              </div>
+              <div class="bp-zone bp-hand">
+                <b>Card hand</b>
+                <span>до 5 карт, выбранная карта, подсветка доступных слотов</span>
+                <i>bottom</i>
+                <div class="bp-card-hand">
+                  <span class="picked">Саксаул<small>помощь</small></span>
+                  <span>Юрта<small>запасы</small></span>
+                  <span>Тамга<small>память</small></span>
+                  <span>След<small>риск</small></span>
+                  <span class="empty">пусто</span>
+                </div>
+              </div>
+            </div>
+            <div class="ux-notes">
+              <article><strong>Карты</strong><span>снизу как рука: выбрал карту -> подсветились слоты.</span></article>
+              <article><strong>Сражение</strong><span>battle bubble над клеткой, детали справа, история слева.</span></article>
+              <article><strong>Камера</strong><span>нужна для растущей пустыни: pan/zoom, но герой не управляется напрямую.</span></article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Claude mockups</p>
+              <h2>Что именно собрать в игре</h2>
+            </div>
+            <div class="claude-mockups">
+              <article>
+                <h3>1. Обычный бег</h3>
+                <div class="claude-wire">
+                  <span class="cw-top">HUD: ресурсы · Круг · День · Силы · скорость</span>
+                  <span class="cw-left">Chat log<br />автоход · находки · проверки</span>
+                  <span class="cw-map">Карта + камера<br />аул · дорога · герой · bubble</span>
+                  <span class="cw-side">Герой<br />кукла · статы · экипировка</span>
+                  <span class="cw-log">Card hand<br />Саксаул · Юрта · Тамга · След · Оазис</span>
+                </div>
+                <p>Игрок наблюдает автодвижение героя, двигает камеру, читает лог слева и держит карты снизу.</p>
+              </article>
+
+              <article>
+                <h3>2. Выбрана карта</h3>
+                <div class="claude-wire selected">
+                  <span class="cw-top">HUD остается читаемым</span>
+                  <span class="cw-left">Лог объясняет:<br />куда можно поставить и почему</span>
+                  <span class="cw-map">Подсветка valid slots<br />невалидные клетки тихие</span>
+                  <span class="cw-side">Прогноз<br />Саксаул: Силы +1</span>
+                  <span class="cw-log">Саксаул выбран<br />карта активна снизу</span>
+                </div>
+                <p>Выбор карты превращает карту в режим постановки: подсветить слоты, показать результат, не ломать автопроход.</p>
+              </article>
+
+              <article>
+                <h3>3. Сражение / check</h3>
+                <div class="claude-wire combat">
+                  <span class="cw-top">Силы заметны</span>
+                  <span class="cw-left">Body check провален.<br />Одежда снизила урон.</span>
+                  <span class="cw-map">Battle bubble<br />над клеткой боя</span>
+                  <span class="cw-side">Волчий след<br />Body 2 vs 4 · fail · урон -2</span>
+                  <span class="cw-log">Карты снизу ждут</span>
+                </div>
+                <p>Бой происходит на карте, детали справа, история результата в логе. Отдельная боевая сцена не нужна.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Состояния</p>
+              <h2>Те же зоны, разные режимы</h2>
+            </div>
+            <div class="ux-state-grid ux-wire-states">
+              <article>
+                <h3>1. Выбрана карта</h3>
+                <div class="state-frame">
+                  <span class="sf-top">HUD без изменений</span>
+                  <span class="sf-map">подсветка доступных roadside-slots</span>
+                  <span class="sf-side">герой/бой</span>
+                  <span class="sf-log">chat/combat log</span>
+                  <span class="sf-hand active">Саксаул выбран</span>
+                </div>
+                <p>Карта снизу активна. На карте подсвечиваются только валидные слоты.</p>
+              </article>
+              <article>
+                <h3>2. Выбор 1 из 3</h3>
+                <div class="state-frame paused">
+                  <span class="sf-top">HUD затемнен</span>
+                  <span class="sf-map">карта видна фоном</span>
+                  <span class="sf-side">герой</span>
+                  <span class="sf-log">лог приглушен</span>
+                  <span class="sf-modal">Юрта · Тамга · След</span>
+                  <span class="sf-hand">рука скрыта/приглушена</span>
+                </div>
+                <p>Пауза только в конце круга. Выбор поверх карты, но контекст пути остается видим.</p>
+              </article>
+              <article>
+                <h3>3. Смерть</h3>
+                <div class="state-frame death">
+                  <span class="sf-top">итог ресурсов</span>
+                  <span class="sf-map">Тамга на клетке смерти</span>
+                  <span class="sf-side">итог героя</span>
+                  <span class="sf-log">смерть + память</span>
+                  <span class="sf-modal">Новый наследник</span>
+                  <span class="sf-hand">нет действий картой</span>
+                </div>
+                <p>Death panel объясняет не проигрыш, а наследование: что получил аул и где Тамга.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section id="styleView" class="view" aria-label="Стиль и фейкшоты">
+          <section class="hero-board">
+            <div class="hero-copy">
+              <p class="eyebrow">GDD / Art track</p>
+              <h2>Пока Code делает playable, фиксируем вид игры.</h2>
+              <p>
+                Фейкшоты нужны не для красоты, а как проверка: читается ли аул, путь,
+                карта в руке, выбранный слот, журнал событий, смерть и Последняя Тамга.
+              </p>
+              <div class="callout-line">
+                Цель визуала: игрок сразу понимает, где род, где путь, где риск и где память.
+              </div>
+            </div>
+            <div class="style-priorities">
+              <article><strong>01</strong><span>Аул и дорога читаются без текста</span></article>
+              <article><strong>02</strong><span>Слот постановки карты виден мгновенно</span></article>
+              <article><strong>03</strong><span>Журнал объясняет авто-события</span></article>
+              <article><strong>04</strong><span>Смерть выглядит как память рода</span></article>
+            </div>
+          </section>
+
+          <section class="visual-section">
+            <div class="section-title">
+              <p class="eyebrow">Fake shots</p>
+              <h2>Целевые состояния первого playable</h2>
+            </div>
+            <div class="fake-shot-grid">
+              <article class="fake-shot core-run">
+                <div class="fake-hud">
+                  <span>Круг 1/10</span><span>Силы 8</span><span>Запасы 1</span>
+                </div>
+                <div class="fake-playfield">
+                  <div class="fake-map-ring">
+                    <span class="road-cell hero-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="road-cell"></span>
+                    <span class="aul-core">Аул</span>
+                  </div>
+                  <div class="fake-log">
+                    <p>Наследник выходит из аула.</p>
+                    <p>Путь дает роду: Запасы +1.</p>
+                  </div>
+                </div>
+                <h3>Core run</h3>
+                <p>Игрок смотрит путь, ресурсы и журнал, но еще не управляет шагами.</p>
+              </article>
+
+              <article class="fake-shot place-card">
+                <div class="fake-hud">
+                  <span>Карта: Саксаул</span><span>Пауза</span>
+                </div>
+                <div class="placement-board">
+                  <span></span><span class="slot-open"></span><span></span>
+                  <span class="road-mini"></span><span class="aul-mini">А</span><span class="road-mini"></span>
+                  <span></span><span class="slot-selected">Саксаул</span><span></span>
+                </div>
+                <h3>Постановка карты</h3>
+                <p>Подсветка говорит: карту нужно поставить в допустимую buildable-зону, а не в road buffer.</p>
+              </article>
+
+              <article class="fake-shot card-choice-shot">
+                <div class="fake-hud">
+                  <span>Круг завершен</span><span>Выбор 1 из 3</span>
+                </div>
+                <div class="choice-cards">
+                  <span>Юрта<small>Запасы</small></span>
+                  <span>Камень Тамги<small>Мудрость</small></span>
+                  <span>Волчий след<small>Риск</small></span>
+                </div>
+                <h3>Выбор карты</h3>
+                <p>Безопасность, память или риск. Решение короткое и понятное.</p>
+              </article>
+
+              <article class="fake-shot death-shot">
+                <div class="fake-hud">
+                  <span>Смерть</span><span>Круг 2</span>
+                </div>
+                <div class="death-board">
+                  <span class="death-tamga">Т</span>
+                  <div>
+                    <strong>Силы иссякли</strong>
+                    <p>Аул получил: Запасы 4, Мудрость 3, Слава 1.</p>
+                    <button type="button">Новый наследник</button>
+                  </div>
+                </div>
+                <h3>Последняя Тамга</h3>
+                <p>Смерть должна выглядеть как след, который зовет следующего героя.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section id="gddView" class="view" aria-label="GDD">
+          <div class="split">
+            <section class="panel">
+              <h2>Проект</h2>
+              <div class="form-grid">
+                <label>
+                  Название
+                  <input id="fieldTitle" type="text" />
+                </label>
+                <label>
+                  ID игры
+                  <input id="fieldGameId" type="text" />
+                </label>
+                <label class="span-2">
+                  Одно предложение
+                  <textarea id="fieldOneLiner" rows="3"></textarea>
+                </label>
+                <label>
+                  Тема джема
+                  <input id="fieldJamTheme" type="text" />
+                </label>
+                <label>
+                  Интерпретация
+                  <input id="fieldInterpretation" type="text" />
+                </label>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Дизайн-пиллары</h2>
+                <button id="addPillarButton" type="button">Добавить</button>
+              </div>
+              <div id="pillarsList" class="stack"></div>
+            </section>
+          </div>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Основной цикл</h2>
+                <button id="addLoopButton" type="button">Добавить</button>
+              </div>
+              <ol id="coreLoopList" class="ordered-editor"></ol>
+            </section>
+
+            <section class="panel">
+              <h2>Скоуп</h2>
+              <div class="form-grid">
+                <label>
+                  MVP
+                  <textarea id="fieldMvp" rows="6"></textarea>
+                </label>
+                <label>
+                  Stretch
+                  <textarea id="fieldStretch" rows="6"></textarea>
+                </label>
+                <label class="span-2">
+                  Резать первым
+                  <textarea id="fieldCutFirst" rows="4"></textarea>
+                </label>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="levelView" class="view" aria-label="Редактор уровня">
+          <div class="level-layout">
+            <section class="canvas-panel">
+              <div class="panel-head">
+                <div>
+                  <h2 id="levelNameHeading">Level</h2>
+                  <p id="cellStatus" class="muted">x: -, y: -</p>
+                </div>
+                <div class="toolbar">
+                  <button class="mode-button is-active" type="button" data-mode="tile">Тайл</button>
+                  <button class="mode-button" type="button" data-mode="entity">Метка</button>
+                  <button class="mode-button" type="button" data-mode="erase">Стереть</button>
+                </div>
+              </div>
+              <div class="canvas-wrap">
+                <canvas id="levelCanvas" width="640" height="480"></canvas>
+              </div>
+            </section>
+
+            <aside class="inspector">
+              <section class="panel">
+                <h2>Уровень</h2>
+                <div class="form-grid compact">
+                  <label class="span-2">
+                    Название
+                    <input id="fieldLevelName" type="text" />
+                  </label>
+                  <label>
+                    Ширина
+                    <input id="fieldLevelWidth" type="number" min="4" max="64" />
+                  </label>
+                  <label>
+                    Высота
+                    <input id="fieldLevelHeight" type="number" min="4" max="64" />
+                  </label>
+                  <label class="span-2">
+                    Заметки
+                    <textarea id="fieldLevelNotes" rows="4"></textarea>
+                  </label>
+                </div>
+                <button id="resizeLevelButton" type="button">Применить размер</button>
+              </section>
+
+              <section class="panel">
+                <h2>Палитра</h2>
+                <div id="paletteList" class="palette-list"></div>
+              </section>
+
+              <section class="panel">
+                <h2>Метки</h2>
+                <div id="entityTypeList" class="palette-list"></div>
+                <div id="entityList" class="entity-list"></div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section id="dataView" class="view" aria-label="JSON">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>JSON-бандл</h2>
+              <div class="toolbar">
+                <button id="copyJsonButton" type="button">Копировать</button>
+                <button id="refreshJsonButton" type="button">Обновить</button>
+              </div>
+            </div>
+            <textarea id="jsonOutput" class="json-output" spellcheck="false"></textarea>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
