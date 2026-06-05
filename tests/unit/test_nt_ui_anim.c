@@ -37,14 +37,14 @@ static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps
 static void test_anim_instant_when_speed_zero(void) {
     s_fx.ctx->frame_dt = 1.0F / 60.0F;
     const uint32_t id = 0x1234U;
-    /* First touch seeds cur = target (scale 1.0). */
-    nt_ui_anim_target_t a = {.scale = 1.0F, .off_x = 0.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
+    /* First touch seeds cur = target (uniform scale 1.0). */
+    nt_ui_anim_target_t a = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
     (void)nt_ui_anim(s_fx.ctx, id, &a, 0.0F);
     /* Now request a different target with speed 0 -> snaps same frame. */
-    nt_ui_anim_target_t b = {.scale = 2.0F, .off_x = 5.0F, .off_y = -3.0F, .opacity = 0.25F, .tint_t = 1.0F};
+    nt_ui_anim_target_t b = {.scale_x = 2.0F, .scale_y = 2.0F, .scale_z = 1.0F, .off_x = 5.0F, .off_y = -3.0F, .opacity = 0.25F, .tint_t = 1.0F};
     const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &b, 0.0F);
     TEST_ASSERT_NOT_NULL(r);
-    TEST_ASSERT_TRUE(float_near(r->scale, 2.0F, 1e-6F));
+    TEST_ASSERT_TRUE(float_near(r->scale_x, 2.0F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->off_x, 5.0F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->off_y, -3.0F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->opacity, 0.25F, 1e-6F));
@@ -56,18 +56,18 @@ static void test_anim_eases_toward_target(void) {
     s_fx.ctx->frame_dt = 1.0F / 60.0F;
     const uint32_t id = 0x2222U;
     /* Seed at target A (scale 1.0). */
-    nt_ui_anim_target_t a = {.scale = 1.0F, .off_x = 0.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
+    nt_ui_anim_target_t a = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
     (void)nt_ui_anim(s_fx.ctx, id, &a, 10.0F);
     /* Drive toward target B (scale 0.95) for ~30 frames at speed 10, dt 1/60. */
-    nt_ui_anim_target_t b = {.scale = 0.95F, .off_x = 0.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
+    nt_ui_anim_target_t b = {.scale_x = 0.95F, .scale_y = 0.95F, .scale_z = 1.0F, .opacity = 1.0F};
     float prev = 1.0F;
     for (int i = 0; i < 30; i++) {
         const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &b, 10.0F);
         TEST_ASSERT_NOT_NULL(r);
         /* Monotonic decreasing toward 0.95, never overshoots below it. */
-        TEST_ASSERT_TRUE(r->scale <= prev + 1e-6F);
-        TEST_ASSERT_TRUE(r->scale >= 0.95F - 1e-6F);
-        prev = r->scale;
+        TEST_ASSERT_TRUE(r->scale_x <= prev + 1e-6F);
+        TEST_ASSERT_TRUE(r->scale_x >= 0.95F - 1e-6F);
+        prev = r->scale_x;
     }
     /* Converged within eps after 30 frames. */
     TEST_ASSERT_TRUE(float_near(prev, 0.95F, 0.01F));
@@ -80,10 +80,10 @@ static void test_anim_first_touch_no_flash(void) {
     const uint32_t id = 0x3333U;
     /* A freshly-seen id with speed > 0 must still START at target (no ramp
      * from zero/one), so the very first frame shows no flash. */
-    nt_ui_anim_target_t t = {.scale = 0.95F, .off_x = 7.0F, .off_y = 9.0F, .opacity = 0.5F, .tint_t = 0.75F};
+    nt_ui_anim_target_t t = {.scale_x = 0.95F, .scale_y = 0.95F, .scale_z = 1.0F, .off_x = 7.0F, .off_y = 9.0F, .opacity = 0.5F, .tint_t = 0.75F};
     const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &t, 10.0F);
     TEST_ASSERT_NOT_NULL(r);
-    TEST_ASSERT_TRUE(float_near(r->scale, 0.95F, 1e-6F));
+    TEST_ASSERT_TRUE(float_near(r->scale_x, 0.95F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->off_x, 7.0F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->off_y, 9.0F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->opacity, 0.5F, 1e-6F));
@@ -101,28 +101,28 @@ static void test_anim_open_address_coexists(void) {
     const uint32_t id2 = 1U + NT_UI_ANIM_SLOTS;
     TEST_ASSERT_EQUAL_UINT32(id1 & (NT_UI_ANIM_SLOTS - 1U), id2 & (NT_UI_ANIM_SLOTS - 1U));
 
-    nt_ui_anim_target_t t1 = {.scale = 1.0F, .off_x = 0.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
+    nt_ui_anim_target_t t1 = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
     const nt_ui_anim_interaction_t *r1 = nt_ui_anim(s_fx.ctx, id1, &t1, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(id1, r1->id);
 
-    nt_ui_anim_target_t t2 = {.scale = 0.5F, .off_x = 2.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
+    nt_ui_anim_target_t t2 = {.scale_x = 0.5F, .scale_y = 0.5F, .scale_z = 1.0F, .off_x = 2.0F, .opacity = 1.0F};
     const nt_ui_anim_interaction_t *r2 = nt_ui_anim(s_fx.ctx, id2, &t2, 10.0F);
     TEST_ASSERT_EQUAL_UINT32(id2, r2->id);
     TEST_ASSERT_TRUE_MESSAGE(r1 != r2, "open addressing must land id2 in a different slot than id1");
-    TEST_ASSERT_TRUE(float_near(r1->scale, 1.0F, 1e-6F)); /* id1 untouched */
-    TEST_ASSERT_TRUE(float_near(r2->scale, 0.5F, 1e-6F));
+    TEST_ASSERT_TRUE(float_near(r1->scale_x, 1.0F, 1e-6F)); /* id1 untouched */
+    TEST_ASSERT_TRUE(float_near(r2->scale_x, 0.5F, 1e-6F));
 
     /* Re-access id1: must keep its eased state, NOT snap. */
     const nt_ui_anim_interaction_t *r3 = nt_ui_anim(s_fx.ctx, id1, &t1, 10.0F);
     TEST_ASSERT_EQUAL_PTR(r1, r3);
     TEST_ASSERT_EQUAL_UINT32(id1, r3->id);
-    TEST_ASSERT_TRUE(float_near(r3->scale, 1.0F, 1e-6F));
+    TEST_ASSERT_TRUE(float_near(r3->scale_x, 1.0F, 1e-6F));
 }
 
 /* All NT_UI_ANIM_PROBE_MAX consecutive slots full with other ids → evict base. */
 static void test_anim_evicts_when_probes_exhausted(void) {
     s_fx.ctx->frame_dt = 1.0F / 60.0F;
-    nt_ui_anim_target_t t = {.scale = 1.0F, .opacity = 1.0F};
+    nt_ui_anim_target_t t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
     /* Fill NT_UI_ANIM_PROBE_MAX consecutive slots starting at bucket 1. */
     for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
         const uint32_t id = 1U + (k * NT_UI_ANIM_SLOTS);
@@ -130,10 +130,10 @@ static void test_anim_evicts_when_probes_exhausted(void) {
     }
     /* New id hashing to same base: all probes occupied → evict base. */
     const uint32_t bumped = 1U + (NT_UI_ANIM_PROBE_MAX * NT_UI_ANIM_SLOTS);
-    nt_ui_anim_target_t t_new = {.scale = 0.25F, .opacity = 1.0F};
+    nt_ui_anim_target_t t_new = {.scale_x = 0.25F, .scale_y = 0.25F, .scale_z = 1.0F, .opacity = 1.0F};
     const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, bumped, &t_new, 10.0F);
     TEST_ASSERT_EQUAL_UINT32(bumped, r->id);
-    TEST_ASSERT_TRUE(float_near(r->scale, 0.25F, 1e-6F));
+    TEST_ASSERT_TRUE(float_near(r->scale_x, 0.25F, 1e-6F));
 }
 
 int main(void) {

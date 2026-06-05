@@ -75,10 +75,19 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         st = &style->hover;
     }
 
+    /* Button style is 2D-only (scale uniform, no Z-axis fields, no rotation) — feed 1/0 defaults to
+     * the 3D-extended target so the eased anim slot still tracks the full 9-field state for ids
+     * shared with 3D widget consumers. */
     nt_ui_anim_target_t tgt = {
-        .scale = st->scale,
+        .scale_x = st->scale,
+        .scale_y = st->scale,
+        .scale_z = 1.0F,
         .off_x = st->offset_x,
         .off_y = st->offset_y,
+        .off_z = 0.0F,
+        .rot_x = 0.0F,
+        .rot_y = 0.0F,
+        .rot_z = 0.0F,
         .opacity = st->opacity,
         .tint_t = 0.0F,
     };
@@ -92,8 +101,15 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .user_data = (data != NULL) ? data->user_data : NULL,
         .layer = (data != NULL) ? data->layer : 0U,
         .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
-        .transform =
-            {.scale_x = a->scale, .scale_y = a->scale, .scale_z = 1.0F, .offset_x = a->off_x, .offset_y = a->off_y, .offset_z = 0.0F, .rotation_x = 0.0F, .rotation_y = 0.0F, .rotation_z = 0.0F},
+        .transform = {.scale_x = a->scale_x,
+                      .scale_y = a->scale_y,
+                      .scale_z = a->scale_z,
+                      .offset_x = a->off_x,
+                      .offset_y = a->off_y,
+                      .offset_z = a->off_z,
+                      .rotation_x = a->rot_x,
+                      .rotation_y = a->rot_y,
+                      .rotation_z = a->rot_z},
         .opacity = a->opacity,
     };
     // #endregion
