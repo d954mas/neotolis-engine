@@ -173,13 +173,14 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
 #if NT_UI_DEBUG_TOOLS
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
     const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * widget_cap, NT_UI_CACHE_LINE);
     const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
 #else
+    const size_t hit_layer_bytes = 0U;
     const size_t widget_registry_bytes = 0U;
     const size_t debug_zones_bytes = 0U;
     const size_t inspector_collapsed_bytes = 0U;
@@ -214,15 +215,19 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
     ctx->tree_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size);
     ctx->tree_root_for_elem = (int32_t *)((char *)arena + ctx_size + tree_baked_bytes);
     ctx->tree_dfs_stack = (nt_ui_dfs_frame_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes);
     ctx->hit_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes);
     ctx->hit_clip_parent_id = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes);
     ctx->hit_generation = (uint32_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes);
-    ctx->hit_layer = (uint8_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes);
     ctx->current_generation = 0U;
+#if NT_UI_DEBUG_TOOLS
+    const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*ctx->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->hit_layer = (uint8_t *)((char *)arena + ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes);
+#else
+    const size_t hit_layer_bytes = 0U;
+#endif
     const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes;
 #if NT_UI_DEBUG_TOOLS
     ctx->widget_registry_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
@@ -1727,7 +1732,7 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
             /* Inspector ancestor uses ortho overlay's inverse; game widgets use the user view_proj. */
             const float *iv = ctx->inv_view_proj;
 #if NT_UI_DEBUG_TOOLS
-            if (ctx->hit_layer[cur_slot] >= 240U) {
+            if (ctx->hit_layer[cur_slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
                 iv = ctx->inv_inspector_view_proj;
             }
 #endif
@@ -1794,7 +1799,7 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
          * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
         const float *iv = ctx->inv_view_proj;
 #if NT_UI_DEBUG_TOOLS
-        if (ctx->hit_layer[slot] >= 240U) {
+        if (ctx->hit_layer[slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
             iv = ctx->inv_inspector_view_proj;
         }
 #endif

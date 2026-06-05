@@ -112,7 +112,6 @@ struct nt_ui_context {
     nt_ui_baked_xform_t *hit_baked;
     uint32_t *hit_clip_parent_id;
     uint32_t *hit_generation;
-    uint8_t *hit_layer; /* per-slot layer cache for 3D ctx → inspector vs game view_proj branch in hit-test. */
     uint32_t current_generation;
 
     /* Per-walk metrics. */
@@ -153,6 +152,10 @@ struct nt_ui_context {
     uint32_t anim_collision_count;
 
 #if NT_UI_DEBUG_TOOLS
+    /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.
+     * Only the inspector-overlay path needs it, so gated under DEBUG_TOOLS. */
+    uint8_t *hit_layer;
+
     /* Arena-allocated, cap = max_elements (worst-case = all interactive). */
     nt_ui_debug_zone_t *debug_zones;
     uint32_t debug_zone_cap;
