@@ -79,6 +79,13 @@ static void set_defaults(void) {
     g_config.start_in_game = 1;
     g_config.path_cells_growth = 1;
     g_config.path_cells_jitter = 1;
+    g_config.map_zone_cols = 6;
+    g_config.map_zone_rows = 6;
+    g_config.map_aul_w = 2;
+    g_config.map_aul_h = 2;
+    g_config.map_bends_base = 4;
+    g_config.map_bends_per_circle = 1;
+    g_config.map_bends_jitter = 2;
     g_config.check_base_difficulty = 1;
     g_config.check_difficulty_per_circle = 1;
     g_config.check_fail_stamina_loss = 2;
@@ -111,6 +118,13 @@ static void apply_ini(const char *k, const char *v) {
         {"path_cells_growth", &g_config.path_cells_growth, NULL},
         {"path_cells_jitter", &g_config.path_cells_jitter, NULL},
         {"debug_random_desert", &g_config.debug_random_desert, NULL},
+        {"map_zone_cols", &g_config.map_zone_cols, NULL},
+        {"map_zone_rows", &g_config.map_zone_rows, NULL},
+        {"map_aul_w", &g_config.map_aul_w, NULL},
+        {"map_aul_h", &g_config.map_aul_h, NULL},
+        {"map_bends_base", &g_config.map_bends_base, NULL},
+        {"map_bends_per_circle", &g_config.map_bends_per_circle, NULL},
+        {"map_bends_jitter", &g_config.map_bends_jitter, NULL},
         {"check_base_difficulty", &g_config.check_base_difficulty, NULL},
         {"check_difficulty_per_circle", &g_config.check_difficulty_per_circle, NULL},
         {"check_fail_stamina_loss", &g_config.check_fail_stamina_loss, NULL},

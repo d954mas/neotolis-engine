@@ -25,30 +25,211 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index) {
     }
 }
 
-/* Per-circle, per-heir variety: deterministic seed, growing length + a fresh
- * tile layout each circle (player-placed tiles will replace the auto layout). */
-static void roll_circle(tj_run_t *r) {
+// #region loop generation (winding closed loop around the central aul)
+#define TJ_ZONE_MAX 12
+enum { OCC_EMPTY = 0, OCC_AUL = 1, OCC_ROAD = 2, OCC_SLOT = 3 };
+
+typedef struct {
+    int cols, rows;
+    uint8_t occ[TJ_ZONE_MAX * TJ_ZONE_MAX];
+} zone_t;
+
+static int clampi(int v, int lo, int hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+static int sign_away(float v, float c) {
+    if (v > c) {
+        return 1;
+    }
+    if (v < c) {
+        return -1;
+    }
+    return 0;
+}
+static float dist2(float px, float py, float cx, float cy) {
+    const float dx = px - cx;
+    const float dy = py - cy;
+    return (dx * dx) + (dy * dy);
+}
+static bool zin(const zone_t *z, int x, int y) { return x >= 0 && x < z->cols && y >= 0 && y < z->rows; }
+static uint8_t *zocc(zone_t *z, int x, int y) { return &z->occ[(y * z->cols) + x]; }
+
+/* Clockwise perimeter of rect [x0..x1]x[y0..y1] into the run's path arrays. */
+static int rect_loop(tj_run_t *r, int x0, int y0, int x1, int y1) {
+    int n = 0;
+    for (int x = x0; x < x1; x++) {
+        r->path_gx[n] = (uint8_t)x;
+        r->path_gy[n] = (uint8_t)y0;
+        n++;
+    }
+    for (int y = y0; y < y1; y++) {
+        r->path_gx[n] = (uint8_t)x1;
+        r->path_gy[n] = (uint8_t)y;
+        n++;
+    }
+    for (int x = x1; x > x0; x--) {
+        r->path_gx[n] = (uint8_t)x;
+        r->path_gy[n] = (uint8_t)y1;
+        n++;
+    }
+    for (int y = y1; y > y0; y--) {
+        r->path_gx[n] = (uint8_t)x0;
+        r->path_gy[n] = (uint8_t)y;
+        n++;
+    }
+    return n;
+}
+
+/* True if (x,y) has a road 4-neighbour other than the allowed anchor cell. */
+static bool road_neighbor_other(const zone_t *z, int x, int y, int ax, int ay) {
+    static const int nb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (int k = 0; k < 4; k++) {
+        const int xx = x + nb[k][0];
+        const int yy = y + nb[k][1];
+        if (!zin(z, xx, yy) || (xx == ax && yy == ay)) {
+            continue;
+        }
+        if (z->occ[(yy * z->cols) + xx] == OCC_ROAD) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Insert two cells right after path index i (between i and i+1). */
+static void path_insert2(tj_run_t *r, int i, int q1x, int q1y, int q2x, int q2y) {
+    for (int k = r->path_cells - 1; k > i; k--) {
+        r->path_gx[k + 2] = r->path_gx[k];
+        r->path_gy[k + 2] = r->path_gy[k];
+    }
+    r->path_gx[i + 1] = (uint8_t)q1x;
+    r->path_gy[i + 1] = (uint8_t)q1y;
+    r->path_gx[i + 2] = (uint8_t)q2x;
+    r->path_gy[i + 2] = (uint8_t)q2y;
+    r->path_cells += 2;
+}
+
+/* Push the loop edge (i -> i+1) outward by one cell, adding a 2-cell bend.
+ * Outward = the side farther from the zone centre, so bends never cross the aul. */
+static bool try_bump(zone_t *z, tj_run_t *r, int i) {
+    if (r->path_cells <= 0) {
+        return false;
+    }
+    const int j = (i + 1) % r->path_cells;
+    const int ax = r->path_gx[i];
+    const int ay = r->path_gy[i];
+    const int bx = r->path_gx[j];
+    const int by = r->path_gy[j];
+    const int dx = bx - ax;
+    const int dy = by - ay;
+    const float cx = (float)(z->cols - 1) * 0.5F;
+    const float cy = (float)(z->rows - 1) * 0.5F;
+    const float mx = (float)(ax + bx) * 0.5F;
+    const float my = (float)(ay + by) * 0.5F;
+    int nx = -dy;
+    int ny = dx;
+    const float dpos = dist2(mx + (float)nx, my + (float)ny, cx, cy);
+    const float dneg = dist2(mx - (float)nx, my - (float)ny, cx, cy);
+    if (dneg > dpos) {
+        nx = -nx;
+        ny = -ny;
+    }
+    const int q1x = ax + nx;
+    const int q1y = ay + ny;
+    const int q2x = bx + nx;
+    const int q2y = by + ny;
+    if (!zin(z, q1x, q1y) || !zin(z, q2x, q2y)) {
+        return false;
+    }
+    if (*zocc(z, q1x, q1y) != OCC_EMPTY || *zocc(z, q2x, q2y) != OCC_EMPTY) {
+        return false;
+    }
+    if (road_neighbor_other(z, q1x, q1y, ax, ay) || road_neighbor_other(z, q2x, q2y, bx, by)) {
+        return false; /* would touch another segment -> keep the loop simple */
+    }
+    path_insert2(r, i, q1x, q1y, q2x, q2y);
+    *zocc(z, q1x, q1y) = OCC_ROAD;
+    *zocc(z, q2x, q2y) = OCC_ROAD;
+    return true;
+}
+
+/* One build slot per road cell: the outward-most empty neighbour, used once. */
+static void compute_slots(zone_t *z, tj_run_t *r) {
+    const float cx = (float)(z->cols - 1) * 0.5F;
+    const float cy = (float)(z->rows - 1) * 0.5F;
+    for (int i = 0; i < r->path_cells; i++) {
+        const int gx = r->path_gx[i];
+        const int gy = r->path_gy[i];
+        const int ox = sign_away((float)gx, cx);
+        const int oy = sign_away((float)gy, cy);
+        const int cand[4][2] = {{ox, 0}, {0, oy}, {-ox, 0}, {0, -oy}};
+        r->slot_gx[i] = TJ_NO_SLOT;
+        r->slot_gy[i] = TJ_NO_SLOT;
+        for (int k = 0; k < 4; k++) {
+            if (cand[k][0] == 0 && cand[k][1] == 0) {
+                continue;
+            }
+            const int sx = gx + cand[k][0];
+            const int sy = gy + cand[k][1];
+            if (zin(z, sx, sy) && *zocc(z, sx, sy) == OCC_EMPTY) {
+                *zocc(z, sx, sy) = OCC_SLOT; /* reserve so two cells never share a slot */
+                r->slot_gx[i] = (uint8_t)sx;
+                r->slot_gy[i] = (uint8_t)sy;
+                break;
+            }
+        }
+    }
+}
+
+/* Per-circle, per-heir variety: deterministic seed, a tight base ring around the
+ * aul, then random outward bends -> a different winding loop each circle. */
+static void gen_loop(tj_run_t *r) {
     rng_seed((uint32_t)((r->heir_index * 7919) + (r->circle * 104729) + 1));
-    int len = g_config.path_cells + (g_config.path_cells_growth * (r->circle - 1));
-    if (r->circle > 1 && g_config.path_cells_jitter > 0) {
-        len += rng_range_int(0, g_config.path_cells_jitter);
+    zone_t z = {0};
+    z.cols = clampi(g_config.map_zone_cols, 4, TJ_ZONE_MAX);
+    z.rows = clampi(g_config.map_zone_rows, 4, TJ_ZONE_MAX);
+    const int aw = clampi(g_config.map_aul_w, 1, z.cols - 2);
+    const int ah = clampi(g_config.map_aul_h, 1, z.rows - 2);
+    const int ax0 = (z.cols - aw) / 2;
+    const int ay0 = (z.rows - ah) / 2;
+    r->grid_cols = z.cols;
+    r->grid_rows = z.rows;
+    r->aul_x0 = ax0;
+    r->aul_y0 = ay0;
+    r->aul_w = aw;
+    r->aul_h = ah;
+    for (int y = ay0; y < ay0 + ah; y++) {
+        for (int x = ax0; x < ax0 + aw; x++) {
+            *zocc(&z, x, y) = OCC_AUL;
+        }
     }
-    if (len % 2 != 0) {
-        len += 1; /* even perimeter so the rectangular grid loop closes cleanly */
+    r->path_cells = rect_loop(r, ax0 - 1, ay0 - 1, ax0 + aw, ay0 + ah);
+    for (int i = 0; i < r->path_cells; i++) {
+        *zocc(&z, r->path_gx[i], r->path_gy[i]) = OCC_ROAD;
     }
-    if (len < 4) {
-        len = 4;
+    int bends = g_config.map_bends_base + (g_config.map_bends_per_circle * (r->circle - 1));
+    if (g_config.map_bends_jitter > 0) {
+        bends += rng_range_int(0, g_config.map_bends_jitter);
     }
-    if (len > TJ_MAX_PATH) {
-        len = TJ_MAX_PATH - (TJ_MAX_PATH % 2);
+    for (int attempt = 0, done = 0; done < bends && attempt < 400 && r->path_cells + 2 <= TJ_MAX_PATH; attempt++) {
+        if (try_bump(&z, r, rng_range_int(0, r->path_cells - 1))) {
+            done++;
+        }
     }
-    r->path_cells = len;
+    compute_slots(&z, r);
     /* Default: empty road (player builds via roadside cards). Random fill is debug only. */
     for (int i = 0; i < TJ_MAX_PATH; i++) {
-        bool fill = g_config.debug_random_desert && (i < len) && (g_config.tile_count > 0);
+        const bool fill = g_config.debug_random_desert && (i < r->path_cells) && (g_config.tile_count > 0);
         r->tile_at[i] = fill ? rng_range_int(0, g_config.tile_count - 1) : -1;
     }
 }
+// #endregion
 
 void tj_run_start(tj_run_t *r, int heir_index) {
     memset(r, 0, sizeof *r);
@@ -66,7 +247,7 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     }
     r->circle = 1;
     r->alive = true;
-    roll_circle(r);
+    gen_loop(r);
     for (int i = 0; i < TJ_MAX_PATH; i++) {
         r->roadside[i] = -1;
     }
@@ -176,7 +357,7 @@ void tj_run_tick(tj_run_t *r, float dt) {
                 return;
             }
             tj_journal_push(TJ_LOG_BIG, "Круг %d пройден.", r->circle - 1);
-            roll_circle(r);
+            gen_loop(r);
             if (r->hand < 0 && g_config.tile_count > 0) {
                 r->hand = rng_range_int(0, g_config.tile_count - 1);
                 tj_journal_push(TJ_LOG_GOOD, "Найдена карта: %s", g_config.tiles[r->hand].name);

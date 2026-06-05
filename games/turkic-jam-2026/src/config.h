@@ -54,9 +54,16 @@ typedef struct {
     int path_cells, laps_to_win, start_stamina;
     float move_seconds_per_cell;
     int start_in_game;       /* 1 = boot straight into the run, 0 = main menu */
-    int path_cells_growth;   /* extra cells per circle beyond the first */
-    int path_cells_jitter;   /* random 0..jitter extra cells per circle (>circle 1) */
+    int path_cells_growth;   /* DEPRECATED (loop length now from map_* below) */
+    int path_cells_jitter;   /* DEPRECATED (loop length now from map_* below) */
     int debug_random_desert; /* 1 = auto-fill cells with random tiles (debug); 0 = empty (player places) */
+    /* Map/loop geometry: aul reserved in the centre, a winding closed loop of
+     * road cells around it, varied per circle via random outward bends. */
+    int map_zone_cols, map_zone_rows; /* play-zone size in cells */
+    int map_aul_w, map_aul_h;         /* central aul rect (cells) */
+    int map_bends_base;               /* random bends on circle 1 */
+    int map_bends_per_circle;         /* extra bends per circle */
+    int map_bends_jitter;             /* random 0..jitter extra bends */
     int check_base_difficulty, check_difficulty_per_circle, check_fail_stamina_loss, check_fail_reward_pct;
     int tamga_wisdom_base, tamga_wisdom_per_circle, tamga_wisdom_slot_div, tamga_glory_div, tamga_max_active;
     int death_keep_supplies_pct, death_keep_wisdom_pct, death_keep_glory_pct;

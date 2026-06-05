@@ -25,7 +25,7 @@ static const nt_ui_label_style_t s_log_styles[4] = {
 };
 // #endregion
 
-// #region map geometry (square tiles on a rectangular grid loop, Loop Hero style)
+// #region map geometry (winding trail loop around the central aul, Loop Hero style)
 #define MAP_SIZE 360.0F
 
 static Clay_Color cell_color(int tile_idx) {
@@ -55,41 +55,18 @@ static Clay_Color cell_color(int tile_idx) {
         }                                                                                                                                                                                              \
     }
 
-/* Rectangle dims whose perimeter == n (n even); kept roughly square. */
-static void grid_dims(int n, int *cols, int *rows) {
-    const int half = (n / 2) + 2; /* cols + rows */
-    int c = (half + 1) / 2;
-    int r = half - c;
-    if (c < 3) {
-        c = 3;
+/* Floating rect (w x h, corner radius cr), offset from the map centre. */
+#define MAP_RECT(w, h, col, cr, ox, oy, z)                                                                                                                                                             \
+    {                                                                                                                                                                                                  \
+        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}}, .backgroundColor = (col), .cornerRadius = CLAY_CORNER_RADIUS(cr), .floating = {                                            \
+            .attachTo = CLAY_ATTACH_TO_PARENT,                                                                                                                                                         \
+            .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},                                                                                   \
+            .offset = {(ox), (oy)},                                                                                                                                                                    \
+            .zIndex = (z),                                                                                                                                                                             \
+        }                                                                                                                                                                                              \
     }
-    if (r < 3) {
-        r = 3;
-    }
-    *cols = c;
-    *rows = r;
-}
 
-/* Cell index i (clockwise from the top-left corner) -> grid coords. */
-static void cell_grid(int i, int cols, int rows, int *gx, int *gy) {
-    const int top = cols;
-    const int right = rows - 1;
-    const int bottom = cols - 1;
-    if (i < top) {
-        *gx = i;
-        *gy = 0;
-    } else if (i < top + right) {
-        *gx = cols - 1;
-        *gy = (i - top) + 1;
-    } else if (i < top + right + bottom) {
-        *gx = (cols - 2) - (i - top - right);
-        *gy = rows - 1;
-    } else {
-        *gx = 0;
-        *gy = (rows - 2) - (i - top - right - bottom);
-    }
-}
-
+/* Cell coord -> pixel offset from the map centre (grid centred in the area). */
 static float grid_x(int gx, int cols, float pitch) { return ((float)gx - ((float)(cols - 1) * 0.5F)) * pitch; }
 static float grid_y(int gy, int rows, float pitch) { return ((float)gy - ((float)(rows - 1) * 0.5F)) * pitch; }
 // #endregion
@@ -104,44 +81,60 @@ void tj_view_hud(game_ctx_t *g, const tj_run_t *run) {
     nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), l_res, &TJ_STYLE_BODY);
 }
 
-static void draw_aul(game_ctx_t *g, int cols, int rows, float pitch) {
-    const float w = ((float)(cols - 2) * pitch) + (pitch * 0.4F);
-    const float h = ((float)(rows - 2) * pitch) + (pitch * 0.4F);
+static void draw_aul(game_ctx_t *g, const tj_run_t *run, float pitch) {
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const float acx = (float)run->aul_x0 + ((float)(run->aul_w - 1) * 0.5F);
+    const float acy = (float)run->aul_y0 + ((float)(run->aul_h - 1) * 0.5F);
+    const float ox = (acx - ((float)(cols - 1) * 0.5F)) * pitch;
+    const float oy = (acy - ((float)(rows - 1) * 0.5F)) * pitch;
+    const float w = (float)run->aul_w * pitch * 0.92F;
+    const float h = (float)run->aul_h * pitch * 0.92F;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = {176.0F, 146.0F, 106.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(6.0F),
-          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, 0.0F}}}) {
+          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {ox, oy}}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Аул", &s_aul_label);
     }
 }
 
-static void draw_road(const tj_run_t *run, int n, int cols, int rows, float pitch, float tile) {
-    for (int i = 0; i < n && i < TJ_MAX_PATH; i++) {
-        int gx;
-        int gy;
-        cell_grid(i, cols, rows, &gx, &gy);
-        const Clay_Color col = (run->tile_at[i] >= 0) ? cell_color(run->tile_at[i]) : (Clay_Color){92.0F, 86.0F, 78.0F, 255.0F};
-        CLAY(MAP_TILE(tile, col, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 1)) {}
+/* Road as a continuous trail: a connector bridges each pair of consecutive
+ * cells, a node square fills every cell (and the turns) -> one winding path. */
+static void draw_road(const tj_run_t *run, float pitch) {
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const float w = pitch * 0.42F; /* trail thickness */
+    const Clay_Color trail = {150.0F, 128.0F, 96.0F, 255.0F};
+    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
+        const int j = (i + 1) % run->path_cells;
+        const float xi = grid_x(run->path_gx[i], cols, pitch);
+        const float yi = grid_y(run->path_gy[i], rows, pitch);
+        const float xj = grid_x(run->path_gx[j], cols, pitch);
+        const float yj = grid_y(run->path_gy[j], rows, pitch);
+        const bool horiz = (run->path_gy[i] == run->path_gy[j]);
+        CLAY(MAP_RECT(horiz ? pitch : w, horiz ? w : pitch, trail, 0.0F, (xi + xj) * 0.5F, (yi + yj) * 0.5F, 1)) {}
+    }
+    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
+        const Clay_Color col = (run->tile_at[i] >= 0) ? cell_color(run->tile_at[i]) : trail;
+        CLAY(MAP_RECT(w, w, col, 0.0F, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 1)) {}
     }
 }
 
-/* Outer build slots (one per road cell, just outside the loop). Filled = marker;
+/* Build slots (the outward empty cell beside each road cell). Filled = marker;
  * empty = clickable button that places the held card. */
-static void draw_slots(game_ctx_t *g, tj_run_t *run, int n, int cols, int rows, float pitch, float tile) {
+static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
     static uint32_t base = 0U;
     if (base == 0U) {
         base = nt_ui_id("tj_slot");
     }
-    const float cx = (float)(cols - 1) * 0.5F;
-    const float cy = (float)(rows - 1) * 0.5F;
-    for (int i = 0; i < n && i < TJ_MAX_PATH; i++) {
-        int gx;
-        int gy;
-        cell_grid(i, cols, rows, &gx, &gy);
-        const int dx = ((float)gx > cx) ? 1 : (((float)gx < cx) ? -1 : 0);
-        const int dy = ((float)gy > cy) ? 1 : (((float)gy < cy) ? -1 : 0);
-        const float sx = grid_x(gx + dx, cols, pitch);
-        const float sy = grid_y(gy + dy, rows, pitch);
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
+        if (run->slot_gx[i] == TJ_NO_SLOT) {
+            continue; /* no free cell beside this road cell */
+        }
+        const float sx = grid_x(run->slot_gx[i], cols, pitch);
+        const float sy = grid_y(run->slot_gy[i], rows, pitch);
         if (run->roadside[i] >= 0) {
             CLAY(MAP_TILE(tile, cell_color(run->roadside[i]), sx, sy, 0)) {}
             continue;
@@ -165,7 +158,10 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, int n, int cols, int rows, 
     }
 }
 
-static void draw_hero(const tj_run_t *run, int n, int cols, int rows, float pitch, float tile) {
+static void draw_hero(const tj_run_t *run, float pitch) {
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const int n = (run->path_cells > 0) ? run->path_cells : 1;
     float per = g_config.move_seconds_per_cell;
     float frac = (per > 0.0F) ? (run->move_t / per) : 0.0F;
     if (frac < 0.0F) {
@@ -178,37 +174,27 @@ static void draw_hero(const tj_run_t *run, int n, int cols, int rows, float pitc
         i0 = 0;
     }
     const int i1 = (i0 + 1) % n;
-    int x0;
-    int y0;
-    int x1;
-    int y1;
-    cell_grid(i0, cols, rows, &x0, &y0);
-    cell_grid(i1, cols, rows, &x1, &y1);
-    const float hx = grid_x(x0, cols, pitch) + ((grid_x(x1, cols, pitch) - grid_x(x0, cols, pitch)) * frac);
-    const float hy = grid_y(y0, rows, pitch) + ((grid_y(y1, rows, pitch) - grid_y(y0, rows, pitch)) * frac);
-    CLAY(MAP_TILE(tile * 0.62F, ((Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}), hx, hy, 2)) {}
+    const float x0 = grid_x(run->path_gx[i0], cols, pitch);
+    const float y0 = grid_y(run->path_gy[i0], rows, pitch);
+    const float hx = x0 + ((grid_x(run->path_gx[i1], cols, pitch) - x0) * frac);
+    const float hy = y0 + ((grid_y(run->path_gy[i1], rows, pitch) - y0) * frac);
+    const float hs = pitch * 0.40F;
+    CLAY(MAP_RECT(hs, hs, ((Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}), hs * 0.5F, hx, hy, 3)) {}
 }
 
 void tj_view_map(game_ctx_t *g, tj_run_t *run) {
-    int n = run->path_cells;
-    if (n < 4) {
-        n = 4;
+    if (run->grid_cols < 2 || run->grid_rows < 2 || run->path_cells < 1) {
+        return; /* loop not generated yet */
     }
-    if (n % 2 != 0) {
-        n -= 1;
-    }
-    int cols;
-    int rows;
-    grid_dims(n, &cols, &rows);
-    const int maxdim = (cols > rows) ? cols : rows;
-    const float pitch = MAP_SIZE / (float)(maxdim + 3);
-    const float tile = pitch * 0.86F;
+    const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
+    const float pitch = MAP_SIZE / (float)(maxdim + 1);
+    const float tile = pitch * 0.66F; /* placed objects beside the trail */
 
     CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_FIXED(MAP_SIZE), CLAY_SIZING_FIXED(MAP_SIZE)}}}) {
-        draw_aul(g, cols, rows, pitch);
-        draw_road(run, n, cols, rows, pitch, tile);
-        draw_slots(g, run, n, cols, rows, pitch, tile);
-        draw_hero(run, n, cols, rows, pitch, tile);
+        draw_aul(g, run, pitch);
+        draw_road(run, pitch);
+        draw_slots(g, run, pitch, tile);
+        draw_hero(run, pitch);
     }
 }
 

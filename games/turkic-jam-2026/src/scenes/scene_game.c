@@ -58,6 +58,23 @@ static int ep_log(int c, char **v, char *o, int cap, void *u) {
     return len;
 }
 
+/* devapi: dump the generated loop geometry (cells + slots) for tests/bots. */
+static int ep_path(int c, char **v, char *o, int cap, void *u) {
+    (void)c;
+    (void)v;
+    (void)u;
+    int len = snprintf(o, (size_t)cap, "{\"cols\":%d,\"rows\":%d,\"aul\":[%d,%d,%d,%d],\"cells\":[", s_run.grid_cols, s_run.grid_rows, s_run.aul_x0, s_run.aul_y0, s_run.aul_w, s_run.aul_h);
+    for (int i = 0; i < s_run.path_cells && len < cap - 24; i++) {
+        len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d]", i ? "," : "", s_run.path_gx[i], s_run.path_gy[i]);
+    }
+    len += snprintf(o + len, (size_t)(cap - len), "],\"slots\":[");
+    for (int i = 0; i < s_run.path_cells && len < cap - 24; i++) {
+        len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d]", i ? "," : "", s_run.slot_gx[i], s_run.slot_gy[i]);
+    }
+    len += snprintf(o + len, (size_t)(cap - len), "]}");
+    return len;
+}
+
 /* devapi: place the held card into a roadside slot. "game.place slot=<i>" */
 static int ep_place(int c, char **v, char *o, int cap, void *u) {
     (void)u;
@@ -78,6 +95,7 @@ static void on_enter(game_ctx_t *g) {
     if (!s_ep_registered) {
         nt_devapi_register("game.run", ep_run, NULL);
         nt_devapi_register("game.log", ep_log, NULL);
+        nt_devapi_register("game.path", ep_path, NULL);
         nt_devapi_register("game.place", ep_place, NULL);
         s_ep_registered = true;
     }
