@@ -11,18 +11,18 @@
 #
 # Цепочка как в Capybara Go: мелкие +/- события -> риск/бой(check) -> иногда крупное.
 
-# --- круг 1: мягкий вход (находка + оазис у дороги) ---
-1 | road  | yurt        | 1 | on_enter
-1 | field | oasis       | 1 | adjacent
+# --- круг 1: мягкий вход (саксаул у дороги — маленькая помощь) ---
+1 | field | saxaul      | 1 | adjacent
 
-# --- круг 2: первый риск (body-check) + пассивный камень Тамги ---
+# --- круг 2: первый риск-встреча на дороге + пассивный доход в поле ---
 2 | road  | wolf_track  | 1 | on_enter
-2 | field | oasis       | 1 | adjacent
+2 | field | saxaul      | 1 | adjacent
 2 | field | tamga_stone | 1 | global
 
 # --- круг 3+: насыщеннее (берётся как пул для кругов 3..10 по fallback) ---
 3 | road  | wolf_track  | 1 | on_enter
 3 | road  | mirage      | 1 | on_enter
-3 | road  | storm       | 1 | on_enter
-3 | field | oasis       | 2 | adjacent
+3 | field | saxaul      | 1 | adjacent
+3 | field | oasis       | 1 | adjacent
+3 | field | yurt        | 1 | global
 3 | field | tamga_stone | 1 | global

@@ -380,13 +380,14 @@ void tj_run_start(tj_run_t *r, int heir_index) {
         r->stamina += h->stamina_bonus;
     }
     r->circle = 1;
+    r->day = 1;
     r->alive = true;
     r->phase = TJ_PHASE_AUL_EXIT;
     r->intro_t = 0.0F;
     tj_journal_clear();
     tj_journal_push(TJ_LOG_BIG, "%s выходит из стойбища. Костёр остаётся за спиной.", heir_name(r));
-    gen_loop(r);                             /* generates the loop and populates this circle (may log global effects) */
-    r->hand = tj_config_tile_index("oasis"); /* FTUE: start holding a guaranteed Oasis card */
+    gen_loop(r);                              /* generates the loop and populates this circle (may log global effects) */
+    r->hand = tj_config_tile_index("saxaul"); /* FTUE: start holding a guaranteed Saxaul card (GDD: small, common) */
     (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
 }
 
@@ -467,6 +468,33 @@ static void resolve_cell(tj_run_t *r) {
     }
 }
 
+/* Offer 3 (preferably distinct) cards and pause for the player's pick. */
+static void offer_cards(tj_run_t *r) {
+    if (g_config.tile_count <= 0) {
+        return;
+    }
+    for (int i = 0; i < 3; i++) {
+        int t = rng_range_int(0, g_config.tile_count - 1);
+        for (int tries = 0; tries < 16 && ((i > 0 && t == r->choice[0]) || (i > 1 && t == r->choice[1])); tries++) {
+            t = rng_range_int(0, g_config.tile_count - 1);
+        }
+        r->choice[i] = t;
+    }
+    r->choosing = true;
+    tj_journal_push(TJ_LOG_BIG, "Конец круга: выбери дар.");
+}
+
+void tj_run_choose_card(tj_run_t *r, int idx) {
+    if (!r->choosing || idx < 0 || idx > 2) {
+        return;
+    }
+    r->hand = r->choice[idx];
+    r->choosing = false;
+    if (r->hand >= 0 && r->hand < g_config.tile_count) {
+        tj_journal_push(TJ_LOG_GOOD, "Взята карта: %s", g_config.tiles[r->hand].name);
+    }
+}
+
 void tj_run_tick(tj_run_t *r, float dt) {
     if (!r->alive || r->won) {
         return;
@@ -482,12 +510,16 @@ void tj_run_tick(tj_run_t *r, float dt) {
         tick_intro(r, dt); /* still leaving the aul: don't tick the loop yet */
         return;
     }
+    if (r->choosing) {
+        return; /* paused on the end-of-circle card choice */
+    }
     r->move_t += dt;
     int guard = 0;
-    while (r->move_t >= per && r->alive && !r->won && guard < TJ_MAX_PATH) {
+    while (r->move_t >= per && r->alive && !r->won && !r->choosing && guard < TJ_MAX_PATH) {
         r->move_t -= per;
         guard++;
         r->cell++;
+        r->day++; /* each cell-to-cell step is a day of travel */
         if (r->cell >= r->path_cells) {
             r->cell = 0;
             r->circle++;
@@ -498,10 +530,7 @@ void tj_run_tick(tj_run_t *r, float dt) {
             }
             tj_journal_push(TJ_LOG_BIG, "Круг %d пройден.", r->circle - 1);
             gen_loop(r);
-            if (r->hand < 0 && g_config.tile_count > 0) {
-                r->hand = rng_range_int(0, g_config.tile_count - 1);
-                tj_journal_push(TJ_LOG_GOOD, "Найдена карта: %s", g_config.tiles[r->hand].name);
-            }
+            offer_cards(r); /* end of circle: pause for a 1-of-3 card choice */
         }
         resolve_cell(r);
     }
