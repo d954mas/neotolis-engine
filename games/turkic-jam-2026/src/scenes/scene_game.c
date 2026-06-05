@@ -2,6 +2,8 @@
  * handles input + flow. No rendering or sim logic lives here (see view.c / sim.c). */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "clay.h"
 
@@ -28,8 +30,8 @@ static int ep_run(int c, char **v, char *o, int cap, void *u) {
     (void)c;
     (void)v;
     (void)u;
-    return snprintf(o, (size_t)cap, "{\"circle\":%d,\"cell\":%d,\"path_cells\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,\"glory\":%d,\"alive\":%s,\"won\":%s}", s_run.circle, s_run.cell,
-                    s_run.path_cells, s_run.stamina, s_run.supplies, s_run.wisdom, s_run.glory, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
+    return snprintf(o, (size_t)cap, "{\"circle\":%d,\"cell\":%d,\"path_cells\":%d,\"hand\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,\"glory\":%d,\"alive\":%s,\"won\":%s}", s_run.circle,
+                    s_run.cell, s_run.path_cells, s_run.hand, s_run.stamina, s_run.supplies, s_run.wisdom, s_run.glory, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
 }
 
 /* devapi: recent event-log lines (newest last), for reading the run narrative. */
@@ -53,6 +55,19 @@ static int ep_log(int c, char **v, char *o, int cap, void *u) {
     }
     return len;
 }
+
+/* devapi: place the held card into a roadside slot. "game.place slot=<i>" */
+static int ep_place(int c, char **v, char *o, int cap, void *u) {
+    (void)u;
+    int slot = -1;
+    for (int i = 0; i < c; i++) {
+        if (strncmp(v[i], "slot=", 5) == 0) {
+            slot = (int)strtol(v[i] + 5, NULL, 10);
+        }
+    }
+    bool ok = tj_run_place_roadside(&s_run, slot);
+    return snprintf(o, (size_t)cap, "{\"placed\":%s,\"slot\":%d,\"hand\":%d}", ok ? "true" : "false", slot, s_run.hand);
+}
 #endif
 
 static void on_enter(game_ctx_t *g) {
@@ -61,6 +76,7 @@ static void on_enter(game_ctx_t *g) {
     if (!s_ep_registered) {
         nt_devapi_register("game.run", ep_run, NULL);
         nt_devapi_register("game.log", ep_log, NULL);
+        nt_devapi_register("game.place", ep_place, NULL);
         s_ep_registered = true;
     }
 #endif

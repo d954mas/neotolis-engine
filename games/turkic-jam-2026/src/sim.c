@@ -40,8 +40,10 @@ static void roll_circle(tj_run_t *r) {
         len = TJ_MAX_PATH;
     }
     r->path_cells = len;
+    /* Default: empty road (player builds via roadside cards). Random fill is debug only. */
     for (int i = 0; i < TJ_MAX_PATH; i++) {
-        r->tile_at[i] = (i < len && g_config.tile_count > 0) ? rng_range_int(0, g_config.tile_count - 1) : -1;
+        bool fill = g_config.debug_random_desert && (i < len) && (g_config.tile_count > 0);
+        r->tile_at[i] = fill ? rng_range_int(0, g_config.tile_count - 1) : -1;
     }
 }
 
@@ -62,6 +64,10 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     r->circle = 1;
     r->alive = true;
     roll_circle(r);
+    for (int i = 0; i < TJ_MAX_PATH; i++) {
+        r->roadside[i] = -1;
+    }
+    r->hand = tj_config_tile_index("oasis"); /* FTUE: start holding a guaranteed Oasis card */
     (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
     tj_journal_clear();
     tj_journal_push(TJ_LOG_BIG, "Новый наследник выходит из аула.");
@@ -80,12 +86,7 @@ static const char *stat_name(tj_stat_t s) {
     }
 }
 
-static void resolve_cell(tj_run_t *r) {
-    int idx = (r->cell >= 0 && r->cell < TJ_MAX_PATH) ? r->tile_at[r->cell] : -1;
-    if (idx < 0 || idx >= g_config.tile_count) {
-        tj_journal_push(TJ_LOG_PLAIN, "Пустая клетка");
-        return;
-    }
+static void apply_tile(tj_run_t *r, int idx) {
     const tj_tile_def_t *t = &g_config.tiles[idx];
     int supplies = t->supplies;
     int wisdom = t->wisdom;
@@ -129,6 +130,26 @@ static void resolve_cell(tj_run_t *r) {
     }
 }
 
+static void resolve_cell(tj_run_t *r) {
+    if (r->cell < 0 || r->cell >= TJ_MAX_PATH) {
+        return;
+    }
+    const int road = r->tile_at[r->cell];
+    const int side = r->roadside[r->cell];
+    const bool has_road = (road >= 0 && road < g_config.tile_count);
+    const bool has_side = (side >= 0 && side < g_config.tile_count);
+    if (!has_road && !has_side) {
+        tj_journal_push(TJ_LOG_PLAIN, "Пустая клетка");
+        return;
+    }
+    if (has_road) {
+        apply_tile(r, road);
+    }
+    if (has_side && r->alive) {
+        apply_tile(r, side);
+    }
+}
+
 void tj_run_tick(tj_run_t *r, float dt) {
     if (!r->alive || r->won) {
         return;
@@ -156,4 +177,20 @@ void tj_run_tick(tj_run_t *r, float dt) {
         }
         resolve_cell(r);
     }
+}
+
+bool tj_run_place_roadside(tj_run_t *r, int slot) {
+    if (slot < 0 || slot >= r->path_cells) {
+        return false;
+    }
+    if (r->hand < 0 || r->hand >= g_config.tile_count) {
+        return false;
+    }
+    if (r->roadside[slot] >= 0) {
+        return false; /* slot already taken */
+    }
+    r->roadside[slot] = r->hand;
+    tj_journal_push(TJ_LOG_GOOD, "Поставлен тайл: %s (слот %d)", g_config.tiles[r->hand].name, slot);
+    r->hand = -1;
+    return true;
 }

@@ -57,6 +57,16 @@ static tj_stat_t stat_from(const char *s) {
     }
     return TJ_STAT_NONE;
 }
+
+static tj_placement_t placement_from(const char *s) {
+    if (strcmp(s, "road") == 0) {
+        return TJ_PLACE_ROAD;
+    }
+    if (strcmp(s, "field") == 0) {
+        return TJ_PLACE_FIELD;
+    }
+    return TJ_PLACE_ROADSIDE;
+}
 // #endregion
 
 // #region defaults
@@ -100,6 +110,7 @@ static void apply_ini(const char *k, const char *v) {
         {"start_in_game", &g_config.start_in_game, NULL},
         {"path_cells_growth", &g_config.path_cells_growth, NULL},
         {"path_cells_jitter", &g_config.path_cells_jitter, NULL},
+        {"debug_random_desert", &g_config.debug_random_desert, NULL},
         {"check_base_difficulty", &g_config.check_base_difficulty, NULL},
         {"check_difficulty_per_circle", &g_config.check_difficulty_per_circle, NULL},
         {"check_fail_stamina_loss", &g_config.check_fail_stamina_loss, NULL},
@@ -203,6 +214,7 @@ static void parse_tiles(const char *path) {
         d->glory = to_int(fld[8]);
         d->stamina_cost = to_int(fld[9]);
         d->stamina_restore = to_int(fld[10]);
+        d->placement = (n >= 12) ? placement_from(fld[11]) : TJ_PLACE_ROADSIDE;
     }
     (void)fclose(f);
 }

@@ -25,11 +25,20 @@ typedef enum {
     TJ_STAT_SPIRIT,
 } tj_stat_t;
 
+/* Where a tile/card may be placed (Loop Hero model). MVP: all player cards are
+ * roadside; road = scripted/debug only; field reserved for post-MVP. */
+typedef enum {
+    TJ_PLACE_ROADSIDE = 0,
+    TJ_PLACE_ROAD,
+    TJ_PLACE_FIELD,
+} tj_placement_t;
+
 typedef struct {
     char id[TJ_ID_LEN];
     char name[TJ_NAME_LEN];
     tj_tile_kind_t kind;
     tj_stat_t check;
+    tj_placement_t placement;
     int diff_base, diff_per_circle;
     int supplies, wisdom, glory;
     int stamina_cost, stamina_restore;
@@ -44,9 +53,10 @@ typedef struct {
 typedef struct {
     int path_cells, laps_to_win, start_stamina;
     float move_seconds_per_cell;
-    int start_in_game;     /* 1 = boot straight into the run, 0 = main menu */
-    int path_cells_growth; /* extra cells per circle beyond the first */
-    int path_cells_jitter; /* random 0..jitter extra cells per circle (>circle 1) */
+    int start_in_game;       /* 1 = boot straight into the run, 0 = main menu */
+    int path_cells_growth;   /* extra cells per circle beyond the first */
+    int path_cells_jitter;   /* random 0..jitter extra cells per circle (>circle 1) */
+    int debug_random_desert; /* 1 = auto-fill cells with random tiles (debug); 0 = empty (player places) */
     int check_base_difficulty, check_difficulty_per_circle, check_fail_stamina_loss, check_fail_reward_pct;
     int tamga_wisdom_base, tamga_wisdom_per_circle, tamga_wisdom_slot_div, tamga_glory_div, tamga_max_active;
     int death_keep_supplies_pct, death_keep_wisdom_pct, death_keep_glory_pct;

@@ -32,9 +32,10 @@ death_keep_supplies_pct, death_keep_wisdom_pct, death_keep_glory_pct`.
 **heirs.tsv** — колонки: `id | name | body | mind | spirit | stamina_bonus`.
 
 **tiles.tsv** — колонки:
-`id | name | kind | check | diff_base | diff_per_circle | supplies | wisdom | glory | stamina_cost | stamina_restore`
+`id | name | kind | check | diff_base | diff_per_circle | supplies | wisdom | glory | stamina_cost | stamina_restore | placement`
 - `kind`: `safe` | `support` | `check`
 - `check`: `none` | `body` | `mind` | `spirit`
+- `placement` (опц. 12-я колонка; отсутствует → `roadside`): `roadside` | `road` | `field`
 
 ## Расширение
 

@@ -26,10 +26,12 @@ static const nt_ui_label_style_t s_log_styles[4] = {
 
 // #region map geometry
 #define MAP_SIZE 360.0F
-#define MAP_RADIUS 142.0F
-#define CELL_SIZE 34.0F
-#define AUL_SIZE 66.0F
-#define HERO_SIZE 22.0F
+#define MAP_RADIUS 116.0F   /* the road ring */
+#define OUTER_RADIUS 154.0F /* roadside build slots */
+#define CELL_SIZE 26.0F
+#define SLOT_SIZE 24.0F
+#define AUL_SIZE 58.0F
+#define HERO_SIZE 18.0F
 
 static Clay_Color cell_color(int tile_idx) {
     if (tile_idx < 0 || tile_idx >= g_config.tile_count) {
@@ -64,9 +66,32 @@ void tj_view_hud(game_ctx_t *g, const tj_run_t *run) {
     static char l_circle[64];
     static char l_res[96];
     (void)snprintf(l_circle, sizeof l_circle, "Круг %d/%d", run->circle, g_config.laps_to_win);
-    (void)snprintf(l_res, sizeof l_res, "Силы %d    Запасы %d    Мудрость %d    Слава %d", run->stamina, run->supplies, run->wisdom, run->glory);
+    const char *hand = (run->hand >= 0 && run->hand < g_config.tile_count) ? g_config.tiles[run->hand].name : "нет";
+    (void)snprintf(l_res, sizeof l_res, "Силы %d   Запасы %d   Мудрость %d   Слава %d     Карта: %s", run->stamina, run->supplies, run->wisdom, run->glory, hand);
     nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), l_circle, &TJ_STYLE_HEADING);
     nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), l_res, &TJ_STYLE_BODY);
+}
+
+static void draw_ring(const tj_run_t *run, int n, float step, float start) {
+    for (int i = 0; i < n && i < TJ_MAX_PATH; i++) {
+        const float a = start + (step * (float)i);
+        const Clay_Color road_col = (run->tile_at[i] >= 0) ? cell_color(run->tile_at[i]) : (Clay_Color){95.0F, 90.0F, 82.0F, 255.0F};
+        CLAY(MAP_MARKER(CELL_SIZE, CELL_SIZE, road_col, CELL_SIZE * 0.5F, MAP_RADIUS * cosf(a), MAP_RADIUS * sinf(a), 1)) {}
+        const Clay_Color slot_col = (run->roadside[i] >= 0) ? cell_color(run->roadside[i]) : (Clay_Color){46.0F, 48.0F, 60.0F, 255.0F};
+        CLAY(MAP_MARKER(SLOT_SIZE, SLOT_SIZE, slot_col, SLOT_SIZE * 0.25F, OUTER_RADIUS * cosf(a), OUTER_RADIUS * sinf(a), 0)) {}
+    }
+}
+
+static void draw_hero(const tj_run_t *run, float step, float start) {
+    float per = g_config.move_seconds_per_cell;
+    float frac = (per > 0.0F) ? (run->move_t / per) : 0.0F;
+    if (frac < 0.0F) {
+        frac = 0.0F;
+    } else if (frac > 1.0F) {
+        frac = 1.0F;
+    }
+    const float ah = start + (step * ((float)run->cell + frac));
+    CLAY(MAP_MARKER(HERO_SIZE, HERO_SIZE, ((Clay_Color){255.0F, 210.0F, 90.0F, 255.0F}), HERO_SIZE * 0.5F, MAP_RADIUS * cosf(ah), MAP_RADIUS * sinf(ah), 2)) {}
 }
 
 void tj_view_map(game_ctx_t *g, const tj_run_t *run) {
@@ -75,35 +100,14 @@ void tj_view_map(game_ctx_t *g, const tj_run_t *run) {
     const float start = -1.5707963F; /* first cell at the top */
 
     CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_FIXED(MAP_SIZE), CLAY_SIZING_FIXED(MAP_SIZE)}}}) {
-        /* aul in the centre, labelled */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(AUL_SIZE), CLAY_SIZING_FIXED(AUL_SIZE)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = {180.0F, 150.0F, 110.0F, 255.0F},
               .cornerRadius = CLAY_CORNER_RADIUS(AUL_SIZE * 0.3F),
               .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, 0.0F}}}) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Аул", &s_aul_label);
         }
-
-        /* ring of cells (tile slots), coloured by tile kind */
-        for (int i = 0; i < n && i < TJ_MAX_PATH; i++) {
-            const float a = start + (step * (float)i);
-            const float ox = MAP_RADIUS * cosf(a);
-            const float oy = MAP_RADIUS * sinf(a);
-            CLAY(MAP_MARKER(CELL_SIZE, CELL_SIZE, cell_color(run->tile_at[i]), CELL_SIZE * 0.5F, ox, oy, 0)) {}
-        }
-
-        /* hero marker, interpolated between cells */
-        float per = g_config.move_seconds_per_cell;
-        float frac = (per > 0.0F) ? (run->move_t / per) : 0.0F;
-        if (frac < 0.0F) {
-            frac = 0.0F;
-        }
-        if (frac > 1.0F) {
-            frac = 1.0F;
-        }
-        const float ah = start + (step * ((float)run->cell + frac));
-        const float hx = MAP_RADIUS * cosf(ah);
-        const float hy = MAP_RADIUS * sinf(ah);
-        CLAY(MAP_MARKER(HERO_SIZE, HERO_SIZE, ((Clay_Color){255.0F, 210.0F, 90.0F, 255.0F}), HERO_SIZE * 0.5F, hx, hy, 2)) {}
+        draw_ring(run, n, step, start);
+        draw_hero(run, step, start);
     }
 }
 
