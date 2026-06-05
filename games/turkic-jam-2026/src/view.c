@@ -23,6 +23,17 @@ static const nt_ui_label_style_t s_log_styles[4] = {
     [TJ_LOG_BAD] = {.font_id = 0, .font_size = 18, .color = {232.0F, 138.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
     [TJ_LOG_BIG] = {.font_id = 0, .font_size = 20, .color = {255.0F, 210.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
 };
+
+static const nt_ui_label_style_t s_chip = {.font_id = 0, .font_size = 19, .color = {214.0F, 204.0F, 184.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_circle_big = {.font_id = 0, .font_size = 30, .color = {255.0F, 214.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20, .color = {196.0F, 168.0F, 124.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {210.0F, 216.0F, 228.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {130.0F, 138.0F, 152.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+
+#define TJ_PANEL_BG {16.0F, 19.0F, 30.0F, 255.0F}
+#define TJ_BAR_BG {20.0F, 24.0F, 38.0F, 255.0F}
+#define TJ_CHIP_BG {34.0F, 40.0F, 58.0F, 255.0F}
 // #endregion
 
 // #region map geometry (winding trail loop around the central aul, Loop Hero style)
@@ -71,14 +82,44 @@ static float grid_x(int gx, int cols, float pitch) { return ((float)gx - ((float
 static float grid_y(int gy, int rows, float pitch) { return ((float)gy - ((float)(rows - 1) * 0.5F)) * pitch; }
 // #endregion
 
-void tj_view_hud(game_ctx_t *g, const tj_run_t *run) {
-    static char l_circle[64];
-    static char l_res[128];
-    const char *hand = (run->hand >= 0 && run->hand < g_config.tile_count) ? g_config.tiles[run->hand].name : "нет";
-    (void)snprintf(l_circle, sizeof l_circle, "Круг %d/%d", run->circle, g_config.laps_to_win);
-    (void)snprintf(l_res, sizeof l_res, "Силы %d   Запасы %d   Мудрость %d   Слава %d     Карта: %s", run->stamina, run->supplies, run->wisdom, run->glory, hand);
-    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), l_circle, &TJ_STYLE_HEADING);
-    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), l_res, &TJ_STYLE_BODY);
+static void hud_chip(game_ctx_t *g, const char *text) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_GROW(0)}, .padding = {14, 14, 0, 0}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = TJ_CHIP_BG,
+          .cornerRadius = CLAY_CORNER_RADIUS(9.0F)}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_chip);
+    }
+}
+
+static void hud_spacer(void) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0)}}}) {}
+}
+
+void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
+    static char circle[40];
+    static char sup[28];
+    static char wis[28];
+    static char glo[28];
+    static char sta[28];
+    (void)snprintf(circle, sizeof circle, "КРУГ %d/%d", run->circle, g_config.laps_to_win);
+    (void)snprintf(sup, sizeof sup, "Запасы %d", run->supplies);
+    (void)snprintf(wis, sizeof wis, "Мудрость %d", run->wisdom);
+    (void)snprintf(glo, sizeof glo, "Слава %d", run->glory);
+    (void)snprintf(sta, sizeof sta, "Силы %d", run->stamina);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64)},
+                     .padding = {16, 16, 10, 10},
+                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                     .childGap = 10,
+                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = TJ_BAR_BG}) {
+        hud_chip(g, sup);
+        hud_chip(g, wis);
+        hud_chip(g, glo);
+        hud_spacer();
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), circle, &s_circle_big);
+        hud_spacer();
+        hud_chip(g, sta);
+        hud_chip(g, "x1");
+    }
 }
 
 static void draw_aul(game_ctx_t *g, const tj_run_t *run, float pitch) {
@@ -252,16 +293,81 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
     }
 }
 
-void tj_view_journal(game_ctx_t *g, int max_lines) {
+void tj_view_log(game_ctx_t *g, int max_lines) {
     const int avail = tj_journal_count();
-    int shown = avail < max_lines ? avail : max_lines;
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2}}) {
+    const int shown = avail < max_lines ? avail : max_lines;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(14), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .backgroundColor = TJ_PANEL_BG}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Летопись", &s_panel_title);
         for (int k = shown - 1; k >= 0; k--) {
             tj_log_kind_t kind = TJ_LOG_PLAIN;
             const char *line = tj_journal_get(k, &kind);
             if (line) {
                 nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), line, &s_log_styles[kind]);
             }
+        }
+    }
+}
+
+static const char *tj_hero_name(const tj_run_t *run) {
+    if (run->heir_index >= 0 && run->heir_index < g_config.heir_count) {
+        return g_config.heirs[run->heir_index].name;
+    }
+    return "Наследник";
+}
+
+void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
+    static char body[20];
+    static char mind[20];
+    static char spirit[20];
+    static char sta[24];
+    static char cellinfo[40];
+    (void)snprintf(body, sizeof body, "Тело %d", run->body);
+    (void)snprintf(mind, sizeof mind, "Ум %d", run->mind);
+    (void)snprintf(spirit, sizeof spirit, "Дух %d", run->spirit);
+    (void)snprintf(sta, sizeof sta, "Силы %d", run->stamina);
+    (void)snprintf(cellinfo, sizeof cellinfo, "Клетка %d / %d", run->cell + 1, run->path_cells);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
+                     .padding = CLAY_PADDING_ALL(16),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 12,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = TJ_PANEL_BG}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tj_hero_name(run), &s_panel_title);
+        /* Hero doll placeholder (real silhouette/equipment slots later). */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(150)}}, .backgroundColor = {54.0F, 60.0F, 80.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {}
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), body, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mind, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), spirit, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cellinfo, &s_dim);
+    }
+}
+
+static void hand_card(game_ctx_t *g, const char *name, bool active) {
+    const Clay_Color bg = active ? (Clay_Color){46.0F, 54.0F, 40.0F, 255.0F} : (Clay_Color){26.0F, 30.0F, 44.0F, 255.0F};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(132), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(10.0F),
+          .border = {.color = active ? (Clay_Color){150.0F, 210.0F, 150.0F, 255.0F} : (Clay_Color){44.0F, 50.0F, 66.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, active ? &s_card_name : &s_dim);
+    }
+}
+
+void tj_view_card_hand(game_ctx_t *g, const tj_run_t *run) {
+    const bool has = (run->hand >= 0 && run->hand < g_config.tile_count);
+    const char *held = has ? g_config.tiles[run->hand].name : "—";
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(118)},
+                     .padding = CLAY_PADDING_ALL(12),
+                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                     .childGap = 12,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = TJ_BAR_BG}) {
+        hand_card(g, held, has);
+        for (int i = 1; i < 5; i++) {
+            hand_card(g, "пусто", false);
+        }
+        if (has) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "  кликни свободный слот у дороги, чтобы поставить", &s_dim);
         }
     }
 }

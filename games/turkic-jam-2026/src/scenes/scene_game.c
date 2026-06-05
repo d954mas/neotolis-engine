@@ -88,6 +88,15 @@ static int ep_path(int c, char **v, char *o, int cap, void *u) {
     return len;
 }
 
+/* devapi: end the run now (for testing death -> aul -> next heir). */
+static int ep_kill(int c, char **v, char *o, int cap, void *u) {
+    (void)c;
+    (void)v;
+    (void)u;
+    s_run.alive = false;
+    return snprintf(o, (size_t)cap, "{\"alive\":false}");
+}
+
 /* devapi: place the held card into a roadside slot. "game.place slot=<i>" */
 static int ep_place(int c, char **v, char *o, int cap, void *u) {
     (void)u;
@@ -110,6 +119,7 @@ static void on_enter(game_ctx_t *g) {
         nt_devapi_register("game.log", ep_log, NULL);
         nt_devapi_register("game.path", ep_path, NULL);
         nt_devapi_register("game.place", ep_place, NULL);
+        nt_devapi_register("game.kill", ep_kill, NULL);
         s_ep_registered = true;
     }
 #endif
@@ -126,17 +136,15 @@ static void on_update(game_ctx_t *g, float dt) {
 
     tj_run_tick(&s_run, dt);
 
-    tj_view_hud(g, &s_run);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 28, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        tj_view_map(g, &s_run);
-        tj_view_journal(g, 7);
-    }
-
-    if (tj_button(g, "game_give_up", i18n(T_LOSE), 240, 58, TJ_BTN_DANGER)) {
-        s_run.alive = false;
-    }
-    if (s_run.hand >= 0) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "В руке карта — кликни свободный слот, чтобы её поставить", &TJ_STYLE_HINT);
+    /* Full-screen frame: top HUD, then [log | map | hero], then card hand. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        tj_view_top_hud(g, &s_run);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
+            tj_view_log(g, 10);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { tj_view_map(g, &s_run); }
+            tj_view_hero_panel(g, &s_run);
+        }
+        tj_view_card_hand(g, &s_run);
     }
 
     if (!s_run.alive) {
@@ -156,4 +164,5 @@ const scene_t SCENE_GAME = {
     .on_enter = on_enter,
     .on_update = on_update,
     .on_exit = NULL,
+    .fullscreen = true,
 };

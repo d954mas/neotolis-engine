@@ -128,6 +128,37 @@ static void try_bind_resources(void) {
     g.resources_ready = s_atlas_bound && s_font_bound;
 }
 
+/* Shared shell: dark backdrop. Most scenes sit in a centered card; a fullscreen
+ * scene (the run) instead fills the whole screen itself. */
+static void build_scene_shell(const nt_ui_transform_t *shake_xform) {
+    const bool fullscreen = g.scene && g.scene->fullscreen;
+    CLAY({.id = CLAY_ID("root"),
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
+                     .padding = fullscreen ? CLAY_PADDING_ALL(0) : CLAY_PADDING_ALL(24),
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {10.0F, 12.0F, 20.0F, 255.0F}}) {
+        if (fullscreen) {
+            if (g.scene->on_update) {
+                g.scene->on_update(&g, g_nt_app.dt);
+            }
+        } else {
+            CLAY({.id = CLAY_ID("card"),
+                  .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)},
+                             .padding = CLAY_PADDING_ALL(48),
+                             .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                             .childGap = 22,
+                             .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = {26.0F, 30.0F, 46.0F, 240.0F},
+                  .cornerRadius = CLAY_CORNER_RADIUS(28),
+                  .userData = (void *)NT_UI_DATA_XFORM(0U, shake_xform, 1.0F)}) {
+                if (g.scene->on_update) {
+                    g.scene->on_update(&g, g_nt_app.dt);
+                }
+            }
+        }
+    }
+}
+
 // #region frame
 static void frame(void) {
     nt_window_poll();
@@ -227,24 +258,7 @@ static void frame(void) {
             shake_xform.rotation_z = sdeg * 0.017453292F; /* deg -> rad */
         }
 
-        /* Shared shell: dark backdrop + centered card. Scenes fill the card. */
-        CLAY({.id = CLAY_ID("root"),
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(24), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {10.0F, 12.0F, 20.0F, 255.0F}}) {
-            CLAY({.id = CLAY_ID("card"),
-                  .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)},
-                             .padding = CLAY_PADDING_ALL(48),
-                             .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                             .childGap = 22,
-                             .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = {26.0F, 30.0F, 46.0F, 240.0F},
-                  .cornerRadius = CLAY_CORNER_RADIUS(28),
-                  .userData = (void *)NT_UI_DATA_XFORM(0U, &shake_xform, 1.0F)}) {
-                if (g.scene && g.scene->on_update) {
-                    g.scene->on_update(&g, g_nt_app.dt);
-                }
-            }
-        }
+        build_scene_shell(&shake_xform);
 
         nt_ui_end(g.ui);
 
