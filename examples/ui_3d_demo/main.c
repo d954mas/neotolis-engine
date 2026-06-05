@@ -229,6 +229,13 @@ static void player_update(float dt) {
         s_player_pos[0] += mx * step;
         s_player_pos[2] += mz * step;
     }
+    /* Vertical flight: Space climbs, Left-Shift descends. Same speed as horizontal. */
+    if (nt_input_key_is_down(NT_KEY_SPACE)) {
+        s_player_pos[1] += MOVE_SPEED * dt;
+    }
+    if (nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT)) {
+        s_player_pos[1] -= MOVE_SPEED * dt;
+    }
     const float inset = 0.5F;
     const float hw = (ROOM_W * 0.5F) - inset;
     const float hd = (ROOM_D * 0.5F) - inset;
@@ -243,6 +250,12 @@ static void player_update(float dt) {
     }
     if (s_player_pos[2] > hd) {
         s_player_pos[2] = hd;
+    }
+    if (s_player_pos[1] < 0.3F) {
+        s_player_pos[1] = 0.3F;
+    }
+    if (s_player_pos[1] > ROOM_H - 0.5F) {
+        s_player_pos[1] = ROOM_H - 0.5F;
     }
 }
 
@@ -388,9 +401,10 @@ static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw
     t.offset_x = wx - cx;
     t.offset_y = wy - cy;
     t.offset_z = wz;
+    t.rotation_x = NT_PI;
     t.rotation_y = yaw;
     t.scale_x = PANEL_SCALE;
-    t.scale_y = -PANEL_SCALE;
+    t.scale_y = PANEL_SCALE;
     t.scale_z = PANEL_SCALE;
     return t;
 }
@@ -504,6 +518,7 @@ static void draw_hud(float fb_w, float fb_h) {
 
     const char *lines[] = {
         "WASD          walk",
+        "Space / Shift fly up / down",
         "RMB drag      mouselook",
         "Q / E         yaw left / right",
         "LMB           click world panel",
