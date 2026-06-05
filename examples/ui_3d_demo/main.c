@@ -1,17 +1,18 @@
 /* ui_3d_demo — walkable space with a central rotating primitive and two world-mounted UI
- * panels (PASS 2). Left wall hosts the SHAPE panel (CUBE / SPHERE / CAPSULE); right wall hosts
- * the SPEED panel (STOP / SLOW / MEDIUM / FAST). Same controls remain on keyboard for parity.
- * PASS 3 adds the 2D-vs-3D input bench.
+ * panels. Left wall hosts the SHAPE panel (CUBE / SPHERE / CAPSULE); right wall hosts the
+ * SPEED panel (STOP / SLOW / MEDIUM / FAST). Same controls remain on keyboard for parity.
  *
  * Controls:
- *   WASD            walk along yaw (no collisions per scope)
+ *   WASD            walk along yaw (no collisions)
+ *   Space / Shift   fly up / down
  *   RMB-drag        mouselook (yaw + pitch)
  *   Q / E           yaw keys (alternate to mouse)
  *   LMB             click world-space panel buttons (raycast through cursor)
  *   R               reset player + shape rotation
- *   1 / 2 / 3       shape  (cube / sphere / capsule)  — same as left panel
- *   4 / 5 / 6 / 7   speed  (stop / slow / medium / fast) — same as right panel
+ *   1 / 2 / 3       shape (cube / sphere / capsule)
+ *   4 / 5 / 6 / 7   speed (stop / slow / medium / fast)
  *   F1              toggle debug overlay (player pose + nt_stats)
+ *   F2              UI inspector (sidebar; see issue #197 for 3D ctx limits)
  *   Esc             quit (native) */
 
 // #region includes
@@ -511,7 +512,7 @@ static void draw_hud(float fb_w, float fb_h) {
 
     const float left_x = 12.0F;
     float y = fb_h - HUD_TITLE_SIZE - 4.0F;
-    draw_hud_block("UI 3D DEMO  (PASS 2)", left_x, y, HUD_TITLE_SIZE, accent);
+    draw_hud_block("UI 3D DEMO", left_x, y, HUD_TITLE_SIZE, accent);
     y -= HUD_TITLE_SIZE + 6.0F;
 
     const char *lines[] = {
@@ -855,7 +856,7 @@ int main(int argc, char *argv[]) {
     nt_platform_web_loading_complete();
 #endif
 
-    nt_log_info("ui_3d_demo: PASS 2 — walk + look + click world panels (SHAPE left, SPEED right). Esc quit.");
+    nt_log_info("ui_3d_demo: walk + look + click world panels (SHAPE left, SPEED right). Esc quit.");
 
     nt_app_run(frame);
 

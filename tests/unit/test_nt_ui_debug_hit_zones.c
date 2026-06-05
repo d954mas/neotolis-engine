@@ -359,7 +359,7 @@ int main(void) {
     return UNITY_END();
 }
 
-#else  /* NT_UI_DEBUG_TOOLS */
+#else /* NT_UI_DEBUG_TOOLS */
 
 /* When debug tools are off the file still compiles for compile_commands.json
  * coverage; tidy lints the same TU in both configurations. Unity's link

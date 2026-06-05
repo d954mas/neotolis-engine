@@ -387,9 +387,9 @@ static float s_compose_children_2x3[BENCH_COMPOSE_ELEMS][6];
 static float s_compose_results_2x3[BENCH_COMPOSE_ELEMS][6];
 
 static void bench_compose_2x3(void) {
-    float (*parents)[6] = s_compose_parents_2x3;
-    float (*children)[6] = s_compose_children_2x3;
-    float (*results)[6] = s_compose_results_2x3;
+    float(*parents)[6] = s_compose_parents_2x3;
+    float(*children)[6] = s_compose_children_2x3;
+    float(*results)[6] = s_compose_results_2x3;
     s_rng = 0x77AABBCCU;
     for (uint32_t i = 0; i < BENCH_COMPOSE_ELEMS; ++i) {
         for (uint32_t k = 0; k < 6; ++k) {

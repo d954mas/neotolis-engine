@@ -1,5 +1,4 @@
-
-#Neotolis Engine — Technical Specification
+# Neotolis Engine — Technical Specification
 
 **Version:** v0.3-consolidated  
 **Status:** Architectural baseline + implementation-oriented spec  
@@ -130,7 +129,7 @@ If a decision can be deferred without loss of base architecture — it is deferr
   symbols (`Clay__OpenElement` / `Clay__ConfigureOpenElement` /
   `Clay__CloseElement`, the `Clay__MeasureText` callback hookup, a few
   `Clay__default*` size constants) — all routed through thin wrappers in
-  `engine/ui/nt_ui_clay_internal.c`, the exclusive `CLAY_IMPLEMENTATION`
+  `engine/ui/nt_ui_clay_impl.c`, the exclusive `CLAY_IMPLEMENTATION`
   TU. The widget composition pattern (button / panel / group `_begin`)
   splits Clay's `CLAY({...}) { body }` into separate `_begin`/`_end`
   calls so widget code can run between them — Clay's public macro
