@@ -87,7 +87,7 @@ static void test_panel_begin_end_balanced(void) {
 
 /* ---- Test 2: panel with element-attached transform via userData ---- */
 static void test_panel_with_transform(void) {
-    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 5.0F, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 5.0F, .rotation_z = 0, .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root"), .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 1.0F)}) {

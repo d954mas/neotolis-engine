@@ -547,9 +547,10 @@ static void declare_reference_buttons(void) {
                 const nt_ui_transform_t baked = {
                     .offset_x = 60.0F,
                     .offset_y = -20.0F,
-                    .rotation = 25.0F * 0.017453292F,
+                    .rotation_z = 25.0F * 0.017453292F,
                     .scale_x = 1.15F,
                     .scale_y = 0.85F,
+                    .scale_z = 1.0F,
                 };
                 CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, &s_btn_standard, &s_btn_decl, true);
@@ -759,9 +760,10 @@ static void frame(void) {
         const nt_ui_transform_t row_xform = {
             .offset_x = s_xform_tx,
             .offset_y = s_xform_ty,
-            .rotation = s_xform_deg * 0.017453292F, /* deg -> rad */
+            .rotation_z = s_xform_deg * 0.017453292F, /* deg -> rad */
             .scale_x = s_xform_scale,
             .scale_y = s_xform_scale,
+            .scale_z = 1.0F,
         };
 
         /* Y_CENTER alignment so a portrait-resized window keeps content

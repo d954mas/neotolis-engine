@@ -437,7 +437,7 @@ static void test_step_commits_what_query_previewed(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_query_step_under_rotation(void) {
     nt_ui_transform_t rot = nt_ui_transform_defaults();
-    rot.rotation = 30.0F * 0.017453292F;
+    rot.rotation_z = 30.0F * 0.017453292F;
 
     /* Frame 1: declare the rotated button so prev-frame tree_baked carries it. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);

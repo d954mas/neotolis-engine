@@ -89,7 +89,7 @@ static void test_clip_axis_aligned_hits_inside_clip(void) {
 /* ---- Test 3: rotated button inside an axis-aligned clip. ---- */
 static void test_clip_with_rotated_button(void) {
     /* Button rotated 30° about its center; clip 400x400 covers the rotated extent. */
-    const nt_ui_transform_t rot30 = {.offset_x = 0, .offset_y = 0, .rotation = DEG2RAD(30.0F), .scale_x = 1.0F, .scale_y = 1.0F};
+    const nt_ui_transform_t rot30 = {.offset_x = 0, .offset_y = 0, .rotation_z = DEG2RAD(30.0F), .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -122,7 +122,7 @@ static void test_clip_rotated_parent(void) {
      * positioned at (100,100), rotated 45° about its own center. Button is axis-
      * aligned 100x100 centered inside the clip — it's reachable only through the
      * rotated clip. */
-    const nt_ui_transform_t rot45 = {.offset_x = 0, .offset_y = 0, .rotation = DEG2RAD(45.0F), .scale_x = 1.0F, .scale_y = 1.0F};
+    const nt_ui_transform_t rot45 = {.offset_x = 0, .offset_y = 0, .rotation_z = DEG2RAD(45.0F), .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);

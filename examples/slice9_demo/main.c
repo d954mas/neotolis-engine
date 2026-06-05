@@ -204,7 +204,7 @@ static void declare_animated_panel(void) {
         t.offset_x = sinf(s_time * 1.0F) * 50.0F;
     }
     if (s_anim_rotation) {
-        t.rotation = sinf(s_time * 3.0F) * 0.15F;
+        t.rotation_z = sinf(s_time * 3.0F) * 0.15F;
     }
     if (s_anim_opacity) {
         opacity = (sinf(s_time * 1.5F) + 1.0F) * 0.5F;

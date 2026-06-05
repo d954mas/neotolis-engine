@@ -92,7 +92,8 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .user_data = (data != NULL) ? data->user_data : NULL,
         .layer = (data != NULL) ? data->layer : 0U,
         .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
-        .transform = {.scale_x = a->scale, .scale_y = a->scale, .offset_x = a->off_x, .offset_y = a->off_y, .rotation = 0.0F},
+        .transform =
+            {.scale_x = a->scale, .scale_y = a->scale, .scale_z = 1.0F, .offset_x = a->off_x, .offset_y = a->off_y, .offset_z = 0.0F, .rotation_x = 0.0F, .rotation_y = 0.0F, .rotation_z = 0.0F},
         .opacity = a->opacity,
     };
     // #endregion

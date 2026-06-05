@@ -104,7 +104,7 @@ static void test_hittest_axis_aligned_baseline(void) {
 /* ---- Test 2: rotated + offset + anisotropic scale ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_hittest_rotated_asymmetric_probes(void) {
-    nt_ui_transform_t t = {.offset_x = OFFSET_X, .offset_y = OFFSET_Y, .rotation = ROT_RAD, .scale_x = SCALE_X, .scale_y = SCALE_Y};
+    nt_ui_transform_t t = {.offset_x = OFFSET_X, .offset_y = OFFSET_Y, .rotation_z = ROT_RAD, .scale_x = SCALE_X, .scale_y = SCALE_Y, .scale_z = 1.0F};
     declare_bbox_with_xform(&t);
 
     const float cx = BBOX_X + (BBOX_W * 0.5F);
@@ -136,7 +136,7 @@ static void test_hittest_rotated_asymmetric_probes(void) {
 
 /* ---- Test 3: hit-test stays in Clay Y-down space ---- */
 static void test_hittest_no_render_y_flip(void) {
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 40.0F, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 40.0F, .rotation_z = 0, .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
     declare_bbox_with_xform(&t);
 
     begin_probe_frame();
@@ -173,7 +173,7 @@ static void test_hittest_padded_asymmetric(void) {
 
 /* ---- Test 5: padded hit-test + rotation ---- */
 static void test_hittest_padded_with_rotation(void) {
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = ROT_RAD, .scale_x = 1.0F, .scale_y = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation_z = ROT_RAD, .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
     declare_bbox_with_xform(&t);
 
     const float cx = BBOX_X + (BBOX_W * 0.5F);
@@ -206,7 +206,7 @@ static void test_hittest_padded_with_rotation(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_hittest_padded_combinatorial_worst_case(void) {
-    nt_ui_transform_t t = {.offset_x = COMBO_OFFSET_X, .offset_y = COMBO_OFFSET_Y, .rotation = COMBO_ROT_RAD, .scale_x = COMBO_SCALE_X, .scale_y = COMBO_SCALE_Y};
+    nt_ui_transform_t t = {.offset_x = COMBO_OFFSET_X, .offset_y = COMBO_OFFSET_Y, .rotation_z = COMBO_ROT_RAD, .scale_x = COMBO_SCALE_X, .scale_y = COMBO_SCALE_Y, .scale_z = 1.0F};
     declare_bbox_with_xform(&t);
 
     const float cx = BBOX_X + (BBOX_W * 0.5F);
@@ -263,7 +263,7 @@ static void test_hittest_padded_zero_equals_unpadded(void) {
  *      against ITS prev-frame composed affine, not whatever element ends up
  *      at the shifted layout slot). ---- */
 static void test_hittest_survives_layout_idx_shift_between_frames(void) {
-    nt_ui_transform_t rot = {.offset_x = 0, .offset_y = 0, .rotation = ROT_RAD, .scale_x = 1.0F, .scale_y = 1.0F};
+    nt_ui_transform_t rot = {.offset_x = 0, .offset_y = 0, .rotation_z = ROT_RAD, .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
     /* Frame 1: declare htbtn alone — it lands at some layout idx (likely 1 after the root). */
     declare_bbox_with_xform(&rot);
 

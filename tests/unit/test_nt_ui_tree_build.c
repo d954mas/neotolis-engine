@@ -87,7 +87,7 @@ static void test_single_xform_root(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t t = nt_ui_transform_defaults();
-    t.rotation = DEG2RAD(30.0F);
+    t.rotation_z = DEG2RAD(30.0F);
     CLAY({.id = CLAY_ID("rot_container"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}},
@@ -115,9 +115,9 @@ static void test_chain_xform_2level(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t outer = nt_ui_transform_defaults();
-    outer.rotation = DEG2RAD(10.0F);
+    outer.rotation_z = DEG2RAD(10.0F);
     nt_ui_transform_t inner = nt_ui_transform_defaults();
-    inner.rotation = DEG2RAD(20.0F);
+    inner.rotation_z = DEG2RAD(20.0F);
     CLAY({.id = CLAY_ID("outer"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .userData = (void *)NT_UI_DATA_XFORM(0, &outer, 1.0F)}) {
@@ -125,7 +125,7 @@ static void test_chain_xform_2level(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Find inner — its baked.rotation should be 30deg (10 + 20 composed). */
+    /* Find inner — its baked Z-rotation should be 30deg (10 + 20 composed). */
     const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
     bool found_inner = false;
     for (int32_t i = 0; i < N; ++i) {
@@ -169,7 +169,7 @@ static void test_floating_attach_to_root_identity_seed(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
-    rot.rotation = DEG2RAD(45.0F);
+    rot.rotation_z = DEG2RAD(45.0F);
     CLAY({.id = CLAY_ID("wrap"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(400.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {
         CLAY({.id = CLAY_ID("tooltip"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}},
@@ -203,7 +203,7 @@ static void test_floating_attach_to_parent_inherits_xform(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
-    rot.rotation = DEG2RAD(45.0F);
+    rot.rotation_z = DEG2RAD(45.0F);
     CLAY({.id = CLAY_ID("card"), .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {
         CLAY(
             {.id = CLAY_ID("badge"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = 10.0F, .y = 10.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(40.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
@@ -233,7 +233,7 @@ static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
-    rot.rotation = DEG2RAD(15.0F);
+    rot.rotation_z = DEG2RAD(15.0F);
     CLAY({.id = CLAY_ID("anchor"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT},
           .layout = {.sizing = {CLAY_SIZING_FIXED(50.0F), CLAY_SIZING_FIXED(50.0F)}},
@@ -261,9 +261,9 @@ static void test_floating_inside_floating_chain(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t rotA = nt_ui_transform_defaults();
-    rotA.rotation = DEG2RAD(10.0F);
+    rotA.rotation_z = DEG2RAD(10.0F);
     nt_ui_transform_t rotB = nt_ui_transform_defaults();
-    rotB.rotation = DEG2RAD(20.0F);
+    rotB.rotation_z = DEG2RAD(20.0F);
     CLAY({.id = CLAY_ID("A"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT},
           .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}},
@@ -292,9 +292,9 @@ static void test_floating_with_own_xform_composes_on_seed(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t outer = nt_ui_transform_defaults();
-    outer.rotation = DEG2RAD(10.0F);
+    outer.rotation_z = DEG2RAD(10.0F);
     nt_ui_transform_t inner = nt_ui_transform_defaults();
-    inner.rotation = DEG2RAD(20.0F);
+    inner.rotation_z = DEG2RAD(20.0F);
     CLAY({.id = CLAY_ID("outer"), .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &outer, 1.0F)}) {
         CLAY({.id = CLAY_ID("float"),
               .floating = {.attachTo = CLAY_ATTACH_TO_PARENT},
@@ -341,7 +341,7 @@ static void test_user_data_xform_macro_copies_transform_by_value(void) {
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     {
         nt_ui_transform_t t = nt_ui_transform_defaults();
-        t.rotation = DEG2RAD(25.0F);
+        t.rotation_z = DEG2RAD(25.0F);
         CLAY({.id = CLAY_ID("xformed"), .layout = {.sizing = {CLAY_SIZING_FIXED(60.0F), CLAY_SIZING_FIXED(60.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(3, &t, 0.7F)}) {}
         /* `t` goes out of scope here; the scratch-alloc copy keeps it alive. */
     }
@@ -461,7 +461,7 @@ static void test_multi_ctx_tree_storage_isolated(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
-    rot.rotation = DEG2RAD(60.0F);
+    rot.rotation_z = DEG2RAD(60.0F);
     CLAY({.id = CLAY_ID("ctx_a_rot"), .layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(100.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {}
     nt_ui_end(s_fx.ctx);
 
@@ -588,7 +588,7 @@ static void test_shear_composition_nonuniform_scale_then_rotation(void) {
     outer.scale_x = 2.0F;
     outer.scale_y = 1.0F;
     nt_ui_transform_t inner = nt_ui_transform_defaults();
-    inner.rotation = DEG2RAD(30.0F);
+    inner.rotation_z = DEG2RAD(30.0F);
 
     CLAY({.id = CLAY_ID("shear_outer"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},

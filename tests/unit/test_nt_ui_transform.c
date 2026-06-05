@@ -146,7 +146,7 @@ static void test_walker_no_scratch_alloc(void) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     t.scale_x = 1.3F;
     t.scale_y = 0.7F;
-    t.rotation = 0.2F;
+    t.rotation_z = 0.2F;
     t.offset_x = 5.0F;
     /* Frame 1 emits & walks so any one-shot init paths fire upfront. */
     walk_with_xform(&t, 0.9F, 50.0F, 50.0F, 80.0F, 40.0F, (Clay_Color){.r = 200, .g = 100, .b = 50, .a = 255});

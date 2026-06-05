@@ -386,8 +386,8 @@ static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
 static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
     const float sx = t->scale_x;
     const float sy = t->scale_y;
-    const float cr = cosf(t->rotation);
-    const float sr = sinf(t->rotation);
+    const float cr = cosf(t->rotation_z);
+    const float sr = sinf(t->rotation_z);
     const float la = cr * sx;
     const float lb = -(sr * sy);
     const float lc = sr * sx;

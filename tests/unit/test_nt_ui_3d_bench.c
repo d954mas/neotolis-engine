@@ -60,14 +60,14 @@ static float s_mouse_x[BENCH_FRAMES];
 static float s_mouse_y[BENCH_FRAMES];
 
 /* Quick LCG so the bench is repeatable. */
-static uint32_t s_rng = 0x1A2B3C4Du;
+static uint32_t s_rng = 0x1A2B3C4DU;
 static float rng_float(float lo, float hi) {
-    s_rng = (s_rng * 1664525u) + 1013904223u;
-    return lo + ((float)(s_rng >> 8) / (float)(1u << 24)) * (hi - lo);
+    s_rng = (s_rng * 1664525U) + 1013904223U;
+    return lo + (((float)(s_rng >> 8) / (float)(1U << 24)) * (hi - lo));
 }
 
 static void init_widgets(void) {
-    s_rng = 0x1A2B3C4Du;
+    s_rng = 0x1A2B3C4DU;
     for (uint32_t i = 0; i < BENCH_WIDGETS; ++i) {
         bench_widget_t *w = &s_widgets[i];
         /* Mild affine: scale 0.8..1.2, rotation -15..15°, translate over 1000×1000 */
@@ -137,10 +137,18 @@ static bool hit_2d(const bench_widget_t *w, float px, float py) {
  * For TRS: inv(M) = [R^T, -R^T·T/s^2]. ~30 ops. */
 static void mat4_inv_trs(const float m[16], float out[16]) {
     /* Read RS columns. */
-    const float r00 = m[0], r01 = m[4], r02 = m[8];
-    const float r10 = m[1], r11 = m[5], r12 = m[9];
-    const float r20 = m[2], r21 = m[6], r22 = m[10];
-    const float tx = m[12], ty = m[13], tz = m[14];
+    const float r00 = m[0];
+    const float r01 = m[4];
+    const float r02 = m[8];
+    const float r10 = m[1];
+    const float r11 = m[5];
+    const float r12 = m[9];
+    const float r20 = m[2];
+    const float r21 = m[6];
+    const float r22 = m[10];
+    const float tx = m[12];
+    const float ty = m[13];
+    const float tz = m[14];
     /* Column scales². */
     const float s0_sq = (r00 * r00) + (r10 * r10) + (r20 * r20);
     const float s1_sq = (r01 * r01) + (r11 * r11) + (r21 * r21);
@@ -163,9 +171,9 @@ static void mat4_inv_trs(const float m[16], float out[16]) {
     out[10] = r22 * inv_s2;
     out[11] = 0.0F;
     /* Translate: -inv_R · T */
-    out[12] = -(out[0] * tx + out[4] * ty + out[8] * tz);
-    out[13] = -(out[1] * tx + out[5] * ty + out[9] * tz);
-    out[14] = -(out[2] * tx + out[6] * ty + out[10] * tz);
+    out[12] = -((out[0] * tx) + (out[4] * ty) + (out[8] * tz));
+    out[13] = -((out[1] * tx) + (out[5] * ty) + (out[9] * tz));
+    out[14] = -((out[2] * tx) + (out[6] * ty) + (out[10] * tz));
     out[15] = 1.0F;
 }
 
@@ -205,9 +213,15 @@ static bool raycast_widget(const bench_widget_t *w, const float inv_vp[16], floa
     }
     const float invw_n = 1.0F / wn[3];
     const float invw_f = 1.0F / wf[3];
-    const float ox = wn[0] * invw_n, oy = wn[1] * invw_n, oz = wn[2] * invw_n;
-    const float fx = wf[0] * invw_f, fy = wf[1] * invw_f, fz = wf[2] * invw_f;
-    const float dx = fx - ox, dy = fy - oy, dz = fz - oz;
+    const float ox = wn[0] * invw_n;
+    const float oy = wn[1] * invw_n;
+    const float oz = wn[2] * invw_n;
+    const float fx = wf[0] * invw_f;
+    const float fy = wf[1] * invw_f;
+    const float fz = wf[2] * invw_f;
+    const float dx = fx - ox;
+    const float dy = fy - oy;
+    const float dz = fz - oz;
 
     /* Widget local plane Z=0; need plane in world: P_world = M · P_local.
      * Plane equation in world space: normal × (X - origin) = 0.
@@ -227,9 +241,9 @@ static bool raycast_widget(const bench_widget_t *w, const float inv_vp[16], floa
     if (t < 0.0F) {
         return false;
     }
-    const float hx = ox + t * dx;
-    const float hy = oy + t * dy;
-    const float hz = oz + t * dz;
+    const float hx = ox + (t * dx);
+    const float hy = oy + (t * dy);
+    const float hz = oz + (t * dz);
     /* Transform hit point into widget local via inverse. */
     float inv[16];
     mat4_inv_trs(w->m, inv);
@@ -325,8 +339,8 @@ static void bench_raycast_ortho(void) {
     const uint64_t t0 = nt_time_nanos();
     for (uint32_t f = 0; f < BENCH_FRAMES; ++f) {
         /* NDC from random screen pixel. */
-        const float px_ndc = (s_mouse_x[f] / 1000.0F) * 2.0F - 1.0F;
-        const float py_ndc = (s_mouse_y[f] / 800.0F) * 2.0F - 1.0F;
+        const float px_ndc = ((s_mouse_x[f] / 1000.0F) * 2.0F) - 1.0F;
+        const float py_ndc = ((s_mouse_y[f] / 800.0F) * 2.0F) - 1.0F;
         for (uint32_t i = 0; i < BENCH_WIDGETS; ++i) {
             if (raycast_widget(&s_widgets[i], inv_vp_flat, px_ndc, py_ndc)) {
                 hits++;
@@ -353,8 +367,8 @@ static void bench_raycast_persp(void) {
     uint32_t hits = 0;
     const uint64_t t0 = nt_time_nanos();
     for (uint32_t f = 0; f < BENCH_FRAMES; ++f) {
-        const float px_ndc = (s_mouse_x[f] / 1000.0F) * 2.0F - 1.0F;
-        const float py_ndc = (s_mouse_y[f] / 800.0F) * 2.0F - 1.0F;
+        const float px_ndc = ((s_mouse_x[f] / 1000.0F) * 2.0F) - 1.0F;
+        const float py_ndc = ((s_mouse_y[f] / 800.0F) * 2.0F) - 1.0F;
         for (uint32_t i = 0; i < BENCH_WIDGETS; ++i) {
             if (raycast_widget(&s_widgets[i], inv_vp_flat, px_ndc, py_ndc)) {
                 hits++;
@@ -376,7 +390,7 @@ static void bench_compose_2x3(void) {
     float (*parents)[6] = s_compose_parents_2x3;
     float (*children)[6] = s_compose_children_2x3;
     float (*results)[6] = s_compose_results_2x3;
-    s_rng = 0x77AABBCCu;
+    s_rng = 0x77AABBCCU;
     for (uint32_t i = 0; i < BENCH_COMPOSE_ELEMS; ++i) {
         for (uint32_t k = 0; k < 6; ++k) {
             parents[i][k] = rng_float(-1.0F, 1.0F);
@@ -402,7 +416,7 @@ static void bench_compose_mat4(void) {
     mat4 *parents = s_compose_parents_mat4;
     mat4 *children = s_compose_children_mat4;
     mat4 *results = s_compose_results_mat4;
-    s_rng = 0x77AABBCCu;
+    s_rng = 0x77AABBCCU;
     for (uint32_t i = 0; i < BENCH_COMPOSE_ELEMS; ++i) {
         for (uint32_t r = 0; r < 4; ++r) {
             for (uint32_t c = 0; c < 4; ++c) {
@@ -484,8 +498,8 @@ static void bench_clip_chain_3d(void) {
         uint32_t hits = 0;
         const uint64_t t0 = nt_time_nanos();
         for (uint32_t f = 0; f < BENCH_FRAMES; ++f) {
-            const float px_ndc = (s_mouse_x[f] / 1000.0F) * 2.0F - 1.0F;
-            const float py_ndc = (s_mouse_y[f] / 800.0F) * 2.0F - 1.0F;
+            const float px_ndc = ((s_mouse_x[f] / 1000.0F) * 2.0F) - 1.0F;
+            const float py_ndc = ((s_mouse_y[f] / 800.0F) * 2.0F) - 1.0F;
             for (uint32_t i = 0; i < BENCH_WIDGETS; ++i) {
                 if (raycast_widget(&s_widgets[i], inv_vp_flat, px_ndc, py_ndc)) {
                     hits++;

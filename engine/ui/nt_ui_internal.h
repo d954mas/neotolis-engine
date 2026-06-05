@@ -151,6 +151,18 @@ struct nt_ui_context {
 
     uint32_t max_elements;
 
+    /* 3D-mode flag — copied from create_desc; gates raycast vs inverse-affine hit-test. */
+    bool use_raycast_input;
+    /* Only valid when use_raycast_input AND view_proj_set; game must call nt_ui_set_view_proj before walk. */
+    bool view_proj_set;
+    float view_proj[16];
+    float inv_view_proj[16];
+#if NT_UI_DEBUG_TOOLS
+    /* Inspector renders at pixel coords even in 3D ctx — own ortho (built per begin from screen dims). */
+    float inspector_view_proj[16];
+    float inv_inspector_view_proj[16];
+#endif
+
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];

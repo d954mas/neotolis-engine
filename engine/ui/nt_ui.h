@@ -107,20 +107,27 @@ typedef struct {
 typedef void (*nt_ui_custom_handler_t)(const nt_ui_custom_frame_t *frame, void *userdata);
 
 /* Render-time transform — no layout effect.
- * Text caveat: glyph atlas font size is picked from the X-column magnitude
- * (sqrtf(a²+c²)); under sx ≠ sy the text quad still stretches via the matrix,
- * but rasterisation samples at the X-derived em-size — Y axis blurs. Use
- * uniform scale or rotation for crisp text. */
+ * 3D-capable: offset_z + rotation_x/y for card-flip and world-space UI; 2D paths
+ * ignore z (rotation_z is the legacy 2D Z-rotation).
+ * Text caveat: glyph atlas font size is picked from the X-column magnitude;
+ * under sx ≠ sy the text quad still stretches, but rasterisation samples at
+ * the X-derived em-size — Y axis blurs. Use uniform scale or Z-only rotation for crisp text. */
 typedef struct {
     float offset_x; /* slide-in/out, additive */
     float offset_y;
-    float rotation; /* radians, additive */
-    float scale_x;  /* 1.0 = default, multiplicative */
-    float scale_y;  /* 1.0 = default, multiplicative */
+    float offset_z;
+    float rotation_x; /* radians; Euler XYZ order */
+    float rotation_y;
+    float rotation_z;
+    float scale_x; /* 1.0 = default, multiplicative */
+    float scale_y;
+    float scale_z;
 } nt_ui_transform_t;
 
 /* MUST use this, not zero-init — scale must be positive; use opacity=0 to hide. */
-static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
+static inline nt_ui_transform_t nt_ui_transform_defaults(void) {
+    return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .offset_z = 0, .rotation_x = 0, .rotation_y = 0, .rotation_z = 0, .scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F};
+}
 
 /* Cleared bit = "ignore the field" — build pass skips composition; walker reads identity. */
 #define NT_UI_ELEM_FLAG_HAS_TRANSFORM (1U << 0)
@@ -143,9 +150,9 @@ typedef struct {
     nt_ui_transform_t transform; /* identity when !HAS_TRANSFORM */
     float opacity;               /* 1.0F when !HAS_OPACITY */
 } nt_ui_element_data_t;
-/* 40B on 64-bit (alignof(void*)=8 → trailing pad), 32B on 32-bit/WASM. */
-_Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 40 : 32), "nt_ui_element_data_t stable ABI");
-_Static_assert(sizeof(nt_ui_transform_t) == 20, "nt_ui_transform_t — fail loudly if extended");
+/* 56B on 64-bit (alignof(void*)=8 → trailing pad), 48B on 32-bit/WASM. */
+_Static_assert(sizeof(nt_ui_element_data_t) == (sizeof(void *) == 8 ? 56 : 48), "nt_ui_element_data_t stable ABI");
+_Static_assert(sizeof(nt_ui_transform_t) == 36, "nt_ui_transform_t — fail loudly if extended");
 
 #if NT_UI_DEBUG_TOOLS
 /* Reserved 240-255 when tools ON; full 0..255 is free for game code when OFF.
@@ -181,11 +188,15 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
+    /* true = raycast hit-test against game's view_proj (3D ctx); requires nt_ui_set_view_proj before walk.
+     * false (default) = inverse-affine 2D hit-test against baked screen-space transform. */
+    bool use_raycast_input;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
+        .use_raycast_input = false,
     };
 }
 

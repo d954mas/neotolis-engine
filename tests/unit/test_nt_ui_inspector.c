@@ -972,7 +972,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     nt_ui_transform_t baked = nt_ui_transform_defaults();
     baked.offset_x = 60.0F;
     baked.offset_y = -20.0F;
-    baked.rotation = 25.0F * 0.017453292F;
+    baked.rotation_z = 25.0F * 0.017453292F;
     baked.scale_x = 1.15F;
     baked.scale_y = 0.85F;
 
@@ -1605,7 +1605,7 @@ static void test_inspector_hover_transformed_widget(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     nt_ui_transform_t baked = nt_ui_transform_defaults();
-    baked.rotation = 25.0F * 0.017453292F;
+    baked.rotation_z = 25.0F * 0.017453292F;
     /* Attach userData directly to xf_btn — floating children inherit transform
      * from their floating parentId (ROOT here = identity), not lexical wrappers. */
     CLAY({.id = CLAY_ID("xf_btn"),
@@ -1900,7 +1900,7 @@ int main(void) {
     return UNITY_END();
 }
 
-#else  /* NT_UI_DEBUG_TOOLS */
+#else /* NT_UI_DEBUG_TOOLS */
 
 /* When debug tools are off the file still compiles for compile_commands.json
  * coverage; tidy lints the same TU in both configurations. Unity's link

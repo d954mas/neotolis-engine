@@ -204,6 +204,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
     ctx->max_elements = desc->max_elements;
+    ctx->use_raycast_input = desc->use_raycast_input;
+    ctx->view_proj_set = false;
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -404,8 +406,9 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, void *user_data, const nt_ui_transform_t *transform, float opacity) {
     NT_ASSERT(transform != NULL && "nt_ui_make_element_data_xform: transform must be non-NULL");
-    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && "nt_ui_make_element_data_xform: scale must be positive; use opacity=0 to hide");
-    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && isfinite(transform->rotation) && isfinite(transform->offset_x) && isfinite(transform->offset_y) &&
+    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && transform->scale_z > 0.0F && "nt_ui_make_element_data_xform: scale must be positive; use opacity=0 to hide");
+    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && isfinite(transform->scale_z) && isfinite(transform->rotation_x) && isfinite(transform->rotation_y) &&
+              isfinite(transform->rotation_z) && isfinite(transform->offset_x) && isfinite(transform->offset_y) && isfinite(transform->offset_z) &&
               "nt_ui_make_element_data_xform: transform fields must be finite");
     NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_make_element_data_xform: opacity must be finite in [0,1]");
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
