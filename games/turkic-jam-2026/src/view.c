@@ -368,55 +368,49 @@ static void hand_card(game_ctx_t *g, const char *name, bool active) {
     }
 }
 
-void tj_view_card_hand(game_ctx_t *g, const tj_run_t *run) {
+/* Pack opened: the front pack's 3 cards, picked inline (hero keeps walking). */
+static void hand_pack_chooser(game_ctx_t *g, tj_run_t *run) {
+    static const char *ids[3] = {"tj_pick0", "tj_pick1", "tj_pick2"};
+    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Дар - выбери карту:", &s_panel_title);
+    for (int i = 0; i < 3; i++) {
+        const int ti = run->pack_offer[0][i];
+        const char *name = (ti >= 0 && ti < g_config.tile_count) ? g_config.tiles[ti].name : "-";
+        if (tj_button(g, ids[i], name, 180, 86, TJ_BTN_SECONDARY)) {
+            tj_run_choose_card(run, i);
+        }
+    }
+}
+
+/* Normal hand: held card, a clickable reward pack (if any), empty slots. */
+static void hand_normal(game_ctx_t *g, tj_run_t *run) {
     const bool has = (run->hand >= 0 && run->hand < g_config.tile_count);
-    const char *held = has ? g_config.tiles[run->hand].name : "—";
+    hand_card(g, has ? g_config.tiles[run->hand].name : "-", has);
+    if (run->packs > 0) {
+        static char pk[32];
+        (void)snprintf(pk, sizeof pk, "Дар x%d", run->packs);
+        if (tj_button(g, "tj_pack", pk, 150, 86, TJ_BTN_PRIMARY)) {
+            tj_run_open_pack(run);
+        }
+    }
+    for (int i = 1; i < 4; i++) {
+        hand_card(g, "пусто", false);
+    }
+    if (has) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "  кликни свободный слот у дороги, чтобы поставить", &s_dim);
+    }
+}
+
+void tj_view_card_hand(game_ctx_t *g, tj_run_t *run) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(118)},
                      .padding = CLAY_PADDING_ALL(12),
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
                      .childGap = 12,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_BAR_BG}) {
-        hand_card(g, held, has);
-        for (int i = 1; i < 5; i++) {
-            hand_card(g, "пусто", false);
-        }
-        if (has) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "  кликни свободный слот у дороги, чтобы поставить", &s_dim);
-        }
-    }
-}
-
-/* End-of-circle decision: a dim modal with 3 cards to pick from (the run pauses). */
-static void choice_row(game_ctx_t *g, tj_run_t *run) {
-    static const char *ids[3] = {"tj_choice0", "tj_choice1", "tj_choice2"};
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}}) {
-        for (int i = 0; i < 3; i++) {
-            const int ti = run->choice[i];
-            const char *name = (ti >= 0 && ti < g_config.tile_count) ? g_config.tiles[ti].name : "—";
-            if (tj_button(g, ids[i], name, 220, 132, TJ_BTN_SECONDARY)) {
-                tj_run_choose_card(run, i);
-            }
-        }
-    }
-}
-
-void tj_view_card_choice(game_ctx_t *g, tj_run_t *run) {
-    if (!run->choosing) {
-        return;
-    }
-    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 30},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(g->logical_w), CLAY_SIZING_FIXED(g->logical_h)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {6.0F, 8.0F, 14.0F, 220.0F}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)},
-                         .padding = CLAY_PADDING_ALL(28),
-                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 20,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {24.0F, 28.0F, 42.0F, 255.0F},
-              .cornerRadius = CLAY_CORNER_RADIUS(18.0F)}) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Конец круга - выбери дар", &s_panel_title);
-            choice_row(g, run);
+        if (run->pack_open) {
+            hand_pack_chooser(g, run);
+        } else {
+            hand_normal(g, run);
         }
     }
 }

@@ -13,7 +13,6 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run);    /* top bar: resourc
 void tj_view_log(game_ctx_t *g, int max_lines);              /* left chat/combat log panel */
 void tj_view_map(game_ctx_t *g, tj_run_t *run);              /* center: aul + road + slots + hero */
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run); /* right: doll, stats, current cell */
-void tj_view_card_hand(game_ctx_t *g, const tj_run_t *run);  /* bottom: held card(s) */
-void tj_view_card_choice(game_ctx_t *g, tj_run_t *run);      /* end-of-circle 1-of-3 modal */
+void tj_view_card_hand(game_ctx_t *g, tj_run_t *run);        /* bottom: held card + reward pack chooser */
 
 #endif /* TJ_VIEW_H */

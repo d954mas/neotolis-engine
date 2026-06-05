@@ -11,6 +11,7 @@
 
 #define TJ_MAX_PATH 32
 #define TJ_MAX_GLOBAL 8 /* passive (global-scope) desert objects active per circle */
+#define TJ_MAX_PACKS 4  /* unopened reward packs that can queue up (hero never waits) */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
 /* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
@@ -31,8 +32,11 @@ typedef struct {
     int day;        /* 1-based: each cell-to-cell step is a day of travel */
     int path_cells; /* cells in this circle's loop (varies per circle/heir) */
     float move_t;
-    bool choosing; /* end-of-circle: paused, player picks 1 of 3 cards */
-    int choice[3]; /* offered tile indices while choosing */
+    /* Reward packs (idle-friendly): a circle grants a pack; the hero keeps walking.
+     * The player opens a pack and picks 1 of 3 cards whenever they like. */
+    int packs;                       /* unopened packs queued */
+    int pack_offer[TJ_MAX_PACKS][3]; /* 3 tile choices per queued pack */
+    bool pack_open;                  /* the front pack's chooser is open */
     int supplies, wisdom, glory;
     int tile_at[TJ_MAX_PATH];  /* road tile on cell (-1 empty); MVP: scripted/debug only */
     int roadside[TJ_MAX_PATH]; /* player-placed roadside tile affecting cell (-1 empty) */
@@ -62,7 +66,9 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index);
 /* Place the held card (hand) into the roadside slot of `slot`. Returns false if
  * out of range, hand empty, or the slot is taken. */
 bool tj_run_place_roadside(tj_run_t *r, int slot);
-/* End-of-circle choice: take offered card `idx` (0..2) into hand, resume the run. */
+/* Open the front reward pack (shows its 3 cards). No-op if no packs queued. */
+void tj_run_open_pack(tj_run_t *r);
+/* Take card `idx` (0..2) from the opened pack into hand; pops the pack. */
 void tj_run_choose_card(tj_run_t *r, int idx);
 void tj_run_tick(tj_run_t *r, float dt);
 int tj_hero_stat(const tj_run_t *r, tj_stat_t s);

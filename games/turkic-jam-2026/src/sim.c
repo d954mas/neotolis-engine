@@ -483,28 +483,42 @@ static void resolve_cell(tj_run_t *r) {
     }
 }
 
-/* Offer 3 (preferably distinct) cards and pause for the player's pick. */
-static void offer_cards(tj_run_t *r) {
-    if (g_config.tile_count <= 0) {
+/* Grant a reward pack (3 preferably-distinct cards). The hero does NOT stop —
+ * the player opens the pack and picks from the hand bar whenever they like. */
+static void push_pack(tj_run_t *r) {
+    if (g_config.tile_count <= 0 || r->packs >= TJ_MAX_PACKS) {
         return;
     }
+    int *offer = r->pack_offer[r->packs];
     for (int i = 0; i < 3; i++) {
         int t = rng_range_int(0, g_config.tile_count - 1);
-        for (int tries = 0; tries < 16 && ((i > 0 && t == r->choice[0]) || (i > 1 && t == r->choice[1])); tries++) {
+        for (int tries = 0; tries < 16 && ((i > 0 && t == offer[0]) || (i > 1 && t == offer[1])); tries++) {
             t = rng_range_int(0, g_config.tile_count - 1);
         }
-        r->choice[i] = t;
+        offer[i] = t;
     }
-    r->choosing = true;
-    tj_journal_push(TJ_LOG_BIG, "Конец круга: выбери дар.");
+    r->packs++;
+    tj_journal_push(TJ_LOG_GOOD, "Найден дар за круг - открой его в руке карт.");
+}
+
+void tj_run_open_pack(tj_run_t *r) {
+    if (r->packs > 0) {
+        r->pack_open = true;
+    }
 }
 
 void tj_run_choose_card(tj_run_t *r, int idx) {
-    if (!r->choosing || idx < 0 || idx > 2) {
+    if (!r->pack_open || r->packs <= 0 || idx < 0 || idx > 2) {
         return;
     }
-    r->hand = r->choice[idx];
-    r->choosing = false;
+    r->hand = r->pack_offer[0][idx];
+    for (int p = 1; p < r->packs; p++) { /* pop the front pack */
+        for (int k = 0; k < 3; k++) {
+            r->pack_offer[p - 1][k] = r->pack_offer[p][k];
+        }
+    }
+    r->packs--;
+    r->pack_open = false;
     if (r->hand >= 0 && r->hand < g_config.tile_count) {
         tj_journal_push(TJ_LOG_GOOD, "Взята карта: %s", g_config.tiles[r->hand].name);
     }
@@ -525,12 +539,9 @@ void tj_run_tick(tj_run_t *r, float dt) {
         tick_intro(r, dt); /* still leaving the aul: don't tick the loop yet */
         return;
     }
-    if (r->choosing) {
-        return; /* paused on the end-of-circle card choice */
-    }
     r->move_t += dt;
     int guard = 0;
-    while (r->move_t >= per && r->alive && !r->won && !r->choosing && guard < TJ_MAX_PATH) {
+    while (r->move_t >= per && r->alive && !r->won && guard < TJ_MAX_PATH) {
         r->move_t -= per;
         guard++;
         r->cell++;
@@ -545,7 +556,7 @@ void tj_run_tick(tj_run_t *r, float dt) {
             }
             tj_journal_push(TJ_LOG_BIG, "Круг %d пройден.", r->circle - 1);
             gen_loop(r);
-            offer_cards(r); /* end of circle: pause for a 1-of-3 card choice */
+            push_pack(r); /* grant a reward pack; the hero keeps walking */
         }
         resolve_cell(r);
     }
