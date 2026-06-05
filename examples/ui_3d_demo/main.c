@@ -79,9 +79,10 @@
 #define LAYER_PANEL 1
 #define LAYER_LABEL 2
 
-/* Panel layout in Clay-pixel space. Scale 0.01 turns 1 px ≈ 1 cm in world. */
+/* Panel layout in Clay-pixel space. Both panels share size so make_wall_xform's pivot math
+ * (panel_w/2, panel_h/2) lines up with each one's actual Clay bbox center. */
 #define PANEL_W 320
-#define PANEL_H 360
+#define PANEL_H 440 /* fits title + 4 buttons + paddings */
 #define PANEL_TITLE_H 48
 #define BTN_W 280
 #define BTN_H 64
@@ -422,13 +423,15 @@ static void declare_panels(void) {
     const nt_ui_transform_t xform_left = make_wall_xform(-4.5F, wall_y, wall_z, 0.0F, (float)PANEL_W, (float)PANEL_H);
     const nt_ui_transform_t xform_right = make_wall_xform(4.5F, wall_y, wall_z, 0.0F, (float)PANEL_W, (float)PANEL_H);
 
-    /* Root: full-fb invisible group hosting both panels. Sizing GROW so Clay knows screen extent. */
-    CLAY({.id = CLAY_ID("ui3d-root"),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+    /* Root: full-fb invisible group anchoring the floating panels. */
+    CLAY({.id = CLAY_ID("ui3d-root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {
 
-        /* ===== Panel A: SHAPE on left wall ===== */
+        /* ===== Panel A: SHAPE — floating so its Clay bbox starts at (0,0). Without floating
+         * Clay would slide the second panel right (cx=480), the XFORM would offset to
+         * wx+320, and only the first panel would land on the wall. */
         CLAY({.id = CLAY_ID("panel-shape"),
               .userData = (void *)NT_UI_DATA_XFORM(LAYER_PANEL, &xform_left, 1.0F),
+              .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(PANEL_W), CLAY_SIZING_FIXED(PANEL_H)},
                          .padding = CLAY_PADDING_ALL(12),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -449,10 +452,11 @@ static void declare_panels(void) {
             }
         }
 
-        /* ===== Panel B: SPEED on right wall ===== */
+        /* ===== Panel B: SPEED — also floating to keep bbox center at (PANEL_W/2, PANEL_H/2). */
         CLAY({.id = CLAY_ID("panel-speed"),
               .userData = (void *)NT_UI_DATA_XFORM(LAYER_PANEL, &xform_right, 1.0F),
-              .layout = {.sizing = {CLAY_SIZING_FIXED(PANEL_W), CLAY_SIZING_FIXED(PANEL_H + BTN_H + 10)},
+              .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(PANEL_W), CLAY_SIZING_FIXED(PANEL_H)},
                          .padding = CLAY_PADDING_ALL(12),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 10,
@@ -686,6 +690,23 @@ static void frame(void) {
          * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
+
+        /* DEBUG: standalone text directly in world space at (0, 4, 0). If this shows up,
+         * text material + font + VP_3D plumbing work — panel labels then disappear due to a
+         * walker emit issue. If this is also invisible, the bug is below nt_ui. */
+        if (s_font_bound) {
+            mat4 debug_model;
+            glm_mat4_identity(debug_model);
+            glm_translate(debug_model, (vec3){-2.5F, 4.0F, 0.0F});
+            /* Glyphs sit Y-down in their atlas; mirror via negative Y in model matches the
+             * room camera's +Y-up so the test text reads upright in the world. */
+            glm_scale(debug_model, (vec3){1.0F, -1.0F, 1.0F});
+            const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
+            nt_text_renderer_set_material(s_text_material);
+            nt_text_renderer_set_font(s_font);
+            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)debug_model, 0.6F, yellow, 0.0F, 0.0F);
+            nt_text_renderer_flush();
+        }
     }
 
     /* HUD: ortho VP. */
