@@ -201,12 +201,16 @@ typedef struct {
      * via nt_ui_set_view_proj after each nt_ui_begin (per-frame reset). false (default) =
      * inverse-affine 2D hit-test against baked screen-space transform. */
     bool use_raycast_input;
+    /* 3D ctx render-only depth bias. 0 = off. Positive values draw deeper hierarchy levels
+     * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. */
+    float element_depth_bias_ndc;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
         .use_raycast_input = false,
+        .element_depth_bias_ndc = 0.0F,
     };
 }
 
@@ -230,6 +234,9 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
  * must receive the SAME view_proj via the game's frame-uniforms UBO before nt_ui_walk, or the
  * rendered geometry will not match where hit-test thinks the widgets are. */
 void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
+/* Optional for 3D ctx. Positive values draw deeper hierarchy levels closer by
+ * hierarchy_depth * ndc_per_element after projection; 0 disables the render bias. */
+void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 

@@ -209,6 +209,9 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->max_elements = desc->max_elements;
     ctx->use_raycast_input = desc->use_raycast_input;
     ctx->view_proj_set = false;
+    NT_ASSERT(isfinite(desc->element_depth_bias_ndc) && desc->element_depth_bias_ndc >= 0.0F && "nt_ui_create_context: element_depth_bias_ndc must be finite and non-negative");
+    NT_ASSERT((desc->element_depth_bias_ndc == 0.0F || desc->use_raycast_input) && "nt_ui_create_context: element_depth_bias_ndc requires use_raycast_input=true");
+    ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -968,7 +971,7 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
 
 // #region helper_emit_text
 /* dispatch_command flushes sprite before and lazy-rebinds after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16]) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16], bool force_screen_space) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -991,7 +994,7 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
      * upside-down inside otherwise-correct panels. Sign chosen per-ctx. */
     const float ox = c->boundingBox.x;
     const float oy = baseline_y;
-    const float sign_y = ctx->use_raycast_input ? +1.0F : -1.0F;
+    const float sign_y = (ctx->use_raycast_input && !force_screen_space) ? +1.0F : -1.0F;
     float m[16];
     for (int rr = 0; rr < 4; ++rr) {
         m[rr] = world_mat4[rr];
@@ -1126,12 +1129,14 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 typedef struct {
     float m[16];
     float accum_opacity;
+    uint16_t hierarchy_depth;
 } nt_ui_walker_state_t;
 
 static void walker_state_init(nt_ui_walker_state_t *ws) {
     const nt_ui_baked_xform_t id = nt_ui_internal_identity_baked();
     memcpy(ws->m, id.m, sizeof ws->m);
     ws->accum_opacity = 1.0F;
+    ws->hierarchy_depth = 0U;
 }
 
 /* Apply accumulated opacity to a packed AABBGGRR color. */
@@ -1192,6 +1197,44 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     }
 }
 
+#if NT_UI_DEBUG_TOOLS
+typedef enum {
+    NT_UI_WALK_MODE_MAIN,
+    NT_UI_WALK_MODE_DEBUG_INSPECTOR,
+} nt_ui_walk_mode_t;
+
+static bool command_is_debug_layer(const Clay_RenderCommand *c) {
+    const uint8_t layer = c->userData ? ((const nt_ui_element_data_t *)c->userData)->layer : 0U;
+    return layer >= NT_UI_LAYER_DEBUG_HIGHLIGHT;
+}
+
+static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode, const Clay_RenderCommand *c) {
+    const bool is_debug = command_is_debug_layer(c);
+    if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
+        return is_debug;
+    }
+    if (ctx->use_raycast_input) {
+        return !is_debug;
+    }
+    return true;
+}
+
+static bool should_release_inspector_strings(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode) {
+    return mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR || !ctx->use_raycast_input || !ctx->inspector_active;
+}
+#else
+typedef enum {
+    NT_UI_WALK_MODE_MAIN,
+} nt_ui_walk_mode_t;
+
+static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode, const Clay_RenderCommand *c) {
+    (void)ctx;
+    (void)mode;
+    (void)c;
+    return true;
+}
+#endif
+
 /* Drain pending text, lazy-rebind sprite if a prior text/scissor/custom closed it. */
 static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) {
     nt_text_renderer_flush();
@@ -1201,39 +1244,62 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
+static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
+    out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
+    out[1] = (m[1] * v[0]) + (m[5] * v[1]) + (m[9] * v[2]) + (m[13] * v[3]);
+    out[2] = (m[2] * v[0]) + (m[6] * v[1]) + (m[10] * v[2]) + (m[14] * v[3]);
+    out[3] = (m[3] * v[0]) + (m[7] * v[1]) + (m[11] * v[2]) + (m[15] * v[3]);
+}
+
+static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierarchy_depth, float world_mat4[16]) {
+    if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0U) {
+        return;
+    }
+    NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: element_depth_bias_ndc requires nt_ui_set_view_proj before nt_ui_walk");
+
+    const float origin[4] = {world_mat4[12], world_mat4[13], world_mat4[14], 1.0F};
+    float clip[4];
+    mat4_mul_vec4_flat(ctx->view_proj, origin, clip);
+    if (clip[3] == 0.0F) {
+        return;
+    }
+
+    clip[2] -= ((float)hierarchy_depth * ctx->element_depth_bias_ndc) * clip[3];
+
+    float biased[4];
+    mat4_mul_vec4_flat(ctx->inv_view_proj, clip, biased);
+    if (biased[3] == 0.0F) {
+        return;
+    }
+
+    const float inv_w = 1.0F / biased[3];
+    world_mat4[12] += (biased[0] * inv_w) - origin[0];
+    world_mat4[13] += (biased[1] * inv_w) - origin[1];
+    world_mat4[14] += (biased[2] * inv_w) - origin[2];
+}
+
 /* For 2D ctx: bake the screen Y-flip (Clay Y-down → GL Y-up) into world_mat4 = Y_flip · ws->m.
  * For 3D ctx (use_raycast_input): world_mat4 = ws->m verbatim; the game's view_proj handles screen
  * mapping, and the custom handler / sprite renderer composes view_proj × world_mat4 as needed.
  * The closed-form below assumes ws->m is affine (row3 = (0,0,0,1)) — guaranteed by compose_transform_level. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
-                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
+                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters, bool force_screen_space) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
-    const uint8_t layer = c->userData ? ((const nt_ui_element_data_t *)c->userData)->layer : 0U;
-    bool screen_space_debug = false;
 
     float world_mat4[16];
     memcpy(world_mat4, ws->m, sizeof world_mat4);
-    if (!ctx->use_raycast_input) {
+    if (!ctx->use_raycast_input || force_screen_space) {
         /* Y_flip = [1 0 0 0; 0 -1 0 0; 0 0 1 0; 0 vy+vh 0 1] (column-major); applied to affine ws->m,
          * the only changes are negating row 1 across all columns and adding (vy+vh) to m[13]. */
         world_mat4[1] = -world_mat4[1];
         world_mat4[5] = -world_mat4[5];
         world_mat4[9] = -world_mat4[9];
         world_mat4[13] = (vy + vh) - world_mat4[13];
+    } else {
+        apply_element_depth_bias(ctx, ws->hierarchy_depth, world_mat4);
     }
-#if NT_UI_DEBUG_TOOLS
-    else if (layer >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
-        NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: 3D debug layers require nt_ui_set_view_proj before nt_ui_end");
-        mat4 overlay;
-        mat4 prewarped;
-        glm_mat4_mul((float(*)[4])ctx->inspector_view_proj, (float(*)[4])ws->m, overlay);
-        glm_mat4_mul((float(*)[4])ctx->inv_view_proj, overlay, prewarped);
-        memcpy(world_mat4, prewarped, sizeof world_mat4);
-        screen_space_debug = true;
-    }
-#endif
     /* X-column magnitude; Y dropped on purpose so glyph atlas stays crisp on the X axis. */
     const float text_scale = sqrtf((ws->m[0] * ws->m[0]) + (ws->m[1] * ws->m[1]));
 
@@ -1265,7 +1331,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
-        emit_text(ctx, &local, text_scale, world_mat4);
+        emit_text(ctx, &local, text_scale, world_mat4, force_screen_space);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
@@ -1289,7 +1355,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
-        if (screen_space_debug) {
+        if (force_screen_space) {
             scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
             if ((uint32_t)*depth > counters->max_scissor_depth) {
                 counters->max_scissor_depth = (uint32_t)*depth;
@@ -1339,7 +1405,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
+static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_ui_walk_mode_t mode) {
     // #region preconditions
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
@@ -1349,6 +1415,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
     // #endregion
+    const bool update_metrics = mode == NT_UI_WALK_MODE_MAIN;
 
     // #region entry-flush
     /* Walker owns GL scissor across the call; drain BEFORE early returns so leaked staging dies with the frame. */
@@ -1361,18 +1428,20 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Zero viewport or degenerate fb (minimized tab, orientation change): no-op. */
     const bool scaled = target->fb_size[0] > 0.0F;
     if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F || (scaled && target->fb_size[1] == 0.0F)) {
-        ctx->last_walk_draw_call_delta = 0;
-        ctx->last_walk_command_count = 0;
-        ctx->last_walk_ms = 0.0F;
-        ctx->last_walk_rect_command_count = 0;
-        ctx->last_walk_image_command_count = 0;
-        ctx->last_walk_text_command_count = 0;
-        ctx->last_walk_border_command_count = 0;
-        ctx->last_walk_scissor_command_count = 0;
-        ctx->last_walk_max_scissor_depth = 0;
+        if (update_metrics) {
+            ctx->last_walk_draw_call_delta = 0;
+            ctx->last_walk_command_count = 0;
+            ctx->last_walk_ms = 0.0F;
+            ctx->last_walk_rect_command_count = 0;
+            ctx->last_walk_image_command_count = 0;
+            ctx->last_walk_text_command_count = 0;
+            ctx->last_walk_border_command_count = 0;
+            ctx->last_walk_scissor_command_count = 0;
+            ctx->last_walk_max_scissor_depth = 0;
 #ifdef NT_TEST_ACCESS
-        ctx->test_last_walk_unlayered_count = 0;
+            ctx->test_last_walk_unlayered_count = 0;
 #endif
+        }
 #if NT_UI_DEBUG_TOOLS
         nt_ui_internal_inspector_strings_release(ctx);
 #endif
@@ -1386,18 +1455,20 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     // #region atlas-not-ready-early-out
     /* Async-friendly: skip walk silently if atlas not yet bound or still loading. */
     if (ctx->atlas.id == 0 || !nt_resource_is_ready(ctx->atlas)) {
-        ctx->last_walk_draw_call_delta = 0;
-        ctx->last_walk_command_count = 0;
-        ctx->last_walk_ms = 0.0F;
-        ctx->last_walk_rect_command_count = 0;
-        ctx->last_walk_image_command_count = 0;
-        ctx->last_walk_text_command_count = 0;
-        ctx->last_walk_border_command_count = 0;
-        ctx->last_walk_scissor_command_count = 0;
-        ctx->last_walk_max_scissor_depth = 0;
+        if (update_metrics) {
+            ctx->last_walk_draw_call_delta = 0;
+            ctx->last_walk_command_count = 0;
+            ctx->last_walk_ms = 0.0F;
+            ctx->last_walk_rect_command_count = 0;
+            ctx->last_walk_image_command_count = 0;
+            ctx->last_walk_text_command_count = 0;
+            ctx->last_walk_border_command_count = 0;
+            ctx->last_walk_scissor_command_count = 0;
+            ctx->last_walk_max_scissor_depth = 0;
 #ifdef NT_TEST_ACCESS
-        ctx->test_last_walk_unlayered_count = 0;
+            ctx->test_last_walk_unlayered_count = 0;
 #endif
+        }
 #if NT_UI_DEBUG_TOOLS
         nt_ui_internal_inspector_strings_release(ctx);
 #endif
@@ -1446,13 +1517,41 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     uint32_t unlayered_count = 0U;
 #endif
     int32_t i = 0;
+    int skip_scissor_depth = 0;
+#if NT_UI_DEBUG_TOOLS
+    const bool force_screen_space = mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR;
+#else
+    const bool force_screen_space = false;
+#endif
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (skip_scissor_depth > 0) {
+            if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+                ++skip_scissor_depth;
+            } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+                --skip_scissor_depth;
+            }
+            ++i;
+            continue;
+        }
         if (!is_segmentable(c->commandType)) {
+            if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
+                dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
+                ++i;
+                continue;
+            }
+            if (!command_matches_walk_mode(ctx, mode, c)) {
+                if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+                    skip_scissor_depth = 1;
+                }
+                ++i;
+                continue;
+            }
             const nt_ui_baked_xform_t b = (c->nt_layout_index < 0 || c->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[c->nt_layout_index];
             memcpy(ws.m, b.m, sizeof ws.m);
             ws.accum_opacity = b.opacity;
-            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
+            ws.hierarchy_depth = b.hierarchy_depth;
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
             ++i;
             continue;
         }
@@ -1470,6 +1569,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         uint32_t active_layers[8] = {0U};
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
+            if (!command_matches_walk_mode(ctx, mode, cc)) {
+                continue;
+            }
             const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
             active_layers[layer >> 5U] |= (1U << (layer & 31U));
 #ifdef NT_TEST_ACCESS
@@ -1488,12 +1590,16 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
                 for (int32_t j = i; j < seg_end; ++j) {
                     const Clay_RenderCommand *cc = &arr->internalArray[j];
+                    if (!command_matches_walk_mode(ctx, mode, cc)) {
+                        continue;
+                    }
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
                         const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
                         memcpy(ws.m, b.m, sizeof ws.m);
                         ws.accum_opacity = b.opacity;
-                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
+                        ws.hierarchy_depth = b.hierarchy_depth;
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
                     }
                 }
             }
@@ -1511,24 +1617,34 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Guard against a CUSTOM handler resetting the gfx counter → unsigned wrap. */
     const uint32_t calls_after = nt_gfx_get_frame_draw_calls();
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards");
-    ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
-    ctx->last_walk_command_count = (uint32_t)arr->length;
-    ctx->last_walk_rect_command_count = counters.rect_command_count;
-    ctx->last_walk_image_command_count = counters.image_command_count;
-    ctx->last_walk_text_command_count = counters.text_command_count;
-    ctx->last_walk_border_command_count = counters.border_command_count;
-    ctx->last_walk_scissor_command_count = counters.scissor_command_count;
-    ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
-    ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
+    if (update_metrics) {
+        ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
+        ctx->last_walk_command_count = (uint32_t)arr->length;
+        ctx->last_walk_rect_command_count = counters.rect_command_count;
+        ctx->last_walk_image_command_count = counters.image_command_count;
+        ctx->last_walk_text_command_count = counters.text_command_count;
+        ctx->last_walk_border_command_count = counters.border_command_count;
+        ctx->last_walk_scissor_command_count = counters.scissor_command_count;
+        ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
+        ctx->last_walk_ms = (float)((nt_time_now() - walk_t0) * 1000.0);
 #ifdef NT_TEST_ACCESS
-    ctx->test_last_walk_unlayered_count = unlayered_count;
+        ctx->test_last_walk_unlayered_count = unlayered_count;
 #endif
+    }
 #if NT_UI_DEBUG_TOOLS
     /* Inspector strings backed by module-level rings are now consumed; release ownership. */
-    nt_ui_internal_inspector_strings_release(ctx);
+    if (should_release_inspector_strings(ctx, mode)) {
+        nt_ui_internal_inspector_strings_release(ctx);
+    }
 #endif
     // #endregion
 }
+
+void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) { nt_ui_walk_impl(ctx, target, NT_UI_WALK_MODE_MAIN); }
+
+#if NT_UI_DEBUG_TOOLS
+void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) { nt_ui_walk_impl(ctx, target, NT_UI_WALK_MODE_DEBUG_INSPECTOR); }
+#endif
 // #endregion
 
 // #region setters
@@ -1588,6 +1704,13 @@ void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
     glm_mat4_inv(m_in, m_inv);
     memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
     ctx->view_proj_set = true;
+}
+
+void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_element_depth_bias: ctx must be non-NULL");
+    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_element_depth_bias: only valid when desc.use_raycast_input=true");
+    NT_ASSERT(isfinite(ndc_per_element) && ndc_per_element >= 0.0F && "nt_ui_set_element_depth_bias: ndc_per_element must be finite and non-negative");
+    ctx->element_depth_bias_ndc = ndc_per_element;
 }
 // #endregion
 

@@ -41,6 +41,7 @@
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
 
 #include "nt_pack_format.h"
@@ -390,10 +391,8 @@ static void try_bind_resources(void) {
 // #endregion
 
 // #region UI panels
-/* Wall-mount XFORM: panel local Clay-bbox center (cx,cy,0) maps to world `wx,wy,wz`.
- * scale_y is negative — that's the only way to flip Clay Y-down → world Y-up without also
- * mirroring X (rotation_z=π) or flipping the panel normal (rotation_x=π). Engine asserts
- * accept non-zero scale (positive or negative); the negative scale is the documented 3D path. */
+/* Wall-mount XFORM: panel local Clay-bbox center maps to world `wx,wy,wz`.
+ * Scale stays positive; rotation_x handles Clay Y-down -> world Y-up. */
 static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw, float panel_w_px, float panel_h_px) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     const float cx = panel_w_px * 0.5F;
@@ -427,8 +426,7 @@ static void ensure_ids(void) {
 static void declare_panels(void) {
     ensure_ids();
     /* Both panels mount on the FRONT wall (-Z) side-by-side. The default panel normal is +Z;
-     * with no rotation_y it points at the player (at +Z looking -Z). Y-flip is the negative
-     * scale_y in make_wall_xform, so the glyphs read upright AND the panel reads top-to-bottom. */
+     * with no rotation_y it points at the player (at +Z looking -Z). */
     const float hd = ROOM_D * 0.5F;
     const float wall_y = 2.8F;
     const float wall_z = -hd + 0.05F;
@@ -629,8 +627,9 @@ static void frame(void) {
     mat4 proj_m;
     mat4 vp_ortho;
     glm_mat4_identity(view_m);
-    glm_ortho(0.0F, fb_w, 0.0F, fb_h, -1.0F, 1.0F, proj_m);
-    glm_mat4_mul(proj_m, view_m, vp_ortho);
+    nt_ui_make_screen_view_proj(fb_w, fb_h, (float *)vp_ortho);
+    memcpy(proj_m, vp_ortho, sizeof proj_m);
+    const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
 
     nt_frame_uniforms_t uniforms_3d = {0};
     memcpy(uniforms_3d.view_proj, vp_3d, 64);
@@ -697,9 +696,7 @@ static void frame(void) {
         declare_panels();
         nt_ui_end(s_ctx);
 
-        const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
         nt_ui_walk(s_ctx, &target);
-        nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         /* Flush UI draws under VP_3D BEFORE switching uniforms; otherwise labels emitted
          * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
         nt_sprite_renderer_flush();
@@ -725,6 +722,16 @@ static void frame(void) {
         nt_gfx_update_buffer(s_frame_ubo, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         draw_hud(fb_w, fb_h);
+        nt_text_renderer_flush();
+    }
+
+    if (ui_can_render && nt_ui_inspector_is_active(s_ctx)) {
+        nt_gfx_update_buffer(s_frame_ubo, &uniforms_2d, sizeof uniforms_2d);
+        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_ui_debug_inspector_walk(s_ctx, &target);
+        nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
+        nt_sprite_renderer_flush();
+        nt_text_renderer_flush();
     }
 
     nt_gfx_end_pass();
@@ -778,6 +785,7 @@ int main(int argc, char *argv[]) {
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     ui_desc.use_raycast_input = true;
+    ui_desc.element_depth_bias_ndc = 0.00005F;
     nt_log_info("ui_3d_demo: UI arena %zu KB, min required %zu KB", sizeof s_ui_arena / 1024U, nt_ui_min_arena_size(&ui_desc) / 1024U);
     s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ctx != NULL && "ui_3d_demo: failed to create UI context");
@@ -813,7 +821,7 @@ int main(int argc, char *argv[]) {
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend_mode = NT_BLEND_MODE_ALPHA,
-        .depth_test = false,
+        .depth_test = true,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
         .label = "ui_3d_demo_sprite",
@@ -822,7 +830,7 @@ int main(int argc, char *argv[]) {
         .vs = s_text_vs_handle,
         .fs = s_text_fs_handle,
         .blend_mode = NT_BLEND_MODE_ALPHA,
-        .depth_test = false,
+        .depth_test = true,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
         .label = "ui_3d_demo_text",

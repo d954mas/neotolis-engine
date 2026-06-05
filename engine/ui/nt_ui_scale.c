@@ -1,6 +1,7 @@
 #include "ui/nt_ui_scale.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "core/nt_assert.h"
 
@@ -106,4 +107,16 @@ nt_ui_target_t nt_ui_scale_make_target(const nt_ui_scale_t *s) {
     t.fb_offset[0] = s->offset_x;
     t.fb_offset[1] = s->offset_y;
     return t;
+}
+
+void nt_ui_make_screen_view_proj(float logical_w, float logical_h, float out_view_proj[16]) {
+    NT_ASSERT(out_view_proj != NULL && "nt_ui_make_screen_view_proj: out_view_proj must be non-NULL");
+    NT_ASSERT(logical_w > 0.0F && logical_h > 0.0F && "nt_ui_make_screen_view_proj: logical dims must be positive");
+    memset(out_view_proj, 0, sizeof(float) * 16U);
+    out_view_proj[0] = 2.0F / logical_w;
+    out_view_proj[5] = 2.0F / logical_h;
+    out_view_proj[10] = -1.0F;
+    out_view_proj[12] = -1.0F;
+    out_view_proj[13] = -1.0F;
+    out_view_proj[15] = 1.0F;
 }

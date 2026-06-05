@@ -55,7 +55,9 @@ typedef struct {
 typedef struct {
     float m[16];
     float opacity;
-    float _pad[3];
+    uint16_t hierarchy_depth;
+    uint16_t _reserved;
+    float _pad[2];
 } nt_ui_baked_xform_t;
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
 
@@ -63,9 +65,11 @@ typedef struct {
     int32_t elem_idx;
     float m[16];
     float opacity;
+    uint16_t hierarchy_depth;
+    uint16_t _reserved;
     int32_t children_cursor;
 } nt_ui_dfs_frame_t;
-_Static_assert(sizeof(nt_ui_dfs_frame_t) == 76, "nt_ui_dfs_frame_t fixed at 76B");
+_Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B");
 
 /* 2D affine extraction from column-major mat4 (matches [a b tx; c d ty]·[x;y;1] applied to (x,y,0,1)):
  *   a = m[0], b = m[4], c = m[1], d = m[5], tx = m[12], ty = m[13]
@@ -73,7 +77,8 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 76, "nt_ui_dfs_frame_t fixed at 76B"
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, ._pad = {0.0F, 0.0F, 0.0F}};
+    nt_ui_baked_xform_t bx = {
+        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, ._reserved = 0U, ._pad = {0.0F, 0.0F}};
     return bx;
 }
 
@@ -142,6 +147,7 @@ struct nt_ui_context {
     /* Set by nt_ui_set_view_proj; reset by nt_ui_begin so a forgotten setter trips the assert
      * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
+    float element_depth_bias_ndc;
     float view_proj[16];
     float inv_view_proj[16];
 #if NT_UI_DEBUG_TOOLS

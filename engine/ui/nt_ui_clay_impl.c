@@ -430,6 +430,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     S[sp].elem_idx = root_elem_idx;
     memcpy(S[sp].m, seed->m, sizeof seed->m);
     S[sp].opacity = seed->opacity;
+    S[sp].hierarchy_depth = seed->hierarchy_depth;
     S[sp].children_cursor = 0;
     sp++;
 
@@ -458,6 +459,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             }
             memcpy(ctx->tree_baked[f->elem_idx].m, m_cur, sizeof m_cur);
             ctx->tree_baked[f->elem_idx].opacity = op;
+            ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
@@ -477,6 +479,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             S[sp].elem_idx = child_idx;
             memcpy(S[sp].m, f->m, sizeof f->m);
             S[sp].opacity = f->opacity;
+            S[sp].hierarchy_depth = (uint16_t)(f->hierarchy_depth + 1U);
             S[sp].children_cursor = 0;
             sp++;
         } else {
@@ -542,6 +545,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                     /* Floating parent must precede child in declaration order or seed would be identity. */
                     NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must precede child in declaration order (Clay invariant broken)");
                     seed = ctx->tree_baked[p_elem_idx];
+                    seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
                 }
             }
         }

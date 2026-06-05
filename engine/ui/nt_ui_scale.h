@@ -49,4 +49,8 @@ nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s);
 
 nt_ui_target_t nt_ui_scale_make_target(const nt_ui_scale_t *s);
 
+/* Standard UI projection used by 2D demos: logical x=[0,w], y=[0,h] maps to
+ * GL Y-up world. nt_ui_walk folds Clay Y-down into world_mat4 for 2D/screen passes. */
+void nt_ui_make_screen_view_proj(float logical_w, float logical_h, float out_view_proj[16]);
+
 #endif /* NT_UI_SCALE_H */

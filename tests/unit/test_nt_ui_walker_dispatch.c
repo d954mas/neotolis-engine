@@ -13,7 +13,9 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_label.h"
 #include "unity.h"
 
 /* ---- Test-local state ---- */
@@ -518,6 +520,127 @@ static void test_dispatch_text_model_matrix_preserves_y_up(void) {
     TEST_ASSERT_EQUAL_INT(530, (int)lrintf(m[13]));
 }
 
+#if NT_UI_DEBUG_TOOLS
+static void test_dispatch_3d_main_walk_skips_debug_layer(void) {
+    s_fx.ctx->use_raycast_input = true;
+
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    c->boundingBox = (Clay_BoundingBox){.x = 10.0F, .y = 20.0F, .width = 100.0F, .height = 50.0F};
+    c->userData = (void *)NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_PANEL_BG);
+    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
+    inject_frozen_cmds(1);
+
+    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+}
+
+static void test_dispatch_3d_debug_layer_draws_in_screen_space_debug_walk(void) {
+    s_fx.ctx->use_raycast_input = true;
+
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    c->boundingBox = (Clay_BoundingBox){.x = 10.0F, .y = 20.0F, .width = 100.0F, .height = 50.0F};
+    c->userData = (void *)NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_PANEL_BG);
+    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_EQUAL_INT(10, (int)lrintf(pos[0]));
+    TEST_ASSERT_EQUAL_INT(530, (int)lrintf(pos[1]));
+}
+
+static void test_dispatch_3d_debug_text_uses_screen_space_orientation(void) {
+    s_fx.ctx->use_raycast_input = true;
+
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
+    c->boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 60.0F, .width = 100.0F, .height = 20.0F};
+    static const char *kText = "AB";
+    c->userData = (void *)NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_PANEL_TEXT);
+    c->renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = kText, .baseChars = kText};
+    c->renderData.text.textColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
+    c->renderData.text.fontId = 0;
+    c->renderData.text.fontSize = 14;
+    c->renderData.text.letterSpacing = 0;
+    c->renderData.text.lineHeight = 0;
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
+    float m[16];
+    memcpy(m, nt_text_renderer_test_last_model(), sizeof m);
+    TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[0] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[5] * 1000.0F));
+    TEST_ASSERT_EQUAL_INT(50, (int)lrintf(m[12]));
+    TEST_ASSERT_EQUAL_INT(530, (int)lrintf(m[13]));
+}
+
+static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
+    s_fx.ctx->use_raycast_input = true;
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float identity_vp[16] = {
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, identity_vp);
+    CLAY({.id = CLAY_ID("debug_tree_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
+        nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER((nt_ui_layer_t)5), "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = {255, 255, 255, 255}});
+    }
+    nt_ui_end(s_fx.ctx);
+
+    uint32_t frozen_debug_text_count = 0U;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT && c->userData != NULL && ((const nt_ui_element_data_t *)c->userData)->layer == NT_UI_LAYER_DEBUG_PANEL_TEXT) {
+            TEST_ASSERT_GREATER_THAN_INT32(0, c->renderData.text.stringContents.length);
+            frozen_debug_text_count++;
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, frozen_debug_text_count);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+    const uint32_t calls_before = nt_text_renderer_test_draw_n_calls();
+    nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_GREATER_THAN_UINT32(calls_before, nt_text_renderer_test_draw_n_calls());
+}
+#endif
+
+static void test_dispatch_3d_element_depth_bias_uses_hierarchy_depth(void) {
+    s_fx.ctx->use_raycast_input = true;
+    nt_ui_set_element_depth_bias(s_fx.ctx, 0.001F);
+    const float identity_vp[16] = {
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, identity_vp);
+    CLAY({.id = CLAY_ID("bias_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .backgroundColor = {255.0F, 255.0F, 255.0F, 255.0F}}) {}
+    CLAY({.id = CLAY_ID("bias_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .backgroundColor = {255.0F, 255.0F, 255.0F, 255.0F}}) {}
+    CLAY({.id = CLAY_ID("bias_c"), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .backgroundColor = {255.0F, 255.0F, 255.0F, 255.0F}}) {}
+    CLAY({.id = CLAY_ID("bias_d"), .layout = {.sizing = {CLAY_SIZING_FIXED(20.0F), CLAY_SIZING_FIXED(20.0F)}}, .backgroundColor = {255.0F, 255.0F, 255.0F, 255.0F}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_EQUAL_INT(-1, (int)lrintf(pos[2] * 1000.0F));
+}
+
 /* Not-READY atlas must silent no-op (async loading is legitimate). */
 static void test_dispatch_image_not_ready_silent(void) {
     nt_ui_image_payload_t bad = {.atlas = {.id = 0xDEADBEEFU}, .region_index = 0, .flip_bits = 0};
@@ -558,6 +681,13 @@ int main(void) {
     RUN_TEST(test_dispatch_image_non_slice9_vertex_positions);
     RUN_TEST(test_dispatch_image_origin_override_shifts_anchor);
     RUN_TEST(test_dispatch_text_model_matrix_preserves_y_up);
+#if NT_UI_DEBUG_TOOLS
+    RUN_TEST(test_dispatch_3d_main_walk_skips_debug_layer);
+    RUN_TEST(test_dispatch_3d_debug_layer_draws_in_screen_space_debug_walk);
+    RUN_TEST(test_dispatch_3d_debug_text_uses_screen_space_orientation);
+    RUN_TEST(test_3d_debug_inspector_walk_draws_real_tree_text);
+#endif
+    RUN_TEST(test_dispatch_3d_element_depth_bias_uses_hierarchy_depth);
     RUN_TEST(test_dispatch_image_not_ready_silent);
     return UNITY_END();
 }

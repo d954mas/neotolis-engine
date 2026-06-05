@@ -35,7 +35,11 @@ void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_met
 /* Called by nt_ui_end if active; not for game code. */
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
 
-/* Call AFTER nt_ui_walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label. */
+/* Draw inspector/debug layers after the game's regular UI pass. Caller must bind a
+ * screen-space view_proj first, e.g. nt_ui_make_screen_view_proj(...). */
+void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
+
+/* Call AFTER debug inspector walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label. */
 void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
 
 #else /* NT_UI_DEBUG_TOOLS */
@@ -64,6 +68,10 @@ static inline void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui
     nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — metrics ignored. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
 }
 static inline void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) { (void)ctx; }
+static inline void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
+    (void)ctx;
+    (void)target;
+}
 static inline void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size) {
     (void)ctx;
     (void)target;

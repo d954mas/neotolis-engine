@@ -10,6 +10,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
+#include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -180,6 +181,29 @@ static void test_button_begin_label_end_inline(void) {
     TEST_ASSERT_FALSE(clicked); /* no press this frame */
     TEST_ASSERT_NOT_NULL(find_first_image_cmd(s_fx.ctx));
     TEST_ASSERT_NOT_NULL(find_first_text_cmd(s_fx.ctx));
+}
+
+static void test_button_label_walks_in_3d_ctx(void) {
+    s_fx.ctx->use_raycast_input = true;
+    nt_text_renderer_test_reset_call_counters();
+
+    static const float identity_vp[16] = {
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, identity_vp);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_3d"), &s_btn_style, NULL, true);
+        nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER(2U), "Go", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
 }
 
 /* ---- Test: slice9_scale propagates from style to the IMAGE payload. ---- */
@@ -384,6 +408,7 @@ int main(void) {
     RUN_TEST(test_button_stack_balanced);
     RUN_TEST(test_button_disabled_path_balanced);
     RUN_TEST(test_button_begin_label_end_inline);
+    RUN_TEST(test_button_label_walks_in_3d_ctx);
     RUN_TEST(test_button_slice9_scale_propagates_to_payload);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_button_id_zero_asserts);

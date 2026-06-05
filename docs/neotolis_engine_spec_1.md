@@ -164,6 +164,13 @@ If a decision can be deferred without loss of base architecture — it is deferr
 the game owns the screen mapping via `nt_ui_set_view_proj`.Hit - test raycasts pointer → NDC(Clay Y - down to NDC Y - up) → world ray via `inv_view_proj` → ray
     - plane at widget Z = 0 → `mat4_inv_trs(baked.m)` back to widget -
                               local → bbox check.
+    Optional `element_depth_bias_ndc` is render-only: positive values move deeper
+    hierarchy levels slightly closer in projected depth to avoid z-fighting. Hit-test
+    stays on the unbiased widget plane.
+    Debug inspector render commands are excluded from the regular 3D walk and
+    drawn by `nt_ui_debug_inspector_walk` as a separate final screen-space pass.
+    The game binds a 2D UI projection first; `nt_ui_make_screen_view_proj(w,h,...)`
+    provides the standard Y-up orthographic matrix used by 2D demos.
 
                               Both modes use the same `tree_baked[layout_idx]` +
                               per -
