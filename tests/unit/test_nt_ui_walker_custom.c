@@ -62,7 +62,7 @@ static void test_custom_handler_invoked(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(1, s_custom_calls);
-    /* Handler receives the bbox in LAYOUT (Y-down) space; world_aff carries
+    /* Handler receives the bbox in LAYOUT (Y-down) space; world_mat4 carries
      * the Y-flip + composed parent chain, so a rotated CUSTOM viewport
      * survives. Handler does the transform itself. */
     TEST_ASSERT_EQUAL_INT(5, (int)s_custom_received_bbox.x);

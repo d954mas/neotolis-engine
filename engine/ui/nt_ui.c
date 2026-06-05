@@ -517,51 +517,24 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 // #endregion
 
 // #region helper_emit_screen_rect
-/* mat4 = aff · T(x, y+h) · S(w, -h); -h cancels the Y-flip baked into aff. */
-static inline void build_quad_mat4(const float aff[6], float x, float y, float w, float h, float out_m[16]) {
+/* sprite_mat4 = world · T(x, y+h) · S(w, -h, 1) maps unit (0,0..1,1) → world. The (x, y+h) origin
+ * and -h scale match the sprite renderer's unit-square convention (GL bottom-left at unit (0,0));
+ * with Y-flip baked into world, this lands the Clay bbox at the correct GL pixels.
+ * Math: out.col0 = w · world.col0; out.col1 = -h · world.col1; col2 unchanged; col3 = world · (x, y+h, 0, 1). */
+static inline void build_quad_mat4(const float world[16], float x, float y, float w, float h, float out_m[16]) {
     const float ox = x;
     const float oy = y + h;
-    out_m[0] = aff[0] * w;
-    out_m[1] = aff[2] * w;
-    out_m[2] = 0.0F;
-    out_m[3] = 0.0F;
-    out_m[4] = -aff[1] * h;
-    out_m[5] = -aff[3] * h;
-    out_m[6] = 0.0F;
-    out_m[7] = 0.0F;
-    out_m[8] = 0.0F;
-    out_m[9] = 0.0F;
-    out_m[10] = 1.0F;
-    out_m[11] = 0.0F;
-    out_m[12] = (aff[0] * ox) + (aff[1] * oy) + aff[4];
-    out_m[13] = (aff[2] * ox) + (aff[3] * oy) + aff[5];
-    out_m[14] = 0.0F;
-    out_m[15] = 1.0F;
+    for (int r = 0; r < 4; ++r) {
+        out_m[r] = w * world[r];
+        out_m[4 + r] = -h * world[4 + r];
+        out_m[8 + r] = world[8 + r];
+        out_m[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
+    }
 }
 
-/* Affine-only mat4 — for callers whose vertices are already in layout-space. */
-static inline void build_affine_mat4(const float aff[6], float out_m[16]) {
-    out_m[0] = aff[0];
-    out_m[1] = aff[2];
-    out_m[2] = 0.0F;
-    out_m[3] = 0.0F;
-    out_m[4] = aff[1];
-    out_m[5] = aff[3];
-    out_m[6] = 0.0F;
-    out_m[7] = 0.0F;
-    out_m[8] = 0.0F;
-    out_m[9] = 0.0F;
-    out_m[10] = 1.0F;
-    out_m[11] = 0.0F;
-    out_m[12] = aff[4];
-    out_m[13] = aff[5];
-    out_m[14] = 0.0F;
-    out_m[15] = 1.0F;
-}
-
-static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float aff[6]) {
+static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
-    build_quad_mat4(aff, x, y, w, h, m);
+    build_quad_mat4(world_mat4, x, y, w, h, m);
     nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
 }
 // #endregion
@@ -597,7 +570,7 @@ static inline void clamp_radii_css3(float w, float h, float *tl, float *tr, floa
 
 // #region helper_emit_rounded_rect
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, const float aff[6]) {
+static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, const float world_mat4[16]) {
     float tl = cr.topLeft;
     float tr = cr.topRight;
     float bl = cr.bottomLeft;
@@ -607,7 +580,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     const float half_h = h * 0.5F;
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, aff);
+        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, world_mat4);
         return;
     }
 
@@ -681,34 +654,34 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         indices[ii++] = next;
     }
 
-    float mat[16];
-    build_affine_mat4(aff, mat);
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
+    /* Vertices are in Clay layout-space; world_mat4 maps layout → world directly. */
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
 }
 // #endregion
 
 // #region helper_emit_border
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float aff[6]) {
+static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float world_mat4[16]) {
     // #region axis-aligned-fast-path
     const float top = (float)widths.top;
     const float bot = (float)widths.bottom;
     const float lft = (float)widths.left;
     const float rgt = (float)widths.right;
-    /* Axis-aligned fast path: per-edge rect emit avoids the geometry mesh. */
-    const bool axis_aligned = (aff[1] == 0.0F && aff[2] == 0.0F);
+    /* Axis-aligned fast path: per-edge rect emit avoids the geometry mesh. Probe Clay X→Y and Y→X
+     * cross-coupling in world_mat4 (col0.y = m[1], col1.x = m[4]); zero ⇔ no rotation/shear. */
+    const bool axis_aligned = (world_mat4[1] == 0.0F && world_mat4[4] == 0.0F);
     if (axis_aligned) {
         if (widths.top) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, aff);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, world_mat4);
         }
         if (widths.bottom) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, aff);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, world_mat4);
         }
         if (widths.left) {
-            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, aff);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, world_mat4);
         }
         if (widths.right) {
-            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, aff);
+            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, world_mat4);
         }
         return;
     }
@@ -806,9 +779,8 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
     if (vi == 0) {
         return;
     }
-    float mat[16];
-    build_affine_mat4(aff, mat);
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, col);
+    /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col);
     // #endregion
 }
 
@@ -842,7 +814,7 @@ static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radi
 /* Caller (emit_border) clamps radii and guarantees at least one is non-zero. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed,
-                                const float aff[6]) {
+                                const float world_mat4[16]) {
     const float x = bb.x;
     const float y = bb.y;
     const float w = bb.width;
@@ -877,12 +849,11 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
         indices[ii++] = out_n;
     }
 
-    float mat[16];
-    build_affine_mat4(aff, mat);
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
+    /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
 }
 
-static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float aff[6]) {
+static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16]) {
     const Clay_BorderRenderData *b = &c->renderData.border;
     const Clay_BoundingBox bb = c->boundingBox;
     const float top = (float)b->width.top;
@@ -900,16 +871,16 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     clamp_radii_css3(bb.width, bb.height, &tl, &tr, &bl, &br);
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, aff);
+        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, world_mat4);
         return;
     }
-    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, aff);
+    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, world_mat4);
 }
 // #endregion
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
+static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -938,10 +909,8 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
     const float s9_scale = p->slice9_scale;
 
     if (has_s9_override || region_slice9) {
-        float m[16];
-        build_affine_mat4(aff, m);
         const uint16_t *src = has_s9_override ? p->slice9_override : NULL;
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src, s9_scale, col, p->flip_bits, m);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src, s9_scale, col, p->flip_bits, world_mat4);
         return;
     }
 
@@ -952,13 +921,17 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
 
-    /* Source's (origin, origin) point anchors at bbox center. */
+    /* Source's (origin, origin) point anchors at bbox center. Build sprite_mat4 = world × T(cx, cy) × S(sx, -sy, 1):
+     * source Y-up (image texels flow up) inverts before world maps to layout — col1 negates world.col1. */
     const float cx = bb.x + (bb.width * 0.5F);
     const float cy = bb.y + (bb.height * 0.5F);
-    const float m[16] = {
-        aff[0] * sx_f, aff[2] * sx_f, 0.0F, 0.0F, -aff[1] * sy_f, -aff[3] * sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * cx) + (aff[1] * cy) + aff[4], (aff[2] * cx) + (aff[3] * cy) + aff[5],
-        0.0F,          1.0F,
-    };
+    float m[16];
+    for (int rr = 0; rr < 4; ++rr) {
+        m[rr] = sx_f * world_mat4[rr];
+        m[4 + rr] = -sy_f * world_mat4[4 + rr];
+        m[8 + rr] = world_mat4[8 + rr];
+        m[12 + rr] = (cx * world_mat4[rr]) + (cy * world_mat4[4 + rr]) + world_mat4[12 + rr];
+    }
     const float origin_x = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : r->origin_x;
     const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : r->origin_y;
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
@@ -967,7 +940,7 @@ static void emit_image(const Clay_RenderCommand *c, const float aff[6]) {
 
 // #region helper_emit_text
 /* dispatch_command flushes sprite before and lazy-rebinds after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float aff[6]) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16]) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -984,12 +957,18 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     /* Y-down: baseline = bbox.y(top) + center_offset + ascent*scale. */
     const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * scale);
 
-    /* Text renderer local is Y-up; pre-flip Y to cancel world_aff's bake. */
+    /* Text renderer local is Y-up (baseline → ascent grows positive Y); invert col1 so text +Y maps
+     * to Clay layout -Y before world_mat4 sends it through. Holds for both 2D ctx (world has screen Y-flip)
+     * and 3D ctx (world has none) — local coord conversion is independent of the screen-space flip. */
     const float ox = c->boundingBox.x;
     const float oy = baseline_y;
-    const float m[16] = {
-        aff[0], aff[2], 0.0F, 0.0F, -aff[1], -aff[3], 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, (aff[0] * ox) + (aff[1] * oy) + aff[4], (aff[2] * ox) + (aff[3] * oy) + aff[5], 0.0F, 1.0F,
-    };
+    float m[16];
+    for (int rr = 0; rr < 4; ++rr) {
+        m[rr] = world_mat4[rr];
+        m[4 + rr] = -world_mat4[4 + rr];
+        m[8 + rr] = world_mat4[8 + rr];
+        m[12 + rr] = (ox * world_mat4[rr]) + (oy * world_mat4[4 + rr]) + world_mat4[12 + rr];
+    }
     const float color[4] = {
         t->textColor.r / 255.0F,
         t->textColor.g / 255.0F,
@@ -1113,18 +1092,15 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 // #endregion
 
 // #region walker_state
+/* m carries the accumulated Clay-layout → world mat4 directly from tree_baked. */
 typedef struct {
-    float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
+    float m[16];
     float accum_opacity;
 } nt_ui_walker_state_t;
 
 static void walker_state_init(nt_ui_walker_state_t *ws) {
-    ws->aff_a = 1.0F;
-    ws->aff_b = 0;
-    ws->aff_c = 0;
-    ws->aff_d = 1.0F;
-    ws->aff_tx = 0;
-    ws->aff_ty = 0;
+    const nt_ui_baked_xform_t id = nt_ui_internal_identity_baked();
+    memcpy(ws->m, id.m, sizeof ws->m);
     ws->accum_opacity = 1.0F;
 }
 
@@ -1153,7 +1129,7 @@ typedef struct {
 } nt_ui_walk_counters_t;
 
 /* type=NONE = engine anchor (skip silently); type=GAME = invoke handler. */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_aff[6], float opacity, bool *sprite_pipeline_dirty) {
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16], float opacity, bool *sprite_pipeline_dirty) {
     const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)c->renderData.custom.customData;
     NT_ASSERT(cd != NULL && "CUSTOM command must have nt_ui_custom_data_t");
     if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
@@ -1163,11 +1139,10 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     nt_text_renderer_flush();
     *sprite_pipeline_dirty = true;
     if (ctx->custom_fn != NULL) {
-        const nt_ui_custom_frame_t frame = {
-            .clay_cmd = (const void *)c,
-            .world_aff = {world_aff[0], world_aff[1], world_aff[2], world_aff[3], world_aff[4], world_aff[5]},
-            .opacity = opacity,
-        };
+        nt_ui_custom_frame_t frame;
+        frame.clay_cmd = (const void *)c;
+        memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
+        frame.opacity = opacity;
         ctx->custom_fn(&frame, ctx->custom_user);
     }
 }
@@ -1196,18 +1171,28 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
-/* Y-flip lives inside world_aff (d → -d, ty → vy+vh-ty); every emit_* applies it uniformly. */
+/* For 2D ctx: bake the screen Y-flip (Clay Y-down → GL Y-up) into world_mat4 = Y_flip · ws->m.
+ * For 3D ctx (use_raycast_input): world_mat4 = ws->m verbatim; the game's view_proj handles screen
+ * mapping, and the custom handler / sprite renderer composes view_proj × world_mat4 as needed.
+ * The closed-form below assumes ws->m is affine (row3 = (0,0,0,1)) — guaranteed by compose_transform_level. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
                              nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
-    const float world_aff[6] = {
-        ws->aff_a, ws->aff_b, -ws->aff_c, -ws->aff_d, ws->aff_tx, vy + vh - ws->aff_ty,
-    };
+    float world_mat4[16];
+    memcpy(world_mat4, ws->m, sizeof world_mat4);
+    if (!ctx->use_raycast_input) {
+        /* Y_flip = [1 0 0 0; 0 -1 0 0; 0 0 1 0; 0 vy+vh 0 1] (column-major); applied to affine ws->m,
+         * the only changes are negating row 1 across all columns and adding (vy+vh) to m[13]. */
+        world_mat4[1] = -world_mat4[1];
+        world_mat4[5] = -world_mat4[5];
+        world_mat4[9] = -world_mat4[9];
+        world_mat4[13] = (vy + vh) - world_mat4[13];
+    }
     /* X-column magnitude; Y dropped on purpose so glyph atlas stays crisp on the X axis. */
-    const float text_scale = sqrtf((ws->aff_a * ws->aff_a) + (ws->aff_c * ws->aff_c));
+    const float text_scale = sqrtf((ws->m[0] * ws->m[0]) + (ws->m[1] * ws->m[1]));
 
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
@@ -1218,7 +1203,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
         col = apply_opacity(col, ws->accum_opacity);
-        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_aff);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
@@ -1227,7 +1212,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.border.color.a = (float)lrintf(local.renderData.border.color.a * ws->accum_opacity);
-        emit_border(ctx, &local, world_aff);
+        emit_border(ctx, &local, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
@@ -1237,7 +1222,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
-        emit_text(ctx, &local, text_scale, world_aff);
+        emit_text(ctx, &local, text_scale, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
@@ -1255,14 +1240,14 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
-        emit_image(&local, world_aff);
+        emit_image(&local, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
-        /* GL scissor is axis-aligned in fb space; rotated clip emits the
-         * bounding-AABB of the 4 transformed corners. */
+        /* GL scissor is axis-aligned in fb space; rotated clip emits the bounding-AABB of the
+         * 4 transformed corners. world_mat4 maps Clay (x,y,0,1) → world. */
         const float bx = c->boundingBox.x;
         const float by = c->boundingBox.y;
         const float bw = c->boundingBox.width;
@@ -1271,8 +1256,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         float wx[4];
         float wy[4];
         for (int ci = 0; ci < 4; ++ci) {
-            wx[ci] = (world_aff[0] * corners[ci][0]) + (world_aff[1] * corners[ci][1]) + world_aff[4];
-            wy[ci] = (world_aff[2] * corners[ci][0]) + (world_aff[3] * corners[ci][1]) + world_aff[5];
+            wx[ci] = (world_mat4[0] * corners[ci][0]) + (world_mat4[4] * corners[ci][1]) + world_mat4[12];
+            wy[ci] = (world_mat4[1] * corners[ci][0]) + (world_mat4[5] * corners[ci][1]) + world_mat4[13];
         }
         float mn_x = wx[0];
         float mx_x = wx[0];
@@ -1297,8 +1282,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
-        /* Handler owns the transform math (LAYOUT bbox + world_aff + opacity passed through). */
-        emit_custom(ctx, c, world_aff, ws->accum_opacity, sprite_pipeline_dirty);
+        /* Handler owns the transform math (LAYOUT bbox + world_mat4 + opacity passed through). */
+        emit_custom(ctx, c, world_mat4, ws->accum_opacity, sprite_pipeline_dirty);
         return;
     }
 }
@@ -1415,12 +1400,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
             const nt_ui_baked_xform_t b = (c->nt_layout_index < 0 || c->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[c->nt_layout_index];
-            ws.aff_a = b.m[0];
-            ws.aff_b = b.m[4];
-            ws.aff_c = b.m[1];
-            ws.aff_d = b.m[5];
-            ws.aff_tx = b.m[12];
-            ws.aff_ty = b.m[13];
+            memcpy(ws.m, b.m, sizeof ws.m);
             ws.accum_opacity = b.opacity;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
             ++i;
@@ -1461,12 +1441,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
                         const nt_ui_baked_xform_t b = (cc->nt_layout_index < 0 || cc->nt_layout_index >= N_elements) ? nt_ui_internal_identity_baked() : ctx->tree_baked[cc->nt_layout_index];
-                        ws.aff_a = b.m[0];
-                        ws.aff_b = b.m[4];
-                        ws.aff_c = b.m[1];
-                        ws.aff_d = b.m[5];
-                        ws.aff_tx = b.m[12];
-                        ws.aff_ty = b.m[13];
+                        memcpy(ws.m, b.m, sizeof ws.m);
                         ws.accum_opacity = b.opacity;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters);
                     }

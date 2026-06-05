@@ -94,12 +94,14 @@ typedef struct {
 #define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
 
 /* Frame snapshot passed to the CUSTOM handler.
- *   clay_cmd  — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
- *   world_aff — 2x3 affine taking LAYOUT point → GL world (parent chain + Y-flip baked in).
- *   opacity   — accumulated [0..1]; multiply into alpha. */
+ *   clay_cmd   — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
+ *   world_mat4 — column-major mat4 taking LAYOUT point → world (parent chain).
+ *                Default 2D ctx bakes the screen Y-flip (LAYOUT Y-down → GL Y-up) into world_mat4;
+ *                3D ctx (use_raycast_input) leaves it unflipped — the handler composes view_proj as needed.
+ *   opacity    — accumulated [0..1]; multiply into alpha. */
 typedef struct {
     const void *clay_cmd;
-    float world_aff[6];
+    float world_mat4[16];
     float opacity;
 } nt_ui_custom_frame_t;
 
@@ -188,8 +190,9 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
-    /* true = raycast hit-test against game's view_proj (3D ctx); requires nt_ui_set_view_proj before walk.
-     * false (default) = inverse-affine 2D hit-test against baked screen-space transform. */
+    /* true = raycast hit-test against game's view_proj (3D ctx); the game populates view_proj on the
+     * ctx (Phase 5 introduces nt_ui_set_view_proj) before each walk. false (default) = inverse-affine
+     * 2D hit-test against baked screen-space transform. */
     bool use_raycast_input;
 } nt_ui_create_desc_t;
 

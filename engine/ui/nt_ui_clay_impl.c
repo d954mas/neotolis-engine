@@ -384,8 +384,9 @@ static nt_ui_element_data_t *bt_scan_userdata(Clay_LayoutElement *elem) {
 }
 
 /* Local = T(O)·T(C)·R(rot_xyz Euler)·S·T(-C); new = accum · local.
- * Pivot is bbox center (cx, cy, 0). Pure Clay Y-down (Y-flip lives in walker). */
-static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, const float accum[16], float out[16]) {
+ * Pivot is bbox center (cx, cy, 0). Pure Clay Y-down (Y-flip lives in walker).
+ * `accum` and `out` are mat4 (= float[4][4]); cglm supports aliasing so out may equal accum. */
+static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, mat4 accum, mat4 out) {
     mat4 m_pivot_pos;
     glm_mat4_identity(m_pivot_pos);
     glm_translate(m_pivot_pos, (vec3){cx + t->offset_x, cy + t->offset_y, t->offset_z});
@@ -407,11 +408,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
     glm_mat4_mul(m_tmp, m_scale, m_local);
     glm_mat4_mul(m_local, m_pivot_neg, m_local);
 
-    mat4 m_accum;
-    memcpy(m_accum, accum, sizeof m_accum);
-    mat4 m_out;
-    glm_mat4_mul(m_accum, m_local, m_out);
-    memcpy(out, m_out, sizeof m_out);
+    glm_mat4_mul(accum, m_local, out);
 }
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
@@ -442,9 +439,8 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                     NT_ASSERT(item != &Clay_LayoutElementHashMapItem_DEFAULT && "build_tree: element's own hashmap lookup failed");
                     const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
                     const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
-                    float m_new[16];
-                    compose_transform_level(&ad->transform, cx, cy, m_cur, m_new);
-                    memcpy(m_cur, m_new, sizeof m_cur);
+                    /* In-place compose — cglm supports aliasing accum == out. */
+                    compose_transform_level(&ad->transform, cx, cy, (float(*)[4])m_cur, (float(*)[4])m_cur);
                 }
                 if ((ad->flags & NT_UI_ELEM_FLAG_HAS_OPACITY) != 0U) {
                     op *= ad->opacity;

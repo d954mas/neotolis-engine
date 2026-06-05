@@ -62,16 +62,9 @@ typedef struct {
 } nt_ui_dfs_frame_t;
 _Static_assert(sizeof(nt_ui_dfs_frame_t) == 76, "nt_ui_dfs_frame_t fixed at 76B");
 
-/* 2D affine extraction from column-major mat4: point' = m · point with point.z=0.
- *   new_x = m[0]·x + m[4]·y + m[12]
- *   new_y = m[1]·x + m[5]·y + m[13]
- * → matches [a b tx; c d ty] · [x; y; 1] with a=m[0] b=m[4] c=m[1] d=m[5] tx=m[12] ty=m[13]. */
-static inline float nt_ui_baked_aff_a(const nt_ui_baked_xform_t *b) { return b->m[0]; }
-static inline float nt_ui_baked_aff_b(const nt_ui_baked_xform_t *b) { return b->m[4]; }
-static inline float nt_ui_baked_aff_c(const nt_ui_baked_xform_t *b) { return b->m[1]; }
-static inline float nt_ui_baked_aff_d(const nt_ui_baked_xform_t *b) { return b->m[5]; }
-static inline float nt_ui_baked_aff_tx(const nt_ui_baked_xform_t *b) { return b->m[12]; }
-static inline float nt_ui_baked_aff_ty(const nt_ui_baked_xform_t *b) { return b->m[13]; }
+/* 2D affine extraction from column-major mat4 (matches [a b tx; c d ty]·[x;y;1] applied to (x,y,0,1)):
+ *   a = m[0], b = m[4], c = m[1], d = m[5], tx = m[12], ty = m[13]
+ * Callers (walker, hit-test, debug_zone fill) inline this indexing directly. */
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
@@ -141,7 +134,8 @@ struct nt_ui_context {
 
     /* 3D-mode flag — copied from create_desc; gates raycast vs inverse-affine hit-test. */
     bool use_raycast_input;
-    /* Only valid when use_raycast_input AND view_proj_set; game must call nt_ui_set_view_proj before walk. */
+    /* Only valid when use_raycast_input AND view_proj_set; populated by the game before walk
+     * (Phase 5 introduces the nt_ui_set_view_proj setter that caches inv_view_proj alongside). */
     bool view_proj_set;
     float view_proj[16];
     float inv_view_proj[16];
