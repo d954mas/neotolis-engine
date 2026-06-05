@@ -93,11 +93,11 @@ def main():
         head = next((t for t in bus.texts() if t and t.startswith("Круг")), None)
         check("run started", head is not None, str(head))
 
-        # watch a couple seconds: the cell/circle should advance on its own
-        c0 = next((t for t in bus.texts() if t and t.startswith("Круг")), "")
+        # watch a couple seconds: the hero cell should advance on its own
+        r0 = bus.req("game.run")["data"]["cell"]
         time.sleep(1.6)
-        c1 = next((t for t in bus.texts() if t and t.startswith("Круг")), "")
-        check("run advances", c0 != c1, f"{c0!r} -> {c1!r}")
+        r1 = bus.req("game.run")["data"]["cell"]
+        check("run advances", r0 != r1, f"cell {r0} -> {r1}")
 
         bus.click_label("Lose")  # force death
         time.sleep(0.4)

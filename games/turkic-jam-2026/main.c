@@ -375,19 +375,22 @@ int main(int argc, char *argv[]) {
     tj_config_load(config_dir);
     nt_log_info("turkic_jam: config '%s' -> %d tiles, %d heirs, %d cells", config_dir, g_config.tile_count, g_config.heir_count, g_config.path_cells);
 
-    g.scene = g_config.start_in_game ? &SCENE_GAME : &SCENE_MENU;
-    if (g.scene->on_enter) {
-        g.scene->on_enter(&g);
-    }
-
-    /* Debug/automation command bus (no-op unless NT_DEVAPI_ENABLED). Start the
-     * TCP server only when --devapi <port> is passed. */
+    /* Debug/automation command bus (no-op unless NT_DEVAPI_ENABLED). */
     nt_devapi_init();
     nt_devapi_register_builtins();
     nt_devapi_set_ui_context(g.ui);
 #if NT_DEVAPI_ENABLED
     nt_devapi_register("game.config", ep_game_config, NULL);
 #endif
+
+    /* Initial scene; its on_enter may register more endpoints (e.g. game.run),
+     * so it must run AFTER nt_devapi_init() clears the registry. */
+    g.scene = g_config.start_in_game ? &SCENE_GAME : &SCENE_MENU;
+    if (g.scene->on_enter) {
+        g.scene->on_enter(&g);
+    }
+
+    /* Start the TCP server last — after endpoints + the first scene are ready. */
     if (devapi_port > 0) {
         nt_devapi_net_start((uint16_t)devapi_port);
     }
