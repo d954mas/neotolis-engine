@@ -106,8 +106,8 @@ static const char *const s_speed_labels[SPEED_COUNT] = {"STOP", "SLOW", "MEDIUM"
 // #endregion
 
 // #region state
-static float s_player_pos[3] = {0.0F, EYE_HEIGHT, -7.0F};
-static float s_player_yaw = NT_PI; /* face +Z toward back wall panels */
+static float s_player_pos[3] = {0.0F, EYE_HEIGHT, 7.0F};
+static float s_player_yaw; /* yaw=0: face -Z toward front wall panels (no X-mirror) */
 static float s_player_pitch;
 
 static int s_shape_kind = SHAPE_CUBE;
@@ -171,8 +171,8 @@ static bool s_ids_ready;
 static void player_reset(void) {
     s_player_pos[0] = 0.0F;
     s_player_pos[1] = EYE_HEIGHT;
-    s_player_pos[2] = -7.0F;
-    s_player_yaw = NT_PI;
+    s_player_pos[2] = 7.0F;
+    s_player_yaw = 0.0F;
     s_player_pitch = 0.0F;
     s_shape_yaw = 0.0F;
 }
@@ -378,8 +378,9 @@ static void try_bind_resources(void) {
 
 // #region UI panels
 /* Wall-mount XFORM: panel local Clay-bbox center (cx,cy,0) maps to world `wx,wy,wz`.
- * Engine asserts positive scale, so Y-flip (Clay Y-down → world Y-up) goes through rotation_x=π.
- * Yaw rotates the panel face around world Y to face the room interior. */
+ * scale_y is negative — that's the only way to flip Clay Y-down → world Y-up without also
+ * mirroring X (rotation_z=π) or flipping the panel normal (rotation_x=π). Engine asserts
+ * accept non-zero scale (positive or negative); the negative scale is the documented 3D path. */
 static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw, float panel_w_px, float panel_h_px) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     const float cx = panel_w_px * 0.5F;
@@ -387,10 +388,9 @@ static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw
     t.offset_x = wx - cx;
     t.offset_y = wy - cy;
     t.offset_z = wz;
-    t.rotation_x = NT_PI;
     t.rotation_y = yaw;
     t.scale_x = PANEL_SCALE;
-    t.scale_y = PANEL_SCALE;
+    t.scale_y = -PANEL_SCALE;
     t.scale_z = PANEL_SCALE;
     return t;
 }
@@ -412,14 +412,12 @@ static void ensure_ids(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_panels(void) {
     ensure_ids();
-    /* Both panels mount on the BACK wall (+Z) side-by-side. The make_wall_xform helper bakes
-     * rotation_x=π into every panel for the Clay Y-down → world Y-up flip. That same rotation
-     * also flips Z, so the panel face naturally ends up pointing -Z (toward the room interior)
-     * which matches the back wall — no extra rotation_y needed, and no X-mirror in the glyphs.
-     * Player spawns at (0, 1.7, -7) yaw=π facing +Z so both panels are in view immediately. */
+    /* Both panels mount on the FRONT wall (-Z) side-by-side. The default panel normal is +Z;
+     * with no rotation_y it points at the player (at +Z looking -Z). Y-flip is the negative
+     * scale_y in make_wall_xform, so the glyphs read upright AND the panel reads top-to-bottom. */
     const float hd = ROOM_D * 0.5F;
     const float wall_y = 2.8F;
-    const float wall_z = hd - 0.05F;
+    const float wall_z = -hd + 0.05F;
     const nt_ui_transform_t xform_left = make_wall_xform(-4.5F, wall_y, wall_z, 0.0F, (float)PANEL_W, (float)PANEL_H);
     const nt_ui_transform_t xform_right = make_wall_xform(4.5F, wall_y, wall_z, 0.0F, (float)PANEL_W, (float)PANEL_H);
 
@@ -686,6 +684,7 @@ static void frame(void) {
 
         const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
         nt_ui_walk(s_ctx, &target);
+        nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         /* Flush UI draws under VP_3D BEFORE switching uniforms; otherwise labels emitted
          * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
         nt_sprite_renderer_flush();
@@ -698,9 +697,6 @@ static void frame(void) {
             mat4 debug_model;
             glm_mat4_identity(debug_model);
             glm_translate(debug_model, (vec3){-2.5F, 4.0F, 0.0F});
-            /* Glyphs sit Y-down in their atlas; mirror via negative Y in model matches the
-             * room camera's +Y-up so the test text reads upright in the world. */
-            glm_scale(debug_model, (vec3){1.0F, -1.0F, 1.0F});
             const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
             nt_text_renderer_set_material(s_text_material);
             nt_text_renderer_set_font(s_font);

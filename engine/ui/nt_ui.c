@@ -432,7 +432,9 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, void *user_data, const nt_ui_transform_t *transform, float opacity) {
     NT_ASSERT(transform != NULL && "nt_ui_make_element_data_xform: transform must be non-NULL");
-    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && transform->scale_z > 0.0F && "nt_ui_make_element_data_xform: scale must be positive; use opacity=0 to hide");
+    /* Non-zero, finite scale. Negative is allowed — needed in 3D ctx for Y-flip (Clay Y-down
+     * → world Y-up) when no rotation can satisfy face direction + Y-flip + no X-mirror. */
+    NT_ASSERT(transform->scale_x != 0.0F && transform->scale_y != 0.0F && transform->scale_z != 0.0F && "nt_ui_make_element_data_xform: scale must be non-zero; use opacity=0 to hide");
     NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && isfinite(transform->scale_z) && isfinite(transform->rotation_x) && isfinite(transform->rotation_y) &&
               isfinite(transform->rotation_z) && isfinite(transform->offset_x) && isfinite(transform->offset_y) && isfinite(transform->offset_z) &&
               "nt_ui_make_element_data_xform: transform fields must be finite");
@@ -983,15 +985,17 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     /* Y-down: baseline = bbox.y(top) + center_offset + ascent*scale. */
     const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * scale);
 
-    /* Text renderer local is Y-up (baseline → ascent grows positive Y); invert col1 so text +Y maps
-     * to Clay layout -Y before world_mat4 sends it through. Holds for both 2D ctx (world has screen Y-flip)
-     * and 3D ctx (world has none) — local coord conversion is independent of the screen-space flip. */
+    /* Text renderer local is Y-up. In 2D ctx the ortho VP carries an implicit screen Y-flip,
+     * so negating col1 cancels it and glyphs read upright. In 3D ctx (use_raycast_input) the
+     * baked world matrix has no implicit Y-flip — keeping the negate there leaves labels
+     * upside-down inside otherwise-correct panels. Sign chosen per-ctx. */
     const float ox = c->boundingBox.x;
     const float oy = baseline_y;
+    const float sign_y = ctx->use_raycast_input ? +1.0F : -1.0F;
     float m[16];
     for (int rr = 0; rr < 4; ++rr) {
         m[rr] = world_mat4[rr];
-        m[4 + rr] = -world_mat4[4 + rr];
+        m[4 + rr] = sign_y * world_mat4[4 + rr];
         m[8 + rr] = world_mat4[8 + rr];
         m[12 + rr] = (ox * world_mat4[rr]) + (oy * world_mat4[4 + rr]) + world_mat4[12 + rr];
     }
@@ -1206,6 +1210,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                              nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
+    const uint8_t layer = c->userData ? ((const nt_ui_element_data_t *)c->userData)->layer : 0U;
+    bool screen_space_debug = false;
 
     float world_mat4[16];
     memcpy(world_mat4, ws->m, sizeof world_mat4);
@@ -1217,6 +1223,17 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         world_mat4[9] = -world_mat4[9];
         world_mat4[13] = (vy + vh) - world_mat4[13];
     }
+#if NT_UI_DEBUG_TOOLS
+    else if (layer >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
+        NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: 3D debug layers require nt_ui_set_view_proj before nt_ui_end");
+        mat4 overlay;
+        mat4 prewarped;
+        glm_mat4_mul((float(*)[4])ctx->inspector_view_proj, (float(*)[4])ws->m, overlay);
+        glm_mat4_mul((float(*)[4])ctx->inv_view_proj, overlay, prewarped);
+        memcpy(world_mat4, prewarped, sizeof world_mat4);
+        screen_space_debug = true;
+    }
+#endif
     /* X-column magnitude; Y dropped on purpose so glyph atlas stays crisp on the X axis. */
     const float text_scale = sqrtf((ws->m[0] * ws->m[0]) + (ws->m[1] * ws->m[1]));
 
@@ -1272,6 +1289,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
+        if (screen_space_debug) {
+            scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
+            if ((uint32_t)*depth > counters->max_scissor_depth) {
+                counters->max_scissor_depth = (uint32_t)*depth;
+            }
+            return;
+        }
         /* GL scissor is axis-aligned in fb space; rotated clip emits the bounding-AABB of the
          * 4 transformed corners. world_mat4 maps Clay (x,y,0,1) → world. */
         const float bx = c->boundingBox.x;
