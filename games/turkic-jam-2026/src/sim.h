@@ -12,6 +12,8 @@
 #define TJ_MAX_PATH 32
 #define TJ_MAX_GLOBAL 8 /* passive (global-scope) desert objects active per circle */
 #define TJ_MAX_PACKS 4  /* unopened reward packs that can queue up (hero never waits) */
+#define TJ_ZONE_MAX 12  /* max play-zone dimension in cells */
+#define TJ_ZONE_CELLS (TJ_ZONE_MAX * TJ_ZONE_MAX)
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
 /* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
@@ -39,9 +41,11 @@ typedef struct {
     int pack_offer[TJ_MAX_PACKS][3]; /* 3 tile choices per queued pack */
     bool pack_open;                  /* the front pack's chooser is open */
     int supplies, wisdom, glory;
-    int tile_at[TJ_MAX_PATH];  /* road tile on cell (-1 empty); MVP: scripted/debug only */
-    int roadside[TJ_MAX_PATH]; /* player-placed roadside tile affecting cell (-1 empty) */
-    int hand;                  /* tile the player holds, ready to place (-1 = none) */
+    int tile_at[TJ_MAX_PATH]; /* road event on cell (-1 empty); reshuffled per circle */
+    /* Persistent player builds in the desert (gy*grid_cols+gx; -1 empty). The field
+     * survives circles; only the road re-routes around it each circle. */
+    int field_tile[TJ_ZONE_CELLS];
+    int hand; /* tile the player holds, ready to place (-1 = none) */
     bool alive;
     bool won;
     /* Loop geometry as data (sim owns it, view only renders). A winding closed
@@ -64,9 +68,9 @@ typedef struct {
 
 void tj_run_start(tj_run_t *r, int heir_index);
 void tj_run_place_tile(tj_run_t *r, int cell, int tile_index);
-/* Place the held card (hand) into the roadside slot of `slot`. Returns false if
- * out of range, hand empty, or the slot is taken. */
-bool tj_run_place_roadside(tj_run_t *r, int slot);
+/* Place the held card into the field cell (gx,gy). Persists across circles.
+ * Returns false if hand empty, out of zone, on road/aul, or the cell is taken. */
+bool tj_run_place_field(tj_run_t *r, int gx, int gy);
 /* Open the front reward pack (shows its 3 cards). No-op if no packs queued. */
 void tj_run_open_pack(tj_run_t *r);
 /* Take card `idx` (0..2) from the opened pack into hand; pops the pack. */

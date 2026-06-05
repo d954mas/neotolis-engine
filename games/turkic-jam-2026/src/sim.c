@@ -27,8 +27,7 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index) {
 }
 
 // #region loop generation (winding closed loop around the central aul)
-#define TJ_ZONE_MAX 12
-enum { OCC_EMPTY = 0, OCC_AUL = 1, OCC_ROAD = 2, OCC_SLOT = 3, OCC_GLOBAL = 4 };
+enum { OCC_EMPTY = 0, OCC_AUL = 1, OCC_ROAD = 2, OCC_SLOT = 3, OCC_GLOBAL = 4, OCC_FIELD = 5 };
 
 typedef struct {
     int cols, rows;
@@ -214,19 +213,6 @@ static void spawn_road(tj_run_t *r, int tile, int count) {
     }
 }
 
-/* Field object (scope adjacent): a free build-slot beside the road, fires on pass. */
-static void spawn_field_adjacent(tj_run_t *r, int tile, int count) {
-    for (int c = 0; c < count; c++) {
-        for (int attempt = 0; attempt < 40; attempt++) {
-            const int i = rng_range_int(0, r->path_cells - 1);
-            if (r->slot_gx[i] != TJ_NO_SLOT && r->roadside[i] < 0) {
-                r->roadside[i] = tile;
-                break;
-            }
-        }
-    }
-}
-
 /* Field object (scope global): a free desert cell; effect is applied per circle. */
 static void spawn_global(zone_t *z, tj_run_t *r, int tile, int count) {
     for (int c = 0; c < count && r->global_count < TJ_MAX_GLOBAL; c++) {
@@ -254,21 +240,30 @@ static void spawn_global(zone_t *z, tj_run_t *r, int tile, int count) {
     }
 }
 
-/* Global object effect: passive resources once per circle (no cost, no check). */
-static void apply_global(tj_run_t *r, int idx) {
+/* A field tile's effect: passive resources once per circle (no cost, no check). */
+static void apply_tile_income(tj_run_t *r, int idx, const char *via) {
     const tj_tile_def_t *t = &g_config.tiles[idx];
     r->supplies += t->supplies;
     r->wisdom += t->wisdom;
     r->glory += t->glory;
     r->stamina += t->stamina_restore;
-    tj_journal_push(TJ_LOG_GOOD, "%s питает род [з%+d м%+d с%+d]", t->name, t->supplies, t->wisdom, t->glory);
+    tj_journal_push(TJ_LOG_GOOD, "%s %s [з%+d м%+d с%+d]", t->name, via, t->supplies, t->wisdom, t->glory);
 }
 
-/* Fill this circle's pool: road events + field objects, from spawns.tsv. */
+/* Apply the player's persistent field builds (global income) for this circle. */
+static void apply_field(tj_run_t *r) {
+    const int n = r->grid_cols * r->grid_rows;
+    for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
+        if (r->field_tile[i] >= 0 && r->field_tile[i] < g_config.tile_count) {
+            apply_tile_income(r, r->field_tile[i], "(поле) питает род");
+        }
+    }
+}
+
+/* Fill this circle's road pool (road reshuffles); the field is persistent. */
 static void populate_circle(zone_t *z, tj_run_t *r) {
     for (int i = 0; i < TJ_MAX_PATH; i++) {
         r->tile_at[i] = -1;
-        r->roadside[i] = -1;
     }
     r->global_count = 0;
     if (g_config.debug_random_desert) {
@@ -285,15 +280,14 @@ static void populate_circle(zone_t *z, tj_run_t *r) {
         }
         if (sp->layer == TJ_SPAWN_ROAD) {
             spawn_road(r, sp->tile_index, sp->count);
-        } else if (sp->scope == TJ_SCOPE_GLOBAL) {
-            spawn_global(z, r, sp->tile_index, sp->count);
         } else {
-            spawn_field_adjacent(r, sp->tile_index, sp->count);
+            spawn_global(z, r, sp->tile_index, sp->count); /* auto desert income, per circle */
         }
     }
     for (int g = 0; g < r->global_count; g++) {
-        apply_global(r, r->global_tile[g]);
+        apply_tile_income(r, r->global_tile[g], "питает род");
     }
+    apply_field(r); /* player's persistent builds pay out too */
 }
 // #endregion
 
@@ -317,6 +311,14 @@ static void gen_loop(tj_run_t *r) {
     for (int y = ay0; y < ay0 + ah; y++) {
         for (int x = ax0; x < ax0 + aw; x++) {
             *zocc(&z, x, y) = OCC_AUL;
+        }
+    }
+    /* Persistent player builds block the road: it re-routes around them each circle. */
+    for (int y = 0; y < z.rows; y++) {
+        for (int x = 0; x < z.cols; x++) {
+            if (r->field_tile[(y * z.cols) + x] >= 0) {
+                *zocc(&z, x, y) = OCC_FIELD;
+            }
         }
     }
     r->path_cells = rect_loop(r, ax0 - 1, ay0 - 1, ax0 + aw, ay0 + ah);
@@ -379,6 +381,9 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     r->phase = TJ_PHASE_AUL_EXIT;
     r->intro_t = 0.0F;
     r->storm_t = 0.0F;
+    for (int i = 0; i < TJ_ZONE_CELLS; i++) {
+        r->field_tile[i] = -1; /* empty field (memset 0 would read as tile 0) */
+    }
     tj_journal_clear();
     /* FTUE: a heir is read as a generic "путник", not a personal name (GDD). */
     const char *who = (g_aul.deaths == 0) ? "Первый путник" : "Новый путник";
@@ -464,18 +469,10 @@ static void resolve_cell(tj_run_t *r) {
         tj_tamga_clear();
     }
     const int road = r->tile_at[r->cell];
-    const int side = r->roadside[r->cell];
-    const bool has_road = (road >= 0 && road < g_config.tile_count);
-    const bool has_side = (side >= 0 && side < g_config.tile_count);
-    if (!has_road && !has_side) {
-        tj_journal_push(TJ_LOG_PLAIN, "Пустая клетка");
-        return;
-    }
-    if (has_road) {
+    if (road >= 0 && road < g_config.tile_count) {
         apply_tile(r, road);
-    }
-    if (has_side && r->alive) {
-        apply_tile(r, side);
+    } else {
+        tj_journal_push(TJ_LOG_PLAIN, "Пустая клетка");
     }
 }
 
@@ -589,18 +586,32 @@ void tj_run_tick(tj_run_t *r, float dt) {
     }
 }
 
-bool tj_run_place_roadside(tj_run_t *r, int slot) {
-    if (slot < 0 || slot >= r->path_cells) {
-        return false;
+static bool cell_on_road(const tj_run_t *r, int gx, int gy) {
+    for (int i = 0; i < r->path_cells && i < TJ_MAX_PATH; i++) {
+        if (r->path_gx[i] == gx && r->path_gy[i] == gy) {
+            return true;
+        }
     }
+    return false;
+}
+
+bool tj_run_place_field(tj_run_t *r, int gx, int gy) {
     if (r->hand < 0 || r->hand >= g_config.tile_count) {
         return false;
     }
-    if (r->roadside[slot] >= 0) {
-        return false; /* slot already taken */
+    if (gx < 0 || gx >= r->grid_cols || gy < 0 || gy >= r->grid_rows) {
+        return false;
     }
-    r->roadside[slot] = r->hand;
-    tj_journal_push(TJ_LOG_GOOD, "Поставлен тайл: %s (слот %d)", g_config.tiles[r->hand].name, slot);
+    const bool on_aul = (gx >= r->aul_x0 && gx < r->aul_x0 + r->aul_w && gy >= r->aul_y0 && gy < r->aul_y0 + r->aul_h);
+    if (on_aul || cell_on_road(r, gx, gy)) {
+        return false;
+    }
+    const int idx = (gy * r->grid_cols) + gx;
+    if (idx < 0 || idx >= TJ_ZONE_CELLS || r->field_tile[idx] >= 0) {
+        return false; /* out of range or already built */
+    }
+    r->field_tile[idx] = r->hand;
+    tj_journal_push(TJ_LOG_GOOD, "Постройка в пустыне: %s", g_config.tiles[r->hand].name);
     r->hand = -1;
     return true;
 }

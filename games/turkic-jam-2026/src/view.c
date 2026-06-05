@@ -210,12 +210,13 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
         if (run->slot_gx[i] == TJ_NO_SLOT) {
             continue; /* no free cell beside this road cell */
         }
-        const float sx = grid_x(run->slot_gx[i], cols, pitch);
-        const float sy = grid_y(run->slot_gy[i], rows, pitch);
-        if (run->roadside[i] >= 0) {
-            CLAY(MAP_TILE(tile, cell_color(run->roadside[i]), sx, sy, 0)) {}
-            continue;
+        const int sgx = run->slot_gx[i];
+        const int sgy = run->slot_gy[i];
+        if (run->field_tile[(sgy * cols) + sgx] >= 0) {
+            continue; /* already built here (drawn by draw_field) */
         }
+        const float sx = grid_x(sgx, cols, pitch);
+        const float sy = grid_y(sgy, rows, pitch);
         const nt_ui_button_style_t st = {
             .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = 0xFF3A302CU, .scale = 1.0F, .opacity = 1.0F},
             .hover = {.bg_region = g->white_region, .bg_tint = 0xFF5AA0FFU, .scale = 1.12F, .opacity = 1.0F},
@@ -230,8 +231,23 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
             .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {sx, sy}},
         };
         if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), base + (uint32_t)i, &st, &decl, run->hand >= 0)) {
-            tj_run_place_roadside(run, i);
+            tj_run_place_field(run, sgx, sgy); /* persistent build; road re-routes around it */
         }
+    }
+}
+
+/* Persistent player builds in the desert (survive the per-circle road reshuffle). */
+static void draw_field(const tj_run_t *run, float pitch, float tile) {
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const int n = cols * rows;
+    for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
+        if (run->field_tile[i] < 0) {
+            continue;
+        }
+        const int gx = i % cols;
+        const int gy = i / cols;
+        CLAY(MAP_RECT(tile, tile, cell_color(run->field_tile[i]), 6.0F, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 1)) {}
     }
 }
 
@@ -350,6 +366,7 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
         draw_road(run, pitch);
         draw_road_events(run, pitch);
         draw_global(run, pitch, tile);
+        draw_field(run, pitch, tile);
         draw_tamga(run, pitch);
         draw_slots(g, run, pitch, tile);
         draw_hero(run, pitch);

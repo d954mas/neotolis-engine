@@ -78,9 +78,14 @@ static int ep_path(int c, char **v, char *o, int cap, void *u) {
     for (int i = 0; i < s_run.path_cells && len < cap - 12; i++) {
         len += snprintf(o + len, (size_t)(cap - len), "%s%d", i ? "," : "", s_run.tile_at[i]);
     }
-    len += snprintf(o + len, (size_t)(cap - len), "],\"side\":[");
-    for (int i = 0; i < s_run.path_cells && len < cap - 12; i++) {
-        len += snprintf(o + len, (size_t)(cap - len), "%s%d", i ? "," : "", s_run.roadside[i]);
+    len += snprintf(o + len, (size_t)(cap - len), "],\"field\":[");
+    bool ffirst = true;
+    for (int i = 0; i < s_run.grid_cols * s_run.grid_rows && len < cap - 24; i++) {
+        if (s_run.field_tile[i] < 0) {
+            continue;
+        }
+        len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d,%d]", ffirst ? "" : ",", i % s_run.grid_cols, i / s_run.grid_cols, s_run.field_tile[i]);
+        ffirst = false;
     }
     len += snprintf(o + len, (size_t)(cap - len), "],\"global\":[");
     for (int i = 0; i < s_run.global_count && len < cap - 24; i++) {
@@ -121,17 +126,20 @@ static int ep_kill(int c, char **v, char *o, int cap, void *u) {
     return snprintf(o, (size_t)cap, "{\"alive\":false}");
 }
 
-/* devapi: place the held card into a roadside slot. "game.place slot=<i>" */
+/* devapi: place the held card into a field cell. "game.place gx=<x> gy=<y>" */
 static int ep_place(int c, char **v, char *o, int cap, void *u) {
     (void)u;
-    int slot = -1;
+    int gx = -1;
+    int gy = -1;
     for (int i = 0; i < c; i++) {
-        if (strncmp(v[i], "slot=", 5) == 0) {
-            slot = (int)strtol(v[i] + 5, NULL, 10);
+        if (strncmp(v[i], "gx=", 3) == 0) {
+            gx = (int)strtol(v[i] + 3, NULL, 10);
+        } else if (strncmp(v[i], "gy=", 3) == 0) {
+            gy = (int)strtol(v[i] + 3, NULL, 10);
         }
     }
-    bool ok = tj_run_place_roadside(&s_run, slot);
-    return snprintf(o, (size_t)cap, "{\"placed\":%s,\"slot\":%d,\"hand\":%d}", ok ? "true" : "false", slot, s_run.hand);
+    const bool ok = tj_run_place_field(&s_run, gx, gy);
+    return snprintf(o, (size_t)cap, "{\"placed\":%s,\"gx\":%d,\"gy\":%d,\"hand\":%d}", ok ? "true" : "false", gx, gy, s_run.hand);
 }
 #endif
 
