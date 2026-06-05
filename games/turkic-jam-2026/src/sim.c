@@ -33,11 +33,14 @@ static void roll_circle(tj_run_t *r) {
     if (r->circle > 1 && g_config.path_cells_jitter > 0) {
         len += rng_range_int(0, g_config.path_cells_jitter);
     }
-    if (len < 3) {
-        len = 3;
+    if (len % 2 != 0) {
+        len += 1; /* even perimeter so the rectangular grid loop closes cleanly */
+    }
+    if (len < 4) {
+        len = 4;
     }
     if (len > TJ_MAX_PATH) {
-        len = TJ_MAX_PATH;
+        len = TJ_MAX_PATH - (TJ_MAX_PATH % 2);
     }
     r->path_cells = len;
     /* Default: empty road (player builds via roadside cards). Random fill is debug only. */
