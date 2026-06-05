@@ -136,15 +136,6 @@ static int clampi(int v, int lo, int hi) {
     }
     return v;
 }
-static int sign_away(float v, float c) {
-    if (v > c) {
-        return 1;
-    }
-    if (v < c) {
-        return -1;
-    }
-    return 0;
-}
 static float dist2(float px, float py, float cx, float cy) {
     const float dx = px - cx;
     const float dy = py - cy;
@@ -252,36 +243,36 @@ static bool try_bump(zone_t *z, tj_run_t *r, int i) {
     return true;
 }
 
-/* Build slot per road cell: TWO cells outward (the 1-cell gap is a no-build buffer)
- * so the player builds FARTHER from the aul, never right against the road. */
-static void compute_slots(zone_t *z, tj_run_t *r) {
-    const float cx = (float)(z->cols - 1) * 0.5F;
-    const float cy = (float)(z->rows - 1) * 0.5F;
-    for (int i = 0; i < r->path_cells; i++) {
-        const int gx = r->path_gx[i];
-        const int gy = r->path_gy[i];
-        const int ox = sign_away((float)gx, cx);
-        const int oy = sign_away((float)gy, cy);
-        const int cand[4][2] = {{ox, 0}, {0, oy}, {-ox, 0}, {0, -oy}};
-        r->slot_gx[i] = TJ_NO_SLOT;
-        r->slot_gy[i] = TJ_NO_SLOT;
-        for (int k = 0; k < 4; k++) {
-            if (cand[k][0] == 0 && cand[k][1] == 0) {
-                continue;
+/* The whole open desert is buildable: every empty cell NOT next to the road (the
+ * 1-cell ring beside the road is a no-build buffer). So the player sees a field of
+ * free cells far from the aul, not a thin strip by the road. */
+static void compute_build(zone_t *z, tj_run_t *r) {
+    r->build_count = 0;
+    for (int y = 0; y < z->rows; y++) {
+        for (int x = 0; x < z->cols; x++) {
+            if (*zocc(z, x, y) != OCC_EMPTY || road_neighbor_other(z, x, y, -1, -1)) {
+                continue; /* occupied, or in the road buffer */
             }
-            const int bx = gx + cand[k][0]; /* buffer cell (1 out, no-build) */
-            const int by = gy + cand[k][1];
-            const int sx = gx + (2 * cand[k][0]); /* build cell (2 out) */
-            const int sy = gy + (2 * cand[k][1]);
-            const bool clear = zin(z, bx, by) && *zocc(z, bx, by) == OCC_EMPTY && zin(z, sx, sy) && *zocc(z, sx, sy) == OCC_EMPTY && !road_neighbor_other(z, sx, sy, -1, -1);
-            if (clear) {
-                *zocc(z, sx, sy) = OCC_SLOT; /* reserve so two cells never share a slot */
-                r->slot_gx[i] = (uint8_t)sx;
-                r->slot_gy[i] = (uint8_t)sy;
-                break;
+            if (r->build_count < TJ_MAX_BUILD) {
+                r->build_gx[r->build_count] = (uint8_t)x;
+                r->build_gy[r->build_count] = (uint8_t)y;
+                r->build_count++;
             }
         }
     }
+}
+
+/* True if (gx,gy) is 4-adjacent to a road cell (the no-build buffer ring). */
+static bool cell_in_buffer(const tj_run_t *r, int gx, int gy) {
+    static const int nb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (int k = 0; k < 4; k++) {
+        for (int i = 0; i < r->path_cells && i < TJ_MAX_PATH; i++) {
+            if (r->path_gx[i] == gx + nb[k][0] && r->path_gy[i] == gy + nb[k][1]) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // #region per-circle population (events on the road, functional objects in the field)
@@ -431,8 +422,8 @@ static void gen_loop(tj_run_t *r) {
             done++;
         }
     }
-    compute_slots(&z, r);
-    populate_circle(&z, r); /* road events + field objects from this circle's pool */
+    populate_circle(&z, r); /* road events + auto desert income (marks occ) */
+    compute_build(&z, r);   /* open field cells, after occ is fully marked */
 }
 // #endregion
 
@@ -698,8 +689,8 @@ bool tj_run_place_field(tj_run_t *r, int gx, int gy) {
         return false;
     }
     const bool on_aul = (gx >= r->aul_x0 && gx < r->aul_x0 + r->aul_w && gy >= r->aul_y0 && gy < r->aul_y0 + r->aul_h);
-    if (on_aul || cell_on_road(r, gx, gy)) {
-        return false;
+    if (on_aul || cell_on_road(r, gx, gy) || cell_in_buffer(r, gx, gy)) {
+        return false; /* aul, road, or the no-build buffer beside the road */
     }
     const int idx = (gy * r->grid_cols) + gx;
     if (idx < 0 || idx >= TJ_ZONE_CELLS || r->field_tile[idx] >= 0) {

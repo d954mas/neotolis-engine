@@ -71,8 +71,8 @@ static int ep_path(int c, char **v, char *o, int cap, void *u) {
         len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d]", i ? "," : "", s_run.path_gx[i], s_run.path_gy[i]);
     }
     len += snprintf(o + len, (size_t)(cap - len), "],\"slots\":[");
-    for (int i = 0; i < s_run.path_cells && len < cap - 24; i++) {
-        len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d]", i ? "," : "", s_run.slot_gx[i], s_run.slot_gy[i]);
+    for (int i = 0; i < s_run.build_count && len < cap - 24; i++) {
+        len += snprintf(o + len, (size_t)(cap - len), "%s[%d,%d]", i ? "," : "", s_run.build_gx[i], s_run.build_gy[i]);
     }
     len += snprintf(o + len, (size_t)(cap - len), "],\"road_ev\":[");
     for (int i = 0; i < s_run.path_cells && len < cap - 12; i++) {

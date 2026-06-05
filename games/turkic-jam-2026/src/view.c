@@ -197,8 +197,8 @@ static void draw_tamga(const tj_run_t *run, float pitch) {
     CLAY(MAP_RECT(m, m, ((Clay_Color){255.0F, 226.0F, 130.0F, 255.0F}), m * 0.5F, x, y, 2)) {}
 }
 
-/* Build slots (the outward empty cell beside each road cell). Filled = marker;
- * empty = clickable button that places the held card. */
+/* The open buildable field: every free desert cell away from the road. Empty =
+ * clickable cell that places the held card (green while a card is held). */
 static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
     static uint32_t base = 0U;
     if (base == 0U) {
@@ -206,12 +206,9 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
     }
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
-    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
-        if (run->slot_gx[i] == TJ_NO_SLOT) {
-            continue; /* no free cell beside this road cell */
-        }
-        const int sgx = run->slot_gx[i];
-        const int sgy = run->slot_gy[i];
+    for (int i = 0; i < run->build_count && i < TJ_MAX_BUILD; i++) {
+        const int sgx = run->build_gx[i];
+        const int sgy = run->build_gy[i];
         if (run->field_tile[(sgy * cols) + sgx] >= 0) {
             continue; /* already built here (drawn by draw_field) */
         }

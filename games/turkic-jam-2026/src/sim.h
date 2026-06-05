@@ -14,6 +14,7 @@
 #define TJ_MAX_PACKS 4  /* unopened reward packs that can queue up (hero never waits) */
 #define TJ_ZONE_MAX 12  /* max play-zone dimension in cells */
 #define TJ_ZONE_CELLS (TJ_ZONE_MAX * TJ_ZONE_MAX)
+#define TJ_MAX_BUILD 96 /* buildable field cells offered at once */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
 /* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
@@ -54,8 +55,11 @@ typedef struct {
     int aul_x0, aul_y0, aul_w, aul_h; /* reserved aul rect (cells), enclosed by the loop */
     uint8_t path_gx[TJ_MAX_PATH];     /* loop cell x in walk order */
     uint8_t path_gy[TJ_MAX_PATH];     /* loop cell y in walk order */
-    uint8_t slot_gx[TJ_MAX_PATH];     /* build-slot cell x for road cell i (TJ_NO_SLOT = none) */
-    uint8_t slot_gy[TJ_MAX_PATH];     /* build-slot cell y for road cell i (TJ_NO_SLOT = none) */
+    /* Buildable field cells this circle: the open desert away from the road (a
+     * 1-cell no-build buffer separates them from the winding road). */
+    uint8_t build_gx[TJ_MAX_BUILD];
+    uint8_t build_gy[TJ_MAX_BUILD];
+    int build_count;
     /* Passive (global-scope) desert objects: applied once per circle, drawn in field. */
     int global_tile[TJ_MAX_GLOBAL];
     uint8_t global_gx[TJ_MAX_GLOBAL];
