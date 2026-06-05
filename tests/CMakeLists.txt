@@ -259,6 +259,13 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
 
+    # --- UI 3D-vs-2D hit-test + compose benchmark ---
+    # Validates Plan A perf cost before engine refactor. Synthetic mat4 vs current 2D path.
+    add_executable(test_nt_ui_3d_bench unit/test_nt_ui_3d_bench.c)
+    target_link_libraries(test_nt_ui_3d_bench PRIVATE nt_math nt_time unity)
+    target_compile_definitions(test_nt_ui_3d_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_3d_bench)
+
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
