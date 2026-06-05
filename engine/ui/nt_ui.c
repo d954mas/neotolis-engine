@@ -1533,11 +1533,11 @@ void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
     mat4 m_in;
     mat4 m_inv;
     memcpy(m_in, view_proj, sizeof m_in);
+    /* Catch singular matrices before invert — bulletproof vs scanning post-invert diagonals which
+     * can leave the four checked entries finite while off-diagonals explode. */
+    NT_ASSERT(glm_mat4_det(m_in) != 0.0F && "nt_ui_set_view_proj: view_proj is singular (det == 0)");
     glm_mat4_inv(m_in, m_inv);
     memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
-    /* Singular check: an inverted singular matrix produces inf/nan — surface it eagerly. */
-    NT_ASSERT(isfinite(ctx->inv_view_proj[0]) && isfinite(ctx->inv_view_proj[5]) && isfinite(ctx->inv_view_proj[10]) && isfinite(ctx->inv_view_proj[15]) &&
-              "nt_ui_set_view_proj: view_proj is singular (det == 0)");
     ctx->view_proj_set = true;
 }
 // #endregion
@@ -1601,9 +1601,10 @@ static void mat4_inv_trs(const float m[16], float out[16]) {
     const float s0_sq = (r00 * r00) + (r10 * r10) + (r20 * r20);
     const float s1_sq = (r01 * r01) + (r11 * r11) + (r21 * r21);
     const float s2_sq = (r02 * r02) + (r12 * r12) + (r22 * r22);
-    const float inv_s0 = (s0_sq > 0.0F) ? (1.0F / s0_sq) : 0.0F;
-    const float inv_s1 = (s1_sq > 0.0F) ? (1.0F / s1_sq) : 0.0F;
-    const float inv_s2 = (s2_sq > 0.0F) ? (1.0F / s2_sq) : 0.0F;
+    NT_ASSERT(s0_sq > 0.0F && s1_sq > 0.0F && s2_sq > 0.0F && "mat4_inv_trs: zero-length scale column — singular widget transform");
+    const float inv_s0 = 1.0F / s0_sq;
+    const float inv_s1 = 1.0F / s1_sq;
+    const float inv_s2 = 1.0F / s2_sq;
     out[0] = r00 * inv_s0;
     out[1] = r01 * inv_s1;
     out[2] = r02 * inv_s2;
@@ -1749,11 +1750,13 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
         return false;
     }
 
-    /* 3D ctx requires nt_ui_set_view_proj before walk; 2D ctx ignores view_proj. */
-    const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
-    const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
+    /* Screen dims only needed for raycast NDC conversion — skip the two getters on the 2D hot path. */
+    float screen_w = 0.0F;
+    float screen_h = 0.0F;
     if (ctx->use_raycast_input) {
         NT_ASSERT(ctx->view_proj_set && "ui_hit_test: ctx is 3D mode but nt_ui_set_view_proj was not called this frame");
+        screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+        screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     }
 
     if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {

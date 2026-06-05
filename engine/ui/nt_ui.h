@@ -209,7 +209,12 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
 /* REQUIRED for ctx with use_raycast_input=true; call once per frame before nt_ui_walk.
  * view_proj is column-major mat4 (cglm convention); engine caches inverse for hit-test raycast.
- * Asserts ctx is non-NULL, use_raycast_input is true, and view_proj is finite + non-singular. */
+ * Asserts ctx is non-NULL, use_raycast_input is true, and view_proj is finite + non-singular.
+ *
+ * Coord convention: baked.m for 3D ctx carries NO implicit Y-flip (Phase 4 decision); game's
+ * view_proj must map LAYOUT-space input (Y-down, matching Clay) → clip space directly. For
+ * screen-fit 3D UI use `glm_ortho(0, w, h, 0, near, far)` (flipped top/bottom). For perspective
+ * 3D world UI, the game's MVP × world_mat4 chain handles the convention. */
 void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);

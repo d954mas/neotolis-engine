@@ -119,7 +119,19 @@ static void test_raycast_hit_accept_and_reject(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 3: set_view_proj asserts when ctx is not 3D mode. ---- */
+/* ---- Test 3b: 3D ctx hit-test asserts when nt_ui_set_view_proj was not called. ---- */
+static void test_hit_test_asserts_when_view_proj_not_set(void) {
+    /* Don't call nt_ui_set_view_proj — view_proj_set stays false. */
+    declare_bbox_3d();
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    const uint32_t id = nt_ui_id("hit3d");
+    NT_TEST_EXPECT_ASSERT(nt_ui_test_hit(s_fx.ctx, id, 200.0F, 100.0F));
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 4: set_view_proj asserts when ctx is not 3D mode. ---- */
 static void test_set_view_proj_asserts_on_2d_ctx(void) {
     /* Recreate 2D ctx. */
     nt_ui_destroy_context(s_fx.ctx);
@@ -136,6 +148,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_view_proj_set_caches_inverse);
     RUN_TEST(test_raycast_hit_accept_and_reject);
+    RUN_TEST(test_hit_test_asserts_when_view_proj_not_set);
     RUN_TEST(test_set_view_proj_asserts_on_2d_ctx);
     return UNITY_END();
 }
