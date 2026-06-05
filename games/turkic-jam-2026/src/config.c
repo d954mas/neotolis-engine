@@ -119,8 +119,8 @@ static void set_defaults(void) {
     g_config.start_in_game = 1;
     g_config.path_cells_growth = 1;
     g_config.path_cells_jitter = 1;
-    g_config.map_zone_cols = 6;
-    g_config.map_zone_rows = 6;
+    g_config.map_zone_cols = 8;
+    g_config.map_zone_rows = 8;
     g_config.map_aul_w = 2;
     g_config.map_aul_h = 2;
     g_config.map_bends_base = 4;

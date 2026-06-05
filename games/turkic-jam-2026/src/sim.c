@@ -252,7 +252,8 @@ static bool try_bump(zone_t *z, tj_run_t *r, int i) {
     return true;
 }
 
-/* One build slot per road cell: the outward-most empty neighbour, used once. */
+/* Build slot per road cell: TWO cells outward (the 1-cell gap is a no-build buffer)
+ * so the player builds FARTHER from the aul, never right against the road. */
 static void compute_slots(zone_t *z, tj_run_t *r) {
     const float cx = (float)(z->cols - 1) * 0.5F;
     const float cy = (float)(z->rows - 1) * 0.5F;
@@ -268,9 +269,12 @@ static void compute_slots(zone_t *z, tj_run_t *r) {
             if (cand[k][0] == 0 && cand[k][1] == 0) {
                 continue;
             }
-            const int sx = gx + cand[k][0];
-            const int sy = gy + cand[k][1];
-            if (zin(z, sx, sy) && *zocc(z, sx, sy) == OCC_EMPTY) {
+            const int bx = gx + cand[k][0]; /* buffer cell (1 out, no-build) */
+            const int by = gy + cand[k][1];
+            const int sx = gx + (2 * cand[k][0]); /* build cell (2 out) */
+            const int sy = gy + (2 * cand[k][1]);
+            const bool clear = zin(z, bx, by) && *zocc(z, bx, by) == OCC_EMPTY && zin(z, sx, sy) && *zocc(z, sx, sy) == OCC_EMPTY && !road_neighbor_other(z, sx, sy, -1, -1);
+            if (clear) {
                 *zocc(z, sx, sy) = OCC_SLOT; /* reserve so two cells never share a slot */
                 r->slot_gx[i] = (uint8_t)sx;
                 r->slot_gy[i] = (uint8_t)sy;
