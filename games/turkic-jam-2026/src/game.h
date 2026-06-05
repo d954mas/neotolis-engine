@@ -37,6 +37,7 @@ typedef struct game_ctx {
     int best;
     tj_shake_t shake;
     const scene_t *scene;
+    const scene_t *prev; /* scene we transitioned from (lets Pause resume cleanly) */
     const scene_t *next; /* pending transition, applied at frame boundary */
 } game_ctx_t;
 

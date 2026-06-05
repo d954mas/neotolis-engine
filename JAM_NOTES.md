@@ -59,6 +59,18 @@
 - Находки: `-Wformat-nonliteral` на vsnprintf-обёртке → атрибут `format(printf,…)`; `bugprone-narrowing-conversions` int→char → ci-compare без сужения; `readability-non-const-parameter` на хендлерах фикс-ABI → NOLINT; PowerShell-пайп строки добавляет BOM в первую строку (драйвить Python-клиентом, не пайпом).
 - Браузер (потом): экспорт C-функции + Playwright (тот же реестр/протокол).
 
+### Слой 4 — кор «Песнь Тамги» (data-driven)
+
+Игра — roguelite loop-builder (GDD-доки в Downloads). Кор **полностью на конфигах**:
+баланс в `config/` (ini + `|`-таблицы), кор читает в рантайме, ничего не хардкодит.
+- `config/`: `balance.ini`, `heirs.tsv`, `tiles.tsv` (+ `CONFIG.md` — схема). Старт сразу в игру — `start_in_game=1`.
+- `src/config.{h,c}` — загрузчик; `src/sim.{h,c}` — забег (авто-движение по кольцу из N клеток, stat-check тайлов `diff=base+per*circle`, Силы→смерть).
+- `scene_game` = реальный забег (меню опционально). `g->prev` чтобы пауза не рестартила забег.
+- **Координация с GDD-агентом (Кодекс):** `coordination/` (PROTOCOL + FROM_CODE/FROM_GDD) + `WORKING_AGREEMENT.md`. Интерфейс = конфиги (схема — Code, значения — GDD). Кодекс уже ответил в логе, прислал схемы `trials/synergies/aul`.
+- Проверено devapi-смоуком 5/5 PASS: config загружен (6 тайлов, 3 наследника), забег идёт сам, смерть→game-over→retry. Игра регистрирует свой эндпоинт `game.config`.
+- Отклонение от спеки: runtime-парсер конфигов (осознанно, ради итераций; релиз — запаковать).
+- Дальше (приоритет GDD): `trials.tsv` → `synergies.tsv` → `aul.tsv`; затем расстановка тайлов картами, выбор наследника, экран аула, Последняя Тамга/реликт.
+
 ---
 
 ## Сложности / трудности в движке и тулчейне

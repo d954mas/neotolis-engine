@@ -1,5 +1,8 @@
 set(TURKIC_JAM_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/games/turkic-jam-2026/${NT_PRESET_NAME}")
 set(TURKIC_JAM_ASSETS_DIR "${TURKIC_JAM_OUTPUT_DIR}/assets")
+# Balance configs next to the exe (Code owns schema, GDD owns values). Loaded at
+# runtime; edit + reconfigure, or run with --config <dir> for live tweaks.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/config" DESTINATION "${TURKIC_JAM_OUTPUT_DIR}")
 # Shared pack location -- builder writes here once; every preset copies from here.
 set(TURKIC_JAM_PACK_DIR "${CMAKE_SOURCE_DIR}/build/games/turkic-jam-2026")
 
@@ -9,6 +12,8 @@ add_executable(turkic_jam
     src/save.c
     src/rng.c
     src/juice.c
+    src/config.c
+    src/sim.c
     src/ui_kit.c
     src/scenes/scene_menu.c
     src/scenes/scene_game.c

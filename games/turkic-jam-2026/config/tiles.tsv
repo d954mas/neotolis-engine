@@ -1,0 +1,14 @@
+# Тайлы пустыни. Поля разделены '|', пробелы обрезаются, '#' — комментарий.
+# kind:  safe | support | check
+# check: none | body | mind | spirit   (для kind=check — какой стат проверяется)
+# diff = diff_base + diff_per_circle * circle (только для kind=check)
+# Награды (supplies/wisdom/glory) выдаются при входе; при провале проверки — доля
+# check_fail_reward_pct и теряется check_fail_stamina_loss Сил. stamina_restore — лечит.
+#
+# id | name | kind | check | diff_base | diff_per_circle | supplies | wisdom | glory | stamina_cost | stamina_restore
+oasis       | Оазис        | safe    | none   | 0 | 0 | 3 | 0 | 0 | 0 | 2
+yurt        | Юрта         | support | none   | 0 | 0 | 2 | 0 | 0 | 0 | 0
+tamga_stone | Камень Тамги | safe    | none   | 0 | 0 | 0 | 2 | 0 | 0 | 0
+wolf_track  | Волчий след  | check   | body   | 2 | 1 | 0 | 0 | 2 | 0 | 0
+mirage      | Мираж        | check   | mind   | 2 | 1 | 0 | 1 | 1 | 0 | 0
+storm       | Песчаная буря| check   | spirit | 3 | 1 | 0 | 0 | 3 | 0 | 0

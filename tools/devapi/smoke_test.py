@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """End-to-end smoke test driven through nt_devapi.
 
-Launches the native game with the TCP server, then walks the whole UI flow and
-asserts the expected screen at each step. Exit code 0 = pass, 1 = fail.
+Launches the native game with the TCP server, confirms the balance config loaded,
+then walks menu -> settings -> back -> run, watches the run advance, forces death,
+and checks the game-over / retry path. Exit 0 = pass, 1 = fail.
 
   python tools/devapi/smoke_test.py [PORT]
-
-Requires a native-debug build (NT_DEVAPI_ENABLED): turkic_jam.exe must exist.
 """
 import json
 import os
@@ -19,7 +18,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 EXE = os.path.join(ROOT, "build", "games", "turkic-jam-2026", "native-debug", "turkic_jam.exe")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 9123
 
-# UI labels include Cyrillic/Turkish; keep printing safe on a cp1251 console.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -29,8 +27,8 @@ except Exception:
 class Bus:
     def __init__(self, sock):
         self.f = sock.makefile("rwb", buffering=0)
-        self.scale_x = 1.0
-        self.scale_y = 1.0
+        self.sx = 1.0
+        self.sy = 1.0
 
     def req(self, line):
         self.f.write((line + "\n").encode())
@@ -44,16 +42,14 @@ class Bus:
         rows = self.req("ui.tree")["data"]
         row = next((r for r in rows if r.get("text") == label), None)
         if not row:
-            raise AssertionError(f"label not found to click: {label!r} (have {[r.get('text') for r in rows if r.get('text')]})")
-        cx = (row["x"] + row["w"] / 2.0) * self.scale_x
-        cy = (row["y"] + row["h"] / 2.0) * self.scale_y
-        self.req(f"input.click x={cx:.0f} y={cy:.0f}")
+            raise AssertionError(f"can't click {label!r}; have {[r.get('text') for r in rows if r.get('text')]}")
+        self.req(f"input.click x={(row['x'] + row['w'] / 2) * self.sx:.0f} y={(row['y'] + row['h'] / 2) * self.sy:.0f}")
         time.sleep(0.35)
 
 
 def connect(timeout=15.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    end = time.time() + timeout
+    while time.time() < end:
         try:
             s = socket.create_connection(("127.0.0.1", PORT), timeout=1.0)
             s.settimeout(3.0)
@@ -65,46 +61,49 @@ def connect(timeout=15.0):
 
 def main():
     if not os.path.exists(EXE):
-        print("FAIL: build the game first (native-debug):", EXE)
+        print("FAIL: build native-debug first:", EXE)
         return 1
-
     proc = subprocess.Popen([EXE, "--devapi", str(PORT)], cwd=os.path.dirname(EXE))
-    failures = []
+    fails = []
     try:
         s = connect()
         if not s:
-            print("FAIL: could not connect to devapi server")
+            print("FAIL: no devapi connection")
             return 1
         bus = Bus(s)
         view = bus.req("view")["data"]
-        bus.scale_x = view["fb_w"] / view["logical_w"]
-        bus.scale_y = view["fb_h"] / view["logical_h"]
+        bus.sx = view["fb_w"] / view["logical_w"]
+        bus.sy = view["fb_h"] / view["logical_h"]
 
-        def check(name, expected_substrings):
-            txt = " | ".join(t for t in bus.texts() if t)
-            ok = all(any(e in t for t in bus.texts()) for e in expected_substrings)
-            print(("PASS" if ok else "FAIL"), name, "::", txt)
-            if not ok:
-                failures.append(name)
+        def check(name, cond, extra=""):
+            print(("PASS" if cond else "FAIL"), name, "::", extra)
+            if not cond:
+                fails.append(name)
 
-        check("menu", ["TURKIC JAM 2026", "START", "Settings"])
-        bus.click_label("Settings")
-        check("settings", ["Settings", "Reset progress"])
-        bus.click_label("Menu")
-        check("back to menu", ["START"])
-        bus.click_label("START")
-        check("game", ["Playing", "TAP +1", "Lose"])
-        bus.click_label("TAP +1")
-        check("score incremented", ["Score: 1"])
-        bus.req("input.key key=P mode=tap")
-        time.sleep(0.35)
-        check("paused", ["Paused", "Resume"])
-        bus.click_label("Resume")
-        check("resumed (score kept)", ["Score: 1"])
-        bus.click_label("Lose")
-        check("game over", ["Game Over", "Retry"])
+        cfg = bus.req("game.config").get("data", {})
+        check("config loaded", cfg.get("tiles", 0) > 0 and cfg.get("heirs", 0) > 0, str(cfg))
+
+        # Menu is optional (start_in_game=1 boots straight into the run).
+        if "START" in bus.texts():
+            bus.click_label("Settings")
+            check("settings", any("Reset" in (t or "") for t in bus.texts()), " | ".join(bus.texts()))
+            bus.click_label("Menu")
+            check("back to menu", "START" in bus.texts())
+            bus.click_label("START")
+        head = next((t for t in bus.texts() if t and t.startswith("Круг")), None)
+        check("run started", head is not None, str(head))
+
+        # watch a couple seconds: the cell/circle should advance on its own
+        c0 = next((t for t in bus.texts() if t and t.startswith("Круг")), "")
+        time.sleep(1.6)
+        c1 = next((t for t in bus.texts() if t and t.startswith("Круг")), "")
+        check("run advances", c0 != c1, f"{c0!r} -> {c1!r}")
+
+        bus.click_label("Lose")  # force death
+        time.sleep(0.4)
+        check("game over", any("Retry" in (t or "") for t in bus.texts()), " | ".join(bus.texts()))
         bus.click_label("Retry")
-        check("retry resets", ["Score: 0", "TAP +1"])
+        check("retry -> run", any(t and t.startswith("Круг") for t in bus.texts()))
 
         s.close()
     finally:
@@ -114,8 +113,8 @@ def main():
         except subprocess.TimeoutExpired:
             proc.kill()
 
-    print("\n=== %s ===" % ("ALL PASSED" if not failures else f"FAILED: {failures}"))
-    return 1 if failures else 0
+    print("\n=== %s ===" % ("ALL PASSED" if not fails else f"FAILED: {fails}"))
+    return 1 if fails else 0
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@
 #include "nt_pack_format.h"
 #include "turkic_jam_assets.h"
 
+#include "config.h"
 #include "game.h"
 #include "i18n.h"
 #include "rng.h"
@@ -68,6 +69,17 @@ static bool s_font_bound;
 
 void game_goto(game_ctx_t *gg, const scene_t *next) { gg->next = next; }
 
+#if NT_DEVAPI_ENABLED
+/* Game-registered devapi endpoint: confirms the loaded balance config. */
+static int ep_game_config(int c, char **v, char *o, int cap, void *u) {
+    (void)c;
+    (void)v;
+    (void)u;
+    return snprintf(o, (size_t)cap, "{\"path_cells\":%d,\"laps_to_win\":%d,\"start_stamina\":%d,\"tiles\":%d,\"heirs\":%d}", g_config.path_cells, g_config.laps_to_win, g_config.start_stamina,
+                    g_config.tile_count, g_config.heir_count);
+}
+#endif
+
 static void apply_transition(void) {
     if (!g.next) {
         return;
@@ -75,6 +87,7 @@ static void apply_transition(void) {
     if (g.scene && g.scene->on_exit) {
         g.scene->on_exit(&g);
     }
+    g.prev = g.scene;
     g.scene = g.next;
     g.next = NULL;
     if (g.scene->on_enter) {
@@ -248,9 +261,12 @@ static void frame(void) {
 // #region main + init
 int main(int argc, char *argv[]) {
     int devapi_port = 0;
+    const char *config_dir = "config";
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--devapi") == 0 && i + 1 < argc) {
             devapi_port = (int)strtol(argv[i + 1], NULL, 10);
+        } else if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
+            config_dir = argv[i + 1];
         }
     }
 
@@ -356,7 +372,10 @@ int main(int argc, char *argv[]) {
     save_init();
     i18n_set((i18n_lang_t)save_get_int("lang", LANG_EN));
 
-    g.scene = &SCENE_MENU;
+    tj_config_load(config_dir);
+    nt_log_info("turkic_jam: config '%s' -> %d tiles, %d heirs, %d cells", config_dir, g_config.tile_count, g_config.heir_count, g_config.path_cells);
+
+    g.scene = g_config.start_in_game ? &SCENE_GAME : &SCENE_MENU;
     if (g.scene->on_enter) {
         g.scene->on_enter(&g);
     }
@@ -366,6 +385,9 @@ int main(int argc, char *argv[]) {
     nt_devapi_init();
     nt_devapi_register_builtins();
     nt_devapi_set_ui_context(g.ui);
+#if NT_DEVAPI_ENABLED
+    nt_devapi_register("game.config", ep_game_config, NULL);
+#endif
     if (devapi_port > 0) {
         nt_devapi_net_start((uint16_t)devapi_port);
     }
