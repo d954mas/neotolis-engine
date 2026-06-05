@@ -338,13 +338,6 @@ static void gen_loop(tj_run_t *r) {
 // #endregion
 
 // #region intro (FTUE: a new heir leaves the aul before the loop starts)
-static const char *heir_name(const tj_run_t *r) {
-    if (r->heir_index >= 0 && r->heir_index < g_config.heir_count) {
-        return g_config.heirs[r->heir_index].name;
-    }
-    return "Наследник";
-}
-
 /* Advance the pre-loop intro: aul_exit -> road_entry -> walk. No loop tick here,
  * so the loading-settle dt never drifts the hero onto the loop. */
 static void tick_intro(tj_run_t *r, float dt) {
@@ -354,7 +347,7 @@ static void tick_intro(tj_run_t *r, float dt) {
         if (r->intro_t >= dur) {
             r->intro_t = 0.0F;
             r->phase = TJ_PHASE_ROAD_ENTRY;
-            tj_journal_push(TJ_LOG_PLAIN, "%s вступает на кольцевую дорогу.", heir_name(r));
+            tj_journal_push(TJ_LOG_PLAIN, "Путник вступает на кольцевую дорогу.");
         }
         return;
     }
@@ -385,8 +378,11 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     r->alive = true;
     r->phase = TJ_PHASE_AUL_EXIT;
     r->intro_t = 0.0F;
+    r->storm_t = 0.0F;
     tj_journal_clear();
-    tj_journal_push(TJ_LOG_BIG, "%s выходит из стойбища. Костёр остаётся за спиной.", heir_name(r));
+    /* FTUE: a heir is read as a generic "путник", not a personal name (GDD). */
+    const char *who = (g_aul.deaths == 0) ? "Первый путник" : "Новый путник";
+    tj_journal_push(TJ_LOG_BIG, "%s выходит из стойбища. Костёр остаётся за спиной.", who);
     gen_loop(r);                              /* generates the loop and populates this circle (may log global effects) */
     r->hand = tj_config_tile_index("saxaul"); /* FTUE: start holding a guaranteed Saxaul card (GDD: small, common) */
     r->tamga_cell = -1;
@@ -498,7 +494,8 @@ static void push_pack(tj_run_t *r) {
         offer[i] = t;
     }
     r->packs++;
-    tj_journal_push(TJ_LOG_GOOD, "Найден дар за круг - открой его в руке карт.");
+    r->pack_open = true; /* offer the choice over the map (does not pause the run) */
+    tj_journal_push(TJ_LOG_GOOD, "Дар за круг — выбери карту над аулом.");
 }
 
 void tj_run_open_pack(tj_run_t *r) {
@@ -518,7 +515,7 @@ void tj_run_choose_card(tj_run_t *r, int idx) {
         }
     }
     r->packs--;
-    r->pack_open = false;
+    r->pack_open = (r->packs > 0); /* keep the chooser up if more packs queued */
     if (r->hand >= 0 && r->hand < g_config.tile_count) {
         tj_journal_push(TJ_LOG_GOOD, "Взята карта: %s", g_config.tiles[r->hand].name);
     }
@@ -560,6 +557,9 @@ void tj_run_tick(tj_run_t *r, float dt) {
     if (dt > 0.1F) {
         dt = 0.1F; /* max frame time: a slow load/hitch frame can't lurch the hero, no spiral */
     }
+    if (r->storm_t > 0.0F) {
+        r->storm_t -= dt; /* veil over the path reshuffle, fades on its own */
+    }
     if (r->phase != TJ_PHASE_WALK) {
         tick_intro(r, dt); /* still leaving the aul: don't tick the loop yet */
         return;
@@ -579,7 +579,8 @@ void tj_run_tick(tj_run_t *r, float dt) {
                 tj_journal_push(TJ_LOG_BIG, "Кольцо разорвано! Род свободен.");
                 return;
             }
-            tj_journal_push(TJ_LOG_BIG, "Круг %d пройден.", r->circle - 1);
+            tj_journal_push(TJ_LOG_BIG, "Круг %d пройден. Песчаная буря заметает путь...", r->circle - 1);
+            r->storm_t = (g_config.storm_seconds > 0.0F) ? g_config.storm_seconds : 1.3F; /* veil the reshuffle */
             gen_loop(r);
             push_pack(r);  /* grant a reward pack; the hero keeps walking */
             apply_perk(r); /* heir's per-circle passive */

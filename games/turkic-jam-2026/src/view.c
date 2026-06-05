@@ -289,6 +289,54 @@ static void draw_hero(const tj_run_t *run, float pitch) {
     CLAY(MAP_RECT(hs, hs, ((Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}), hs * 0.5F, hx, hy, 3)) {}
 }
 
+/* Sandstorm veil over the map: opaque at the circle change, fades to reveal the
+ * new (different) path -> the reshuffle reads as a desert storm, not a hard snap. */
+static void draw_storm(const tj_run_t *run) {
+    if (run->storm_t <= 0.0F) {
+        return;
+    }
+    const float dur = (g_config.storm_seconds > 0.0F) ? g_config.storm_seconds : 1.3F;
+    float a = run->storm_t / dur;
+    if (a > 1.0F) {
+        a = 1.0F;
+    }
+    const Clay_Color sand = {196.0F, 172.0F, 122.0F, a * 235.0F};
+    CLAY(MAP_RECT(MAP_SIZE, MAP_SIZE, sand, 0.0F, 0.0F, 0.0F, 10)) {}
+}
+
+static void pack_row(game_ctx_t *g, tj_run_t *run) {
+    static const char *ids[3] = {"tj_pick0", "tj_pick1", "tj_pick2"};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
+        for (int i = 0; i < 3; i++) {
+            const int ti = run->pack_offer[0][i];
+            const char *name = (ti >= 0 && ti < g_config.tile_count) ? g_config.tiles[ti].name : "-";
+            if (tj_button(g, ids[i], name, 148, 78, TJ_BTN_SECONDARY)) {
+                tj_run_choose_card(run, i);
+            }
+        }
+    }
+}
+
+/* Reward choice floats over the aul (does NOT pause the run -> no broken idle). */
+static void draw_pack_choice(game_ctx_t *g, tj_run_t *run) {
+    if (!run->pack_open || run->packs <= 0) {
+        return;
+    }
+    CLAY({.floating =
+              {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, -24.0F}, .zIndex = 25},
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)},
+                     .padding = CLAY_PADDING_ALL(14),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 10,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {20.0F, 24.0F, 38.0F, 238.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
+          .border = {.color = {196.0F, 168.0F, 124.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Дар пути - выбери карту", &s_panel_title);
+        pack_row(g, run);
+    }
+}
+
 void tj_view_map(game_ctx_t *g, tj_run_t *run) {
     if (run->grid_cols < 2 || run->grid_rows < 2 || run->path_cells < 1) {
         return; /* loop not generated yet */
@@ -305,6 +353,8 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
         draw_tamga(run, pitch);
         draw_slots(g, run, pitch, tile);
         draw_hero(run, pitch);
+        draw_storm(run);
+        draw_pack_choice(g, run);
     }
 }
 
@@ -368,49 +418,21 @@ static void hand_card(game_ctx_t *g, const char *name, bool active) {
     }
 }
 
-/* Pack opened: the front pack's 3 cards, picked inline (hero keeps walking). */
-static void hand_pack_chooser(game_ctx_t *g, tj_run_t *run) {
-    static const char *ids[3] = {"tj_pick0", "tj_pick1", "tj_pick2"};
-    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Дар - выбери карту:", &s_panel_title);
-    for (int i = 0; i < 3; i++) {
-        const int ti = run->pack_offer[0][i];
-        const char *name = (ti >= 0 && ti < g_config.tile_count) ? g_config.tiles[ti].name : "-";
-        if (tj_button(g, ids[i], name, 180, 86, TJ_BTN_SECONDARY)) {
-            tj_run_choose_card(run, i);
-        }
-    }
-}
-
-/* Normal hand: held card, a clickable reward pack (if any), empty slots. */
-static void hand_normal(game_ctx_t *g, tj_run_t *run) {
-    const bool has = (run->hand >= 0 && run->hand < g_config.tile_count);
-    hand_card(g, has ? g_config.tiles[run->hand].name : "-", has);
-    if (run->packs > 0) {
-        static char pk[32];
-        (void)snprintf(pk, sizeof pk, "Дар x%d", run->packs);
-        if (tj_button(g, "tj_pack", pk, 150, 86, TJ_BTN_PRIMARY)) {
-            tj_run_open_pack(run);
-        }
-    }
-    for (int i = 1; i < 4; i++) {
-        hand_card(g, "пусто", false);
-    }
-    if (has) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "  кликни свободный слот у дороги, чтобы поставить", &s_dim);
-    }
-}
-
+/* Bottom hand: the held card + empty slots. Reward choice floats over the aul. */
 void tj_view_card_hand(game_ctx_t *g, tj_run_t *run) {
+    const bool has = (run->hand >= 0 && run->hand < g_config.tile_count);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(118)},
                      .padding = CLAY_PADDING_ALL(12),
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
                      .childGap = 12,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_BAR_BG}) {
-        if (run->pack_open) {
-            hand_pack_chooser(g, run);
-        } else {
-            hand_normal(g, run);
+        hand_card(g, has ? g_config.tiles[run->hand].name : "-", has);
+        for (int i = 1; i < 5; i++) {
+            hand_card(g, "пусто", false);
+        }
+        if (has) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "  кликни свободный слот у дороги, чтобы поставить", &s_dim);
         }
     }
 }

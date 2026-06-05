@@ -32,6 +32,7 @@ typedef struct {
     int day;        /* 1-based: each cell-to-cell step is a day of travel */
     int path_cells; /* cells in this circle's loop (varies per circle/heir) */
     float move_t;
+    float storm_t; /* sandstorm transition timer: hides the new circle's path reshuffle */
     /* Reward packs (idle-friendly): a circle grants a pack; the hero keeps walking.
      * The player opens a pack and picks 1 of 3 cards whenever they like. */
     int packs;                       /* unopened packs queued */
