@@ -105,8 +105,8 @@ static const char *const s_speed_labels[SPEED_COUNT] = {"STOP", "SLOW", "MEDIUM"
 // #endregion
 
 // #region state
-static float s_player_pos[3] = {0.0F, EYE_HEIGHT, 7.0F};
-static float s_player_yaw;
+static float s_player_pos[3] = {0.0F, EYE_HEIGHT, -7.0F};
+static float s_player_yaw = NT_PI; /* face +Z toward back wall panels */
 static float s_player_pitch;
 
 static int s_shape_kind = SHAPE_CUBE;
@@ -170,8 +170,8 @@ static bool s_ids_ready;
 static void player_reset(void) {
     s_player_pos[0] = 0.0F;
     s_player_pos[1] = EYE_HEIGHT;
-    s_player_pos[2] = 7.0F;
-    s_player_yaw = 0.0F;
+    s_player_pos[2] = -7.0F;
+    s_player_yaw = NT_PI;
     s_player_pitch = 0.0F;
     s_shape_yaw = 0.0F;
 }
@@ -411,15 +411,16 @@ static void ensure_ids(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_panels(void) {
     ensure_ids();
-    /* Both panels mount on the FRONT wall (-Z) side-by-side. Player starts at (0, 1.7, 7)
-     * facing -Z so both are in view immediately — no need to look around to find them. */
+    /* Both panels mount on the BACK wall (+Z) side-by-side. The make_wall_xform helper bakes
+     * rotation_x=π into every panel for the Clay Y-down → world Y-up flip. That same rotation
+     * also flips Z, so the panel face naturally ends up pointing -Z (toward the room interior)
+     * which matches the back wall — no extra rotation_y needed, and no X-mirror in the glyphs.
+     * Player spawns at (0, 1.7, -7) yaw=π facing +Z so both panels are in view immediately. */
     const float hd = ROOM_D * 0.5F;
-    const float wall_y = 2.8F; /* slightly above eye level (1.7 m); avoids floor-grid clutter */
-    const float wall_z = -hd + 0.05F;
-    /* After rotation_x=π the panel's normal points -Z (away from the room). Add rotation_y=π
-     * (180° around Y) to flip the normal back to +Z so the front face looks at the player. */
-    const nt_ui_transform_t xform_left = make_wall_xform(-4.5F, wall_y, wall_z, NT_PI, (float)PANEL_W, (float)PANEL_H);
-    const nt_ui_transform_t xform_right = make_wall_xform(4.5F, wall_y, wall_z, NT_PI, (float)PANEL_W, (float)PANEL_H);
+    const float wall_y = 2.8F;
+    const float wall_z = hd - 0.05F;
+    const nt_ui_transform_t xform_left = make_wall_xform(-4.5F, wall_y, wall_z, 0.0F, (float)PANEL_W, (float)PANEL_H);
+    const nt_ui_transform_t xform_right = make_wall_xform(4.5F, wall_y, wall_z, 0.0F, (float)PANEL_W, (float)PANEL_H);
 
     /* Root: full-fb invisible group hosting both panels. Sizing GROW so Clay knows screen extent. */
     CLAY({.id = CLAY_ID("ui3d-root"),
