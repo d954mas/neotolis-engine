@@ -217,22 +217,51 @@ static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
         }
         const float sx = grid_x(sgx, cols, pitch);
         const float sy = grid_y(sgy, rows, pitch);
+        /* Highlight buildable cells green while a card is held (valid placement). */
+        const uint32_t idle_tint = (run->hand >= 0) ? 0xCC3AA85EU : 0x553A302CU;
         const nt_ui_button_style_t st = {
-            .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = 0xFF3A302CU, .scale = 1.0F, .opacity = 1.0F},
-            .hover = {.bg_region = g->white_region, .bg_tint = 0xFF5AA0FFU, .scale = 1.12F, .opacity = 1.0F},
-            .pressed = {.bg_region = g->white_region, .bg_tint = 0xFF5AA0FFU, .scale = 0.95F, .opacity = 1.0F},
-            .disabled = {.bg_region = g->white_region, .bg_tint = 0xFF2A2422U, .scale = 1.0F, .opacity = 0.6F},
+            .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = idle_tint, .scale = 1.0F, .opacity = 1.0F},
+            .hover = {.bg_region = g->white_region, .bg_tint = 0xFF7CE08CU, .scale = 1.12F, .opacity = 1.0F},
+            .pressed = {.bg_region = g->white_region, .bg_tint = 0xFF7CE08CU, .scale = 0.95F, .opacity = 1.0F},
+            .disabled = {.bg_region = g->white_region, .bg_tint = 0x442A2422U, .scale = 1.0F, .opacity = 0.5F},
             .transition_speed = 14.0F,
             .hit_padding_lrtb = {4, 4, 4, 4},
             .slice9_scale = 1.0F,
         };
         const Clay_ElementDeclaration decl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(tile), CLAY_SIZING_FIXED(tile)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {sx, sy}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {sx, sy}, .zIndex = 5},
         };
         if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), base + (uint32_t)i, &st, &decl, run->hand >= 0)) {
             tj_run_place_field(run, sgx, sgy); /* persistent build; road re-routes around it */
         }
+    }
+}
+
+/* Click anywhere on the map that is not a buildable slot (while holding a card)
+ * -> short "can't build here" feedback in the log (no modal). */
+static void draw_build_catcher(game_ctx_t *g, tj_run_t *run) {
+    if (run->hand < 0) {
+        return;
+    }
+    static uint32_t cid = 0U;
+    if (cid == 0U) {
+        cid = nt_ui_id("tj_nobuild");
+    }
+    const nt_ui_button_style_t st = {
+        .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
+        .hover = {.bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
+        .pressed = {.bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
+        .disabled = {.bg_region = g->white_region, .bg_tint = 0x00000000U, .scale = 1.0F, .opacity = 0.0F},
+        .transition_speed = 1.0F,
+        .slice9_scale = 1.0F,
+    };
+    const Clay_ElementDeclaration decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(MAP_SIZE), CLAY_SIZING_FIXED(MAP_SIZE)}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, 0.0F}, .zIndex = 4},
+    };
+    if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), cid, &st, &decl, true)) {
+        tj_journal_push(TJ_LOG_BAD, "Здесь не строят. Ставь в подсвеченные клетки у дороги.");
     }
 }
 
@@ -368,6 +397,7 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
         draw_global(run, pitch, tile);
         draw_field(run, pitch, tile);
         draw_tamga(run, pitch);
+        draw_build_catcher(g, run);
         draw_slots(g, run, pitch, tile);
         draw_hero(run, pitch);
         draw_storm(run);
