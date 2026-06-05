@@ -37,15 +37,22 @@
  *   - tree/hit baked-xform + index arrays (production)
  *   - debug_zones, widget_registry, inspector_collapsed_ids (DEBUG_TOOLS only)
  *
- * Memory cost per ctx (production / production+debug):
- *   max_elements=1024  → ~110 KB / ~250 KB
- *   max_elements=4096  → ~430 KB / ~990 KB
- *   max_elements=8192  → ~940 KB / ~2.0 MB
+ * Memory cost per ctx (production / production+debug; post-3D-refactor, mat4 baked storage):
+ *   max_elements=1024  → ~210 KB / ~350 KB
+ *   max_elements=4096  → ~820 KB / ~1.4 MB
+ *   max_elements=8192  → ~1.7 MB / ~2.7 MB
+ * tree_baked + hit_baked grow at 160 B/element (vs 64 B pre-refactor): mat4(64) + opacity(4) + pad(12) × 2 arrays.
  *
  * Override the default via game's compile defs:
  *   target_compile_definitions(my_game PRIVATE NT_UI_DEFAULT_MAX_ELEMENT_COUNT=4096)
  * Game's `-D` propagates because this header's #ifndef picks it up when the
  * game includes nt_ui.h. Alternatively set desc.max_elements at runtime.
+ *
+ * 3D ctx (use_raycast_input=true) hot-path costs (native-release bench, post-refactor):
+ *   - hit-test raycast: 6.8 ns/op (vs 2D inverse-affine 3.4 ns/op; 2× slower)
+ *   - clip-chain depth=4: 6.1 ns/op (vs 2D 4.3 ns/op; ~40% slower)
+ *   - compose mat4×mat4: 15.2 ns/op (vs 2x3 affine 6.5 ns/op; 2.3× slower)
+ * All well under any frame budget at typical UI scale (≤1024 elements, ≤10 hit-tested widgets).
  *
  * NT_UI_TREE_DFS_DEPTH_CAP (256, in nt_ui_internal.h) caps UI nesting depth
  * — independent of max_elements. Overriding requires patching nt_ui's own
