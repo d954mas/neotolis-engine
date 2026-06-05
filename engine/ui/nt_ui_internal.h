@@ -32,7 +32,12 @@ typedef struct {
     float layout_l, layout_t, layout_r, layout_b;
     /* Exact visual bbox (unpadded). */
     float visual_l, visual_t, visual_r, visual_b;
-    float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
+    /* Full composed mat4 (column-major); overlay extracts the top-left 2×2 + col3 (a=m[0],
+     * b=m[4], c=m[1], d=m[5], tx=m[12], ty=m[13]) for the planar highlight box. For 3D ctx
+     * widgets with rotation_x/y or offset_z this is a 2D-projection approximation — overlay
+     * still draws something, just not the rotated-out-of-plane outline. Full 3D-pose overlay
+     * would need view_proj-projected corners; not implemented (debug-only path). */
+    float m[16];
     /* Used by both rotation pivot and inverse-affine so draw matches hit-test. */
     float center_x, center_y;
     /* bit0 hovered, bit1 pressed, bit2 captured, bit3 disabled-heuristic. */

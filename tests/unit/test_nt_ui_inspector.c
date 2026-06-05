@@ -998,7 +998,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     /* Zone must be recorded; composed affine differs from identity (rotation+scale). */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(s_fx.ctx, nt_ui_id("xform_btn"));
     TEST_ASSERT_NOT_NULL(z);
-    TEST_ASSERT_TRUE(z->aff_a != 1.0F || z->aff_b != 0.0F || z->aff_c != 0.0F || z->aff_d != 1.0F || z->aff_tx != 0.0F || z->aff_ty != 0.0F);
+    TEST_ASSERT_TRUE(z->m[0] != 1.0F || z->m[4] != 0.0F || z->m[1] != 0.0F || z->m[5] != 1.0F || z->m[12] != 0.0F || z->m[13] != 0.0F);
 
     /* Project top-left through accum + Y-flip; must differ from axis-aligned. */
     float proj_x = 0.0F;

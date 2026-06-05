@@ -1039,13 +1039,14 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (z->id == 0U) {
                 continue;
             }
-            /* Forward-transform the visual center; panel filter operates in screen space. */
-            const float a = z->aff_a;
-            const float b = z->aff_b;
-            const float c = z->aff_c;
-            const float dd = z->aff_d;
-            const float tx = z->aff_tx;
-            const float ty = z->aff_ty;
+            /* Forward-transform the visual center; panel filter operates in screen space.
+             * Extract 2D affine subset from the recorded mat4 (a=m[0], b=m[4], c=m[1], d=m[5]). */
+            const float a = z->m[0];
+            const float b = z->m[4];
+            const float c = z->m[1];
+            const float dd = z->m[5];
+            const float tx = z->m[12];
+            const float ty = z->m[13];
             const float screen_cx = (z->center_x * a) + (z->center_y * b) + tx;
             if (screen_cx >= panel_left_x) {
                 continue;

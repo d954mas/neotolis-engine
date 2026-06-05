@@ -2022,24 +2022,13 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         z->layout_b = z->visual_b + pb;
         z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
         z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
-        /* Snapshot composed affine — same source as walker/hit-test. */
+        /* Snapshot composed mat4 — same source as walker/hit-test. */
         const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
         if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
-            const nt_ui_baked_xform_t b = ctx->hit_baked[e_slot];
-            z->aff_a = b.m[0];
-            z->aff_b = b.m[4];
-            z->aff_c = b.m[1];
-            z->aff_d = b.m[5];
-            z->aff_tx = b.m[12];
-            z->aff_ty = b.m[13];
+            memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
         } else {
             const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-            z->aff_a = b.m[0];
-            z->aff_b = b.m[4];
-            z->aff_c = b.m[1];
-            z->aff_d = b.m[5];
-            z->aff_tx = b.m[12];
-            z->aff_ty = b.m[13];
+            memcpy(z->m, b.m, sizeof z->m);
         }
         uint16_t flags = 0U;
         if (out.hovered) {
@@ -2099,21 +2088,10 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
     const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
     if (e_slot >= 0 && e_slot < (int32_t)ctx->max_elements) {
-        const nt_ui_baked_xform_t b = ctx->hit_baked[e_slot];
-        z->aff_a = b.m[0];
-        z->aff_b = b.m[4];
-        z->aff_c = b.m[1];
-        z->aff_d = b.m[5];
-        z->aff_tx = b.m[12];
-        z->aff_ty = b.m[13];
+        memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
     } else {
         const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-        z->aff_a = b.m[0];
-        z->aff_b = b.m[4];
-        z->aff_c = b.m[1];
-        z->aff_d = b.m[5];
-        z->aff_tx = b.m[12];
-        z->aff_ty = b.m[13];
+        memcpy(z->m, b.m, sizeof z->m);
     }
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }

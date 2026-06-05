@@ -60,10 +60,12 @@ static uint32_t color_for_state(uint16_t flags) {
 // #endregion
 
 // #region zone helpers
-/* Composed affine + walker Y-flip into world space. */
+/* Composed affine + walker Y-flip into world space. Extracts the 2D affine subset (top-left 2×2 +
+ * col3) from the recorded mat4 — accurate for 2D ctx + planar 3D widgets; rotation_x/y/offset_z
+ * widgets get a 2D-projection approximation for the highlight outline. */
 void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y) {
-    const float wx = (z->aff_a * x) + (z->aff_b * y) + z->aff_tx;
-    const float wy = (z->aff_c * x) + (z->aff_d * y) + z->aff_ty;
+    const float wx = (z->m[0] * x) + (z->m[4] * y) + z->m[12];
+    const float wy = (z->m[1] * x) + (z->m[5] * y) + z->m[13];
     *out_x = wx;
     *out_y = vy + vh - wy;
 }

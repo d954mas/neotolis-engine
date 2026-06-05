@@ -144,8 +144,8 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
 
     /* Fall back to axis-aligned bbox for plain Clay elements without a recorded zone. */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(ctx, ctx->inspector_highlight_id);
-    /* Skip projection when composed affine is identity. */
-    const bool z_has_xform = (z != NULL) && (z->aff_a != 1.0F || z->aff_b != 0.0F || z->aff_c != 0.0F || z->aff_d != 1.0F || z->aff_tx != 0.0F || z->aff_ty != 0.0F);
+    /* Skip projection when composed mat4 is identity (top-left 2×2 + col3 subset). */
+    const bool z_has_xform = (z != NULL) && (z->m[0] != 1.0F || z->m[4] != 0.0F || z->m[1] != 0.0F || z->m[5] != 1.0F || z->m[12] != 0.0F || z->m[13] != 0.0F);
     if (z_has_xform) {
         nt_sprite_renderer_set_material(ctx->sprite_material);
 
