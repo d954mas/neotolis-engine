@@ -15,6 +15,11 @@ import time
 
 HOST = "127.0.0.1"
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 9123

@@ -14,6 +14,11 @@ import sys
 
 HOST = "127.0.0.1"
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def connect(port, timeout=5.0):
     s = socket.create_connection((HOST, port), timeout=timeout)

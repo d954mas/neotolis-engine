@@ -892,6 +892,16 @@
             "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "group": "build",
             "problemMatcher": []
+        },
+        {
+            "label": "Smoke test (devapi)",
+            "type": "shell",
+            "command": "python tools/devapi/smoke_test.py 9123",
+            "dependsOn": ["Build turkic_jam (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "test",
+            "problemMatcher": []
         }
     ]
 }

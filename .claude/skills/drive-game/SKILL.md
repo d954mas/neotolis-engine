@@ -83,6 +83,9 @@ loop:
   sleep(0.3); verify via ui.tree    # observe again
 ```
 `tools/devapi/devapi_bot_demo.py` is a working example (clicks START, confirms the scene swap).
+`tools/devapi/smoke_test.py` self-launches the game and asserts the whole flow
+(menu→settings→game→pause→game-over→retry); exit 0/1. Run it as a regression check
+(VS Code task: **Smoke test (devapi)**).
 
 ## 7. Notes
 - Only one client at a time (a new connection replaces the old).

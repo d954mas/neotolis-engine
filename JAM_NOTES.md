@@ -55,6 +55,7 @@
 - Эндпоинты v1: `ping`, `endpoints`, `view`, `ui.tree`, `ui.element id=`, `entity.list`, `input.key key=P mode=tap`, `input.move`, `input.click x= y=`, `input.click_ui id=`, `input.button`.
 - Файлы: `engine/devapi/nt_devapi.{h,c}` + `nt_devapi_net.c`; клиент `tools/devapi/devapi_cli.py` + бот `devapi_bot_demo.py`; скилл `.claude/skills/drive-game/SKILL.md`.
 - **Статус: ✅ сделано и проверено на ПК.** Запуск: `turkic_jam.exe --devapi 9123`. Прогон бота: прочитал `ui.tree` (меню), кликнул START через `input.click`, сцена сменилась на игровую (`Playing/Score/TAP +1/Lose`). Бот реально может играть.
+- **Автотест** `tools/devapi/smoke_test.py` сам поднимает игру и прогоняет весь флоу (меню→настройки→назад→старт→тап→пауза→resume→lose→gameover→retry) с проверками — **9/9 PASS, exit 0**. VS Code: задача `Smoke test (devapi)`. Заодно подтвердил рендер EN/RU/TR (`English | Русский | Türkçe`).
 - Находки: `-Wformat-nonliteral` на vsnprintf-обёртке → атрибут `format(printf,…)`; `bugprone-narrowing-conversions` int→char → ci-compare без сужения; `readability-non-const-parameter` на хендлерах фикс-ABI → NOLINT; PowerShell-пайп строки добавляет BOM в первую строку (драйвить Python-клиентом, не пайпом).
 - Браузер (потом): экспорт C-функции + Playwright (тот же реестр/протокол).
 
