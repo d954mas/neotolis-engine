@@ -68,6 +68,22 @@ static tj_placement_t placement_from(const char *s) {
     return TJ_PLACE_ROADSIDE;
 }
 
+static tj_perk_t perk_from(const char *s) {
+    if (strcmp(s, "stamina_per_circle") == 0) {
+        return TJ_PERK_STAMINA_PER_CIRCLE;
+    }
+    if (strcmp(s, "supplies_per_circle") == 0) {
+        return TJ_PERK_SUPPLIES_PER_CIRCLE;
+    }
+    if (strcmp(s, "wisdom_per_circle") == 0) {
+        return TJ_PERK_WISDOM_PER_CIRCLE;
+    }
+    if (strcmp(s, "glory_per_circle") == 0) {
+        return TJ_PERK_GLORY_PER_CIRCLE;
+    }
+    return TJ_PERK_NONE;
+}
+
 static tj_spawn_layer_t layer_from(const char *s) {
     if (strcmp(s, "field") == 0) {
         return TJ_SPAWN_FIELD;
@@ -221,6 +237,8 @@ static void parse_heirs(const char *path) {
         d->mind = to_int(fld[3]);
         d->spirit = to_int(fld[4]);
         d->stamina_bonus = to_int(fld[5]);
+        d->perk = (n >= 7) ? perk_from(fld[6]) : TJ_PERK_NONE;
+        d->perk_value = (n >= 8) ? to_int(fld[7]) : 0;
     }
     (void)fclose(f);
 }

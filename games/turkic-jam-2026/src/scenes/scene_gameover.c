@@ -31,7 +31,7 @@ static void on_update(game_ctx_t *g, float dt) {
 
     if (tj_button(g, "go_retry", i18n(T_RETRY), 360, 100, TJ_BTN_PRIMARY)) {
         g->score = 0;
-        game_goto(g, &SCENE_GAME);
+        game_goto(g, &SCENE_HEIR_SELECT); /* new heir -> pick an archetype again */
     }
     if (tj_button(g, "go_menu", i18n(T_MENU), 300, 80, TJ_BTN_SECONDARY)) {
         game_goto(g, &SCENE_MENU);

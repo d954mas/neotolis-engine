@@ -524,6 +524,31 @@ void tj_run_choose_card(tj_run_t *r, int idx) {
     }
 }
 
+/* Heir perk: a flat per-circle passive (sidegrade). Applied each completed circle. */
+static void apply_perk(tj_run_t *r) {
+    if (r->heir_index < 0 || r->heir_index >= g_config.heir_count) {
+        return;
+    }
+    const tj_heir_def_t *h = &g_config.heirs[r->heir_index];
+    const int v = h->perk_value;
+    switch (h->perk) {
+    case TJ_PERK_STAMINA_PER_CIRCLE:
+        r->stamina += v;
+        break;
+    case TJ_PERK_SUPPLIES_PER_CIRCLE:
+        r->supplies += v;
+        break;
+    case TJ_PERK_WISDOM_PER_CIRCLE:
+        r->wisdom += v;
+        break;
+    case TJ_PERK_GLORY_PER_CIRCLE:
+        r->glory += v;
+        break;
+    default:
+        break;
+    }
+}
+
 void tj_run_tick(tj_run_t *r, float dt) {
     if (!r->alive || r->won) {
         return;
@@ -556,7 +581,8 @@ void tj_run_tick(tj_run_t *r, float dt) {
             }
             tj_journal_push(TJ_LOG_BIG, "Круг %d пройден.", r->circle - 1);
             gen_loop(r);
-            push_pack(r); /* grant a reward pack; the hero keeps walking */
+            push_pack(r);  /* grant a reward pack; the hero keeps walking */
+            apply_perk(r); /* heir's per-circle passive */
         }
         resolve_cell(r);
     }

@@ -401,7 +401,9 @@ int main(int argc, char *argv[]) {
 
     /* Initial scene; its on_enter may register more endpoints (e.g. game.run),
      * so it must run AFTER nt_devapi_init() clears the registry. */
-    g.scene = g_config.start_in_game ? &SCENE_GAME : &SCENE_MENU;
+    /* start_in_game -> heir select (the run's real start), unless there's only one heir. */
+    const scene_t *boot = (g_config.heir_count > 1) ? &SCENE_HEIR_SELECT : &SCENE_GAME;
+    g.scene = g_config.start_in_game ? boot : &SCENE_MENU;
     if (g.scene->on_enter) {
         g.scene->on_enter(&g);
     }

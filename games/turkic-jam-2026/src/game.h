@@ -35,6 +35,7 @@ typedef struct game_ctx {
     bool resources_ready;
     int score;
     int best;
+    int chosen_heir; /* archetype picked on the heir-select screen */
     tj_shake_t shake;
     const scene_t *scene;
     const scene_t *prev; /* scene we transitioned from (lets Pause resume cleanly) */
@@ -45,6 +46,7 @@ typedef struct game_ctx {
 void game_goto(game_ctx_t *g, const scene_t *next);
 
 extern const scene_t SCENE_MENU;
+extern const scene_t SCENE_HEIR_SELECT;
 extern const scene_t SCENE_GAME;
 extern const scene_t SCENE_SETTINGS;
 extern const scene_t SCENE_GAMEOVER;

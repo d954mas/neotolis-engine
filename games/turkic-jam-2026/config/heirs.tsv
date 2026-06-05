@@ -1,5 +1,8 @@
-# Наследники (архетипы). Поля разделены '|', пробелы обрезаются, '#' — комментарий.
-# id | name | body | mind | spirit | stamina_bonus
-hunter      | Охотник    | 3 | 1 | 1 | 0
-shaman      | Шаман      | 1 | 1 | 3 | 0
-storyteller | Сказитель  | 1 | 3 | 1 | 0
+# Наследники (архетипы). Поля '|'-разделены, пробелы обрезаются, '#' — комментарий.
+# Сумма статов держится равной (бюджет силы один, отличается распределение) ->
+# герои РАЗНЫЕ, но не сильнее друг друга. perk — плоская пассивка за круг (сайдгрейд).
+# perk: none | stamina_per_circle | supplies_per_circle | wisdom_per_circle | glory_per_circle
+# id | name | body | mind | spirit | stamina_bonus | perk | perk_value
+hunter      | Охотник    | 3 | 1 | 1 | 0 | stamina_per_circle  | 1
+shaman      | Шаман      | 1 | 1 | 3 | 0 | wisdom_per_circle    | 1
+storyteller | Сказитель  | 1 | 3 | 1 | 0 | glory_per_circle     | 1

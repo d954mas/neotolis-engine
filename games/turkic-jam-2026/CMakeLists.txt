@@ -19,6 +19,7 @@ add_executable(turkic_jam
     src/view.c
     src/ui_kit.c
     src/scenes/scene_menu.c
+    src/scenes/scene_heir_select.c
     src/scenes/scene_game.c
     src/scenes/scene_settings.c
     src/scenes/scene_gameover.c

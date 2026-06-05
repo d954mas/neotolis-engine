@@ -45,10 +45,22 @@ typedef struct {
     int stamina_cost, stamina_restore;
 } tj_tile_def_t;
 
+/* Heir perk: a flat per-circle passive (sidegrade, not power creep). Balance-safe
+ * and easy to extend; the stat spread (body/mind/spirit) is the main difference. */
+typedef enum {
+    TJ_PERK_NONE = 0,
+    TJ_PERK_STAMINA_PER_CIRCLE, /* +value Силы each circle */
+    TJ_PERK_SUPPLIES_PER_CIRCLE,
+    TJ_PERK_WISDOM_PER_CIRCLE,
+    TJ_PERK_GLORY_PER_CIRCLE,
+} tj_perk_t;
+
 typedef struct {
     char id[TJ_ID_LEN];
     char name[TJ_NAME_LEN];
     int body, mind, spirit, stamina_bonus;
+    tj_perk_t perk;
+    int perk_value;
 } tj_heir_def_t;
 
 /* Where a spawned object sits, and how its effect fires (Loop Hero is not only

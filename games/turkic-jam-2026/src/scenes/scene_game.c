@@ -152,7 +152,7 @@ static void on_enter(game_ctx_t *g) {
     if (g->prev == &SCENE_PAUSE) {
         return; /* resume: keep the run in progress */
     }
-    tj_run_start(&s_run, 0); /* TODO: heir selection. Desert is auto-rolled per circle in sim. */
+    tj_run_start(&s_run, g->chosen_heir); /* archetype chosen on the heir-select screen */
 }
 
 static void on_update(game_ctx_t *g, float dt) {
