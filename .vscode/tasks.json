@@ -800,6 +800,90 @@
             "dependsOn": ["Build wasm-release-paired", "Ensure server ui_buttons_demo (release :8099)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build & run turkic_jam packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_turkic_jam_packs && build\\games\\turkic-jam-2026\\native-debug\\build_turkic_jam_packs.exe build/games/turkic-jam-2026",
+            "dependsOn": ["Configure native-debug"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build turkic_jam (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target turkic_jam",
+            "dependsOn": ["Build & run turkic_jam packs (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Run turkic_jam (native-debug)",
+            "type": "shell",
+            "command": "build\\games\\turkic-jam-2026\\native-debug\\turkic_jam.exe",
+            "dependsOn": ["Build turkic_jam (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "presentation": { "panel": "dedicated", "reveal": "always" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run turkic_jam packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_turkic_jam_packs && build\\games\\turkic-jam-2026\\native-release\\build_turkic_jam_packs.exe build/games/turkic-jam-2026",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run turkic_jam packs (release)",
+            "dependsOn": ["Configure native-release", "Build & run turkic_jam packs (release command)"],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build turkic_jam (release)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target turkic_jam",
+            "dependsOn": ["Build & run turkic_jam packs (release)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Ensure server turkic_jam (debug :8100)",
+            "type": "shell",
+            "command": "python -m http.server 8100 -d \"${workspaceFolder}/build/games/turkic-jam-2026/wasm-debug-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve turkic_jam (debug)",
+            "dependsOn": [
+                "Build & run turkic_jam packs (debug)",
+                "Build wasm-debug-paired",
+                "Ensure server turkic_jam (debug :8100)"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

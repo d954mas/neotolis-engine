@@ -150,7 +150,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/textured_quad/native-release/build_tq_packs.exe",
-            "args": ["build/examples/textured_quad"],
+            "args": [
+                "build/examples/textured_quad"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build pack builders (release)"
@@ -160,7 +162,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/sponza/native-release/build_sponza_packs.exe",
-            "args": ["build/examples/sponza"],
+            "args": [
+                "build/examples/sponza"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build pack builders (release)"
@@ -242,7 +246,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/text/native-release/build_text_packs.exe",
-            "args": ["build/examples/text"],
+            "args": [
+                "build/examples/text"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build pack builders (release)"
@@ -270,7 +276,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/bunnymark/native-release/build_bunnymark_packs.exe",
-            "args": ["build/examples/bunnymark"],
+            "args": [
+                "build/examples/bunnymark"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build & run bunnymark packs (release)"
@@ -316,7 +324,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/ui_theme_demo/native-release/build_ui_theme_demo_packs.exe",
-            "args": ["build/examples/ui_theme_demo"],
+            "args": [
+                "build/examples/ui_theme_demo"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build & run ui_theme_demo packs (release)"
@@ -362,7 +372,9 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/slice9_demo/native-release/slice9_demo_build_packs.exe",
-            "args": ["build/examples/slice9_demo"],
+            "args": [
+                "build/examples/slice9_demo"
+            ],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build & run slice9_demo packs (release)"
@@ -465,6 +477,24 @@
             "url": "http://localhost:8099/index.html",
             "webRoot": "${workspaceFolder}/build/examples/ui_buttons_demo/wasm-release-paired",
             "preLaunchTask": "Build & Serve ui_buttons_demo (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug Desktop turkic_jam",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/games/turkic-jam-2026/native-debug/turkic_jam.exe",
+            "cwd": "${workspaceFolder}/build/games/turkic-jam-2026/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build turkic_jam (debug)"
+        },
+        {
+            "name": "Debug WASM turkic_jam",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8100/index.html",
+            "webRoot": "${workspaceFolder}/build/games/turkic-jam-2026/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve turkic_jam (debug)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
