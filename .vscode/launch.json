@@ -432,6 +432,24 @@
             "preLaunchTask": "Build native-release"
         },
         {
+            "name": "Debug Desktop ui_3d_demo",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_3d_demo/native-debug/ui_3d_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_3d_demo/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build ui_3d_demo (debug)"
+        },
+        {
+            "name": "Run Desktop ui_3d_demo (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_3d_demo/native-release/ui_3d_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_3d_demo/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build ui_3d_demo (release)"
+        },
+        {
             "name": "Debug WASM ui_buttons_demo",
             "type": "chrome",
             "request": "launch",
