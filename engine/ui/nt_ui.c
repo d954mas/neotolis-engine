@@ -2007,6 +2007,38 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
+#if NT_UI_DEBUG_TOOLS
+/* Inspector viewport pick in 3D ctx: topmost recorded zone whose cursor ray-vs-plane hit lands in
+ * its visual bbox, using the game view_proj (scene elements). The 2D-affine screen scan can't do
+ * this — z->m maps Clay→world in 3D, not Clay→screen. Returns 0 when nothing is under the cursor. */
+uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_pick_zone_3d: ctx must be non-NULL");
+    if (!ctx->use_raycast_input) {
+        return 0U;
+    }
+    const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+    const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
+    /* Reverse order: deepest-declared zone wins, matching the 2D scan. */
+    for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
+        const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
+        if (z->id == 0U) {
+            continue;
+        }
+        nt_ui_baked_xform_t b = {0};
+        memcpy(b.m, z->m, sizeof b.m);
+        float lx;
+        float ly;
+        if (!raycast_hit(ctx->inv_view_proj, &b, px, py, screen_w, screen_h, &lx, &ly)) {
+            continue;
+        }
+        if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
+            return z->id;
+        }
+    }
+    return 0U;
+}
+#endif
+
 /* Resolves the single pidx that "owns" a widget for this frame under α-semantics:
  *   - a pointer holding this id wins (already captured)
  *   - else first pidx with empty capture that's pressed_now over the widget
