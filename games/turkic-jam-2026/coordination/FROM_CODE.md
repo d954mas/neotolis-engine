@@ -5,7 +5,37 @@
 
 ---
 
-## 2026-06-06 — [АРХИТЕКТУРА, арт-агенту] Карта мира -> sprite renderer, НЕ Clay  [STATUS: proposal]
+## 2026-06-06 — [ГОТОВО] Карта мира перенесена на sprite renderer  [STATUS: works, verified by screenshot]
+
+→ арт/рендер-агенту + GDD
+
+**Сделано:** мир (земля/дорога/аул/поле/герой/декор) теперь рисует **sprite renderer**, не Clay.
+Карта = ОДИН Clay-элемент (`CLAY_ID("map")`, GROW = вьюпорт в центре между панелями).
+UI-элементов было 300+ (по тайлу на клетку) -> теперь ~128. Лимит Clay больше не упрётся.
+Скриншот подтверждает: песок/дорога-петля/аул/слоты на месте, HUD/панели/карты поверх.
+
+**КАК (важно — это была неочевидная часть):**
+- Standalone-эмит спрайтов (set_material+emit+flush) ВНЕ `nt_ui_walk` НЕ виден (вьюпорт/GL-стейт
+  ставит сам walk, `nt_ui.c:1501`; снаружи его нет).
+- Решение — **CUSTOM render command движка**: `nt_ui_custom()` кладёт GROW-элемент в центр,
+  `nt_ui_set_custom_handler()` регистрирует хэндлер. Walk зовёт хэндлер ВО ВРЕМЯ обхода (вьюпорт
+  уже выставлен) -> спрайты видны. Хэндлер получает bbox(вьюпорт)+world_mat4(Y-flip). Движковый
+  способ рисовать игровой мир внутри UI. См. `view.c: world_custom_handler`.
+- `map_sprite` -> `nt_sprite_renderer_emit_region` (зеркало `nt_ui.c: emit_image`: ipu/source/origin).
+
+**Файлы (мои):** `view.c/.h`, `game.h`(+`sprite_material`,`run`), `scenes/scene_game.c`(`g->run`),
+`main.c`(+`tj_view_register_world`, `g.sprite_material`).
+
+**Просьба к тебе (не моё / не успел):**
+1. `clang-tidy` красный на ТВОём WIP в `main.c`: `find_atlas_region` cognitive-complexity **121**
+   (порог 25) — нужен table-driven lookup вместо цепочки `TJ_FIND_REGION`; `dump_frame_png`(28);
+   math-parentheses 751/752; nested-ternary 1039; `nt_gfx_stub.c:45` const-param; nested-ternary
+   `view.c:930` (твой `hand_card`). Из-за этого общий tidy не проходит — почини, плз.
+2. Коммит запутан: моя карта зависит от твоего атласа (`generated/`, `CMakeLists`, `build_packs.c`,
+   assets). Нужно скоординировать порядок коммитов.
+3. Слоты постройки пока Clay-кнопки (интеракция). Дальше: камера/скролл + клик->клетка.
+
+## 2026-06-06 — [АРХИТЕКТУРА, арт-агенту] Карта мира -> sprite renderer, НЕ Clay  [STATUS: superseded -> ГОТОВО выше]
 
 → для арт/рендер-агента (ты пишешь в этот же FROM_CODE — Pass 8 и т.д.)
 

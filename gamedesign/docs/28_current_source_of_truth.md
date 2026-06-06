@@ -4,6 +4,39 @@
 
 ```text
 28_current_source_of_truth.md
+-> 31_visual_production_master_plan.md
+-> 32_asset_production_batch_a.md
+-> 33_asset_production_batch_b.md
+-> 34_asset_production_batch_c.md
+-> 35_runtime_visual_qa_checklist.md
+-> 36_visual_asset_status_matrix.md
+-> 37_final_art_repaint_pass_1.md
+-> 38_final_repaint_pass_1_delivery_review.md
+-> 39_final_repaint_pass_2_contract.md
+-> 40_final_repaint_pass_2_delivery_review.md
+-> 41_final_repaint_pass_3_world_map_contract.md
+-> 43_final_repaint_pass_3_world_map_delivery_review.md
+-> 44_final_repaint_pass_4_fx_contract.md
+-> 46_final_repaint_pass_4_fx_delivery_review.md
+-> 45_final_repaint_pass_5_aul_upgrades_contract.md
+-> 47_final_repaint_pass_5_aul_upgrades_delivery_review.md
+-> 48_runtime_visual_qa_harness_spec.md
+-> 49_final_repaint_pass_6_future_tile_card_library_contract.md
+-> 50_final_repaint_pass_6_future_tile_card_library_delivery_review.md
+-> 51_final_repaint_pass_7_hero_archetype_panels_contract.md
+-> 52_runtime_visual_qa_devapi_evidence.md
+-> 53_final_repaint_pass_7_hero_archetype_panels_delivery_review.md
+-> 54_art_source_policy_generated_bitmap.md
+-> 55_desktop_l5_visual_capture_contract.md
+-> 56_generated_bitmap_art_audit.md
+-> 57_pass_8_generated_bitmap_repaint_readiness.md
+-> 58_pass_8_generated_card_art_delivery_review.md
+-> 59_pass_9_generated_active_tiles_delivery_review.md
+-> 60_pass_10_generated_wayfarer_equipment_contract.md
+-> 61_pass_10_generated_wayfarer_equipment_delivery_review.md
+-> 62_pass_11_generated_hud_icons_contract.md
+-> 63_pass_11_generated_hud_icons_delivery_review.md
+-> 42_visual_completion_board.md
 -> 26_ftue_step_1_narrative.md
 -> 30_narrative_content_baseline.md
 -> 22_ftue_production_script.md

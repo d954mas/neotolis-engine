@@ -21,6 +21,7 @@ add_executable(turkic_jam
     src/scenes/scene_menu.c
     src/scenes/scene_heir_select.c
     src/scenes/scene_game.c
+    src/scenes/scene_visual_qa.c
     src/scenes/scene_settings.c
     src/scenes/scene_gameover.c
     src/scenes/scene_pause.c
@@ -40,7 +41,7 @@ target_include_directories(turkic_jam PRIVATE
 if(EMSCRIPTEN)
     target_link_libraries(turkic_jam PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
 else()
-    target_link_libraries(turkic_jam PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(turkic_jam PRIVATE nt_gfx nt_http_stub nt_fs stb_image_write)
     # save.c uses fopen for the native KV file.
     target_compile_definitions(turkic_jam PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()

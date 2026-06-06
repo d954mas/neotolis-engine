@@ -316,6 +316,7 @@ void nt_gfx_begin_frame(void);
 void nt_gfx_end_frame(void);
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
+bool nt_gfx_readback_rgba8(uint8_t *dst, uint32_t width, uint32_t height);
 
 /* ---- Resource creation ---- */
 

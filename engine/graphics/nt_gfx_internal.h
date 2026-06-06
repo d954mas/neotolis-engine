@@ -23,6 +23,7 @@ void nt_gfx_backend_begin_frame(void);
 void nt_gfx_backend_end_frame(void);
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_backend_end_pass(void);
+bool nt_gfx_backend_readback_rgba8(uint8_t *dst, uint32_t width, uint32_t height);
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);

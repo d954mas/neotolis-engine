@@ -38,6 +38,39 @@
 28. [28_current_source_of_truth.md](28_current_source_of_truth.md) - актуальный короткий контракт после ревью документов и чата с Code.
 29. [29_card_tile_families_review.md](29_card_tile_families_review.md) - ревью карт-тайлов, семейств и player-facing решения для `wolf_track`.
 30. [30_narrative_content_baseline.md](30_narrative_content_baseline.md) - нарративный baseline FTUE, карт, событий, синергий и первых вещей.
+31. [31_visual_production_master_plan.md](31_visual_production_master_plan.md) - production-план всего визуала: UI kit, карты, тайлы, персонажи, экипировка, иконки, FX и интеграция в игру.
+32. [32_asset_production_batch_a.md](32_asset_production_batch_a.md) - конкретный Batch A для production PNG: UI 9-slice, ground/decor/road/buffer, аул, первые тайлы, герой, размеры, alpha, slice9, crop/acceptance.
+33. [33_asset_production_batch_b.md](33_asset_production_batch_b.md) - Batch B для production PNG: playable cards, HUD icons, equipment/hero panel, first FX, размеры, alpha, acceptance и Code request.
+34. [34_asset_production_batch_c.md](34_asset_production_batch_c.md) - Batch C для future visual library: будущие тайлы, этапы аула, FTUE/death memory FX, архетипы героя и future icons.
+35. [35_runtime_visual_qa_checklist.md](35_runtime_visual_qa_checklist.md) - runtime QA checklist: raw PNG -> builder -> atlas bind -> drawn state -> screenshot proof.
+36. [36_visual_asset_status_matrix.md](36_visual_asset_status_matrix.md) - current visual asset matrix: raw inventory, batch status, runtime status, final-art gaps and next acceptance targets.
+37. [37_final_art_repaint_pass_1.md](37_final_art_repaint_pass_1.md) - first final repaint contract for visible gameplay UI, cards, HUD icons, hero, saxaul, aul and road/buffer.
+38. [38_final_repaint_pass_1_delivery_review.md](38_final_repaint_pass_1_delivery_review.md) - delivered repaint pass 1 files, technical verification, art lead review and next screenshot QA gates.
+39. [39_final_repaint_pass_2_contract.md](39_final_repaint_pass_2_contract.md) - second final repaint contract for hero movement, hero panel, equipment, HUD stat icons and card utility icons.
+40. [40_final_repaint_pass_2_delivery_review.md](40_final_repaint_pass_2_delivery_review.md) - delivered repaint pass 2 files, technical verification, art lead review and next runtime screenshot QA gates.
+41. [41_final_repaint_pass_3_world_map_contract.md](41_final_repaint_pass_3_world_map_contract.md) - third final repaint contract for ground, decor, road, buffer, aul and remaining active world tiles.
+42. [42_visual_completion_board.md](42_visual_completion_board.md) - active board for all visual passes, candidate-final status, runtime QA gaps and next owners.
+43. [43_final_repaint_pass_3_world_map_delivery_review.md](43_final_repaint_pass_3_world_map_delivery_review.md) - delivered world/map repaint files, technical verification, art lead review and next runtime screenshot QA gates.
+44. [44_final_repaint_pass_4_fx_contract.md](44_final_repaint_pass_4_fx_contract.md) - fourth final repaint contract for first playable feedback FX plus FTUE/death/memory future FX.
+45. [45_final_repaint_pass_5_aul_upgrades_contract.md](45_final_repaint_pass_5_aul_upgrades_contract.md) - fifth final repaint contract for aul upgrade stages and Tamga post.
+46. [46_final_repaint_pass_4_fx_delivery_review.md](46_final_repaint_pass_4_fx_delivery_review.md) - delivered FX repaint files, technical verification, art lead review and next runtime FX QA gates.
+47. [47_final_repaint_pass_5_aul_upgrades_delivery_review.md](47_final_repaint_pass_5_aul_upgrades_delivery_review.md) - delivered aul upgrade repaint files, technical verification, art lead review and next registry/runtime QA gates.
+48. [48_runtime_visual_qa_harness_spec.md](48_runtime_visual_qa_harness_spec.md) - QA-only visual harness request for proving L4/L5 screenshots across gameplay, UI, cards, equipment, FX and aul progression.
+49. [49_final_repaint_pass_6_future_tile_card_library_contract.md](49_final_repaint_pass_6_future_tile_card_library_contract.md) - sixth final repaint contract for remaining future tile/card/icon placeholder PNGs.
+50. [50_final_repaint_pass_6_future_tile_card_library_delivery_review.md](50_final_repaint_pass_6_future_tile_card_library_delivery_review.md) - delivered future tile/card/icon repaint files, technical verification, art lead review and next registry/runtime QA gates.
+51. [51_final_repaint_pass_7_hero_archetype_panels_contract.md](51_final_repaint_pass_7_hero_archetype_panels_contract.md) - seventh final repaint contract for hero archetype panel dolls and small icon readability fixes.
+52. [52_runtime_visual_qa_devapi_evidence.md](52_runtime_visual_qa_devapi_evidence.md) - desktop/native devapi evidence for visual QA reachability and nonzero atlas bind counts.
+53. [53_final_repaint_pass_7_hero_archetype_panels_delivery_review.md](53_final_repaint_pass_7_hero_archetype_panels_delivery_review.md) - delivered hero archetype panel repaint files, technical verification, art review and next registry/runtime QA gates.
+54. [54_art_source_policy_generated_bitmap.md](54_art_source_policy_generated_bitmap.md) - production art source policy: candidate-final art should come from generated bitmap / painted source, not pure SVG-like script placeholders.
+55. [55_desktop_l5_visual_capture_contract.md](55_desktop_l5_visual_capture_contract.md) - desktop/native L5 capture/readback contract for proving real runtime pixel readability.
+56. [56_generated_bitmap_art_audit.md](56_generated_bitmap_art_audit.md) - audit separating pipeline/script technical art from generated bitmap production art and defining the next targeted repaint gate.
+57. [57_pass_8_generated_bitmap_repaint_readiness.md](57_pass_8_generated_bitmap_repaint_readiness.md) - prepared Pass 8 priority list for targeted generated bitmap repaint after L5 screenshot review.
+58. [58_pass_8_generated_card_art_delivery_review.md](58_pass_8_generated_card_art_delivery_review.md) - generated bitmap card art delivery, pack/L5 evidence, and card layout fix request before final acceptance.
+59. [59_pass_9_generated_active_tiles_delivery_review.md](59_pass_9_generated_active_tiles_delivery_review.md) - generated bitmap active tile delivery, rejected magenta-source note, pack/L5 evidence, and post-map-migration review gate.
+60. [60_pass_10_generated_wayfarer_equipment_contract.md](60_pass_10_generated_wayfarer_equipment_contract.md) - generated bitmap contract for wayfarer map sprites, hero panel doll and equipment kit.
+61. [61_pass_10_generated_wayfarer_equipment_delivery_review.md](61_pass_10_generated_wayfarer_equipment_delivery_review.md) - delivered generated wayfarer/equipment runtime files, pack/L5 evidence and final review risks.
+62. [62_pass_11_generated_hud_icons_contract.md](62_pass_11_generated_hud_icons_contract.md) - generated bitmap contract for HUD, stat, utility and future icons.
+63. [63_pass_11_generated_hud_icons_delivery_review.md](63_pass_11_generated_hud_icons_delivery_review.md) - delivered generated HUD/icon runtime files, pack/L5 evidence and final review risks.
 
 Исходные материалы сохранены отдельно:
 

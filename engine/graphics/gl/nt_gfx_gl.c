@@ -656,6 +656,26 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
 
 void nt_gfx_backend_end_pass(void) {}
 
+bool nt_gfx_backend_readback_rgba8(uint8_t *dst, uint32_t width, uint32_t height) {
+    if (dst == NULL || width == 0 || height == 0) {
+        return false;
+    }
+    while (glGetError() != GL_NO_ERROR) {
+    }
+#ifndef NT_PLATFORM_WEB
+    glReadBuffer(GL_BACK);
+#endif
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        NT_LOG_WARN("gfx readback failed: GL error 0x%04X", err);
+        return false;
+    }
+    return true;
+}
+
 /* ---- Scissor and viewport ----
  *
  * Raw GL bottom-left convention. Callers are expected to y-flip if they

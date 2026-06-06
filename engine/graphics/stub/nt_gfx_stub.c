@@ -42,6 +42,13 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
 void nt_gfx_backend_end_pass(void) {}
 
+bool nt_gfx_backend_readback_rgba8(uint8_t *dst, uint32_t width, uint32_t height) {
+    (void)dst;
+    (void)width;
+    (void)height;
+    return false;
+}
+
 /* Scissor and viewport stub no-ops. State is cached in shared nt_gfx.c
  * so NT_TEST_ACCESS probes can read it back without GL. */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {

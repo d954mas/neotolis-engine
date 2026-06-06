@@ -313,6 +313,13 @@ void nt_gfx_end_pass(void) {
     nt_gfx_backend_end_pass();
 }
 
+bool nt_gfx_readback_rgba8(uint8_t *dst, uint32_t width, uint32_t height) {
+    if (!g_nt_gfx.initialized || g_nt_gfx.context_lost || dst == NULL || width == 0 || height == 0) {
+        return false;
+    }
+    return nt_gfx_backend_readback_rgba8(dst, width, height);
+}
+
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {

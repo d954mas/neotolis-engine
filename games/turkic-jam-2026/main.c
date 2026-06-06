@@ -36,6 +36,7 @@
 #include "i18n.h"
 #include "rng.h"
 #include "save.h"
+#include "view.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -43,6 +44,8 @@
 
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
+#else
+#include "stb_image_write.h"
 #endif
 
 #include "clay.h"
@@ -50,6 +53,7 @@
 
 #define TJ_UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 #define TJ_SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
+#define TJ_ARRAY_COUNT(a) ((uint32_t)(sizeof(a) / sizeof((a)[0])))
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, TJ_UI_ARENA_SIZE);
 
@@ -67,6 +71,11 @@ static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 static bool s_atlas_bound;
 static bool s_font_bound;
+#ifndef NT_PLATFORM_WEB
+static const char *s_dump_frame_path;
+static bool s_exit_after_frame;
+static bool s_dump_frame_done;
+#endif
 
 void game_goto(game_ctx_t *gg, const scene_t *next) { gg->next = next; }
 
@@ -96,6 +105,8 @@ static void apply_transition(void) {
     }
 }
 
+static void bind_optional_world_regions(void);
+
 static void bind_atlas(void) {
     g.atlas = s_atlas_handle;
     g.white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS__WHITE.value);
@@ -106,6 +117,7 @@ static void bind_atlas(void) {
     NT_ASSERT(g.btn_blue != NT_ATLAS_INVALID_REGION);
     NT_ASSERT(g.btn_green != NT_ATLAS_INVALID_REGION);
     NT_ASSERT(g.btn_red != NT_ATLAS_INVALID_REGION);
+    bind_optional_world_regions();
     nt_ui_set_atlas_white_region(g.ui, s_atlas_handle, g.white_region);
     s_atlas_bound = true;
     nt_log_info("turkic_jam: atlas bound");
@@ -116,6 +128,516 @@ static void bind_font(void) {
     nt_ui_set_font(g.ui, 0U, g.font);
     s_font_bound = true;
     nt_log_info("turkic_jam: font bound");
+}
+
+static uint32_t find_atlas_region(const char *name) {
+#define TJ_FIND_REGION(n, id)                                                                                                                                                                          \
+    if (strcmp(name, n) == 0) {                                                                                                                                                                        \
+        return nt_atlas_find_region(s_atlas_handle, id.value);                                                                                                                                         \
+    }
+    TJ_FIND_REGION("ground_sand_base_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_GROUND_SAND_BASE_01);
+    TJ_FIND_REGION("decor_dune_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DECOR_DUNE_01);
+    TJ_FIND_REGION("decor_stones_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DECOR_STONES_01);
+    TJ_FIND_REGION("decor_dry_grass_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DECOR_DRY_GRASS_01);
+    TJ_FIND_REGION("decor_tracks_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DECOR_TRACKS_01);
+    TJ_FIND_REGION("decor_bones_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DECOR_BONES_01);
+    TJ_FIND_REGION("decor_cracks_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DECOR_CRACKS_01);
+    TJ_FIND_REGION("road_straight_ns", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_STRAIGHT_NS);
+    TJ_FIND_REGION("road_straight_ew", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_STRAIGHT_EW);
+    TJ_FIND_REGION("road_corner_ne", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_CORNER_NE);
+    TJ_FIND_REGION("road_corner_es", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_CORNER_ES);
+    TJ_FIND_REGION("road_corner_sw", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_CORNER_SW);
+    TJ_FIND_REGION("road_corner_wn", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_CORNER_WN);
+    TJ_FIND_REGION("road_entry_aul", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_ENTRY_AUL);
+    TJ_FIND_REGION("road_current_highlight", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ROAD_CURRENT_HIGHLIGHT);
+    TJ_FIND_REGION("buffer_edge_stones_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_EDGE_STONES_01);
+    TJ_FIND_REGION("buffer_packed_sand_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_PACKED_SAND_01);
+    TJ_FIND_REGION("buffer_stakes_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_STAKES_01);
+    TJ_FIND_REGION("buffer_cart_marks_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_CART_MARKS_01);
+    TJ_FIND_REGION("aul_ground_2x2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_GROUND_2X2);
+    TJ_FIND_REGION("aul_yurt_small_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_YURT_SMALL_01);
+    TJ_FIND_REGION("aul_yurt_small_02", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_YURT_SMALL_02);
+    TJ_FIND_REGION("aul_fire_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_FIRE_01);
+    TJ_FIND_REGION("aul_tamga_post_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_TAMGA_POST_01);
+    TJ_FIND_REGION("aul_stage_01_camp", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_STAGE_01_CAMP);
+    TJ_FIND_REGION("aul_stage_02_settlement", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_STAGE_02_SETTLEMENT);
+    TJ_FIND_REGION("aul_stage_03_village", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_STAGE_03_VILLAGE);
+    TJ_FIND_REGION("aul_stage_04_fortified_aul", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_STAGE_04_FORTIFIED_AUL);
+    TJ_FIND_REGION("aul_stage_05_steppe_capital", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_AUL_STAGE_05_STEPPE_CAPITAL);
+    TJ_FIND_REGION("tile_saxaul_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_SAXAUL_01);
+    TJ_FIND_REGION("tile_oasis_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_OASIS_01);
+    TJ_FIND_REGION("tile_yurt_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_YURT_01);
+    TJ_FIND_REGION("tile_tamga_stone_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_TAMGA_STONE_01);
+    TJ_FIND_REGION("tile_wolf_track_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WOLF_TRACK_01);
+    TJ_FIND_REGION("tile_mirage_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_MIRAGE_01);
+    TJ_FIND_REGION("tile_storm_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STORM_01);
+    TJ_FIND_REGION("tile_last_tamga_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_LAST_TAMGA_01);
+    TJ_FIND_REGION("tile_well_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WELL_01);
+    TJ_FIND_REGION("tile_watchtower_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATCHTOWER_01);
+    TJ_FIND_REGION("tile_pack_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_PACK_01);
+    TJ_FIND_REGION("tile_small_camp_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_SMALL_CAMP_01);
+    TJ_FIND_REGION("tile_clan_camp_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_CLAN_CAMP_01);
+    TJ_FIND_REGION("tile_hunting_trail_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HUNTING_TRAIL_01);
+    TJ_FIND_REGION("tile_vision_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_VISION_01);
+    TJ_FIND_REGION("tile_false_path_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_FALSE_PATH_01);
+    TJ_FIND_REGION("tile_buried_spring_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_BURIED_SPRING_01);
+    TJ_FIND_REGION("hero_wayfarer_idle_s", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_WAYFARER_IDLE_S);
+    TJ_FIND_REGION("hero_wayfarer_walk_s", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_WAYFARER_WALK_S);
+    TJ_FIND_REGION("hero_wayfarer_walk_e", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_WAYFARER_WALK_E);
+    TJ_FIND_REGION("hero_wayfarer_walk_n", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_WAYFARER_WALK_N);
+    TJ_FIND_REGION("hero_wayfarer_walk_w", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_WAYFARER_WALK_W);
+    TJ_FIND_REGION("hero_wayfarer_panel", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_WAYFARER_PANEL);
+    TJ_FIND_REGION("hero_body_panel", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_BODY_PANEL);
+    TJ_FIND_REGION("hero_mind_panel", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_MIND_PANEL);
+    TJ_FIND_REGION("hero_spirit_panel", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_SPIRIT_PANEL);
+    TJ_FIND_REGION("ui_panel_felt_dark_96", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_PANEL_FELT_DARK_96);
+    TJ_FIND_REGION("ui_panel_felt_light_96", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_PANEL_FELT_LIGHT_96);
+    TJ_FIND_REGION("ui_card_playable_96x128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_PLAYABLE_96X128);
+    TJ_FIND_REGION("ui_card_selected_96x128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_SELECTED_96X128);
+    TJ_FIND_REGION("ui_slot_equipment_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_SLOT_EQUIPMENT_64);
+    TJ_FIND_REGION("ui_chip_resource_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CHIP_RESOURCE_64);
+    TJ_FIND_REGION("ui_tooltip_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_TOOLTIP_DARK_64);
+    TJ_FIND_REGION("ui_card_back_96x128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_BACK_96X128);
+    TJ_FIND_REGION("ui_button_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_BUTTON_DARK_64);
+    TJ_FIND_REGION("card_badge_count_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_BADGE_COUNT_32);
+    TJ_FIND_REGION("card_placement_roadside_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_PLACEMENT_ROADSIDE_32);
+    TJ_FIND_REGION("card_placement_field_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_PLACEMENT_FIELD_32);
+    TJ_FIND_REGION("card_placement_special_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_PLACEMENT_SPECIAL_32);
+    TJ_FIND_REGION("card_art_saxaul_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_SAXAUL_64);
+    TJ_FIND_REGION("card_art_yurt_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_YURT_64);
+    TJ_FIND_REGION("card_art_tamga_stone_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_TAMGA_STONE_64);
+    TJ_FIND_REGION("card_art_wolf_track_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_WOLF_TRACK_64);
+    TJ_FIND_REGION("card_art_oasis_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_OASIS_64);
+    TJ_FIND_REGION("card_art_mirage_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_MIRAGE_64);
+    TJ_FIND_REGION("card_art_storm_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_STORM_64);
+    TJ_FIND_REGION("card_art_last_tamga_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_LAST_TAMGA_64);
+    TJ_FIND_REGION("card_art_well_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_WELL_64);
+    TJ_FIND_REGION("card_art_watchtower_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_WATCHTOWER_64);
+    TJ_FIND_REGION("equip_slot_weapon_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_SLOT_WEAPON_01);
+    TJ_FIND_REGION("equip_slot_clothes_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_SLOT_CLOTHES_01);
+    TJ_FIND_REGION("equip_slot_tamga_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_SLOT_TAMGA_01);
+    TJ_FIND_REGION("equip_slot_tool_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_SLOT_TOOL_01);
+    TJ_FIND_REGION("equip_weapon_staff_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_WEAPON_STAFF_01);
+    TJ_FIND_REGION("equip_clothes_cloak_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_CLOTHES_CLOAK_01);
+    TJ_FIND_REGION("equip_tamga_charm_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_TAMGA_CHARM_01);
+    TJ_FIND_REGION("equip_tool_satchel_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_EQUIP_TOOL_SATCHEL_01);
+    TJ_FIND_REGION("icon_stamina_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_STAMINA_32);
+    TJ_FIND_REGION("icon_supplies_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_SUPPLIES_32);
+    TJ_FIND_REGION("icon_wisdom_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_WISDOM_32);
+    TJ_FIND_REGION("icon_glory_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_GLORY_32);
+    TJ_FIND_REGION("icon_circle_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_CIRCLE_32);
+    TJ_FIND_REGION("icon_day_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_DAY_32);
+    TJ_FIND_REGION("icon_body_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_BODY_32);
+    TJ_FIND_REGION("icon_mind_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_MIND_32);
+    TJ_FIND_REGION("icon_spirit_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_SPIRIT_32);
+    TJ_FIND_REGION("icon_last_tamga_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_LAST_TAMGA_32);
+    TJ_FIND_REGION("icon_settings_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_SETTINGS_32);
+    TJ_FIND_REGION("icon_speed_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_SPEED_32);
+    TJ_FIND_REGION("icon_aul_upgrade_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_AUL_UPGRADE_32);
+    TJ_FIND_REGION("icon_card_gain_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_CARD_GAIN_32);
+    TJ_FIND_REGION("icon_deck_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_DECK_32);
+    TJ_FIND_REGION("icon_map_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_MAP_32);
+    TJ_FIND_REGION("icon_memory_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_MEMORY_32);
+    TJ_FIND_REGION("icon_warning_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_WARNING_32);
+    TJ_FIND_REGION("fx_dust_step_00", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_00);
+    TJ_FIND_REGION("fx_dust_step_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_01);
+    TJ_FIND_REGION("fx_dust_step_02", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_02);
+    TJ_FIND_REGION("fx_dust_step_03", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_03);
+    TJ_FIND_REGION("fx_tile_placed_00", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_00);
+    TJ_FIND_REGION("fx_tile_placed_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_01);
+    TJ_FIND_REGION("fx_tile_placed_02", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_02);
+    TJ_FIND_REGION("fx_tile_placed_03", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_03);
+    TJ_FIND_REGION("fx_tile_trigger_00", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_TRIGGER_00);
+    TJ_FIND_REGION("fx_tile_trigger_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_TRIGGER_01);
+    TJ_FIND_REGION("fx_tile_trigger_02", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_TRIGGER_02);
+    TJ_FIND_REGION("fx_tile_trigger_03", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_TRIGGER_03);
+    TJ_FIND_REGION("fx_gain_popup_00", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_GAIN_POPUP_00);
+    TJ_FIND_REGION("fx_gain_popup_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_GAIN_POPUP_01);
+    TJ_FIND_REGION("fx_gain_popup_02", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_GAIN_POPUP_02);
+    TJ_FIND_REGION("fx_invalid_cell_00", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_INVALID_CELL_00);
+    TJ_FIND_REGION("fx_invalid_cell_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_INVALID_CELL_01);
+#undef TJ_FIND_REGION
+    return NT_ATLAS_INVALID_REGION;
+}
+
+static uint32_t count_bound_regions(const uint32_t *regions, uint32_t count) {
+    uint32_t found = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (regions[i] != 0U && regions[i] != NT_ATLAS_INVALID_REGION) {
+            found++;
+        }
+    }
+    return found;
+}
+
+#if NT_DEVAPI_ENABLED
+/* QA-only evidence endpoint: proves the desktop runtime reached the visual QA scene. */
+static int ep_visual_qa_status(int c, char **v, char *o, int cap, void *u) {
+    (void)c;
+    (void)v;
+    (void)u;
+    const uint32_t batch_a_regions[] = {
+        g.ground_sand_base,
+        g.decor_dune,
+        g.decor_stones,
+        g.decor_dry_grass,
+        g.decor_tracks,
+        g.decor_bones,
+        g.decor_cracks,
+        g.road_straight_ns,
+        g.road_straight_ew,
+        g.road_corner_ne,
+        g.road_corner_es,
+        g.road_corner_sw,
+        g.road_corner_wn,
+        g.road_entry_aul,
+        g.road_current_highlight,
+        g.buffer_edge_stones,
+        g.buffer_packed_sand,
+        g.buffer_stakes,
+        g.buffer_cart_marks,
+        g.aul_ground_2x2,
+        g.aul_yurt_small_01,
+        g.aul_yurt_small_02,
+        g.aul_fire_01,
+        g.tile_saxaul,
+        g.tile_yurt,
+        g.tile_tamga_stone,
+        g.tile_wolf_track,
+        g.tile_oasis,
+        g.tile_mirage,
+        g.tile_storm,
+        g.tile_last_tamga,
+        g.hero_wayfarer_idle_s,
+        g.hero_wayfarer_walk_s,
+        g.hero_wayfarer_walk_e,
+        g.hero_wayfarer_walk_n,
+        g.hero_wayfarer_walk_w,
+        g.hero_wayfarer_panel,
+        g.ui_panel_felt_dark_96,
+        g.ui_panel_felt_light_96,
+        g.ui_card_playable_96x128,
+        g.ui_card_selected_96x128,
+        g.ui_slot_equipment_64,
+        g.ui_chip_resource_64,
+        g.ui_tooltip_dark_64,
+    };
+    const uint32_t batch_b_regions[] = {
+        g.ui_card_back_96x128,
+        g.ui_button_dark_64,
+        g.card_badge_count_32,
+        g.card_placement_roadside_32,
+        g.card_placement_field_32,
+        g.card_placement_special_32,
+        g.card_art_saxaul_64,
+        g.card_art_yurt_64,
+        g.card_art_tamga_stone_64,
+        g.card_art_wolf_track_64,
+        g.equip_slot_weapon_01,
+        g.equip_slot_clothes_01,
+        g.equip_slot_tamga_01,
+        g.equip_slot_tool_01,
+        g.equip_weapon_staff_01,
+        g.equip_clothes_cloak_01,
+        g.equip_tamga_charm_01,
+        g.equip_tool_satchel_01,
+        g.icon_stamina_32,
+        g.icon_supplies_32,
+        g.icon_wisdom_32,
+        g.icon_glory_32,
+        g.icon_circle_32,
+        g.icon_day_32,
+        g.icon_body_32,
+        g.icon_mind_32,
+        g.icon_spirit_32,
+        g.icon_last_tamga_32,
+        g.icon_settings_32,
+        g.icon_speed_32,
+        g.fx_dust_step[0],
+        g.fx_dust_step[1],
+        g.fx_dust_step[2],
+        g.fx_dust_step[3],
+        g.fx_tile_placed[0],
+        g.fx_tile_placed[1],
+        g.fx_tile_placed[2],
+        g.fx_tile_placed[3],
+        g.fx_tile_trigger[0],
+        g.fx_tile_trigger[1],
+        g.fx_tile_trigger[2],
+        g.fx_tile_trigger[3],
+        g.fx_gain_popup[0],
+        g.fx_gain_popup[1],
+        g.fx_gain_popup[2],
+        g.fx_invalid_cell[0],
+        g.fx_invalid_cell[1],
+    };
+    const uint32_t batch_c_aul_regions[] = {
+        g.aul_tamga_post_01, g.aul_stage_01_camp, g.aul_stage_02_settlement, g.aul_stage_03_village, g.aul_stage_04_fortified_aul, g.aul_stage_05_steppe_capital,
+    };
+    const uint32_t batch_c_hero_panel_regions[] = {
+        g.hero_body_panel,
+        g.hero_mind_panel,
+        g.hero_spirit_panel,
+    };
+    const uint32_t pass6_future_regions[] = {
+        g.card_art_oasis_64,     g.card_art_mirage_64,  g.card_art_storm_64,  g.card_art_last_tamga_64, g.card_art_well_64,      g.card_art_watchtower_64, g.tile_well_01,
+        g.tile_watchtower_01,    g.tile_pack_01,        g.tile_small_camp_01, g.tile_clan_camp_01,      g.tile_hunting_trail_01, g.tile_vision_01,         g.tile_false_path_01,
+        g.tile_buried_spring_01, g.icon_aul_upgrade_32, g.icon_card_gain_32,  g.icon_deck_32,           g.icon_map_32,           g.icon_memory_32,         g.icon_warning_32,
+    };
+    return snprintf(o, (size_t)cap,
+                    "{\"scene\":\"%s\",\"visual_qa\":%s,\"resources_ready\":%s,\"logical\":[%u,%u],\"batch_a\":[%u,%u],\"batch_b\":[%u,%u],\"batch_c_aul\":[%u,%u],"
+                    "\"batch_c_hero_panels\":[%u,%u],\"pass6_future\":[%u,%u],"
+                    "\"draw_groups\":[\"gameplay_composition\",\"active_tiles\",\"hud_cards_icons\",\"hero_equipment\",\"fx_strips\",\"aul_progression\",\"ui_surfaces\",\"future_library\",\"hero_"
+                    "archetype_panels\"]}",
+                    g.scene ? g.scene->name : "", (g.scene == &SCENE_VISUAL_QA) ? "true" : "false", g.resources_ready ? "true" : "false", (uint32_t)g.logical_w, (uint32_t)g.logical_h,
+                    count_bound_regions(batch_a_regions, TJ_ARRAY_COUNT(batch_a_regions)), TJ_ARRAY_COUNT(batch_a_regions), count_bound_regions(batch_b_regions, TJ_ARRAY_COUNT(batch_b_regions)),
+                    TJ_ARRAY_COUNT(batch_b_regions), count_bound_regions(batch_c_aul_regions, TJ_ARRAY_COUNT(batch_c_aul_regions)), TJ_ARRAY_COUNT(batch_c_aul_regions),
+                    count_bound_regions(batch_c_hero_panel_regions, TJ_ARRAY_COUNT(batch_c_hero_panel_regions)), TJ_ARRAY_COUNT(batch_c_hero_panel_regions),
+                    count_bound_regions(pass6_future_regions, TJ_ARRAY_COUNT(pass6_future_regions)), TJ_ARRAY_COUNT(pass6_future_regions));
+}
+#endif
+
+static void bind_optional_world_regions(void) {
+    g.ground_sand_base = find_atlas_region("ground_sand_base_01");
+    g.decor_dune = find_atlas_region("decor_dune_01");
+    g.decor_stones = find_atlas_region("decor_stones_01");
+    g.decor_dry_grass = find_atlas_region("decor_dry_grass_01");
+    g.decor_tracks = find_atlas_region("decor_tracks_01");
+    g.decor_bones = find_atlas_region("decor_bones_01");
+    g.decor_cracks = find_atlas_region("decor_cracks_01");
+    g.road_straight_ns = find_atlas_region("road_straight_ns");
+    g.road_straight_ew = find_atlas_region("road_straight_ew");
+    g.road_corner_ne = find_atlas_region("road_corner_ne");
+    g.road_corner_es = find_atlas_region("road_corner_es");
+    g.road_corner_sw = find_atlas_region("road_corner_sw");
+    g.road_corner_wn = find_atlas_region("road_corner_wn");
+    g.road_entry_aul = find_atlas_region("road_entry_aul");
+    g.road_current_highlight = find_atlas_region("road_current_highlight");
+    g.buffer_edge_stones = find_atlas_region("buffer_edge_stones_01");
+    g.buffer_packed_sand = find_atlas_region("buffer_packed_sand_01");
+    g.buffer_stakes = find_atlas_region("buffer_stakes_01");
+    g.buffer_cart_marks = find_atlas_region("buffer_cart_marks_01");
+    g.aul_ground_2x2 = find_atlas_region("aul_ground_2x2");
+    g.aul_yurt_small_01 = find_atlas_region("aul_yurt_small_01");
+    g.aul_yurt_small_02 = find_atlas_region("aul_yurt_small_02");
+    g.aul_fire_01 = find_atlas_region("aul_fire_01");
+    g.aul_tamga_post_01 = find_atlas_region("aul_tamga_post_01");
+    g.aul_stage_01_camp = find_atlas_region("aul_stage_01_camp");
+    g.aul_stage_02_settlement = find_atlas_region("aul_stage_02_settlement");
+    g.aul_stage_03_village = find_atlas_region("aul_stage_03_village");
+    g.aul_stage_04_fortified_aul = find_atlas_region("aul_stage_04_fortified_aul");
+    g.aul_stage_05_steppe_capital = find_atlas_region("aul_stage_05_steppe_capital");
+    g.tile_saxaul = find_atlas_region("tile_saxaul_01");
+    g.tile_oasis = find_atlas_region("tile_oasis_01");
+    g.tile_yurt = find_atlas_region("tile_yurt_01");
+    g.tile_tamga_stone = find_atlas_region("tile_tamga_stone_01");
+    g.tile_wolf_track = find_atlas_region("tile_wolf_track_01");
+    g.tile_mirage = find_atlas_region("tile_mirage_01");
+    g.tile_storm = find_atlas_region("tile_storm_01");
+    g.tile_last_tamga = find_atlas_region("tile_last_tamga_01");
+    g.tile_well_01 = find_atlas_region("tile_well_01");
+    g.tile_watchtower_01 = find_atlas_region("tile_watchtower_01");
+    g.tile_pack_01 = find_atlas_region("tile_pack_01");
+    g.tile_small_camp_01 = find_atlas_region("tile_small_camp_01");
+    g.tile_clan_camp_01 = find_atlas_region("tile_clan_camp_01");
+    g.tile_hunting_trail_01 = find_atlas_region("tile_hunting_trail_01");
+    g.tile_vision_01 = find_atlas_region("tile_vision_01");
+    g.tile_false_path_01 = find_atlas_region("tile_false_path_01");
+    g.tile_buried_spring_01 = find_atlas_region("tile_buried_spring_01");
+    g.hero_wayfarer_idle_s = find_atlas_region("hero_wayfarer_idle_s");
+    g.hero_wayfarer_walk_s = find_atlas_region("hero_wayfarer_walk_s");
+    g.hero_wayfarer_walk_e = find_atlas_region("hero_wayfarer_walk_e");
+    g.hero_wayfarer_walk_n = find_atlas_region("hero_wayfarer_walk_n");
+    g.hero_wayfarer_walk_w = find_atlas_region("hero_wayfarer_walk_w");
+    g.hero_wayfarer_panel = find_atlas_region("hero_wayfarer_panel");
+    g.hero_body_panel = find_atlas_region("hero_body_panel");
+    g.hero_mind_panel = find_atlas_region("hero_mind_panel");
+    g.hero_spirit_panel = find_atlas_region("hero_spirit_panel");
+    g.ui_panel_felt_dark_96 = find_atlas_region("ui_panel_felt_dark_96");
+    g.ui_panel_felt_light_96 = find_atlas_region("ui_panel_felt_light_96");
+    g.ui_card_playable_96x128 = find_atlas_region("ui_card_playable_96x128");
+    g.ui_card_selected_96x128 = find_atlas_region("ui_card_selected_96x128");
+    g.ui_slot_equipment_64 = find_atlas_region("ui_slot_equipment_64");
+    g.ui_chip_resource_64 = find_atlas_region("ui_chip_resource_64");
+    g.ui_tooltip_dark_64 = find_atlas_region("ui_tooltip_dark_64");
+    g.ui_card_back_96x128 = find_atlas_region("ui_card_back_96x128");
+    g.ui_button_dark_64 = find_atlas_region("ui_button_dark_64");
+    g.card_badge_count_32 = find_atlas_region("card_badge_count_32");
+    g.card_placement_roadside_32 = find_atlas_region("card_placement_roadside_32");
+    g.card_placement_field_32 = find_atlas_region("card_placement_field_32");
+    g.card_placement_special_32 = find_atlas_region("card_placement_special_32");
+    g.card_art_saxaul_64 = find_atlas_region("card_art_saxaul_64");
+    g.card_art_yurt_64 = find_atlas_region("card_art_yurt_64");
+    g.card_art_tamga_stone_64 = find_atlas_region("card_art_tamga_stone_64");
+    g.card_art_wolf_track_64 = find_atlas_region("card_art_wolf_track_64");
+    g.card_art_oasis_64 = find_atlas_region("card_art_oasis_64");
+    g.card_art_mirage_64 = find_atlas_region("card_art_mirage_64");
+    g.card_art_storm_64 = find_atlas_region("card_art_storm_64");
+    g.card_art_last_tamga_64 = find_atlas_region("card_art_last_tamga_64");
+    g.card_art_well_64 = find_atlas_region("card_art_well_64");
+    g.card_art_watchtower_64 = find_atlas_region("card_art_watchtower_64");
+    g.equip_slot_weapon_01 = find_atlas_region("equip_slot_weapon_01");
+    g.equip_slot_clothes_01 = find_atlas_region("equip_slot_clothes_01");
+    g.equip_slot_tamga_01 = find_atlas_region("equip_slot_tamga_01");
+    g.equip_slot_tool_01 = find_atlas_region("equip_slot_tool_01");
+    g.equip_weapon_staff_01 = find_atlas_region("equip_weapon_staff_01");
+    g.equip_clothes_cloak_01 = find_atlas_region("equip_clothes_cloak_01");
+    g.equip_tamga_charm_01 = find_atlas_region("equip_tamga_charm_01");
+    g.equip_tool_satchel_01 = find_atlas_region("equip_tool_satchel_01");
+    g.icon_stamina_32 = find_atlas_region("icon_stamina_32");
+    g.icon_supplies_32 = find_atlas_region("icon_supplies_32");
+    g.icon_wisdom_32 = find_atlas_region("icon_wisdom_32");
+    g.icon_glory_32 = find_atlas_region("icon_glory_32");
+    g.icon_circle_32 = find_atlas_region("icon_circle_32");
+    g.icon_day_32 = find_atlas_region("icon_day_32");
+    g.icon_body_32 = find_atlas_region("icon_body_32");
+    g.icon_mind_32 = find_atlas_region("icon_mind_32");
+    g.icon_spirit_32 = find_atlas_region("icon_spirit_32");
+    g.icon_last_tamga_32 = find_atlas_region("icon_last_tamga_32");
+    g.icon_settings_32 = find_atlas_region("icon_settings_32");
+    g.icon_speed_32 = find_atlas_region("icon_speed_32");
+    g.icon_aul_upgrade_32 = find_atlas_region("icon_aul_upgrade_32");
+    g.icon_card_gain_32 = find_atlas_region("icon_card_gain_32");
+    g.icon_deck_32 = find_atlas_region("icon_deck_32");
+    g.icon_map_32 = find_atlas_region("icon_map_32");
+    g.icon_memory_32 = find_atlas_region("icon_memory_32");
+    g.icon_warning_32 = find_atlas_region("icon_warning_32");
+    g.fx_dust_step[0] = find_atlas_region("fx_dust_step_00");
+    g.fx_dust_step[1] = find_atlas_region("fx_dust_step_01");
+    g.fx_dust_step[2] = find_atlas_region("fx_dust_step_02");
+    g.fx_dust_step[3] = find_atlas_region("fx_dust_step_03");
+    g.fx_tile_placed[0] = find_atlas_region("fx_tile_placed_00");
+    g.fx_tile_placed[1] = find_atlas_region("fx_tile_placed_01");
+    g.fx_tile_placed[2] = find_atlas_region("fx_tile_placed_02");
+    g.fx_tile_placed[3] = find_atlas_region("fx_tile_placed_03");
+    g.fx_tile_trigger[0] = find_atlas_region("fx_tile_trigger_00");
+    g.fx_tile_trigger[1] = find_atlas_region("fx_tile_trigger_01");
+    g.fx_tile_trigger[2] = find_atlas_region("fx_tile_trigger_02");
+    g.fx_tile_trigger[3] = find_atlas_region("fx_tile_trigger_03");
+    g.fx_gain_popup[0] = find_atlas_region("fx_gain_popup_00");
+    g.fx_gain_popup[1] = find_atlas_region("fx_gain_popup_01");
+    g.fx_gain_popup[2] = find_atlas_region("fx_gain_popup_02");
+    g.fx_invalid_cell[0] = find_atlas_region("fx_invalid_cell_00");
+    g.fx_invalid_cell[1] = find_atlas_region("fx_invalid_cell_01");
+    const uint32_t batch_a_regions[] = {
+        g.ground_sand_base,
+        g.decor_dune,
+        g.decor_stones,
+        g.decor_dry_grass,
+        g.decor_tracks,
+        g.decor_bones,
+        g.decor_cracks,
+        g.road_straight_ns,
+        g.road_straight_ew,
+        g.road_corner_ne,
+        g.road_corner_es,
+        g.road_corner_sw,
+        g.road_corner_wn,
+        g.road_entry_aul,
+        g.road_current_highlight,
+        g.buffer_edge_stones,
+        g.buffer_packed_sand,
+        g.buffer_stakes,
+        g.buffer_cart_marks,
+        g.aul_ground_2x2,
+        g.aul_yurt_small_01,
+        g.aul_yurt_small_02,
+        g.aul_fire_01,
+        g.tile_saxaul,
+        g.tile_yurt,
+        g.tile_tamga_stone,
+        g.tile_wolf_track,
+        g.tile_oasis,
+        g.tile_mirage,
+        g.tile_storm,
+        g.tile_last_tamga,
+        g.hero_wayfarer_idle_s,
+        g.hero_wayfarer_walk_s,
+        g.hero_wayfarer_walk_e,
+        g.hero_wayfarer_walk_n,
+        g.hero_wayfarer_walk_w,
+        g.hero_wayfarer_panel,
+        g.ui_panel_felt_dark_96,
+        g.ui_panel_felt_light_96,
+        g.ui_card_playable_96x128,
+        g.ui_card_selected_96x128,
+        g.ui_slot_equipment_64,
+        g.ui_chip_resource_64,
+        g.ui_tooltip_dark_64,
+    };
+    nt_log_info("turkic_jam: optional Batch A atlas regions %u/%u", count_bound_regions(batch_a_regions, (uint32_t)(sizeof(batch_a_regions) / sizeof(batch_a_regions[0]))),
+                (unsigned)(sizeof(batch_a_regions) / sizeof(batch_a_regions[0])));
+    const uint32_t batch_b_regions[] = {
+        g.ui_card_back_96x128,
+        g.ui_button_dark_64,
+        g.card_badge_count_32,
+        g.card_placement_roadside_32,
+        g.card_placement_field_32,
+        g.card_placement_special_32,
+        g.card_art_saxaul_64,
+        g.card_art_yurt_64,
+        g.card_art_tamga_stone_64,
+        g.card_art_wolf_track_64,
+        g.equip_slot_weapon_01,
+        g.equip_slot_clothes_01,
+        g.equip_slot_tamga_01,
+        g.equip_slot_tool_01,
+        g.equip_weapon_staff_01,
+        g.equip_clothes_cloak_01,
+        g.equip_tamga_charm_01,
+        g.equip_tool_satchel_01,
+        g.icon_stamina_32,
+        g.icon_supplies_32,
+        g.icon_wisdom_32,
+        g.icon_glory_32,
+        g.icon_circle_32,
+        g.icon_day_32,
+        g.icon_body_32,
+        g.icon_mind_32,
+        g.icon_spirit_32,
+        g.icon_last_tamga_32,
+        g.icon_settings_32,
+        g.icon_speed_32,
+        g.fx_dust_step[0],
+        g.fx_dust_step[1],
+        g.fx_dust_step[2],
+        g.fx_dust_step[3],
+        g.fx_tile_placed[0],
+        g.fx_tile_placed[1],
+        g.fx_tile_placed[2],
+        g.fx_tile_placed[3],
+        g.fx_tile_trigger[0],
+        g.fx_tile_trigger[1],
+        g.fx_tile_trigger[2],
+        g.fx_tile_trigger[3],
+        g.fx_gain_popup[0],
+        g.fx_gain_popup[1],
+        g.fx_gain_popup[2],
+        g.fx_invalid_cell[0],
+        g.fx_invalid_cell[1],
+    };
+    nt_log_info("turkic_jam: optional Batch B atlas regions %u/%u", count_bound_regions(batch_b_regions, (uint32_t)(sizeof(batch_b_regions) / sizeof(batch_b_regions[0]))),
+                (unsigned)(sizeof(batch_b_regions) / sizeof(batch_b_regions[0])));
+    const uint32_t batch_c_aul_regions[] = {
+        g.aul_tamga_post_01, g.aul_stage_01_camp, g.aul_stage_02_settlement, g.aul_stage_03_village, g.aul_stage_04_fortified_aul, g.aul_stage_05_steppe_capital,
+    };
+    nt_log_info("turkic_jam: optional Batch C aul progression atlas regions %u/%u", count_bound_regions(batch_c_aul_regions, (uint32_t)(sizeof(batch_c_aul_regions) / sizeof(batch_c_aul_regions[0]))),
+                (unsigned)(sizeof(batch_c_aul_regions) / sizeof(batch_c_aul_regions[0])));
+    const uint32_t batch_c_hero_panel_regions[] = {
+        g.hero_body_panel,
+        g.hero_mind_panel,
+        g.hero_spirit_panel,
+    };
+    nt_log_info("turkic_jam: optional Batch C hero archetype panels atlas regions %u/%u",
+                count_bound_regions(batch_c_hero_panel_regions, (uint32_t)(sizeof(batch_c_hero_panel_regions) / sizeof(batch_c_hero_panel_regions[0]))),
+                (unsigned)(sizeof(batch_c_hero_panel_regions) / sizeof(batch_c_hero_panel_regions[0])));
+    const uint32_t pass6_future_regions[] = {
+        g.card_art_oasis_64,     g.card_art_mirage_64,  g.card_art_storm_64,  g.card_art_last_tamga_64, g.card_art_well_64,      g.card_art_watchtower_64, g.tile_well_01,
+        g.tile_watchtower_01,    g.tile_pack_01,        g.tile_small_camp_01, g.tile_clan_camp_01,      g.tile_hunting_trail_01, g.tile_vision_01,         g.tile_false_path_01,
+        g.tile_buried_spring_01, g.icon_aul_upgrade_32, g.icon_card_gain_32,  g.icon_deck_32,           g.icon_map_32,           g.icon_memory_32,         g.icon_warning_32,
+    };
+    nt_log_info("turkic_jam: optional Pass 6 future library atlas regions %u/%u", count_bound_regions(pass6_future_regions, (uint32_t)(sizeof(pass6_future_regions) / sizeof(pass6_future_regions[0]))),
+                (unsigned)(sizeof(pass6_future_regions) / sizeof(pass6_future_regions[0])));
 }
 
 static void try_bind_resources(void) {
@@ -158,6 +680,94 @@ static void build_scene_shell(const nt_ui_transform_t *shake_xform) {
         }
     }
 }
+
+#ifndef NT_PLATFORM_WEB
+static bool dump_frame_png(const char *path, uint32_t width, uint32_t height) {
+    if (path == NULL || width == 0 || height == 0) {
+        return false;
+    }
+    const uint64_t byte_count64 = (uint64_t)width * (uint64_t)height * 4ULL;
+    if (byte_count64 > SIZE_MAX) {
+        nt_log_error("visual_qa: dump-frame too large (%ux%u)", width, height);
+        return false;
+    }
+    const size_t byte_count = (size_t)byte_count64;
+    const size_t stride = (size_t)width * 4U;
+    uint8_t *pixels = (uint8_t *)malloc(byte_count);
+    if (pixels == NULL) {
+        nt_log_error("visual_qa: dump-frame allocation failed (%zu bytes)", byte_count);
+        return false;
+    }
+    if (!nt_gfx_readback_rgba8(pixels, width, height)) {
+        free(pixels);
+        nt_log_error("visual_qa: framebuffer readback failed");
+        return false;
+    }
+
+    bool all_black = true;
+    bool all_white = true;
+    bool all_same = true;
+    uint8_t first[4] = {pixels[0], pixels[1], pixels[2], pixels[3]};
+    uint8_t min_rgb = 255U;
+    uint8_t max_rgb = 0U;
+    uint32_t checksum = 2166136261U;
+    for (size_t i = 0; i < byte_count; i += 4U) {
+        const uint8_t r = pixels[i + 0U];
+        const uint8_t gch = pixels[i + 1U];
+        const uint8_t b = pixels[i + 2U];
+        const uint8_t a = pixels[i + 3U];
+        all_black = all_black && r == 0U && gch == 0U && b == 0U;
+        all_white = all_white && r == 255U && gch == 255U && b == 255U;
+        all_same = all_same && r == first[0] && gch == first[1] && b == first[2] && a == first[3];
+        if (r < min_rgb) {
+            min_rgb = r;
+        }
+        if (gch < min_rgb) {
+            min_rgb = gch;
+        }
+        if (b < min_rgb) {
+            min_rgb = b;
+        }
+        if (r > max_rgb) {
+            max_rgb = r;
+        }
+        if (gch > max_rgb) {
+            max_rgb = gch;
+        }
+        if (b > max_rgb) {
+            max_rgb = b;
+        }
+        checksum ^= r;
+        checksum *= 16777619U;
+        checksum ^= gch;
+        checksum *= 16777619U;
+        checksum ^= b;
+        checksum *= 16777619U;
+        checksum ^= a;
+        checksum *= 16777619U;
+    }
+
+    for (uint32_t y = 0; y < height / 2U; y++) {
+        uint8_t *top = pixels + (size_t)y * stride;
+        uint8_t *bottom = pixels + (size_t)(height - 1U - y) * stride;
+        for (size_t x = 0; x < stride; x++) {
+            const uint8_t tmp = top[x];
+            top[x] = bottom[x];
+            bottom[x] = tmp;
+        }
+    }
+
+    const int written = stbi_write_png(path, (int)width, (int)height, 4, pixels, (int)stride);
+    free(pixels);
+    nt_log_info("visual_qa: dump-frame path=%s size=%ux%u all_black=%d all_white=%d all_same=%d rgb_range=%u..%u checksum=0x%08X", path, width, height, all_black ? 1 : 0, all_white ? 1 : 0,
+                all_same ? 1 : 0, min_rgb, max_rgb, checksum);
+    if (!written) {
+        nt_log_error("visual_qa: PNG write failed: %s", path);
+        return false;
+    }
+    return true;
+}
+#endif
 
 // #region frame
 static void frame(void) {
@@ -269,6 +879,17 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_segment();
     nt_gfx_end_frame();
+#ifndef NT_PLATFORM_WEB
+    if (can_render && s_dump_frame_path != NULL && !s_dump_frame_done) {
+        s_dump_frame_done = true;
+        (void)dump_frame_png(s_dump_frame_path, g_nt_window.fb_width, g_nt_window.fb_height);
+        if (s_exit_after_frame) {
+            nt_app_quit();
+        }
+    } else if (can_render && s_exit_after_frame && s_dump_frame_path == NULL) {
+        nt_app_quit();
+    }
+#endif
     nt_window_swap_buffers();
 }
 // #endregion
@@ -277,11 +898,20 @@ static void frame(void) {
 int main(int argc, char *argv[]) {
     int devapi_port = 0;
     const char *config_dir = "config";
+    bool visual_qa = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--devapi") == 0 && i + 1 < argc) {
             devapi_port = (int)strtol(argv[i + 1], NULL, 10);
         } else if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
             config_dir = argv[i + 1];
+        } else if (strcmp(argv[i], "--visual-qa") == 0) {
+            visual_qa = true;
+#ifndef NT_PLATFORM_WEB
+        } else if (strcmp(argv[i], "--dump-frame") == 0 && i + 1 < argc) {
+            s_dump_frame_path = argv[i + 1];
+        } else if (strcmp(argv[i], "--exit-after-frame") == 0) {
+            s_exit_after_frame = true;
+#endif
         }
     }
 
@@ -371,6 +1001,8 @@ int main(int argc, char *argv[]) {
 
     nt_ui_set_sprite_material(g.ui, s_sprite_material);
     nt_ui_set_text_material(g.ui, s_text_material);
+    g.sprite_material = s_sprite_material; /* lets the map render directly via the sprite renderer. */
+    tj_view_register_world(&g);            /* CUSTOM render handler draws the map world during the UI walk. */
 
     g.font = nt_font_create(&(nt_font_create_desc_t){
         .curve_texture_width = 1024,
@@ -397,13 +1029,14 @@ int main(int argc, char *argv[]) {
     nt_devapi_set_ui_context(g.ui);
 #if NT_DEVAPI_ENABLED
     nt_devapi_register("game.config", ep_game_config, NULL);
+    nt_devapi_register("visual_qa.status", ep_visual_qa_status, NULL);
 #endif
 
     /* Initial scene; its on_enter may register more endpoints (e.g. game.run),
      * so it must run AFTER nt_devapi_init() clears the registry. */
     /* start_in_game -> heir select (the run's real start), unless there's only one heir. */
     const scene_t *boot = (g_config.heir_count > 1) ? &SCENE_HEIR_SELECT : &SCENE_GAME;
-    g.scene = g_config.start_in_game ? boot : &SCENE_MENU;
+    g.scene = visual_qa ? &SCENE_VISUAL_QA : (g_config.start_in_game ? boot : &SCENE_MENU);
     if (g.scene->on_enter) {
         g.scene->on_enter(&g);
     }

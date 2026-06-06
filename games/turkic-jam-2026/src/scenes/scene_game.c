@@ -157,11 +157,14 @@ static void on_enter(game_ctx_t *g) {
         s_ep_registered = true;
     }
 #endif
+    g->run = &s_run; /* expose the run to the world sprite pass (tj_view_world in main.c) */
     if (g->prev == &SCENE_PAUSE) {
         return; /* resume: keep the run in progress */
     }
     tj_run_start(&s_run, g->chosen_heir); /* archetype chosen on the heir-select screen */
 }
+
+static void on_exit(game_ctx_t *g) { g->run = NULL; }
 
 static void on_update(game_ctx_t *g, float dt) {
     if (nt_input_key_is_pressed(NT_KEY_P)) {
@@ -198,6 +201,6 @@ const scene_t SCENE_GAME = {
     .name = "game",
     .on_enter = on_enter,
     .on_update = on_update,
-    .on_exit = NULL,
+    .on_exit = on_exit,
     .fullscreen = true,
 };
