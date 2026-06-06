@@ -575,11 +575,18 @@ static void draw_field(game_ctx_t *g, const tj_run_t *run, float pitch, float ti
         }
         const int gx = i % cols;
         const int gy = i / cols;
+        float ts = tile;
+        if (i == run->fx_cell && run->fx_cell_t > 0.0F) { /* place/merge pop: settle from big -> normal */
+            const float dur = (run->fx_cell_mag > 0.5F) ? 0.45F : 0.30F;
+            float p = 1.0F - (run->fx_cell_t / dur);
+            p = (p < 0.0F) ? 0.0F : ((p > 1.0F) ? 1.0F : p);
+            ts = tile * (1.0F + (run->fx_cell_mag * (1.0F - (p * (2.0F - p))))); /* 1-(ease_out_quad) */
+        }
         const uint32_t region = tile_region_for_index(g, run->field_tile[i]);
         if (has_region(region)) {
-            map_sprite(g, region, tile, tile, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 4);
+            map_sprite(g, region, ts, ts, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 4);
         } else {
-            map_rect_sprite(g, cell_color(run->field_tile[i]), tile, tile, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
+            map_rect_sprite(g, cell_color(run->field_tile[i]), ts, ts, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
         }
     }
 }
@@ -668,10 +675,15 @@ static void draw_hero(game_ctx_t *g, const tj_run_t *run, float pitch) {
         hero_walk_pos(run, pitch, &hx, &hy);
     }
     const float hs = pitch * 0.40F;
+    /* Walk bob: a small up-down spring while moving so the hero reads as alive. */
+    float bob = 0.0F;
+    if (run->phase == TJ_PHASE_WALK && !run->in_combat && !run->in_event) {
+        bob = -fabsf(sinf(run->move_t * 6.2832F)) * (pitch * 0.08F);
+    }
     const uint32_t region = hero_region(g, run);
     if (has_region(region)) {
         /* Hero a bit larger than a cell and lifted so it stands ON the trail, not in it. */
-        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy - (pitch * 0.18F), 6);
+        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy - (pitch * 0.18F) + bob, 6);
     } else {
         map_rect_sprite(g, (Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}, hs, hs, hx, hy);
     }
@@ -1004,12 +1016,15 @@ void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run) {
 }
 
 /* One fighter line in the corner combat window: small portrait + name + HP bar + value/dmg. */
-static void compact_fighter(game_ctx_t *g, uint32_t sprite, const char *name, float frac, Clay_Color hpcol, const char *hpval, const char *dmg, bool show_dmg, const nt_ui_label_style_t *dmgstyle) {
+static void compact_fighter(game_ctx_t *g, uint32_t sprite, const char *name, float frac, Clay_Color hpcol, const char *hpval, const char *dmg, bool show_dmg, const nt_ui_label_style_t *dmgstyle,
+                            float punch) {
+    const float psz = 44.0F * (1.0F + (0.20F * punch)); /* portrait punches outward on a fresh hit */
+    const Clay_Color box = {60.0F + (40.0F * punch), 42.0F + (18.0F * punch), 28.0F, 255.0F};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(54)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {60.0F, 42.0F, 28.0F, 255.0F},
+              .backgroundColor = box,
               .cornerRadius = CLAY_CORNER_RADIUS(8.0F)}) {
-            floating_center_sprite(g, sprite, 44.0F, 44.0F, 0);
+            floating_center_sprite(g, sprite, psz, psz, 0);
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, &s_stat);
@@ -1107,10 +1122,12 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
           .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
           .border = {.color = {200.0F, 90.0F, 70.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->combat_label[0] ? run->combat_label : "Бой", &s_panel_title);
+        const float hero_punch = (run->fx_hero_t > 0.0F) ? (run->fx_hero_t / 0.6F) : 0.0F; /* portrait punch on a fresh hit */
+        const float enemy_punch = (run->fx_enemy_t > 0.0F) ? (run->fx_enemy_t / 0.6F) : 0.0F;
         compact_fighter(g, g->hero_wayfarer_panel, pick_lang("Hero", "Чемпион", "Kahraman"), (float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, hpv, hdmg,
-                        run->fx_hero_t > 0.0F && run->fx_hero_dmg > 0, &s_log_styles[TJ_LOG_BAD]);
+                        run->fx_hero_t > 0.0F && run->fx_hero_dmg > 0, &s_log_styles[TJ_LOG_BAD], hero_punch);
         compact_fighter(g, has_region(eregion) ? eregion : 0U, ename, (float)ehp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, ehpv, edmg, run->fx_enemy_t > 0.0F && run->fx_enemy_dmg > 0,
-                        &s_log_styles[TJ_LOG_GOOD]);
+                        &s_log_styles[TJ_LOG_GOOD], enemy_punch);
     }
 }
 

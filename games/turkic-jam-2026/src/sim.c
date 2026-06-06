@@ -655,6 +655,9 @@ static void try_merge_at(tj_run_t *r, int gx, int gy) {
         }
         r->field_tile[start] = up;
         r->merges_done++;
+        r->fx_cell = start; /* merge pop: bigger than a plain placement */
+        r->fx_cell_t = 0.45F;
+        r->fx_cell_mag = 0.60F;
         tj_journal_push(TJ_LOG_GOOD, "Мердж: %s", g_config.tiles[up].name);
         /* loop: the upgraded tile may complete another triple (cascade) */
     }
@@ -701,6 +704,9 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     r->hand_count = 0;
     r->merges_done = 0;
     r->forced_pull_tile = -1;
+    r->fx_cell = -1;
+    r->fx_cell_t = 0.0F;
+    r->fx_cell_mag = 0.0F;
     r->pouch = g_config.pouch_start; /* start with a pouch of cards to pull */
     recompute_field_bonuses(r);      /* empty field at start: bonuses 0, but keep state consistent */
     r->tamga_cell = -1;
@@ -1095,6 +1101,9 @@ bool tj_run_place_card(tj_run_t *r, int hand_idx, int gx, int gy) {
     }
     const int idx = (gy * r->grid_cols) + gx;
     r->field_tile[idx] = tile;
+    r->fx_cell = idx; /* placement pop (a merge below overrides with a bigger one) */
+    r->fx_cell_t = 0.30F;
+    r->fx_cell_mag = 0.35F;
     log_event("card_placed", &(tj_log_ctx_t){.tile = g_config.tiles[tile].name});
     for (int k = hand_idx; k < r->hand_count - 1; k++) {
         r->hand_cards[k] = r->hand_cards[k + 1]; /* remove from the fan */

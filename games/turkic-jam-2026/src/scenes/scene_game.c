@@ -328,6 +328,9 @@ static void on_update(game_ctx_t *g, float dt) {
     if (!s_ftue_active) {
         tj_run_tick(&s_run, dt); /* tutorial pauses the run: no time pressure while learning */
     }
+    if (s_run.fx_cell_t > 0.0F) {
+        s_run.fx_cell_t -= dt; /* place/merge pop decays every frame, even while the run is paused */
+    }
     handle_map_input(g, dt);
 
     if (s_ftue_active) { /* state-driven step advance (action steps advance via the overlay button) */

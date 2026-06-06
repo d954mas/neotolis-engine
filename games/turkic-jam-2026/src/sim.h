@@ -63,6 +63,9 @@ typedef struct {
     int pouch;            /* pending cards to pull (the "мешочек"): click it to draw into the fan */
     int merges_done;      /* lifetime merges this run (FTUE gate + juice triggers) */
     int forced_pull_tile; /* FTUE: if >=0, the pouch draws this tile id instead of a random one */
+    int fx_cell;          /* field cell index with an active place/merge pop (-1 none) */
+    float fx_cell_t;      /* pop timer (counts down) */
+    float fx_cell_mag;    /* pop magnitude (place small, merge big) */
     bool alive;
     bool won;
     /* Auto-combat: hero pauses on an enemy road cell and trades blows (ATB by speed). */
