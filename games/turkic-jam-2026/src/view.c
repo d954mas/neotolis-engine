@@ -374,11 +374,17 @@ static void draw_base_decor(game_ctx_t *g, const tj_run_t *run, float pitch, flo
         if (run->field_tile[(gy * cols) + gx] >= 0) {
             continue;
         }
+        /* Small accents only (pebbles/tufts), so buildable cells still read as open. */
+        if (((gx * 7) + (gy * 5)) % 3 != 0) {
+            continue;
+        }
         const uint32_t region = decor_region_for_cell(g, gx, gy);
         if (has_region(region)) {
-            map_sprite(g, region, tile, tile, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 1);
+            const float asz = pitch * 0.36F;
+            map_sprite(g, region, asz, asz, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 1);
         }
     }
+    (void)tile;
 }
 
 static void draw_aul(game_ctx_t *g, const tj_run_t *run, float pitch) {
@@ -388,15 +394,15 @@ static void draw_aul(game_ctx_t *g, const tj_run_t *run, float pitch) {
     const float acy = (float)run->aul_y0 + ((float)(run->aul_h - 1) * 0.5F);
     const float ox = (acx - ((float)(cols - 1) * 0.5F)) * pitch;
     const float oy = (acy - ((float)(rows - 1) * 0.5F)) * pitch;
-    const float w = (float)run->aul_w * pitch * 0.92F;
-    const float h = (float)run->aul_h * pitch * 0.92F;
+    const float w = (float)run->aul_w * pitch;
+    const float h = (float)run->aul_h * pitch;
     if (has_region(g->aul_ground_2x2) && has_region(g->aul_yurt_small_01) && has_region(g->aul_fire_01)) {
         map_sprite(g, g->aul_ground_2x2, w, h, ox, oy, 2);
-        map_sprite(g, g->aul_yurt_small_01, pitch, pitch, ox - (pitch * 0.26F), oy - (pitch * 0.15F), 3);
+        map_sprite(g, g->aul_yurt_small_01, pitch * 1.25F, pitch * 1.25F, ox - (pitch * 0.30F), oy - (pitch * 0.18F), 3);
         if (has_region(g->aul_yurt_small_02)) {
-            map_sprite(g, g->aul_yurt_small_02, pitch, pitch, ox + (pitch * 0.28F), oy + (pitch * 0.10F), 3);
+            map_sprite(g, g->aul_yurt_small_02, pitch * 1.15F, pitch * 1.15F, ox + (pitch * 0.32F), oy + (pitch * 0.12F), 3);
         }
-        map_sprite(g, g->aul_fire_01, pitch, pitch, ox + (pitch * 0.10F), oy - (pitch * 0.25F), 4);
+        map_sprite(g, g->aul_fire_01, pitch * 0.95F, pitch * 0.95F, ox + (pitch * 0.12F), oy - (pitch * 0.28F), 4);
         return;
     }
     map_rect_sprite(g, (Clay_Color){176.0F, 146.0F, 106.0F, 255.0F}, w, h, ox, oy);
@@ -494,11 +500,16 @@ static void draw_road_events(game_ctx_t *g, const tj_run_t *run, float pitch) {
     }
 }
 
+/* Non-buildable cells beside the road get a solid blocker object (stones/stakes) so
+ * "can't build here" reads from the art, not just a tint. Drawn near cell-size so the
+ * cell looks occupied. Sand-like variants are excluded on purpose. */
 static void draw_road_buffer(game_ctx_t *g, const tj_run_t *run, float pitch, float tile) {
-    const uint32_t variants[] = {g->buffer_edge_stones, g->buffer_packed_sand, g->buffer_stakes, g->buffer_cart_marks};
+    (void)tile;
+    const uint32_t variants[] = {g->buffer_edge_stones, g->buffer_stakes, g->buffer_cart_marks, g->decor_stones};
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
-    const Clay_Color fallback = {92.0F, 78.0F, 58.0F, 155.0F};
+    const float bsz = pitch * 0.86F;
+    const Clay_Color fallback = {120.0F, 104.0F, 78.0F, 235.0F};
     for (int gy = 0; gy < rows; gy++) {
         for (int gx = 0; gx < cols; gx++) {
             if (!is_buffer_cell(run, gx, gy)) {
@@ -508,9 +519,9 @@ static void draw_road_buffer(game_ctx_t *g, const tj_run_t *run, float pitch, fl
             const float x = grid_x(gx, cols, pitch);
             const float y = grid_y(gy, rows, pitch);
             if (has_region(region)) {
-                map_sprite(g, region, tile, tile, x, y, 3);
+                map_sprite(g, region, bsz, bsz, x, y, 3);
             } else {
-                map_rect_sprite(g, fallback, tile, tile, x, y);
+                map_rect_sprite(g, fallback, bsz, bsz, x, y);
             }
         }
     }
@@ -731,7 +742,8 @@ static void draw_hero(game_ctx_t *g, const tj_run_t *run, float pitch) {
     const float hs = pitch * 0.40F;
     const uint32_t region = hero_region(g, run);
     if (has_region(region)) {
-        map_sprite(g, region, pitch, pitch, hx, hy, 6);
+        /* Hero a bit larger than a cell and lifted so it stands ON the trail, not in it. */
+        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy - (pitch * 0.18F), 6);
     } else {
         map_rect_sprite(g, (Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}, hs, hs, hx, hy);
     }
