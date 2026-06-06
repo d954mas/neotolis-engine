@@ -191,6 +191,9 @@ struct nt_ui_context {
     uint32_t inspector_collapsed_count;
 
     nt_ui_inspector_metrics_t inspector_metrics;
+    /* Optional overlay materials (typically depth_test=false); 0 = fall back to the game's sprite/text material. */
+    nt_material_t inspector_sprite_material;
+    nt_material_t inspector_text_material;
 #endif /* NT_UI_DEBUG_TOOLS */
 
     Clay_Arena clay_arena;

@@ -1512,6 +1512,22 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
     }
 
+#if NT_UI_DEBUG_TOOLS
+    /* DEBUG_INSPECTOR: render with the inspector's own overlay materials (typically depth-off) when the
+     * game supplied them, so the debug view stays on top without touching the game scene's depth.
+     * Restored at exit-flush. After the early-outs, the path to exit has no further returns. */
+    const nt_material_t saved_sprite_mat = ctx->sprite_material;
+    const nt_material_t saved_text_mat = ctx->text_material;
+    if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
+        if (ctx->inspector_sprite_material.id != 0) {
+            ctx->sprite_material = ctx->inspector_sprite_material;
+        }
+        if (ctx->inspector_text_material.id != 0) {
+            ctx->text_material = ctx->inspector_text_material;
+        }
+    }
+#endif
+
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
@@ -1641,6 +1657,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 #endif
     }
 #if NT_UI_DEBUG_TOOLS
+    /* Restore the game's materials swapped in for the inspector pass. */
+    ctx->sprite_material = saved_sprite_mat;
+    ctx->text_material = saved_text_mat;
     /* Inspector strings backed by module-level rings are now consumed; release ownership. */
     if (should_release_inspector_strings(ctx, mode)) {
         nt_ui_internal_inspector_strings_release(ctx);

@@ -129,7 +129,9 @@ static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
-static nt_material_t s_text_material_3d; /* world-space text that writes + tests depth */
+static nt_material_t s_text_material_3d;          /* world-space text that writes + tests depth */
+static nt_material_t s_inspector_sprite_material; /* depth-off overlay materials for the F2 inspector */
+static nt_material_t s_inspector_text_material;
 static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
@@ -875,6 +877,31 @@ int main(int argc, char *argv[]) {
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ctx, s_text_material);
+    /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
+     * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
+    s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_sprite_vs_handle,
+        .fs = s_sprite_fs_handle,
+        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
+        .texture_count = 1,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .label = "ui_3d_demo_inspector_sprite",
+    });
+    s_inspector_text_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_text_vs_handle,
+        .fs = s_text_fs_handle,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
+        .label = "ui_3d_demo_inspector_text",
+    });
+    nt_ui_inspector_set_materials(s_ctx, s_inspector_sprite_material, s_inspector_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .curve_texture_width = 1024,
@@ -907,6 +934,8 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_destroy(s_text_material_3d);
+    nt_material_destroy(s_inspector_sprite_material);
+    nt_material_destroy(s_inspector_text_material);
     nt_material_shutdown();
     nt_stats_shutdown();
     nt_mem_scratch_shutdown();

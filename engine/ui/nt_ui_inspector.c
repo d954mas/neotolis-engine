@@ -36,6 +36,13 @@ void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_met
     NT_ASSERT(metrics->font_size > 0U && "nt_ui_inspector_set_metrics: font_size must be > 0");
     ctx->inspector_metrics = *metrics;
 }
+
+void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text) {
+    NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_materials: ctx must be non-NULL");
+    /* 0 handles fall back to the game's sprite/text material at walk time. */
+    ctx->inspector_sprite_material = sprite;
+    ctx->inspector_text_material = text;
+}
 // #endregion
 
 // #region toggle + getters
