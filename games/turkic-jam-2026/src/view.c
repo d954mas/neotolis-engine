@@ -90,8 +90,11 @@ static bool has_region(uint32_t region) { return region != 0U && region != NT_AT
 /* World-space map render state. The map (ground/road/aul/field/hero) is drawn by
  * the sprite renderer, NOT Clay — so the per-cell count is off the UI element
  * budget. tj_view_world sets these each frame from the "map" viewport bbox. */
-static float s_world_m[16];      /* Clay layout-space -> GL world (Y-flip around logical_h). */
-static float s_map_cx, s_map_cy; /* viewport centre, logical coords; map offsets are relative to it. */
+static float s_world_m[16];       /* Clay layout-space -> GL world (Y-flip around logical_h). */
+static float s_map_cx, s_map_cy;  /* viewport centre, logical coords; map offsets are relative to it. */
+static float s_map_vw = 360.0F;   /* viewport size (the "map" element bbox). */
+static float s_map_vh = 360.0F;   //
+static float s_map_pitch = 40.0F; /* cell size (px); set by the render handler, read by Clay catchers. */
 
 static uint8_t clamp_u8(float v) {
     if (v <= 0.0F) {
@@ -149,6 +152,8 @@ static void set_world_from_frame(const nt_ui_custom_frame_t *frame) {
     const Clay_BoundingBox bb = cmd->boundingBox;
     s_map_cx = bb.x + (bb.width * 0.5F);
     s_map_cy = bb.y + (bb.height * 0.5F);
+    s_map_vw = bb.width;
+    s_map_vh = bb.height;
     memcpy(s_world_m, frame->world_mat4, sizeof s_world_m);
 }
 
@@ -350,9 +355,12 @@ static void draw_ground(game_ctx_t *g, const tj_run_t *run, float pitch, float t
         map_rect_sprite(g, (Clay_Color){54.0F, 48.0F, 36.0F, 255.0F}, (float)cols * pitch, (float)rows * pitch, 0.0F, 0.0F);
         return;
     }
+    (void)tile;
+    /* Full-pitch tiles, 1px overlap, so the ground reads as one continuous map (no gaps). */
+    const float gsz = pitch + 1.0F;
     for (int gy = 0; gy < rows; gy++) {
         for (int gx = 0; gx < cols; gx++) {
-            map_sprite(g, g->ground_sand_base, tile, tile, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 0);
+            map_sprite(g, g->ground_sand_base, gsz, gsz, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 0);
         }
     }
 }
@@ -790,7 +798,10 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     }
     set_world_from_frame(frame);
     const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
-    const float pitch = MAP_SIZE / (float)(maxdim + 1);
+    /* Pitch fills the viewport's short side (1-cell margin) -> big, gapless tiles.
+     * Stored so the Clay catchers (built before this runs) align next frame. */
+    const float pitch = floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1));
+    s_map_pitch = pitch;
     const float tile = pitch * 0.66F;
     nt_sprite_renderer_set_material(g->sprite_material);
     draw_ground(g, run, pitch, tile);
@@ -812,8 +823,9 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
     if (run->grid_cols < 2 || run->grid_rows < 2 || run->path_cells < 1) {
         return; /* loop not generated yet */
     }
-    const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
-    const float pitch = MAP_SIZE / (float)(maxdim + 1);
+    /* Use the pitch the render handler computed last frame (viewport-fitted), so the
+     * Clay interaction catchers line up with the sprite cells. */
+    const float pitch = s_map_pitch;
     const float tile = pitch * 0.66F; /* placed objects beside the trail */
 
     /* Viewport element: grows to fill the centre gap. The map WORLD is drawn by the
