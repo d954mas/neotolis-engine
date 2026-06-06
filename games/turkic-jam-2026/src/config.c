@@ -112,6 +112,8 @@ static void set_defaults(void) {
     g_config.path_cells = 12;
     g_config.laps_to_win = 10;
     g_config.start_stamina = 10;
+    g_config.pouch_start = 3;
+    g_config.pouch_per_circle = 3;
     g_config.move_seconds_per_cell = 0.6F;
     g_config.aul_exit_seconds = 2.0F;
     g_config.road_entry_seconds = 0.7F;
@@ -131,6 +133,32 @@ static void set_defaults(void) {
     g_config.check_difficulty_per_circle = 1;
     g_config.check_fail_stamina_loss = 2;
     g_config.check_fail_reward_pct = 50;
+    g_config.combat_dmg_base = 1;
+    g_config.combat_atk_base = 0.55F;
+    g_config.combat_spd_mul = 0.35F;
+    g_config.combat_vit_hp = 2;
+    g_config.combat_vit_def = 1;
+    g_config.enemy_atk_interval = 0.85F;
+    g_config.enemy_hp_base = 3;
+    g_config.enemy_hp_per_diff = 2;
+    g_config.enemy_atk_base = 1;
+    g_config.enemy_atk_per_diff = 1;
+    g_config.elite_hp_pct = 180;
+    g_config.elite_atk_pct = 140;
+    g_config.boss_hp_pct = 300;
+    g_config.boss_atk_pct = 180;
+    g_config.event_die = 10;
+    g_config.event_dice_coeff = 0.25F;
+    g_config.event_dc_base = 4;
+    g_config.event_dc_per_circle = 2;
+    g_config.event_pass_supplies = 3;
+    g_config.event_fail_hp = 2;
+    g_config.event_reveal_seconds = 1.5F;
+    g_config.arch_fat_hp_pct = 200;
+    g_config.arch_fast_interval_pct = 50;
+    g_config.arch_fast_hp_pct = 70;
+    g_config.arch_fierce_atk_pct = 200;
+    g_config.rest_heal_pct = 25;
     g_config.tamga_wisdom_base = 3;
     g_config.tamga_wisdom_per_circle = 3;
     g_config.tamga_wisdom_slot_div = 3;
@@ -154,6 +182,8 @@ static void apply_ini(const char *k, const char *v) {
         {"path_cells", &g_config.path_cells, NULL},
         {"laps_to_win", &g_config.laps_to_win, NULL},
         {"start_stamina", &g_config.start_stamina, NULL},
+        {"pouch_start", &g_config.pouch_start, NULL},
+        {"pouch_per_circle", &g_config.pouch_per_circle, NULL},
         {"move_seconds_per_cell", NULL, &g_config.move_seconds_per_cell},
         {"aul_exit_seconds", NULL, &g_config.aul_exit_seconds},
         {"road_entry_seconds", NULL, &g_config.road_entry_seconds},
@@ -174,6 +204,32 @@ static void apply_ini(const char *k, const char *v) {
         {"check_difficulty_per_circle", &g_config.check_difficulty_per_circle, NULL},
         {"check_fail_stamina_loss", &g_config.check_fail_stamina_loss, NULL},
         {"check_fail_reward_pct", &g_config.check_fail_reward_pct, NULL},
+        {"combat_dmg_base", &g_config.combat_dmg_base, NULL},
+        {"combat_atk_base", NULL, &g_config.combat_atk_base},
+        {"combat_spd_mul", NULL, &g_config.combat_spd_mul},
+        {"combat_vit_hp", &g_config.combat_vit_hp, NULL},
+        {"combat_vit_def", &g_config.combat_vit_def, NULL},
+        {"enemy_atk_interval", NULL, &g_config.enemy_atk_interval},
+        {"enemy_hp_base", &g_config.enemy_hp_base, NULL},
+        {"enemy_hp_per_diff", &g_config.enemy_hp_per_diff, NULL},
+        {"enemy_atk_base", &g_config.enemy_atk_base, NULL},
+        {"enemy_atk_per_diff", &g_config.enemy_atk_per_diff, NULL},
+        {"elite_hp_pct", &g_config.elite_hp_pct, NULL},
+        {"elite_atk_pct", &g_config.elite_atk_pct, NULL},
+        {"boss_hp_pct", &g_config.boss_hp_pct, NULL},
+        {"boss_atk_pct", &g_config.boss_atk_pct, NULL},
+        {"event_die", &g_config.event_die, NULL},
+        {"event_dice_coeff", NULL, &g_config.event_dice_coeff},
+        {"event_dc_base", &g_config.event_dc_base, NULL},
+        {"event_dc_per_circle", &g_config.event_dc_per_circle, NULL},
+        {"event_pass_supplies", &g_config.event_pass_supplies, NULL},
+        {"event_fail_hp", &g_config.event_fail_hp, NULL},
+        {"event_reveal_seconds", NULL, &g_config.event_reveal_seconds},
+        {"arch_fat_hp_pct", &g_config.arch_fat_hp_pct, NULL},
+        {"arch_fast_interval_pct", &g_config.arch_fast_interval_pct, NULL},
+        {"arch_fast_hp_pct", &g_config.arch_fast_hp_pct, NULL},
+        {"arch_fierce_atk_pct", &g_config.arch_fierce_atk_pct, NULL},
+        {"rest_heal_pct", &g_config.rest_heal_pct, NULL},
         {"tamga_wisdom_base", &g_config.tamga_wisdom_base, NULL},
         {"tamga_wisdom_per_circle", &g_config.tamga_wisdom_per_circle, NULL},
         {"tamga_wisdom_slot_div", &g_config.tamga_wisdom_slot_div, NULL},
@@ -276,6 +332,10 @@ static void parse_tiles(const char *path) {
         d->stamina_cost = to_int(fld[9]);
         d->stamina_restore = to_int(fld[10]);
         d->placement = (n >= 12) ? placement_from(fld[11]) : TJ_PLACE_ROADSIDE;
+        d->line = (n >= 13) ? to_int(fld[12]) : 0;
+        d->tier = (n >= 14) ? to_int(fld[13]) : 0;
+        d->boost_stat = (n >= 15) ? stat_from(fld[14]) : TJ_STAT_NONE;
+        d->boost_amount = (n >= 16) ? to_int(fld[15]) : 0;
     }
     (void)fclose(f);
 }

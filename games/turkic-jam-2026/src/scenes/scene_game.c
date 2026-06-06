@@ -26,6 +26,9 @@
 #endif
 
 static tj_run_t s_run;
+static bool s_banked = false;    /* death banked into the aul once per run */
+static int s_drag_card = -1;     /* hand card being dragged onto the field (-1 = none) */
+static bool s_help_open = false; /* "?" how-to modal toggled open */
 
 #if NT_DEVAPI_ENABLED
 /* devapi: live run state for bots/tests. */
@@ -33,11 +36,12 @@ static int ep_run(int c, char **v, char *o, int cap, void *u) {
     (void)c;
     (void)v;
     (void)u;
-    return snprintf(o, (size_t)cap,
-                    "{\"circle\":%d,\"day\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"packs\":%d,\"pack_open\":%s,\"hand\":%d,\"tamga_cell\":%d,\"stamina\":%d,\"supplies\":%d,\"wisdom\":%d,"
-                    "\"glory\":%d,\"alive\":%s,\"won\":%s}",
-                    s_run.circle, s_run.day, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.packs, s_run.pack_open ? "true" : "false", s_run.hand, s_run.tamga_cell, s_run.stamina,
-                    s_run.supplies, s_run.wisdom, s_run.glory, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
+    return snprintf(
+        o, (size_t)cap,
+        "{\"circle\":%d,\"day\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"hand_count\":%d,\"pouch\":%d,\"in_combat\":%s,\"in_event\":%s,\"tamga_cell\":%d,\"stamina\":%d,\"stamina_max\":%d,"
+        "\"supplies\":%d,\"alive\":%s,\"won\":%s}",
+        s_run.circle, s_run.day, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.hand_count, s_run.pouch, s_run.in_combat ? "true" : "false", s_run.in_event ? "true" : "false", s_run.tamga_cell,
+        s_run.stamina, s_run.stamina_max, s_run.supplies, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
 }
 
 /* devapi: recent event-log lines (newest last), for reading the run narrative. */
@@ -115,7 +119,7 @@ static int ep_choose(int c, char **v, char *o, int cap, void *u) {
         }
     }
     tj_run_choose_card(&s_run, idx);
-    return snprintf(o, (size_t)cap, "{\"packs\":%d,\"hand\":%d}", s_run.packs, s_run.hand);
+    return snprintf(o, (size_t)cap, "{\"packs\":%d,\"hand_count\":%d}", s_run.packs, s_run.hand_count);
 }
 
 /* devapi: end the run now (for testing death -> aul -> next heir). */
@@ -140,7 +144,39 @@ static int ep_place(int c, char **v, char *o, int cap, void *u) {
         }
     }
     const bool ok = tj_run_place_field(&s_run, gx, gy);
-    return snprintf(o, (size_t)cap, "{\"placed\":%s,\"gx\":%d,\"gy\":%d,\"hand\":%d}", ok ? "true" : "false", gx, gy, s_run.hand);
+    return snprintf(o, (size_t)cap, "{\"placed\":%s,\"gx\":%d,\"gy\":%d,\"hand_count\":%d}", ok ? "true" : "false", gx, gy, s_run.hand_count);
+}
+
+/* devapi: lift a placed building into the (empty) hand. "game.pickup gx=<x> gy=<y>" */
+static int ep_pickup(int c, char **v, char *o, int cap, void *u) {
+    (void)u;
+    int gx = -1;
+    int gy = -1;
+    for (int i = 0; i < c; i++) {
+        if (strncmp(v[i], "gx=", 3) == 0) {
+            gx = (int)strtol(v[i] + 3, NULL, 10);
+        } else if (strncmp(v[i], "gy=", 3) == 0) {
+            gy = (int)strtol(v[i] + 3, NULL, 10);
+        }
+    }
+    const bool ok = tj_run_pickup_field(&s_run, gx, gy);
+    return snprintf(o, (size_t)cap, "{\"picked\":%s,\"hand_count\":%d}", ok ? "true" : "false", s_run.hand_count);
+}
+
+/* devapi (debug): force a specific card into hand by tile id. "game.give id=war_1" */
+static int ep_give(int c, char **v, char *o, int cap, void *u) {
+    (void)u;
+    char id[32] = {0};
+    for (int i = 0; i < c; i++) {
+        if (strncmp(v[i], "id=", 3) == 0) {
+            (void)snprintf(id, sizeof id, "%s", v[i] + 3);
+        }
+    }
+    const int t = tj_config_tile_index(id);
+    if (t >= 0 && s_run.hand_count < TJ_MAX_HAND) {
+        s_run.hand_cards[s_run.hand_count++] = t;
+    }
+    return snprintf(o, (size_t)cap, "{\"hand_count\":%d}", s_run.hand_count);
 }
 #endif
 
@@ -152,6 +188,8 @@ static void on_enter(game_ctx_t *g) {
         nt_devapi_register("game.log", ep_log, NULL);
         nt_devapi_register("game.path", ep_path, NULL);
         nt_devapi_register("game.place", ep_place, NULL);
+        nt_devapi_register("game.pickup", ep_pickup, NULL);
+        nt_devapi_register("game.give", ep_give, NULL);
         nt_devapi_register("game.openpack", ep_openpack, NULL);
         nt_devapi_register("game.choose", ep_choose, NULL);
         nt_devapi_register("game.kill", ep_kill, NULL);
@@ -162,10 +200,18 @@ static void on_enter(game_ctx_t *g) {
     if (g->prev == &SCENE_PAUSE) {
         return; /* resume: keep the run in progress */
     }
-    tj_run_start(&s_run, g->chosen_heir); /* archetype chosen on the heir-select screen */
+    tj_run_start(&s_run, g->chosen_heir); /* one champion of the clan */
+    s_banked = false;
 }
 
 static void on_exit(game_ctx_t *g) { g->run = NULL; }
+
+/* Start the next run in place (no gameover scene): re-roll the champion, clear flags. */
+static void start_new_run(game_ctx_t *g) {
+    g->score = 0;
+    s_banked = false;
+    tj_run_start(&s_run, g->chosen_heir);
+}
 
 /* Keyboard camera pan (arrows / WASD). */
 static void camera_keys(float dt) {
@@ -184,9 +230,9 @@ static void camera_keys(float dt) {
     }
 }
 
-/* Mouse on the map: a DRAG (press + move) scrolls the camera; a CLICK (press +
- * release without moving) places the held card on release. The reward modal owns
- * input while open, so the map is inert then. */
+/* Input. Press on a hand card -> drag it (StS-style); release over a buildable cell
+ * places it, else it snaps back. Press on the map -> drag scrolls the camera; a tap
+ * on a placed building lifts it into the fan (to move/merge). */
 static void handle_map_input(game_ctx_t *g, float dt) {
     static bool press_active = false;
     static bool dragged = false;
@@ -194,10 +240,6 @@ static void handle_map_input(game_ctx_t *g, float dt) {
     static float press_y = 0.0F;
     static float last_x = 0.0F;
     static float last_y = 0.0F;
-    if (s_run.pack_open) {
-        press_active = false;
-        return;
-    }
     camera_keys(dt);
     const float mx = g->ptr_x;
     const float my = g->ptr_y;
@@ -208,14 +250,17 @@ static void handle_map_input(game_ctx_t *g, float dt) {
         press_y = my;
         last_x = mx;
         last_y = my;
+        s_drag_card = tj_view_hand_index_at(&s_run, mx, my); /* >=0 if grabbing a card from the fan */
         return;
     }
     if (press_active && nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
-        if (!dragged && (fabsf(mx - press_x) + fabsf(my - press_y)) > 8.0F) {
-            dragged = true; /* moved past the threshold -> it's a scroll, not a tap */
-        }
-        if (dragged) {
-            tj_view_world_pan(mx - last_x, my - last_y); /* grab-the-map scroll */
+        if (s_drag_card < 0) { /* map press: a move past threshold = camera scroll */
+            if (!dragged && (fabsf(mx - press_x) + fabsf(my - press_y)) > 8.0F) {
+                dragged = true;
+            }
+            if (dragged) {
+                tj_view_world_pan(mx - last_x, my - last_y);
+            }
         }
         last_x = mx;
         last_y = my;
@@ -225,8 +270,14 @@ static void handle_map_input(game_ctx_t *g, float dt) {
         press_active = false;
         int gx = -1;
         int gy = -1;
-        if (!dragged && s_run.hand >= 0 && tj_view_world_cell_at(mx, my, &gx, &gy) && !tj_run_place_field(&s_run, gx, gy)) {
-            tj_journal_push(TJ_LOG_BAD, "Здесь нельзя строить — выбери свободную клетку поля.");
+        const bool on_cell = tj_view_world_cell_at(mx, my, &gx, &gy);
+        if (s_drag_card >= 0) {
+            if (on_cell && !tj_run_place_card(&s_run, s_drag_card, gx, gy)) {
+                tj_journal_push(TJ_LOG_BAD, "Сюда нельзя — тяни на зелёную клетку за дорогой.");
+            }
+            s_drag_card = -1; /* dropped: placed, or snapped back to the fan */
+        } else if (!dragged && on_cell) {
+            tj_run_pickup_field(&s_run, gx, gy); /* lift a placed building to move it */
         }
     }
 }
@@ -245,22 +296,43 @@ static void on_update(game_ctx_t *g, float dt) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
             tj_view_log(g, 10);
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { tj_view_map(g, &s_run); }
-            tj_view_hero_panel(g, &s_run);
+            if (s_run.alive && !s_run.won) {
+                tj_view_hero_panel(g, &s_run);
+            } else if (tj_view_aul_panel(g, &s_run)) {
+                start_new_run(g); /* "Новый забег" pressed in the aul panel */
+            }
         }
-        tj_view_card_hand(g, &s_run);
-        tj_view_pack_overlay(g, &s_run); /* reward modal: full-screen, above the clipped map */
+        tj_view_card_hand(g, &s_run, s_drag_card);
+        if (tj_view_help_button(g)) {
+            s_help_open = !s_help_open; /* "?" toggles the how-to modal */
+        }
+        if (s_help_open && tj_view_help_modal(g)) {
+            s_help_open = false; /* "Понятно" closes it */
+        }
+        tj_view_action_overlay(g, &s_run); /* combat / dice window, above the map */
+        if (s_drag_card >= 0) {
+            tj_view_drag_overlay(g, &s_run, s_drag_card); /* dragged card + targeting arrow */
+        }
+        if (!s_run.alive || s_run.won) {
+            tj_view_death_overlay(g, &s_run); /* run-over veil + text (passthrough, above map) */
+        }
     }
 
-    if (!s_run.alive) {
-        tj_tamga_spawn(s_run.cell, s_run.circle);                       /* leave the Last Tamga where the heir fell */
+    /* Run over (death or victory): bank once into the aul, then stay in-scene — the
+     * right panel becomes the aul (results + upgrades + "Новый забег"). No gameover scene. */
+    if ((!s_run.alive || s_run.won) && !s_banked) {
+        if (!s_run.alive) {
+            tj_tamga_spawn(s_run.cell, s_run.circle); /* leave the Last Tamga where the heir fell */
+        }
         tj_aul_add_from_run(s_run.supplies, s_run.wisdom, s_run.glory); /* bank into the aul (meta) */
         g->score = s_run.circle;
         if (g->score > g->best) {
             g->best = g->score;
         }
-        game_goto(g, &SCENE_GAMEOVER);
-    } else if (s_run.won) {
-        game_goto(g, &SCENE_MENU);
+        s_banked = true;
+    }
+    if (!s_run.alive || s_run.won) {
+        s_run.death_t += dt; /* drive the run-over veil animation */
     }
 }
 

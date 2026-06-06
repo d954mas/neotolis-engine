@@ -16,6 +16,7 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_label.h"
 
+#include "aul.h"
 #include "config.h"
 #include "i18n.h"
 #include "journal.h"
@@ -35,6 +36,7 @@ static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20,
 static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {232.0F, 222.0F, 202.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_die = {.font_id = 0, .font_size = 44, .color = {40.0F, 28.0F, 18.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
 #define TJ_PANEL_BG {35.0F, 31.0F, 24.0F, 255.0F}
 #define TJ_BAR_BG {31.0F, 28.0F, 22.0F, 255.0F}
@@ -290,18 +292,6 @@ static uint32_t card_art_region_for_id(const game_ctx_t *g, const char *id) {
     return NT_ATLAS_INVALID_REGION;
 }
 
-static uint32_t placement_icon_region(const game_ctx_t *g, tj_placement_t placement) {
-    switch (placement) {
-    case TJ_PLACE_ROADSIDE:
-        return g->card_placement_roadside_32;
-    case TJ_PLACE_FIELD:
-        return g->card_placement_field_32;
-    case TJ_PLACE_ROAD:
-        return g->card_placement_special_32;
-    default:
-        return NT_ATLAS_INVALID_REGION;
-    }
-}
 // #endregion
 
 static void hud_chip(game_ctx_t *g, uint32_t icon_region, const char *text) {
@@ -336,15 +326,11 @@ static const char *pick_lang(const char *en, const char *ru, const char *tr) {
 void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
     static char circle[40];
     static char sup[28];
-    static char wis[28];
-    static char glo[28];
     static char sta[28];
     static char day[24];
     (void)snprintf(circle, sizeof circle, "%s %d/%d", pick_lang("Circle", "Круг", "Dongu"), run->circle, g_config.laps_to_win);
-    (void)snprintf(sup, sizeof sup, "%s %d", pick_lang("Supplies", "Запасы", "Azik"), run->supplies);
-    (void)snprintf(wis, sizeof wis, "%s %d", pick_lang("Wisdom", "Мудрость", "Bilgelik"), run->wisdom);
-    (void)snprintf(glo, sizeof glo, "%s %d", pick_lang("Glory", "Слава", "San"), run->glory);
-    (void)snprintf(sta, sizeof sta, "%s %d", pick_lang("Stamina", "Силы", "Guc"), run->stamina);
+    (void)snprintf(sup, sizeof sup, "%s %d", pick_lang("Supplies", "Припасы", "Azik"), run->supplies);
+    (void)snprintf(sta, sizeof sta, "%s %d/%d", pick_lang("HP", "ХП", "CAN"), run->stamina, run->stamina_max);
     (void)snprintf(day, sizeof day, "%s %d", pick_lang("Day", "День", "Gun"), run->day);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64)},
                      .padding = {16, 16, 10, 10},
@@ -353,8 +339,6 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_BAR_BG}) {
         hud_chip(g, g->icon_supplies_32, sup);
-        hud_chip(g, g->icon_wisdom_32, wis);
-        hud_chip(g, g->icon_glory_32, glo);
         hud_spacer();
         hud_chip(g, g->icon_circle_32, circle);
         hud_spacer();
@@ -496,19 +480,37 @@ static void draw_road(game_ctx_t *g, const tj_run_t *run, float pitch) {
     for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
         map_sprite(g, road_region_for_path_cell(g, run, i), pitch, pitch, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 2);
     }
-    if (run->cell >= 0 && run->cell < run->path_cells && has_region(g->road_current_highlight)) {
-        map_sprite(g, g->road_current_highlight, pitch, pitch, grid_x(run->path_gx[run->cell], cols, pitch), grid_y(run->path_gy[run->cell], rows, pitch), 5);
-    }
 }
 
-/* Road events (scope on_enter): a kind-coloured marker sitting on the trail. */
+/* What sits on each road cell, drawn ON the trail: enemies/boss as creatures
+ * (boss biggest), events/rest as small markers. Trail cells stay clean. */
 static void draw_road_events(game_ctx_t *g, const tj_run_t *run, float pitch) {
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
-    const float m = pitch * 0.5F;
     for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
-        if (run->tile_at[i] >= 0) {
-            map_rect_sprite(g, cell_color(run->tile_at[i]), m, m, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch));
+        const float x = grid_x(run->path_gx[i], cols, pitch);
+        const float y = grid_y(run->path_gy[i], rows, pitch);
+        const tj_cell_role_t role = (tj_cell_role_t)run->cell_role[i];
+        if (role == TJ_CELL_FIGHT || role == TJ_CELL_ELITE || role == TJ_CELL_BOSS) {
+            float sz = pitch * 0.72F;
+            Clay_Color fb = {205.0F, 110.0F, 88.0F, 255.0F};
+            if (role == TJ_CELL_ELITE) {
+                sz = pitch * 0.9F;
+                fb = (Clay_Color){226.0F, 150.0F, 70.0F, 255.0F};
+            } else if (role == TJ_CELL_BOSS) {
+                sz = pitch * 1.06F;
+                fb = (Clay_Color){214.0F, 72.0F, 70.0F, 255.0F};
+            }
+            const uint32_t region = tile_region_for_index(g, run->tile_at[i]);
+            if (has_region(region)) {
+                map_sprite(g, region, sz, sz, x, y, 6);
+            } else {
+                map_rect_sprite(g, fb, sz, sz, x, y);
+            }
+        } else if (role == TJ_CELL_EVENT) {
+            map_rect_sprite(g, (Clay_Color){92.0F, 172.0F, 202.0F, 255.0F}, pitch * 0.5F, pitch * 0.5F, x, y);
+        } else if (role == TJ_CELL_REST) {
+            map_rect_sprite(g, (Clay_Color){120.0F, 190.0F, 110.0F, 255.0F}, pitch * 0.42F, pitch * 0.42F, x, y);
         }
     }
 }
@@ -779,15 +781,22 @@ static void cell_overlay(game_ctx_t *g, uint32_t region, Clay_Color fallback, fl
     }
 }
 
-/* Placement cue: only while a card is held, and only on the cell under the
- * cursor — green hover frame if buildable, red invalid frame if blocked. Keeps
- * the field uncluttered (no all-cells highlight). */
+/* Placement cue while a card is held: a faint green frame on EVERY buildable cell
+ * (so "where do I build?" reads instantly), plus a stronger frame under the cursor. */
 static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
-    if (run->hand < 0) {
+    if (run->hand_count <= 0) {
         return;
     }
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
+    for (int gy = 0; gy < rows; gy++) {
+        for (int gx = 0; gx < cols; gx++) {
+            if (!is_build_cell(run, gx, gy) || !cell_in_view(gx, gy, cols, rows, pitch)) {
+                continue;
+            }
+            cell_overlay(g, g->ui_valid_cell_overlay_128, (Clay_Color){150.0F, 230.0F, 160.0F, 90.0F}, pitch, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
+        }
+    }
     int hgx = -1;
     int hgy = -1;
     if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy) || !cell_in_view(hgx, hgy, cols, rows, pitch)) {
@@ -795,7 +804,7 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     }
     const bool ok = is_build_cell(run, hgx, hgy);
     const uint32_t region = ok ? g->ui_hover_cell_overlay_128 : g->ui_invalid_cell_overlay_128;
-    const Clay_Color fb = ok ? (Clay_Color){160.0F, 255.0F, 175.0F, 190.0F} : (Clay_Color){236.0F, 110.0F, 92.0F, 150.0F};
+    const Clay_Color fb = ok ? (Clay_Color){160.0F, 255.0F, 175.0F, 220.0F} : (Clay_Color){236.0F, 110.0F, 92.0F, 180.0F};
     cell_overlay(g, region, fb, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
 }
 
@@ -874,31 +883,37 @@ static const char *tj_hero_name(const tj_run_t *run) {
     return pick_lang("Heir", "Наследник", "Varis");
 }
 
-static void equipment_slot(game_ctx_t *g, uint32_t slot_region, uint32_t item_region) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(52), CLAY_SIZING_FIXED(52)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {54.0F, 36.0F, 24.0F, 255.0F},
-          .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
-          .border = {.color = {132.0F, 92.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
-        floating_center_sprite(g, slot_region, 52.0F, 52.0F, 0);
-        floating_center_sprite(g, item_region, 34.0F, 34.0F, 1);
+/* Horizontal fill bar (HP / enemy HP): dark track + colored fill by fraction. */
+static void hp_bar(float frac, Clay_Color fill, float total) {
+    if (frac < 0.0F) {
+        frac = 0.0F;
+    }
+    if (frac > 1.0F) {
+        frac = 1.0F;
+    }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(total), CLAY_SIZING_FIXED(14)}}, .backgroundColor = {40.0F, 28.0F, 20.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(total * frac), CLAY_SIZING_FIXED(14)}}, .backgroundColor = fill, .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {}
     }
 }
 
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
-    static char body[20];
-    static char mind[20];
-    static char spirit[20];
-    static char sta[24];
+    static char force[40];
+    static char speed[40];
+    static char vigor[40];
+    static char sta[40];
+    static char enemyline[48];
     static char cellinfo[40];
-    (void)snprintf(body, sizeof body, "%s %d", pick_lang("Body", "Тело", "Beden"), run->body);
-    (void)snprintf(mind, sizeof mind, "%s %d", pick_lang("Mind", "Ум", "Akil"), run->mind);
-    (void)snprintf(spirit, sizeof spirit, "%s %d", pick_lang("Spirit", "Дух", "Ruh"), run->spirit);
-    (void)snprintf(sta, sizeof sta, "%s %d", pick_lang("Stamina", "Силы", "Guc"), run->stamina);
+    (void)snprintf(force, sizeof force, "%s %d", pick_lang("Force", "Сила", "Kuvvet"), run->body + run->bonus_force);
+    (void)snprintf(speed, sizeof speed, "%s %d", pick_lang("Speed", "Скорость", "Hiz"), run->mind + run->bonus_speed);
+    (void)snprintf(vigor, sizeof vigor, "%s %d", pick_lang("Vigor", "Выносливость", "Dayanma"), run->spirit + run->bonus_vigor);
+    (void)snprintf(sta, sizeof sta, "%s %d/%d", pick_lang("HP", "ХП", "CAN"), run->stamina, run->stamina_max);
     (void)snprintf(cellinfo, sizeof cellinfo, "%s %d / %d", pick_lang("Cell", "Клетка", "Hucre"), run->cell + 1, run->path_cells);
+    const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
+    const bool fighting = run->in_combat && run->combat_tile >= 0 && run->combat_tile < g_config.tile_count;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 12,
+                     .childGap = 10,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tj_hero_name(run), &s_panel_title);
@@ -907,30 +922,227 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
               .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
             floating_center_sprite(g, g->hero_wayfarer_panel, 96.0F, 132.0F, 0);
         }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            equipment_slot(g, g->equip_slot_weapon_01, g->equip_weapon_staff_01);
-            equipment_slot(g, g->equip_slot_clothes_01, g->equip_clothes_cloak_01);
-            equipment_slot(g, g->equip_slot_tamga_01, g->equip_tamga_charm_01);
-            equipment_slot(g, g->equip_slot_tool_01, g->equip_tool_satchel_01);
-        }
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), body, &s_stat);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mind, &s_stat);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), spirit, &s_stat);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
+        hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 250.0F);
+        if (fighting) {
+            const int emax = (run->combat_enemy_max > 0) ? run->combat_enemy_max : 1;
+            (void)snprintf(enemyline, sizeof enemyline, "%s", run->combat_label[0] ? run->combat_label : g_config.tiles[run->combat_tile].name);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), enemyline, &s_stat);
+            hp_bar((float)run->combat_enemy_hp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, 250.0F);
+        }
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), force, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), speed, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), vigor, &s_stat);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cellinfo, &s_dim);
     }
 }
 
-static void card_surface(game_ctx_t *g, uint32_t region) {
-    if (!has_region(region)) {
+/* Right panel when the run is over: result + aul upgrades + "Новый забег".
+ * Returns true if the player pressed "Новый забег". */
+bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
+    static char head[48];
+    static char res[40];
+    static char sup[40];
+    static char u0[48];
+    static char u1[48];
+    static char u2[48];
+    static char u3[48];
+    (void)snprintf(head, sizeof head, "%s", run->won ? "Кольцо разорвано!" : "Наследник пал");
+    (void)snprintf(res, sizeof res, "Дошёл до круга %d", run->circle);
+    (void)snprintf(sup, sizeof sup, "Аул · припасы %d", g_aul.supplies);
+    (void)snprintf(u0, sizeof u0, "+Сила  ур.%d  (%d)", g_aul.up_force, tj_aul_upgrade_cost(0));
+    (void)snprintf(u1, sizeof u1, "+Скорость  ур.%d  (%d)", g_aul.up_speed, tj_aul_upgrade_cost(1));
+    (void)snprintf(u2, sizeof u2, "+Выносл.  ур.%d  (%d)", g_aul.up_vigor, tj_aul_upgrade_cost(2));
+    (void)snprintf(u3, sizeof u3, "+Наследие  ур.%d  (%d)", g_aul.up_keep, tj_aul_upgrade_cost(3));
+    bool newrun = false;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
+                     .padding = CLAY_PADDING_ALL(16),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 8,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = TJ_PANEL_BG}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), head, &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), res, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sup, &s_dim);
+        if (tj_button(g, "aul_f", u0, 258, 44, TJ_BTN_SECONDARY)) {
+            tj_aul_upgrade(0);
+        }
+        if (tj_button(g, "aul_s", u1, 258, 44, TJ_BTN_SECONDARY)) {
+            tj_aul_upgrade(1);
+        }
+        if (tj_button(g, "aul_v", u2, 258, 44, TJ_BTN_SECONDARY)) {
+            tj_aul_upgrade(2);
+        }
+        if (tj_button(g, "aul_k", u3, 258, 44, TJ_BTN_SECONDARY)) {
+            tj_aul_upgrade(3);
+        }
+        if (tj_button(g, "aul_new", "Новый забег", 258, 58, TJ_BTN_PRIMARY)) {
+            newrun = true;
+        }
+    }
+    return newrun;
+}
+
+/* Fullscreen run-over veil (fades in via death_t) + big verdict. Passthrough so the
+ * aul panel underneath stays clickable. */
+void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run) {
+    const bool won = run->won;
+    float a = run->death_t * 140.0F;
+    const float amax = won ? 110.0F : 140.0F;
+    if (a > amax) {
+        a = amax;
+    }
+    const Clay_Color veil = won ? (Clay_Color){18.0F, 40.0F, 18.0F, a} : (Clay_Color){92.0F, 16.0F, 12.0F, a};
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                       .zIndex = 45,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = veil}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), won ? "ПОБЕДА" : "СМЕРТЬ", &s_die);
+    }
+}
+
+/* One fighter line in the corner combat window: small portrait + name + HP bar + value/dmg. */
+static void compact_fighter(game_ctx_t *g, uint32_t sprite, const char *name, float frac, Clay_Color hpcol, const char *hpval, const char *dmg, bool show_dmg, const nt_ui_label_style_t *dmgstyle) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(54)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {60.0F, 42.0F, 28.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(8.0F)}) {
+            floating_center_sprite(g, sprite, 44.0F, 44.0F, 0);
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, &s_stat);
+            hp_bar(frac, hpcol, 200.0F);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hpval, &s_dim);
+                if (show_dmg) {
+                    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dmg, dmgstyle);
+                }
+            }
+        }
+    }
+}
+
+/* Centered dice-event window: die rolls (spins then locks), then stat x multiplier
+ * = effect vs DC, then success/fail — revealed over run->event_t. */
+static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
+    static char dnum[8];
+    static char mathline[56];
+    static char resline[40];
+    const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 1.5F;
+    const float t = run->event_t;
+    const bool spinning = t < dur * 0.45F;
+    const bool show_math = t >= dur * 0.45F;
+    const bool show_res = t >= dur * 0.72F;
+    int shown = run->ev_roll;
+    if (spinning && run->ev_die > 0) {
+        shown = ((int)(t * 53.0F) % run->ev_die) + 1; /* cycling face while rolling */
+    }
+    (void)snprintf(dnum, sizeof dnum, "%d", shown);
+    const float mult = 1.0F + (g_config.event_dice_coeff * (float)run->ev_roll);
+    const int eff = (int)((float)run->ev_stat * mult);
+    (void)snprintf(mathline, sizeof mathline, "%s %d  x%.2f  = %d", run->ev_statname, run->ev_stat, (double)mult, eff);
+    (void)snprintf(resline, sizeof resline, "DC %d  ->  %s", run->ev_dc, run->ev_pass ? "УСПЕХ" : "ПРОВАЛ");
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 60},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {16.0F, 12.0F, 8.0F, 150.0F}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(460), CLAY_SIZING_FIT(0)},
+                         .padding = CLAY_PADDING_ALL(22),
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 14,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {40.0F, 34.0F, 24.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
+              .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->ev_name, &s_panel_title);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = {232.0F, 224.0F, 206.0F, 255.0F},
+                  .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dnum, &s_die);
+            }
+            if (show_math) {
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
+            }
+            if (show_res) {
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_log_styles[TJ_LOG_GOOD] : &s_log_styles[TJ_LOG_BAD]);
+            }
+        }
+    }
+}
+
+/* Centered combat window: hero vs enemy, HP bars, floating damage numbers. */
+void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
+    if (run->in_event) {
+        event_overlay(g, run);
         return;
     }
-    const nt_ui_image_style_t img = nt_ui_image_style_defaults();
-    const Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(112.0F), CLAY_SIZING_FIXED(128.0F)}},
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 0},
-    };
-    nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
+    if (!run->in_combat) {
+        return;
+    }
+    static char hpv[24];
+    static char ehpv[24];
+    static char hdmg[12];
+    static char edmg[12];
+    const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
+    const int emax = (run->combat_enemy_max > 0) ? run->combat_enemy_max : 1;
+    const int ehp = (run->combat_enemy_hp < 0) ? 0 : run->combat_enemy_hp;
+    const char *ename = (run->combat_tile >= 0 && run->combat_tile < g_config.tile_count) ? g_config.tiles[run->combat_tile].name : "Враг";
+    (void)snprintf(hpv, sizeof hpv, "%d/%d", run->stamina, smax);
+    (void)snprintf(ehpv, sizeof ehpv, "%d/%d", ehp, emax);
+    (void)snprintf(hdmg, sizeof hdmg, "-%d", run->fx_hero_dmg);
+    (void)snprintf(edmg, sizeof edmg, "-%d", run->fx_enemy_dmg);
+    const uint32_t eregion = tile_region_for_index(g, run->combat_tile);
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_BOTTOM, .parent = CLAY_ATTACH_POINT_RIGHT_BOTTOM},
+                       .offset = {-14.0F, -172.0F}, /* bottom-right corner, just above the hand bar */
+                       .zIndex = 58,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH}, /* don't block merging on the field */
+          .layout = {.sizing = {CLAY_SIZING_FIXED(330), CLAY_SIZING_FIT(0)},
+                     .padding = CLAY_PADDING_ALL(12),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 8,
+                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {42.0F, 30.0F, 22.0F, 248.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
+          .border = {.color = {200.0F, 90.0F, 70.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->combat_label[0] ? run->combat_label : "Бой", &s_panel_title);
+        compact_fighter(g, g->hero_wayfarer_panel, pick_lang("Hero", "Чемпион", "Kahraman"), (float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, hpv, hdmg,
+                        run->fx_hero_t > 0.0F && run->fx_hero_dmg > 0, &s_log_styles[TJ_LOG_BAD]);
+        compact_fighter(g, has_region(eregion) ? eregion : 0U, ename, (float)ehp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, ehpv, edmg, run->fx_enemy_t > 0.0F && run->fx_enemy_dmg > 0,
+                        &s_log_styles[TJ_LOG_GOOD]);
+    }
+}
+
+/* Hand fan layout (screen/logical coords): cards in a row right of the pouch. */
+#define FAN_CARD_W 100.0F
+#define FAN_CARD_H 124.0F
+#define FAN_X0 224.0F
+#define FAN_STEP 74.0F /* per-card step (overlapping fan) */
+#define FAN_Y 556.0F   /* resting top-left y */
+#define FAN_LIFT 30.0F /* hovered/selected card rises this much */
+
+static float fan_cx(int i) { return FAN_X0 + ((float)i * FAN_STEP) + (FAN_CARD_W * 0.5F); }
+
+/* Screen centre of hand card `idx` (the drag arrow's origin). */
+static void fan_card_center(const tj_run_t *run, int idx, float *cx, float *cy) {
+    (void)run;
+    *cx = fan_cx(idx);
+    *cy = FAN_Y + (FAN_CARD_H * 0.5F);
+}
+
+/* Hand index under a logical point, or -1. Topmost (rightmost) card wins. */
+int tj_view_hand_index_at(const tj_run_t *run, float lx, float ly) {
+    if (ly < FAN_Y - FAN_LIFT || ly > FAN_Y + FAN_CARD_H) {
+        return -1;
+    }
+    for (int i = run->hand_count - 1; i >= 0; i--) {
+        const float cx = fan_cx(i);
+        if (lx >= cx - (FAN_CARD_W * 0.5F) && lx <= cx + (FAN_CARD_W * 0.5F)) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 /* Clay floating image at a pixel offset from the parent centre (card art/badges).
@@ -948,52 +1160,143 @@ static void card_sprite(game_ctx_t *g, uint32_t region, float w, float h, float 
     nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
 }
 
-static void hand_card(game_ctx_t *g, int tile_index, bool active) {
-    const bool has_tile = tile_index >= 0 && tile_index < g_config.tile_count;
-    const char *name = has_tile ? g_config.tiles[tile_index].name : pick_lang("empty", "пусто", "bos");
-    uint32_t surface = g->ui_card_back_96x128;
-    if (has_tile) {
-        surface = active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128;
-    }
-    const uint32_t art = has_tile ? card_art_region_for_id(g, g_config.tiles[tile_index].id) : NT_ATLAS_INVALID_REGION;
-    const uint32_t placement = has_tile ? placement_icon_region(g, g_config.tiles[tile_index].placement) : NT_ATLAS_INVALID_REGION;
-    const Clay_Color bg = active ? (Clay_Color){82.0F, 68.0F, 38.0F, 255.0F} : (Clay_Color){42.0F, 34.0F, 25.0F, 255.0F};
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(132), CLAY_SIZING_FIXED(128)},
-                     .padding = CLAY_PADDING_ALL(10),
+/* One card at an absolute screen position (floating to root) so the fan can overlap
+ * and the hovered/dragged card can lift out. */
+static void draw_fan_card(game_ctx_t *g, int tile, float x, float y, bool active, const nt_ui_transform_t *xf) {
+    const bool has = tile >= 0 && tile < g_config.tile_count;
+    const uint32_t surface = has ? (active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128) : g->ui_card_back_96x128;
+    const uint32_t art = has ? card_art_region_for_id(g, g_config.tiles[tile].id) : NT_ATLAS_INVALID_REGION;
+    const Clay_Color bg = active ? (Clay_Color){82.0F, 68.0F, 38.0F, 255.0F} : (Clay_Color){46.0F, 36.0F, 26.0F, 255.0F};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(FAN_CARD_W), CLAY_SIZING_FIXED(FAN_CARD_H)},
+                     .padding = CLAY_PADDING_ALL(6),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 4,
-                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_BOTTOM}},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}, .offset = {x, y}, .zIndex = active ? 36 : 20},
           .backgroundColor = bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10.0F),
-          .border = {.color = active ? (Clay_Color){198.0F, 154.0F, 55.0F, 255.0F} : (Clay_Color){104.0F, 76.0F, 42.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-        card_surface(g, surface);
-        if (has_tile) {
-            card_sprite(g, art, 72.0F, 72.0F, 0.0F, -14.0F, 1);
-            card_sprite(g, placement, 24.0F, 24.0F, 38.0F, 40.0F, 2);
-            card_sprite(g, active ? g->card_badge_count_32 : NT_ATLAS_INVALID_REGION, 24.0F, 24.0F, -38.0F, -44.0F, 2);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(90), CLAY_SIZING_FIXED(78)}}}) {}
+          .border = {.color = active ? (Clay_Color){198.0F, 154.0F, 55.0F, 255.0F} : (Clay_Color){104.0F, 76.0F, 42.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, xf, 1.0F)}) {
+        card_sprite(g, surface, FAN_CARD_W - 8.0F, FAN_CARD_H - 8.0F, 0.0F, 0.0F, 0);
+        if (has) {
+            card_sprite(g, art, 58.0F, 58.0F, 0.0F, -18.0F, 1);
         }
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, active ? &s_card_name : &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), has ? g_config.tiles[tile].name : "", active ? &s_card_name : &s_dim);
     }
 }
 
-/* Bottom hand: the held card + empty slots. Reward choice floats over the aul. */
-void tj_view_card_hand(game_ctx_t *g, tj_run_t *run) {
-    const bool has = (run->hand >= 0 && run->hand < g_config.tile_count);
+/* Filled dot at a screen position (the drag arrow's dotted trail). */
+static void floating_screen_dot(float cx, float cy, float d, Clay_Color col) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(d), CLAY_SIZING_FIXED(d)}},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_TOP}, .offset = {cx, cy}, .zIndex = 38},
+          .backgroundColor = col,
+          .cornerRadius = CLAY_CORNER_RADIUS(d * 0.5F)}) {}
+}
+
+/* While dragging a card: a dotted arrow from its fan slot to the cursor, plus the
+ * card riding under the cursor (StS-style targeting). */
+void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx) {
+    if (drag_idx < 0 || drag_idx >= run->hand_count) {
+        return;
+    }
+    float ox = 0.0F;
+    float oy = 0.0F;
+    fan_card_center(run, drag_idx, &ox, &oy);
+    const float px = g->ptr_x;
+    const float py = g->ptr_y;
+    const int dots = 9;
+    for (int k = 1; k <= dots; k++) {
+        const float t = (float)k / (float)(dots + 1);
+        floating_screen_dot(ox + ((px - ox) * t), oy + ((py - oy) * t), 6.0F + (8.0F * t), (Clay_Color){250.0F, 222.0F, 120.0F, 235.0F});
+    }
+    static nt_ui_transform_t s_ghost_xf;
+    s_ghost_xf = nt_ui_transform_defaults();
+    s_ghost_xf.rotation_z = 0.05F; /* slight tilt while dragging */
+    s_ghost_xf.scale_x = 1.06F;
+    s_ghost_xf.scale_y = 1.06F;
+    draw_fan_card(g, run->hand_cards[drag_idx], px - (FAN_CARD_W * 0.5F), py - (FAN_CARD_H * 0.6F), true, &s_ghost_xf);
+}
+
+/* Bottom hand: pouch button + a fan of held cards (drag one onto a field cell).
+ * `drag_idx` is the card currently being dragged (drawn under the cursor instead). */
+void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
+    static char pouchlbl[40];
+    (void)snprintf(pouchlbl, sizeof pouchlbl, "%s (%d)", pick_lang("Pouch", "Мешочек", "Torba"), run->pouch);
+    const int hover = (drag_idx >= 0) ? -1 : tj_view_hand_index_at(run, g->ptr_x, g->ptr_y);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(156)},
                      .padding = CLAY_PADDING_ALL(12),
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                     .childGap = 12,
-                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                     .childGap = 14,
+                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_BAR_BG}) {
-        hand_card(g, has ? run->hand : -1, has);
-        for (int i = 1; i < 5; i++) {
-            hand_card(g, -1, false);
+        if (tj_button(g, "pull_pouch", pouchlbl, 190, 96, TJ_BTN_PRIMARY)) {
+            tj_run_pull_pouch(run); /* draw one card from the pouch into the fan */
         }
-        if (has) {
-            const char *hint = pick_lang("  click a highlighted cell beyond the road to place", "  кликни подсвеченную клетку за дорогой, чтобы поставить",
-                                         "  yerlestirmek icin yolun disindaki isikli hucreye tikla");
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hint, &s_dim);
+        const char *hint;
+        if (run->hand_count > 0) {
+            hint = pick_lang("drag a card onto a green cell; line up 3 alike to merge", "тяни карту на зелёную клетку · собери 3 одинаковых рядом → апгрейд", "karti yesil hucreye surukle");
+        } else if (run->pouch > 0) {
+            hint = pick_lang("tap the Pouch to draw a card", "жми «Мешочек» — вытяни карту", "kart cek");
+        } else {
+            hint = pick_lang("win fights and finish laps to fill the pouch", "побеждай и проходи круги — мешочек копится", "savaslari kazan");
+        }
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hint, &s_dim);
+    }
+    static nt_ui_transform_t s_fan_xf[TJ_MAX_HAND];
+    const float center = (run->hand_count > 1) ? ((float)(run->hand_count - 1) * 0.5F) : 0.0F;
+    for (int i = 0; i < run->hand_count; i++) {
+        if (i == drag_idx) {
+            continue; /* drawn under the cursor by tj_view_drag_overlay */
+        }
+        const float off = (float)i - center;
+        const bool lift = (i == hover);
+        s_fan_xf[i] = nt_ui_transform_defaults();
+        s_fan_xf[i].rotation_z = lift ? 0.0F : (off * 0.09F); /* arc tilt; hover straightens */
+        if (lift) {
+            s_fan_xf[i].scale_x = 1.14F;
+            s_fan_xf[i].scale_y = 1.14F;
+        }
+        const float yarc = (off * off) * 1.7F; /* edges sit lower -> fan arc */
+        draw_fan_card(g, run->hand_cards[i], FAN_X0 + ((float)i * FAN_STEP), (lift ? FAN_Y - FAN_LIFT : FAN_Y) + yarc, lift, &s_fan_xf[i]);
+    }
+}
+
+/* Small "?" help button, top-right. Returns true on click (toggle the help modal). */
+bool tj_view_help_button(game_ctx_t *g) {
+    bool clicked = false;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}, .offset = {-12.0F, 12.0F}, .zIndex = 52},
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
+        clicked = tj_button(g, "help_q", "?", 44, 44, TJ_BTN_SECONDARY);
+    }
+    return clicked;
+}
+
+/* Help modal: how-to reference (the full lesson lives in the tutorial/FTUE).
+ * Returns true when the player closes it. */
+bool tj_view_help_modal(game_ctx_t *g) {
+    bool close = false;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 80},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {16.0F, 12.0F, 8.0F, 205.0F}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(540), CLAY_SIZING_FIT(0)},
+                         .padding = CLAY_PADDING_ALL(24),
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 9,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {40.0F, 34.0F, 24.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
+              .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("How to play", "Как играть", "Nasil oynanir"), &s_panel_title);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The hero walks the ring and fights on his own.", "Герой идёт по кольцу и сам сражается.", "Kahraman kendi savasir."),
+                        &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
+                        pick_lang("- Pouch: draw a card, drag it onto a green field cell", "• «Мешочек»: вытяни карту и тяни её на зелёную клетку поля", "- torba"), &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
+                        pick_lang("- 3 alike in a row merge into a stronger one (upgrades you)", "• 3 одинаковых рядом сливаются в сильнее (качают героя)", "- 3 ayni"), &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
+                        pick_lang("- Events are dice rolls; a boss waits at the end of each lap", "• События — бросок кубика; в конце круга — босс", "- olaylar"), &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("- On death: upgrade the aul on the right, then a new run", "• Умер → прокачай аул справа → новый забег", "- aul"), &s_stat);
+            close = tj_button(g, "help_close", pick_lang("Got it", "Понятно", "Tamam"), 200, 54, TJ_BTN_PRIMARY);
         }
     }
+    return close;
 }

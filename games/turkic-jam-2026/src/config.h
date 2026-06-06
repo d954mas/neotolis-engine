@@ -45,6 +45,9 @@ typedef struct {
     int diff_base, diff_per_circle;
     int supplies, wisdom, glory;
     int stamina_cost, stamina_restore;
+    int line, tier;       /* merge line (0 = none/enemy), tier (1..); 3 connected same line+tier -> tier+1 */
+    tj_stat_t boost_stat; /* live combat stat a placed building adds (TJ_STAT_NONE = income only) */
+    int boost_amount;     /* live boost per building */
 } tj_tile_def_t;
 
 /* Heir perk: a flat per-circle passive (sidegrade, not power creep). Balance-safe
@@ -99,6 +102,7 @@ typedef struct {
 
 typedef struct {
     int path_cells, laps_to_win, start_stamina;
+    int pouch_start, pouch_per_circle; /* cards in the starting pouch, and added each circle */
     float move_seconds_per_cell;
     float aul_exit_seconds;   /* FTUE intro: hero walks out of the aul to the road */
     float road_entry_seconds; /* FTUE intro: hero stands on the first road cell */
@@ -116,6 +120,25 @@ typedef struct {
     int map_bends_per_circle;         /* extra bends per circle */
     int map_bends_jitter;             /* random 0..jitter extra bends */
     int check_base_difficulty, check_difficulty_per_circle, check_fail_stamina_loss, check_fail_reward_pct;
+    /* Auto-combat derived params. Сила=body, Скорость=mind, Выносливость=spirit. */
+    int combat_dmg_base;                                        /* hero hit damage = combat_dmg_base + Сила */
+    float combat_atk_base;                                      /* hero attack interval (s) at 0 Скорость */
+    float combat_spd_mul;                                       /* interval = combat_atk_base / (1 + Скорость*combat_spd_mul) */
+    int combat_vit_hp;                                          /* max HP bonus = Выносливость*combat_vit_hp */
+    int combat_vit_def;                                         /* flat defense = Выносливость*combat_vit_def */
+    float enemy_atk_interval;                                   /* enemy attack interval (s) */
+    int enemy_hp_base, enemy_hp_per_diff;                       /* enemy HP = base + per_diff*tile_diff */
+    int enemy_atk_base, enemy_atk_per_diff;                     /* enemy hit dmg = base + per_diff*tile_diff */
+    int elite_hp_pct, elite_atk_pct, boss_hp_pct, boss_atk_pct; /* enemy scaling for elite/boss cells */
+    /* Dice events: roll 1=fail, max=pass; else effective = stat*(1+coeff*roll) vs DC. */
+    int event_die;
+    float event_dice_coeff;
+    int event_dc_base, event_dc_per_circle;
+    int event_pass_supplies, event_fail_hp;
+    float event_reveal_seconds; /* animated dice reveal duration */
+    /* Boss/elite archetypes: Толстяк(hp), Шустрый(fast+frail), Лютый(atk). */
+    int arch_fat_hp_pct, arch_fast_interval_pct, arch_fast_hp_pct, arch_fierce_atk_pct;
+    int rest_heal_pct; /* heal at the pre-boss rest cell, % of max HP */
     int tamga_wisdom_base, tamga_wisdom_per_circle, tamga_wisdom_slot_div, tamga_glory_div, tamga_max_active;
     int death_keep_supplies_pct, death_keep_wisdom_pct, death_keep_glory_pct;
     tj_tile_def_t tiles[TJ_MAX_TILES];

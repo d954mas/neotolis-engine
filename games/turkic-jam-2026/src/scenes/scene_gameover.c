@@ -44,9 +44,31 @@ static void on_update(game_ctx_t *g, float dt) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tamga, &TJ_STYLE_BODY);
     }
 
+    /* Aul meta: spend banked supplies on permanent upgrades before the next run. */
+    static char u0[56];
+    static char u1[56];
+    static char u2[56];
+    static char u3[56];
+    (void)snprintf(u0, sizeof u0, "+Сила  ур.%d  (%d)", g_aul.up_force, tj_aul_upgrade_cost(0));
+    (void)snprintf(u1, sizeof u1, "+Скорость  ур.%d  (%d)", g_aul.up_speed, tj_aul_upgrade_cost(1));
+    (void)snprintf(u2, sizeof u2, "+Выносливость  ур.%d  (%d)", g_aul.up_vigor, tj_aul_upgrade_cost(2));
+    (void)snprintf(u3, sizeof u3, "+Наследие  ур.%d  (%d)", g_aul.up_keep, tj_aul_upgrade_cost(3));
+    if (tj_button(g, "up_f", u0, 360, 54, TJ_BTN_SECONDARY)) {
+        tj_aul_upgrade(0);
+    }
+    if (tj_button(g, "up_s", u1, 360, 54, TJ_BTN_SECONDARY)) {
+        tj_aul_upgrade(1);
+    }
+    if (tj_button(g, "up_v", u2, 360, 54, TJ_BTN_SECONDARY)) {
+        tj_aul_upgrade(2);
+    }
+    if (tj_button(g, "up_k", u3, 360, 54, TJ_BTN_SECONDARY)) {
+        tj_aul_upgrade(3);
+    }
+
     if (tj_button(g, "go_retry", i18n(T_RETRY), 360, 100, TJ_BTN_PRIMARY)) {
         g->score = 0;
-        game_goto(g, &SCENE_HEIR_SELECT); /* new heir -> pick an archetype again */
+        game_goto(g, &SCENE_GAME); /* one champion of the clan -> straight back into a run */
     }
     if (tj_button(g, "go_menu", i18n(T_MENU), 300, 80, TJ_BTN_SECONDARY)) {
         game_goto(g, &SCENE_MENU);

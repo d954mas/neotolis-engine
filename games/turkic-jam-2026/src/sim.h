@@ -15,6 +15,7 @@
 #define TJ_ZONE_MAX 20  /* max play-zone dimension in cells (aul + 2*(road band + field band)) */
 #define TJ_ZONE_CELLS (TJ_ZONE_MAX * TJ_ZONE_MAX)
 #define TJ_MAX_BUILD 96 /* capped debug list; real buildability is a distance predicate */
+#define TJ_MAX_HAND 16  /* cards held in the fan at once */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
 /* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
@@ -23,6 +24,16 @@ typedef enum {
     TJ_PHASE_ROAD_ENTRY,   /* standing on the first road cell */
     TJ_PHASE_WALK,         /* normal auto-walk around the loop */
 } tj_phase_t;
+
+/* Per road-cell rhythm role (Capybara-Go cadence): no dead cells. */
+typedef enum {
+    TJ_CELL_TRAIL = 0, /* minor pickup, no dead air */
+    TJ_CELL_FIGHT,     /* regular enemy auto-battle */
+    TJ_CELL_EVENT,     /* dice event (stub reward for now) */
+    TJ_CELL_ELITE,     /* mid-lap tougher enemy */
+    TJ_CELL_BOSS,      /* last cell of the lap */
+    TJ_CELL_REST,      /* pre-boss heal */
+} tj_cell_role_t;
 
 typedef struct {
     int heir_index;
@@ -42,13 +53,35 @@ typedef struct {
     int pack_offer[TJ_MAX_PACKS][3]; /* 3 tile choices per queued pack */
     bool pack_open;                  /* the front pack's chooser is open */
     int supplies, wisdom, glory;
-    int tile_at[TJ_MAX_PATH]; /* road event on cell (-1 empty); reshuffled per circle */
+    int tile_at[TJ_MAX_PATH];       /* enemy tile on cell (-1 none); reshuffled per circle */
+    uint8_t cell_role[TJ_MAX_PATH]; /* tj_cell_role_t per cell: trail/fight/event/elite/boss */
     /* Persistent player builds in the desert (gy*grid_cols+gx; -1 empty). The field
      * survives circles; only the road re-routes around it each circle. */
     int field_tile[TJ_ZONE_CELLS];
-    int hand; /* tile the player holds, ready to place (-1 = none) */
+    int hand_cards[TJ_MAX_HAND]; /* the fan of held cards; drag one onto a field cell */
+    int hand_count;
+    int pouch; /* pending cards to pull (the "мешочек"): click it to draw into the fan */
     bool alive;
     bool won;
+    /* Auto-combat: hero pauses on an enemy road cell and trades blows (ATB by speed). */
+    bool in_combat;
+    int combat_tile; /* tile index of the enemy being fought */
+    int combat_enemy_hp, combat_enemy_max, combat_enemy_atk;
+    float combat_enemy_interval;   /* enemy attack interval (archetype-dependent) */
+    char combat_label[40];         /* "Босс-Толстяк" etc. for the fight readout */
+    int fx_hero_dmg, fx_enemy_dmg; /* last damage to each side (floating numbers) */
+    float fx_hero_t, fx_enemy_t;   /* fade timers for the damage numbers */
+    /* Timed dice-event reveal (animated; walk paused). Result is precomputed. */
+    bool in_event;
+    float event_t;
+    int ev_die, ev_roll, ev_stat, ev_dc, ev_gain;
+    bool ev_pass;
+    char ev_name[24], ev_statname[24];
+    float death_t;                             /* run-over overlay animation timer (advanced by the scene) */
+    float hero_atk_t, enemy_atk_t;             /* per-side attack timers */
+    int stamina_max;                           /* current max HP (base + Выносливость buildings) */
+    int base_max;                              /* HP max without field buildings */
+    int bonus_force, bonus_speed, bonus_vigor; /* live combat bonuses from placed field buildings */
     /* Loop geometry as data (sim owns it, view only renders). A winding closed
      * loop of cells around the central aul; varies per circle/heir. */
     int grid_cols, grid_rows;         /* play-zone dimensions in cells */
@@ -75,6 +108,14 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index);
 /* Place the held card into the field cell (gx,gy). Persists across circles.
  * Returns false if hand empty, out of zone, on road/aul, or the cell is taken. */
 bool tj_run_place_field(tj_run_t *r, int gx, int gy);
+/* Place hand card `hand_idx` into the field cell (gx,gy); removes it from the fan,
+ * runs merge, recomputes bonuses. Returns false if invalid index or cell. */
+bool tj_run_place_card(tj_run_t *r, int hand_idx, int gx, int gy);
+/* Move support: lift a placed building back into an empty hand (then re-place it
+ * elsewhere to line up a merge). Returns false if hand is full or the cell is empty. */
+bool tj_run_pickup_field(tj_run_t *r, int gx, int gy);
+/* Pull one card from the pouch into an empty hand (drop-floor tier by circle). */
+void tj_run_pull_pouch(tj_run_t *r);
 /* Chebyshev distance from (gx,gy) to the aul rect (0 = on/inside the aul). Defines
  * the concentric bands: 1..road_band = road band (no build), beyond = field. */
 int tj_run_dist_to_aul(const tj_run_t *r, int gx, int gy);
