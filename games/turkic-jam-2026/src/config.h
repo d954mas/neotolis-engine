@@ -129,6 +129,7 @@ typedef struct {
     float enemy_atk_interval;                                   /* enemy attack interval (s) */
     int enemy_hp_base, enemy_hp_per_diff;                       /* enemy HP = base + per_diff*tile_diff */
     int enemy_atk_base, enemy_atk_per_diff;                     /* enemy hit dmg = base + per_diff*tile_diff */
+    int enemy_scale_per_circle_pct;                             /* +% per circle on enemy HP+atk (super-linear late ramp) */
     int elite_hp_pct, elite_atk_pct, boss_hp_pct, boss_atk_pct; /* enemy scaling for elite/boss cells */
     /* Dice events: roll 1=fail, max=pass; else effective = stat*(1+coeff*roll) vs DC. */
     int event_die;

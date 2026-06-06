@@ -752,8 +752,11 @@ static void start_combat(tj_run_t *r, int tile, tj_cell_role_t role) {
         atk_pct = g_config.boss_atk_pct;
         rolelbl = "Босс";
     }
-    int hp = (g_config.enemy_hp_base + (g_config.enemy_hp_per_diff * diff)) * hp_pct / 100;
-    int atk = (g_config.enemy_atk_base + (g_config.enemy_atk_per_diff * diff)) * atk_pct / 100;
+    /* Super-linear late ramp: base scales with diff (linear in circle), then a
+     * per-circle %-bonus on top. Gentle early, biting by the late circles. */
+    const int circle_pct = 100 + (g_config.enemy_scale_per_circle_pct * r->circle);
+    int hp = (g_config.enemy_hp_base + (g_config.enemy_hp_per_diff * diff)) * hp_pct / 100 * circle_pct / 100;
+    int atk = (g_config.enemy_atk_base + (g_config.enemy_atk_per_diff * diff)) * atk_pct / 100 * circle_pct / 100;
     float interval = (g_config.enemy_atk_interval > 0.0F) ? g_config.enemy_atk_interval : 0.85F;
     /* Archetype (elite/boss): Толстяк=much HP, Шустрый=fast+frail, Лютый=big hit.
      * Each punishes a dumped stat; boss rotates by circle so the player can learn it. */

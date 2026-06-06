@@ -143,6 +143,7 @@ static void set_defaults(void) {
     g_config.enemy_hp_per_diff = 2;
     g_config.enemy_atk_base = 1;
     g_config.enemy_atk_per_diff = 1;
+    g_config.enemy_scale_per_circle_pct = 12;
     g_config.elite_hp_pct = 180;
     g_config.elite_atk_pct = 140;
     g_config.boss_hp_pct = 300;
@@ -214,6 +215,7 @@ static void apply_ini(const char *k, const char *v) {
         {"enemy_hp_per_diff", &g_config.enemy_hp_per_diff, NULL},
         {"enemy_atk_base", &g_config.enemy_atk_base, NULL},
         {"enemy_atk_per_diff", &g_config.enemy_atk_per_diff, NULL},
+        {"enemy_scale_per_circle_pct", &g_config.enemy_scale_per_circle_pct, NULL},
         {"elite_hp_pct", &g_config.elite_hp_pct, NULL},
         {"elite_atk_pct", &g_config.elite_atk_pct, NULL},
         {"boss_hp_pct", &g_config.boss_hp_pct, NULL},
