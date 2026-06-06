@@ -1114,30 +1114,46 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
     }
 }
 
-/* Hand fan layout (screen/logical coords): cards in a row right of the pouch. */
+/* Hand fan layout (screen/logical coords). The fan is pinned to the viewport
+ * bottom and centred, so it tracks window resizes instead of drifting off. */
 #define FAN_CARD_W 100.0F
 #define FAN_CARD_H 124.0F
-#define FAN_X0 224.0F
-#define FAN_STEP 74.0F /* per-card step (overlapping fan) */
-#define FAN_Y 556.0F   /* resting top-left y */
-#define FAN_LIFT 30.0F /* hovered/selected card rises this much */
+#define FAN_STEP 74.0F      /* per-card step (overlapping fan) */
+#define FAN_LIFT 30.0F      /* hovered/selected card rises this much */
+#define FAN_BOTTOM 164.0F   /* resting top-left y measured up from the viewport bottom */
+#define FAN_LEFT_MIN 212.0F /* never slide left under the pouch button */
 
-static float fan_cx(int i) { return FAN_X0 + ((float)i * FAN_STEP) + (FAN_CARD_W * 0.5F); }
+/* Fan base = top-left of card 0, derived from the live viewport + hand size.
+ * Centred horizontally, clamped to clear the pouch, pinned above the bottom bar. */
+static void fan_base(const game_ctx_t *g, int count, float *x0, float *y) {
+    const float total = (count > 1) ? ((float)(count - 1) * FAN_STEP + FAN_CARD_W) : FAN_CARD_W;
+    float x = (g->logical_w - total) * 0.5F;
+    if (x < FAN_LEFT_MIN) {
+        x = FAN_LEFT_MIN;
+    }
+    *x0 = x;
+    *y = g->logical_h - FAN_BOTTOM;
+}
 
 /* Screen centre of hand card `idx` (the drag arrow's origin). */
-static void fan_card_center(const tj_run_t *run, int idx, float *cx, float *cy) {
-    (void)run;
-    *cx = fan_cx(idx);
-    *cy = FAN_Y + (FAN_CARD_H * 0.5F);
+static void fan_card_center(const game_ctx_t *g, const tj_run_t *run, int idx, float *cx, float *cy) {
+    float x0;
+    float y;
+    fan_base(g, run->hand_count, &x0, &y);
+    *cx = x0 + ((float)idx * FAN_STEP) + (FAN_CARD_W * 0.5F);
+    *cy = y + (FAN_CARD_H * 0.5F);
 }
 
 /* Hand index under a logical point, or -1. Topmost (rightmost) card wins. */
-int tj_view_hand_index_at(const tj_run_t *run, float lx, float ly) {
-    if (ly < FAN_Y - FAN_LIFT || ly > FAN_Y + FAN_CARD_H) {
+int tj_view_hand_index_at(const game_ctx_t *g, const tj_run_t *run, float lx, float ly) {
+    float x0;
+    float y;
+    fan_base(g, run->hand_count, &x0, &y);
+    if (ly < y - FAN_LIFT || ly > y + FAN_CARD_H) {
         return -1;
     }
     for (int i = run->hand_count - 1; i >= 0; i--) {
-        const float cx = fan_cx(i);
+        const float cx = x0 + ((float)i * FAN_STEP) + (FAN_CARD_W * 0.5F);
         if (lx >= cx - (FAN_CARD_W * 0.5F) && lx <= cx + (FAN_CARD_W * 0.5F)) {
             return i;
         }
@@ -1200,7 +1216,7 @@ void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx) {
     }
     float ox = 0.0F;
     float oy = 0.0F;
-    fan_card_center(run, drag_idx, &ox, &oy);
+    fan_card_center(g, run, drag_idx, &ox, &oy);
     const float px = g->ptr_x;
     const float py = g->ptr_y;
     const int dots = 9;
@@ -1221,7 +1237,7 @@ void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx) {
 void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
     static char pouchlbl[40];
     (void)snprintf(pouchlbl, sizeof pouchlbl, "%s (%d)", pick_lang("Pouch", "Мешочек", "Torba"), run->pouch);
-    const int hover = (drag_idx >= 0) ? -1 : tj_view_hand_index_at(run, g->ptr_x, g->ptr_y);
+    const int hover = (drag_idx >= 0) ? -1 : tj_view_hand_index_at(g, run, g->ptr_x, g->ptr_y);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(156)},
                      .padding = CLAY_PADDING_ALL(12),
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
@@ -1242,6 +1258,9 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hint, &s_dim);
     }
     static nt_ui_transform_t s_fan_xf[TJ_MAX_HAND];
+    float fx0;
+    float fy;
+    fan_base(g, run->hand_count, &fx0, &fy);
     const float center = (run->hand_count > 1) ? ((float)(run->hand_count - 1) * 0.5F) : 0.0F;
     for (int i = 0; i < run->hand_count; i++) {
         if (i == drag_idx) {
@@ -1256,7 +1275,7 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
             s_fan_xf[i].scale_y = 1.14F;
         }
         const float yarc = (off * off) * 1.7F; /* edges sit lower -> fan arc */
-        draw_fan_card(g, run->hand_cards[i], FAN_X0 + ((float)i * FAN_STEP), (lift ? FAN_Y - FAN_LIFT : FAN_Y) + yarc, lift, &s_fan_xf[i]);
+        draw_fan_card(g, run->hand_cards[i], fx0 + ((float)i * FAN_STEP), (lift ? fy - FAN_LIFT : fy) + yarc, lift, &s_fan_xf[i]);
     }
 }
 

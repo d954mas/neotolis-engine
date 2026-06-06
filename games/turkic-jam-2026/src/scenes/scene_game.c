@@ -250,7 +250,7 @@ static void handle_map_input(game_ctx_t *g, float dt) {
         press_y = my;
         last_x = mx;
         last_y = my;
-        s_drag_card = tj_view_hand_index_at(&s_run, mx, my); /* >=0 if grabbing a card from the fan */
+        s_drag_card = tj_view_hand_index_at(g, &s_run, mx, my); /* >=0 if grabbing a card from the fan */
         return;
     }
     if (press_active && nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
