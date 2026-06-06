@@ -1215,6 +1215,11 @@ static bool command_is_debug_layer(const Clay_RenderCommand *c) {
 static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mode_t mode, const Clay_RenderCommand *c) {
     const bool is_debug = command_is_debug_layer(c);
     if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
+        /* Scissors are structural — skipping a non-debug-tagged clip (e.g. a floating clipTo) would
+         * drop its whole subtree, hiding the inspector tree text that lives inside it. */
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START || c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+            return true;
+        }
         return is_debug;
     }
     if (ctx->use_raycast_input) {
