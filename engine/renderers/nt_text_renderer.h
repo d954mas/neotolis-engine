@@ -64,6 +64,7 @@ void nt_text_renderer_test_reset_call_counters(void);
  * Lets tests pin nt_ui's emit_text mat4 construction without needing a real font. */
 const float *nt_text_renderer_test_last_model(void);
 uint32_t nt_text_renderer_test_draw_n_calls(void);
+float nt_text_renderer_test_glyph_depth_bias(void);
 #endif
 // #endregion
 

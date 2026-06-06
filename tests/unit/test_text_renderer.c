@@ -440,6 +440,24 @@ static void bench_draw_mixed_ui(void) {
     (void)fflush(stdout);
 }
 
+/* ---- glyph depth bias lifecycle ---- */
+
+/* Renderer state, not a file-static: preserved across a GPU context-loss restore like material/font
+ * (a game sets it once for world-space nameplates and must not lose it on restore). */
+void test_glyph_depth_bias_persists_across_restore(void) {
+    nt_text_renderer_set_glyph_depth_bias(0.25F); /* exactly representable, so == is safe */
+    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_glyph_depth_bias() == 0.25F);
+}
+
+/* Cold shutdown/init clears it (test isolation; no leak across renderer reinit). */
+void test_glyph_depth_bias_resets_on_reinit(void) {
+    nt_text_renderer_set_glyph_depth_bias(0.25F);
+    nt_text_renderer_shutdown();
+    nt_text_renderer_init();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_glyph_depth_bias() == 0.0F);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -459,6 +477,8 @@ int main(void) {
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);
     RUN_TEST(test_draw_n_does_not_over_read);
+    RUN_TEST(test_glyph_depth_bias_persists_across_restore);
+    RUN_TEST(test_glyph_depth_bias_resets_on_reinit);
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();

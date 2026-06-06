@@ -189,6 +189,7 @@ void nt_text_renderer_restore_gpu(void) {
     /* Save state that survives context loss */
     nt_material_t saved_material = s_text.material;
     nt_font_t saved_font = s_text.font;
+    float saved_glyph_depth_bias = s_text.glyph_depth_bias;
 
     /* Full shutdown → init cycle (frees pool slots, no leaks) */
     nt_text_renderer_shutdown();
@@ -197,7 +198,8 @@ void nt_text_renderer_restore_gpu(void) {
     /* Restore state */
     s_text.material = saved_material;
     s_text.font = saved_font;
-    s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
+    s_text.glyph_depth_bias = saved_glyph_depth_bias; /* logical state survives restore, like material/font */
+    s_text.pipeline_material_version = 0;             /* force pipeline recreation on next flush */
 }
 // #endregion
 
@@ -499,5 +501,6 @@ void nt_text_renderer_test_reset_call_counters(void) {
 }
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
+float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
 #endif
 // #endregion
