@@ -149,7 +149,10 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_gfx_set_scissor_enabled(true);
     }
 
-    const bool can_label = ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F;
+    /* Inspector text material when set, else the game's (mirrors draw_hit_zones). Gate can_label on
+     * the resolved one so a depth-off-only inspector material still draws the label. */
+    const nt_material_t tmat = (ctx->inspector_text_material.id != 0U) ? ctx->inspector_text_material : ctx->text_material;
+    const bool can_label = tmat.id != 0U && font.id != 0U && label_size > 0.0F;
     const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 
     if (ctx->use_raycast_input) {
@@ -208,7 +211,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                         tm[8 + rr] = m[8 + rr];
                         tm[12 + rr] = (ox * m[rr]) + (oy * m[4 + rr]) + m[12 + rr];
                     }
-                    const nt_material_t tmat = (ctx->inspector_text_material.id != 0U) ? ctx->inspector_text_material : ctx->text_material;
                     nt_text_renderer_set_material(tmat);
                     nt_text_renderer_set_font(font);
                     nt_text_renderer_draw_n(buf, (size_t)n, tm, label_size, white, 0.0F, 0.0F);
@@ -273,7 +275,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
             }
             if (n > 0) {
-                overlay_draw_text(ctx->text_material, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
+                overlay_draw_text(tmat, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
             }
         }
         nt_sprite_renderer_flush();
@@ -311,7 +313,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 0x641C42A8U);
     overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, 0xFFFFFFFFU);
 
-    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+    if (can_label) {
         char buf[80];
         int n;
         if (info.id_string_len > 0U && info.id_string != NULL) {
@@ -321,13 +323,12 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
         }
         if (n > 0) {
-            const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-            overlay_draw_text(ctx->text_material, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, color, buf, (size_t)n);
+            overlay_draw_text(tmat, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, white, buf, (size_t)n);
         }
     }
 
     nt_sprite_renderer_flush();
-    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+    if (can_label) {
         nt_text_renderer_flush();
     }
     if (scissor_w > 0 && scissor_h > 0) {
