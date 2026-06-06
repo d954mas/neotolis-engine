@@ -9,12 +9,12 @@
 
 #include "config.h"
 
-#define TJ_MAX_PATH 32
+#define TJ_MAX_PATH 48  /* road loop cells; band road is small but allow bend headroom */
 #define TJ_MAX_GLOBAL 8 /* passive (global-scope) desert objects active per circle */
 #define TJ_MAX_PACKS 4  /* unopened reward packs that can queue up (hero never waits) */
-#define TJ_ZONE_MAX 12  /* max play-zone dimension in cells */
+#define TJ_ZONE_MAX 20  /* max play-zone dimension in cells (aul + 2*(road band + field band)) */
 #define TJ_ZONE_CELLS (TJ_ZONE_MAX * TJ_ZONE_MAX)
-#define TJ_MAX_BUILD 96 /* buildable field cells offered at once */
+#define TJ_MAX_BUILD 96 /* capped debug list; real buildability is a distance predicate */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
 /* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
@@ -75,6 +75,12 @@ void tj_run_place_tile(tj_run_t *r, int cell, int tile_index);
 /* Place the held card into the field cell (gx,gy). Persists across circles.
  * Returns false if hand empty, out of zone, on road/aul, or the cell is taken. */
 bool tj_run_place_field(tj_run_t *r, int gx, int gy);
+/* Chebyshev distance from (gx,gy) to the aul rect (0 = on/inside the aul). Defines
+ * the concentric bands: 1..road_band = road band (no build), beyond = field. */
+int tj_run_dist_to_aul(const tj_run_t *r, int gx, int gy);
+/* True if a card may be placed here: in the field band (dist > road_band), not on
+ * the road, and empty. Single source of truth for placement + build hints. */
+bool tj_run_cell_buildable(const tj_run_t *r, int gx, int gy);
 /* Open the front reward pack (shows its 3 cards). No-op if no packs queued. */
 void tj_run_open_pack(tj_run_t *r);
 /* Take card `idx` (0..2) from the opened pack into hand; pops the pack. */

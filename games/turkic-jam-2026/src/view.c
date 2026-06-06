@@ -193,8 +193,6 @@ static void floating_center_sprite(game_ctx_t *g, uint32_t region, float w, floa
     nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
 }
 
-static bool is_aul_cell(const tj_run_t *run, int gx, int gy) { return gx >= run->aul_x0 && gx < run->aul_x0 + run->aul_w && gy >= run->aul_y0 && gy < run->aul_y0 + run->aul_h; }
-
 static bool is_path_cell(const tj_run_t *run, int gx, int gy) {
     for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
         if (run->path_gx[i] == gx && run->path_gy[i] == gy) {
@@ -204,27 +202,15 @@ static bool is_path_cell(const tj_run_t *run, int gx, int gy) {
     return false;
 }
 
-static bool is_build_cell(const tj_run_t *run, int gx, int gy) {
-    for (int i = 0; i < run->build_count && i < TJ_MAX_BUILD; i++) {
-        if (run->build_gx[i] == gx && run->build_gy[i] == gy) {
-            return true;
-        }
-    }
-    return false;
-}
+static bool is_build_cell(const tj_run_t *run, int gx, int gy) { return tj_run_cell_buildable(run, gx, gy); }
 
+/* No-build road band around the aul (minus the road itself): gets blocker objects. */
 static bool is_buffer_cell(const tj_run_t *run, int gx, int gy) {
-    if (is_aul_cell(run, gx, gy) || is_path_cell(run, gx, gy) || is_build_cell(run, gx, gy)) {
+    const int d = tj_run_dist_to_aul(run, gx, gy);
+    if (d < 1 || d > g_config.map_road_band) {
         return false;
     }
-    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
-        const int dx = abs((int)run->path_gx[i] - gx);
-        const int dy = abs((int)run->path_gy[i] - gy);
-        if (dx + dy == 1) {
-            return true;
-        }
-    }
-    return false;
+    return !is_path_cell(run, gx, gy);
 }
 
 static uint32_t decor_region_for_cell(const game_ctx_t *g, int gx, int gy) {
@@ -381,25 +367,22 @@ static void draw_ground(game_ctx_t *g, const tj_run_t *run, float pitch, float t
 }
 
 static void draw_base_decor(game_ctx_t *g, const tj_run_t *run, float pitch, float tile) {
+    (void)tile;
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
-    for (int i = 0; i < run->build_count && i < TJ_MAX_BUILD; i++) {
-        const int gx = run->build_gx[i];
-        const int gy = run->build_gy[i];
-        if (run->field_tile[(gy * cols) + gx] >= 0) {
-            continue;
-        }
-        /* Small accents only (pebbles/tufts), so buildable cells still read as open. */
-        if (((gx * 7) + (gy * 5)) % 3 != 0) {
-            continue;
-        }
-        const uint32_t region = decor_region_for_cell(g, gx, gy);
-        if (has_region(region)) {
-            const float asz = pitch * 0.36F;
-            map_sprite(g, region, asz, asz, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 1);
+    const float asz = pitch * 0.36F;
+    for (int gy = 0; gy < rows; gy++) {
+        for (int gx = 0; gx < cols; gx++) {
+            /* Sparse small accents on open buildable cells -> field reads as alive but open. */
+            if (((gx * 7) + (gy * 5)) % 3 != 0 || !is_build_cell(run, gx, gy)) {
+                continue;
+            }
+            const uint32_t region = decor_region_for_cell(g, gx, gy);
+            if (has_region(region)) {
+                map_sprite(g, region, asz, asz, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 1);
+            }
         }
     }
-    (void)tile;
 }
 
 static void draw_aul(game_ctx_t *g, const tj_run_t *run, float pitch) {
@@ -728,25 +711,21 @@ static void draw_pack_choice(game_ctx_t *g, tj_run_t *run) {
 
 /* Buildable cues (sprite, replaces the old Clay slot buttons): a soft green tint on
  * empty buildable cells while a card is held, brighter on the hovered cell. */
+/* While holding a card, highlight the cell under the cursor: green = buildable,
+ * red = blocked. The open field already reads as buildable, so only the hover cue
+ * is needed (a green wash over the whole ~field would be noise). */
 static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     if (run->hand < 0) {
         return;
     }
-    const int cols = run->grid_cols;
-    const int rows = run->grid_rows;
     int hgx = -1;
     int hgy = -1;
-    const bool hover = tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy);
-    for (int i = 0; i < run->build_count && i < TJ_MAX_BUILD; i++) {
-        const int sgx = run->build_gx[i];
-        const int sgy = run->build_gy[i];
-        if (run->field_tile[(sgy * cols) + sgx] >= 0) {
-            continue; /* already built (drawn by draw_field) */
-        }
-        const bool on = hover && hgx == sgx && hgy == sgy;
-        const Clay_Color tint = on ? (Clay_Color){132.0F, 236.0F, 150.0F, 170.0F} : (Clay_Color){84.0F, 200.0F, 112.0F, 70.0F};
-        map_rect_sprite(g, tint, pitch * 0.9F, pitch * 0.9F, grid_x(sgx, cols, pitch), grid_y(sgy, rows, pitch));
+    if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy)) {
+        return;
     }
+    const bool ok = is_build_cell(run, hgx, hgy);
+    const Clay_Color tint = ok ? (Clay_Color){132.0F, 236.0F, 150.0F, 165.0F} : (Clay_Color){236.0F, 110.0F, 92.0F, 120.0F};
+    map_rect_sprite(g, tint, pitch * 0.92F, pitch * 0.92F, grid_x(hgx, run->grid_cols, pitch), grid_y(hgy, run->grid_rows, pitch));
 }
 
 /* The map WORLD: ground/road/aul/field/hero drawn by the sprite renderer. Invoked
@@ -762,8 +741,12 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     }
     set_world_from_frame(frame);
     const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
-    /* Pitch fills the viewport's short side (1-cell margin) -> big, gapless tiles. */
-    const float pitch = floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1));
+    /* Show ~9 cells across the viewport's short side -> big tiles; larger zones than
+     * that scroll (camera pan). A small zone that fits stays centred. */
+    float pitch = floorf(fminf(s_map_vw, s_map_vh) / 9.0F);
+    if (pitch > floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1)) && maxdim + 1 < 9) {
+        pitch = floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1)); /* tiny zone: just fit */
+    }
     s_map_pitch = pitch;
     s_map_extent = (float)maxdim * pitch;
     s_map_cols = run->grid_cols;

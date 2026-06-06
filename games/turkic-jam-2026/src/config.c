@@ -119,10 +119,11 @@ static void set_defaults(void) {
     g_config.start_in_game = 1;
     g_config.path_cells_growth = 1;
     g_config.path_cells_jitter = 1;
-    g_config.map_zone_cols = 8;
-    g_config.map_zone_rows = 8;
+    g_config.map_zone_cols = 18;
+    g_config.map_zone_rows = 18;
     g_config.map_aul_w = 2;
     g_config.map_aul_h = 2;
+    g_config.map_road_band = 2;
     g_config.map_bends_base = 4;
     g_config.map_bends_per_circle = 1;
     g_config.map_bends_jitter = 2;
@@ -165,6 +166,7 @@ static void apply_ini(const char *k, const char *v) {
         {"map_zone_rows", &g_config.map_zone_rows, NULL},
         {"map_aul_w", &g_config.map_aul_w, NULL},
         {"map_aul_h", &g_config.map_aul_h, NULL},
+        {"map_road_band", &g_config.map_road_band, NULL},
         {"map_bends_base", &g_config.map_bends_base, NULL},
         {"map_bends_per_circle", &g_config.map_bends_per_circle, NULL},
         {"map_bends_jitter", &g_config.map_bends_jitter, NULL},
