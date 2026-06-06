@@ -41,8 +41,6 @@ static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .
 // #endregion
 
 // #region map geometry (winding trail loop around the central aul, Loop Hero style)
-#define MAP_SIZE 360.0F
-
 static Clay_Color cell_color(int tile_idx) {
     if (tile_idx < 0 || tile_idx >= g_config.tile_count) {
         return (Clay_Color){62.0F, 64.0F, 76.0F, 255.0F};
@@ -58,17 +56,6 @@ static Clay_Color cell_color(int tile_idx) {
         return (Clay_Color){120.0F, 120.0F, 130.0F, 255.0F};
     }
 }
-
-/* Square tile marker, floating-offset from the map centre. */
-#define MAP_TILE(sz, col, ox, oy, z)                                                                                                                                                                   \
-    {                                                                                                                                                                                                  \
-        .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}}, .backgroundColor = (col), .cornerRadius = CLAY_CORNER_RADIUS(3.0F), .floating = {                                        \
-            .attachTo = CLAY_ATTACH_TO_PARENT,                                                                                                                                                         \
-            .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},                                                                                   \
-            .offset = {(ox), (oy)},                                                                                                                                                                    \
-            .zIndex = (z),                                                                                                                                                                             \
-        }                                                                                                                                                                                              \
-    }
 
 /* Floating rect (w x h, corner radius cr), offset from the map centre. */
 #define MAP_RECT(w, h, col, cr, ox, oy, z)                                                                                                                                                             \
