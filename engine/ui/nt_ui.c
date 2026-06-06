@@ -971,7 +971,7 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
 
 // #region helper_emit_text
 /* dispatch_command flushes sprite before and lazy-rebinds after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16], bool force_screen_space) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16]) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -982,24 +982,28 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
 
     const float font_size = (float)t->fontSize * text_scale;
     nt_font_metrics_t metrics = nt_font_get_metrics(font);
-    const float scale = (metrics.units_per_em > 0) ? (font_size / (float)metrics.units_per_em) : 0.0F;
-    const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
+    /* Vertical centering lives in Clay layout space (bbox is Clay px), so use the Clay font size —
+     * the world font_size folds in text_scale and would collapse the offset under a 3D XFORM. */
+    const float layout_scale = (metrics.units_per_em > 0) ? ((float)t->fontSize / (float)metrics.units_per_em) : 0.0F;
+    const float text_h = (float)(metrics.ascent - metrics.descent) * layout_scale;
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
     /* Y-down: baseline = bbox.y(top) + center_offset + ascent*scale. */
-    const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * scale);
+    const float baseline_y = c->boundingBox.y + center_offset + ((float)metrics.ascent * layout_scale);
 
-    /* Text renderer local is Y-up. In 2D ctx the ortho VP carries an implicit screen Y-flip,
-     * so negating col1 cancels it and glyphs read upright. In 3D ctx (use_raycast_input) the
-     * baked world matrix has no implicit Y-flip — keeping the negate there leaves labels
-     * upside-down inside otherwise-correct panels. Sign chosen per-ctx. */
+    /* Text-renderer local is Y-up; Clay positions are Y-down. Negating col1 always opposes the two
+     * so glyphs read upright — independent of how world_mat4 maps Clay→world (2D ortho, 3D billboard
+     * via negative scale_y, or inspector screen-space). */
     const float ox = c->boundingBox.x;
     const float oy = baseline_y;
-    const float sign_y = (ctx->use_raycast_input && !force_screen_space) ? +1.0F : -1.0F;
+    const float sign_y = -1.0F;
+    /* size already folds in text_scale (world X-magnitude), so the model handed to the renderer must
+     * be scale-free like every other call site — else the X scale lands twice and glyphs shrink ~text_scale. */
+    const float inv_ts = (text_scale > 0.0F) ? (1.0F / text_scale) : 0.0F;
     float m[16];
     for (int rr = 0; rr < 4; ++rr) {
-        m[rr] = world_mat4[rr];
-        m[4 + rr] = sign_y * world_mat4[4 + rr];
-        m[8 + rr] = world_mat4[8 + rr];
+        m[rr] = world_mat4[rr] * inv_ts;
+        m[4 + rr] = sign_y * world_mat4[4 + rr] * inv_ts;
+        m[8 + rr] = world_mat4[8 + rr] * inv_ts;
         m[12 + rr] = (ox * world_mat4[rr]) + (oy * world_mat4[4 + rr]) + world_mat4[12 + rr];
     }
     const float color[4] = {
@@ -1331,7 +1335,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
-        emit_text(ctx, &local, text_scale, world_mat4, force_screen_space);
+        emit_text(ctx, &local, text_scale, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {

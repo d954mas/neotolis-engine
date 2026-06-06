@@ -322,6 +322,26 @@ static void draw_room(void) {
     nt_shape_renderer_rect_rot(right_pos, wall_sz_lr, side_rot, wall_col);
 }
 
+/* Backing board behind each UI panel — visual reference to judge panel fit/alignment. */
+static void draw_boards(void) {
+    const float board_col[4] = {0.42F, 0.28F, 0.14F, 1.0F};
+    const float frame_col[4] = {0.22F, 0.14F, 0.07F, 1.0F};
+    const float hd = ROOM_D * 0.5F;
+    const float bz = -hd + 0.03F; /* between wall (-hd) and panel (-hd+0.05) */
+    const float fz = bz - 0.01F;
+    const float bw = (PANEL_W * PANEL_SCALE) + 0.5F;
+    const float bh = (PANEL_H * PANEL_SCALE) + 0.5F;
+    const float board_sz[2] = {bw, bh};
+    const float frame_sz[2] = {bw + 0.18F, bh + 0.18F};
+    const float xs[2] = {-4.5F, 4.5F};
+    for (int i = 0; i < 2; ++i) {
+        const float frame_pos[3] = {xs[i], 2.8F, fz};
+        const float board_pos[3] = {xs[i], 2.8F, bz};
+        nt_shape_renderer_rect(frame_pos, frame_sz, frame_col);
+        nt_shape_renderer_rect(board_pos, board_sz, board_col);
+    }
+}
+
 static void draw_shape(void) {
     const float pos[3] = {0.0F, ROOM_H * 0.5F, 0.0F};
     versor q;
@@ -393,7 +413,8 @@ static void try_bind_resources(void) {
 
 // #region UI panels
 /* Wall-mount XFORM: panel local Clay-bbox center maps to world `wx,wy,wz`.
- * Scale stays positive; rotation_x handles Clay Y-down -> world Y-up. */
+ * Negative scale_y reflects Clay Y-down -> world Y-up while keeping normal +Z (player-facing)
+ * and X un-mirrored — a rotation can't satisfy all three at once. */
 static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw, float panel_w_px, float panel_h_px) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     const float cx = panel_w_px * 0.5F;
@@ -401,10 +422,9 @@ static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw
     t.offset_x = wx - cx;
     t.offset_y = wy - cy;
     t.offset_z = wz;
-    t.rotation_x = NT_PI;
     t.rotation_y = yaw;
     t.scale_x = PANEL_SCALE;
-    t.scale_y = PANEL_SCALE;
+    t.scale_y = -PANEL_SCALE;
     t.scale_z = PANEL_SCALE;
     return t;
 }
@@ -679,6 +699,7 @@ static void frame(void) {
     nt_shape_renderer_set_cam_pos(cam_pos);
     nt_shape_renderer_set_depth(true);
     draw_room();
+    draw_boards();
     draw_shape();
     nt_shape_renderer_flush();
 
@@ -703,17 +724,16 @@ static void frame(void) {
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
 
-        /* DEBUG: standalone text directly in world space at (0, 4, 0). If this shows up,
-         * text material + font + VP_3D plumbing work — panel labels then disappear due to a
-         * walker emit issue. If this is also invisible, the bug is below nt_ui. */
+        /* World-space text centered on the shape; depth_test hides it behind the shape. No depth_write:
+         * coplanar glyph quads (0.5px AA dilation + kerning overlap) would self-z-fight. */
         if (s_font_bound) {
-            mat4 debug_model;
-            glm_mat4_identity(debug_model);
-            glm_translate(debug_model, (vec3){-2.5F, 4.0F, 0.0F});
+            mat4 text_model;
+            glm_mat4_identity(text_model);
+            glm_translate(text_model, (vec3){-2.5F, 4.9F, 0.0F});
             const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
             nt_text_renderer_set_material(s_text_material);
             nt_text_renderer_set_font(s_font);
-            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)debug_model, 0.6F, yellow, 0.0F, 0.0F);
+            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)text_model, 0.6F, yellow, 0.0F, 0.0F);
             nt_text_renderer_flush();
         }
     }
@@ -834,6 +854,8 @@ int main(int argc, char *argv[]) {
         .depth_test = true,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
         .label = "ui_3d_demo_text",
     });
 
