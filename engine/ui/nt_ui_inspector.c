@@ -39,6 +39,7 @@ void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_met
 
 void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_materials: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_inspector_set_materials: must be called outside begin/end");
     /* 0 handles fall back to the game's sprite/text material at walk time. */
     ctx->inspector_sprite_material = sprite;
     ctx->inspector_text_material = text;
