@@ -641,7 +641,16 @@ static void hero_exit_pos(const tj_run_t *run, float pitch, float *hx, float *hy
 
 static uint32_t hero_region(const game_ctx_t *g, const tj_run_t *run) {
     if (run->phase == TJ_PHASE_AUL_EXIT) {
-        return g->hero_wayfarer_idle_s;
+        /* Face the way out (toward road cell 0) instead of a fixed idle, so leaving
+         * the aul reads as walking, not sliding. */
+        const float acx = (float)run->aul_x0 + ((float)(run->aul_w - 1) * 0.5F);
+        const float acy = (float)run->aul_y0 + ((float)(run->aul_h - 1) * 0.5F);
+        const float dx = (float)run->path_gx[0] - acx;
+        const float dy = (float)run->path_gy[0] - acy;
+        if (fabsf(dx) >= fabsf(dy)) {
+            return (dx >= 0.0F) ? g->hero_wayfarer_walk_e : g->hero_wayfarer_walk_w;
+        }
+        return (dy < 0.0F) ? g->hero_wayfarer_walk_n : g->hero_wayfarer_walk_s;
     }
     const int n = (run->path_cells > 0) ? run->path_cells : 1;
     int i0 = run->cell % n;
@@ -693,7 +702,8 @@ static void draw_storm(const tj_run_t *run) {
         a = 1.0F;
     }
     const Clay_Color sand = {196.0F, 172.0F, 122.0F, a * 235.0F};
-    CLAY(MAP_RECT(MAP_SIZE, MAP_SIZE, sand, 0.0F, 0.0F, 0.0F, 10)) {}
+    /* Cover the whole viewport (not the old fixed 360) so the reshuffle is fully veiled. */
+    CLAY(MAP_RECT(s_map_vw, s_map_vh, sand, 0.0F, 0.0F, 0.0F, 10)) {}
 }
 
 static void pack_row(game_ctx_t *g, tj_run_t *run) {
