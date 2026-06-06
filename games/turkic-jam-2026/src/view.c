@@ -1319,3 +1319,93 @@ bool tj_view_help_modal(game_ctx_t *g) {
     }
     return close;
 }
+
+/* Staged first-run tutorial. `step` 0..4 (scene owns advancement). Draws a pulsing
+ * highlight on the step's target + a top-center instruction panel. Returns:
+ * 1 = action button pressed (advance), 2 = "Skip" pressed, 0 = nothing.
+ * The run is paused by the scene while this is up, so there is no time pressure. */
+int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) {
+    (void)run;
+    int result = 0;
+    const float vw = g->logical_w;
+    const float vh = g->logical_h;
+
+    /* Pulsing ring on the target element (pouch for step 1, field for 2-3). */
+    float hx = 0.0F;
+    float hy = 0.0F;
+    float hw = 0.0F;
+    float hh = 0.0F;
+    bool has_hl = false;
+    if (step == 1) {
+        hx = 12.0F;
+        hy = vh - 126.0F;
+        hw = 190.0F;
+        hh = 96.0F;
+        has_hl = true;
+    } else if (step == 2 || step == 3) {
+        hx = 298.0F;
+        hy = 64.0F;
+        hw = vw - 596.0F;
+        hh = vh - 220.0F;
+        has_hl = true;
+    }
+    if (has_hl) {
+        const float pulse = 0.5F + (0.5F * sinf(t * 4.5F));
+        const Clay_Color ring = {255.0F, 214.0F, 110.0F, 150.0F + (95.0F * pulse)};
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                           .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+                           .offset = {hx, hy},
+                           .zIndex = 78,
+                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(hw), CLAY_SIZING_FIXED(hh)}},
+              .cornerRadius = CLAY_CORNER_RADIUS(12.0F),
+              .border = {.color = ring, .width = CLAY_BORDER_OUTSIDE(3 + (int)(3.0F * pulse))}}) {}
+    }
+
+    const char *body;
+    switch (step) {
+    case 0:
+        body = pick_lang("Your hero walks the steppe and fights on his own. Your job: build the field and make him stronger.",
+                         "Твой герой сам идёт по степи и сражается. Твоя задача — строить поле и усиливать его.", "Kahraman kendi yurur ve savasir. Senin isin: tarlayi kur.");
+        break;
+    case 1:
+        body = pick_lang("Tap the Pouch (bottom-left) to draw a card.", "Нажми «Мешочек» внизу слева — вытяни карту.", "Sol alttaki torbaya bas - kart cek.");
+        break;
+    case 2:
+        body = pick_lang("Drag the card onto a green field cell.", "Перетащи карту на зелёную клетку поля.", "Karti yesil hucreye surukle.");
+        break;
+    case 3:
+        body = pick_lang("Place 3 alike in a row - they merge and raise the hero's stat.", "Поставь 3 одинаковых рядом — они сольются и поднимут стат героя.",
+                         "3 ayni yan yana - birlesip kahramani guclendirir.");
+        break;
+    default:
+        body = pick_lang("Done! Survive, clear laps, beat bosses. If you fall, upgrade the aul and send a new hero. Good luck!",
+                         "Готово! Выживай, проходи круги, бей боссов. Погиб — прокачай аул и пошли нового. Удачи!", "Hazir! Hayatta kal, tur gec, boss yen. Iyi sanslar!");
+        break;
+    }
+
+    static char stepnum[24];
+    (void)snprintf(stepnum, sizeof stepnum, "%s %d/4", pick_lang("Tutorial", "Обучение", "Egitim"), (step < 4) ? (step + 1) : 4);
+    const bool action_step = (step == 0 || step >= 4);
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_TOP}, .offset = {0.0F, 74.0F}, .zIndex = 82},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)},
+                     .padding = CLAY_PADDING_ALL(20),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 12,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {40.0F, 34.0F, 24.0F, 250.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
+          .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), stepnum, &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), body, &s_stat);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
+            if (action_step && tj_button(g, "ftue_next", (step >= 4) ? pick_lang("Play >", "Играть ▶", "Oyna ▶") : pick_lang("Next >", "Дальше ▶", "Ileri ▶"), 200, 50, TJ_BTN_PRIMARY)) {
+                result = 1;
+            }
+            if (step < 4 && tj_button(g, "ftue_skip", pick_lang("Skip", "Пропустить", "Atla"), 150, 44, TJ_BTN_SECONDARY)) {
+                result = 2;
+            }
+        }
+    }
+    return result;
+}

@@ -16,6 +16,7 @@
 #include "game.h"
 #include "i18n.h"
 #include "journal.h"
+#include "save.h"
 #include "sim.h"
 #include "ui/nt_ui_label.h"
 #include "ui_kit.h"
@@ -26,9 +27,12 @@
 #endif
 
 static tj_run_t s_run;
-static bool s_banked = false;    /* death banked into the aul once per run */
-static int s_drag_card = -1;     /* hand card being dragged onto the field (-1 = none) */
-static bool s_help_open = false; /* "?" how-to modal toggled open */
+static bool s_banked = false;      /* death banked into the aul once per run */
+static int s_drag_card = -1;       /* hand card being dragged onto the field (-1 = none) */
+static bool s_help_open = false;   /* "?" how-to modal toggled open */
+static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
+static int s_ftue_step = 0;        /* 0 intro, 1 pull, 2 place, 3 merge, 4 done */
+static float s_ftue_t = 0.0F;      /* tutorial animation clock (highlight pulse) */
 
 #if NT_DEVAPI_ENABLED
 /* devapi: live run state for bots/tests. */
@@ -180,6 +184,38 @@ static int ep_give(int c, char **v, char *o, int cap, void *u) {
 }
 #endif
 
+/* First-run tutorial gating. Only the very first run ever (persisted as save
+ * "ftue_done"). Forces tutorial pulls to a known mergeable tile + tops up the pouch
+ * so the lesson always succeeds; the scene pauses the run while the overlay is up. */
+static void ftue_begin(void) {
+    if (save_get_int("ftue_done", 0) != 0) {
+        s_ftue_active = false;
+        return;
+    }
+    s_ftue_active = true;
+    s_ftue_step = 0;
+    s_ftue_t = 0.0F;
+    s_run.forced_pull_tile = tj_config_tile_index("war_1"); /* always Точило -> 3-in-a-row merges cleanly */
+    s_run.pouch += 4;                                       /* headroom so a misplace can be retried */
+}
+
+static void ftue_finish(void) {
+    s_ftue_active = false;
+    s_run.forced_pull_tile = -1;
+    save_set_int("ftue_done", 1);
+    save_flush();
+}
+
+static bool field_has_any_tile(void) {
+    const int n = s_run.grid_cols * s_run.grid_rows;
+    for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
+        if (s_run.field_tile[i] >= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void on_enter(game_ctx_t *g) {
 #if NT_DEVAPI_ENABLED
     static bool s_ep_registered = false;
@@ -202,6 +238,7 @@ static void on_enter(game_ctx_t *g) {
     }
     tj_run_start(&s_run, g->chosen_heir); /* one champion of the clan */
     s_banked = false;
+    ftue_begin(); /* first-run tutorial (no-op once "ftue_done" is saved) */
 }
 
 static void on_exit(game_ctx_t *g) { g->run = NULL; }
@@ -211,6 +248,7 @@ static void start_new_run(game_ctx_t *g) {
     g->score = 0;
     s_banked = false;
     tj_run_start(&s_run, g->chosen_heir);
+    ftue_begin(); /* no-op after the first run (save flag) */
 }
 
 /* Keyboard camera pan (arrows / WASD). */
@@ -287,8 +325,21 @@ static void on_update(game_ctx_t *g, float dt) {
         game_goto(g, &SCENE_PAUSE);
     }
 
-    tj_run_tick(&s_run, dt);
+    if (!s_ftue_active) {
+        tj_run_tick(&s_run, dt); /* tutorial pauses the run: no time pressure while learning */
+    }
     handle_map_input(g, dt);
+
+    if (s_ftue_active) { /* state-driven step advance (action steps advance via the overlay button) */
+        s_ftue_t += dt;
+        if (s_ftue_step == 1 && s_run.hand_count > 0) {
+            s_ftue_step = 2;
+        } else if (s_ftue_step == 2 && field_has_any_tile()) {
+            s_ftue_step = 3;
+        } else if (s_ftue_step == 3 && s_run.merges_done > 0) {
+            s_ftue_step = 4;
+        }
+    }
 
     /* Full-screen frame: top HUD, then [log | map | hero], then card hand. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
@@ -308,6 +359,18 @@ static void on_update(game_ctx_t *g, float dt) {
         }
         if (s_help_open && tj_view_help_modal(g)) {
             s_help_open = false; /* "Понятно" closes it */
+        }
+        if (s_ftue_active) {
+            const int fr = tj_view_ftue_overlay(g, &s_run, s_ftue_step, s_ftue_t);
+            if (fr == 1) { /* action button: advance intro, or finish on the last card */
+                if (s_ftue_step == 0) {
+                    s_ftue_step = 1;
+                } else {
+                    ftue_finish();
+                }
+            } else if (fr == 2) {
+                ftue_finish(); /* skipped */
+            }
         }
         tj_view_action_overlay(g, &s_run); /* combat / dice window, above the map */
         if (s_drag_card >= 0) {

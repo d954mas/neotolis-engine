@@ -654,6 +654,7 @@ static void try_merge_at(tj_run_t *r, int gx, int gy) {
             cleared++;
         }
         r->field_tile[start] = up;
+        r->merges_done++;
         tj_journal_push(TJ_LOG_GOOD, "Мердж: %s", g_config.tiles[up].name);
         /* loop: the upgraded tile may complete another triple (cascade) */
     }
@@ -698,6 +699,8 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     }
     gen_loop(r); /* generates the loop and populates this circle (may log global effects) */
     r->hand_count = 0;
+    r->merges_done = 0;
+    r->forced_pull_tile = -1;
     r->pouch = g_config.pouch_start; /* start with a pouch of cards to pull */
     recompute_field_bonuses(r);      /* empty field at start: bonuses 0, but keep state consistent */
     r->tamga_cell = -1;
@@ -1127,7 +1130,7 @@ void tj_run_pull_pouch(tj_run_t *r) {
     if (r->pouch <= 0 || r->hand_count >= TJ_MAX_HAND) {
         return; /* nothing to pull, or the fan is full */
     }
-    const int c = pick_field_card(r->circle);
+    int c = (r->forced_pull_tile >= 0) ? r->forced_pull_tile : pick_field_card(r->circle); /* FTUE forces a known tile */
     if (c < 0) {
         return;
     }
