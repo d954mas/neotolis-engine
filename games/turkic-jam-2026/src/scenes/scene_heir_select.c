@@ -12,8 +12,8 @@
 #include "ui_kit.h"
 
 static const nt_ui_label_style_t s_name = {.font_id = 0, .font_size = 26, .color = {255.0F, 214.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 18, .color = {210.0F, 216.0F, 228.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_perk = {.font_id = 0, .font_size = 16, .color = {150.0F, 210.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 18, .color = {232.0F, 222.0F, 202.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_perk = {.font_id = 0, .font_size = 16, .color = {126.0F, 188.0F, 134.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
 static void perk_fmt(char *buf, size_t cap, tj_perk_t perk, int v) {
     const char *res = NULL;
@@ -53,7 +53,7 @@ static void hero_card(game_ctx_t *g, int i) {
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 12,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {26.0F, 30.0F, 46.0F, 255.0F},
+          .backgroundColor = {42.0F, 34.0F, 25.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), h->name, &s_name);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), stat[i], &s_stat);

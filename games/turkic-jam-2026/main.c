@@ -665,7 +665,7 @@ static void build_scene_shell(const nt_ui_transform_t *shake_xform) {
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
                      .padding = fullscreen ? CLAY_PADDING_ALL(0) : CLAY_PADDING_ALL(24),
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {10.0F, 12.0F, 20.0F, 255.0F}}) {
+          .backgroundColor = {18.0F, 16.0F, 14.0F, 255.0F}}) {
         if (fullscreen) {
             if (g.scene->on_update) {
                 g.scene->on_update(&g, g_nt_app.dt);
@@ -677,7 +677,7 @@ static void build_scene_shell(const nt_ui_transform_t *shake_xform) {
                              .layoutDirection = CLAY_TOP_TO_BOTTOM,
                              .childGap = 22,
                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = {26.0F, 30.0F, 46.0F, 240.0F},
+                  .backgroundColor = {35.0F, 31.0F, 24.0F, 240.0F},
                   .cornerRadius = CLAY_CORNER_RADIUS(28),
                   .userData = (void *)NT_UI_DATA_XFORM(0U, shake_xform, 1.0F)}) {
                 if (g.scene->on_update) {
@@ -846,7 +846,7 @@ static void frame(void) {
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {0.04F, 0.05F, 0.08F, 1.0F},
+        .clear_color = {0.07F, 0.06F, 0.05F, 1.0F},
         .clear_depth = 1.0F,
     });
 

@@ -11,9 +11,9 @@
 #include "game.h"
 
 typedef enum {
-    TJ_BTN_PRIMARY = 0, /* blue */
-    TJ_BTN_SECONDARY,   /* green */
-    TJ_BTN_DANGER,      /* red */
+    TJ_BTN_PRIMARY = 0,
+    TJ_BTN_SECONDARY,
+    TJ_BTN_DANGER,
 } tj_btn_variant_t;
 
 extern const nt_ui_label_style_t TJ_STYLE_TITLE;

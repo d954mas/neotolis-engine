@@ -23,21 +23,21 @@
 // #region styles
 /* One style per journal kind (TJ_LOG_*). */
 static const nt_ui_label_style_t s_log_styles[4] = {
-    [TJ_LOG_PLAIN] = {.font_id = 0, .font_size = 18, .color = {150.0F, 158.0F, 172.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
-    [TJ_LOG_GOOD] = {.font_id = 0, .font_size = 18, .color = {150.0F, 210.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
-    [TJ_LOG_BAD] = {.font_id = 0, .font_size = 18, .color = {232.0F, 138.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
-    [TJ_LOG_BIG] = {.font_id = 0, .font_size = 20, .color = {255.0F, 210.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_PLAIN] = {.font_id = 0, .font_size = 18, .color = {184.0F, 172.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_GOOD] = {.font_id = 0, .font_size = 18, .color = {126.0F, 188.0F, 134.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_BAD] = {.font_id = 0, .font_size = 18, .color = {224.0F, 108.0F, 76.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_BIG] = {.font_id = 0, .font_size = 20, .color = {232.0F, 196.0F, 98.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
 };
 
 static const nt_ui_label_style_t s_chip = {.font_id = 0, .font_size = 19, .color = {214.0F, 204.0F, 184.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20, .color = {196.0F, 168.0F, 124.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
-static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {210.0F, 216.0F, 228.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {130.0F, 138.0F, 152.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20, .color = {224.0F, 198.0F, 142.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {232.0F, 222.0F, 202.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
-#define TJ_PANEL_BG {16.0F, 19.0F, 30.0F, 255.0F}
-#define TJ_BAR_BG {20.0F, 24.0F, 38.0F, 255.0F}
-#define TJ_CHIP_BG {34.0F, 40.0F, 58.0F, 255.0F}
+#define TJ_PANEL_BG {35.0F, 31.0F, 24.0F, 255.0F}
+#define TJ_BAR_BG {31.0F, 28.0F, 22.0F, 255.0F}
+#define TJ_CHIP_BG {82.0F, 50.0F, 28.0F, 255.0F}
 // #endregion
 
 // #region map geometry (winding trail loop around the central aul, Loop Hero style)
@@ -47,17 +47,17 @@ static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .
 
 static Clay_Color cell_color(int tile_idx) {
     if (tile_idx < 0 || tile_idx >= g_config.tile_count) {
-        return (Clay_Color){62.0F, 64.0F, 76.0F, 255.0F};
+        return (Clay_Color){184.0F, 177.0F, 160.0F, 255.0F};
     }
     switch (g_config.tiles[tile_idx].kind) {
     case TJ_TILE_SAFE:
         return (Clay_Color){90.0F, 175.0F, 110.0F, 255.0F};
     case TJ_TILE_SUPPORT:
-        return (Clay_Color){88.0F, 140.0F, 205.0F, 255.0F};
+        return (Clay_Color){43.0F, 140.0F, 132.0F, 255.0F};
     case TJ_TILE_CHECK:
         return (Clay_Color){205.0F, 110.0F, 88.0F, 255.0F};
     default:
-        return (Clay_Color){120.0F, 120.0F, 130.0F, 255.0F};
+        return (Clay_Color){184.0F, 177.0F, 160.0F, 255.0F};
     }
 }
 
@@ -386,15 +386,17 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
 }
 
 static void draw_ground(game_ctx_t *g, const tj_run_t *run, float pitch, float tile) {
+    (void)tile;
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
     if (!has_region(g->ground_sand_base)) {
-        map_rect_sprite(g, (Clay_Color){54.0F, 48.0F, 36.0F, 255.0F}, (float)cols * pitch, (float)rows * pitch, 0.0F, 0.0F);
+        map_rect_sprite(g, (Clay_Color){166.0F, 124.0F, 66.0F, 255.0F}, pitch, pitch, 0.0F, 0.0F);
         return;
     }
+    const float ground = pitch * 1.03F;
     for (int gy = 0; gy < rows; gy++) {
         for (int gx = 0; gx < cols; gx++) {
-            map_sprite(g, g->ground_sand_base, tile, tile, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 0);
+            map_sprite(g, g->ground_sand_base, ground, ground, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 0);
         }
     }
 }
@@ -897,7 +899,7 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
 
     /* Viewport element: grows to fill the centre gap. The map WORLD is drawn by the
      * CUSTOM handler; Clay keeps only the interaction catchers + on-top overlays. */
-    CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.horizontal = true, .vertical = true}}) {
+    CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .backgroundColor = {78.0F, 54.0F, 30.0F, 255.0F}, .clip = {.horizontal = true, .vertical = true}}) {
         nt_ui_custom(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), run);
         draw_road_catchers(g, run, pitch);
         draw_build_catcher(g, run);
@@ -932,9 +934,9 @@ static const char *tj_hero_name(const tj_run_t *run) {
 
 static void equipment_slot(game_ctx_t *g, uint32_t slot_region, uint32_t item_region) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(52), CLAY_SIZING_FIXED(52)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {38.0F, 43.0F, 58.0F, 255.0F},
+          .backgroundColor = {54.0F, 36.0F, 24.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
-          .border = {.color = {74.0F, 82.0F, 98.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
+          .border = {.color = {132.0F, 92.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
         floating_center_sprite(g, slot_region, 52.0F, 52.0F, 0);
         floating_center_sprite(g, item_region, 34.0F, 34.0F, 1);
     }
@@ -959,7 +961,7 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tj_hero_name(run), &s_panel_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(150)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {54.0F, 60.0F, 80.0F, 255.0F},
+              .backgroundColor = {70.0F, 48.0F, 32.0F, 255.0F},
               .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
             floating_center_sprite(g, g->hero_wayfarer_panel, 96.0F, 132.0F, 0);
         }
@@ -1010,7 +1012,7 @@ static void hand_card(game_ctx_t *g, int tile_index, bool active) {
     const uint32_t surface = has_tile ? (active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128) : g->ui_card_back_96x128;
     const uint32_t art = has_tile ? card_art_region_for_id(g, g_config.tiles[tile_index].id) : NT_ATLAS_INVALID_REGION;
     const uint32_t placement = has_tile ? placement_icon_region(g, g_config.tiles[tile_index].placement) : NT_ATLAS_INVALID_REGION;
-    const Clay_Color bg = active ? (Clay_Color){46.0F, 54.0F, 40.0F, 255.0F} : (Clay_Color){26.0F, 30.0F, 44.0F, 255.0F};
+    const Clay_Color bg = active ? (Clay_Color){38.0F, 76.0F, 64.0F, 255.0F} : (Clay_Color){42.0F, 34.0F, 25.0F, 255.0F};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(132), CLAY_SIZING_FIXED(128)},
                      .padding = CLAY_PADDING_ALL(10),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1018,7 +1020,7 @@ static void hand_card(game_ctx_t *g, int tile_index, bool active) {
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10.0F),
-          .border = {.color = active ? (Clay_Color){150.0F, 210.0F, 150.0F, 255.0F} : (Clay_Color){44.0F, 50.0F, 66.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+          .border = {.color = active ? (Clay_Color){198.0F, 154.0F, 55.0F, 255.0F} : (Clay_Color){104.0F, 76.0F, 42.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         card_surface(g, surface);
         if (has_tile) {
             card_sprite(g, art, 72.0F, 72.0F, 0.0F, -14.0F, 1);

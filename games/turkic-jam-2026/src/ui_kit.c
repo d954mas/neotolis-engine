@@ -17,21 +17,21 @@ const nt_ui_label_style_t TJ_STYLE_TITLE = {
 const nt_ui_label_style_t TJ_STYLE_HEADING = {
     .font_id = 0,
     .font_size = 44,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = {232.0F, 214.0F, 176.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
 const nt_ui_label_style_t TJ_STYLE_BODY = {
     .font_id = 0,
     .font_size = 26,
-    .color = {200.0F, 206.0F, 218.0F, 255.0F},
+    .color = {218.0F, 202.0F, 174.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
 const nt_ui_label_style_t TJ_STYLE_HINT = {
     .font_id = 0,
     .font_size = 18,
-    .color = {150.0F, 158.0F, 172.0F, 255.0F},
+    .color = {176.0F, 160.0F, 135.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
@@ -44,19 +44,19 @@ static const nt_ui_label_style_t s_btn_label = {
 // #endregion
 
 bool tj_button(game_ctx_t *g, const char *id_str, const char *text, int w, int h, tj_btn_variant_t variant) {
-    uint32_t region = g->btn_blue;
+    uint32_t tint = 0xFFFFFFFF;
     if (variant == TJ_BTN_SECONDARY) {
-        region = g->btn_green;
+        tint = 0xF6B8B86EU;
     } else if (variant == TJ_BTN_DANGER) {
-        region = g->btn_red;
+        tint = 0xFF253A8FU;
     }
 
     /* Only idle.atlas is set; other states inherit it (atlas.id == 0). */
     const nt_ui_button_style_t style = {
-        .idle = {.atlas = g->atlas, .bg_region = region, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 1.0F},
-        .hover = {.bg_region = region, .bg_tint = 0xFFFFFFFF, .scale = 1.06F, .opacity = 1.0F},
-        .pressed = {.bg_region = region, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_y = 3.0F, .opacity = 1.0F},
-        .disabled = {.bg_region = region, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 0.4F},
+        .idle = {.atlas = g->atlas, .bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 1.0F, .opacity = 1.0F},
+        .hover = {.bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 1.06F, .opacity = 1.0F},
+        .pressed = {.bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 0.95F, .offset_y = 3.0F, .opacity = 1.0F},
+        .disabled = {.bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 1.0F, .opacity = 0.4F},
         .transition_speed = 12.0F,
         .hit_padding_lrtb = {16, 16, 16, 16},
         .slice9_scale = 1.0F,
