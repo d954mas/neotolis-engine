@@ -1,6 +1,7 @@
 /* Run scene — thin orchestrator. Drives the sim, calls the view systems, and
  * handles input + flow. No rendering or sim logic lives here (see view.c / sim.c). */
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -166,8 +167,8 @@ static void on_enter(game_ctx_t *g) {
 
 static void on_exit(game_ctx_t *g) { g->run = NULL; }
 
-/* Camera pan (arrows/WASD) + click->cell placement on the sprite map. */
-static void handle_map_input(game_ctx_t *g, float dt) {
+/* Keyboard camera pan (arrows / WASD). */
+static void camera_keys(float dt) {
     const float pan = 360.0F * dt;
     if (nt_input_key_is_down(NT_KEY_ARROW_LEFT) || nt_input_key_is_down(NT_KEY_A)) {
         tj_view_world_pan(pan, 0.0F);
@@ -181,18 +182,52 @@ static void handle_map_input(game_ctx_t *g, float dt) {
     if (nt_input_key_is_down(NT_KEY_ARROW_DOWN) || nt_input_key_is_down(NT_KEY_S)) {
         tj_view_world_pan(0.0F, -pan);
     }
-    /* Place the held card by clicking a desert cell. The reward pack (Clay) owns
-     * clicks while open, so skip then. */
-    if (s_run.pack_open || s_run.hand < 0 || !nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+}
+
+/* Mouse on the map: a DRAG (press + move) scrolls the camera; a CLICK (press +
+ * release without moving) places the held card on release. The reward modal owns
+ * input while open, so the map is inert then. */
+static void handle_map_input(game_ctx_t *g, float dt) {
+    static bool press_active = false;
+    static bool dragged = false;
+    static float press_x = 0.0F;
+    static float press_y = 0.0F;
+    static float last_x = 0.0F;
+    static float last_y = 0.0F;
+    if (s_run.pack_open) {
+        press_active = false;
         return;
     }
-    int gx = -1;
-    int gy = -1;
-    if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &gx, &gy)) {
+    camera_keys(dt);
+    const float mx = g->ptr_x;
+    const float my = g->ptr_y;
+    if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        press_active = true;
+        dragged = false;
+        press_x = mx;
+        press_y = my;
+        last_x = mx;
+        last_y = my;
         return;
     }
-    if (!tj_run_place_field(&s_run, gx, gy)) {
-        tj_journal_push(TJ_LOG_BAD, "Здесь нельзя строить — выбери свободную клетку поля.");
+    if (press_active && nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
+        if (!dragged && (fabsf(mx - press_x) + fabsf(my - press_y)) > 8.0F) {
+            dragged = true; /* moved past the threshold -> it's a scroll, not a tap */
+        }
+        if (dragged) {
+            tj_view_world_pan(mx - last_x, my - last_y); /* grab-the-map scroll */
+        }
+        last_x = mx;
+        last_y = my;
+        return;
+    }
+    if (nt_input_mouse_is_released(NT_BUTTON_LEFT) && press_active) {
+        press_active = false;
+        int gx = -1;
+        int gy = -1;
+        if (!dragged && s_run.hand >= 0 && tj_view_world_cell_at(mx, my, &gx, &gy) && !tj_run_place_field(&s_run, gx, gy)) {
+            tj_journal_push(TJ_LOG_BAD, "Здесь нельзя строить — выбери свободную клетку поля.");
+        }
     }
 }
 
@@ -213,6 +248,7 @@ static void on_update(game_ctx_t *g, float dt) {
             tj_view_hero_panel(g, &s_run);
         }
         tj_view_card_hand(g, &s_run);
+        tj_view_pack_overlay(g, &s_run); /* reward modal: full-screen, above the clipped map */
     }
 
     if (!s_run.alive) {

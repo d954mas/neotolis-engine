@@ -15,6 +15,7 @@ void tj_view_register_world(game_ctx_t *g);                       /* register th
 void tj_view_map(game_ctx_t *g, tj_run_t *run);                   /* center: viewport custom element + on-top overlays (Clay) */
 void tj_view_world_pan(float dx, float dy);                       /* pan the map camera (world px), clamped */
 bool tj_view_world_cell_at(float lx, float ly, int *gx, int *gy); /* logical point -> grid cell; false if outside */
+void tj_view_pack_overlay(game_ctx_t *g, tj_run_t *run);          /* reward-chooser modal; call at scene root, above the clipped map */
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run);      /* right: doll, stats, current cell */
 void tj_view_card_hand(game_ctx_t *g, tj_run_t *run);             /* bottom: held card + reward pack chooser */
 

@@ -17,43 +17,44 @@
 #include "ui/nt_ui_label.h"
 
 #include "config.h"
+#include "i18n.h"
 #include "journal.h"
 #include "ui_kit.h"
 
 // #region styles
 /* One style per journal kind (TJ_LOG_*). */
 static const nt_ui_label_style_t s_log_styles[4] = {
-    [TJ_LOG_PLAIN] = {.font_id = 0, .font_size = 18, .color = {150.0F, 158.0F, 172.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
-    [TJ_LOG_GOOD] = {.font_id = 0, .font_size = 18, .color = {150.0F, 210.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
-    [TJ_LOG_BAD] = {.font_id = 0, .font_size = 18, .color = {232.0F, 138.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
-    [TJ_LOG_BIG] = {.font_id = 0, .font_size = 20, .color = {255.0F, 210.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_PLAIN] = {.font_id = 0, .font_size = 18, .color = {184.0F, 172.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_GOOD] = {.font_id = 0, .font_size = 18, .color = {126.0F, 188.0F, 134.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_BAD] = {.font_id = 0, .font_size = 18, .color = {224.0F, 108.0F, 76.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
+    [TJ_LOG_BIG] = {.font_id = 0, .font_size = 20, .color = {232.0F, 196.0F, 98.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT},
 };
 
 static const nt_ui_label_style_t s_chip = {.font_id = 0, .font_size = 19, .color = {214.0F, 204.0F, 184.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20, .color = {196.0F, 168.0F, 124.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
-static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {210.0F, 216.0F, 228.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {130.0F, 138.0F, 152.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20, .color = {224.0F, 198.0F, 142.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {232.0F, 222.0F, 202.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
-#define TJ_PANEL_BG {16.0F, 19.0F, 30.0F, 255.0F}
-#define TJ_BAR_BG {20.0F, 24.0F, 38.0F, 255.0F}
-#define TJ_CHIP_BG {34.0F, 40.0F, 58.0F, 255.0F}
+#define TJ_PANEL_BG {35.0F, 31.0F, 24.0F, 255.0F}
+#define TJ_BAR_BG {31.0F, 28.0F, 22.0F, 255.0F}
+#define TJ_CHIP_BG {82.0F, 50.0F, 28.0F, 255.0F}
 // #endregion
 
 // #region map geometry (winding trail loop around the central aul, Loop Hero style)
 static Clay_Color cell_color(int tile_idx) {
     if (tile_idx < 0 || tile_idx >= g_config.tile_count) {
-        return (Clay_Color){62.0F, 64.0F, 76.0F, 255.0F};
+        return (Clay_Color){104.0F, 92.0F, 72.0F, 255.0F};
     }
     switch (g_config.tiles[tile_idx].kind) {
     case TJ_TILE_SAFE:
         return (Clay_Color){90.0F, 175.0F, 110.0F, 255.0F};
     case TJ_TILE_SUPPORT:
-        return (Clay_Color){88.0F, 140.0F, 205.0F, 255.0F};
+        return (Clay_Color){86.0F, 134.0F, 102.0F, 255.0F};
     case TJ_TILE_CHECK:
         return (Clay_Color){205.0F, 110.0F, 88.0F, 255.0F};
     default:
-        return (Clay_Color){120.0F, 120.0F, 130.0F, 255.0F};
+        return (Clay_Color){140.0F, 124.0F, 96.0F, 255.0F};
     }
 }
 
@@ -149,11 +150,13 @@ static void set_world_from_frame(const nt_ui_custom_frame_t *frame) {
     memcpy(s_world_m, frame->world_mat4, sizeof s_world_m);
 }
 
-/* Pan the camera (world px), clamped so the map can't slide fully off the viewport. */
+/* Pan the camera (world px), clamped so the map edge stops at ~the viewport edge
+ * (one cell of overscroll), per axis. */
 void tj_view_world_pan(float dx, float dy) {
-    const float lim = s_map_extent * 0.5F;
-    s_cam_x = fmaxf(-lim, fminf(lim, s_cam_x + dx));
-    s_cam_y = fmaxf(-lim, fminf(lim, s_cam_y + dy));
+    const float limx = fmaxf(0.0F, (s_map_extent - s_map_vw) * 0.5F) + s_map_pitch;
+    const float limy = fmaxf(0.0F, (s_map_extent - s_map_vh) * 0.5F) + s_map_pitch;
+    s_cam_x = fmaxf(-limx, fminf(limx, s_cam_x + dx));
+    s_cam_y = fmaxf(-limy, fminf(limy, s_cam_y + dy));
 }
 
 /* Logical point -> grid cell (inverse of grid_x/grid_y about the map centre).
@@ -318,6 +321,18 @@ static void hud_spacer(void) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0)}}}) {}
 }
 
+static const char *pick_lang(const char *en, const char *ru, const char *tr) {
+    switch (i18n_get()) {
+    case LANG_RU:
+        return ru;
+    case LANG_TR:
+        return tr;
+    case LANG_EN:
+    default:
+        return en;
+    }
+}
+
 void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
     static char circle[40];
     static char sup[28];
@@ -325,12 +340,12 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
     static char glo[28];
     static char sta[28];
     static char day[24];
-    (void)snprintf(circle, sizeof circle, "КРУГ %d/%d", run->circle, g_config.laps_to_win);
-    (void)snprintf(sup, sizeof sup, "Запасы %d", run->supplies);
-    (void)snprintf(wis, sizeof wis, "Мудрость %d", run->wisdom);
-    (void)snprintf(glo, sizeof glo, "Слава %d", run->glory);
-    (void)snprintf(sta, sizeof sta, "Силы %d", run->stamina);
-    (void)snprintf(day, sizeof day, "День %d", run->day);
+    (void)snprintf(circle, sizeof circle, "%s %d/%d", pick_lang("Circle", "Круг", "Dongu"), run->circle, g_config.laps_to_win);
+    (void)snprintf(sup, sizeof sup, "%s %d", pick_lang("Supplies", "Запасы", "Azik"), run->supplies);
+    (void)snprintf(wis, sizeof wis, "%s %d", pick_lang("Wisdom", "Мудрость", "Bilgelik"), run->wisdom);
+    (void)snprintf(glo, sizeof glo, "%s %d", pick_lang("Glory", "Слава", "San"), run->glory);
+    (void)snprintf(sta, sizeof sta, "%s %d", pick_lang("Stamina", "Силы", "Guc"), run->stamina);
+    (void)snprintf(day, sizeof day, "%s %d", pick_lang("Day", "День", "Gun"), run->day);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64)},
                      .padding = {16, 16, 10, 10},
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
@@ -676,36 +691,71 @@ static void draw_storm(const tj_run_t *run) {
     CLAY(MAP_RECT(s_map_vw, s_map_vh, sand, 0.0F, 0.0F, 0.0F, 10)) {}
 }
 
-static void pack_row(game_ctx_t *g, tj_run_t *run) {
-    static const char *ids[3] = {"tj_pick0", "tj_pick1", "tj_pick2"};
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
-        for (int i = 0; i < 3; i++) {
-            const int ti = run->pack_offer[0][i];
-            const char *name = (ti >= 0 && ti < g_config.tile_count) ? g_config.tiles[ti].name : "-";
-            if (tj_button(g, ids[i], name, 148, 78, TJ_BTN_SECONDARY)) {
-                tj_run_choose_card(run, i);
-            }
-        }
+/* One clickable reward card (surface + art + name). nt_ui_button_begin/end lets the
+ * whole card be the hit target with art layered inside. */
+static void pack_card(game_ctx_t *g, tj_run_t *run, int i) {
+    const int ti = run->pack_offer[0][i];
+    const bool has = ti >= 0 && ti < g_config.tile_count;
+    const char *name = has ? g_config.tiles[ti].name : "-";
+    const uint32_t art = has ? card_art_region_for_id(g, g_config.tiles[ti].id) : NT_ATLAS_INVALID_REGION;
+    static const char *ids[3] = {"tj_packcard0", "tj_packcard1", "tj_packcard2"};
+    const nt_ui_button_style_t st = {
+        .idle = {.atlas = g->atlas, .bg_region = g->ui_card_playable_96x128, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
+        .hover = {.bg_region = g->ui_card_selected_96x128, .bg_tint = 0xFFFFFFFFU, .scale = 1.06F, .opacity = 1.0F},
+        .pressed = {.bg_region = g->ui_card_selected_96x128, .bg_tint = 0xFFFFFFFFU, .scale = 0.97F, .opacity = 1.0F},
+        .disabled = {.bg_region = g->ui_card_playable_96x128, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.5F},
+        .transition_speed = 14.0F,
+        .hit_padding_lrtb = {4, 4, 4, 4},
+        .slice9_scale = 1.0F,
+    };
+    const Clay_ElementDeclaration decl = {
+        .layout =
+            {
+                .sizing = {CLAY_SIZING_FIXED(128), CLAY_SIZING_FIXED(168)},
+                .padding = CLAY_PADDING_ALL(10),
+                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .childGap = 8,
+                .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+            },
+    };
+    /* Non-floating art (Clay sequences it per call) + explicit per-card id so two
+     * offers of the same tile can't collide on a Clay element ID. */
+    nt_ui_button_begin(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), nt_ui_id(ids[i % 3]), &st, &decl, true);
+    inline_sprite(g, art, 88.0F, 88.0F);
+    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, &s_card_name);
+    if (nt_ui_button_end(g->ui)) {
+        tj_run_choose_card(run, i); /* picks the card and closes the modal (pack_open -> false) */
     }
 }
 
-/* Reward choice floats over the aul (does NOT pause the run -> no broken idle). */
-static void draw_pack_choice(game_ctx_t *g, tj_run_t *run) {
+/* Reward chooser as a real modal: a full-screen dim scrim (blocks the map visually;
+ * the scene gates map input while pack_open) + a centred panel of clickable cards.
+ * Public so the scene draws it at the root, ABOVE the clipped map viewport. */
+void tj_view_pack_overlay(game_ctx_t *g, tj_run_t *run) {
     if (!run->pack_open || run->packs <= 0) {
         return;
     }
-    CLAY({.floating =
-              {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, -24.0F}, .zIndex = 25},
-          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)},
-                     .padding = CLAY_PADDING_ALL(14),
-                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 10,
-                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {20.0F, 24.0F, 38.0F, 238.0F},
-          .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
-          .border = {.color = {196.0F, 168.0F, 124.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Дар пути - выбери карту", &s_panel_title);
-        pack_row(g, run);
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 50},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {18.0F, 13.0F, 8.0F, 200.0F}}) {
+        CLAY({.layout =
+                  {
+                      .sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)},
+                      .padding = CLAY_PADDING_ALL(24),
+                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                      .childGap = 16,
+                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+                  },
+              .backgroundColor = {42.0F, 34.0F, 25.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
+              .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Road gift - choose a card", "Дар пути - выбери карту", "Yol hediyesi - kart sec"), &s_panel_title);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 14}}) {
+                for (int i = 0; i < 3; i++) {
+                    pack_card(g, run, i);
+                }
+            }
+        }
     }
 }
 
@@ -770,12 +820,10 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     }
     set_world_from_frame(frame);
     const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
-    /* Show ~9 cells across the viewport's short side -> big tiles; larger zones than
-     * that scroll (camera pan). A small zone that fits stays centred. */
-    float pitch = floorf(fminf(s_map_vw, s_map_vh) / 9.0F);
-    if (pitch > floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1)) && maxdim + 1 < 9) {
-        pitch = floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1)); /* tiny zone: just fit */
-    }
+    /* Big tiles: ~6 cells across the viewport short side; the large zone scrolls
+     * (camera pan/drag). A small zone that already fits gets the larger fit pitch. */
+    const float vmin = fminf(s_map_vw, s_map_vh);
+    const float pitch = fmaxf(floorf(vmin / 6.0F), floorf(vmin / (float)(maxdim + 1)));
     s_map_pitch = pitch;
     s_map_extent = (float)maxdim * pitch;
     s_map_cols = run->grid_cols;
@@ -802,13 +850,13 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
     if (run->grid_cols < 2 || run->grid_rows < 2 || run->path_cells < 1) {
         return; /* loop not generated yet */
     }
-    /* Viewport element: grows to fill the centre gap. The map WORLD (incl. build cues)
-     * is drawn by the CUSTOM handler; placement is click->cell (scene). Clay keeps only
-     * the on-top overlays (storm veil, reward pack). */
+    /* Viewport element: grows to fill the centre gap, clipped so the big scrolling map
+     * stays inside it. The map WORLD is the CUSTOM handler; the storm veil clips with it.
+     * The reward chooser is a separate top-level modal (tj_view_pack_overlay), NOT here,
+     * so the clip can't hide it and it sits above everything. */
     CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .backgroundColor = {78.0F, 54.0F, 30.0F, 255.0F}, .clip = {.horizontal = true, .vertical = true}}) {
         nt_ui_custom(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), run);
         draw_storm(run);
-        draw_pack_choice(g, run);
     }
 }
 
@@ -816,7 +864,7 @@ void tj_view_log(game_ctx_t *g, int max_lines) {
     const int avail = tj_journal_count();
     const int shown = avail < max_lines ? avail : max_lines;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(14), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}, .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Летопись", &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Chronicle", "Летопись", "Gunluk"), &s_panel_title);
         for (int k = shown - 1; k >= 0; k--) {
             tj_log_kind_t kind = TJ_LOG_PLAIN;
             const char *line = tj_journal_get(k, &kind);
@@ -831,14 +879,14 @@ static const char *tj_hero_name(const tj_run_t *run) {
     if (run->heir_index >= 0 && run->heir_index < g_config.heir_count) {
         return g_config.heirs[run->heir_index].name;
     }
-    return "Наследник";
+    return pick_lang("Heir", "Наследник", "Varis");
 }
 
 static void equipment_slot(game_ctx_t *g, uint32_t slot_region, uint32_t item_region) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(52), CLAY_SIZING_FIXED(52)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {38.0F, 43.0F, 58.0F, 255.0F},
+          .backgroundColor = {54.0F, 36.0F, 24.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
-          .border = {.color = {74.0F, 82.0F, 98.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
+          .border = {.color = {132.0F, 92.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
         floating_center_sprite(g, slot_region, 52.0F, 52.0F, 0);
         floating_center_sprite(g, item_region, 34.0F, 34.0F, 1);
     }
@@ -850,11 +898,11 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     static char spirit[20];
     static char sta[24];
     static char cellinfo[40];
-    (void)snprintf(body, sizeof body, "Тело %d", run->body);
-    (void)snprintf(mind, sizeof mind, "Ум %d", run->mind);
-    (void)snprintf(spirit, sizeof spirit, "Дух %d", run->spirit);
-    (void)snprintf(sta, sizeof sta, "Силы %d", run->stamina);
-    (void)snprintf(cellinfo, sizeof cellinfo, "Клетка %d / %d", run->cell + 1, run->path_cells);
+    (void)snprintf(body, sizeof body, "%s %d", pick_lang("Body", "Тело", "Beden"), run->body);
+    (void)snprintf(mind, sizeof mind, "%s %d", pick_lang("Mind", "Ум", "Akil"), run->mind);
+    (void)snprintf(spirit, sizeof spirit, "%s %d", pick_lang("Spirit", "Дух", "Ruh"), run->spirit);
+    (void)snprintf(sta, sizeof sta, "%s %d", pick_lang("Stamina", "Силы", "Guc"), run->stamina);
+    (void)snprintf(cellinfo, sizeof cellinfo, "%s %d / %d", pick_lang("Cell", "Клетка", "Hucre"), run->cell + 1, run->path_cells);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -863,7 +911,7 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tj_hero_name(run), &s_panel_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(150)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {54.0F, 60.0F, 80.0F, 255.0F},
+              .backgroundColor = {70.0F, 48.0F, 32.0F, 255.0F},
               .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
             floating_center_sprite(g, g->hero_wayfarer_panel, 96.0F, 132.0F, 0);
         }
@@ -910,14 +958,14 @@ static void card_sprite(game_ctx_t *g, uint32_t region, float w, float h, float 
 
 static void hand_card(game_ctx_t *g, int tile_index, bool active) {
     const bool has_tile = tile_index >= 0 && tile_index < g_config.tile_count;
-    const char *name = has_tile ? g_config.tiles[tile_index].name : "пусто";
+    const char *name = has_tile ? g_config.tiles[tile_index].name : pick_lang("empty", "пусто", "bos");
     uint32_t surface = g->ui_card_back_96x128;
     if (has_tile) {
         surface = active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128;
     }
     const uint32_t art = has_tile ? card_art_region_for_id(g, g_config.tiles[tile_index].id) : NT_ATLAS_INVALID_REGION;
     const uint32_t placement = has_tile ? placement_icon_region(g, g_config.tiles[tile_index].placement) : NT_ATLAS_INVALID_REGION;
-    const Clay_Color bg = active ? (Clay_Color){46.0F, 54.0F, 40.0F, 255.0F} : (Clay_Color){26.0F, 30.0F, 44.0F, 255.0F};
+    const Clay_Color bg = active ? (Clay_Color){82.0F, 68.0F, 38.0F, 255.0F} : (Clay_Color){42.0F, 34.0F, 25.0F, 255.0F};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(132), CLAY_SIZING_FIXED(128)},
                      .padding = CLAY_PADDING_ALL(10),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -925,7 +973,7 @@ static void hand_card(game_ctx_t *g, int tile_index, bool active) {
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10.0F),
-          .border = {.color = active ? (Clay_Color){150.0F, 210.0F, 150.0F, 255.0F} : (Clay_Color){44.0F, 50.0F, 66.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+          .border = {.color = active ? (Clay_Color){198.0F, 154.0F, 55.0F, 255.0F} : (Clay_Color){104.0F, 76.0F, 42.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         card_surface(g, surface);
         if (has_tile) {
             card_sprite(g, art, 72.0F, 72.0F, 0.0F, -14.0F, 1);
@@ -951,7 +999,9 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run) {
             hand_card(g, -1, false);
         }
         if (has) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "  кликни свободный слот у дороги, чтобы поставить", &s_dim);
+            const char *hint = pick_lang("  click a highlighted cell beyond the road to place", "  кликни подсвеченную клетку за дорогой, чтобы поставить",
+                                         "  yerlestirmek icin yolun disindaki isikli hucreye tikla");
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hint, &s_dim);
         }
     }
 }
