@@ -46,9 +46,9 @@ static const nt_ui_label_style_t s_btn_label = {
 bool tj_button(game_ctx_t *g, const char *id_str, const char *text, int w, int h, tj_btn_variant_t variant) {
     uint32_t tint = 0xFFFFFFFF;
     if (variant == TJ_BTN_SECONDARY) {
-        tint = 0xF6B8B86EU;
+        tint = 0xFF3A5A8AU;
     } else if (variant == TJ_BTN_DANGER) {
-        tint = 0xFF253A8FU;
+        tint = 0xFF283A9CU;
     }
 
     /* Only idle.atlas is set; other states inherit it (atlas.id == 0). */
