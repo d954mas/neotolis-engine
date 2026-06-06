@@ -29,7 +29,9 @@ uint32_t nt_ui_debug_get_zone_count(const nt_ui_context_t *ctx);
 /* First-frame Clay miss → no zone recorded (not an assert). pad_lrtb NULL = zero padding. */
 void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* `target` MUST match the nt_ui_walk target. label_size 0 skips labels. */
+/* `target` MUST match the nt_ui_walk target. label_size 0 skips labels.
+ * Side effect: leaves the sprite/text renderers bound to the inspector (or game) materials without
+ * restoring the prior binding — call as the terminal UI draw of the pass, or rebind afterward. */
 void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_ui_debug_hit_mode_t mode, nt_font_t font, float label_size);
 
 #else /* NT_UI_DEBUG_TOOLS */

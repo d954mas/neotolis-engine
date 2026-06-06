@@ -25,11 +25,12 @@ void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
-/* The bound material must use the slug_text vs/fs, ALPHA blend, cull NONE, and set the alpha-clip
- * param (frag discards coverage < u_alpha_cutoff.x; a missing/0 param disables the discard):
- *     .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
- *     .param_count = 1,
- * Both setters auto-flush staging on change. */
+/* The bound material uses the slug_text vs/fs, ALPHA blend, cull NONE. The alpha-clip is OPT-IN:
+ * the renderer binds only the params the material declares (it never injects a default), so declaring
+ *     .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}}, .param_count = 1,
+ * enables the frag's `discard coverage < u_alpha_cutoff.x`. Omit it and the uniform stays 0 (GL-spec
+ * default for an unset uniform) → no discard. Omitting is a valid choice, not an error; depth-writing
+ * world-space text that wants clean AA edges should declare it. Both setters auto-flush on change. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
@@ -43,8 +44,10 @@ void nt_text_renderer_set_font(nt_font_t font);
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 
-/* Per-glyph model-local +Z step. With depth_write, coplanar glyph quads z-fight at overlapping AA
- * fringes; a small step separates them by draw order. 0 (default) = off. Persists until changed. */
+/* Per-glyph clip-space depth bias toward the near plane — the VS does gl_Position.z -= bias * w, NOT a
+ * world/model-space +Z offset. With depth_write, coplanar glyph quads z-fight at overlapping AA fringes;
+ * a small per-glyph bias separates them by draw order. Signed. 0 (default) = off. Persists until changed
+ * (kept across restore_gpu, cleared on cold init/shutdown). */
 void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
 
 void nt_text_renderer_flush(void);

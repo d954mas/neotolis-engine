@@ -296,7 +296,7 @@ void test_draw_n_matches_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, draw_gcount);
 
     /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
-     * so we copy out before reset. Stride is 68 bytes per nt_text_vertex_t. */
+     * so we copy out before reset. Stride is 72 bytes per nt_text_vertex_t. */
     const size_t bytes_to_copy = (size_t)draw_vcount * 72U;
     uint8_t buf_draw[8U * 72U];
     memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);

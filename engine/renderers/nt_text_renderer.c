@@ -13,7 +13,7 @@
 #include <string.h>
 
 // #region Vertex format
-/* 68 bytes per vertex, matching slug_text.vert contract */
+/* 72 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */

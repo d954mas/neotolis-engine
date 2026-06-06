@@ -2012,6 +2012,9 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
  * in its visual bbox, using the game view_proj (scene elements). Reverse-declaration order, NOT
  * camera distance — overlapping panels resolve by declaration, matching the 2D scan and per-widget
  * clicks. The 2D-affine screen scan can't do this — z->m maps Clay→world in 3D, not Clay→screen.
+ * SCOPE: only recorded debug_zones (interactive widgets / explicitly recorded ids) are hover-pickable
+ * in 3D — there is no full-layout raycast. Non-interactive elements (panels, labels) are selectable
+ * via the inspector tree (which resolves any id through hit_baked), just not by scene hover.
  * Returns 0 when nothing is under the cursor. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_pick_zone_3d: ctx must be non-NULL");

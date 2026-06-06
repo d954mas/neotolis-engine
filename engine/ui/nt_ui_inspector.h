@@ -44,7 +44,10 @@ void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
  * screen-space view_proj first, e.g. nt_ui_make_screen_view_proj(...). */
 void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
-/* Call AFTER debug inspector walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label. */
+/* Call AFTER debug inspector walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label.
+ * Side effect: leaves the sprite/text renderers bound to the inspector (or game) materials and does
+ * NOT restore the prior binding — call it as the terminal UI draw of the pass, or rebind your own
+ * materials afterward. */
 void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
 
 #else /* NT_UI_DEBUG_TOOLS */
