@@ -709,23 +709,52 @@ static void draw_pack_choice(game_ctx_t *g, tj_run_t *run) {
     }
 }
 
-/* Buildable cues (sprite, replaces the old Clay slot buttons): a soft green tint on
- * empty buildable cells while a card is held, brighter on the hovered cell. */
-/* While holding a card, highlight the cell under the cursor: green = buildable,
- * red = blocked. The open field already reads as buildable, so only the hover cue
- * is needed (a green wash over the whole ~field would be noise). */
+/* True if the cell's quad falls within the viewport (+1 cell margin) — culls the
+ * off-screen overlays on the big scrolling map. */
+static bool cell_in_view(int gx, int gy, int cols, int rows, float pitch) {
+    const float x = grid_x(gx, cols, pitch);
+    const float y = grid_y(gy, rows, pitch);
+    const float mx = (s_map_vw * 0.5F) + pitch;
+    const float my = (s_map_vh * 0.5F) + pitch;
+    return x > -mx && x < mx && y > -my && y < my;
+}
+
+/* Draw a cell overlay sprite (ornate frame), falling back to a tint if the region
+ * is missing so the cue never disappears. */
+static void cell_overlay(game_ctx_t *g, uint32_t region, Clay_Color fallback, float pitch, float ox, float oy) {
+    if (has_region(region)) {
+        map_sprite(g, region, pitch, pitch, ox, oy, 7);
+    } else {
+        map_rect_sprite(g, fallback, pitch * 0.92F, pitch * 0.92F, ox, oy);
+    }
+}
+
+/* Placement cues while holding a card: an ornate green frame on every visible
+ * buildable cell, the hover frame on the cell under the cursor, and the red invalid
+ * frame when the cursor is over a blocked cell. */
 static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     if (run->hand < 0) {
         return;
     }
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
     int hgx = -1;
     int hgy = -1;
-    if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy)) {
-        return;
+    const bool hover = tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy);
+    for (int gy = 0; gy < rows; gy++) {
+        for (int gx = 0; gx < cols; gx++) {
+            if (!is_build_cell(run, gx, gy) || !cell_in_view(gx, gy, cols, rows, pitch)) {
+                continue;
+            }
+            const bool on = hover && hgx == gx && hgy == gy;
+            const uint32_t region = on ? g->ui_hover_cell_overlay_128 : g->ui_valid_cell_overlay_128;
+            const Clay_Color fb = on ? (Clay_Color){160.0F, 255.0F, 175.0F, 190.0F} : (Clay_Color){90.0F, 200.0F, 115.0F, 80.0F};
+            cell_overlay(g, region, fb, pitch, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
+        }
     }
-    const bool ok = is_build_cell(run, hgx, hgy);
-    const Clay_Color tint = ok ? (Clay_Color){132.0F, 236.0F, 150.0F, 165.0F} : (Clay_Color){236.0F, 110.0F, 92.0F, 120.0F};
-    map_rect_sprite(g, tint, pitch * 0.92F, pitch * 0.92F, grid_x(hgx, run->grid_cols, pitch), grid_y(hgy, run->grid_rows, pitch));
+    if (hover && !is_build_cell(run, hgx, hgy)) {
+        cell_overlay(g, g->ui_invalid_cell_overlay_128, (Clay_Color){236.0F, 110.0F, 92.0F, 150.0F}, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
+    }
 }
 
 /* The map WORLD: ground/road/aul/field/hero drawn by the sprite renderer. Invoked
