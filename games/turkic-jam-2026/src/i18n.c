@@ -77,7 +77,7 @@ static const char *s_lang_label[LANG_COUNT] = {
     [LANG_TR] = "Türkçe",
 };
 
-static i18n_lang_t s_lang = LANG_EN;
+static i18n_lang_t s_lang = LANG_RU;
 
 void i18n_set(i18n_lang_t lang) {
     if (lang >= 0 && lang < LANG_COUNT) {

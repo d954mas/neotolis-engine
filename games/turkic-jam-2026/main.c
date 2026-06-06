@@ -1033,7 +1033,7 @@ int main(int argc, char *argv[]) {
     /* Persistence + restore last language before the first frame. */
     rng_seed(0xC0FFEEU);
     save_init();
-    i18n_set((i18n_lang_t)save_get_int("lang", LANG_EN));
+    i18n_set((i18n_lang_t)save_get_int("lang", LANG_RU));
 
     tj_config_load(config_dir);
     nt_log_info("turkic_jam: config '%s' -> %d tiles, %d heirs, %d cells", config_dir, g_config.tile_count, g_config.heir_count, g_config.path_cells);

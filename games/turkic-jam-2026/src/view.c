@@ -779,9 +779,9 @@ static void cell_overlay(game_ctx_t *g, uint32_t region, Clay_Color fallback, fl
     }
 }
 
-/* Placement cues while holding a card: an ornate green frame on every visible
- * buildable cell, the hover frame on the cell under the cursor, and the red invalid
- * frame when the cursor is over a blocked cell. */
+/* Placement cue: only while a card is held, and only on the cell under the
+ * cursor — green hover frame if buildable, red invalid frame if blocked. Keeps
+ * the field uncluttered (no all-cells highlight). */
 static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     if (run->hand < 0) {
         return;
@@ -790,21 +790,13 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     const int rows = run->grid_rows;
     int hgx = -1;
     int hgy = -1;
-    const bool hover = tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy);
-    for (int gy = 0; gy < rows; gy++) {
-        for (int gx = 0; gx < cols; gx++) {
-            if (!is_build_cell(run, gx, gy) || !cell_in_view(gx, gy, cols, rows, pitch)) {
-                continue;
-            }
-            const bool on = hover && hgx == gx && hgy == gy;
-            const uint32_t region = on ? g->ui_hover_cell_overlay_128 : g->ui_valid_cell_overlay_128;
-            const Clay_Color fb = on ? (Clay_Color){160.0F, 255.0F, 175.0F, 190.0F} : (Clay_Color){90.0F, 200.0F, 115.0F, 80.0F};
-            cell_overlay(g, region, fb, pitch, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
-        }
+    if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy) || !cell_in_view(hgx, hgy, cols, rows, pitch)) {
+        return;
     }
-    if (hover && !is_build_cell(run, hgx, hgy)) {
-        cell_overlay(g, g->ui_invalid_cell_overlay_128, (Clay_Color){236.0F, 110.0F, 92.0F, 150.0F}, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
-    }
+    const bool ok = is_build_cell(run, hgx, hgy);
+    const uint32_t region = ok ? g->ui_hover_cell_overlay_128 : g->ui_invalid_cell_overlay_128;
+    const Clay_Color fb = ok ? (Clay_Color){160.0F, 255.0F, 175.0F, 190.0F} : (Clay_Color){236.0F, 110.0F, 92.0F, 150.0F};
+    cell_overlay(g, region, fb, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
 }
 
 /* The map WORLD: ground/road/aul/field/hero drawn by the sprite renderer. Invoked
