@@ -144,6 +144,44 @@ static float dist2(float px, float py, float cx, float cy) {
 static bool zin(const zone_t *z, int x, int y) { return x >= 0 && x < z->cols && y >= 0 && y < z->rows; }
 static uint8_t *zocc(zone_t *z, int x, int y) { return &z->occ[(y * z->cols) + x]; }
 
+static bool cell_on_road(const tj_run_t *r, int gx, int gy); /* defined below */
+
+/* Chebyshev distance from (gx,gy) to the aul rect (0 = on/inside the aul). The
+ * concentric bands key off this: 1..road_band = road band (no build), beyond = field. */
+int tj_run_dist_to_aul(const tj_run_t *r, int gx, int gy) {
+    int dx = 0;
+    if (gx < r->aul_x0) {
+        dx = r->aul_x0 - gx;
+    } else if (gx >= r->aul_x0 + r->aul_w) {
+        dx = gx - (r->aul_x0 + r->aul_w - 1);
+    }
+    int dy = 0;
+    if (gy < r->aul_y0) {
+        dy = r->aul_y0 - gy;
+    } else if (gy >= r->aul_y0 + r->aul_h) {
+        dy = gy - (r->aul_y0 + r->aul_h - 1);
+    }
+    return (dx > dy) ? dx : dy;
+}
+
+bool tj_run_cell_buildable(const tj_run_t *r, int gx, int gy) {
+    if (gx < 0 || gx >= r->grid_cols || gy < 0 || gy >= r->grid_rows) {
+        return false;
+    }
+    if (tj_run_dist_to_aul(r, gx, gy) <= g_config.map_road_band) {
+        return false; /* aul + road band */
+    }
+    if (cell_on_road(r, gx, gy) || r->field_tile[(gy * r->grid_cols) + gx] >= 0) {
+        return false; /* on road, or already built */
+    }
+    for (int i = 0; i < r->global_count && i < TJ_MAX_GLOBAL; i++) {
+        if (r->global_gx[i] == gx && r->global_gy[i] == gy) {
+            return false; /* a global landmark occupies it */
+        }
+    }
+    return true;
+}
+
 /* Clockwise perimeter of rect [x0..x1]x[y0..y1] into the run's path arrays. */
 static int rect_loop(tj_run_t *r, int x0, int y0, int x1, int y1) {
     int n = 0;
@@ -231,6 +269,10 @@ static bool try_bump(zone_t *z, tj_run_t *r, int i) {
     if (!zin(z, q1x, q1y) || !zin(z, q2x, q2y)) {
         return false;
     }
+    /* Keep the road inside the band around the aul; bends never reach the field. */
+    if (tj_run_dist_to_aul(r, q1x, q1y) > g_config.map_road_band || tj_run_dist_to_aul(r, q2x, q2y) > g_config.map_road_band) {
+        return false;
+    }
     if (*zocc(z, q1x, q1y) != OCC_EMPTY || *zocc(z, q2x, q2y) != OCC_EMPTY) {
         return false;
     }
@@ -243,15 +285,15 @@ static bool try_bump(zone_t *z, tj_run_t *r, int i) {
     return true;
 }
 
-/* The whole open desert is buildable: every empty cell NOT next to the road (the
- * 1-cell ring beside the road is a no-build buffer). So the player sees a field of
- * free cells far from the aul, not a thin strip by the road. */
+/* The outer field (beyond the road band) is buildable. build_gx/gy is a capped debug
+ * snapshot for devapi/tests; gameplay uses tj_run_cell_buildable directly. */
 static void compute_build(zone_t *z, tj_run_t *r) {
+    (void)z;
     r->build_count = 0;
-    for (int y = 0; y < z->rows; y++) {
-        for (int x = 0; x < z->cols; x++) {
-            if (*zocc(z, x, y) != OCC_EMPTY || road_neighbor_other(z, x, y, -1, -1)) {
-                continue; /* occupied, or in the road buffer */
+    for (int y = 0; y < r->grid_rows; y++) {
+        for (int x = 0; x < r->grid_cols; x++) {
+            if (!tj_run_cell_buildable(r, x, y)) {
+                continue;
             }
             if (r->build_count < TJ_MAX_BUILD) {
                 r->build_gx[r->build_count] = (uint8_t)x;
@@ -260,19 +302,6 @@ static void compute_build(zone_t *z, tj_run_t *r) {
             }
         }
     }
-}
-
-/* True if (gx,gy) is 4-adjacent to a road cell (the no-build buffer ring). */
-static bool cell_in_buffer(const tj_run_t *r, int gx, int gy) {
-    static const int nb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    for (int k = 0; k < 4; k++) {
-        for (int i = 0; i < r->path_cells && i < TJ_MAX_PATH; i++) {
-            if (r->path_gx[i] == gx + nb[k][0] && r->path_gy[i] == gy + nb[k][1]) {
-                return true;
-            }
-        }
-    }
-    return false;
 }
 
 // #region per-circle population (events on the road, functional objects in the field)
@@ -685,17 +714,10 @@ bool tj_run_place_field(tj_run_t *r, int gx, int gy) {
     if (r->hand < 0 || r->hand >= g_config.tile_count) {
         return false;
     }
-    if (gx < 0 || gx >= r->grid_cols || gy < 0 || gy >= r->grid_rows) {
-        return false;
-    }
-    const bool on_aul = (gx >= r->aul_x0 && gx < r->aul_x0 + r->aul_w && gy >= r->aul_y0 && gy < r->aul_y0 + r->aul_h);
-    if (on_aul || cell_on_road(r, gx, gy) || cell_in_buffer(r, gx, gy)) {
-        return false; /* aul, road, or the no-build buffer beside the road */
+    if (!tj_run_cell_buildable(r, gx, gy)) {
+        return false; /* aul / road band / road / occupied -> no build */
     }
     const int idx = (gy * r->grid_cols) + gx;
-    if (idx < 0 || idx >= TJ_ZONE_CELLS || r->field_tile[idx] >= 0) {
-        return false; /* out of range or already built */
-    }
     r->field_tile[idx] = r->hand;
     log_event("card_placed", &(tj_log_ctx_t){.tile = g_config.tiles[r->hand].name});
     r->hand = -1;

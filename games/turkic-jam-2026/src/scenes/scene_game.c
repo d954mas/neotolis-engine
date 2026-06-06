@@ -166,12 +166,43 @@ static void on_enter(game_ctx_t *g) {
 
 static void on_exit(game_ctx_t *g) { g->run = NULL; }
 
+/* Camera pan (arrows/WASD) + click->cell placement on the sprite map. */
+static void handle_map_input(game_ctx_t *g, float dt) {
+    const float pan = 360.0F * dt;
+    if (nt_input_key_is_down(NT_KEY_ARROW_LEFT) || nt_input_key_is_down(NT_KEY_A)) {
+        tj_view_world_pan(pan, 0.0F);
+    }
+    if (nt_input_key_is_down(NT_KEY_ARROW_RIGHT) || nt_input_key_is_down(NT_KEY_D)) {
+        tj_view_world_pan(-pan, 0.0F);
+    }
+    if (nt_input_key_is_down(NT_KEY_ARROW_UP) || nt_input_key_is_down(NT_KEY_W)) {
+        tj_view_world_pan(0.0F, pan);
+    }
+    if (nt_input_key_is_down(NT_KEY_ARROW_DOWN) || nt_input_key_is_down(NT_KEY_S)) {
+        tj_view_world_pan(0.0F, -pan);
+    }
+    /* Place the held card by clicking a desert cell. The reward pack (Clay) owns
+     * clicks while open, so skip then. */
+    if (s_run.pack_open || s_run.hand < 0 || !nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        return;
+    }
+    int gx = -1;
+    int gy = -1;
+    if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &gx, &gy)) {
+        return;
+    }
+    if (!tj_run_place_field(&s_run, gx, gy)) {
+        tj_journal_push(TJ_LOG_BAD, "Здесь нельзя строить — выбери свободную клетку поля.");
+    }
+}
+
 static void on_update(game_ctx_t *g, float dt) {
     if (nt_input_key_is_pressed(NT_KEY_P)) {
         game_goto(g, &SCENE_PAUSE);
     }
 
     tj_run_tick(&s_run, dt);
+    handle_map_input(g, dt);
 
     /* Full-screen frame: top HUD, then [log | map | hero], then card hand. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {

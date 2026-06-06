@@ -111,6 +111,7 @@ typedef struct {
      * road cells around it, varied per circle via random outward bends. */
     int map_zone_cols, map_zone_rows; /* play-zone size in cells */
     int map_aul_w, map_aul_h;         /* central aul rect (cells) */
+    int map_road_band;                /* road lives within this many cells of the aul (no-build band) */
     int map_bends_base;               /* random bends on circle 1 */
     int map_bends_per_circle;         /* extra bends per circle */
     int map_bends_jitter;             /* random 0..jitter extra bends */

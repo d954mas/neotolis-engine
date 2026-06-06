@@ -146,8 +146,9 @@ typedef struct game_ctx {
     bool resources_ready;
     int score;
     int best;
-    int chosen_heir; /* archetype picked on the heir-select screen */
-    const void *run; /* &tj_run_t while in SCENE_GAME (else NULL); for the world sprite pass */
+    int chosen_heir;    /* archetype picked on the heir-select screen */
+    const void *run;    /* &tj_run_t while in SCENE_GAME (else NULL); for the world sprite pass */
+    float ptr_x, ptr_y; /* pointer in logical coords (set each frame); for map click->cell + hover */
     tj_shake_t shake;
     const scene_t *scene;
     const scene_t *prev; /* scene we transitioned from (lets Pause resume cleanly) */

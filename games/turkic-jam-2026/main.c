@@ -861,6 +861,8 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
+        g.ptr_x = mouse_logical.x; /* expose to scenes for map click->cell + hover */
+        g.ptr_y = mouse_logical.y;
         nt_ui_begin(g.ui, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
         /* Screen-shake (juice): trauma -> small offset+rotation on the card. */
