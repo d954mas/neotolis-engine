@@ -9,6 +9,7 @@
 
 #include "utf8/nt_utf8.h"
 
+#include <math.h>
 #include <string.h>
 
 // #region Vertex format
@@ -39,6 +40,9 @@ static struct {
     /* Current state */
     nt_material_t material;
     nt_font_t font;
+    /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
+     * fringes; 0 = off, signed. Lives in s_text so init/shutdown/restore_gpu memset clears it. */
+    float glyph_depth_bias;
 
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
@@ -243,10 +247,6 @@ void nt_text_renderer_set_font(nt_font_t font) {
 // #region Vertex generation helpers
 static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast */ }
 
-/* Per-glyph depth offset (model-local +Z) so depth-writing glyph quads don't z-fight at their
- * overlapping AA fringes. 0 = off. Set via nt_text_renderer_set_glyph_depth_bias. */
-static float s_glyph_depth_bias = 0.0F;
-
 static void transform_point(float out[3], const float model[16], float x, float y) {
     /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */
     out[0] = model[0] * x + model[4] * y + model[12];
@@ -406,7 +406,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
             emit_quad(g, model, scale, pen_x, pen_y, color, band_count, glyph_bias);
-            glyph_bias += s_glyph_depth_bias;
+            glyph_bias += s_text.glyph_depth_bias;
         }
 
         pen_x += (float)g->advance * scale;
@@ -415,7 +415,10 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     }
 }
 
-void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) { s_glyph_depth_bias = bias_per_glyph; }
+void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
+    NT_ASSERT(isfinite(bias_per_glyph) && "nt_text_renderer_set_glyph_depth_bias: bias must be finite");
+    s_text.glyph_depth_bias = bias_per_glyph; /* signed: subtracted from NDC z in the VS */
+}
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);
@@ -457,6 +460,19 @@ void nt_text_renderer_flush(void) {
         nt_gfx_set_uniform_int("u_curve_texture", 0);
         nt_gfx_set_uniform_int("u_band_texture", 1);
         nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
+    }
+
+    /* Re-read material vec4 params every flush (e.g. u_alpha_cutoff) — same contract sprite/mesh
+     * renderers honor; without this the shader sees uninitialized uniforms. */
+    if (s_text.material.id != 0) {
+        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
+        if (mi != NULL) {
+            for (uint8_t p = 0; p < mi->param_count; p++) {
+                if (mi->param_names[p] != NULL) {
+                    nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
+                }
+            }
+        }
     }
 
     /* Single draw call per flush */
