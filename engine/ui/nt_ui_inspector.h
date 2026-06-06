@@ -33,7 +33,7 @@ extern const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT;
 void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics);
 
 /* Optional overlay materials for the inspector — typically depth_test=false so the debug view stays
- * on top without testing the game's 3D depth (a passive overlay, no shared-state side effects).
+ * on top without testing the game's 3D depth (a passive overlay, no depth-buffer side effects).
  * Pass NT_MATERIAL_INVALID for either to fall back to the game's sprite/text material. */
 void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text);
 

@@ -29,8 +29,9 @@ void nt_text_renderer_restore_gpu(void);
  * the renderer binds only the params the material declares (it never injects a default), so declaring
  *     .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}}, .param_count = 1,
  * enables the frag's `discard coverage < u_alpha_cutoff.x`. Omit it and the uniform stays 0 (GL-spec
- * default for an unset uniform) → no discard. Omitting is a valid choice, not an error; depth-writing
- * world-space text that wants clean AA edges should declare it. Both setters auto-flush on change. */
+ * default for an unset uniform) → no discard. Omitting is a valid choice, not an error. Depth-writing
+ * world-space text should declare it; see NT_TEXT_ALPHA_CUTOFF_DEFAULT for the cutoff value to use.
+ * Both setters auto-flush on change. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
