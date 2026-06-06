@@ -17,11 +17,19 @@
 /* uint16 index buffer: base = glyph_index * 4, must not overflow */
 _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPHS > 16383 overflows uint16 index buffer");
 
+/* Default for the slug_text `u_alpha_cutoff.x` param: discards only fully-empty glyph-quad pixels.
+ * World-space text that writes depth should raise this (~0.5) so AA edges don't write depth and halo. */
+#define NT_TEXT_ALPHA_CUTOFF_DEFAULT (1.0F / 255.0F)
+
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
-/* Both setters auto-flush staging on change. */
+/* The bound material must use the slug_text vs/fs, ALPHA blend, cull NONE, and set the alpha-clip
+ * param (frag discards coverage < u_alpha_cutoff.x; a missing/0 param disables the discard):
+ *     .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+ *     .param_count = 1,
+ * Both setters auto-flush staging on change. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 

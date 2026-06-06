@@ -554,6 +554,8 @@ int main(int argc, char *argv[]) {
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
         .label = "slice9_demo_text",
     });
 
