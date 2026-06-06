@@ -90,11 +90,16 @@ static bool has_region(uint32_t region) { return region != 0U && region != NT_AT
 /* World-space map render state. The map (ground/road/aul/field/hero) is drawn by
  * the sprite renderer, NOT Clay — so the per-cell count is off the UI element
  * budget. tj_view_world sets these each frame from the "map" viewport bbox. */
-static float s_world_m[16];       /* Clay layout-space -> GL world (Y-flip around logical_h). */
-static float s_map_cx, s_map_cy;  /* viewport centre, logical coords; map offsets are relative to it. */
-static float s_map_vw = 360.0F;   /* viewport size (the "map" element bbox). */
-static float s_map_vh = 360.0F;   //
-static float s_map_pitch = 40.0F; /* cell size (px); set by the render handler, read by Clay catchers. */
+static float s_world_m[16];         /* Clay layout-space -> GL world (Y-flip around logical_h). */
+static float s_map_cx, s_map_cy;    /* map centre, logical coords (viewport centre + camera pan). */
+static float s_map_vw = 360.0F;     /* viewport size (the "map" element bbox). */
+static float s_map_vh = 360.0F;     //
+static float s_map_pitch = 40.0F;   /* cell size (px); set by the render handler, read by interaction. */
+static float s_cam_x = 0.0F;        /* camera pan offset (world px), added to the viewport centre. */
+static float s_cam_y = 0.0F;        //
+static float s_map_extent = 360.0F; /* maxdim * pitch; bounds the camera pan. */
+static int s_map_cols = 8;          /* grid dims captured for click->cell picking. */
+static int s_map_rows = 8;          //
 
 static uint8_t clamp_u8(float v) {
     if (v <= 0.0F) {
@@ -150,11 +155,34 @@ static void map_rect_sprite(game_ctx_t *g, Clay_Color col, float w, float h, flo
 static void set_world_from_frame(const nt_ui_custom_frame_t *frame) {
     const Clay_RenderCommand *cmd = (const Clay_RenderCommand *)frame->clay_cmd;
     const Clay_BoundingBox bb = cmd->boundingBox;
-    s_map_cx = bb.x + (bb.width * 0.5F);
-    s_map_cy = bb.y + (bb.height * 0.5F);
+    s_map_cx = bb.x + (bb.width * 0.5F) + s_cam_x;
+    s_map_cy = bb.y + (bb.height * 0.5F) + s_cam_y;
     s_map_vw = bb.width;
     s_map_vh = bb.height;
     memcpy(s_world_m, frame->world_mat4, sizeof s_world_m);
+}
+
+/* Pan the camera (world px), clamped so the map can't slide fully off the viewport. */
+void tj_view_world_pan(float dx, float dy) {
+    const float lim = s_map_extent * 0.5F;
+    s_cam_x = fmaxf(-lim, fminf(lim, s_cam_x + dx));
+    s_cam_y = fmaxf(-lim, fminf(lim, s_cam_y + dy));
+}
+
+/* Logical point -> grid cell (inverse of grid_x/grid_y about the map centre).
+ * Returns false if the point is outside the grid. Uses last frame's transform. */
+bool tj_view_world_cell_at(float lx, float ly, int *gx, int *gy) {
+    if (s_map_pitch <= 0.0F) {
+        return false;
+    }
+    const int cx = (int)lroundf(((lx - s_map_cx) / s_map_pitch) + ((float)(s_map_cols - 1) * 0.5F));
+    const int cy = (int)lroundf(((ly - s_map_cy) / s_map_pitch) + ((float)(s_map_rows - 1) * 0.5F));
+    if (cx < 0 || cx >= s_map_cols || cy < 0 || cy >= s_map_rows) {
+        return false;
+    }
+    *gx = cx;
+    *gy = cy;
+    return true;
 }
 
 static void inline_sprite(game_ctx_t *g, uint32_t region, float w, float h) {
@@ -549,102 +577,6 @@ static void draw_tamga(game_ctx_t *g, const tj_run_t *run, float pitch) {
     map_rect_sprite(g, (Clay_Color){255.0F, 226.0F, 130.0F, 255.0F}, m, m, x, y);
 }
 
-/* The open buildable field: every free desert cell away from the road. Empty =
- * clickable cell that places the held card (green while a card is held). */
-static void draw_slots(game_ctx_t *g, tj_run_t *run, float pitch, float tile) {
-    static uint32_t base = 0U;
-    if (base == 0U) {
-        base = nt_ui_id("tj_slot");
-    }
-    const int cols = run->grid_cols;
-    const int rows = run->grid_rows;
-    for (int i = 0; i < run->build_count && i < TJ_MAX_BUILD; i++) {
-        const int sgx = run->build_gx[i];
-        const int sgy = run->build_gy[i];
-        if (run->field_tile[(sgy * cols) + sgx] >= 0) {
-            continue; /* already built here (drawn by draw_field) */
-        }
-        const float sx = grid_x(sgx, cols, pitch);
-        const float sy = grid_y(sgy, rows, pitch);
-        /* Highlight buildable cells green while a card is held (valid placement). */
-        const uint32_t idle_tint = (run->hand >= 0) ? 0xCC3AA85EU : 0x553A302CU;
-        const nt_ui_button_style_t st = {
-            .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = idle_tint, .scale = 1.0F, .opacity = 1.0F},
-            .hover = {.bg_region = g->white_region, .bg_tint = 0xFF7CE08CU, .scale = 1.12F, .opacity = 1.0F},
-            .pressed = {.bg_region = g->white_region, .bg_tint = 0xFF7CE08CU, .scale = 0.95F, .opacity = 1.0F},
-            .disabled = {.bg_region = g->white_region, .bg_tint = 0x442A2422U, .scale = 1.0F, .opacity = 0.5F},
-            .transition_speed = 14.0F,
-            .hit_padding_lrtb = {4, 4, 4, 4},
-            .slice9_scale = 1.0F,
-        };
-        const Clay_ElementDeclaration decl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(tile), CLAY_SIZING_FIXED(tile)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {sx, sy}, .zIndex = 5},
-        };
-        if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), base + (uint32_t)i, &st, &decl, run->hand >= 0)) {
-            tj_run_place_field(run, sgx, sgy); /* persistent build; road re-routes around it */
-        }
-    }
-}
-
-/* A fully-transparent click button (for invalid-placement feedback catchers). */
-static nt_ui_button_style_t invisible_button(game_ctx_t *g) {
-    return (nt_ui_button_style_t){
-        .idle = {.atlas = g->atlas, .bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
-        .hover = {.bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
-        .pressed = {.bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
-        .disabled = {.bg_region = g->white_region, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.0F},
-        .transition_speed = 1.0F,
-        .slice9_scale = 1.0F,
-    };
-}
-
-/* Generic no-build catcher behind everything: clicking off a buildable cell while
- * holding a card -> "place farther, at a highlighted cell" feedback. */
-static void draw_build_catcher(game_ctx_t *g, tj_run_t *run) {
-    if (run->hand < 0) {
-        return;
-    }
-    static uint32_t cid = 0U;
-    if (cid == 0U) {
-        cid = nt_ui_id("tj_nobuild");
-    }
-    const nt_ui_button_style_t st = invisible_button(g);
-    const Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(MAP_SIZE), CLAY_SIZING_FIXED(MAP_SIZE)}},
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, 0.0F}, .zIndex = 3},
-    };
-    if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), cid, &st, &decl, true)) {
-        tj_journal_push(TJ_LOG_BAD, "Эта карта ставится у дороги, в подсвеченную клетку.");
-    }
-}
-
-/* Per-road-cell catchers (above the generic one): clicking the road -> its message. */
-static void draw_road_catchers(game_ctx_t *g, tj_run_t *run, float pitch) {
-    if (run->hand < 0) {
-        return;
-    }
-    static uint32_t rbase = 0U;
-    if (rbase == 0U) {
-        rbase = nt_ui_id("tj_roadcatch");
-    }
-    const int cols = run->grid_cols;
-    const int rows = run->grid_rows;
-    const nt_ui_button_style_t st = invisible_button(g);
-    for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
-        const Clay_ElementDeclaration decl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(pitch), CLAY_SIZING_FIXED(pitch)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                         .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
-                         .offset = {grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch)},
-                         .zIndex = 4},
-        };
-        if (nt_ui_button(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), rbase + (uint32_t)i, &st, &decl, true)) {
-            tj_journal_push(TJ_LOG_BAD, "Здесь проходит дорога.");
-        }
-    }
-}
-
 /* Persistent player builds in the desert (survive the per-circle road reshuffle). */
 static void draw_field(game_ctx_t *g, const tj_run_t *run, float pitch, float tile) {
     const int cols = run->grid_cols;
@@ -797,6 +729,29 @@ static void draw_pack_choice(game_ctx_t *g, tj_run_t *run) {
     }
 }
 
+/* Buildable cues (sprite, replaces the old Clay slot buttons): a soft green tint on
+ * empty buildable cells while a card is held, brighter on the hovered cell. */
+static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
+    if (run->hand < 0) {
+        return;
+    }
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    int hgx = -1;
+    int hgy = -1;
+    const bool hover = tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy);
+    for (int i = 0; i < run->build_count && i < TJ_MAX_BUILD; i++) {
+        const int sgx = run->build_gx[i];
+        const int sgy = run->build_gy[i];
+        if (run->field_tile[(sgy * cols) + sgx] >= 0) {
+            continue; /* already built (drawn by draw_field) */
+        }
+        const bool on = hover && hgx == sgx && hgy == sgy;
+        const Clay_Color tint = on ? (Clay_Color){132.0F, 236.0F, 150.0F, 170.0F} : (Clay_Color){84.0F, 200.0F, 112.0F, 70.0F};
+        map_rect_sprite(g, tint, pitch * 0.9F, pitch * 0.9F, grid_x(sgx, cols, pitch), grid_y(sgy, rows, pitch));
+    }
+}
+
 /* The map WORLD: ground/road/aul/field/hero drawn by the sprite renderer. Invoked
  * by nt_ui_walk as a CUSTOM render command (NT_UI_CUSTOM_TYPE_GAME) — during the
  * walk the GL viewport + frame state are set up, so a standalone sprite emit is
@@ -810,10 +765,12 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     }
     set_world_from_frame(frame);
     const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
-    /* Pitch fills the viewport's short side (1-cell margin) -> big, gapless tiles.
-     * Stored so the Clay catchers (built before this runs) align next frame. */
+    /* Pitch fills the viewport's short side (1-cell margin) -> big, gapless tiles. */
     const float pitch = floorf(fminf(s_map_vw, s_map_vh) / (float)(maxdim + 1));
     s_map_pitch = pitch;
+    s_map_extent = (float)maxdim * pitch;
+    s_map_cols = run->grid_cols;
+    s_map_rows = run->grid_rows;
     const float tile = pitch * 0.66F;
     nt_sprite_renderer_set_material(g->sprite_material);
     draw_ground(g, run, pitch, tile);
@@ -824,6 +781,7 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     draw_road_events(g, run, pitch);
     draw_global(g, run, pitch, tile);
     draw_field(g, run, pitch, tile);
+    draw_build_hints(g, run, pitch);
     draw_tamga(g, run, pitch);
     draw_hero(g, run, pitch);
     nt_sprite_renderer_flush();
@@ -835,18 +793,11 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run) {
     if (run->grid_cols < 2 || run->grid_rows < 2 || run->path_cells < 1) {
         return; /* loop not generated yet */
     }
-    /* Use the pitch the render handler computed last frame (viewport-fitted), so the
-     * Clay interaction catchers line up with the sprite cells. */
-    const float pitch = s_map_pitch;
-    const float tile = pitch * 0.66F; /* placed objects beside the trail */
-
-    /* Viewport element: grows to fill the centre gap. The map WORLD is drawn by the
-     * CUSTOM handler; Clay keeps only the interaction catchers + on-top overlays. */
+    /* Viewport element: grows to fill the centre gap. The map WORLD (incl. build cues)
+     * is drawn by the CUSTOM handler; placement is click->cell (scene). Clay keeps only
+     * the on-top overlays (storm veil, reward pack). */
     CLAY({.id = CLAY_ID("map"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {
         nt_ui_custom(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), run);
-        draw_build_catcher(g, run);
-        draw_road_catchers(g, run, pitch);
-        draw_slots(g, run, pitch, tile);
         draw_storm(run);
         draw_pack_choice(g, run);
     }
@@ -950,8 +901,11 @@ static void card_sprite(game_ctx_t *g, uint32_t region, float w, float h, float 
 
 static void hand_card(game_ctx_t *g, int tile_index, bool active) {
     const bool has_tile = tile_index >= 0 && tile_index < g_config.tile_count;
-    const char *name = has_tile ? g_config.tiles[tile_index].name : "РїСѓСЃС‚Рѕ";
-    const uint32_t surface = has_tile ? (active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128) : g->ui_card_back_96x128;
+    const char *name = has_tile ? g_config.tiles[tile_index].name : "пусто";
+    uint32_t surface = g->ui_card_back_96x128;
+    if (has_tile) {
+        surface = active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128;
+    }
     const uint32_t art = has_tile ? card_art_region_for_id(g, g_config.tiles[tile_index].id) : NT_ATLAS_INVALID_REGION;
     const uint32_t placement = has_tile ? placement_icon_region(g, g_config.tiles[tile_index].placement) : NT_ATLAS_INVALID_REGION;
     const Clay_Color bg = active ? (Clay_Color){46.0F, 54.0F, 40.0F, 255.0F} : (Clay_Color){26.0F, 30.0F, 44.0F, 255.0F};
