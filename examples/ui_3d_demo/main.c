@@ -752,9 +752,17 @@ static void frame(void) {
     }
 
     if (ui_can_render && nt_ui_inspector_is_active(s_ctx)) {
+        /* Sidebar tree is its own screen-space pass (ortho). */
         nt_gfx_update_buffer(s_frame_ubo, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         nt_ui_debug_inspector_walk(s_ctx, &target);
+        nt_sprite_renderer_flush();
+        nt_text_renderer_flush();
+
+        /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
+         * so it lands on the panel; the depth-off inspector materials keep it on top. */
+        nt_gfx_update_buffer(s_frame_ubo, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();

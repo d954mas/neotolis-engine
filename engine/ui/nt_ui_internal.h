@@ -264,11 +264,21 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
+/* 3D-ctx inspector viewport pick: topmost recorded zone the cursor ray hits (game view_proj). 0 = none. */
+uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
+
 void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y);
 
 void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color);
 
 void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color);
+
+/* 3D-ctx variants: corners stay in the element's Clay-layout space and `model` (the recorded world
+ * mat4) maps them into the scene. Caller binds the perspective view_proj so the debug overlay lands
+ * on the element in 3D. The 2D-ctx helpers above pre-project to screen and emit under identity. */
+void nt_ui_internal_emit_filled_quad_m(nt_resource_t atlas, uint32_t region, const float v[4][2], const float model[16], uint32_t color);
+
+void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, const float model[16], uint32_t color);
 
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
