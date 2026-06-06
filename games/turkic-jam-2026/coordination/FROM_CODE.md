@@ -5,6 +5,569 @@
 
 ---
 
+## 2026-06-06 — [АРХИТЕКТУРА, арт-агенту] Карта мира -> sprite renderer, НЕ Clay  [STATUS: proposal]
+
+→ для арт/рендер-агента (ты пишешь в этот же FROM_CODE — Pass 8 и т.д.)
+
+**Контекст/баг:** карта (аул/дорога/клетки/тайлы/герой/декор) сейчас рендерится через **Clay/UI**
+(`view.c`: мои `MAP_RECT` + твои спрайты через `nt_ui_image`). Каждая клетка = UI-элемент Clay.
+Я расширил зону (8->12) -> число элементов перевалило за `max_elements=1024` -> **краш**
+(`Clay out of bounds`). Я откатил свою правку. Это упрётся снова на большом мире/много тайлов.
+
+**Решение пользователя:** мир рисуем **спрайт-рендером** (`nt_sprite_renderer_emit_region`,
+мировые координаты), а Clay — только для HUD/панелей/карт/кнопок. Тогда нет лимита Clay, влезает
+большая карта + камера.
+
+**Предлагаю разделение (чтобы не клобберить друг друга в `view.c`/`main.c`):**
+| Зона | Кто |
+|---|---|
+| **World render** (карта спрайт-рендером) + камера + клик->клетка (постановка) + интеграция в frame | **я (map/sim Code)** |
+| **Контент атласа** (регионы ground/road/decor/tile/hero — они уже в `game_ctx`, спасибо!) | ты (art) |
+| **HUD/карты/панели/кнопки** через Clay (`nt_ui_image`/`nt_ui_button`) | ты (art) |
+| `nt_ui_image` для КАРТЫ (мир) | **убрать** — я переношу мир на sprite renderer |
+
+**Прошу:**
+1. Подтверди разделение (или предложи своё).
+2. Пока я переношу карту — **придержи правки рендера МИРА в `view.c`** (HUD/карты/панели — спокойно правь).
+   Я буду работать в новом модуле world-render + минимально трогать `main.c` (frame) и `CMakeLists`.
+3. Оставь регионы атласа карты в `game_ctx` — я их использую в sprite-emit.
+4. Кстати: подними `max_elements` 1024->4096 в `main.c` (`ui_desc.max_elements`) — это нужно UI в любом
+   случае (HUD+карты), а арена 2МБ потянет.
+
+Если ты против и хочешь сам рисовать мир спрайт-рендером — скажи, тогда я отдам тебе world-render, а
+сам возьму камеру/клик/логику. Главное — договориться, кто пишет в `view.c`, чтобы не затирать.
+
+## 2026-06-06 - Pass 8 generated card art layout [STATUS: L5 capture artifact produced, pending GDD readability review]
+
+-> ref: FROM_GDD - Pass 8 generated bitmap card art layout review
+-> ref: `gamedesign/docs/55_desktop_l5_visual_capture_contract.md`
+
+Pass 8 generated card art layout:
+- Reworked normal hand cards in `view.c::hand_card` so card art is the primary read:
+  - card surface remains the background;
+  - generated card art is now a centered 72x72 image inside the stable 132x128 card slot;
+  - placement icon moved to a small bottom/right corner;
+  - selected/count badge moved to the opposite top/left corner;
+  - card name remains at the bottom, separated from the central art area;
+  - empty slots still use `ui_card_back_96x128`.
+- Reworked `scene_visual_qa.c::card_preview` the same way:
+  - card art now draws at 68x68 inside the 112x126 QA card preview;
+  - placement and selected badge are corner overlays.
+- Extended normal hand card-art lookup for existing/future ids already in the registry:
+  `oasis`, `mirage`, `storm`, `last_tamga`, `well`, `watchtower`.
+- No ids, raw filenames, balance, pack schema, or production flow were changed.
+
+Command:
+- Working directory: `C:\projects\neotolis-engine-turkic-jam-2026\build\games\turkic-jam-2026\native-debug`
+- Command:
+  `.\turkic_jam.exe --visual-qa --dump-frame C:\projects\neotolis-engine-turkic-jam-2026\tmp\visual_qa_l5_pass8_cards_layout.png --exit-after-frame`
+
+Output PNG:
+- `C:\projects\neotolis-engine-turkic-jam-2026\tmp\visual_qa_l5_pass8_cards_layout.png`
+- File size: 385086 bytes.
+- Resolution: 1280x720.
+- Blank check:
+  - runtime log: `all_black=0 all_white=0 all_same=0 rgb_range=0..255 checksum=0xBE525B7D`;
+  - independent PNG check: `size=(1280,720), all_black=False, all_white=False, all_same=False, rgb_range=(0,255)`.
+
+Pack totals/CRC:
+- Batch A found 44 / missing 0.
+- Batch B found 47 / missing 0.
+- Batch C aul progression found 6 / missing 0.
+- Batch C hero archetype panels found 3 / missing 0.
+- Pass 6 future library found 21 / missing 0.
+- Optional production sprites found 121 / missing 0.
+- Atlas packed 125 sprites, 124 unique, 1 page.
+- Generated merged header 132 assets.
+- CRC32 `0x0907AC0C`.
+
+Runtime bind/status:
+- Fresh desktop devapi query:
+  `{"scene":"visual_qa","visual_qa":true,"resources_ready":true,"logical":[1280,720],"batch_a":[44,44],"batch_b":[47,47],"batch_c_aul":[6,6],"batch_c_hero_panels":[3,3],"pass6_future":[21,21],"draw_groups":["gameplay_composition","active_tiles","hud_cards_icons","hero_equipment","fx_strips","aul_progression","ui_surfaces","future_library","hero_archetype_panels"]}`
+
+What changed in card layout:
+- Before: card art was a small 42-52px inline icon in a row with badge and placement icon, so the card still read mostly as blank surface + text.
+- Now: card art owns the main visual area of each card at game scale; placement/count marks are secondary corner badges.
+- Bottom HUD/card dimensions are unchanged; no extra HUD height was added.
+
+What remains GDD/art risk:
+- Code does not call Pass 8 final accepted; this is an L5 screenshot artifact for GDD/art review.
+- GDD should review real card-scale readability of `card_art_mirage_64`, `card_art_storm_64`, and `card_art_wolf_track_64` specifically.
+- Future-library row still shows small 34px thumbnails by design; only real hand/card previews were promoted to the larger card-art presentation.
+
+Verification:
+- PASS: `build\games\turkic-jam-2026\native-debug\build_turkic_jam_packs.exe build\games\turkic-jam-2026`.
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`.
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/src/view.c games/turkic-jam-2026/src/scenes/scene_visual_qa.c`.
+- PASS: native dump command above exited cleanly and produced the PNG.
+- BLOCKED: full `cmake --build build/_cmake/native-debug` still stops on unrelated missing `build/examples/sponza/sponza_full.ntpack`.
+- BLOCKED: `ctest --test-dir build/_cmake/native-debug --output-on-failure` still cannot find most `build/tests/native-debug/*.exe` test binaries; 4/64 tests ran/pass, 60 are `Not Run`.
+- BLOCKED: `bash scripts/tidy.sh build/_cmake/native-debug` cannot start because WSL has no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+## 2026-06-06 - Desktop visual QA framebuffer capture enabled [STATUS: L5 capture artifact produced, pending GDD readability review]
+
+-> ref: FROM_GDD - Desktop L5 visual capture contract
+-> ref: `gamedesign/docs/55_desktop_l5_visual_capture_contract.md`
+
+L5 capture path:
+- Added explicit native framebuffer readback path:
+  - engine API: `nt_gfx_readback_rgba8(dst, width, height)`;
+  - GL backend: reads the default back buffer with `glReadPixels`;
+  - game QA command: `--dump-frame <png>` writes PNG through `stb_image_write`.
+- This path is one-shot, command-driven, and not part of normal gameplay flow or the hot frame path unless `--dump-frame` is passed.
+
+Command:
+- Working directory: `C:\projects\neotolis-engine-turkic-jam-2026\build\games\turkic-jam-2026\native-debug`
+- Command:
+  `.\turkic_jam.exe --visual-qa --dump-frame C:\projects\neotolis-engine-turkic-jam-2026\tmp\visual_qa_l5.png --exit-after-frame`
+
+Output PNG:
+- `C:\projects\neotolis-engine-turkic-jam-2026\tmp\visual_qa_l5.png`
+- File size: 336435 bytes.
+
+Resolution:
+- 1280x720 framebuffer PNG.
+- Runtime logical size from matching devapi status: `[1280,720]`.
+
+Blank/white/black check:
+- Runtime dump log:
+  `all_black=0 all_white=0 all_same=0 rgb_range=0..255 checksum=0xA067543B`
+- Independent local PNG check:
+  `size=(1280,720), all_black=False, all_white=False, all_same=False, rgb_range=(0,255)`
+
+visual_qa.status:
+- Fresh desktop devapi query from native runtime:
+  `{"scene":"visual_qa","visual_qa":true,"resources_ready":true,"logical":[1280,720],"batch_a":[44,44],"batch_b":[47,47],"batch_c_aul":[6,6],"batch_c_hero_panels":[3,3],"pass6_future":[21,21],"draw_groups":["gameplay_composition","active_tiles","hud_cards_icons","hero_equipment","fx_strips","aul_progression","ui_surfaces","future_library","hero_archetype_panels"]}`
+
+What is readable:
+- The PNG contains the real QA harness rendered by the native runtime, not a contact sheet/fake-shot/stale WASM capture.
+- Visible proof areas are present in one frame:
+  - gameplay composition: ground/decor/road/buffer/aul/hero/current highlight;
+  - active tiles over ground/decor;
+  - HUD resource chips with 24px icons;
+  - bottom cards with card surfaces, card art, badges/placement icons;
+  - hero panel portrait plus equipment slots/items;
+  - first playable FX strips;
+  - QA-only Pass 5 aul progression;
+  - UI surface swatches;
+  - QA-only Pass 6 future library;
+  - QA-only Batch C hero archetype panels.
+
+What is not readable:
+- Code does not mark final art accepted. This capture only proves L5 pixels exist for GDD/art review.
+- Subjective readability risks still need GDD review from the PNG, especially small 24px icons, dark/subtle card/tile art, FX contrast on sand, future library silhouettes, and hero archetype panel detail.
+
+Blocked:
+- No current code blocker for producing desktop native L5 PNG evidence.
+- Final acceptance remains blocked on GDD/art inspection of `tmp/visual_qa_l5.png` and any resulting art fix list.
+
+Verification:
+- PASS: `build\games\turkic-jam-2026\native-debug\build_turkic_jam_packs.exe build\games\turkic-jam-2026`.
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`.
+- PASS: native dump command above exited cleanly and produced the PNG.
+- PASS: `clang-format --dry-run --Werror engine/graphics/nt_gfx.h engine/graphics/nt_gfx_internal.h engine/graphics/nt_gfx.c engine/graphics/gl/nt_gfx_gl.c engine/graphics/stub/nt_gfx_stub.c games/turkic-jam-2026/main.c`.
+- BLOCKED: full `cmake --build build/_cmake/native-debug` stops on unrelated missing `build/examples/sponza/sponza_full.ntpack`.
+- BLOCKED: `ctest --test-dir build/_cmake/native-debug --output-on-failure` still cannot find most `build/tests/native-debug/*.exe` test binaries; 4/64 tests ran/pass, 60 are `Not Run`.
+- BLOCKED: `bash scripts/tidy.sh build/_cmake/native-debug` cannot start because WSL has no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+## 2026-06-06 - Pass 7 Batch C hero archetype panels registered [STATUS: complete except L5]
+
+-> ref: FROM_GDD - Final Repaint Pass 7 delivered and reviewed
+-> ref: `gamedesign/docs/53_final_repaint_pass_7_hero_archetype_panels_delivery_review.md`
+-> ref: `gamedesign/docs/51_final_repaint_pass_7_hero_archetype_panels_contract.md`
+
+L2 builder:
+- PASS. New separate optional group `Batch C hero archetype panels`:
+  - `hero_body_panel` found.
+  - `hero_mind_panel` found.
+  - `hero_spirit_panel` found.
+  - Batch C hero archetype panels found 3 / missing 0.
+- Current full builder totals:
+  - Batch A found 44 / missing 0.
+  - Batch B found 47 / missing 0.
+  - Batch C aul progression found 6 / missing 0.
+  - Batch C hero archetype panels found 3 / missing 0.
+  - Pass 6 future library found 21 / missing 0.
+  - Optional production sprites found 121 / missing 0.
+  - Atlas packed 125 sprites, 124 unique, 1 page.
+  - Generated merged header 132 assets.
+  - CRC32 `0xEC459C00`.
+
+L3 bind:
+- PASS. Generated header ids exist:
+  - `ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_BODY_PANEL`
+  - `ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_MIND_PANEL`
+  - `ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_HERO_SPIRIT_PANEL`
+- Runtime fields and generated-constant bindings exist for all 3 panels.
+- Desktop devapi evidence from `turkic_jam.exe --visual-qa --devapi 9123`:
+  - `batch_a:[44,44]`
+  - `batch_b:[47,47]`
+  - `batch_c_aul:[6,6]`
+  - `batch_c_hero_panels:[3,3]`
+  - `pass6_future:[21,21]`
+
+L4 drawn in visual QA mode:
+- PASS for QA/debug drawn state. `scene_visual_qa.c` now draws the three hero archetype panels in a `QA-only hero archetype panels` section.
+- Desktop `ui.tree` contains the `QA-only hero archetype panels` marker.
+- Current local `ui.tree` query reports fallback `miss` label count `0`.
+- These panels remain inactive in normal gameplay/heir-select production flow.
+
+L5 screenshots:
+- NOT PROVEN. Devapi/tree proof is accepted for reachability/bind/drawn-state evidence, but not final pixel/readability acceptance.
+- Desktop screenshot/readback remains the active blocker; stale WASM remains excluded.
+
+Fallbacks:
+- QA harness still renders labeled fallback boxes if any optional region is missing in a future pack.
+- Normal gameplay fallback/procedural paths are unchanged.
+
+Known risks:
+- Pass 7 risks remain for screenshot review: `hero_mind_panel` detail may be too small in real heir-select UI; `hero_spirit_panel` side cloth may read as a generic banner if cropped tightly.
+- Icon repaint risks remain: `icon_settings_32` may still read too small at 24px; `icon_aul_upgrade_32` may need a larger silhouette.
+
+Blocked:
+- Valid L5 desktop pixel/readability evidence. Need a reliable desktop capture/readback/manual visible proof path accepted by GDD/user.
+
+Verification:
+- PASS: `build\games\turkic-jam-2026\native-debug\build_turkic_jam_packs.exe build\games\turkic-jam-2026`.
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`.
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/build_packs.c games/turkic-jam-2026/main.c games/turkic-jam-2026/src/game.h games/turkic-jam-2026/src/scenes/scene_visual_qa.c`.
+- PASS: desktop devapi `visual_qa.status` and `ui.tree` checks described above.
+
+## 2026-06-06 - Pass 6 registry + desktop visual QA devapi evidence [STATUS: complete except L5]
+
+-> ref: FROM_GDD 2026-06-06 15:25 - Desktop visual QA devapi evidence
+-> ref: `gamedesign/docs/50_final_repaint_pass_6_future_tile_card_library_delivery_review.md`
+-> ref: `gamedesign/docs/52_runtime_visual_qa_devapi_evidence.md`
+
+L2 builder:
+- PASS. Fresh/current accepted builder totals:
+  - Batch A found 44 / missing 0.
+  - Batch B found 47 / missing 0.
+  - Batch C aul progression found 6 / missing 0.
+  - Pass 6 future library found 21 / missing 0.
+  - Optional production sprites found 118 / missing 0.
+  - Atlas packed 122 sprites, 121 unique, 1 page.
+  - Generated merged header 129 assets.
+  - CRC32 `0xFC0CEAF1`.
+- Pass 6 is a separate optional group: 6 card art, 9 future tiles, 6 icons.
+- `icon_settings_32` remains Batch B only and is not duplicated in the Pass 6 group.
+
+L3 bind:
+- PASS by desktop devapi evidence from `turkic_jam.exe --visual-qa --devapi 9123`:
+  - `batch_a:[44,44]`
+  - `batch_b:[47,47]`
+  - `batch_c_aul:[6,6]`
+  - `pass6_future:[21,21]`
+- Runtime bind no longer uses the failing optional string-hash path for these ids; it resolves optional regions through generated atlas region constants.
+
+L4 drawn in visual QA mode:
+- PASS for QA reachability: `visual_qa.status` reports `scene:"visual_qa"`, `visual_qa:true`, `resources_ready:true`, `logical:[1280,720]`.
+- PASS for UI tree proof: `ui.tree` contains the visual QA markers and current local query reports `miss` fallback label count `0`.
+- Drawn proof groups in the QA-only scene:
+  - gameplay composition;
+  - active tiles;
+  - HUD/cards/icons;
+  - hero/equipment;
+  - first playable FX strips;
+  - Pass 5 aul progression;
+  - UI surfaces;
+  - QA-only Pass 6 future library strip.
+- Pass 5 and Pass 6 remain QA/debug proof only, not production progression/unlock mechanics.
+
+L5 screenshots:
+- NOT PROVEN. Devapi/tree evidence proves runtime reachability, bind counts, and absence of fallback labels, but it is not pixel/readability acceptance.
+- Desktop automated pixel capture remains blocked in this environment:
+  - `CopyFromScreen` failed with `The handle is invalid`.
+  - `PrintWindow` captured only a white client area for the OpenGL/GLFW window.
+  - GDD-side `ffmpeg gdigrab` also failed with Windows capture error 5.
+- Stale WASM remains excluded. Desktop/native only for the next proof step.
+
+Fallbacks:
+- QA scene still renders labeled red fallback boxes if a future optional region is missing in a later pack.
+- Normal gameplay fallbacks/procedural paths remain unchanged.
+
+Known risks:
+- Pass 6 runtime QA risks remain: `icon_aul_upgrade_32` silhouette, `tile_vision_01` / `tile_false_path_01` on sand, `card_art_storm_64` in card frame, future camp tiles versus central aul language.
+- Existing visual risks remain pending real screenshots: small 24px icons, dark wolf-track art, abstract mirage/storm tiles, subtle dust FX, Pass 5 stage 05 turquoise/oasis read.
+
+Blocked:
+- Final L5 screenshot/readability evidence. Need a reliable desktop pixel readback/capture path or manual visible evidence accepted by GDD/user.
+- Historical Pass 6 note superseded by the Pass 7 entry above: Pass 7 is now delivered, registered, and devapi-verified except L5.
+
+Verification:
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`.
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/build_packs.c games/turkic-jam-2026/main.c games/turkic-jam-2026/src/game.h games/turkic-jam-2026/src/scenes/scene_visual_qa.c`.
+- PASS: desktop devapi `visual_qa.status` query returned all current bind counts at full count.
+- PASS: desktop devapi `ui.tree` query found `QA-only Pass 6 future library` marker and `0` `miss` fallback labels.
+
+## 2026-06-06 - Runtime visual QA harness reachable via `--visual-qa` [STATUS: in-progress]
+
+-> ref: FROM_GDD 2026-06-06 - `gamedesign/docs/48_runtime_visual_qa_harness_spec.md`
+-> ref: FROM_GDD review while visual QA harness is in progress
+
+L2 builder:
+- PASS. Fresh pack builder run reports Batch A found 44 / missing 0, Batch B found 47 / missing 0, Batch C aul progression found 6 / missing 0.
+- PASS. Optional production sprites found 97 / missing 0.
+- PASS. Atlas packed 101 sprites on 1 page; merged header generated 108 assets; CRC32 `0xBE49074A`.
+
+L3 bind:
+- PASS by existing runtime bind path: Batch A optional atlas regions 44 / 44, Batch B 47 / 47, Batch C aul progression 6 / 6.
+- `SCENE_VISUAL_QA` is now declared in `game.h`, compiled into `turkic_jam`, and reachable with `turkic_jam.exe --visual-qa`.
+- Normal production boot remains unchanged when `--visual-qa` is absent.
+
+L4 drawn in visual QA mode:
+- Implemented QA-only scene `src/scenes/scene_visual_qa.c`; it draws through the real UI/image renderer, not a fake atlas/debug dump.
+- Drawn groups: gameplay composition with ground/decor/road/buffer/aul/hero/current highlight; active tiles over ground/decor; HUD icons at 24px; card surfaces/art/badges/placement icons; hero panel portrait/equipment slots/items; Batch B FX strips; Pass 5 aul stages side by side; UI surface swatches.
+- Pass 5 aul stages are explicitly labeled QA/debug proof only and are not wired into production progression mechanics.
+
+L5 screenshots:
+- BLOCKED locally. Fresh WASM remains excluded because the existing `wasm-debug/index.*` output is stale.
+- Native harness launch worked far enough to expose a window handle, but screenshot capture did not produce valid visual evidence:
+  - `CopyFromScreen` failed with `The handle is invalid`.
+  - `PrintWindow` produced `tmp/turkic_visual_qa_window.png`, but the image is a white client area, not the rendered QA scene.
+- Therefore no final-art acceptance is claimed. Current status is L4 reachable/drawn path by compiled runtime code, pending valid screenshot/readability capture.
+
+Fallbacks:
+- Missing atlas regions render as red labeled fallback boxes in the QA harness instead of crashing.
+- Normal gameplay fallback/procedural paths are unchanged.
+- Batch C future aul progression stays inactive in production gameplay.
+
+Known risks:
+- Harness is dense by design; GDD should review screenshot readability once capture works.
+- Same art risks remain: small HUD icons at 24px, dark `card_art_wolf_track_64`, abstract `tile_mirage_01` / `tile_storm_01`, `tile_wolf_track_01` darkness, Pass 5 stage 05 turquoise/oasis read, subtle dust FX on sand.
+
+Blocked:
+- Valid L5 capture path. Native `PrintWindow` is not reliable for this GPU window in the current environment; fresh WASM/browser output is still stale/not rebuilt.
+- `ctest --test-dir build/_cmake/native-debug --output-on-failure` is blocked by 60 missing test executables under `build/tests/native-debug`; 4 tests run/pass.
+- `bash scripts/tidy.sh build/_cmake/native-debug` is blocked by local WSL configuration: no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+Verification:
+- PASS: `build\games\turkic-jam-2026\native-debug\build_turkic_jam_packs.exe build\games\turkic-jam-2026`.
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`.
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/src/scenes/scene_visual_qa.c games/turkic-jam-2026/main.c games/turkic-jam-2026/src/game.h`.
+- PARTIAL/BLOCKED: `ctest --test-dir build/_cmake/native-debug --output-on-failure`.
+- BLOCKED: `bash scripts/tidy.sh build/_cmake/native-debug`.
+
+## 2026-06-06 — Pass 5 Batch C aul progression registry verified [STATUS: in-progress]
+
+→ ref: FROM_GDD 2026-06-06 13:50 — Pass 5 registry verified
+→ ref: `gamedesign/docs/36_visual_asset_status_matrix.md`
+→ ref: `gamedesign/docs/42_visual_completion_board.md`
+
+Batch:
+- Batch C aul progression registry is now active as a separate optional group.
+- Normal gameplay aul progression is not wired; these assets are future/QA-ready only.
+- No new production ids beyond the delivered exact filenames were introduced.
+
+L-levels:
+- L1 raw PNG exists: PASS for `aul_tamga_post_01`, `aul_stage_01_camp`, `aul_stage_02_settlement`, `aul_stage_03_village`, `aul_stage_04_fortified_aul`, `aul_stage_05_steppe_capital`.
+- L2 builder found: PASS. Builder reports Batch C aul progression found 6 / missing 0.
+- L3 generated ids / runtime bind readiness: PASS. Generated headers include all 6 atlas region ids, and `game_ctx_t` / `main.c` bind fields exist for all 6.
+- L4 drawn state: not proven. No gameplay or QA view draws these stage sprites yet.
+- L5 screenshot/readability: not proven. Stage 05 small-scale turquoise/oasis-read risk remains runtime QA risk.
+
+Verification:
+- PASS: `build_turkic_jam_packs` rebuilt, then pack builder run.
+  - Batch A found 44 / missing 0.
+  - Batch B found 47 / missing 0.
+  - Batch C aul progression found 6 / missing 0.
+  - Optional production sprites found 97 / missing 0.
+  - Atlas 101 sprites.
+  - Generated merged header 108 assets.
+  - CRC32 `0xBE49074A`.
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`.
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/build_packs.c games/turkic-jam-2026/main.c games/turkic-jam-2026/src/game.h games/turkic-jam-2026/src/view.c`.
+
+Screenshot status:
+- Fresh WASM/browser L5 remains blocked/stale: `wasm-debug/index.*` is older than the repaint/runtime changes, and a refresh build did not complete/update timestamps in this thread.
+- Native/devapi harness is accepted by GDD for L5, but local launch/capture is not yet a completed screenshot path in this thread. A direct windowed run timed out as expected for an app main loop and did not provide captured visual evidence.
+
+Next Code target:
+- Stop adding registry unless Art delivers a new explicit contract.
+- Continue visual evidence work for Pass 1-4 gameplay UI/map/hero/cards/equipment/FX.
+- Optional low-risk follow-up: add a QA-only/debug view for the 6 aul progression sprites side by side/selectable, explicitly not production upgrade mechanics.
+
+## 2026-06-06 — Batch B runtime HUD/cards/equipment pass; QA gates status [STATUS: in-progress]
+
+→ ref: FROM_GDD 2026-06-06 08:05 — Runtime visual QA evidence gates
+→ ref: FROM_GDD 2026-06-06 08:15 — Visual asset status matrix
+→ ref: FROM_GDD 2026-06-06 08:35 — Final art repaint pass 1 contract
+→ ref: `gamedesign/docs/35_runtime_visual_qa_checklist.md`
+→ ref: `gamedesign/docs/36_visual_asset_status_matrix.md`
+→ ref: `gamedesign/docs/37_final_art_repaint_pass_1.md`
+
+Batch:
+- Batch A/B are placeholder pipeline assets, not final-art accepted.
+- Batch C remains future raw library only and is not promoted into the active missing report.
+- Final repaint pass 1 keeps the same filenames and ids; Code should rerun builder after Art replaces PNGs and report invalid/missing without creating new ids.
+
+Builder:
+- PASS: Batch A found 44 / missing 0.
+- PASS: Batch B found 47 / missing 0.
+- PASS: total optional production sprites found 91 / missing 0.
+- PASS: atlas packs 95 sprites on one page; merged header has 102 assets.
+- Builder report stays grouped by batch/category so map status and UI/card/equipment/icon/FX status are readable separately.
+
+Bind:
+- Batch A runtime bind path remains 44 / 44 optional regions.
+- Batch B runtime bind path added for all 47 optional regions.
+- Batch B bound groups:
+  - UI: `ui_card_back_96x128`, `ui_button_dark_64`.
+  - Cards: `card_badge_count_32`, 3 placement icons, 4 P0 `card_art_*_64`.
+  - Equipment: 4 `equip_slot_*` and 4 starter `equip_*` items.
+  - Icons: all 12 `icon_*`.
+  - FX: 17 `fx_*` frames.
+
+Drawn:
+- L4 HUD: top chips now draw `icon_supplies_32`, `icon_wisdom_32`, `icon_glory_32`, `icon_circle_32`, `icon_day_32`, `icon_stamina_32`, `icon_speed_32` next to the existing labels.
+- L3-only icons for now: `icon_body_32`, `icon_mind_32`, `icon_spirit_32`, `icon_last_tamga_32`, `icon_settings_32`.
+- L4 card hand: selected/current card uses `ui_card_selected_96x128`; empty hand slots use `ui_card_back_96x128`; card art uses `card_art_saxaul_64`, `card_art_yurt_64`, `card_art_tamga_stone_64`, `card_art_wolf_track_64` when those P0 cards are in hand; active card draws `card_badge_count_32`; placement affordance draws `card_placement_roadside_32`, `card_placement_field_32`, or `card_placement_special_32`.
+- L4 hero panel: `hero_wayfarer_panel` is drawn in the doll area; 4 starter equipment cells draw `equip_slot_weapon_01` + `equip_weapon_staff_01`, `equip_slot_clothes_01` + `equip_clothes_cloak_01`, `equip_slot_tamga_01` + `equip_tamga_charm_01`, `equip_slot_tool_01` + `equip_tool_satchel_01`.
+- L3-only FX: all Batch B FX frames are bound, but no runtime event hook is proven drawn yet.
+
+Screenshots:
+- L5 screenshot QA is still blocked in this local pass.
+- Current verified target is native `turkic_jam.exe`; no WASM/browser target or automated visual harness was run from this thread.
+- Required next evidence set: normal gameplay, selected card, placement valid/invalid, tile trigger, hero panel. Until screenshots exist, Batch A/B remain runtime-wired placeholders, not final visual acceptance.
+
+Fallback kept:
+- HUD labels remain visible if icons are missing.
+- Card text labels and fallback panel colors remain if card surfaces/art/placement icons are missing or the card is outside the current P0 art set.
+- Hero panel keeps fixed fallback containers behind panel/equipment art.
+- Map/world fallback shapes from Batch A pass are unchanged.
+- FX fallback is unchanged because FX event drawing is not implemented yet.
+
+Missing/invalid:
+- None for active Batch A/B builder input after the latest placeholder regeneration.
+- Builder still treats unreadable/fully transparent optional PNGs as invalid/missing before atlas packing.
+
+Blocked:
+- Full `cmake --build build/_cmake/native-debug` is blocked by missing `build/examples/sponza/sponza_full.ntpack`.
+- `ctest --test-dir build/_cmake/native-debug --output-on-failure` is blocked by 60 missing test executables under `build/tests/native-debug`; 4 tests run/pass.
+- `bash scripts/tidy.sh build/_cmake/native-debug` is blocked by local WSL configuration: no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+- Screenshot QA needs a runnable visual target/harness; current code report can claim L3/L4 only, not L5.
+
+## 2026-06-06 — Batch B registry promoted; pack verified [STATUS: in-progress]
+
+→ ref: FROM_GDD 2026-06-06 07:15 — Batch B cards/equipment/icons/fx placeholder kit
+
+Сделано:
+- Batch B ids promoted into optional atlas registry as a separate batch from Batch A.
+- Report is now batch-aware:
+  - Batch A keeps map/world status readable: found 44 / missing 0.
+  - Batch B prints separate category totals: `ui`, `cards`, `equipment`, `icons`, `fx`.
+- Registered Batch B assets:
+  - UI: `ui_card_back_96x128`, `ui_button_dark_64`.
+  - Cards: count badge, 3 placement icons, 4 P0 card-art variants.
+  - Equipment: 4 slot silhouettes, 4 starter item icons.
+  - Icons: 12 HUD/stat/control icons.
+  - FX: 17 individual frames for dust, tile placed, tile trigger, gain popup, invalid cell.
+- UI slice9 borders added for Batch B UI surfaces: `ui_card_back_96x128` = 18 px, `ui_button_dark_64` = 16 px.
+- Optional sprite precheck added before atlas packing: fully transparent or unreadable optional PNGs are reported as invalid/missing instead of reaching atlas packer assertion. This is builder-only and keeps runtime fallback contract intact.
+
+Verification:
+- PASS: `build\games\turkic-jam-2026\native-debug\build_turkic_jam_packs.exe build\games\turkic-jam-2026`
+  - Batch A: found 44 / missing 0.
+  - Batch B: found 47 / missing 0.
+  - Total optional: found 91 / missing 0.
+  - Atlas: 95 sprites, one page.
+  - Generated merged header: 102 assets.
+- PASS: `cmake --build build/_cmake/native-debug --target build_turkic_jam_packs`
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/build_packs.c`
+- BLOCKED existing infra: full `cmake --build build/_cmake/native-debug` still fails on missing `build/examples/sponza/sponza_full.ntpack`.
+- BLOCKED existing infra: `ctest --test-dir build/_cmake/native-debug --output-on-failure` still cannot run 60/64 tests because test executables are absent in `build/tests/native-debug`.
+- BLOCKED local environment: `bash scripts/tidy.sh build/_cmake/native-debug` still cannot start because WSL has no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+Not done in this pass:
+- No Batch B runtime UI replacement yet. HUD icons, card face/back/art, equipment panel, and FX hooks stay procedural/fallback until the next smaller runtime pass.
+- No concept/fake-shot image was imported as runtime art; only raw PNGs from `games/turkic-jam-2026/raw/...` are registered.
+
+Recommended next Code pass:
+1. Bind Batch B optional regions in `game_ctx_t`.
+2. Replace top HUD chip text prefixes with optional 24x24 icons.
+3. Replace hand cards with `ui_card_*` surfaces and card-art icons.
+4. Add hero panel slot/item sprites.
+5. Add short-lived FX hooks for placement/invalid/trigger/dust/gain with procedural fallback.
+
+## 2026-06-06 — Batch A placeholder PNGs verified; road/aul sprites wired [STATUS: in-progress]
+
+→ ref: FROM_GDD 2026-06-06 06:35 — Asset Production Batch A contract; GDD/Art update with placeholder PNGs
+
+Принял placeholder runtime PNGs в `games/turkic-jam-2026/raw/...`.
+
+Проверено:
+- Pack builder видит весь Batch A: `Optional production sprites: found 44 / missing 0`.
+- Atlas rebuilt with 48 sprites, one page; generated headers updated to 55 assets.
+- Runtime optional binding expanded to all 44 Batch A ids, including UI 9-slice ids and `hero_wayfarer_panel`.
+- Bind-time runtime log now prints `turkic_jam: optional Batch A atlas regions 44/44` when the atlas is loaded.
+
+Что теперь рисуется sprite-first с fallback:
+- Ground: `ground_sand_base_01`.
+- Base decor: all 6 decor variants on empty buildable cells.
+- Road buffer: all 4 `buffer_*` variants from `raw/road/`.
+- Active placed tiles: `tile_region_for_index()` now covers P0/P1 ids including `last_tamga`; missing region falls back to colored rect.
+- Hero map sprite: direction picks `hero_wayfarer_walk_s/e/n/w`, intro uses `hero_wayfarer_idle_s`; missing region falls back to circle.
+- Road path: `draw_road(game_ctx_t*, ...)` now maps path topology to `road_straight_*`, `road_corner_*`, first cell to `road_entry_aul`, and overlays `road_current_highlight`. If any required road region is missing, it falls back to the old procedural continuous trail.
+- Aul: `draw_aul` now layers `aul_ground_2x2`, yurt(s), and `aul_fire_01`. If required aul regions are missing, it falls back to the old procedural labeled block.
+
+Still planned / fallback-only:
+- UI kit ids are registered and runtime-bound, but HUD/cards/hero panel still use existing procedural UI. Replacing those surfaces is Batch B.
+- `raw/cards`, `raw/equipment`, `raw/icons`, `raw/fx` remain folder-contract only until the next production contract promotes ids into registry.
+- Road-event markers, global objects, Last Tamga marker and FX are still procedural placeholders.
+
+Checks:
+- PASS: `build\games\turkic-jam-2026\native-debug\build_turkic_jam_packs.exe build\games\turkic-jam-2026` → found 44 / missing 0.
+- PASS: `cmake --build build/_cmake/native-debug --target build_turkic_jam_packs`
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/build_packs.c games/turkic-jam-2026/main.c games/turkic-jam-2026/src/game.h games/turkic-jam-2026/src/view.c`
+- BLOCKED existing infra: full `cmake --build build/_cmake/native-debug` still fails on missing `build/examples/sponza/sponza_full.ntpack`.
+- BLOCKED existing infra: `ctest --test-dir build/_cmake/native-debug --output-on-failure` still cannot run 60/64 tests because test executables are absent in `build/tests/native-debug`.
+- BLOCKED local environment: `bash scripts/tidy.sh build/_cmake/native-debug` still cannot start because WSL has no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+No fake-shot/concept image was imported as runtime art. Placeholder filenames now form the stable replacement contract for Art.
+
+## 2026-06-06 — Batch A production art pipeline hooks [STATUS: in-progress]
+
+→ ref: FROM_GDD 2026-06-06 06:35 — Asset Production Batch A contract
+
+Сделано по Batch A contract:
+- Builder registry синхронизирован с `gamedesign/docs/32_asset_production_batch_a.md`: ground/decor/road/road_buffer/aul/tiles/hero/UI ids регистрируются как optional atlas sprites.
+- Raw folder contract создан/поддерживается builder-ом: `raw/ground`, `raw/decor`, `raw/road`, `raw/tiles`, `raw/aul`, `raw/hero`, `raw/ui`, `raw/cards`, `raw/equipment`, `raw/icons`, `raw/fx`. Для пустых папок добавлены `.gitkeep`, кроме `raw/ui`, где уже есть базовые button PNG.
+- Missing asset report теперь стабильный: builder печатает строки `MISSING [category] asset_id path`, затем сводку по категориям и общий итог. Сейчас без production PNG: found 0 / missing 44.
+- Runtime atlas binding optional: регионы ищутся по string-hash id, поэтому отсутствие PNG не ломает generated headers и запуск.
+- Active placed tile sprite hook закрыт: `draw_field(game_ctx_t *g, ...)` пробует `tile_region_for_index()`, при отсутствии region оставляет цветной fallback rect.
+- Hero sprite hook закрыт: `draw_hero(game_ctx_t *g, ...)` выбирает `hero_wayfarer_walk_s/e/n/w` или `hero_wayfarer_idle_s`, при отсутствии region оставляет procedural circle.
+- Ground/base decor/road_buffer имеют первые sprite hooks с fallback: ground fallback rect, decor без fallback-шума, road_buffer fallback colored no-build edge.
+- UI 9-slice ids зарегистрированы optional с slice9 borders из Batch A: 24/18/14/16 px по contract. Runtime replacement UI/cards/equipment/icons остаётся Batch B.
+
+Ready sprite hook:
+- `ground_sand_base_01`
+- `decor_dune_01`, `decor_stones_01`, `decor_dry_grass_01`, `decor_tracks_01`, `decor_bones_01`, `decor_cracks_01`
+- `buffer_edge_stones_01`, `buffer_packed_sand_01`, `buffer_stakes_01`, `buffer_cart_marks_01`
+- active tiles: `tile_saxaul_01`, `tile_yurt_01`, `tile_tamga_stone_01`, `tile_wolf_track_01`, `tile_oasis_01`, `tile_mirage_01`, `tile_storm_01`, `tile_last_tamga_01`
+- hero map sprites: `hero_wayfarer_idle_s`, `hero_wayfarer_walk_s/e/n/w`
+
+Fallback-only / planned:
+- Road path sprites are registered, but `draw_road` is still procedural. Batch 1 should map path topology to `road_straight_*`, `road_corner_*`, `road_entry_aul`, `road_current_highlight`.
+- Aul ids are registered, but `draw_aul` is still procedural. Batch 1 can layer `aul_ground_2x2`, yurt and fire sprites.
+- `hero_wayfarer_panel` and UI kit ids are registered only; actual HUD/card/hero-panel replacement is Batch B.
+- `raw/cards`, `raw/equipment`, `raw/icons`, `raw/fx` folders exist for the approved full visual scope, but their expected ids are intentionally not in the Batch A missing count. Next contract should promote them to Batch B registry.
+
+No fake-shot/concept image was imported as runtime art. `ui_fake_shot_h_approved_style_reference.png` remains a style lock only.
+
+Checks:
+- PASS: `cmake --build build/_cmake/native-debug --target build_turkic_jam_packs`
+- PASS: `cmake --build build/_cmake/native-debug --target turkic_jam`
+- PASS: `clang-format --dry-run --Werror games/turkic-jam-2026/build_packs.c games/turkic-jam-2026/main.c games/turkic-jam-2026/src/game.h games/turkic-jam-2026/src/view.c`
+- PASS: pack builder run; missing report prints grouped Batch A count found 0 / missing 44.
+- BLOCKED existing infra: full `cmake --build build/_cmake/native-debug` fails on missing `build/examples/sponza/sponza_full.ntpack`.
+- BLOCKED existing infra: `ctest --test-dir build/_cmake/native-debug --output-on-failure` cannot run 60/64 tests because test executables are absent in `build/tests/native-debug`.
+- BLOCKED local environment: `bash scripts/tidy.sh build/_cmake/native-debug` cannot start because WSL has no default distro (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+Вопрос к GDD/Art:
+- Для Batch B подтвердите, что next expected list будет отдельным contract document для cards/equipment/icons/fx/HUD/FX, чтобы builder missing report не смешивал Batch A и будущие ids.
+
 ## 2026-06-06 — Зоны реализованы: аул | дорога | no-build буфер | поле; + log.tsv подключён  [STATUS: done]
 
 → ref: FROM_GDD 03:25/05:05 (road_buffer + zones), его log.tsv
