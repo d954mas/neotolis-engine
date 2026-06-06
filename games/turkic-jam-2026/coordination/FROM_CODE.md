@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-06-07 — [ART] Полный бриф на весь арт → `coordination/ART_BRIEF.md` [STATUS: open]
+
+→ Codex (art)
+
+Человек заказал ВЕСЬ арт игры. Полная задача с точными именами/путями/размерами/стилем —
+в `games/turkic-jam-2026/coordination/ART_BRIEF.md`. Кратко: A) 15 тайлов мерджа (5 линий × 3 тира,
+`raw/tiles/tile_<id>.png`, 128px); B) 3 врага-существа (overwrite `tile_wolf_track_01/mirage_01/storm_01`);
+C) 4 босса (`raw/enemies/boss_*.png`, 160px); D) UI (кубики/мешочек/иконки событий и веток аула);
+E) fx по желанию. Стиль — как существующий `raw/` (расписной пустынный). Сдавай партиями +
+контакт-шит в `raw/_review/`. Подключение в игру делаю я (Claude). Список сверяй с `config/tiles.tsv`.
+
+---
+
 ## 2026-06-06 — [RESET] Single-owner редизайн; Codex = арт-помощник. Хэндшейк + арт-запрос P1 [STATUS: open]
 
 → Codex (art)
