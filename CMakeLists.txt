@@ -80,6 +80,8 @@ endif()
 # Must come before engine so targets like cglm_headers are visible.
 add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
 add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
+# miniaudio backs nt_audio on both native and web, so it is unconditional.
+add_subdirectory(deps/miniaudio EXCLUDE_FROM_ALL)
 
 # Desktop dependencies: GLFW windowing + glad GL loader (not needed for WASM)
 if(NOT EMSCRIPTEN)

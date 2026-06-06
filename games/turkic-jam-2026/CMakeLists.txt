@@ -3,6 +3,12 @@ set(TURKIC_JAM_ASSETS_DIR "${TURKIC_JAM_OUTPUT_DIR}/assets")
 # Balance configs next to the exe (Code owns schema, GDD owns values). Loaded at
 # runtime; edit + reconfigure, or run with --config <dir> for live tweaks.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/config" DESTINATION "${TURKIC_JAM_OUTPUT_DIR}")
+# Loose audio (music + SFX). Native loads from disk next to the exe; web fetches
+# them, so the same files also go into the per-preset assets/ dir.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/audio")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/audio" DESTINATION "${TURKIC_JAM_OUTPUT_DIR}")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/audio" DESTINATION "${TURKIC_JAM_ASSETS_DIR}")
+endif()
 # Shared pack location -- builder writes here once; every preset copies from here.
 set(TURKIC_JAM_PACK_DIR "${CMAKE_SOURCE_DIR}/build/games/turkic-jam-2026")
 
@@ -12,6 +18,7 @@ add_executable(turkic_jam
     src/save.c
     src/rng.c
     src/juice.c
+    src/audio_assets.c
     src/config.c
     src/sim.c
     src/journal.c
@@ -30,7 +37,7 @@ target_link_libraries(turkic_jam PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
-    nt_render nt_hash nt_mem_scratch nt_devapi
+    nt_render nt_hash nt_mem_scratch nt_devapi nt_audio
 )
 # Generated asset headers from builder + game headers in src/.
 target_include_directories(turkic_jam PRIVATE

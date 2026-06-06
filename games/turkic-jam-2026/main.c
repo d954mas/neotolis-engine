@@ -5,6 +5,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "audio/nt_audio.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -30,6 +31,7 @@
 #include "nt_pack_format.h"
 #include "turkic_jam_assets.h"
 
+#include "audio_assets.h"
 #include "aul.h"
 #include "config.h"
 #include "game.h"
@@ -900,6 +902,18 @@ static bool dump_frame_png(const char *path, uint32_t width, uint32_t height) {
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
+
+    /* Audio: resume on the first user gesture (web autoplay policy), advance
+       async loads + reap voices, and click SFX on press. */
+    if (nt_audio_get_state() == NT_AUDIO_SUSPENDED && nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        nt_audio_try_resume();
+    }
+    nt_audio_update();
+    tj_audio_assets_poll();
+    if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        tj_audio_play_click();
+    }
+
     nt_devapi_apply_pending(); /* inject queued synthetic input (no-op unless devapi on) */
     nt_devapi_net_poll();      /* serve debug/bot commands */
     nt_mem_scratch_reset();
@@ -1069,6 +1083,8 @@ int main(int argc, char *argv[]) {
 
     nt_http_init();
     nt_fs_init();
+    nt_audio_init();
+    tj_audio_assets_init(); /* kicks off async music/SFX loads (fs/http ready above) */
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_mem_scratch_init(TJ_SCRATCH_ARENA_SIZE);
@@ -1193,6 +1209,7 @@ int main(int argc, char *argv[]) {
 #ifndef NT_PLATFORM_WEB
     nt_devapi_net_stop();
     nt_devapi_shutdown();
+    nt_audio_shutdown();
     nt_ui_destroy_context(g.ui);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();
