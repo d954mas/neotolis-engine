@@ -12,6 +12,29 @@ GDD owner status: accepted as production baseline for the first playable. Painte
 
 ## Art Bible v0.1
 
+### Reusable Asset Composition Rule
+
+Production art should separate reusable surfaces from semantic content.
+
+Core rule:
+
+```text
+base surface / 9-slice frame / ground layer
+-> icon, marker, active object or item art
+-> text/value/state overlay
+```
+
+Do not bake many semantic variants into separate full surfaces if the visual system can use one reusable surface plus a small icon/overlay. This keeps the art consistent and prevents generated assets from drifting into four different versions of the same UI cell.
+
+Examples:
+
+- Equipment inventory cell: one `ui_slot_9s` / base slot surface, with weapon/clothes/tool/tamga marker as an overlay.
+- Card surface: one playable card face, with card art/title/count/placement icon layered on top.
+- Map tile: ground/base decor separate from active tile object sprite.
+- HUD chip: one chip frame, with resource/stat icon and number layered on top.
+
+Temporary compatibility rule: if runtime currently requires several filenames for the same surface type, those files should be identical aliases of the same base surface until the runtime exposes a reusable base id plus separate overlay ids.
+
 ### Камера и форма
 
 - Вид: 2D top-down с легкой декоративной перспективой объектов.

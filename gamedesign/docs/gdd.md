@@ -71,6 +71,38 @@
 61. [61_pass_10_generated_wayfarer_equipment_delivery_review.md](61_pass_10_generated_wayfarer_equipment_delivery_review.md) - delivered generated wayfarer/equipment runtime files, pack/L5 evidence and final review risks.
 62. [62_pass_11_generated_hud_icons_contract.md](62_pass_11_generated_hud_icons_contract.md) - generated bitmap contract for HUD, stat, utility and future icons.
 63. [63_pass_11_generated_hud_icons_delivery_review.md](63_pass_11_generated_hud_icons_delivery_review.md) - delivered generated HUD/icon runtime files, pack/L5 evidence and final review risks.
+64. [64_pass_12_generated_ui_surfaces_contract.md](64_pass_12_generated_ui_surfaces_contract.md) - generated bitmap contract for UI panels, cards, chips, slots and tooltip/button surfaces.
+65. [65_pass_12_generated_ui_surfaces_delivery_review.md](65_pass_12_generated_ui_surfaces_delivery_review.md) - delivered generated UI surface runtime files, pack/L5 evidence and final review risks.
+66. [66_visual_design_bible.md](66_visual_design_bible.md) - current visual design bible for generated UI materials, buttons, cards, panels, icons and runtime acceptance.
+67. [67_art_generation_and_reuse_protocol.md](67_art_generation_and_reuse_protocol.md) - mandatory art workflow protocol: generated bitmap source, component inventory, reuse map, no SVG-looking production art.
+68. [68_pass_13_world_foundation_contract.md](68_pass_13_world_foundation_contract.md) - source-first generated bitmap contract for world foundation: ground, decor, road, road buffer and starting aul.
+69. [69_pass_13_world_foundation_source_review.md](69_pass_13_world_foundation_source_review.md) - GDD source-review gate for Pass 13 before slicing, runtime overwrite or Code work.
+70. [70_gameplay_map_zoom_visual_review.md](70_gameplay_map_zoom_visual_review.md) - GDD review of the larger desktop gameplay map scale and visual implications for Pass 13.
+71. [71_pass_13_world_foundation_source_review.md](71_pass_13_world_foundation_source_review.md) - GDD review of the generated Pass 13 world source sheet, accepted with restrictions before slicing.
+72. [72_visual_design_bible_enforcement.md](72_visual_design_bible_enforcement.md) - mandatory GDD enforcement gate: no SVG-looking production art, no repeated one-off UI generation, source sheet plus reuse map required.
+73. [73_pass_13_slicing_proposal_review.md](73_pass_13_slicing_proposal_review.md) - GDD review rejecting Pass 13 slicing proposal for runtime overwrite and requesting cleaner V2 crops from the same source.
+74. [74_runtime_ui_button_cleanup.md](74_runtime_ui_button_cleanup.md) - runtime cleanup removing old demo one-off button art and keeping UI buttons on the generated Pass 12 material system.
+75. [75_pass_13_slicing_proposal_v2_review.md](75_pass_13_slicing_proposal_v2_review.md) - GDD review partially accepting Pass 13 V2 ground/decor/aul candidates and rejecting road/buffer for V3.
+76. [76_pass_13_partial_runtime_integration_review.md](76_pass_13_partial_runtime_integration_review.md) - runtime integration review for accepted Pass 13 V2 ground/decor/aul subset, with screenshot evidence and next Code/Art tasks.
+77. [77_pass_13_road_buffer_v3_review.md](77_pass_13_road_buffer_v3_review.md) - GDD review accepting V3 road/buffer source direction but rejecting runtime slices for alignment and cleanup.
+78. [78_build_slot_overlay_runtime_review.md](78_build_slot_overlay_runtime_review.md) - GDD runtime review accepting softened build-slot overlay so generated map art remains readable.
+79. [79_visual_source_registry_and_reuse_queue.md](79_visual_source_registry_and_reuse_queue.md) - active source registry and reuse queue preventing SVG-looking art and repeated one-off UI generation.
+80. [80_pass_13_road_buffer_v4_review.md](80_pass_13_road_buffer_v4_review.md) - GDD review accepting revised V4 road/buffer candidates for runtime copy.
+81. [81_cyrillic_runtime_text_review.md](81_cyrillic_runtime_text_review.md) - runtime text review accepting current Cyrillic UI fix.
+82. [82_pass_13_road_buffer_runtime_review.md](82_pass_13_road_buffer_runtime_review.md) - runtime screenshot review accepting integrated Pass 13 V4 road/buffer for the current playable.
+83. [83_normal_gameplay_visual_review_request.md](83_normal_gameplay_visual_review_request.md) - next visual QA request for a dense gameplay screenshot covering cards, active tiles, HUD/icons and hero/equipment.
+84. [84_dense_visual_qa_screenshot_review.md](84_dense_visual_qa_screenshot_review.md) - GDD review of the dense visual QA screenshot, accepting evidence and defining targeted fixes only.
+85. [85_dense_visual_qa_followup_review.md](85_dense_visual_qa_followup_review.md) - GDD review of empty-card treatment and map-context active tiles, confirming Beast Trail targeted art fix.
+86. [86_pass_14_beast_trail_targeted_art_contract.md](86_pass_14_beast_trail_targeted_art_contract.md) - targeted generated-bitmap contract for `Звериная тропа` tile/card art only.
+87. [87_pass_14_beast_trail_delivery_review.md](87_pass_14_beast_trail_delivery_review.md) - Pass 14 source accepted, first slices rejected, revision requested.
+88. [88_ui_asset_kit_contract.md](88_ui_asset_kit_contract.md) - mandatory generated-bitmap reusable UI kit contract.
+89. [89_pass_15_ui_asset_kit_work_order.md](89_pass_15_ui_asset_kit_work_order.md) - Pass 15 UI inventory/contact work order.
+90. [90_pass_14_beast_trail_revision_approval.md](90_pass_14_beast_trail_revision_approval.md) - revised Beast Trail slices approved for Code integration.
+91. [91_pass_14_beast_trail_runtime_review.md](91_pass_14_beast_trail_runtime_review.md) - Beast Trail runtime integration accepted for current playable.
+92. [92_pass_15_ui_inventory_review.md](92_pass_15_ui_inventory_review.md) - Pass 15 UI inventory/reuse map accepted.
+93. [93_pass_15_ui_contact_review.md](93_pass_15_ui_contact_review.md) - Pass 15 contact accepted as reuse proof, not final UI acceptance.
+94. [94_pass_15_runtime_ui_reuse_review.md](94_pass_15_runtime_ui_reuse_review.md) - Pass 15 runtime UI reuse proof accepted; normal gameplay placement-state proof requested.
+96. [96_ui_design_bible_component_families.md](96_ui_design_bible_component_families.md) - UI design bible for generated-bitmap reusable component families.
 
 Исходные материалы сохранены отдельно:
 

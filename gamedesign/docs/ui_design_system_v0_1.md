@@ -37,6 +37,32 @@ arabian palace / genie / flying carpet / bazaar language
 
 ## Core UI Surfaces
 
+### Composition Rule
+
+UI art must be built from reusable primitives:
+
+```text
+surface/frame -> semantic icon/marker -> content/text/item art
+```
+
+Do not generate separate baked surfaces for every semantic variant when one base surface plus an icon/overlay can express the state. This is especially important for inventory/equipment slots, card slots, HUD chips and tooltip frames.
+
+Wrong:
+
+```text
+equip_slot_weapon_01, equip_slot_clothes_01, equip_slot_tool_01, equip_slot_tamga_01
+all painted as different unique slot frames
+```
+
+Correct:
+
+```text
+one reusable equipment slot base surface
+plus a small weapon/clothes/tool/tamga icon or overlay marker
+```
+
+If the current runtime contract still requires four slot filenames, those four PNGs should be visually identical base-slot aliases until Code exposes a separate overlay/icon id.
+
 ### Nine-Slice Assets
 
 | Asset id | Use | Material | Border target |

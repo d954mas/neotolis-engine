@@ -10,8 +10,11 @@
 #include "ui/nt_ui_label.h"
 
 static const nt_ui_label_style_t s_title = {.font_id = 0, .font_size = 20, .color = {246.0F, 222.0F, 176.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
-static const nt_ui_label_style_t s_label = {.font_id = 0, .font_size = 13, .color = {210.0F, 216.0F, 228.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 12, .color = {132.0F, 144.0F, 164.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_label = {.font_id = 0, .font_size = 13, .color = {226.0F, 212.0F, 184.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 12, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_log = {.font_id = 0, .font_size = 15, .color = {218.0F, 202.0F, 174.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+static const nt_ui_label_style_t s_log_good = {.font_id = 0, .font_size = 15, .color = {126.0F, 188.0F, 134.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+static const nt_ui_label_style_t s_empty_card = {.font_id = 0, .font_size = 14, .color = {246.0F, 232.0F, 194.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_bad = {.font_id = 0, .font_size = 12, .color = {255.0F, 156.0F, 132.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_chip = {.font_id = 0, .font_size = 14, .color = {232.0F, 226.0F, 210.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
@@ -39,7 +42,20 @@ static void qa_float_image(game_ctx_t *g, uint32_t region, float w, float h, flo
     if (!has_region(region)) {
         return;
     }
-    const nt_ui_image_style_t img = nt_ui_image_style_defaults();
+    nt_ui_image_style_t img = nt_ui_image_style_defaults();
+    const Clay_ElementDeclaration decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {ox, oy}, .zIndex = z},
+    };
+    nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
+}
+
+static void qa_float_image_tinted(game_ctx_t *g, uint32_t region, float w, float h, float ox, float oy, int16_t z, uint32_t color) {
+    if (!has_region(region)) {
+        return;
+    }
+    nt_ui_image_style_t img = nt_ui_image_style_defaults();
+    img.color_packed = color;
     const Clay_ElementDeclaration decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
         .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {ox, oy}, .zIndex = z},
@@ -50,8 +66,8 @@ static void qa_float_image(game_ctx_t *g, uint32_t region, float w, float h, flo
 #define QA_SECTION(w, h)                                                                                                                                                                               \
     {                                                                                                                                                                                                  \
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .padding = CLAY_PADDING_ALL(8), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6},                                      \
-        .backgroundColor = {18.0F, 22.0F, 34.0F, 245.0F}, .cornerRadius = CLAY_CORNER_RADIUS(6.0F), .border = {                                                                                        \
-            .color = {58.0F, 68.0F, 88.0F, 255.0F},                                                                                                                                                    \
+        .backgroundColor = {35.0F, 31.0F, 24.0F, 245.0F}, .cornerRadius = CLAY_CORNER_RADIUS(6.0F), .border = {                                                                                        \
+            .color = {104.0F, 76.0F, 42.0F, 255.0F},                                                                                                                                                   \
             .width = CLAY_BORDER_OUTSIDE(1)                                                                                                                                                            \
         }                                                                                                                                                                                              \
     }
@@ -62,7 +78,7 @@ static void qa_icon_chip(game_ctx_t *g, uint32_t icon, const char *text) {
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
                      .childGap = 5,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {34.0F, 40.0F, 58.0F, 255.0F},
+          .backgroundColor = {82.0F, 50.0F, 28.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(6.0F)}) {
         qa_image(g, icon, 24.0F, 24.0F, "miss");
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_chip);
@@ -71,8 +87,8 @@ static void qa_icon_chip(game_ctx_t *g, uint32_t icon, const char *text) {
 
 static void draw_gameplay_composition(game_ctx_t *g) {
     CLAY(QA_SECTION(350.0F, 278.0F)) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "QA gameplay composition", &s_title);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_FIXED(230)}}, .backgroundColor = {28.0F, 30.0F, 34.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Gameplay composition", &s_title);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_FIXED(230)}}, .backgroundColor = {78.0F, 54.0F, 30.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {
             for (int gy = 0; gy < 5; gy++) {
                 for (int gx = 0; gx < 6; gx++) {
                     const float x = ((float)gx - 2.5F) * 48.0F;
@@ -105,6 +121,12 @@ static void draw_gameplay_composition(game_ctx_t *g) {
             qa_float_image(g, g->aul_yurt_small_01, 42.0F, 40.0F, -26.0F, -78.0F, 4);
             qa_float_image(g, g->aul_yurt_small_02, 42.0F, 40.0F, 18.0F, -68.0F, 4);
             qa_float_image(g, g->aul_fire_01, 32.0F, 32.0F, 6.0F, -88.0F, 5);
+            qa_float_image(g, g->tile_saxaul, 38.0F, 38.0F, -120.0F, -34.0F, 4);
+            qa_float_image(g, g->tile_yurt, 38.0F, 38.0F, -120.0F, 76.0F, 4);
+            qa_float_image(g, g->tile_tamga_stone, 38.0F, 38.0F, 118.0F, -34.0F, 4);
+            qa_float_image(g, g->tile_wolf_track, 38.0F, 38.0F, 118.0F, 76.0F, 4);
+            qa_float_image(g, g->tile_mirage, 38.0F, 38.0F, -72.0F, -76.0F, 4);
+            qa_float_image(g, g->tile_storm, 38.0F, 38.0F, 72.0F, -76.0F, 4);
             qa_float_image(g, g->hero_wayfarer_idle_s, 46.0F, 56.0F, 0.0F, 0.0F, 6);
         }
     }
@@ -139,20 +161,44 @@ static void draw_active_tiles(game_ctx_t *g) {
     }
 }
 
+static void draw_log_panel(game_ctx_t *g) {
+    CLAY(QA_SECTION(350.0F, 196.0F)) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Летопись", &s_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Первый путник выходит из аула.", &s_log);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Костер остается за спиной.", &s_log);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Путь дает роду: Запасы +1.", &s_log_good);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Саксаул: путник находит помощь.", &s_log_good);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Звериная тропа ждет у дороги.", &s_log);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Тамга прошлого мерцает в песке.", &s_log);
+    }
+}
+
 static void card_preview(game_ctx_t *g, uint32_t surface, uint32_t art, uint32_t placement, const char *name, bool selected) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(112), CLAY_SIZING_FIXED(126)},
-                     .padding = CLAY_PADDING_ALL(7),
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(126)},
+                     .padding = CLAY_PADDING_ALL(6),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 3,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = selected ? (Clay_Color){48.0F, 58.0F, 42.0F, 255.0F} : (Clay_Color){28.0F, 32.0F, 44.0F, 255.0F},
+          .backgroundColor = selected ? (Clay_Color){38.0F, 76.0F, 64.0F, 255.0F} : (Clay_Color){42.0F, 34.0F, 25.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(6.0F)}) {
-        qa_float_image(g, surface, 104.0F, 118.0F, 0.0F, 0.0F, 0);
-        qa_float_image(g, art, 68.0F, 68.0F, 0.0F, -14.0F, 1);
-        qa_float_image(g, placement, 22.0F, 22.0F, 34.0F, 38.0F, 2);
-        qa_float_image(g, selected ? g->card_badge_count_32 : NT_ATLAS_INVALID_REGION, 22.0F, 22.0F, -34.0F, -42.0F, 2);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(88), CLAY_SIZING_FIXED(78)}}}) {}
-        qa_dim(g, name);
+        const bool empty = !has_region(art) && !has_region(placement);
+        if (empty) {
+            qa_float_image_tinted(g, surface, 90.0F, 118.0F, 0.0F, 0.0F, 0, 0xFF78726CU);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(76), CLAY_SIZING_FIXED(76)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(58), CLAY_SIZING_FIXED(22)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                      .backgroundColor = {18.0F, 16.0F, 14.0F, 215.0F},
+                      .cornerRadius = CLAY_CORNER_RADIUS(3.0F)}) {
+                    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, &s_empty_card);
+                }
+            }
+        } else {
+            qa_float_image(g, surface, 90.0F, 118.0F, 0.0F, 0.0F, 0);
+            qa_float_image(g, art, 60.0F, 60.0F, 0.0F, -14.0F, 1);
+            qa_float_image(g, placement, 20.0F, 20.0F, 29.0F, 39.0F, 2);
+            qa_float_image(g, selected ? g->card_badge_count_32 : NT_ATLAS_INVALID_REGION, 20.0F, 20.0F, -29.0F, -43.0F, 2);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(76), CLAY_SIZING_FIXED(76)}}}) {}
+            qa_dim(g, name);
+        }
     }
 }
 
@@ -178,6 +224,7 @@ static void draw_ui_cards(game_ctx_t *g) {
             card_preview(g, g->ui_card_playable_96x128, g->card_art_yurt_64, g->card_placement_field_32, "yurt", false);
             card_preview(g, g->ui_card_playable_96x128, g->card_art_tamga_stone_64, g->card_placement_special_32, "tamga", false);
             card_preview(g, g->ui_card_playable_96x128, g->card_art_wolf_track_64, g->card_placement_roadside_32, "trail", false);
+            card_preview(g, g->ui_card_back_96x128, NT_ATLAS_INVALID_REGION, NT_ATLAS_INVALID_REGION, "пусто", false);
         }
     }
 }
@@ -187,7 +234,7 @@ static void fx_strip(game_ctx_t *g, const char *name, const uint32_t *frames, ui
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(88), CLAY_SIZING_FIXED(30)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { qa_dim(g, name); }
         for (uint32_t i = 0; i < count; i++) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32)}},
-                  .backgroundColor = bg ? (Clay_Color){82.0F, 70.0F, 48.0F, 255.0F} : (Clay_Color){26.0F, 28.0F, 36.0F, 255.0F},
+                  .backgroundColor = bg ? (Clay_Color){82.0F, 70.0F, 48.0F, 255.0F} : (Clay_Color){42.0F, 34.0F, 25.0F, 255.0F},
                   .cornerRadius = CLAY_CORNER_RADIUS(3.0F)}) {
                 qa_float_image(g, frames[i], 32.0F, 32.0F, 0.0F, 0.0F, 0);
             }
@@ -208,7 +255,7 @@ static void draw_fx(game_ctx_t *g) {
                          .layoutDirection = CLAY_LEFT_TO_RIGHT,
                          .childGap = 8,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {18.0F, 20.0F, 28.0F, 255.0F},
+              .backgroundColor = {31.0F, 28.0F, 22.0F, 255.0F},
               .cornerRadius = CLAY_CORNER_RADIUS(3.0F)}) {
             qa_image(g, g->fx_gain_popup[1], 24.0F, 24.0F, "miss");
             qa_label(g, "+1 supplies text stays readable");
@@ -218,7 +265,7 @@ static void draw_fx(game_ctx_t *g) {
 
 static void draw_pass6_future_library(game_ctx_t *g) {
     CLAY(QA_SECTION(520.0F, 188.0F)) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "QA-only Pass 6 future library", &s_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Future asset library", &s_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(38)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(30)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { qa_dim(g, "cards"); }
             qa_image(g, g->card_art_oasis_64, 34.0F, 34.0F, "miss");
@@ -249,13 +296,13 @@ static void draw_pass6_future_library(game_ctx_t *g) {
             qa_image(g, g->icon_memory_32, 28.0F, 28.0F, "miss");
             qa_image(g, g->icon_warning_32, 28.0F, 28.0F, "miss");
         }
-        qa_dim(g, "Future asset proof only: not production tile/card unlocks");
+        qa_dim(g, "Future asset proof only: not active tile/card unlocks");
     }
 }
 
 static void equipment_cell(game_ctx_t *g, uint32_t slot, uint32_t item, const char *name) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(86)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(58), CLAY_SIZING_FIXED(58)}}, .backgroundColor = {38.0F, 43.0F, 58.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(5.0F)}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(58), CLAY_SIZING_FIXED(58)}}, .backgroundColor = {54.0F, 36.0F, 24.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(5.0F)}) {
             qa_float_image(g, slot, 58.0F, 58.0F, 0.0F, 0.0F, 0);
             qa_float_image(g, item, 38.0F, 38.0F, 0.0F, 0.0F, 1);
         }
@@ -268,7 +315,7 @@ static void draw_hero_panel(game_ctx_t *g) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Hero panel + equipment", &s_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(112), CLAY_SIZING_FIXED(142)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = {54.0F, 60.0F, 80.0F, 255.0F},
+                  .backgroundColor = {70.0F, 48.0F, 32.0F, 255.0F},
                   .cornerRadius = CLAY_CORNER_RADIUS(6.0F)}) {
                 qa_float_image(g, g->hero_wayfarer_panel, 92.0F, 126.0F, 0.0F, 0.0F, 0);
             }
@@ -295,7 +342,7 @@ static void draw_hero_panel(game_ctx_t *g) {
 
 static void draw_hero_archetype_panels(game_ctx_t *g) {
     CLAY(QA_SECTION(380.0F, 126.0F)) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "QA-only hero archetype panels", &s_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Hero archetype panels", &s_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
             CLAY({.layout = {
                       .sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(82)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
@@ -325,7 +372,7 @@ static void stage_cell(game_ctx_t *g, uint32_t region, const char *name) {
 
 static void draw_aul_progression(game_ctx_t *g) {
     CLAY(QA_SECTION(380.0F, 160.0F)) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "QA-only Pass 5 aul progression", &s_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Aul progression", &s_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4}}) {
             stage_cell(g, g->aul_stage_01_camp, "01");
             stage_cell(g, g->aul_stage_02_settlement, "02");
@@ -334,7 +381,7 @@ static void draw_aul_progression(game_ctx_t *g) {
             stage_cell(g, g->aul_stage_05_steppe_capital, "05");
             stage_cell(g, g->aul_tamga_post_01, "post");
         }
-        qa_dim(g, "Debug proof only: not production upgrade mechanics");
+        qa_dim(g, "Progression proof only: not active upgrade mechanics");
     }
 }
 
@@ -355,15 +402,16 @@ static void draw_surface_swatches(game_ctx_t *g) {
 static void on_update(game_ctx_t *g, float dt) {
     (void)dt;
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6},
-          .backgroundColor = {10.0F, 12.0F, 20.0F, 255.0F}}) {
+          .backgroundColor = {18.0F, 16.0F, 14.0F, 255.0F}}) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(26)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "VISUAL QA HARNESS - runtime renderer, not production gameplay/progression", &s_title);
-            qa_dim(g, "--visual-qa");
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Runtime asset board", &s_title);
+            qa_dim(g, "visual set");
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
                 draw_gameplay_composition(g);
                 draw_active_tiles(g);
+                draw_log_panel(g);
             }
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
                 draw_ui_cards(g);

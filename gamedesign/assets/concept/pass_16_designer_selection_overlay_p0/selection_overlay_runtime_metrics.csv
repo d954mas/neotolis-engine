@@ -1,0 +1,4 @@
+file,width,height,alpha_pixels,center_alpha_pixels,crop_box
+ui_valid_cell_overlay_128.png,128,128,7749,63,(60, 48, 685, 674)
+ui_invalid_cell_overlay_128.png,128,128,6285,15,(773, 50, 1396, 672)
+ui_hover_cell_overlay_128.png,128,128,7512,41,(1485, 50, 2109, 674)

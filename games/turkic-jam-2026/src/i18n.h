@@ -29,6 +29,8 @@ typedef enum {
     T_RETRY,
     T_LOSE,
     T_RESET,
+    T_CHOOSE,
+    T_HEIR_TITLE,
     T_COUNT,
 } i18n_key_t;
 

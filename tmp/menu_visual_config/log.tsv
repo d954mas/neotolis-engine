@@ -1,0 +1,17 @@
+# Журнал событий. Формат предлагает GDD; Code заводит схему/лоадер.
+# tone: info | gain | success | danger | card | circle | death | memory
+# placeholders: {tile} {stat} {diff} {supplies} {wisdom} {glory} {stamina} {circle} {hero}
+#
+# event_id | tone | template
+run_start     | info    | {hero} выходит из аула. Костер остается за спиной.
+resource_gain | gain    | Путь дает роду: Запасы +{supplies}, Мудрость +{wisdom}, Слава +{glory}.
+tile_safe     | gain    | {tile}: путник находит помощь. Силы +{stamina}.
+check_success | success | {tile}: проверка {stat} пройдена. Род получает Славу +{glory}.
+check_fail    | danger  | {tile}: проверка {stat} провалена. Силы {stamina}.
+card_gain     | card    | Песок открывает знак: {tile}.
+card_placed   | card    | Игрок оставляет след в пустыне: {tile}.
+lap_complete  | circle  | Круг {circle} завершен. Аул снова впереди.
+death         | death   | Силы иссякли. Путь окончен, но имя осталось.
+tamga_spawn   | memory  | На песке проступает Последняя Тамга.
+tamga_pickup  | memory  | Путник поднимает Тамгу прошлого. Мудрость +{wisdom}, Слава +{glory}.
+new_heir      | info    | Новый наследник выходит к дороге.

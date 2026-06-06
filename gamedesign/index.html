@@ -1683,6 +1683,46 @@
             </div>
           </section>
 
+          <section class="visual-section design-bible-section">
+            <div class="section-title">
+              <p class="eyebrow">Design Bible / UI materials</p>
+              <h2>Подложки, кнопки и карты делаем как материалы, а не как SVG.</h2>
+              <p>
+                Текущий visual baseline: generated bitmap material, войлок, кожа, пергамент,
+                тонкая плетеная кромка. Правила и источник:
+                <code>gamedesign/docs/66_visual_design_bible.md</code>.
+              </p>
+            </div>
+            <div class="design-bible-grid">
+              <article class="design-bible-card wide">
+                <img src="assets/concept/pass_12_generated_ui_surfaces/pass_12_ui_material_source.png" alt="Generated UI material source sheet" />
+                <h3>Material source</h3>
+                <p>Это главный реф для кнопок, подложек, рамок карт и слотов.</p>
+              </article>
+              <article class="design-bible-card">
+                <img src="assets/concept/pass_12_generated_ui_surfaces/pass_12_generated_ui_surfaces_contact_sheet.png" alt="Generated UI surfaces contact sheet" />
+                <h3>Runtime UI kit</h3>
+                <p>Exact PNG: панели, card surfaces, selected frame, resource chip, equipment slot.</p>
+              </article>
+              <article class="design-bible-card">
+                <img src="../tmp/visual_qa_l5_pass12_ui_surfaces.png" alt="Desktop L5 UI screenshot" />
+                <h3>L5 screenshot</h3>
+                <p>Проверка в реальном runtime scale: HUD, cards, right panel, UI swatches.</p>
+              </article>
+            </div>
+            <div class="design-rule-row">
+              <article><strong>Cards</strong><span>Generated art в центре, пергамент/войлок как подложка.</span></article>
+              <article><strong>Buttons</strong><span>Темный войлок/кожа, pressed state, без web-плашек.</span></article>
+              <article><strong>Slots</strong><span>Слоты как держатели предметов, не как новые loot cards.</span></article>
+              <article><strong>Accent</strong><span>Бирюза/золото только для selected/memory, не для всего экрана.</span></article>
+            </div>
+            <div class="design-protocol">
+              <strong>Art production rule</strong>
+              <span>Сначала generated source sheet + component inventory + reuse map. Потом exact runtime PNG. Не SVG. Не генерировать одинаковые кнопки заново.</span>
+              <code>gamedesign/docs/67_art_generation_and_reuse_protocol.md</code>
+            </div>
+          </section>
+
           <section class="visual-section">
             <div class="section-title">
               <p class="eyebrow">Fake shots</p>

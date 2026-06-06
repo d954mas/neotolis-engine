@@ -5,6 +5,134 @@
 
 ---
 
+## 2026-06-06 - Normal gameplay placement-state proof [STATUS: desktop QA dump produced, pending GDD placement review]
+
+-> ref: `gamedesign/docs/94_pass_15_runtime_ui_reuse_review.md`
+
+Screenshot:
+- Output: `tmp/normal_gameplay_placement_state.png`
+- Runtime scene: `SCENE_GAME`, not `SCENE_VISUAL_QA`
+- Config: `tmp/cyrillic_qa_config` (QA-only one-heir config to bypass heir select; production flow still starts according to normal config)
+- Frame check: 1280x720, nonblank, all_black=0, all_white=0, all_same=0, checksum `0xAADA0C8F`
+
+What the screenshot shows:
+- map is the largest object;
+- one selected `saxaul` card in the bottom hand;
+- valid buildable cells are highlighted on the actual map while the card is held;
+- one hovered/active build slot is visible;
+- invalid road/no-build feedback is visible in the left log (`this card is placed near the road, in a highlighted cell`);
+- current contextual hint is visible in the bottom hand (`click a free slot near the road...`);
+- top HUD chips, left log, right hero/equipment/stats panel remain visible.
+
+Commands/checks:
+- `cmake --build build/_cmake/native-debug --target build_turkic_jam_packs`: PASS / no work to do
+- `cmake --build build/_cmake/native-debug --target turkic_jam`: PASS
+- `clang-format --dry-run --Werror games/turkic-jam-2026/main.c`: PASS
+- Desktop capture command shape:
+  - `build/games/turkic-jam-2026/native-debug/turkic_jam.exe --config C:/projects/neotolis-engine-turkic-jam-2026/tmp/cyrillic_qa_config --devapi 47217 --dump-frame C:/projects/neotolis-engine-turkic-jam-2026/tmp/normal_gameplay_placement_state.png --dump-frame-after 180 --exit-after-frame`
+  - devapi then moved/clicked real runtime input: road cell for invalid feedback, build slot for hover proof.
+
+Changed files for this task:
+- `games/turkic-jam-2026/main.c`: added native-only `--dump-frame-after <frames>` so desktop readback can capture a runtime state after devapi input; no gameplay mechanics changed.
+- `games/turkic-jam-2026/coordination/FROM_CODE.md`: this report.
+
+No raw UI/art files or ids were added. Existing Pass 12 UI family baseline remains unchanged.
+
+Observed UI gap:
+- Invalid feedback is currently log-based, not a dedicated map-local invalid overlay.
+- The selected-card hint is current hand-bar text, not a small contextual tooltip attached to a cell/card.
+- The valid placement overlay is readable in this screenshot, but GDD should decide from the pixels whether a future reusable `selection_overlay_128` family is needed.
+
+Check blockers:
+- `ctest --test-dir build/_cmake/native-debug --output-on-failure`: infrastructure failure; 60/64 tests are registered but their executables are missing under `build/tests/native-debug`.
+- `bash scripts/tidy.sh build/_cmake/native-debug`: infrastructure failure before clang-tidy; WSL default distro is not installed (`WSL_E_DEFAULT_DISTRO_NOT_FOUND`).
+
+## 2026-06-06 - Pass 15 runtime UI reuse proof [STATUS: desktop QA dump produced, pending GDD UI review]
+
+-> ref: `gamedesign/docs/93_pass_15_ui_contact_review.md`
+
+Task result:
+- Produced native desktop runtime proof using current Pass 12 reusable UI families only.
+- No new UI art, raw UI files, UI ids, card surfaces, button surfaces, panel surfaces, slot surfaces, or gameplay mechanics were added.
+- No Code layout changes were made for this proof pass.
+
+Runtime UI families visible in the proof:
+- `ui_panel_felt_dark_96`
+- `ui_panel_felt_light_96`
+- `ui_button_dark_64`
+- `ui_card_playable_96x128`
+- `ui_card_selected_96x128`
+- `ui_card_back_96x128`
+- `ui_slot_equipment_64`
+- `ui_chip_resource_64`
+- `ui_tooltip_dark_64`
+
+Screenshot:
+- Output: `tmp/pass15_ui_reuse_runtime_proof.png`
+- Command: `build/games/turkic-jam-2026/native-debug/turkic_jam.exe --visual-qa --dump-frame C:/projects/neotolis-engine-turkic-jam-2026/tmp/pass15_ui_reuse_runtime_proof.png --exit-after-frame`
+- Frame check: 1280x720, nonblank, all_black=0, all_white=0, all_same=0, checksum `0xC9C645FE`
+- Runtime bind: Batch A 44/44, Batch B 47/47, Batch C aul 6/6, Batch C hero panels 3/3, Pass 6 future 21/21
+
+What the screenshot shows:
+- map remains the main object in the upper-left gameplay composition;
+- top HUD chips use the current chip material and existing icon ids;
+- left log is visible with readable Russian text;
+- bottom/center hand shows selected, playable, and back/empty card states;
+- right hero/equipment/stats panel uses panel + equipment slot/item visuals;
+- UI surface swatches show the reusable panel/card/button/tooltip families in one runtime frame;
+- placement/FX feedback is visible in the same QA runtime renderer.
+
+Checks:
+- `cmake --build build/_cmake/native-debug --target build_turkic_jam_packs`: PASS / no work to do
+- `build/games/turkic-jam-2026/native-debug/build_turkic_jam_packs.exe build/games/turkic-jam-2026`: PASS
+  - Batch A found 44 / missing 0
+  - Batch B found 47 / missing 0
+  - Batch C aul progression found 6 / missing 0
+  - Batch C hero archetype panels found 3 / missing 0
+  - Pass 6 future library found 21 / missing 0
+  - Optional production sprites found 121 / missing 0
+  - Atlas packed 122 sprites, 119 unique, 1 page
+  - CRC32 `0xD9AABDEB`
+- `cmake --build build/_cmake/native-debug --target turkic_jam`: PASS
+
+Observed UI family gaps from runtime evidence:
+- Tooltip material is proven as a reusable surface swatch in visual QA, but there is not yet a production gameplay tooltip interaction proof in this dump.
+- Valid/invalid feedback is visible through QA FX/placement strips, not a full normal-gameplay interaction capture.
+- Empty/back card readability is acceptable for proof framing, pending GDD final readability judgement.
+
+## 2026-06-06 - Pass 14 Beast Trail revision integrated [STATUS: desktop QA dump produced, pending GDD readability review]
+
+-> ref: `gamedesign/docs/90_pass_14_beast_trail_revision_approval.md`
+
+Copied exactly two approved runtime replacements:
+- `gamedesign/assets/concept/pass_14_beast_trail/proposed_runtime/tiles/tile_wolf_track_01.png`
+  -> `games/turkic-jam-2026/raw/tiles/tile_wolf_track_01.png`
+- `gamedesign/assets/concept/pass_14_beast_trail/proposed_runtime/cards/card_art_wolf_track_64.png`
+  -> `games/turkic-jam-2026/raw/cards/card_art_wolf_track_64.png`
+
+No ids, filenames, UI layout, gameplay mechanics, HUD/log/right panel, or other P0 card art were changed.
+
+Checks:
+- `cmake --build build/_cmake/native-debug --target build_turkic_jam_packs`: PASS / no work to do
+- `build/games/turkic-jam-2026/native-debug/build_turkic_jam_packs.exe build/games/turkic-jam-2026`: PASS
+  - Batch A found 44 / missing 0
+  - Batch B found 47 / missing 0
+  - Batch C aul progression found 6 / missing 0
+  - Batch C hero archetype panels found 3 / missing 0
+  - Pass 6 future library found 21 / missing 0
+  - Optional production sprites found 121 / missing 0
+  - Atlas packed 122 sprites, 119 unique, 1 page
+  - CRC32 `0xD9AABDEB`
+- `cmake --build build/_cmake/native-debug --target turkic_jam`: PASS
+- `clang-format --dry-run --Werror games/turkic-jam-2026/src/scenes/scene_visual_qa.c games/turkic-jam-2026/src/view.c`: PASS
+
+Desktop QA dump:
+- Command: `build/games/turkic-jam-2026/native-debug/turkic_jam.exe --visual-qa --dump-frame C:/projects/neotolis-engine-turkic-jam-2026/tmp/pass14_beast_trail_runtime_qa.png --exit-after-frame`
+- Output: `tmp/pass14_beast_trail_runtime_qa.png`
+- Runtime bind: Batch A 44/44, Batch B 47/47, Batch C aul 6/6, Batch C hero panels 3/3, Pass 6 future 21/21
+- Frame check: 1280x720, nonblank, all_black=0, all_white=0, all_same=0, checksum `0xC9C645FE`
+- Visual content: Beast Trail revision is visible in the QA gameplay map context and in the hand card row as `trail`.
+
 ## 2026-06-06 — [ГОТОВО] Карта мира перенесена на sprite renderer  [STATUS: works, verified by screenshot]
 
 → арт/рендер-агенту + GDD

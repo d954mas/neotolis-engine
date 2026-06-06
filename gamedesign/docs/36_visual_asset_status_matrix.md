@@ -139,7 +139,7 @@ These 30 files were delivered as `candidate technical art` in `43_final_repaint_
 | Batch | Scope | Raw | Builder | Runtime | Final art | Current decision |
 | --- | --- | --- | --- | --- | --- | --- |
 | A | map/world/base UI | L1 yes, 44 files | L2 yes, found 44/0 | L3/L4 partial: map, road, aul, tiles, hero wired by Code report | partial: 10 Pass 1 candidates; 5 Pass 2 hero candidates; 30 Pass 3 map/world candidates; not L5 accepted | Push repaint candidates to L5 screenshots |
-| B | cards/equipment/icons/first FX | L1 yes, 47 files | L2 yes, found 47/0 | L3 pass by devapi: 47/47; L4 QA draw groups reachable | Pass 8 card art, Pass 10 equipment and Pass 11 icons are candidate generated bitmap art with QA-only L5 proof; UI/FX still technical candidates | Finish normal gameplay screenshot/readability QA |
+| B | cards/equipment/icons/first FX | L1 yes, 47 files | L2 yes, found 47/0 | L3 pass by devapi: 47/47; L4 QA draw groups reachable | Pass 8 card art, Pass 10 equipment, Pass 11 icons and Pass 12 UI surfaces are candidate generated bitmap art with QA-only L5 proof; FX still technical candidates | Finish normal gameplay screenshot/readability QA |
 | C | future visual library | L1 yes, 60 files | L2 pass: aul progression 6/0, Pass 7 hero panels 3/0, Pass 6 future group 21/0 | partial: aul progression 6/6, Pass 7 hero panels 3/3, Pass 6 future 21/21 by desktop devapi; visual QA harness reaches groups | mixed: Pass 5/6 are candidate technical art; corrected Pass 7 hero panels are candidate generated bitmap art | Prove through desktop screenshot/readability QA |
 
 ## Gameplay screen status
@@ -154,9 +154,9 @@ These 30 files were delivered as `candidate technical art` in `43_final_repaint_
 | Hero on map | wayfarer idle/walk directions | Batch A `hero_wayfarer_*`; Pass 10 generated bitmap repaint delivered for all wayfarer map sprites | QA-only L5 visible; normal post-map-migration gameplay screenshot pending | GDD: review tone/readability; Code only after map migration |
 | Active tile objects | saxaul/yurt/tamga stone/beast trail/oasis/mirage/storm/last tamga | Batch A `tile_*`; Pass 9 generated bitmap repaint delivered for 8 active tile objects | QA-only L5 visible; normal post-map-migration gameplay screenshot pending | GDD: review cutout halos/detail density after map migration |
 | Top HUD | resource/stat/day/circle/speed icons | Batch B and Pass 6 `icon_*`; Pass 11 generated bitmap repaint delivered for all 18 HUD/utility/future icons | QA-only L5 visible; normal gameplay HUD screenshot pending | GDD: review body/glory/tamga readability after map migration |
-| Card hand | card surfaces, art, badge, placement icons | Batch A/B `ui_card_*`, `card_art_*`, `card_badge_*`, `card_placement_*`; Pass 8 generated bitmap card art delivered for 10 card-art files | QA-only L5 visible after card-layout fix; normal gameplay screenshot pending | GDD: review weak cards; Art: repaint mirage/storm/trail if needed |
+| Card hand | card surfaces, art, badge, placement icons | Batch A/B `ui_card_*`, `card_art_*`, `card_badge_*`, `card_placement_*`; Pass 8 generated bitmap card art and Pass 12 generated UI surfaces delivered | QA-only L5 visible after card-layout fix; normal gameplay screenshot pending | GDD: review weak cards and card surface noise; Art: targeted fixes only |
 | Right hero panel | doll, equipment slots/items, stats | Batch A hero panel + Batch B equipment; Pass 10 generated bitmap repaint delivered for panel, items and slots | QA-only L5 visible; normal gameplay/right-panel screenshot pending | GDD: review if first traveler reads too heroic |
-| Combat/chat log | panel/text styling, not heavy art | UI kit | procedural/fallback acceptable | Code: keep readable, no oversized art |
+| Combat/chat log | panel/text styling, not heavy art | UI kit; Pass 12 generated dark/light panel surfaces available | procedural layout acceptable; generated surfaces QA-only L5 visible | Code: keep readable, no oversized art |
 | First FX | dust, tile placed, trigger, gain, invalid | Batch B `fx_*`; Pass 4 candidate technical art | not proven drawn yet | Code: hook selected FX after delivery |
 | FTUE intro | sand/fire/aul reveal | Batch C future FX; Pass 4 candidate technical art | future only | GDD/Code: feature start before registry |
 | Death/memory | Last Tamga FX, near death | Batch C future FX; Pass 4 candidate technical art | future only | Future Code hook |
@@ -216,7 +216,7 @@ No new broad fake-shot pass is needed unless GDD explicitly asks.
 
 The full user goal is not complete yet because:
 
-- Pass 1-6 technical repaint passes still cover many UI/FX/ground/future scopes, while Pass 7/8/9/10/11 have generated bitmap source and QA-only L5 evidence;
+- Pass 1-6 technical repaint passes still cover FX/ground/future scopes, while Pass 7/8/9/10/11/12 have generated bitmap source and QA-only L5 evidence;
 - Batch A/B are not fully proven in normal gameplay after the map migration;
 - Batch B runtime pass is still in progress, especially FX L4 hooks;
 - Batch C is partially runtime-integrated for aul progression, future tile/card/icon library, and hero archetype panels; source-policy acceptance still depends on generated bitmap source or explicit technical exception plus L5;
@@ -233,5 +233,5 @@ The full user goal is not complete yet because:
 Current active repaint contract:
 
 ```text
-63_pass_11_generated_hud_icons_delivery_review.md
+68_pass_13_world_foundation_contract.md
 ```

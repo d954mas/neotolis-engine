@@ -4,6 +4,9 @@
 
 ```text
 28_current_source_of_truth.md
+-> 66_visual_design_bible.md
+-> 67_art_generation_and_reuse_protocol.md
+-> 96_ui_design_bible_component_families.md
 -> 31_visual_production_master_plan.md
 -> 32_asset_production_batch_a.md
 -> 33_asset_production_batch_b.md
@@ -36,6 +39,28 @@
 -> 61_pass_10_generated_wayfarer_equipment_delivery_review.md
 -> 62_pass_11_generated_hud_icons_contract.md
 -> 63_pass_11_generated_hud_icons_delivery_review.md
+-> 64_pass_12_generated_ui_surfaces_contract.md
+-> 65_pass_12_generated_ui_surfaces_delivery_review.md
+-> 68_pass_13_world_foundation_contract.md
+-> 69_pass_13_world_foundation_source_review.md
+-> 70_gameplay_map_zoom_visual_review.md
+-> 71_pass_13_world_foundation_source_review.md
+-> 72_visual_design_bible_enforcement.md
+-> 73_pass_13_slicing_proposal_review.md
+-> 74_runtime_ui_button_cleanup.md
+-> 75_pass_13_slicing_proposal_v2_review.md
+-> 76_pass_13_partial_runtime_integration_review.md
+-> 77_pass_13_road_buffer_v3_review.md
+-> 78_build_slot_overlay_runtime_review.md
+-> 79_visual_source_registry_and_reuse_queue.md
+-> 80_pass_13_road_buffer_v4_review.md
+-> 81_cyrillic_runtime_text_review.md
+-> 82_pass_13_road_buffer_runtime_review.md
+-> 83_normal_gameplay_visual_review_request.md
+-> 84_dense_visual_qa_screenshot_review.md
+-> 85_dense_visual_qa_followup_review.md
+-> 86_pass_14_beast_trail_targeted_art_contract.md
+-> 94_pass_15_runtime_ui_reuse_review.md
 -> 42_visual_completion_board.md
 -> 26_ftue_step_1_narrative.md
 -> 30_narrative_content_baseline.md

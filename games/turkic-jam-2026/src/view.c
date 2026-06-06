@@ -17,6 +17,7 @@
 #include "ui/nt_ui_label.h"
 
 #include "config.h"
+#include "i18n.h"
 #include "journal.h"
 #include "ui_kit.h"
 
@@ -927,9 +928,49 @@ void tj_view_log(game_ctx_t *g, int max_lines) {
 
 static const char *tj_hero_name(const tj_run_t *run) {
     if (run->heir_index >= 0 && run->heir_index < g_config.heir_count) {
-        return g_config.heirs[run->heir_index].name;
+        const tj_heir_def_t *h = &g_config.heirs[run->heir_index];
+        const i18n_lang_t lang = i18n_get();
+        if (strcmp(h->id, "hunter") == 0) {
+            return lang == LANG_TR ? "Avcı" : (lang == LANG_RU ? h->name : "Hunter");
+        }
+        if (strcmp(h->id, "shaman") == 0) {
+            return lang == LANG_TR ? "Kam" : (lang == LANG_RU ? h->name : "Shaman");
+        }
+        if (strcmp(h->id, "storyteller") == 0) {
+            return lang == LANG_TR ? "Anlatıcı" : (lang == LANG_RU ? h->name : "Storyteller");
+        }
+        return h->name;
     }
-    return "Наследник";
+    const i18n_lang_t lang = i18n_get();
+    return lang == LANG_TR ? "Varis" : (lang == LANG_RU ? "Наследник" : "Heir");
+}
+
+static const char *hero_body_label(i18n_lang_t lang) {
+    if (lang == LANG_TR) {
+        return "Beden";
+    }
+    return lang == LANG_RU ? "Тело" : "Body";
+}
+
+static const char *hero_mind_label(i18n_lang_t lang) {
+    if (lang == LANG_TR) {
+        return "Akıl";
+    }
+    return lang == LANG_RU ? "Ум" : "Mind";
+}
+
+static const char *hero_spirit_label(i18n_lang_t lang) {
+    if (lang == LANG_TR) {
+        return "Ruh";
+    }
+    return lang == LANG_RU ? "Дух" : "Spirit";
+}
+
+static const char *hero_stamina_label(i18n_lang_t lang) {
+    if (lang == LANG_TR) {
+        return "Dayanıklılık";
+    }
+    return lang == LANG_RU ? "Силы" : "Stamina";
 }
 
 static void equipment_slot(game_ctx_t *g, uint32_t slot_region, uint32_t item_region) {
@@ -943,16 +984,23 @@ static void equipment_slot(game_ctx_t *g, uint32_t slot_region, uint32_t item_re
 }
 
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
-    static char body[20];
-    static char mind[20];
-    static char spirit[20];
-    static char sta[24];
-    static char cellinfo[40];
-    (void)snprintf(body, sizeof body, "Тело %d", run->body);
-    (void)snprintf(mind, sizeof mind, "Ум %d", run->mind);
-    (void)snprintf(spirit, sizeof spirit, "Дух %d", run->spirit);
-    (void)snprintf(sta, sizeof sta, "Силы %d", run->stamina);
-    (void)snprintf(cellinfo, sizeof cellinfo, "Клетка %d / %d", run->cell + 1, run->path_cells);
+    static char body[32];
+    static char mind[32];
+    static char spirit[32];
+    static char sta[40];
+    static char cellinfo[48];
+    const i18n_lang_t lang = i18n_get();
+    (void)snprintf(body, sizeof body, "%s %d", hero_body_label(lang), run->body);
+    (void)snprintf(mind, sizeof mind, "%s %d", hero_mind_label(lang), run->mind);
+    (void)snprintf(spirit, sizeof spirit, "%s %d", hero_spirit_label(lang), run->spirit);
+    (void)snprintf(sta, sizeof sta, "%s %d", hero_stamina_label(lang), run->stamina);
+    if (lang == LANG_TR) {
+        (void)snprintf(cellinfo, sizeof cellinfo, "Hücre %d / %d", run->cell + 1, run->path_cells);
+    } else if (lang == LANG_RU) {
+        (void)snprintf(cellinfo, sizeof cellinfo, "Клетка %d / %d", run->cell + 1, run->path_cells);
+    } else {
+        (void)snprintf(cellinfo, sizeof cellinfo, "Cell %d / %d", run->cell + 1, run->path_cells);
+    }
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,

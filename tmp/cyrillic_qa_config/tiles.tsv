@@ -1,0 +1,17 @@
+# Тайлы пустыни. Поля разделены '|', пробелы обрезаются, '#' — комментарий.
+# kind:  safe | support | check
+# check: none | body | mind | spirit   (для kind=check — какой стат проверяется)
+# diff = diff_base + diff_per_circle * circle (только для kind=check)
+# Для roadside награды (supplies/wisdom/glory/stamina_restore) выдаются при проходе
+# связанной road-клетки. Для field эти же числа трактуются как базовый эффект зоны:
+# доход за круг, аура или синергия — конкретный runtime-режим уточняется GDD/Code.
+# При провале проверки — доля check_fail_reward_pct и теряется check_fail_stamina_loss Сил.
+#
+# id | name | kind | check | diff_base | diff_per_circle | supplies | wisdom | glory | stamina_cost | stamina_restore | placement
+saxaul      | Саксаул       | safe    | none   | 0 | 0 | 1 | 0 | 0 | 0 | 1 | roadside
+oasis       | Оазис         | safe    | none   | 0 | 0 | 3 | 0 | 0 | 0 | 2 | roadside
+yurt        | Юрта          | support | none   | 0 | 0 | 2 | 0 | 0 | 0 | 0 | field
+tamga_stone | Камень Тамги  | safe    | none   | 0 | 0 | 0 | 2 | 0 | 0 | 0 | field
+wolf_track  | Звериная тропа | check   | body   | 2 | 1 | 0 | 0 | 2 | 0 | 0 | roadside
+mirage      | Мираж         | check   | mind   | 2 | 1 | 0 | 1 | 1 | 0 | 0 | field
+storm       | Песчаная буря | check   | spirit | 3 | 1 | 0 | 0 | 3 | 0 | 0 | field

@@ -8,6 +8,235 @@
 
 ---
 
+## 2026-06-06 17:16 - Normal gameplay placement-state review [STATUS: Code/Art task authorized]
+
+-> ref: `games/turkic-jam-2026/coordination/FROM_CODE.md` entry "Normal gameplay placement-state proof"
+-> reviewed screenshot: `tmp/normal_gameplay_placement_state.png`
+-> supporting docs:
+`gamedesign/docs/94_pass_15_runtime_ui_reuse_review.md`
+`gamedesign/docs/95_selection_overlay_family_contract_draft.md`
+`gamedesign/docs/96_ui_design_bible_component_families.md`
+
+GDD decision:
+
+```text
+NORMAL GAMEPLAY LAYOUT PROOF ACCEPTED
+CURRENT PLACEMENT FEEDBACK NOT FINAL ACCEPTED
+SELECTION_OVERLAY PROPOSAL PASS AUTHORIZED
+NO RAW OVERWRITE YET
+NO NEW BUTTON/CARD/PANEL UI ART
+```
+
+Accepted from the screenshot:
+
+```text
+map is the dominant screen object
+top HUD chips are readable enough for current pass
+left log is useful and not oversized
+right hero/equipment panel reads as hero/status support
+bottom hand reads as selected card + empty card backs
+existing Pass 12 UI families work in real gameplay layout
+```
+
+Rejected / not production-ready yet:
+
+```text
+valid buildable cells still read like technical green fill, not approved production art
+invalid/no-build feedback is only log-based; the map does not show a local invalid state
+selected-card hint copy says "near the road", while the current accepted model is buildable cells beyond the road buffer
+there is no compact cell/card tooltip proof yet; the bottom instruction slab is acceptable for QA but not final UI
+```
+
+Required Code follow-up:
+
+```text
+1. Fix placement copy in runtime text:
+   - use "за кромкой дороги" / "в подсвеченную клетку за дорогой" language
+   - avoid "у дороги" if the target cell is separated by road_buffer
+2. Keep the current layout and Pass 12 UI families.
+3. Prepare runtime to consume one reusable selection_overlay family only after Art/GDD provides approved PNGs.
+4. If no approved overlay exists yet, runtime-only debug overlays are allowed only as temporary QA evidence, not final art.
+```
+
+Authorized Art follow-up:
+
+```text
+Create one selection_overlay proposal family:
+ui_valid_cell_overlay_128.png
+ui_invalid_cell_overlay_128.png
+ui_hover_cell_overlay_128.png
+
+Proposal only:
+source sheet
+contact sheet in current gameplay screenshot context
+reuse map
+exact proposed runtime PNGs
+```
+
+Constraints:
+
+```text
+generated bitmap / painterly raster visible pixels only
+transparent center
+edge/corner dust treatment, not full tile art
+no one-off per-card overlays
+no SVG/vector/procedural-looking final pixels
+no raw overwrite before GDD reviews the proposal
+```
+
+This authorizes `selection_overlay` generation as a proposal pass because the normal gameplay proof showed a concrete readability gap.
+
+## 2026-06-06 19:45 - Pass 13 source review [STATUS: no new Code task]
+
+-> ref: `gamedesign/docs/71_pass_13_world_foundation_source_review.md`
+-> source: `gamedesign/assets/concept/pass_13_generated_world_foundation/pass_13_world_foundation_source.png`
+
+GDD reviewed the generated Pass 13 world foundation source sheet.
+
+Decision:
+
+```text
+source accepted with restrictions
+slicing/contact proposal pending
+runtime raw overwrite not approved yet
+no Code integration task yet
+```
+
+Important for Code:
+
+```text
+Do not change ids/layout for Pass 13.
+Do not consume Pass 13 into raw runtime files until GDD accepts the slicing/contact sheet.
+Future comparison screenshot should use current larger map baseline:
+tmp/map_zoom_game_check_done.png
+```
+
+## 2026-06-06 19:30 - Pass 13 world foundation source contract [STATUS: art-only, no new Code task]
+
+-> ref: `gamedesign/docs/68_pass_13_world_foundation_contract.md`
+
+GDD opened the next generated-bitmap art contract for world foundation:
+
+```text
+ground
+empty decor cells
+road
+road buffer
+starting aul core
+```
+
+Decision:
+
+```text
+source/contact/reuse-map first
+no runtime overwrite yet
+no new Code task while map migration status is unclear
+preserve existing runtime filenames and pack ids
+```
+
+Art must follow:
+
+```text
+66_visual_design_bible.md
+67_art_generation_and_reuse_protocol.md
+```
+
+Hard rule:
+
+```text
+one generated world foundation source sheet -> reusable sliced world assets -> exact existing runtime PNG filenames later
+no SVG-looking art
+no procedural/script-looking candidate-final art
+no isolated repeated generation
+```
+
+Runtime files that may be touched later are the existing `raw/ground`, `raw/decor`, `raw/road` and starting `raw/aul` files listed in doc 68. Code should not change ids/layout for this pass.
+
+## 2026-06-06 19:15 - Visual design bible and art reuse protocol [STATUS: no new Code task]
+
+-> ref: `gamedesign/docs/66_visual_design_bible.md`
+-> ref: `gamedesign/docs/67_art_generation_and_reuse_protocol.md`
+
+GDD fixed the visual production rule after user feedback:
+
+```text
+production-facing art must use generated bitmap / painted-source bitmap
+no SVG/script-looking art as final/candidate-final
+do not generate repeated one-off UI elements
+generate source sheets, then reuse/decompose into exact runtime PNGs
+```
+
+Required Art delivery shape for future passes:
+
+```text
+component inventory
+existing generated sources to reuse
+new generated source needed yes/no
+runtime files touched
+reuse map
+contact sheet
+pack/L5 target
+risks
+```
+
+Code implication:
+
+```text
+Do not add new ids/layout only because Art generated a one-off visual.
+Prefer existing runtime filenames and reusable UI/material families.
+Reject broad art requests that skip component inventory/reuse map.
+```
+
+No Code action is requested from this entry while the map migration remains in progress.
+
+## 2026-06-06 19:05 - Pass 12 generated UI surfaces delivered [STATUS: no new Code task]
+
+-> ref: `gamedesign/docs/64_pass_12_generated_ui_surfaces_contract.md`
+-> ref: `gamedesign/docs/65_pass_12_generated_ui_surfaces_delivery_review.md`
+
+Generated bitmap candidate runtime UI surfaces delivered:
+
+```text
+raw/ui/ui_panel_felt_dark_96.png
+raw/ui/ui_panel_felt_light_96.png
+raw/ui/ui_card_playable_96x128.png
+raw/ui/ui_card_selected_96x128.png
+raw/ui/ui_card_back_96x128.png
+raw/ui/ui_slot_equipment_64.png
+raw/ui/ui_chip_resource_64.png
+raw/ui/ui_tooltip_dark_64.png
+raw/ui/ui_button_dark_64.png
+```
+
+Validation:
+
+```text
+all files exact expected dimensions
+all files RGBA
+all files non-empty alpha
+```
+
+Pack/L5 evidence:
+
+```text
+Optional production sprites found 121 / missing 0
+Atlas 125 sprites
+Generated merged header 132 assets
+CRC32 0x689C6987
+Desktop L5 PNG: tmp/visual_qa_l5_pass12_ui_surfaces.png
+Runtime status: Batch A 44/44, Batch B 47/47, Batch C aul 6/6, Batch C hero panels 3/3, Pass 6 future 21/21
+```
+
+Status:
+
+```text
+candidate generated bitmap runtime UI art
+not final accepted
+pending user/GDD review in normal gameplay UI after map migration
+```
+
+Do not start a new Code task from this entry. Code thread is paused while another agent migrates the map from Clay to sprites.
+
 ## 2026-06-06 18:40 - Pass 11 generated HUD icons delivered [STATUS: no new Code task]
 
 -> ref: `gamedesign/docs/62_pass_11_generated_hud_icons_contract.md`
@@ -3191,3 +3420,25 @@ Acceptance:
 
 ## 2026-06-05 18:40 — <тема>  [STATUS: open]
 <что нужно от кода / что поменял в балансе / вопрос>
+## 2026-06-06 15:40 - Visual bible enforcement for Art/Code  [STATUS: open]
+
+GDD fixed a mandatory visual gate:
+
+```text
+gamedesign/docs/72_visual_design_bible_enforcement.md
+```
+
+Code coordination rule:
+
+```text
+Do not take SVG-looking / script-looking candidate-final art into production.
+Do not accept repeated one-off UI assets as a reason to create new UI ids or layout exceptions.
+Art must provide source sheet, component inventory, reuse map, target-size contact sheet and exact runtime filenames before raw overwrite.
+```
+
+Pass 13 world foundation is still source/proposal only. No `games/turkic-jam-2026/raw/*` overwrite is approved until GDD reviews:
+
+```text
+pass_13_world_foundation_reuse_map.md
+pass_13_world_foundation_slicing_proposal_contact.png
+```
