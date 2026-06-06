@@ -221,19 +221,19 @@ void test_measure_null_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* ---- Test 7: Vertex stride is 68 bytes (TEXT-01) ---- */
+/* ---- Test 7: Vertex stride is 72 bytes (TEXT-01) ---- */
 
-void test_vertex_stride_68(void) {
+void test_vertex_stride_72(void) {
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1, nt_text_renderer_test_glyph_count());
 
-    /* 4 vertices for one glyph, at 68 bytes stride */
+    /* 4 vertices for one glyph, at 72 bytes stride */
     const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
     TEST_ASSERT_NOT_NULL(verts);
 
-    /* Vertex 0 and vertex 1 should be at offsets 0 and 68 */
+    /* Vertex 0 and vertex 1 should be at offsets 0 and 72 */
     /* They represent different quad corners, so position data differs */
-    TEST_ASSERT_FALSE(memcmp(verts, verts + 68, 68) == 0);
+    TEST_ASSERT_FALSE(memcmp(verts, verts + 72, 72) == 0);
 }
 
 /* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
@@ -278,8 +278,8 @@ void test_draw_newline_advances_to_next_line(void) {
     float second_y = 0.0F;
     memcpy(&first_x, verts + 0, sizeof(float));
     memcpy(&first_y, verts + 4, sizeof(float));
-    memcpy(&second_x, verts + ((size_t)4U * 68U), sizeof(float));
-    memcpy(&second_y, verts + ((size_t)4U * 68U) + 4U, sizeof(float));
+    memcpy(&second_x, verts + ((size_t)4U * 72U), sizeof(float));
+    memcpy(&second_y, verts + ((size_t)4U * 72U) + 4U, sizeof(float));
 
     TEST_ASSERT_TRUE(first_x == second_x);
     TEST_ASSERT_TRUE(second_y < first_y);
@@ -297,8 +297,8 @@ void test_draw_n_matches_draw(void) {
 
     /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
      * so we copy out before reset. Stride is 68 bytes per nt_text_vertex_t. */
-    const size_t bytes_to_copy = (size_t)draw_vcount * 68U;
-    uint8_t buf_draw[8U * 68U];
+    const size_t bytes_to_copy = (size_t)draw_vcount * 72U;
+    uint8_t buf_draw[8U * 72U];
     memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
 
     /* Reset staging counters (no pipeline → flush warns + zeros counters). */
@@ -323,7 +323,7 @@ void test_draw_n_letter_spacing_advances_pen(void) {
     TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count());
     const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
     float base_b_x = 0.0F;
-    memcpy(&base_b_x, vraw + ((size_t)4U * 68U), sizeof(float));
+    memcpy(&base_b_x, vraw + ((size_t)4U * 72U), sizeof(float));
 
     nt_text_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
@@ -332,7 +332,7 @@ void test_draw_n_letter_spacing_advances_pen(void) {
     nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white, 7.0F, 0.0F);
     const uint8_t *vspaced = (const uint8_t *)nt_text_renderer_test_vertices();
     float spaced_b_x = 0.0F;
-    memcpy(&spaced_b_x, vspaced + ((size_t)4U * 68U), sizeof(float));
+    memcpy(&spaced_b_x, vspaced + ((size_t)4U * 72U), sizeof(float));
 
     /* UNITY_EXCLUDE_FLOAT in this build: int-truncate to compare. */
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_x + 7.0F), (int32_t)spaced_b_x);
@@ -347,7 +347,7 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
     /* vertex 0 = A's first corner, vertex 4 = B's first corner. y is float[1]. */
     float base_b_y = 0.0F;
-    memcpy(&base_b_y, vraw + ((size_t)4U * 68U) + sizeof(float), sizeof(float));
+    memcpy(&base_b_y, vraw + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
 
     nt_text_renderer_flush();
 
@@ -355,7 +355,7 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     nt_text_renderer_draw_n("A\nB", 3U, s_identity, 32.0F, s_white, 0.0F, 10.0F);
     const uint8_t *vleading = (const uint8_t *)nt_text_renderer_test_vertices();
     float leading_b_y = 0.0F;
-    memcpy(&leading_b_y, vleading + ((size_t)4U * 68U) + sizeof(float), sizeof(float));
+    memcpy(&leading_b_y, vleading + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
 
     /* B drew lower by exactly 10px (pen_y decreases by line_advance, which got +10). */
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_y - 10.0F), (int32_t)leading_b_y);
@@ -369,8 +369,8 @@ void test_draw_n_does_not_over_read(void) {
     const uint32_t ref_vcount = nt_text_renderer_test_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(8U, ref_vcount);
 
-    const size_t bytes_to_copy = (size_t)ref_vcount * 68U;
-    uint8_t buf_ref[8U * 68U];
+    const size_t bytes_to_copy = (size_t)ref_vcount * 72U;
+    uint8_t buf_ref[8U * 72U];
     memcpy(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
 
     nt_text_renderer_flush();
@@ -450,7 +450,7 @@ int main(void) {
     RUN_TEST(test_measure_returns_nonzero);
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
-    RUN_TEST(test_vertex_stride_68);
+    RUN_TEST(test_vertex_stride_72);
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);

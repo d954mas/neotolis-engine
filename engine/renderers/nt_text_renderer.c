@@ -19,8 +19,9 @@ typedef struct {
     float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_offset_x, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     float color[4];        /* 16B: RGBA float */
+    float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 68, "text vertex stride must be 68 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 72, "text vertex stride must be 72 bytes");
 // #endregion
 
 // #region Module state
@@ -86,10 +87,10 @@ static void create_pipeline(void) {
         nt_gfx_destroy_pipeline(s_text.pipeline);
     }
 
-    /* Slug vertex layout: 5 attributes, stride = 68 bytes */
+    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {
-        .attr_count = 5,
-        .stride = 68,
+        .attr_count = 6,
+        .stride = 72,
         .attrs =
             {
                 {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},  /* a_position */
@@ -97,6 +98,7 @@ static void create_pipeline(void) {
                 {.location = 2, .format = NT_FORMAT_FLOAT4, .offset = 20}, /* a_glyph_data */
                 {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 36}, /* a_glyph_bounds */
                 {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 52}, /* a_color */
+                {.location = 5, .format = NT_FORMAT_FLOAT, .offset = 68},  /* a_depth_bias */
             },
     };
 
@@ -241,6 +243,10 @@ void nt_text_renderer_set_font(nt_font_t font) {
 // #region Vertex generation helpers
 static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast */ }
 
+/* Per-glyph depth offset (model-local +Z) so depth-writing glyph quads don't z-fight at their
+ * overlapping AA fringes. 0 = off. Set via nt_text_renderer_set_glyph_depth_bias. */
+static float s_glyph_depth_bias = 0.0F;
+
 static void transform_point(float out[3], const float model[16], float x, float y) {
     /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */
     out[0] = model[0] * x + model[4] * y + model[12];
@@ -248,7 +254,7 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
@@ -294,6 +300,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     v[0].glyph_bounds[2] = (float)g->bbox_x1;
     v[0].glyph_bounds[3] = (float)g->bbox_y1;
     memcpy(v[0].color, color, 16);
+    v[0].depth_bias = glyph_bias;
     v[1] = v[0];
     v[2] = v[0];
     v[3] = v[0];
@@ -351,6 +358,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     uint32_t prev_cp = 0;
     float pen_x = 0.0F;
     float pen_y = 0.0F;
+    float glyph_bias = 0.0F; /* accumulates per emitted glyph (clip-space depth bias) */
     /* Natural line advance from font metrics, plus user-supplied leading. */
     const float natural_line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
     const float line_advance = natural_line_advance + line_leading;
@@ -397,7 +405,8 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x, pen_y, color, band_count);
+            emit_quad(g, model, scale, pen_x, pen_y, color, band_count, glyph_bias);
+            glyph_bias += s_glyph_depth_bias;
         }
 
         pen_x += (float)g->advance * scale;
@@ -405,6 +414,8 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         had_glyph_on_line = true;
     }
 }
+
+void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) { s_glyph_depth_bias = bias_per_glyph; }
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);

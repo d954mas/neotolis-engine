@@ -129,6 +129,7 @@ static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
+static nt_material_t s_text_material_3d; /* world-space text that writes + tests depth */
 static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
@@ -724,16 +725,18 @@ static void frame(void) {
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
 
-        /* World-space text centered on the shape; depth_test hides it behind the shape. No depth_write:
-         * coplanar glyph quads (0.5px AA dilation + kerning overlap) would self-z-fight. */
+        /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
+         * quads from z-fighting at their AA fringes (set before the draw, reset after). */
         if (s_font_bound) {
+            const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
+            nt_text_renderer_set_material(s_text_material_3d);
+            nt_text_renderer_set_font(s_font);
+            nt_text_renderer_set_glyph_depth_bias(0.0001F);
             mat4 text_model;
             glm_mat4_identity(text_model);
-            glm_translate(text_model, (vec3){-2.5F, 4.9F, 0.0F});
-            const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
-            nt_text_renderer_set_material(s_text_material);
-            nt_text_renderer_set_font(s_font);
-            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)text_model, 0.6F, yellow, 0.0F, 0.0F);
+            glm_translate(text_model, (vec3){-7.0F, 4.0F, 0.0F});
+            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)text_model, 0.8F, yellow, 0.0F, 0.0F);
+            nt_text_renderer_set_glyph_depth_bias(0.0F);
             nt_text_renderer_flush();
         }
     }
@@ -858,6 +861,17 @@ int main(int argc, char *argv[]) {
         .param_count = 1,
         .label = "ui_3d_demo_text",
     });
+    s_text_material_3d = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_text_vs_handle,
+        .fs = s_text_fs_handle,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = true,
+        .depth_write = true,
+        .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
+        .label = "ui_3d_demo_text_3d",
+    });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ctx, s_text_material);
@@ -892,6 +906,7 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_material_destroy(s_text_material_3d);
     nt_material_shutdown();
     nt_stats_shutdown();
     nt_mem_scratch_shutdown();

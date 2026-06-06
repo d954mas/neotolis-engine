@@ -43,6 +43,10 @@ void nt_text_renderer_set_font(nt_font_t font);
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 
+/* Per-glyph model-local +Z step. With depth_write, coplanar glyph quads z-fight at overlapping AA
+ * fringes; a small step separates them by draw order. 0 (default) = off. Persists until changed. */
+void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
+
 void nt_text_renderer_flush(void);
 
 // #region test_access
