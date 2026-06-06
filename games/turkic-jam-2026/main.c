@@ -73,6 +73,7 @@ static bool s_atlas_bound;
 static bool s_font_bound;
 #ifndef NT_PLATFORM_WEB
 static const char *s_dump_frame_path;
+static uint32_t s_dump_frame_after;
 static bool s_exit_after_frame;
 static bool s_dump_frame_done;
 #endif
@@ -110,13 +111,7 @@ static void bind_optional_world_regions(void);
 static void bind_atlas(void) {
     g.atlas = s_atlas_handle;
     g.white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS__WHITE.value);
-    g.btn_blue = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUTTON_BLUE.value);
-    g.btn_green = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUTTON_GREEN.value);
-    g.btn_red = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUTTON_RED.value);
     NT_ASSERT(g.white_region != NT_ATLAS_INVALID_REGION);
-    NT_ASSERT(g.btn_blue != NT_ATLAS_INVALID_REGION);
-    NT_ASSERT(g.btn_green != NT_ATLAS_INVALID_REGION);
-    NT_ASSERT(g.btn_red != NT_ATLAS_INVALID_REGION);
     bind_optional_world_regions();
     nt_ui_set_atlas_white_region(g.ui, s_atlas_handle, g.white_region);
     s_atlas_bound = true;
@@ -199,6 +194,9 @@ static uint32_t find_atlas_region(const char *name) {
     TJ_FIND_REGION("ui_tooltip_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_TOOLTIP_DARK_64);
     TJ_FIND_REGION("ui_card_back_96x128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_BACK_96X128);
     TJ_FIND_REGION("ui_button_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_BUTTON_DARK_64);
+    TJ_FIND_REGION("ui_valid_cell_overlay_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_VALID_CELL_OVERLAY_128);
+    TJ_FIND_REGION("ui_invalid_cell_overlay_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_INVALID_CELL_OVERLAY_128);
+    TJ_FIND_REGION("ui_hover_cell_overlay_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_HOVER_CELL_OVERLAY_128);
     TJ_FIND_REGION("card_badge_count_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_BADGE_COUNT_32);
     TJ_FIND_REGION("card_placement_roadside_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_PLACEMENT_ROADSIDE_32);
     TJ_FIND_REGION("card_placement_field_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_PLACEMENT_FIELD_32);
@@ -325,6 +323,9 @@ static int ep_visual_qa_status(int c, char **v, char *o, int cap, void *u) {
     const uint32_t batch_b_regions[] = {
         g.ui_card_back_96x128,
         g.ui_button_dark_64,
+        g.ui_valid_cell_overlay_128,
+        g.ui_invalid_cell_overlay_128,
+        g.ui_hover_cell_overlay_128,
         g.card_badge_count_32,
         g.card_placement_roadside_32,
         g.card_placement_field_32,
@@ -462,6 +463,9 @@ static void bind_optional_world_regions(void) {
     g.ui_tooltip_dark_64 = find_atlas_region("ui_tooltip_dark_64");
     g.ui_card_back_96x128 = find_atlas_region("ui_card_back_96x128");
     g.ui_button_dark_64 = find_atlas_region("ui_button_dark_64");
+    g.ui_valid_cell_overlay_128 = find_atlas_region("ui_valid_cell_overlay_128");
+    g.ui_invalid_cell_overlay_128 = find_atlas_region("ui_invalid_cell_overlay_128");
+    g.ui_hover_cell_overlay_128 = find_atlas_region("ui_hover_cell_overlay_128");
     g.card_badge_count_32 = find_atlas_region("card_badge_count_32");
     g.card_placement_roadside_32 = find_atlas_region("card_placement_roadside_32");
     g.card_placement_field_32 = find_atlas_region("card_placement_field_32");
@@ -570,6 +574,9 @@ static void bind_optional_world_regions(void) {
     const uint32_t batch_b_regions[] = {
         g.ui_card_back_96x128,
         g.ui_button_dark_64,
+        g.ui_valid_cell_overlay_128,
+        g.ui_invalid_cell_overlay_128,
+        g.ui_hover_cell_overlay_128,
         g.card_badge_count_32,
         g.card_placement_roadside_32,
         g.card_placement_field_32,
@@ -881,10 +888,14 @@ static void frame(void) {
     nt_gfx_end_frame();
 #ifndef NT_PLATFORM_WEB
     if (can_render && s_dump_frame_path != NULL && !s_dump_frame_done) {
-        s_dump_frame_done = true;
-        (void)dump_frame_png(s_dump_frame_path, g_nt_window.fb_width, g_nt_window.fb_height);
-        if (s_exit_after_frame) {
-            nt_app_quit();
+        if (s_dump_frame_after > 0U) {
+            s_dump_frame_after--;
+        } else {
+            s_dump_frame_done = true;
+            (void)dump_frame_png(s_dump_frame_path, g_nt_window.fb_width, g_nt_window.fb_height);
+            if (s_exit_after_frame) {
+                nt_app_quit();
+            }
         }
     } else if (can_render && s_exit_after_frame && s_dump_frame_path == NULL) {
         nt_app_quit();
@@ -909,6 +920,9 @@ int main(int argc, char *argv[]) {
 #ifndef NT_PLATFORM_WEB
         } else if (strcmp(argv[i], "--dump-frame") == 0 && i + 1 < argc) {
             s_dump_frame_path = argv[i + 1];
+        } else if (strcmp(argv[i], "--dump-frame-after") == 0 && i + 1 < argc) {
+            const long frames = strtol(argv[i + 1], NULL, 10);
+            s_dump_frame_after = frames > 0 ? (uint32_t)frames : 0U;
         } else if (strcmp(argv[i], "--exit-after-frame") == 0) {
             s_exit_after_frame = true;
 #endif

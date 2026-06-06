@@ -26,9 +26,6 @@
 /* Reuse the ui_theme_demo font (same precedent as ui_buttons_demo). */
 #define FONT_PATH "examples/ui_theme_demo/raw/font.ttf"
 
-/* Kenney button slice9 corner (px). */
-#define BUTTON_BORDER 16
-
 /* ASCII + Cyrillic + Turkish letters used by i18n (EN/RU/TR). Roboto covers all. */
 #define TJ_CHARSET                                                                                                                                                                                     \
     NT_CHARSET_ASCII                                                                                                                                                                                   \
@@ -274,20 +271,6 @@ int main(int argc, char *argv[]) {
     nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
 
-    /* Kenney CC0 buttons (384x128, 16px corners), reused as slice9 bg art. */
-    nt_atlas_sprite_opts_t btn_opts = nt_atlas_sprite_opts_defaults();
-    btn_opts.slice9_left = BUTTON_BORDER;
-    btn_opts.slice9_right = BUTTON_BORDER;
-    btn_opts.slice9_top = BUTTON_BORDER;
-    btn_opts.slice9_bottom = BUTTON_BORDER;
-    btn_opts.name = "button_blue";
-    nt_builder_atlas_add(ctx, "games/turkic-jam-2026/raw/ui/button_blue_depth.png", &btn_opts);
-    btn_opts.name = "button_green";
-    nt_builder_atlas_add(ctx, "games/turkic-jam-2026/raw/ui/button_green_depth.png", &btn_opts);
-    btn_opts.name = "button_red";
-    nt_builder_atlas_add(ctx, "games/turkic-jam-2026/raw/ui/button_red_depth.png", &btn_opts);
-    (void)printf("  Atlas: 3 Kenney buttons (s9:%d)\n", BUTTON_BORDER);
-
     const tj_atlas_asset_t world_assets[] = {
         {"ground", "games/turkic-jam-2026/raw/ground/ground_sand_base_01.png", "ground_sand_base_01", 0.5F, 0.5F},
         {"decor", "games/turkic-jam-2026/raw/decor/decor_dune_01.png", "decor_dune_01", 0.5F, 0.5F},
@@ -337,6 +320,9 @@ int main(int argc, char *argv[]) {
     const tj_atlas_asset_t ui_assets[] = {
         {"ui", "games/turkic-jam-2026/raw/ui/ui_card_back_96x128.png", "ui_card_back_96x128", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_button_dark_64.png", "ui_button_dark_64", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/ui_valid_cell_overlay_128.png", "ui_valid_cell_overlay_128", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/ui_invalid_cell_overlay_128.png", "ui_invalid_cell_overlay_128", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/ui_hover_cell_overlay_128.png", "ui_hover_cell_overlay_128", 0.5F, 0.5F},
         {"cards", "games/turkic-jam-2026/raw/cards/card_badge_count_32.png", "card_badge_count_32", 0.5F, 0.5F},
         {"cards", "games/turkic-jam-2026/raw/cards/card_placement_roadside_32.png", "card_placement_roadside_32", 0.5F, 0.5F},
         {"cards", "games/turkic-jam-2026/raw/cards/card_placement_field_32.png", "card_placement_field_32", 0.5F, 0.5F},

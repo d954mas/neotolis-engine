@@ -30,9 +30,6 @@ typedef struct game_ctx {
     nt_resource_t atlas;
     nt_material_t sprite_material; /* shared with the UI; used to draw the map world directly. */
     uint32_t white_region;
-    uint32_t btn_blue;
-    uint32_t btn_green;
-    uint32_t btn_red;
     uint32_t ground_sand_base;
     uint32_t decor_dune;
     uint32_t decor_stones;
@@ -97,6 +94,9 @@ typedef struct game_ctx {
     uint32_t ui_tooltip_dark_64;
     uint32_t ui_card_back_96x128;
     uint32_t ui_button_dark_64;
+    uint32_t ui_valid_cell_overlay_128;
+    uint32_t ui_invalid_cell_overlay_128;
+    uint32_t ui_hover_cell_overlay_128;
     uint32_t card_badge_count_32;
     uint32_t card_placement_roadside_32;
     uint32_t card_placement_field_32;

@@ -36,9 +36,6 @@
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_EDGE_STONES_01 ((nt_hash64_t){0xE294468F73A4BEDCULL}) /* turkic_jam_atlas/buffer_edge_stones_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_PACKED_SAND_01 ((nt_hash64_t){0xC212DC36582F7B35ULL}) /* turkic_jam_atlas/buffer_packed_sand_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUFFER_STAKES_01 ((nt_hash64_t){0x3811A78BAFA5B648ULL}) /* turkic_jam_atlas/buffer_stakes_01 */
-#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUTTON_BLUE ((nt_hash64_t){0x04DD51E0B9359D84ULL}) /* turkic_jam_atlas/button_blue */
-#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUTTON_GREEN ((nt_hash64_t){0x7ABDDB88258FF8EEULL}) /* turkic_jam_atlas/button_green */
-#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BUTTON_RED ((nt_hash64_t){0x72F1164809108B78ULL}) /* turkic_jam_atlas/button_red */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_LAST_TAMGA_64 ((nt_hash64_t){0xD552D2DC6B5C3859ULL}) /* turkic_jam_atlas/card_art_last_tamga_64 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_MIRAGE_64 ((nt_hash64_t){0x102205D264C43C37ULL}) /* turkic_jam_atlas/card_art_mirage_64 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_CARD_ART_OASIS_64 ((nt_hash64_t){0x7892758EBF3ABC20ULL}) /* turkic_jam_atlas/card_art_oasis_64 */
@@ -142,10 +139,13 @@
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_PLAYABLE_96X128 ((nt_hash64_t){0x16B71A47FDE068E2ULL}) /* turkic_jam_atlas/ui_card_playable_96x128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_SELECTED_96X128 ((nt_hash64_t){0xA365300739BA8C6EULL}) /* turkic_jam_atlas/ui_card_selected_96x128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CHIP_RESOURCE_64 ((nt_hash64_t){0xFE1CEB29A2C83620ULL}) /* turkic_jam_atlas/ui_chip_resource_64 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_HOVER_CELL_OVERLAY_128 ((nt_hash64_t){0xF789BA5603A285B0ULL}) /* turkic_jam_atlas/ui_hover_cell_overlay_128 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_INVALID_CELL_OVERLAY_128 ((nt_hash64_t){0xC5746976CE685039ULL}) /* turkic_jam_atlas/ui_invalid_cell_overlay_128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_PANEL_FELT_DARK_96 ((nt_hash64_t){0x7D0822339B0CE9EAULL}) /* turkic_jam_atlas/ui_panel_felt_dark_96 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_PANEL_FELT_LIGHT_96 ((nt_hash64_t){0xA039547B7507473DULL}) /* turkic_jam_atlas/ui_panel_felt_light_96 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_SLOT_EQUIPMENT_64 ((nt_hash64_t){0x0C51B0A0AAB2298BULL}) /* turkic_jam_atlas/ui_slot_equipment_64 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_TOOLTIP_DARK_64 ((nt_hash64_t){0x2C13CCB1F97F308FULL}) /* turkic_jam_atlas/ui_tooltip_dark_64 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_VALID_CELL_OVERLAY_128 ((nt_hash64_t){0x7B35205EB33AD4E1ULL}) /* turkic_jam_atlas/ui_valid_cell_overlay_128 */
 
 #if NT_HASH_LABELS
 static inline void turkic_jam_assets_register_labels(void) {
@@ -170,9 +170,6 @@ static inline void turkic_jam_assets_register_labels(void) {
     (void)nt_hash64_str("turkic_jam_atlas/buffer_edge_stones_01");
     (void)nt_hash64_str("turkic_jam_atlas/buffer_packed_sand_01");
     (void)nt_hash64_str("turkic_jam_atlas/buffer_stakes_01");
-    (void)nt_hash64_str("turkic_jam_atlas/button_blue");
-    (void)nt_hash64_str("turkic_jam_atlas/button_green");
-    (void)nt_hash64_str("turkic_jam_atlas/button_red");
     (void)nt_hash64_str("turkic_jam_atlas/card_art_last_tamga_64");
     (void)nt_hash64_str("turkic_jam_atlas/card_art_mirage_64");
     (void)nt_hash64_str("turkic_jam_atlas/card_art_oasis_64");
@@ -277,10 +274,13 @@ static inline void turkic_jam_assets_register_labels(void) {
     (void)nt_hash64_str("turkic_jam_atlas/ui_card_playable_96x128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_card_selected_96x128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_chip_resource_64");
+    (void)nt_hash64_str("turkic_jam_atlas/ui_hover_cell_overlay_128");
+    (void)nt_hash64_str("turkic_jam_atlas/ui_invalid_cell_overlay_128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_panel_felt_dark_96");
     (void)nt_hash64_str("turkic_jam_atlas/ui_panel_felt_light_96");
     (void)nt_hash64_str("turkic_jam_atlas/ui_slot_equipment_64");
     (void)nt_hash64_str("turkic_jam_atlas/ui_tooltip_dark_64");
+    (void)nt_hash64_str("turkic_jam_atlas/ui_valid_cell_overlay_128");
 }
 #endif
 
