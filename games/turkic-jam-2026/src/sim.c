@@ -1045,7 +1045,8 @@ static void event_finish(tj_run_t *r) {
 static void event_tick(tj_run_t *r, float dt) {
     r->event_t += dt;
     const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 1.5F;
-    if (r->event_t >= dur) {
+    const float hold = 2.5F; /* keep success/fail readable after the wheel lands (view clamps reveal f to 1) */
+    if (r->event_t >= dur + hold) {
         event_finish(r);
     }
 }

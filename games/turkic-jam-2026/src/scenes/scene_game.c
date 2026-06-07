@@ -204,7 +204,8 @@ static void ftue_begin(void) {
     s_intro_black = true;                                   /* open on a black screen; the first tap unlocks web audio + starts the reveal */
     s_run.phase = TJ_PHASE_AUL_READY;                       /* hero waits at the fire until the player sends him */
     s_run.forced_pull_tile = tj_config_tile_index("war_1"); /* always Точило -> 3-in-a-row merges cleanly */
-    s_run.pouch += 4;                                       /* headroom so a misplace can be retried */
+    /* No pouch pre-fill: the first pouch must be EARNED in the first fight so step 1 (pouch>0) shows
+       the combat. Retry headroom is added later, in ftue_seed_merge (the place+merge lesson). */
 }
 
 static void ftue_finish(void) {
@@ -234,14 +235,14 @@ static void on_enter(game_ctx_t *g) {
     if (g->prev == &SCENE_PAUSE) {
         return; /* resume: keep the run in progress */
     }
-    tj_run_start(&s_run, g->chosen_heir); /* one champion of the clan */
+    tj_run_start(&s_run, g->chosen_heir); /* one clan batyr */
     s_banked = false;
     ftue_begin(); /* first-run tutorial (no-op once "ftue_done" is saved) */
 }
 
 static void on_exit(game_ctx_t *g) { g->run = NULL; }
 
-/* Start the next run in place (no gameover scene): re-roll the champion, clear flags. */
+/* Start the next run in place (no gameover scene): re-roll the batyr, clear flags. */
 static void start_new_run(game_ctx_t *g) {
     g->score = 0;
     s_banked = false;
@@ -358,6 +359,7 @@ static void ftue_seed_merge(void) {
     s_run.field_tile[(by * cols) + bx] = war;
     s_run.field_tile[(by * cols) + bx + 1] = war;
     tj_view_set_ftue_gap(bx + 2, by); /* the cell the player fills to complete the trio */
+    s_run.pouch += 3;                 /* retry headroom: a misplaced drag can be recovered (forced_pull_tile = war_1) */
 }
 
 static void ftue_step_tick(float dt) {
