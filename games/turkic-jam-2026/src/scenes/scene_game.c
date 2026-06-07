@@ -402,7 +402,7 @@ static void on_update(game_ctx_t *g, float dt) {
             }
         }
         if (!in_intro) {
-            tj_view_card_hand(g, &s_run, s_drag_card);
+            tj_view_card_hand(g, &s_run, s_drag_card, s_ftue_active);
             if (tj_view_help_button(g)) {
                 s_help_open = !s_help_open; /* "?" toggles the how-to modal */
             }
@@ -418,7 +418,9 @@ static void on_update(game_ctx_t *g, float dt) {
                 ftue_finish(); /* "Играть" on the last card, or "Пропустить" */
             }
         }
-        tj_view_action_overlay(g, &s_run); /* combat / dice window, above the map */
+        if (s_run.alive && !s_run.won) {
+            tj_view_action_overlay(g, &s_run); /* combat / dice window — not over the run-over screen */
+        }
         if (s_drag_card >= 0) {
             tj_view_drag_overlay(g, &s_run, s_drag_card); /* dragged card + targeting arrow */
         }

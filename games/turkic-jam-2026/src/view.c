@@ -1251,7 +1251,7 @@ void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx) {
 
 /* Bottom hand: pouch button + a fan of held cards (drag one onto a field cell).
  * `drag_idx` is the card currently being dragged (drawn under the cursor instead). */
-void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
+void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial) {
     static char pouchlbl[40];
     (void)snprintf(pouchlbl, sizeof pouchlbl, "%s (%d)", pick_lang("Pouch", "Мешочек", "Torba"), run->pouch);
     const int hover = (drag_idx >= 0) ? -1 : tj_view_hand_index_at(g, run, g->ptr_x, g->ptr_y);
@@ -1264,15 +1264,17 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
         if (tj_button(g, "pull_pouch", pouchlbl, 190, 96, TJ_BTN_PRIMARY)) {
             tj_run_pull_pouch(run); /* draw one card from the pouch into the fan */
         }
-        const char *hint;
-        if (run->hand_count > 0) {
-            hint = pick_lang("drag a card onto a green cell; line up 3 alike to merge", "тяни карту на зелёную клетку · собери 3 одинаковых рядом → апгрейд", "karti yesil hucreye surukle");
-        } else if (run->pouch > 0) {
-            hint = pick_lang("tap the Pouch to draw a card", "жми «Мешочек» — вытяни карту", "kart cek");
-        } else {
-            hint = pick_lang("win fights and finish laps to fill the pouch", "побеждай и проходи круги — мешочек копится", "savaslari kazan");
+        if (!tutorial) { /* during FTUE the staged panel already gives the instruction */
+            const char *hint;
+            if (run->hand_count > 0) {
+                hint = pick_lang("drag a card onto a green cell; line up 3 alike to merge", "тяни карту на зелёную клетку · собери 3 одинаковых рядом → апгрейд", "karti yesil hucreye surukle");
+            } else if (run->pouch > 0) {
+                hint = pick_lang("tap the Pouch to draw a card", "жми «Мешочек» — вытяни карту", "kart cek");
+            } else {
+                hint = pick_lang("win fights and finish laps to fill the pouch", "побеждай и проходи круги — мешочек копится", "savaslari kazan");
+            }
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hint, &s_dim);
         }
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hint, &s_dim);
     }
     static nt_ui_transform_t s_fan_xf[TJ_MAX_HAND];
     float fx0;
@@ -1511,7 +1513,7 @@ bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
             .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID,
                          .parentId = CLAY_ID("intro_send_box").id,
                          .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
-                         .offset = {6.0F, bob},
+                         .offset = {-16.0F, bob},
                          .zIndex = 86,
                          .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
         };
