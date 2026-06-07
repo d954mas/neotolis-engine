@@ -29,6 +29,7 @@
 static tj_run_t s_run;
 static bool s_banked = false;      /* death banked into the aul once per run */
 static int s_drag_card = -1;       /* hand card being dragged onto the field (-1 = none) */
+static int s_prev_merges = 0;      /* edge-detect new merges this frame -> screen-shake punch */
 static bool s_help_open = false;   /* "?" how-to modal toggled open */
 static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
 static int s_ftue_step = 0;        /* 0 intro (reveal->send->walkout), 1 pull, 2 place, 3 merge, 4 done */
@@ -367,6 +368,7 @@ static void draw_intro_overlays(game_ctx_t *g) {
 
 static void on_update(game_ctx_t *g, float dt) {
     const bool paused = g->settings_open; /* settings modal freezes the run */
+    g->anim_t += dt;                      /* free-running clock for glows/pulses (runs even while paused) */
     if (!paused && nt_input_key_is_pressed(NT_KEY_P)) {
         game_goto(g, &SCENE_PAUSE);
     }
@@ -389,6 +391,14 @@ static void on_update(game_ctx_t *g, float dt) {
     if (!paused) {
         ftue_step_tick(dt);
     }
+    /* Merge punch: shake scales with how many fuses landed this frame (cascades hit harder). */
+    if (s_run.merges_done != s_prev_merges) {
+        if (s_run.merges_done > s_prev_merges) {
+            const float amt = 0.26F * (float)(s_run.merges_done - s_prev_merges);
+            tj_shake_add(&g->shake, (amt > 0.7F) ? 0.7F : amt);
+        }
+        s_prev_merges = s_run.merges_done; /* also resets on a fresh run (merges_done back to 0) */
+    }
 
     /* Hand the intro state to the sprite world pass (it draws the black screen + sand +
      * dawn veil; Clay carries only the UI). */
@@ -396,6 +406,7 @@ static void on_update(game_ctx_t *g, float dt) {
     g->intro_black = in_intro && s_intro_black;
     g->intro_t = s_intro_t;
     g->intro_anim_t = s_ftue_t;
+    g->drag_tile = (s_drag_card >= 0 && s_drag_card < s_run.hand_count) ? s_run.hand_cards[s_drag_card] : -1; /* held card -> merge telegraph */
 
     /* Full-screen frame: top HUD, then [log | map | hero], then card hand. During the
      * first-run intro everything but the world + launch panel is hidden (progressive
@@ -444,8 +455,12 @@ static void on_update(game_ctx_t *g, float dt) {
         if (s_run.alive && !s_run.won) {
             tj_view_action_overlay(g, &s_run); /* combat / dice window — not over the run-over screen */
         }
+        if (!in_intro && s_run.alive && !s_run.won) {
+            tj_view_field_badges(g, &s_run);  /* level numbers + max crowns over the field */
+            tj_view_field_tooltip(g, &s_run); /* hover a building -> name + level + effect */
+        }
         if (s_drag_card >= 0) {
-            tj_view_drag_overlay(g, &s_run, s_drag_card); /* dragged card + targeting arrow */
+            tj_view_drag_overlay(g, &s_run, s_drag_card); /* dragged card + targeting arrow + merge "+N" */
         }
         if (!s_run.alive || s_run.won) {
             tj_view_death_overlay(g, &s_run); /* run-over veil + text (passthrough, above map) */

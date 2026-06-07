@@ -165,6 +165,8 @@ typedef struct game_ctx {
     int chosen_heir;    /* archetype picked on the heir-select screen */
     const void *run;    /* &tj_run_t while in SCENE_GAME (else NULL); for the world sprite pass */
     float ptr_x, ptr_y; /* pointer in logical coords (set each frame); for map click->cell + hover */
+    int drag_tile;      /* tile index of the card being dragged onto the field (-1 none); drives the merge telegraph */
+    float anim_t;       /* free-running UI clock (s); drives pulses/glows independent of the run */
     /* First-run intro, set by scene_game each frame so the sprite world pass can draw the
      * black screen + drifting sand + dawn-reveal veil (Clay = UI only; scene/fx = sprites). */
     bool intro_active;  /* the first-run intro is showing */

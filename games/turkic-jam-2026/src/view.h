@@ -22,7 +22,9 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run);                     
 void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run);                          /* fullscreen run-over veil + verdict */
 void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial);       /* bottom: pouch + fan of cards (drag_idx drawn at cursor); tutorial hides the stock hint */
 int tj_view_hand_index_at(const game_ctx_t *g, const tj_run_t *run, float lx, float ly); /* hand card under a logical point, or -1 */
-void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx);             /* dragged card + dotted targeting arrow */
+void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx);             /* dragged card + dotted targeting arrow + merge "+N" badge */
+void tj_view_field_badges(game_ctx_t *g, const tj_run_t *run);                           /* per-building level numbers + max-tier crowns (Clay, over the map) */
+void tj_view_field_tooltip(game_ctx_t *g, const tj_run_t *run);                          /* hover tooltip: building name + level + effect (when not dragging) */
 bool tj_view_help_button(game_ctx_t *g);                                                 /* "?" button top-right; true on click */
 bool tj_view_help_modal(game_ctx_t *g);                                                  /* how-to modal; true when closed */
 int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t);         /* first-run tutorial; 1=advance 2=skip 0=none */

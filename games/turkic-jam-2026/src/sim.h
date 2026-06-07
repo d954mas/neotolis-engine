@@ -127,6 +127,11 @@ bool tj_run_place_card(tj_run_t *r, int hand_idx, int gx, int gy);
 bool tj_run_pickup_field(tj_run_t *r, int gx, int gy);
 /* Pull one card from the pouch into an empty hand (drop-floor tier by circle). */
 void tj_run_pull_pouch(tj_run_t *r);
+/* Drag telegraph (non-mutating): size of the same-line+tier group that would form if
+ * `tile` were placed at (gx,gy), counting the placed tile. Fills group[] (cell indices,
+ * up to group_cap) and sets *out_result to the tier+1 tile when it would fuse (>=3 and a
+ * higher tier exists), else -1. Returns 0 if not buildable / non-merge tile. */
+int tj_run_merge_preview(const tj_run_t *r, int tile, int gx, int gy, int *group, int group_cap, int *out_result);
 /* Chebyshev distance from (gx,gy) to the aul rect (0 = on/inside the aul). Defines
  * the concentric bands: 1..road_band = road band (no build), beyond = field. */
 int tj_run_dist_to_aul(const tj_run_t *r, int gx, int gy);
