@@ -910,9 +910,9 @@ static void start_combat(tj_run_t *r, int tile, tj_cell_role_t role) {
     if (archlbl[0] != '\0') {
         (void)snprintf(r->combat_label, sizeof r->combat_label, "%s-%s", rolelbl, archlbl);
     } else {
-        (void)snprintf(r->combat_label, sizeof r->combat_label, "%s: %s", rolelbl, t->name);
+        (void)snprintf(r->combat_label, sizeof r->combat_label, "%s: %s", rolelbl, tj_tile_disp(t));
     }
-    tj_journal_push((role == TJ_CELL_BOSS) ? TJ_LOG_BIG : TJ_LOG_BAD, "%s (%s)", r->combat_label, t->name);
+    tj_journal_push((role == TJ_CELL_BOSS) ? TJ_LOG_BIG : TJ_LOG_BAD, "%s (%s)", r->combat_label, tj_tile_disp(t));
 }
 
 /* Enemy down: pause on a victory celebration. Loot is snapshot for the readout now but
