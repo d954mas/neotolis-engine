@@ -120,16 +120,30 @@ void tj_audio_assets_init(void) {
     s_entries[TJ_AUDIO_DEATH] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "death.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
     s_entries[TJ_AUDIO_MUSIC] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "music.mp3", .music = true, .clip = NT_AUDIO_CLIP_INVALID};
 
-    for (int i = 0; i < TJ_AUDIO_COUNT; ++i) {
-        s_entries[i].req_id = req_start(s_entries[i].path);
-        s_entries[i].pending = s_entries[i].req_id != 0;
-        if (!s_entries[i].pending) {
-            nt_log_warn("turkic_jam: audio request rejected: %s", s_entries[i].path);
-        }
-    }
+    /* Loads are issued ONE AT A TIME in poll. The shared fs pool is only NT_FS_MAX_REQUESTS (8)
+       slots; firing all audio loads here at once starves the asset-pack load (regions never
+       resolve -> blank/gray screen), so we leave the pool free and trickle audio in. */
 }
 
 void tj_audio_assets_poll(void) {
+    /* Trickle: keep at most one audio load in flight so the shared fs pool stays free for the pack. */
+    bool inflight = false;
+    for (int i = 0; i < TJ_AUDIO_COUNT; ++i) {
+        if (s_entries[i].pending) {
+            inflight = true;
+            break;
+        }
+    }
+    if (!inflight) {
+        for (int i = 0; i < TJ_AUDIO_COUNT; ++i) {
+            tj_audio_entry_t *e = &s_entries[i];
+            if (!e->done && !e->pending) {
+                e->req_id = req_start(e->path);
+                e->pending = e->req_id != 0; /* pool momentarily full -> retry next frame */
+                break;
+            }
+        }
+    }
     for (int i = 0; i < TJ_AUDIO_COUNT; ++i) {
         tj_audio_entry_t *e = &s_entries[i];
         if (!e->pending) {
