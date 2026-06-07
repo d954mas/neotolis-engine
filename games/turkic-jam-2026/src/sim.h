@@ -82,6 +82,7 @@ typedef struct {
     bool in_event;
     float event_t;
     int ev_die, ev_roll, ev_stat, ev_dc, ev_gain;
+    int ev_kind; /* 0=Завал/Сила, 1=Погоня/Скорость, 2=Буря/Выносливость (window text key) */
     bool ev_pass;
     char ev_name[24], ev_statname[24];
     float death_t;                             /* run-over overlay animation timer (advanced by the scene) */

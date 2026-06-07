@@ -905,6 +905,7 @@ static void start_event(tj_run_t *r) {
     r->in_event = true;
     r->event_t = 0.0F;
     r->ev_die = die;
+    r->ev_kind = pick;
     r->ev_roll = roll;
     r->ev_stat = stat;
     r->ev_dc = dc;
