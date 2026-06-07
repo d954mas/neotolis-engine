@@ -1630,43 +1630,95 @@ bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
     return next;
 }
 
+/* One aul upgrade as a wide row button: stat icon + name + what it raises + level + supplies cost.
+   `lvl`/`cost` must outlive the frame (caller owns the buffers). Returns true if the buy fires. */
+static bool aul_upgrade_button(game_ctx_t *g, const char *id_str, uint32_t icon, const char *name, const char *effect, const char *lvl, const char *cost, bool afford) {
+    static const nt_ui_label_style_t s_up_name = {.font_id = 0, .font_size = 17, .color = {236.0F, 226.0F, 206.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+    static const nt_ui_label_style_t s_up_eff = {.font_id = 0, .font_size = 13, .color = {178.0F, 162.0F, 138.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+    static const nt_ui_label_style_t s_up_lvl = {.font_id = 0, .font_size = 12, .color = {170.0F, 156.0F, 132.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_RIGHT};
+    const nt_ui_label_style_t s_up_cost = {
+        .font_id = 0, .font_size = 18, .color = afford ? (Clay_Color){255.0F, 224.0F, 120.0F, 255.0F} : (Clay_Color){190.0F, 110.0F, 96.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_RIGHT};
+    const uint32_t tint = afford ? 0xFF3A5A8AU : 0xFF323036U;
+    const float op = afford ? 1.0F : 0.7F;
+    const nt_ui_button_style_t style = {
+        .idle = {.atlas = g->atlas, .bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 1.0F, .opacity = op},
+        .hover = {.bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = afford ? 1.03F : 1.0F, .opacity = op},
+        .pressed = {.bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 0.98F, .offset_y = 2.0F, .opacity = op},
+        .disabled = {.bg_region = g->ui_button_dark_64, .bg_tint = tint, .scale = 1.0F, .opacity = 0.4F},
+        .transition_speed = 12.0F,
+        .hit_padding_lrtb = {6, 6, 4, 4},
+        .slice9_scale = 1.0F,
+    };
+    const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(50)},
+                                                     .padding = {12, 12, 4, 4},
+                                                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                                                     .childGap = 10,
+                                                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    nt_ui_button_begin(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), nt_ui_id(id_str), &style, &decl, true);
+    inline_sprite(g, icon, 30.0F, 30.0F);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 1}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, &s_up_name);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), effect, &s_up_eff);
+    }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 1, .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), lvl, &s_up_lvl);
+        CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}}}) {
+            inline_sprite(g, g->icon_supplies_32, 18.0F, 18.0F);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cost, &s_up_cost);
+        }
+    }
+    return nt_ui_button_end(g->ui);
+}
+
 /* Run-over step 2 (right panel): the aul — banked supplies + heritage upgrades + send the next
  * heir. Returns true if the player pressed "Отправить батыра". */
 bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     (void)run;
-    static char sup[40];
-    static char u0[48];
-    static char u1[48];
-    static char u2[48];
-    static char u3[48];
-    (void)snprintf(sup, sizeof sup, "Припасы аула: %d", g_aul.supplies);
-    (void)snprintf(u0, sizeof u0, "%s  ур.%d  —  %d", stat_sabre(), g_aul.up_force, tj_aul_upgrade_cost(0));
-    (void)snprintf(u1, sizeof u1, "%s  ур.%d  —  %d", stat_horse(), g_aul.up_speed, tj_aul_upgrade_cost(1));
-    (void)snprintf(u2, sizeof u2, "%s  ур.%d  —  %d", stat_amulet(), g_aul.up_vigor, tj_aul_upgrade_cost(2));
-    (void)snprintf(u3, sizeof u3, "Наследие  ур.%d  -  %d", g_aul.up_keep, tj_aul_upgrade_cost(3));
+    static const nt_ui_label_style_t s_sup_big = {.font_id = 0, .font_size = 26, .color = {255.0F, 224.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+    static char sup[16];
+    static char lvl[4][12];
+    static char cost[4][12];
+    const int lv[4] = {g_aul.up_force, g_aul.up_speed, g_aul.up_vigor, g_aul.up_keep};
+    const int c[4] = {tj_aul_upgrade_cost(0), tj_aul_upgrade_cost(1), tj_aul_upgrade_cost(2), tj_aul_upgrade_cost(3)};
+    (void)snprintf(sup, sizeof sup, "%d", g_aul.supplies);
+    for (int i = 0; i < 4; i++) {
+        (void)snprintf(lvl[i], sizeof lvl[i], "ур.%d", lv[i]);
+        (void)snprintf(cost[i], sizeof cost[i], "%d", c[i]);
+    }
     bool newrun = false;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 8,
+                     .childGap = 7,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Аул", &s_panel_title);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sup, &s_dim);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Прокачка наследия:", &s_dim);
-        if (tj_button(g, "aul_f", u0, 290, 44, TJ_BTN_SECONDARY)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIT(0)},
+                         .padding = {10, 10, 6, 6},
+                         .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                         .childGap = 8,
+                         .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {40.0F, 30.0F, 18.0F, 200.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(8.0F)}) {
+            inline_sprite(g, g->icon_supplies_32, 26.0F, 26.0F);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sup, &s_sup_big);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("supplies", "припасы", "erzak"), &s_dim);
+        }
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Heritage upgrades", "Прокачка наследия", "Miras"), &s_dim);
+        if (aul_upgrade_button(g, "aul_f", g->icon_body_32, stat_sabre(), pick_lang("combat damage", "урон в бою", "hasar"), lvl[0], cost[0], g_aul.supplies >= c[0])) {
             tj_aul_upgrade(0);
         }
-        if (tj_button(g, "aul_s", u1, 290, 44, TJ_BTN_SECONDARY)) {
+        if (aul_upgrade_button(g, "aul_s", g->icon_mind_32, stat_horse(), pick_lang("attack speed", "скорость атак", "hiz"), lvl[1], cost[1], g_aul.supplies >= c[1])) {
             tj_aul_upgrade(1);
         }
-        if (tj_button(g, "aul_v", u2, 290, 44, TJ_BTN_SECONDARY)) {
+        if (aul_upgrade_button(g, "aul_v", g->icon_spirit_32, stat_amulet(), pick_lang("defense", "защита", "savunma"), lvl[2], cost[2], g_aul.supplies >= c[2])) {
             tj_aul_upgrade(2);
         }
-        if (tj_button(g, "aul_k", u3, 290, 44, TJ_BTN_SECONDARY)) {
+        if (aul_upgrade_button(g, "aul_k", g->icon_supplies_32, pick_lang("Heritage", "Наследие", "Miras"), pick_lang("keep supplies on death", "припасы при смерти", "erzak"), lvl[3], cost[3],
+                               g_aul.supplies >= c[3])) {
             tj_aul_upgrade(3);
         }
-        if (tj_button(g, "aul_new", "Отправить батыра", 290, 76, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "aul_new", "Отправить батыра", 300, 64, TJ_BTN_PRIMARY)) {
             newrun = true;
         }
     }
@@ -1746,11 +1798,11 @@ static void event_result_text(const tj_run_t *run, int die, const char *statname
     int eff = (int)((float)run->ev_stat * mult);
     if (run->ev_roll <= 1) {
         eff = 0;
-        (void)snprintf(mathline, ml, "%s %d * %s = 0", statname, run->ev_stat, pick_lang("miss", "мимо", "iska"));
+        (void)snprintf(mathline, ml, "%s %d * %s = 0", statname, run->ev_stat, pick_lang("FAIL", "ПРОВАЛ", "BASARISIZ"));
         (void)snprintf(compareline, cl, "%s 0 < %s %d", pick_lang("Total", "Итог", "Toplam"), pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     } else if (run->ev_roll >= die) {
-        (void)snprintf(mathline, ml, "%s %d * %s = %s", statname, run->ev_stat, pick_lang("max", "куш", "kazanc"), pick_lang("success", "успех", "basari"));
-        (void)snprintf(compareline, cl, "%s: %s > %s %d", pick_lang("Total", "Итог", "Toplam"), pick_lang("max", "куш", "kazanc"), pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
+        (void)snprintf(mathline, ml, "%s %d * %s = %s", statname, run->ev_stat, pick_lang("SUCCESS", "УСПЕХ", "BASARI"), pick_lang("SUCCESS", "УСПЕХ", "BASARI"));
+        (void)snprintf(compareline, cl, "%s: %s > %s %d", pick_lang("Total", "Итог", "Toplam"), pick_lang("SUCCESS", "УСПЕХ", "BASARI"), pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     } else {
         (void)snprintf(mathline, ml, "%s %d * x%g = %d", statname, run->ev_stat, (double)mult, eff);
         (void)snprintf(compareline, cl, "%s %d %s %s %d", pick_lang("Total", "Итог", "Toplam"), eff, run->ev_pass ? ">=" : "<", pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
@@ -1765,30 +1817,42 @@ static void event_result_text(const tj_run_t *run, int die, const char *statname
 /* One wheel face at (dx,dy) from the disc centre: roll = i+1 (1 = miss/red,
  * die = win/green, else a multiplier); `sel` = resting under the pointer. `text`
  * must outlive the frame — the caller owns the buffer (Clay stores it by pointer). */
-static void event_wheel_chip(game_ctx_t *g, int roll, int die, bool sel, float dx, float dy, char *text, size_t cap) {
+static void event_wheel_label(game_ctx_t *g, int roll, int die, bool sel, float dx, float dy, char *text, size_t cap) {
     if (roll <= 1) {
-        (void)snprintf(text, cap, "%s", pick_lang("miss", "мимо", "iska"));
+        (void)snprintf(text, cap, "%s", pick_lang("FAIL", "ПРОВАЛ", "BASARISIZ"));
     } else if (roll >= die) {
-        (void)snprintf(text, cap, "%s", pick_lang("win", "куш", "kazanc"));
+        (void)snprintf(text, cap, "%s", pick_lang("SUCCESS", "УСПЕХ", "BASARI"));
     } else {
         (void)snprintf(text, cap, "x%g", (double)(1.0F + (g_config.event_dice_coeff * (float)roll)));
     }
-    Clay_Color bg = {58.0F, 46.0F, 30.0F, 240.0F};
+    Clay_Color bg = {0.0F, 0.0F, 0.0F, 0.0F};
+    Clay_Color bord = {0.0F, 0.0F, 0.0F, 0.0F};
+    nt_ui_label_style_t st = s_wheel_chip;
+    st.color = (Clay_Color){246.0F, 226.0F, 170.0F, sel ? 255.0F : 220.0F};
+    float w = 50.0F;
+    float h = 22.0F;
     if (sel) {
         bg = (Clay_Color){236.0F, 196.0F, 96.0F, 255.0F};
+        bord = (Clay_Color){250.0F, 230.0F, 170.0F, 255.0F};
+        st = s_wheel_chip_sel;
+        st.font_size = 14;
     } else if (roll <= 1) {
-        bg = (Clay_Color){96.0F, 44.0F, 36.0F, 240.0F};
+        st.font_size = 11;
+        st.color = (Clay_Color){255.0F, 214.0F, 188.0F, 190.0F};
+        w = 54.0F;
     } else if (roll >= die) {
-        bg = (Clay_Color){46.0F, 82.0F, 48.0F, 240.0F};
+        st.font_size = 11;
+        st.color = (Clay_Color){216.0F, 255.0F, 186.0F, 190.0F};
+        w = 50.0F;
+    } else {
+        st.font_size = 12;
     }
-    const Clay_Color bord = sel ? (Clay_Color){250.0F, 230.0F, 170.0F, 255.0F} : (Clay_Color){92.0F, 72.0F, 42.0F, 200.0F};
-    const float csz = sel ? 44.0F : 36.0F;
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {dx, dy}, .zIndex = 62},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(csz), CLAY_SIZING_FIXED(csz)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = bg,
-          .cornerRadius = CLAY_CORNER_RADIUS(csz * 0.5F),
-          .border = {.color = bord, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, sel ? &s_wheel_chip_sel : &s_wheel_chip);
+          .cornerRadius = CLAY_CORNER_RADIUS(5.0F),
+          .border = {.color = bord, .width = CLAY_BORDER_OUTSIDE(sel ? 2 : 0)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &st);
     }
 }
 
@@ -1796,15 +1860,20 @@ static void event_wheel_chip(game_ctx_t *g, int roll, int die, bool sel, float d
  * `spin`), the tested stat in the hub, and a fixed pointer at the top. */
 static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchips, const char *hubval, char chiptext[][16]) {
     const float wheel = 214.0F;
-    const float ring_r = 80.0F;
+    const float ring_r = 67.0F;
     const float step = 6.2831853F / (float)die;
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(wheel), CLAY_SIZING_FIXED(wheel)}},
-          .backgroundColor = {26.0F, 20.0F, 13.0F, 255.0F},
-          .cornerRadius = CLAY_CORNER_RADIUS(wheel * 0.5F),
-          .border = {.color = {150.0F, 112.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(3)}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(wheel), CLAY_SIZING_FIXED(wheel)}}, .backgroundColor = {26.0F, 20.0F, 13.0F, 0.0F}, .cornerRadius = CLAY_CORNER_RADIUS(wheel * 0.5F)}) {
+        if (has_region(g->ui_fortune_wheel_384)) {
+            static nt_ui_transform_t s_wheel_xf;
+            s_wheel_xf = nt_ui_transform_defaults();
+            s_wheel_xf.rotation_z = spin;
+            const nt_ui_image_style_t img = nt_ui_image_style_defaults();
+            const Clay_ElementDeclaration idecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(wheel), CLAY_SIZING_FIXED(wheel)}}};
+            nt_ui_image(g->ui, nt_ui_make_element_data_xform(TJ_LAYER_IMG, NULL, &s_wheel_xf, 1.0F), g->atlas, g->ui_fortune_wheel_384, &img, &idecl);
+        }
         for (int i = 0; i < nchips; i++) {
             const float ang = ((float)i * step) + spin;
-            event_wheel_chip(g, i + 1, die, i == hi_idx, ring_r * sinf(ang), -ring_r * cosf(ang), chiptext[i], sizeof chiptext[i]);
+            event_wheel_label(g, i + 1, die, i == hi_idx, ring_r * sinf(ang), -ring_r * cosf(ang), chiptext[i], sizeof chiptext[i]);
         }
         /* hub: the stat under test, shown from the first beat */
         CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 63},
@@ -1815,13 +1884,12 @@ static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchi
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hubval, &s_wheel_hub);
         }
         /* fixed pointer near 12 o'clock — the face resting here is the result */
-        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                           .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
-                           .offset = {0.0F, -(ring_r + 18.0F)},
-                           .zIndex = 64},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(16.0F), CLAY_SIZING_FIXED(16.0F)}},
+        CLAY({.floating =
+                  {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {0.0F, -101.0F}, .zIndex = 64},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(18.0F), CLAY_SIZING_FIXED(18.0F)}},
               .backgroundColor = {250.0F, 220.0F, 120.0F, 255.0F},
-              .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {}
+              .cornerRadius = CLAY_CORNER_RADIUS(9.0F),
+              .border = {.color = {92.0F, 54.0F, 18.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {}
     }
 }
 
