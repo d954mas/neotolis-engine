@@ -423,7 +423,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed) {
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
@@ -460,6 +460,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             memcpy(ctx->tree_baked[f->elem_idx].m, m_cur, sizeof m_cur);
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
+            ctx->tree_baked[f->elem_idx].zindex = root_zindex; /* uniform per Clay tree root */
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
@@ -526,6 +527,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         if (root_idx < 0) {
             continue;
         }
+        /* Effective Clay zIndex is uniform per tree root (Clay tags every command of a root with it). */
+        const int16_t root_zindex = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx)->zIndex;
 
         nt_ui_baked_xform_t seed;
         if (root_idx == 0) {
@@ -549,7 +552,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                 }
             }
         }
-        bt_dfs_subtree(ctx, cc, elem_idx, &seed);
+        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex);
     }
     // #endregion
 

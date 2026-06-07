@@ -1966,10 +1966,11 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
     return true;
 }
 
-/* out_t (nullable, valid only when this returns true): world distance from the near plane to the hit
- * in 3D ctx; 0 in 2D ctx (no depth). The game's occlusion cutoff is near-plane-relative too. */
+/* out_t / out_zindex (both nullable, valid only when this returns true): out_t = world distance from
+ * the near plane to the hit in 3D ctx (0 in 2D); out_zindex = the hit element's effective Clay zIndex
+ * (its floating tree-root's), used for 2D front-most arbitration. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t) {
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, int16_t *out_zindex) {
     if (id == 0U) {
         return false;
     }
@@ -2001,6 +2002,9 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
 
     const Clay_BoundingBox box = d.boundingBox;
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
+    if (out_zindex != NULL) {
+        *out_zindex = b.zindex; /* slot already gated by hit_generation above */
+    }
     float lx;
     float ly;
     if (ctx->use_raycast_input) {
@@ -2111,7 +2115,7 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
         const uint32_t hot = ctx->pointer_hot[i].id;
         const bool arbitrated_ok = (hot == 0U) || (hot == id) || (cap->active_id == id);
         float hit_t = 0.0F;
-        const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, &hit_t);
+        const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, &hit_t, NULL);
         if (!over) {
             continue;
         }
@@ -2173,7 +2177,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         const nt_ui_capture_t *cap = &ctx->captures[pidx];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
-        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL);
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL, NULL);
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
         out.pressed_now = s.new_capture;
@@ -2226,11 +2230,13 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_hot_t best = {0};
         bool found = false;
-        bool occluded = false; /* hit >= 1 widget, but the cutoff blocked all of them */
+        bool occluded = false;           /* hit >= 1 widget, but the cutoff blocked all of them */
+        int16_t best_zindex = INT16_MIN; /* 2D: highest effective zIndex seen so far */
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
-            if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, &t)) {
+            int16_t zi = 0;
+            if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, &t, &zi)) {
                 continue;
             }
             if (ctx->use_raycast_input) {
@@ -2244,10 +2250,14 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
                     found = true;
                 }
             } else {
-                /* 2D: no depth — later-declared (drawn-on-top) hit wins; overwrite on each hit. */
-                best.id = rec->id;
-                best.distance = 0.0F;
-                found = true;
+                /* 2D: highest effective zIndex wins; >= so a later-declared tie still overwrites,
+                 * preserving paint-order behavior within one z tier. */
+                if (!found || zi >= best_zindex) {
+                    best.id = rec->id;
+                    best.distance = 0.0F;
+                    best_zindex = zi;
+                    found = true;
+                }
             }
         }
         /* Hit something but the cutoff blocked all of it → block (don't let hot==0 fallback re-admit
@@ -2548,7 +2558,7 @@ bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit: ctx must be non-NULL");
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
-    const bool hit = ui_hit_test(ctx, id, px, py, NULL, NULL);
+    const bool hit = ui_hit_test(ctx, id, px, py, NULL, NULL, NULL);
     Clay_SetCurrentContext(saved);
     return hit;
 }
@@ -2557,7 +2567,7 @@ bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit_padded: ctx must be non-NULL");
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
-    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL);
+    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL, NULL);
     Clay_SetCurrentContext(saved);
     return hit;
 }

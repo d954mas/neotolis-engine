@@ -94,6 +94,40 @@ void test_overlap_top_wins_hover(void) {
     TEST_ASSERT_FALSE(bottom.hovered);
 }
 
+/* Two overlapping floating widgets where the HIGHER zIndex is declared FIRST: true z-order must pick
+ * it (the old "last-declared wins" would wrongly pick the later, lower-z one). */
+static void declare_zindexed(void) {
+    CLAY({.id = CLAY_ID("hiz"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10, .offset = {.x = BOT_X, .y = BOT_Y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(BOX_W), CLAY_SIZING_FIXED(BOX_H)}}}) {}
+    CLAY({.id = CLAY_ID("lowz"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = TOP_X, .y = TOP_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BOX_W), CLAY_SIZING_FIXED(BOX_H)}}}) {}
+}
+
+static void declare_zindexed_only(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    declare_zindexed();
+    nt_ui_end(s_fx.ctx);
+}
+
+static void step_zindexed(const nt_pointer_t *p, nt_ui_interaction_t *hiz, nt_ui_interaction_t *lowz) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    declare_zindexed();
+    *hiz = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hiz"));
+    *lowz = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("lowz"));
+    nt_ui_end(s_fx.ctx);
+}
+
+void test_higher_zindex_wins_despite_earlier_declaration(void) {
+    nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
+    nt_ui_interaction_t hiz;
+    nt_ui_interaction_t lowz;
+    declare_zindexed_only(&over);      /* frame 1: bake */
+    step_zindexed(&over, &hiz, &lowz); /* frame 2: register (still fallback) */
+    step_zindexed(&over, &hiz, &lowz); /* frame 3: arbitrated by zIndex */
+    TEST_ASSERT_TRUE(hiz.hovered);     /* z=10 wins even though declared first */
+    TEST_ASSERT_FALSE(lowz.hovered);
+}
+
 /* Press lands on the front-most widget only; the one behind never captures. */
 void test_overlap_top_wins_press(void) {
     nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
@@ -112,6 +146,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_empty_registry_fallback_both_hover);
     RUN_TEST(test_overlap_top_wins_hover);
+    RUN_TEST(test_higher_zindex_wins_despite_earlier_declaration);
     RUN_TEST(test_overlap_top_wins_press);
     return UNITY_END();
 }
