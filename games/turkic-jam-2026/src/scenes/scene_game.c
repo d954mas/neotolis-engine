@@ -36,6 +36,8 @@ static bool s_help_open = false;   /* "?" how-to modal toggled open */
 static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
 static int s_ftue_step = 0;        /* 0 intro, 1 watch (walk+fight to 1st pouch), 2 pull, 3 place+merge (2 seeded), 4 done */
 static float s_ftue_t = 0.0F;      /* tutorial animation clock (highlight pulse) */
+static int s_ftue_target_gx = -1;  /* FTUE place+merge: the ONLY cell that accepts the drag (-1 = no lock) */
+static int s_ftue_target_gy = -1;
 static float s_intro_t = 0.0F;     /* first-run intro clock: dawn reveal + send-the-wayfarer cues */
 static bool s_intro_black = false; /* first-run: holding the black-screen open until the player taps */
 
@@ -211,6 +213,9 @@ static void ftue_begin(void) {
 static void ftue_finish(void) {
     s_ftue_active = false;
     s_run.forced_pull_tile = -1;
+    s_ftue_target_gx = -1;
+    s_ftue_target_gy = -1;
+    tj_view_set_ftue_gap(-1, -1);
     save_set_int("ftue_done", 1);
     save_flush();
 }
@@ -312,7 +317,10 @@ static void handle_map_input(game_ctx_t *g, float dt) {
         int gy = -1;
         const bool on_cell = tj_view_world_cell_at(mx, my, &gx, &gy);
         if (s_drag_card >= 0) {
-            if (on_cell && !tj_run_place_card(&s_run, s_drag_card, gx, gy)) {
+            const bool ftue_lock = s_ftue_active && s_ftue_step == 3 && s_ftue_target_gx >= 0;
+            if (ftue_lock && (!on_cell || gx != s_ftue_target_gx || gy != s_ftue_target_gy)) {
+                tj_journal_push(TJ_LOG_BAD, "Тяни карту на подсвеченную клетку."); /* lesson: only the gold gap accepts it */
+            } else if (on_cell && !tj_run_place_card(&s_run, s_drag_card, gx, gy)) {
                 tj_journal_push(TJ_LOG_BAD, "Сюда нельзя — тяни на зелёную клетку за дорогой.");
             }
             s_drag_card = -1; /* dropped: placed, or snapped back to the fan */
@@ -359,7 +367,9 @@ static void ftue_seed_merge(void) {
     s_run.field_tile[(by * cols) + bx] = war;
     s_run.field_tile[(by * cols) + bx + 1] = war;
     tj_view_set_ftue_gap(bx + 2, by); /* the cell the player fills to complete the trio */
-    s_run.pouch += 3;                 /* retry headroom: a misplaced drag can be recovered (forced_pull_tile = war_1) */
+    s_ftue_target_gx = bx + 2;        /* lock the drop to this cell while the lesson runs */
+    s_ftue_target_gy = by;
+    s_run.pouch += 3; /* retry headroom: a misplaced drag can be recovered (forced_pull_tile = war_1) */
 }
 
 static void ftue_step_tick(float dt) {
@@ -388,6 +398,8 @@ static void ftue_step_tick(float dt) {
         s_ftue_step = 3; /* pull done -> place+merge lesson (2 tiles pre-placed, drag 1 to complete) */
     } else if (s_ftue_step == 3 && s_run.merges_done > 0) {
         tj_view_set_ftue_gap(-1, -1);
+        s_ftue_target_gx = -1;
+        s_ftue_target_gy = -1;
         s_ftue_step = 4; /* the guided drag merged -> tutorial complete */
     }
 }

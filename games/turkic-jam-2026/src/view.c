@@ -1038,17 +1038,24 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     }
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
-    for (int gy = 0; gy < rows; gy++) {
-        for (int gx = 0; gx < cols; gx++) {
-            if (!is_build_cell(run, gx, gy)) { /* highlight every buildable cell; map viewport clips off-screen */
-                continue;
+    const bool ftue_lock = (s_ftue_gap_gx >= 0 && s_ftue_gap_gy >= 0); /* lesson: only the gold gap is a legal target */
+    if (!ftue_lock) {
+        for (int gy = 0; gy < rows; gy++) {
+            for (int gx = 0; gx < cols; gx++) {
+                if (!is_build_cell(run, gx, gy)) { /* highlight every buildable cell; map viewport clips off-screen */
+                    continue;
+                }
+                cell_overlay(g, g->ui_valid_cell_overlay_128, (Clay_Color){150.0F, 230.0F, 160.0F, 90.0F}, pitch, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
             }
-            cell_overlay(g, g->ui_valid_cell_overlay_128, (Clay_Color){150.0F, 230.0F, 160.0F, 90.0F}, pitch, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
         }
     }
     int hgx = -1;
     int hgy = -1;
     if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &hgx, &hgy) || !cell_in_view(hgx, hgy, cols, rows, pitch)) {
+        return;
+    }
+    if (ftue_lock && (hgx != s_ftue_gap_gx || hgy != s_ftue_gap_gy)) { /* hovering off the gap reads as invalid */
+        cell_overlay(g, g->ui_invalid_cell_overlay_128, (Clay_Color){236.0F, 110.0F, 92.0F, 180.0F}, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
         return;
     }
     const bool ok = is_build_cell(run, hgx, hgy);
@@ -2400,8 +2407,8 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
         hw = 198.0F;
         hh = 104.0F;
         has_hl = true;
-    } else if (step == 3) {
-        const float cardx = fmaxf((vw - 100.0F) * 0.5F, 292.0F); /* ring the drawn card (fan_base for 1 card) */
+    } else if (step == 3 && g->drag_tile < 0) {
+        const float cardx = fmaxf((vw - 100.0F) * 0.5F, 292.0F); /* ring the source card only while idle (drag takes over) */
         hx = cardx - 6.0F;
         hy = vh - 170.0F;
         hw = 112.0F;
@@ -2429,6 +2436,36 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
             .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                          .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
                          .offset = {hx + 66.0F, hy - 80.0F - bob},
+                         .zIndex = 86,
+                         .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+        };
+        nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, g->ui_finger_pointer_128, &fimg, &fdecl);
+    }
+    if (step == 3 && g->drag_tile < 0 && s_ftue_gap_gx >= 0 && s_map_pitch > 0.0F && has_region(g->ui_finger_pointer_128)) {
+        /* A finger glides from the source card up to the gold gap, on a loop — shows HOW to drag. */
+        const float cardx = fmaxf((vw - 100.0F) * 0.5F, 292.0F);
+        const float sx = cardx + 44.0F;
+        const float sy = vh - 120.0F;
+        const float ex = s_map_cx + grid_x(s_ftue_gap_gx, run->grid_cols, s_map_pitch);
+        const float ey = s_map_cy + grid_y(s_ftue_gap_gy, run->grid_rows, s_map_pitch);
+        const float cyc = fmodf(t * 0.5F, 1.0F);
+        const float ease = cyc * cyc * (3.0F - (2.0F * cyc));
+        const float fx = sx + ((ex - sx) * ease);
+        const float fy = sy + ((ey - sy) * ease);
+        float fade = 1.0F;
+        if (cyc < 0.12F) {
+            fade = cyc / 0.12F;
+        } else if (cyc > 0.82F) {
+            fade = (1.0F - cyc) / 0.18F;
+        }
+        const uint32_t a = (uint32_t)(fade * 255.0F);
+        nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        fimg.color_packed = (a << 24) | 0x00FFFFFFU; /* 0xAABBGGRR: fade the hand in/out across the glide */
+        const Clay_ElementDeclaration fdecl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(60.0F), CLAY_SIZING_FIXED(72.0F)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+                         .offset = {fx, fy},
                          .zIndex = 86,
                          .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
         };
