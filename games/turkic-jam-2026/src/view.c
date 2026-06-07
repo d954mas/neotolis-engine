@@ -331,13 +331,11 @@ static int tier_id_index(const char *id, const char *prefix) {
     return id[n] - '1';
 }
 
-/* Only tiers 1..3 have dedicated art; higher tiers reuse the top sprite and lean on the
- * pedestal colour + level number for identity. */
-static uint32_t tier_sprite(const uint32_t arr[3], int tier0) {
-    if (tier0 < 0) {
+static uint32_t tier_sprite(const uint32_t arr[5], int tier0) {
+    if (tier0 < 0 || tier0 >= 5) {
         return NT_ATLAS_INVALID_REGION;
     }
-    return arr[(tier0 > 2) ? 2 : tier0];
+    return arr[tier0];
 }
 
 static uint32_t merge_tile_region_for_id(const game_ctx_t *g, const char *id) {
@@ -479,18 +477,6 @@ static void hud_chip(game_ctx_t *g, uint32_t icon_region, const char *text) {
 
 static void hud_spacer(void) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(0)}}}) {}
-}
-
-static const char *pick_lang(const char *en, const char *ru, const char *tr) {
-    switch (i18n_get()) {
-    case LANG_RU:
-        return ru;
-    case LANG_TR:
-        return tr;
-    case LANG_EN:
-    default:
-        return en;
-    }
 }
 
 /* Short "what it gives" line for a building/card -> caller's buffer (so several can coexist
@@ -2688,7 +2674,7 @@ static tj_btn_variant_t settings_lang_variant(i18n_lang_t lang) { return i18n_ge
 /* Full reset: wipe progress (best + aul + tamga), keep UI prefs (lang+volumes),
  * close the modal, and drop back to the menu at zero. */
 static void settings_full_reset(game_ctx_t *g) {
-    const int lang = save_get_int("lang", LANG_RU);
+    const int lang = save_get_int("lang", LANG_EN);
     const int music = save_get_int("music_vol", 60);
     const int sfx = save_get_int("sfx_vol", 70);
     save_clear();

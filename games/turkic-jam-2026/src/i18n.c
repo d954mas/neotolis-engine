@@ -86,7 +86,7 @@ static const char *s_lang_label[LANG_COUNT] = {
     [LANG_TR] = "Türkçe",
 };
 
-static i18n_lang_t s_lang = LANG_RU;
+static i18n_lang_t s_lang = LANG_EN; /* default English; players switch in settings (persisted) */
 
 void i18n_set(i18n_lang_t lang) {
     if (lang >= 0 && lang < LANG_COUNT) {
@@ -111,4 +111,16 @@ const char *i18n_lang_label(i18n_lang_t lang) {
         return "?";
     }
     return s_lang_label[lang];
+}
+
+const char *pick_lang(const char *en, const char *ru, const char *tr) {
+    switch (s_lang) {
+    case LANG_RU:
+        return ru;
+    case LANG_TR:
+        return tr;
+    case LANG_EN:
+    default:
+        return en;
+    }
 }

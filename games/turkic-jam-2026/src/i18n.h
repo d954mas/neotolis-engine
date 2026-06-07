@@ -44,4 +44,8 @@ void i18n_cycle(void); /* EN -> RU -> TR -> EN */
 const char *i18n(i18n_key_t key);              /* current-language string for key */
 const char *i18n_lang_label(i18n_lang_t lang); /* endonym, e.g. "Русский" */
 
+/* Inline 3-language pick (EN/RU/TR) for one-off strings outside the key table. Args must
+   outlive the frame (string literals do). Usable from any module that includes i18n.h. */
+const char *pick_lang(const char *en, const char *ru, const char *tr);
+
 #endif /* TJ_I18N_H */
