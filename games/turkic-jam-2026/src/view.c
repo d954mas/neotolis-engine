@@ -1878,8 +1878,8 @@ static void event_wheel_label(game_ctx_t *g, int roll, int die, bool sel, float 
 /* The fate wheel: a disc with the multiplier faces around the rim (rotated by
  * `spin`), the tested stat in the hub, and a fixed pointer at the top. */
 static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchips, const char *hubval, char chiptext[][16]) {
-    const float wheel = 214.0F;
-    const float ring_r = 67.0F;
+    const float wheel = 160.0F;
+    const float ring_r = 50.0F;
     const float step = 6.2831853F / (float)die;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(wheel), CLAY_SIZING_FIXED(wheel)}}, .backgroundColor = {26.0F, 20.0F, 13.0F, 0.0F}, .cornerRadius = CLAY_CORNER_RADIUS(wheel * 0.5F)}) {
         if (has_region(g->ui_fortune_wheel_384)) {
@@ -2024,12 +2024,12 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
         }
         /* Reserve the wheel + result space from the first frame so the staged reveal never grows
            the card (the column was visibly jumping down then back up as lines appeared). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(214.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(160.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             if (show_wheel) {
                 event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
             }
         }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64.0F)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56.0F)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
             if (show_math) {
                 nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_ev_check);
                 nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), compareline, &s_stat);
