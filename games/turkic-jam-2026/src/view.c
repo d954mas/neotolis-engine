@@ -1414,23 +1414,42 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     }
 }
 
-/* Right panel when the run is over: result + aul upgrades + "Новый забег".
- * Returns true if the player pressed "Новый забег". */
-bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
-    static char head[48];
+/* Run-over step 1 (right panel): the verdict, the sand line on death, how far the heir got,
+ * then a button. Returns true once the player acknowledges and moves on to the aul. */
+bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
     static char res[40];
+    (void)snprintf(res, sizeof res, "Дошёл до круга %d", run->circle);
+    bool next = false;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
+                     .padding = CLAY_PADDING_ALL(20),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 14,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = TJ_PANEL_BG}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Кольцо разорвано!" : "Наследник пал", &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Тамга рода вписана в степь." : "Песок укрыл его следы — и всё, что он возвёл.", &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), res, &s_stat);
+        if (tj_button(g, "death_next", run->won ? "Дальше" : "В аул", 258, 56, TJ_BTN_PRIMARY)) {
+            next = true;
+        }
+    }
+    return next;
+}
+
+/* Run-over step 2 (right panel): the aul — banked supplies + heritage upgrades + send the next
+ * heir. Returns true if the player pressed "Отправить путника". */
+bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
+    (void)run;
     static char sup[40];
     static char u0[48];
     static char u1[48];
     static char u2[48];
     static char u3[48];
-    (void)snprintf(head, sizeof head, "%s", run->won ? "Кольцо разорвано!" : "Наследник пал");
-    (void)snprintf(res, sizeof res, "Дошёл до круга %d", run->circle);
-    (void)snprintf(sup, sizeof sup, "Аул · припасы %d", g_aul.supplies);
-    (void)snprintf(u0, sizeof u0, "+Сила  ур.%d  (%d)", g_aul.up_force, tj_aul_upgrade_cost(0));
-    (void)snprintf(u1, sizeof u1, "+Скорость  ур.%d  (%d)", g_aul.up_speed, tj_aul_upgrade_cost(1));
-    (void)snprintf(u2, sizeof u2, "+Выносл.  ур.%d  (%d)", g_aul.up_vigor, tj_aul_upgrade_cost(2));
-    (void)snprintf(u3, sizeof u3, "+Наследие  ур.%d  (%d)", g_aul.up_keep, tj_aul_upgrade_cost(3));
+    (void)snprintf(sup, sizeof sup, "Припасы аула: %d", g_aul.supplies);
+    (void)snprintf(u0, sizeof u0, "Сила  ур.%d  —  %d", g_aul.up_force, tj_aul_upgrade_cost(0));
+    (void)snprintf(u1, sizeof u1, "Скорость  ур.%d  —  %d", g_aul.up_speed, tj_aul_upgrade_cost(1));
+    (void)snprintf(u2, sizeof u2, "Выносл.  ур.%d  —  %d", g_aul.up_vigor, tj_aul_upgrade_cost(2));
+    (void)snprintf(u3, sizeof u3, "Наследие  ур.%d  —  %d", g_aul.up_keep, tj_aul_upgrade_cost(3));
     bool newrun = false;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
@@ -1438,22 +1457,22 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
                      .childGap = 8,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), head, &s_panel_title);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), res, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Аул", &s_panel_title);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sup, &s_dim);
-        if (tj_button(g, "aul_f", u0, 258, 44, TJ_BTN_SECONDARY)) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Прокачка наследия:", &s_dim);
+        if (tj_button(g, "aul_f", u0, 290, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(0);
         }
-        if (tj_button(g, "aul_s", u1, 258, 44, TJ_BTN_SECONDARY)) {
+        if (tj_button(g, "aul_s", u1, 290, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(1);
         }
-        if (tj_button(g, "aul_v", u2, 258, 44, TJ_BTN_SECONDARY)) {
+        if (tj_button(g, "aul_v", u2, 290, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(2);
         }
-        if (tj_button(g, "aul_k", u3, 258, 44, TJ_BTN_SECONDARY)) {
+        if (tj_button(g, "aul_k", u3, 290, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(3);
         }
-        if (tj_button(g, "aul_new", "Отправить путника", 258, 58, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "aul_new", "Отправить путника", 290, 58, TJ_BTN_PRIMARY)) {
             newrun = true;
         }
     }

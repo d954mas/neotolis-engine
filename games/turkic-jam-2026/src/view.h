@@ -19,8 +19,9 @@ void tj_view_pack_overlay(game_ctx_t *g, tj_run_t *run);                        
 void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run);                         /* centered dice-event window (combat now lives in the hero panel) */
 void tj_view_battle_tick(game_ctx_t *g, const tj_run_t *run, float dt);                  /* advance the combat-stage particles/shake; spawn sparks on hits + a victory burst */
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run);                             /* right: hero name, battle stage (hero vs enemy), stats, current cell */
-bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run);                              /* right panel when run over: result + upgrades + new-run (true on "Новый забег") */
-void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run);                          /* fullscreen run-over veil + verdict */
+bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run);                            /* run-over step 1: verdict + sand line + result (true once acknowledged) */
+bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run);                              /* run-over step 2: aul supplies + upgrades (true on "Отправить путника") */
+void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run);                          /* DEPRECATED fullscreen run-over veil (no longer called; run-over lives in the panel) */
 void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial);       /* bottom: pouch + fan of cards (drag_idx drawn at cursor); tutorial hides the stock hint */
 int tj_view_hand_index_at(const game_ctx_t *g, const tj_run_t *run, float lx, float ly); /* hand card under a logical point, or -1 */
 void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx);             /* dragged card + dotted targeting arrow */

@@ -28,6 +28,7 @@
 
 static tj_run_t s_run;
 static bool s_banked = false;      /* death banked into the aul once per run */
+static bool s_run_ack = false;     /* run-over: player dismissed the death screen -> reveal the aul */
 static int s_drag_card = -1;       /* hand card being dragged onto the field (-1 = none) */
 static bool s_help_open = false;   /* "?" how-to modal toggled open */
 static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
@@ -383,8 +384,8 @@ static void on_update(game_ctx_t *g, float dt) {
     if (s_run.fx_cell_t > 0.0F) {
         s_run.fx_cell_t -= dt; /* place/merge pop decays every frame, even while the run is paused */
     }
-    if (!paused && !in_intro) {
-        handle_map_input(g, dt); /* camera + cards are locked during the intro / settings */
+    if (!paused && !in_intro && s_run.alive && !s_run.won) {
+        handle_map_input(g, dt); /* camera + cards locked during intro / settings / run-over (no dragging while dead) */
     }
     if (!paused) {
         ftue_step_tick(dt);
@@ -416,12 +417,18 @@ static void on_update(game_ctx_t *g, float dt) {
                 }
             } else if (s_run.alive && !s_run.won) {
                 tj_view_hero_panel(g, &s_run);
+            } else if (!s_run_ack) {
+                if (tj_view_death_panel(g, &s_run)) {
+                    s_run_ack = true; /* verdict acknowledged -> reveal the aul + upgrades */
+                }
             } else if (tj_view_aul_panel(g, &s_run)) {
-                start_new_run(g); /* "Новый забег" pressed in the aul panel */
+                start_new_run(g); /* "Отправить путника" -> send the next heir */
             }
         }
         if (!in_intro) {
-            tj_view_card_hand(g, &s_run, s_drag_card, s_ftue_active);
+            if (s_run.alive && !s_run.won) {
+                tj_view_card_hand(g, &s_run, s_drag_card, s_ftue_active); /* no hand on the run-over screen */
+            }
             if (!paused && tj_view_help_button(g)) {
                 s_help_open = !s_help_open; /* "?" toggles the how-to modal */
             }
@@ -448,9 +455,8 @@ static void on_update(game_ctx_t *g, float dt) {
         if (s_drag_card >= 0) {
             tj_view_drag_overlay(g, &s_run, s_drag_card); /* dragged card + targeting arrow */
         }
-        if (!s_run.alive || s_run.won) {
-            tj_view_death_overlay(g, &s_run); /* run-over veil + text (passthrough, above map) */
-        }
+        /* Run-over presentation lives in the right panel now (tj_view_aul_panel): no
+         * full-screen veil over the map — the panel carries the verdict + sand line. */
     }
 
     /* Run over (death or victory): bank once into the aul, then stay in-scene — the
@@ -465,6 +471,7 @@ static void on_update(game_ctx_t *g, float dt) {
             g->best = g->score;
         }
         s_banked = true;
+        s_run_ack = false; /* start the run-over on the death screen; the aul appears after "В аул" */
     }
     if (!paused && (!s_run.alive || s_run.won)) {
         s_run.death_t += dt; /* drive the run-over veil animation */
