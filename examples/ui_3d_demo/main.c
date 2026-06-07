@@ -372,6 +372,51 @@ static void draw_shape(void) {
         break;
     }
 }
+
+/* Cursor ray vs the central object's bounding sphere. *out_dist = world distance from the near plane
+ * to the front hit (same metric as the UI hit distance), or false on miss. Fed to
+ * nt_ui_set_pointer_occlusion so a panel directly behind the object can't be clicked through it. */
+static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, const mat4 vp, float *out_dist) {
+    if (fb_w <= 0.0F || fb_h <= 0.0F) {
+        return false;
+    }
+    mat4 vp_copy;
+    memcpy(vp_copy, vp, sizeof vp_copy);
+    mat4 inv;
+    glm_mat4_inv(vp_copy, inv);
+    const float ndc_x = ((px / fb_w) * 2.0F) - 1.0F;
+    const float ndc_y = 1.0F - ((py / fb_h) * 2.0F); /* screen Y-down -> NDC Y-up */
+    vec4 np = {ndc_x, ndc_y, -1.0F, 1.0F};
+    vec4 fp = {ndc_x, ndc_y, 1.0F, 1.0F};
+    vec4 nw;
+    vec4 fw;
+    glm_mat4_mulv(inv, np, nw);
+    glm_mat4_mulv(inv, fp, fw);
+    if (nw[3] == 0.0F || fw[3] == 0.0F) {
+        return false;
+    }
+    vec3 o = {nw[0] / nw[3], nw[1] / nw[3], nw[2] / nw[3]};
+    vec3 fpt = {fw[0] / fw[3], fw[1] / fw[3], fw[2] / fw[3]};
+    vec3 dir;
+    glm_vec3_sub(fpt, o, dir);
+    vec3 center = {0.0F, ROOM_H * 0.5F, 0.0F};
+    const float radius = 1.7F; /* bounding sphere over cube/sphere/capsule */
+    vec3 oc;
+    glm_vec3_sub(o, center, oc);
+    const float a = glm_vec3_dot(dir, dir);
+    const float b = 2.0F * glm_vec3_dot(oc, dir);
+    const float c = glm_vec3_dot(oc, oc) - (radius * radius);
+    const float disc = (b * b) - (4.0F * a * c);
+    if (a <= 0.0F || disc < 0.0F) {
+        return false;
+    }
+    const float s = (-b - sqrtf(disc)) / (2.0F * a); /* nearest root along near->far */
+    if (s < 0.0F) {
+        return false; /* sphere behind the near plane */
+    }
+    *out_dist = s * sqrtf(a); /* ray param -> world distance from the near plane */
+    return true;
+}
 // #endregion
 
 // #region resource binding
@@ -718,6 +763,12 @@ static void frame(void) {
         const nt_pointer_t mouse_phys = g_nt_input.pointers[0];
         nt_ui_begin(s_ctx, fb_w, fb_h, dt, &mouse_phys, 1);
         nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
+        /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel
+         * behind the object can't be clicked through it (game owns the world raycast). */
+        float occl_dist = 0.0F;
+        if (cursor_object_distance(mouse_phys.x, mouse_phys.y, fb_w, fb_h, vp_3d, &occl_dist)) {
+            nt_ui_set_pointer_occlusion(s_ctx, 0, occl_dist);
+        }
         declare_panels();
         nt_ui_end(s_ctx);
 
