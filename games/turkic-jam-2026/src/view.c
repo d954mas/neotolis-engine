@@ -1860,7 +1860,7 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
     static char phasebuf[64];
     static char hubval[8];
     static char mathline[88];
-    static char compareline[64];
+    static char compareline[96];
     static char resline[56];
     const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 3.0F;
     float f = (dur > 0.0F) ? (run->event_t / dur) : 1.0F; /* normalized reveal progress */
@@ -1886,7 +1886,7 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
     if (!show_stat) {
         (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Threat appears", "Сначала: событие и сложность", "Tehlike"));
     } else if (!show_wheel) {
-        (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Your stat answers", "Теперь: твой параметр", "Nitelik"));
+        (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("My stat answers", "Теперь: мой параметр", "Nitelik"));
     } else if (!show_math) {
         (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Wheel is rolling", "Колесо решает множитель", "Cark"));
     } else {
@@ -1912,7 +1912,7 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             event_info_card(g, pick_lang("Difficulty", "Сложность", "Zorluk"), dcbuf, (Clay_Color){202.0F, 114.0F, 78.0F, 255.0F}, 0U);
-            event_info_card(g, pick_lang("Your stat", "Твой параметр", "Nitelik"), show_stat ? statbuf : "?", (Clay_Color){116.0F, 176.0F, 210.0F, 255.0F},
+            event_info_card(g, pick_lang("My stat", "Мой параметр", "Nitelik"), show_stat ? statbuf : "?", (Clay_Color){116.0F, 176.0F, 210.0F, 255.0F},
                             show_stat ? event_stat_icon(g, run->ev_kind) : 0U);
         }
         if (show_wheel) {
@@ -2296,10 +2296,10 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
     float hh = 0.0F;
     bool has_hl = false;
     if (step == 2) {
-        hx = 12.0F;
-        hy = vh - 126.0F;
-        hw = 190.0F;
-        hh = 96.0F;
+        hx = 94.0F;
+        hy = vh - 130.0F;
+        hw = 198.0F;
+        hh = 104.0F;
         has_hl = true;
     } else if (step == 3 || step == 4) {
         hx = 298.0F;
@@ -2371,9 +2371,6 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
             if (action_step && tj_button(g, "ftue_next", pick_lang("Play", "Играть", "Oyna"), 200, 50, TJ_BTN_PRIMARY)) {
                 result = 1;
-            }
-            if (step < 5 && tj_button(g, "ftue_skip", pick_lang("Skip", "Пропустить", "Atla"), 150, 44, TJ_BTN_SECONDARY)) {
-                result = 2;
             }
         }
     }
