@@ -30,7 +30,7 @@ static int s_count;
 /* clang-format off */
 EM_JS(void, tj_js_store, (const char *key, const char *val), {
     try {
-        localStorage.setItem(UTF8ToString(key), UTF8ToString(val));
+        window["localStorage"]["setItem"](UTF8ToString(key), UTF8ToString(val));
     } catch (e) {
     }
 });
@@ -39,7 +39,7 @@ EM_JS(void, tj_js_store, (const char *key, const char *val), {
 EM_JS(char *, tj_js_load, (const char *key), {
     var s = null;
     try {
-        s = localStorage.getItem(UTF8ToString(key));
+        s = window["localStorage"]["getItem"](UTF8ToString(key));
     } catch (e) {
     }
     if (s === null) {
