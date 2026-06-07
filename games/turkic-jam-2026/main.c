@@ -213,6 +213,7 @@ static uint32_t find_atlas_region(const char *name) {
     TJ_FIND_REGION("ui_slot_equipment_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_SLOT_EQUIPMENT_64);
     TJ_FIND_REGION("ui_chip_resource_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CHIP_RESOURCE_64);
     TJ_FIND_REGION("ui_tooltip_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_TOOLTIP_DARK_64);
+    TJ_FIND_REGION("ui_fortune_wheel_384", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_FORTUNE_WHEEL_384);
     TJ_FIND_REGION("die_d4", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D4);
     TJ_FIND_REGION("die_d6", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D6);
     TJ_FIND_REGION("die_d8", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D8);
@@ -393,6 +394,7 @@ static int ep_visual_qa_status(int c, char **v, char *o, int cap, void *u) {
         g.ui_slot_equipment_64,
         g.ui_chip_resource_64,
         g.ui_tooltip_dark_64,
+        g.ui_fortune_wheel_384,
         g.die_d[0],
         g.die_d[1],
         g.die_d[2],
@@ -524,18 +526,28 @@ static void bind_optional_world_regions(void) {
     g.tile_war[0] = find_atlas_region("tile_war_1");
     g.tile_war[1] = find_atlas_region("tile_war_2");
     g.tile_war[2] = find_atlas_region("tile_war_3");
+    g.tile_war[3] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_4.value);
+    g.tile_war[4] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_5.value);
     g.tile_horse[0] = find_atlas_region("tile_horse_1");
     g.tile_horse[1] = find_atlas_region("tile_horse_2");
     g.tile_horse[2] = find_atlas_region("tile_horse_3");
+    g.tile_horse[3] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_4.value);
+    g.tile_horse[4] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_5.value);
     g.tile_steppe[0] = find_atlas_region("tile_steppe_1");
     g.tile_steppe[1] = find_atlas_region("tile_steppe_2");
     g.tile_steppe[2] = find_atlas_region("tile_steppe_3");
+    g.tile_steppe[3] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_4.value);
+    g.tile_steppe[4] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_5.value);
     g.tile_home[0] = find_atlas_region("tile_home_1");
     g.tile_home[1] = find_atlas_region("tile_home_2");
     g.tile_home[2] = find_atlas_region("tile_home_3");
+    g.tile_home[3] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_4.value);
+    g.tile_home[4] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_5.value);
     g.tile_water[0] = find_atlas_region("tile_water_1");
     g.tile_water[1] = find_atlas_region("tile_water_2");
     g.tile_water[2] = find_atlas_region("tile_water_3");
+    g.tile_water[3] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_4.value);
+    g.tile_water[4] = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_5.value);
     g.boss_fat = find_atlas_region("boss_fat");
     g.boss_swift = find_atlas_region("boss_swift");
     g.boss_fierce = find_atlas_region("boss_fierce");
@@ -565,6 +577,7 @@ static void bind_optional_world_regions(void) {
     g.ui_slot_equipment_64 = find_atlas_region("ui_slot_equipment_64");
     g.ui_chip_resource_64 = find_atlas_region("ui_chip_resource_64");
     g.ui_tooltip_dark_64 = find_atlas_region("ui_tooltip_dark_64");
+    g.ui_fortune_wheel_384 = find_atlas_region("ui_fortune_wheel_384");
     g.die_d[0] = find_atlas_region("die_d4");
     g.die_d[1] = find_atlas_region("die_d6");
     g.die_d[2] = find_atlas_region("die_d8");
@@ -705,6 +718,7 @@ static void bind_optional_world_regions(void) {
         g.ui_slot_equipment_64,
         g.ui_chip_resource_64,
         g.ui_tooltip_dark_64,
+        g.ui_fortune_wheel_384,
         g.die_d[0],
         g.die_d[1],
         g.die_d[2],
@@ -1105,7 +1119,7 @@ int main(int argc, char *argv[]) {
 
     g_nt_window.width = 1280;
     g_nt_window.height = 720;
-    g_nt_window.title = "Кочевая петля";
+    g_nt_window.title = "Nomad Loop"; /* OS window title; in-game title is localized (T_TITLE) */
     nt_window_init();
     nt_input_init();
 
