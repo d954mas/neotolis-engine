@@ -2201,11 +2201,22 @@ void tj_view_field_tooltip(game_ctx_t *g, const tj_run_t *run) {
     static char eff[40];
     tile_effect_str(t, eff, sizeof eff);
     (void)snprintf(nm, sizeof nm, "%s  %s%d", g_config.tiles[t].name, pick_lang("lv.", "ур.", "sv."), g_config.tiles[t].tier);
+    /* Edge-aware: in the right half grow toward centre (off the hero panel); near the bottom grow up
+       (off the hand). The cursor anchor flips so the box never bleeds onto the side panels. */
+    const bool flip_x = g->ptr_x > g->logical_w * 0.5F;
+    const bool flip_y = g->ptr_y > g->logical_h * 0.58F;
+    Clay_FloatingAttachPointType ap = CLAY_ATTACH_POINT_LEFT_TOP;
+    if (flip_x && flip_y) {
+        ap = CLAY_ATTACH_POINT_RIGHT_BOTTOM;
+    } else if (flip_x) {
+        ap = CLAY_ATTACH_POINT_RIGHT_TOP;
+    } else if (flip_y) {
+        ap = CLAY_ATTACH_POINT_LEFT_BOTTOM;
+    }
+    const float ox = flip_x ? (g->ptr_x - 18.0F) : (g->ptr_x + 18.0F);
+    const float oy = flip_y ? (g->ptr_y - 18.0F) : (g->ptr_y + 18.0F);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .padding = {10, 10, 8, 8}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3},
-          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
-                       .offset = {g->ptr_x + 18.0F, g->ptr_y + 18.0F},
-                       .zIndex = 45},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = ap, .parent = CLAY_ATTACH_POINT_LEFT_TOP}, .offset = {ox, oy}, .zIndex = 45},
           .backgroundColor = {28.0F, 22.0F, 14.0F, 242.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
           .border = {.color = {150.0F, 116.0F, 54.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
