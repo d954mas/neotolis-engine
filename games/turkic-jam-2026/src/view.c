@@ -51,6 +51,7 @@ static const nt_ui_label_style_t s_die = {.font_id = 0, .font_size = 44, .color 
 /* Dice-event "wheel of fate" window. */
 static const nt_ui_label_style_t s_ev_title = {.font_id = 0, .font_size = 28, .color = {240.0F, 212.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_ev_check = {.font_id = 0, .font_size = 18, .color = {226.0F, 196.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_ev_value = {.font_id = 0, .font_size = 24, .color = {248.0F, 236.0F, 204.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_wheel_chip = {.font_id = 0, .font_size = 15, .color = {210.0F, 196.0F, 166.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_wheel_chip_sel = {.font_id = 0, .font_size = 16, .color = {32.0F, 24.0F, 12.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_wheel_hub = {.font_id = 0, .font_size = 32, .color = {245.0F, 232.0F, 200.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
@@ -479,13 +480,13 @@ static void tile_effect_str(int tile, char *out, size_t cap) {
     }
     const tj_tile_def_t *t = &g_config.tiles[tile];
     if (t->boost_stat == TJ_STAT_BODY) {
-        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Force", "Сила", "Guc"));
+        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Sabre", "Сабля", "Kilic"));
     } else if (t->boost_stat == TJ_STAT_MIND) {
-        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Speed", "Скорость", "Hiz"));
+        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Horse", "Конь", "At"));
     } else if (t->boost_stat == TJ_STAT_SPIRIT) {
-        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Vigor", "Выносл.", "Daya"));
+        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Amulet", "Оберег", "Tumar"));
     } else if (t->supplies > 0) {
-        (void)snprintf(out, cap, "+%d %s", t->supplies, pick_lang("supplies/lap", "припас/круг", "erzak/tur"));
+        (void)snprintf(out, cap, "+%d %s", t->supplies, pick_lang("to clan", "в род", "soya")); /* paid to the aul at death, not per circle */
     } else if (t->stamina_restore > 0) {
         (void)snprintf(out, cap, "+%d %s", t->stamina_restore, pick_lang("HP/lap", "ХП/круг", "CAN/tur"));
     } else {
@@ -1716,16 +1717,18 @@ static float event_spin_amount(float f, int target, int die) {
 }
 
 /* Post-spin math + outcome lines. ev_roll 1 = miss, max = win, else stat x mult vs DC. */
-static void event_result_text(const tj_run_t *run, int die, const char *statname, char *mathline, size_t ml, char *resline, size_t rl) {
+static void event_result_text(const tj_run_t *run, int die, const char *statname, char *mathline, size_t ml, char *compareline, size_t cl, char *resline, size_t rl) {
     const float mult = 1.0F + (g_config.event_dice_coeff * (float)run->ev_roll);
-    const int eff = (int)((float)run->ev_stat * mult);
+    int eff = (int)((float)run->ev_stat * mult);
     if (run->ev_roll <= 1) {
-        (void)snprintf(mathline, ml, "%s", pick_lang("Natural 1 - miss", "Выпала 1 - провал", "Dogal 1 - iska"));
+        eff = 0;
+        (void)snprintf(mathline, ml, "%s %d * 0 = 0", statname, run->ev_stat);
     } else if (run->ev_roll >= die) {
-        (void)snprintf(mathline, ml, "%s", pick_lang("Maximum - hit!", "Максимум - успех!", "Maksimum!"));
+        (void)snprintf(mathline, ml, "%s %d * x%g = %d", statname, run->ev_stat, (double)mult, eff);
     } else {
-        (void)snprintf(mathline, ml, "%s %d  x%g  = %d   (DC %d)", statname, run->ev_stat, (double)mult, eff, run->ev_dc);
+        (void)snprintf(mathline, ml, "%s %d * x%g = %d", statname, run->ev_stat, (double)mult, eff);
     }
+    (void)snprintf(compareline, cl, "%s %d %s %s %d", pick_lang("Total", "Итог", "Toplam"), eff, run->ev_pass ? ">" : "<", pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     if (run->ev_pass) {
         (void)snprintf(resline, rl, "%s   +%d", pick_lang("SUCCESS", "УСПЕХ", "BASARI"), run->ev_gain);
     } else {
@@ -1753,7 +1756,7 @@ static void event_wheel_chip(game_ctx_t *g, int roll, int die, bool sel, float d
         bg = (Clay_Color){46.0F, 82.0F, 48.0F, 240.0F};
     }
     const Clay_Color bord = sel ? (Clay_Color){250.0F, 230.0F, 170.0F, 255.0F} : (Clay_Color){92.0F, 72.0F, 42.0F, 200.0F};
-    const float csz = sel ? 50.0F : 42.0F;
+    const float csz = sel ? 44.0F : 36.0F;
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {dx, dy}, .zIndex = 62},
           .layout = {.sizing = {CLAY_SIZING_FIXED(csz), CLAY_SIZING_FIXED(csz)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = bg,
@@ -1766,8 +1769,8 @@ static void event_wheel_chip(game_ctx_t *g, int roll, int die, bool sel, float d
 /* The fate wheel: a disc with the multiplier faces around the rim (rotated by
  * `spin`), the tested stat in the hub, and a fixed pointer at the top. */
 static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchips, const char *hubval, char chiptext[][16]) {
-    const float wheel = 250.0F;
-    const float ring_r = 96.0F;
+    const float wheel = 214.0F;
+    const float ring_r = 80.0F;
     const float step = 6.2831853F / (float)die;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(wheel), CLAY_SIZING_FIXED(wheel)}},
           .backgroundColor = {26.0F, 20.0F, 13.0F, 255.0F},
@@ -1779,16 +1782,16 @@ static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchi
         }
         /* hub: the stat under test, shown from the first beat */
         CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 63},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(80.0F), CLAY_SIZING_FIXED(80.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(68.0F), CLAY_SIZING_FIXED(68.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = {62.0F, 46.0F, 28.0F, 255.0F},
-              .cornerRadius = CLAY_CORNER_RADIUS(40.0F),
+              .cornerRadius = CLAY_CORNER_RADIUS(34.0F),
               .border = {.color = {150.0F, 112.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hubval, &s_wheel_hub);
         }
         /* fixed pointer near 12 o'clock — the face resting here is the result */
         CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
                            .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
-                           .offset = {0.0F, -(ring_r + 20.0F)},
+                           .offset = {0.0F, -(ring_r + 18.0F)},
                            .zIndex = 64},
               .layout = {.sizing = {CLAY_SIZING_FIXED(16.0F), CLAY_SIZING_FIXED(16.0F)}},
               .backgroundColor = {250.0F, 220.0F, 120.0F, 255.0F},
@@ -1796,33 +1799,105 @@ static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchi
     }
 }
 
+static void event_step(game_ctx_t *g, const char *text, bool active, bool done) {
+    nt_ui_label_style_t st = s_wheel_chip;
+    st.font_size = 13;
+    st.color = active ? (Clay_Color){42.0F, 30.0F, 14.0F, 255.0F} : (Clay_Color){218.0F, 202.0F, 168.0F, 255.0F};
+    Clay_Color bg = done ? (Clay_Color){72.0F, 104.0F, 56.0F, 235.0F} : (Clay_Color){54.0F, 42.0F, 28.0F, 225.0F};
+    if (active) {
+        bg = (Clay_Color){226.0F, 174.0F, 78.0F, 255.0F};
+    }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(82.0F), CLAY_SIZING_FIXED(26.0F)}, .padding = {5, 5, 2, 2}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(5.0F),
+          .border = {.color = {96.0F, 72.0F, 38.0F, 210.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &st);
+    }
+}
+
+static void event_info_card(game_ctx_t *g, const char *label, const char *value, Clay_Color accent) {
+    nt_ui_label_style_t lbl = s_dim;
+    lbl.font_size = 14;
+    nt_ui_label_style_t val = s_ev_value;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(136.0F), CLAY_SIZING_FIT(0)},
+                     .padding = CLAY_PADDING_ALL(8),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 3,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {48.0F, 36.0F, 24.0F, 245.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
+          .border = {.color = accent, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), label, &lbl);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), value, &val);
+    }
+}
+
 static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
     static char chiptext[24][16];
-    static char checkbuf[48];
+    static char dcbuf[32];
+    static char statbuf[40];
+    static char rollbuf[32];
+    static char phasebuf[64];
     static char hubval[8];
-    static char mathline[64];
-    static char resline[48];
+    static char mathline[88];
+    static char resline[56];
     const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 3.0F;
-    const float f = (dur > 0.0F) ? (run->event_t / dur) : 1.0F; /* normalized reveal progress */
+    float f = (dur > 0.0F) ? (run->event_t / dur) : 1.0F; /* normalized reveal progress */
+    if (f > 1.0F) {
+        f = 1.0F;
+    }
     const int die = (run->ev_die > 1) ? run->ev_die : 10;
     const int nchips = (die < 24) ? die : 24;
     const int target = ((run->ev_roll >= 1) ? run->ev_roll : 1) - 1; /* 0-based landing face */
     const float spin = event_spin_amount(f, target, die);
-    const int hi_idx = (f >= 0.66F) ? target : -1; /* the winner highlights once it settles */
+    const int hi_idx = (f >= 0.74F) ? target : -1; /* the winner highlights once it settles */
+    const bool show_stat = f >= 0.22F;
+    const bool show_wheel = f >= 0.40F;
     const bool show_math = f >= 0.78F;
     const bool show_res = f >= 0.90F;
     const char *title = NULL;
     const char *desc = NULL;
     const char *statname = NULL;
     event_strings(run->ev_kind, &title, &desc, &statname);
-    (void)snprintf(checkbuf, sizeof checkbuf, "%s: %s", pick_lang("Test", "Проверка", "Sinav"), statname);
+    statname = run->ev_statname[0] ? run->ev_statname : statname;
+    (void)snprintf(dcbuf, sizeof dcbuf, "%d", run->ev_dc);
+    (void)snprintf(statbuf, sizeof statbuf, "%s %d", statname, run->ev_stat);
+    (void)snprintf(rollbuf, sizeof rollbuf, "d%d", die);
+    if (!show_stat) {
+        (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Threat appears", "Сначала: событие и сложность", "Tehlike"));
+    } else if (!show_wheel) {
+        (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Your stat answers", "Теперь: твой параметр", "Nitelik"));
+    } else if (!show_math) {
+        (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Wheel is rolling", "Колесо решает множитель", "Cark"));
+    } else {
+        (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Compare and resolve", "Сравнение и итог", "Sonuc"));
+    }
     (void)snprintf(hubval, sizeof hubval, "%d", run->ev_stat);
     event_result_text(run, die, statname, mathline, sizeof mathline, resline, sizeof resline);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300.0F), CLAY_SIZING_FIT(0)},
+                     .padding = CLAY_PADDING_ALL(10),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 8,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = {48.0F, 34.0F, 22.0F, 255.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(12.0F),
+          .border = {.color = {126.0F, 88.0F, 40.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), title, &s_ev_title);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), desc, &s_dim);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), checkbuf, &s_ev_check);
-        event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), phasebuf, &s_ev_check);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            event_step(g, pick_lang("Event", "Событие", "Olay"), !show_stat, true);
+            event_step(g, pick_lang("Stat", "Параметр", "Nitelik"), show_stat && !show_wheel, show_wheel);
+            event_step(g, pick_lang("Wheel", "Колесо", "Cark"), show_wheel && !show_math, show_math);
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            event_info_card(g, pick_lang("Difficulty", "Сложность", "Zorluk"), dcbuf, (Clay_Color){202.0F, 114.0F, 78.0F, 255.0F});
+            event_info_card(g, pick_lang("Your stat", "Твой параметр", "Nitelik"), show_stat ? statbuf : "?", (Clay_Color){116.0F, 176.0F, 210.0F, 255.0F});
+        }
+        event_info_card(g, pick_lang("Wheel die", "Колесо", "Cark"), show_wheel ? rollbuf : "?", (Clay_Color){218.0F, 170.0F, 76.0F, 255.0F});
+        if (show_wheel) {
+            event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
+        }
         if (show_math) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
         }
@@ -2168,14 +2243,13 @@ bool tj_view_help_modal(game_ctx_t *g) {
               .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
               .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("How to play", "Как играть", "Nasil oynanir"), &s_panel_title);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The hero walks the ring and fights on his own.", "Герой идёт по кольцу и сам сражается.", "Kahraman kendi savasir."),
-                        &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The batyr walks the loop and fights on his own.", "Батыр идёт по кругу и сам сражается.", "Batır kendi savasir."), &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
                         pick_lang("- Pouch: draw a card, drag it onto a green field cell", "- «Мешочек»: вытяни карту и тяни её на зелёную клетку поля", "- torba"), &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
                         pick_lang("- 3 alike in a row merge into a stronger one (upgrades you)", "- 3 одинаковых рядом сливаются в сильнее (качают героя)", "- 3 ayni"), &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
-                        pick_lang("- Events are dice rolls; a boss waits at the end of each lap", "- События — бросок кубика; в конце круга — босс", "- olaylar"), &s_stat);
+                        pick_lang("- Events spin a wheel of fate; a boss waits at the end of each lap", "- События — колесо судьбы; в конце круга — босс", "- olaylar"), &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("- On death: upgrade the aul on the right, then a new run", "- Умер -> прокачай аул справа -> новый забег", "- aul"),
                         &s_stat);
             close = tj_button(g, "help_close", pick_lang("Got it", "Понятно", "Tamam"), 200, 54, TJ_BTN_PRIMARY);
@@ -2194,19 +2268,19 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
     const float vw = g->logical_w;
     const float vh = g->logical_h;
 
-    /* Pulsing ring on the target element (pouch for step 1, field for 2-3). */
+    /* Pulsing ring on the target element (pouch for step 2 = pull, field for 3-4 = place/merge). */
     float hx = 0.0F;
     float hy = 0.0F;
     float hw = 0.0F;
     float hh = 0.0F;
     bool has_hl = false;
-    if (step == 1) {
+    if (step == 2) {
         hx = 12.0F;
         hy = vh - 126.0F;
         hw = 190.0F;
         hh = 96.0F;
         has_hl = true;
-    } else if (step == 2 || step == 3) {
+    } else if (step == 3 || step == 4) {
         hx = 298.0F;
         hy = 64.0F;
         hw = vw - 596.0F;
@@ -2228,35 +2302,40 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
 
     const char *body;
     switch (step) {
-    case 0:
-        body = pick_lang("Your hero walks the steppe and fights on his own. Your job: build the field and make him stronger.",
-                         "Твой герой сам идёт по степи и сражается. Твоя задача — строить поле и усиливать его.", "Kahraman kendi yurur ve savasir. Senin isin: tarlayi kur.");
-        break;
     case 1:
-        body = pick_lang("Tap the Pouch (bottom-left) to draw a card.", "Нажми «Мешочек» внизу слева — вытяни карту.", "Sol alttaki torbaya bas - kart cek.");
+        body = pick_lang("The batyr walks and fights on his own. Win a fight to earn your first Pouch.", "Батыр идёт и сам бьётся. Победи в бою — добудь первый мешочек.",
+                         "Batır kendi savasir. Ilk torbayı kazan.");
         break;
     case 2:
-        body = pick_lang("Drag the card onto a green field cell.", "Перетащи карту на зелёную клетку поля.", "Karti yesil hucreye surukle.");
+        body = pick_lang("Victory! The Pouch holds a tile-card. Tap the Pouch (bottom-left) to draw it.", "Победа! В мешочке — карта-тайл. Нажми «Мешочек» внизу слева и вытяни её.",
+                         "Zafer! Torbaya bas, kart cek.");
         break;
     case 3:
-        body = pick_lang("Place 3 alike in a row - they merge and raise the hero's stat.", "Поставь 3 одинаковых рядом — они сольются и поднимут стат героя.",
-                         "3 ayni yan yana - birlesip kahramani guclendirir.");
+        body = pick_lang("Drag the tile onto a free green field cell.", "Перетащи тайл на свободную зелёную клетку поля.", "Karti yesil hucreye surukle.");
+        break;
+    case 4:
+        body = pick_lang("Place 3 of a kind in a row - they merge and raise one of the batyr's stats.", "Поставь 3 одинаковых рядом — они сольются и поднимут стат батыра.",
+                         "3 ayni yan yana - birlesir, guclendirir.");
         break;
     default:
-        body = pick_lang("Done! Survive, clear laps, beat bosses. If you fall, upgrade the aul and send a new hero. Good luck!",
-                         "Готово! Выживай, проходи круги, бей боссов. Погиб — прокачай аул и пошли нового. Удачи!", "Hazir! Hayatta kal, tur gec, boss yen. Iyi sanslar!");
+        body = pick_lang("Done! Survive, clear laps, beat bosses. If you fall, upgrade the aul and send a new batyr. Good luck!",
+                         "Готово! Выживай, проходи круги, бей боссов. Погиб — прокачай аул и пошли нового батыра. Удачи!", "Hazir! Hayatta kal, tur gec, boss yen. Iyi sanslar!");
         break;
     }
 
     static char stepnum[24];
-    int shown_step = step; /* pull/place/merge = 1..3 (intro is a separate stage, not numbered) */
-    if (shown_step < 1) {
-        shown_step = 1;
-    } else if (shown_step > 3) {
-        shown_step = 3;
+    if (step == 1) {
+        (void)snprintf(stepnum, sizeof stepnum, "%s", pick_lang("Combat", "Бой", "Savas"));
+    } else {
+        int shown_step = step - 1; /* pull/place/merge = 1..3 */
+        if (shown_step < 1) {
+            shown_step = 1;
+        } else if (shown_step > 3) {
+            shown_step = 3;
+        }
+        (void)snprintf(stepnum, sizeof stepnum, "%s %d/3", pick_lang("Tutorial", "Обучение", "Egitim"), shown_step);
     }
-    (void)snprintf(stepnum, sizeof stepnum, "%s %d/3", pick_lang("Tutorial", "Обучение", "Egitim"), shown_step);
-    const bool action_step = (step == 0 || step >= 4);
+    const bool action_step = (step >= 5);
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_TOP}, .offset = {0.0F, 74.0F}, .zIndex = 82},
           .layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)},
                      .padding = CLAY_PADDING_ALL(20),
@@ -2269,10 +2348,10 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), stepnum, &s_panel_title);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), body, &s_stat);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
-            if (action_step && tj_button(g, "ftue_next", (step >= 4) ? pick_lang("Play >", "Играть ▶", "Oyna ▶") : pick_lang("Next >", "Дальше ▶", "Ileri ▶"), 200, 50, TJ_BTN_PRIMARY)) {
+            if (action_step && tj_button(g, "ftue_next", pick_lang("Play", "Играть", "Oyna"), 200, 50, TJ_BTN_PRIMARY)) {
                 result = 1;
             }
-            if (step < 4 && tj_button(g, "ftue_skip", pick_lang("Skip", "Пропустить", "Atla"), 150, 44, TJ_BTN_SECONDARY)) {
+            if (step < 5 && tj_button(g, "ftue_skip", pick_lang("Skip", "Пропустить", "Atla"), 150, 44, TJ_BTN_SECONDARY)) {
                 result = 2;
             }
         }
