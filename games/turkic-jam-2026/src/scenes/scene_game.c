@@ -34,7 +34,7 @@ static int s_drag_card = -1;       /* hand card being dragged onto the field (-1
 static int s_prev_merges = 0;      /* edge-detect new merges this frame -> screen-shake punch */
 static bool s_help_open = false;   /* "?" how-to modal toggled open */
 static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
-static int s_ftue_step = 0;        /* 0 intro, 1 watch (walk+fight to 1st pouch), 2 pull, 3 place, 4 merge, 5 done */
+static int s_ftue_step = 0;        /* 0 intro, 1 watch (walk+fight to 1st pouch), 2 pull, 3 place+merge (2 seeded), 4 done */
 static float s_ftue_t = 0.0F;      /* tutorial animation clock (highlight pulse) */
 static float s_intro_t = 0.0F;     /* first-run intro clock: dawn reveal + send-the-wayfarer cues */
 static bool s_intro_black = false; /* first-run: holding the black-screen open until the player taps */
@@ -214,16 +214,6 @@ static void ftue_finish(void) {
     save_flush();
 }
 
-static bool field_has_any_tile(void) {
-    const int n = s_run.grid_cols * s_run.grid_rows;
-    for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
-        if (s_run.field_tile[i] >= 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static void on_enter(game_ctx_t *g) {
 #if NT_DEVAPI_ENABLED
     static bool s_ep_registered = false;
@@ -330,6 +320,43 @@ static void handle_map_input(game_ctx_t *g, float dt) {
 
 /* First-run tutorial clocks + state-driven step gates (action steps advance on the
  * real action, not a timer). Intro: dawn reveal -> send -> walkout, then the pull lesson. */
+/* FTUE merge lesson: pre-place 2 matching tiles (war_1) so a single guided drag completes a
+ * 3-in-a-row, teaching place + merge in one move. Picks a horizontal buildable triple nearest the
+ * grid centre (on-screen without panning); the gap is highlighted for the player. */
+static void ftue_seed_merge(void) {
+    const int war = tj_config_tile_index("war_1");
+    if (war < 0) {
+        return;
+    }
+    const int cols = s_run.grid_cols;
+    const int rows = s_run.grid_rows;
+    int bx = -1;
+    int by = -1;
+    int bd = 1 << 30;
+    for (int y = 0; y < rows; y++) {
+        for (int x = 0; x + 2 < cols; x++) {
+            const int i0 = (y * cols) + x;
+            if (tj_run_cell_buildable(&s_run, x, y) && tj_run_cell_buildable(&s_run, x + 1, y) && tj_run_cell_buildable(&s_run, x + 2, y) && s_run.field_tile[i0] < 0 && s_run.field_tile[i0 + 1] < 0 &&
+                s_run.field_tile[i0 + 2] < 0) {
+                const int dx = (x + 1) - (cols / 2);
+                const int dy = y - (rows / 2);
+                const int d = (dx * dx) + (dy * dy);
+                if (d < bd) {
+                    bd = d;
+                    bx = x;
+                    by = y;
+                }
+            }
+        }
+    }
+    if (bx < 0) {
+        return;
+    }
+    s_run.field_tile[(by * cols) + bx] = war;
+    s_run.field_tile[(by * cols) + bx + 1] = war;
+    tj_view_set_ftue_gap(bx + 2, by); /* the cell the player fills to complete the trio */
+}
+
 static void ftue_step_tick(float dt) {
     if (!s_ftue_active) {
         return;
@@ -352,11 +379,11 @@ static void ftue_step_tick(float dt) {
     } else if (s_ftue_step == 1 && s_run.pouch > 0) {
         s_ftue_step = 2; /* first pouch earned in combat -> teach the pull */
     } else if (s_ftue_step == 2 && s_run.hand_count > 0) {
-        s_ftue_step = 3;
-    } else if (s_ftue_step == 3 && field_has_any_tile()) {
-        s_ftue_step = 4;
-    } else if (s_ftue_step == 4 && s_run.merges_done > 0) {
-        s_ftue_step = 5;
+        ftue_seed_merge();
+        s_ftue_step = 3; /* pull done -> place+merge lesson (2 tiles pre-placed, drag 1 to complete) */
+    } else if (s_ftue_step == 3 && s_run.merges_done > 0) {
+        tj_view_set_ftue_gap(-1, -1);
+        s_ftue_step = 4; /* the guided drag merged -> tutorial complete */
     }
 }
 

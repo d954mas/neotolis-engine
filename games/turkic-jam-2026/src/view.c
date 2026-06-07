@@ -1013,6 +1013,25 @@ static void cell_overlay(game_ctx_t *g, uint32_t region, Clay_Color fallback, fl
 /* Placement cue, shown ONLY while a card is being dragged (not just held): a faint green
  * frame on every buildable cell, a stronger cue under the cursor, and the gold merge
  * telegraph. Dragging is the moment "where can I build?" matters; otherwise it's noise. */
+static int s_ftue_gap_gx = -1; /* FTUE merge lesson: the cell the player must fill (-1 = none) */
+static int s_ftue_gap_gy = -1;
+void tj_view_set_ftue_gap(int gx, int gy) {
+    s_ftue_gap_gx = gx;
+    s_ftue_gap_gy = gy;
+}
+
+/* Pulsing gold overlay on the FTUE merge gap, drawn in the world pass so it tracks the camera. */
+static void draw_ftue_gap(game_ctx_t *g, const tj_run_t *run, float pitch) {
+    if (s_ftue_gap_gx < 0 || s_ftue_gap_gy < 0) {
+        return;
+    }
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const float pulse = 0.5F + (0.5F * sinf(g->anim_t * 4.5F));
+    const Clay_Color gold = {255.0F, 214.0F, 110.0F, 150.0F + (95.0F * pulse)};
+    cell_overlay(g, g->ui_hover_cell_overlay_128, gold, pitch, grid_x(s_ftue_gap_gx, cols, pitch), grid_y(s_ftue_gap_gy, rows, pitch));
+}
+
 static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     if (g->drag_tile < 0) {
         return;
@@ -1021,7 +1040,7 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     const int rows = run->grid_rows;
     for (int gy = 0; gy < rows; gy++) {
         for (int gx = 0; gx < cols; gx++) {
-            if (!is_build_cell(run, gx, gy) || !cell_in_view(gx, gy, cols, rows, pitch)) {
+            if (!is_build_cell(run, gx, gy)) { /* highlight every buildable cell; map viewport clips off-screen */
                 continue;
             }
             cell_overlay(g, g->ui_valid_cell_overlay_128, (Clay_Color){150.0F, 230.0F, 160.0F, 90.0F}, pitch, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
@@ -1326,6 +1345,7 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     draw_global(g, run, pitch, tile);
     draw_field(g, run, pitch, tile);
     draw_build_hints(g, run, pitch);
+    draw_ftue_gap(g, run, pitch);
     draw_tamga(g, run, pitch);
     draw_hero(g, run, pitch);
     if (g->intro_active) {
@@ -2301,11 +2321,12 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
         hw = 198.0F;
         hh = 104.0F;
         has_hl = true;
-    } else if (step == 3 || step == 4) {
-        hx = 298.0F;
-        hy = 64.0F;
-        hw = vw - 596.0F;
-        hh = vh - 220.0F;
+    } else if (step == 3) {
+        const float cardx = fmaxf((vw - 100.0F) * 0.5F, 292.0F); /* ring the drawn card (fan_base for 1 card) */
+        hx = cardx - 6.0F;
+        hy = vh - 170.0F;
+        hw = 112.0F;
+        hh = 136.0F;
         has_hl = true;
     }
     if (has_hl) {
@@ -2346,11 +2367,8 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
                          "Zafer! Torbaya bas, kart cek.");
         break;
     case 3:
-        body = pick_lang("Drag the tile onto a free green field cell.", "Перетащи тайл на свободную зелёную клетку поля.", "Karti yesil hucreye surukle.");
-        break;
-    case 4:
-        body = pick_lang("Place 3 of a kind in a row - they merge and raise one of the batyr's stats.", "Поставь 3 одинаковых рядом — они сольются и поднимут стат батыра.",
-                         "3 ayni yan yana - birlesir, guclendirir.");
+        body = pick_lang("Drag the tile onto the glowing cell - makes 3 in a row, they merge and raise a stat.",
+                         "Перетащи тайл на подсвеченную клетку — выйдет 3 в ряд, они сольются и поднимут стат батыра.", "Karti parlayan hucreye surukle.");
         break;
     default:
         body = pick_lang("Done! Survive, clear laps, beat bosses. If you fall, upgrade the aul and send a new batyr. Good luck!",
@@ -2362,15 +2380,15 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
     if (step == 1) {
         (void)snprintf(stepnum, sizeof stepnum, "%s", pick_lang("Combat", "Бой", "Savas"));
     } else {
-        int shown_step = step - 1; /* pull/place/merge = 1..3 */
+        int shown_step = step - 1; /* pull = 1, place+merge = 2 */
         if (shown_step < 1) {
             shown_step = 1;
-        } else if (shown_step > 3) {
-            shown_step = 3;
+        } else if (shown_step > 2) {
+            shown_step = 2;
         }
-        (void)snprintf(stepnum, sizeof stepnum, "%s %d/3", pick_lang("Tutorial", "Обучение", "Egitim"), shown_step);
+        (void)snprintf(stepnum, sizeof stepnum, "%s %d/2", pick_lang("Tutorial", "Обучение", "Egitim"), shown_step);
     }
-    const bool action_step = (step >= 5);
+    const bool action_step = (step >= 4);
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_TOP}, .offset = {0.0F, 74.0F}, .zIndex = 82},
           .layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)},
                      .padding = CLAY_PADDING_ALL(20),
