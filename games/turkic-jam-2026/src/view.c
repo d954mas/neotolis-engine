@@ -1612,6 +1612,30 @@ void tj_view_intro_banner(game_ctx_t *g, const char *text) {
 /* First-run black-screen open: full black, the opening lines fade in, then a "tap to
  * continue" prompt + finger. The player's tap unlocks web audio (main.c resume) and
  * starts the dawn reveal. t = seconds since the screen appeared. */
+/* Warm sand grains drifting on the wind across the black screen (procedural, no asset:
+ * tinted rounded Clay rects, deterministic drift by index + time). */
+static void draw_intro_sand(game_ctx_t *g, float t) {
+    const float vw = g->logical_w;
+    const float vh = g->logical_h;
+    for (int i = 0; i < 30; i++) {
+        const float bx = (float)((i * 131) % 1000) / 1000.0F * vw;
+        const float by = (float)((i * 197) % 1000) / 1000.0F * vh;
+        const float spd = 16.0F + ((float)(i % 5) * 13.0F); /* wind: grains drift rightward */
+        const float gx = fmodf(bx + (t * spd), vw + 6.0F) - 3.0F;
+        const float gy = by + (sinf((t * 0.6F) + (float)i) * 9.0F);
+        const float sz = 2.0F + (float)(i % 3);
+        const float al = 28.0F + ((float)(i % 4) * 30.0F);
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                           .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+                           .offset = {gx, gy},
+                           .zIndex = 89,
+                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
+              .backgroundColor = {206.0F, 184.0F, 142.0F, al},
+              .cornerRadius = CLAY_CORNER_RADIUS(sz * 0.5F)}) {}
+    }
+}
+
 void tj_view_intro_black(game_ctx_t *g, float t) {
     const float a1 = (t < 0.4F) ? (t / 0.4F) : 1.0F;                                /* "следы" fades in 0..0.4 */
     const float a2 = (t < 1.0F) ? 0.0F : ((t < 1.6F) ? ((t - 1.0F) / 0.6F) : 1.0F); /* "путника" 1.0..1.6 */
@@ -1621,8 +1645,14 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
                        .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
                        .zIndex = 88,
                        .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {8.0F, 6.0F, 4.0F, 255.0F}}) {
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+          .backgroundColor = {8.0F, 6.0F, 4.0F, 255.0F}}) {}
+    draw_intro_sand(g, t); /* drifting sand on the wind */
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                       .zIndex = 90,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Sand erases every footprint.", "Песок стирает следы.", "Kum izleri siler."), &l1);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The path awaits its first wayfarer.", "Путь ждёт первого путника.", "Yol ilk yolcusunu bekliyor."), &l2);
     }
@@ -1634,7 +1664,7 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_BOTTOM, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
                        .offset = {0.0F, -96.0F},
-                       .zIndex = 89,
+                       .zIndex = 91,
                        .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
           .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("tap to continue", "нажми, чтобы продолжить", "devam icin dokun"), &hint);
@@ -1647,7 +1677,7 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
             .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                          .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
                          .offset = {120.0F, -88.0F + bob},
-                         .zIndex = 90,
+                         .zIndex = 92,
                          .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
         };
         nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, g->ui_finger_pointer_128, &fimg, &fdecl);
