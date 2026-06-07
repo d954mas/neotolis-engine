@@ -155,7 +155,7 @@ static void set_defaults(void) {
     g_config.event_dc_per_circle = 2;
     g_config.event_pass_supplies = 3;
     g_config.event_fail_hp = 2;
-    g_config.event_reveal_seconds = 1.5F;
+    g_config.event_reveal_seconds = 5.0F;
     g_config.arch_fat_hp_pct = 200;
     g_config.arch_fast_interval_pct = 50;
     g_config.arch_fast_hp_pct = 70;
@@ -384,15 +384,17 @@ static void parse_log_events(const char *path) {
         if (*t == '\0' || *t == '#') {
             continue;
         }
-        char *fld[4];
-        int n = split_pipe(t, fld, 4);
+        char *fld[5];
+        int n = split_pipe(t, fld, 5);
         if (n < 3 || g_config.log_event_count >= TJ_MAX_LOG_EVENTS) {
             continue;
         }
         tj_log_event_t *e = &g_config.log_events[g_config.log_event_count++];
         (void)snprintf(e->id, sizeof e->id, "%s", fld[0]);
         (void)snprintf(e->tone, sizeof e->tone, "%s", fld[1]);
-        (void)snprintf(e->tmpl, sizeof e->tmpl, "%s", fld[2]);
+        (void)snprintf(e->tmpl[0], sizeof e->tmpl[0], "%s", fld[2]);                     /* EN */
+        (void)snprintf(e->tmpl[1], sizeof e->tmpl[1], "%s", (n >= 4) ? fld[3] : fld[2]); /* RU */
+        (void)snprintf(e->tmpl[2], sizeof e->tmpl[2], "%s", (n >= 5) ? fld[4] : fld[2]); /* TR */
     }
     (void)fclose(f);
 }

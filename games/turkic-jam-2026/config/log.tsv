@@ -2,16 +2,16 @@
 # tone: info | gain | success | danger | card | circle | death | memory
 # placeholders: {tile} {stat} {diff} {supplies} {wisdom} {glory} {stamina} {circle} {hero}
 #
-# event_id | tone | template
-run_start     | info    | {hero} выходит из аула. Костер остается за спиной.
-resource_gain | gain    | Путь дает роду: Запасы +{supplies}, Мудрость +{wisdom}, Слава +{glory}.
-tile_safe     | gain    | {tile}: путник находит помощь. Силы +{stamina}.
-check_success | success | {tile}: проверка {stat} пройдена. Род получает Славу +{glory}.
-check_fail    | danger  | {tile}: проверка {stat} провалена. Силы {stamina}.
-card_gain     | card    | Песок открывает знак: {tile}.
-card_placed   | card    | Игрок оставляет след в пустыне: {tile}.
-lap_complete  | circle  | Круг {circle} завершен. Аул снова впереди.
-death         | death   | Силы иссякли. Путь окончен, но имя осталось.
-tamga_spawn   | memory  | На песке проступает Последняя Тамга.
-tamga_pickup  | memory  | Путник поднимает Тамгу прошлого. Мудрость +{wisdom}, Слава +{glory}.
-new_heir      | info    | Новый наследник выходит к дороге.
+# event_id | tone | EN template | RU template | TR template
+run_start     | info    | {hero} leaves the aul. The campfire stays behind.                                    | {hero} выходит из аула. Костер остается за спиной.                  | {hero} auldan ayriliyor. Ates arkada kaliyor.
+resource_gain | gain    | The road gives to the clan: Supplies +{supplies}, Wisdom +{wisdom}, Glory +{glory}. | Путь дает роду: Запасы +{supplies}, Мудрость +{wisdom}, Слава +{glory}. | Yol soya verir: Erzak +{supplies}, Bilgelik +{wisdom}, Un +{glory}.
+tile_safe     | gain    | {tile}: the wayfarer finds aid. Stamina +{stamina}.                                 | {tile}: путник находит помощь. Силы +{stamina}.                    | {tile}: yolcu yardim bulur. Takat +{stamina}.
+check_success | success | {tile}: {stat} check passed. The clan gains Glory +{glory}.                          | {tile}: проверка {stat} пройдена. Род получает Славу +{glory}.     | {tile}: {stat} sinavi gecildi. Soy Un +{glory} kazanir.
+check_fail    | danger  | {tile}: {stat} check failed. Stamina {stamina}.                                     | {tile}: проверка {stat} провалена. Силы {stamina}.                 | {tile}: {stat} sinavi basarisiz. Takat {stamina}.
+card_gain     | card    | The sand reveals a sign: {tile}.                                                    | Песок открывает знак: {tile}.                                      | Kum bir isaret aciyor: {tile}.
+card_placed   | card    | You leave a mark in the desert: {tile}.                                             | Игрок оставляет след в пустыне: {tile}.                            | Colde bir iz birakiyorsun: {tile}.
+lap_complete  | circle  | Lap {circle} complete. The aul lies ahead again.                                    | Круг {circle} завершен. Аул снова впереди.                         | Tur {circle} tamamlandi. Aul yine ileride.
+death         | death   | Stamina is spent. The road ends, but the name remains.                              | Силы иссякли. Путь окончен, но имя осталось.                       | Takat tukendi. Yol bitti ama isim kaldi.
+tamga_spawn   | memory  | The Last Tamga surfaces in the sand.                                                | На песке проступает Последняя Тамга.                               | Kumda Son Tamga beliriyor.
+tamga_pickup  | memory  | The wayfarer lifts the Tamga of the past. Wisdom +{wisdom}, Glory +{glory}.         | Путник поднимает Тамгу прошлого. Мудрость +{wisdom}, Слава +{glory}. | Yolcu gecmisin Tamgasini aliyor. Bilgelik +{wisdom}, Un +{glory}.
+new_heir      | info    | A new heir steps out to the road.                                                   | Новый наследник выходит к дороге.                                  | Yeni varis yola cikiyor.

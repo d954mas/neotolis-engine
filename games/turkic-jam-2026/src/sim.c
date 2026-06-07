@@ -115,7 +115,7 @@ static void log_event(const char *id, const tj_log_ctx_t *ctx) {
     }
     const tj_log_ctx_t empty = {0};
     char buf[TJ_JOURNAL_LINE];
-    log_subst(buf, sizeof buf, e->tmpl, ctx ? ctx : &empty);
+    log_subst(buf, sizeof buf, e->tmpl[(int)i18n_get()], ctx ? ctx : &empty);
     tj_journal_push(tone_to_kind(e->tone), "%s", buf);
 }
 // #endregion

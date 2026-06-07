@@ -91,13 +91,13 @@ typedef struct {
     int count;
 } tj_spawn_t;
 
-/* Event-log line template (log.tsv): event_id | tone | template. Placeholders
+/* Event-log line template (log.tsv): event_id | tone | en | ru | tr. Placeholders
  * {tile}{stat}{hero}{supplies}{wisdom}{glory}{stamina}{circle}{diff} are filled
  * at push time. Lets the GDD own the run narrative without code edits. */
 typedef struct {
     char id[TJ_ID_LEN];
     char tone[12];
-    char tmpl[TJ_LOG_TMPL_LEN];
+    char tmpl[3][TJ_LOG_TMPL_LEN]; /* [0]=EN [1]=RU [2]=TR, indexed by i18n_get() */
 } tj_log_event_t;
 
 typedef struct {
