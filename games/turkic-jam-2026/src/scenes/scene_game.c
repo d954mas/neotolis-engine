@@ -369,7 +369,8 @@ static void ftue_seed_merge(void) {
     tj_view_set_ftue_gap(bx + 2, by); /* the cell the player fills to complete the trio */
     s_ftue_target_gx = bx + 2;        /* lock the drop to this cell while the lesson runs */
     s_ftue_target_gy = by;
-    s_run.pouch += 3; /* retry headroom: a misplaced drag can be recovered (forced_pull_tile = war_1) */
+    tj_view_focus_ftue_merge(bx + 1, by); /* frame the trio left-upper so the drag from the card is easy */
+    s_run.pouch += 3;                     /* retry headroom: a misplaced drag can be recovered (forced_pull_tile = war_1) */
 }
 
 static void ftue_step_tick(float dt) {

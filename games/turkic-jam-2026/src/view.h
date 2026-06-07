@@ -12,7 +12,8 @@
 void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run); /* top bar: resources, circle, Силы */
 void tj_view_log(game_ctx_t *g, int max_lines);           /* left chat/combat log panel */
 void tj_view_register_world(game_ctx_t *g);
-void tj_view_set_ftue_gap(int gx, int gy); /* FTUE: highlight the merge-gap cell (-1,-1 clears) */ /* register the CUSTOM render handler that draws the map world (call once, after UI ctx) */
+void tj_view_set_ftue_gap(int gx, int gy);     /* FTUE: highlight the merge-gap cell (-1,-1 clears) */
+void tj_view_focus_ftue_merge(int gx, int gy); /* FTUE: pan the camera to frame the merge trio comfortably */ /* register the CUSTOM render handler that draws the map world (call once, after UI ctx) */
 void tj_view_map(game_ctx_t *g, tj_run_t *run);                                                    /* center: viewport custom element + on-top overlays (Clay) */
 void tj_view_world_pan(float dx, float dy);                                                        /* pan the map camera (world px), clamped */
 bool tj_view_world_cell_at(float lx, float ly, int *gx, int *gy);                                  /* logical point -> grid cell; false if outside */

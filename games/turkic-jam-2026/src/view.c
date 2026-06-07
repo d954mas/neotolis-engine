@@ -251,6 +251,24 @@ void tj_view_world_pan(float dx, float dy) {
     s_cam_y = fmaxf(-limy, fminf(limy, s_cam_y + dy));
 }
 
+/* FTUE: frame cell (gx,gy) in the comfortable left-upper part of the map viewport, so the merge
+   trio sits clear of the bottom hand and the right hero panel with room to drag up into it. */
+void tj_view_focus_ftue_merge(int gx, int gy) {
+    if (s_map_pitch <= 0.0F || s_map_vw <= 0.0F) {
+        return;
+    }
+    const float vcx = s_map_cx - s_cam_x; /* viewport centre, no pan */
+    const float vcy = s_map_cy - s_cam_y;
+    const float tx = vcx - (s_map_vw * 0.16F); /* a touch left of centre */
+    const float ty = vcy - (s_map_vh * 0.12F); /* above centre — drag room below */
+    const float gxoff = ((float)gx - ((float)(s_map_cols - 1) * 0.5F)) * s_map_pitch;
+    const float gyoff = ((float)gy - ((float)(s_map_rows - 1) * 0.5F)) * s_map_pitch;
+    const float limx = fmaxf(0.0F, (s_map_extent - s_map_vw) * 0.5F) + s_map_pitch;
+    const float limy = fmaxf(0.0F, (s_map_extent - s_map_vh) * 0.5F) + s_map_pitch;
+    s_cam_x = fmaxf(-limx, fminf(limx, tx - vcx - gxoff));
+    s_cam_y = fmaxf(-limy, fminf(limy, ty - vcy - gyoff));
+}
+
 /* Logical point -> grid cell (inverse of grid_x/grid_y about the map centre).
  * Returns false if the point is outside the grid. Uses last frame's transform. */
 bool tj_view_world_cell_at(float lx, float ly, int *gx, int *gy) {
@@ -574,7 +592,7 @@ static void draw_aul(game_ctx_t *g, const tj_run_t *run, float pitch) {
         if (has_region(g->aul_yurt_small_02)) {
             map_sprite(g, g->aul_yurt_small_02, pitch * 1.15F, pitch * 1.15F, ox + (pitch * 0.32F), oy + (pitch * 0.12F), 3);
         }
-        map_sprite(g, g->aul_fire_01, pitch * 0.95F, pitch * 0.95F, ox + (pitch * 0.12F), oy - (pitch * 0.28F), 4);
+        map_sprite(g, g->aul_fire_01, pitch * 0.6F, pitch * 0.6F, ox - (pitch * 0.02F), oy + (pitch * 0.30F), 4); /* campfire sits in front of the yurts, not floating over them */
         return;
     }
     map_rect_sprite(g, (Clay_Color){176.0F, 146.0F, 106.0F, 255.0F}, w, h, ox, oy);
@@ -694,7 +712,7 @@ static void draw_road_events(game_ctx_t *g, const tj_run_t *run, float pitch) {
  * cell looks occupied. Sand-like variants are excluded on purpose. */
 static void draw_road_buffer(game_ctx_t *g, const tj_run_t *run, float pitch, float tile) {
     (void)tile;
-    const uint32_t variants[] = {g->buffer_edge_stones, g->buffer_stakes, g->buffer_cart_marks, g->decor_stones};
+    const uint32_t variants[] = {g->buffer_edge_stones, g->buffer_stakes, g->decor_stones}; /* cart_marks dropped: its diagonal ruts read as a stray road on the no-build band */
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
     const float bsz = pitch * 0.86F;
