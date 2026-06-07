@@ -159,7 +159,8 @@ typedef struct game_ctx {
     uint32_t fx_sand_grain_01; /* soft round particle (Kenney CC0) for drifting intro sand */
     float logical_w, logical_h;
     bool resources_ready;
-    bool settings_open; /* settings modal is up; pauses the run while open */
+    bool settings_open;   /* settings modal is up; pauses the run while open */
+    bool request_restart; /* full reset from settings -> scene_game starts a fresh run next frame */
     int score;
     int best;
     int chosen_heir;    /* archetype picked on the heir-select screen */

@@ -2093,7 +2093,7 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
 // #endregion
 
 // #region settings modal
-#define TJ_RESET_HOLD_SECONDS 5.0F
+#define TJ_RESET_HOLD_SECONDS 1.5F
 
 static float s_settings_reset_hold;
 
@@ -2122,7 +2122,7 @@ static void settings_full_reset(game_ctx_t *g) {
     g->best = 0;
     g->score = 0;
     g->settings_open = false;
-    game_goto(g, &SCENE_MENU);
+    g->request_restart = true; /* scene_game starts a fresh run next frame (intro replays: ftue_done was wiped) */
 }
 
 static void settings_volume_row(game_ctx_t *g, const char *label, const char *slider_id, const char *save_key, float cur, void (*apply)(float)) {

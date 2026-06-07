@@ -369,12 +369,16 @@ static void draw_intro_overlays(game_ctx_t *g) {
 
 /* One-shot SFX on game-state rising edges. New-run resets (merges/fx back to 0) self-correct
  * via the end-of-frame prev capture, so they don't mis-fire. */
-static void sfx_tick(void) {
+static void sfx_tick(float dt) {
     static int prev_merges = 0;
     static bool prev_win = false;
     static bool prev_event = false;
     static bool prev_alive = true;
     static float prev_enemy_fx = 0.0F;
+    static float hit_cd = 0.0F;
+    if (hit_cd > 0.0F) {
+        hit_cd -= dt;
+    }
     if (s_run.merges_done > prev_merges) {
         tj_audio_play_sfx(TJ_SFX_MERGE);
     }
@@ -387,8 +391,9 @@ static void sfx_tick(void) {
     if (!s_run.alive && prev_alive) {
         tj_audio_play_sfx(TJ_SFX_DEATH);
     }
-    if (s_run.fx_enemy_t > prev_enemy_fx + 0.01F) {
+    if (s_run.fx_enemy_t > prev_enemy_fx + 0.01F && hit_cd <= 0.0F) {
         tj_audio_play_sfx(TJ_SFX_HIT); /* hero just landed a blow on the enemy */
+        hit_cd = 0.13F;                /* throttle: machine-gun hits blur into a low hum */
     }
     prev_merges = s_run.merges_done;
     prev_win = s_run.combat_win;
@@ -398,6 +403,12 @@ static void sfx_tick(void) {
 }
 
 static void on_update(game_ctx_t *g, float dt) {
+    if (g->request_restart) { /* full reset from settings: drop straight into a fresh run */
+        g->request_restart = false;
+        s_drag_card = -1;
+        s_run_ack = false;
+        start_new_run(g);
+    }
     const bool paused = g->settings_open; /* settings modal freezes the run */
     if (!paused && nt_input_key_is_pressed(NT_KEY_P)) {
         game_goto(g, &SCENE_PAUSE);
@@ -421,7 +432,7 @@ static void on_update(game_ctx_t *g, float dt) {
     if (!paused) {
         ftue_step_tick(dt);
         tj_view_battle_tick(g, &s_run, dt); /* combat-stage particles/shake + hit/victory bursts */
-        sfx_tick();                         /* one-shot SFX on state edges */
+        sfx_tick(dt);                       /* one-shot SFX on state edges */
     }
 
     /* Hand the intro state to the sprite world pass (it draws the black screen + sand +
