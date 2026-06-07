@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "aul.h"
+#include "i18n.h"
 #include "journal.h"
 #include "rng.h"
 
@@ -520,7 +521,7 @@ static void tick_intro(tj_run_t *r, float dt) {
         if (r->intro_t >= dur) {
             r->intro_t = 0.0F;
             r->phase = TJ_PHASE_ROAD_ENTRY;
-            tj_journal_push(TJ_LOG_PLAIN, "Батыр выходит на дорогу.");
+            tj_journal_push(TJ_LOG_PLAIN, "%s", pick_lang("The batyr sets out on the road.", "Батыр выходит на дорогу.", "Batır yola çıkıyor."));
         }
         return;
     }
@@ -690,7 +691,7 @@ static void try_merge_at(tj_run_t *r, int gx, int gy) {
         r->fx_cell = start; /* merge pop: bigger than a plain placement */
         r->fx_cell_t = 0.45F;
         r->fx_cell_mag = 0.60F;
-        tj_journal_push(TJ_LOG_GOOD, "Мердж: %s", g_config.tiles[up].name);
+        tj_journal_push(TJ_LOG_GOOD, "%s %s", pick_lang("Merge:", "Мердж:", "Birleşme:"), g_config.tiles[up].name);
         /* loop: the upgraded tile may complete another triple (cascade) */
     }
 }
@@ -796,7 +797,7 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     tj_journal_clear();
     /* FTUE: a heir is read as a generic "путник", not a personal name (GDD). */
     if (g_aul.deaths == 0) {
-        log_event("run_start", &(tj_log_ctx_t){.hero = "Первый батыр"});
+        log_event("run_start", &(tj_log_ctx_t){.hero = pick_lang("First batyr", "Первый батыр", "İlk batır")});
     } else {
         log_event("new_heir", NULL);
     }
@@ -822,7 +823,7 @@ void tj_run_start(tj_run_t *r, int heir_index) {
         r->tamga_glory = g_aul.tamga_glory;
         log_event("tamga_spawn", NULL);
     }
-    (void)snprintf(r->last_event, sizeof r->last_event, "%s", "Выход из аула");
+    (void)snprintf(r->last_event, sizeof r->last_event, "%s", pick_lang("Leaving the aul", "Выход из аула", "Auldan çıkış"));
 }
 
 // #region auto-combat (hero pauses on an enemy cell; deterministic ATB by speed)
@@ -857,15 +858,15 @@ static void start_combat(tj_run_t *r, int tile, tj_cell_role_t role) {
     }
     int hp_pct = 100;
     int atk_pct = 100;
-    const char *rolelbl = "Бой";
+    const char *rolelbl = pick_lang("Fight", "Бой", "Savaş");
     if (role == TJ_CELL_ELITE) {
         hp_pct = g_config.elite_hp_pct;
         atk_pct = g_config.elite_atk_pct;
-        rolelbl = "Элита";
+        rolelbl = pick_lang("Elite", "Элита", "Seçkin");
     } else if (role == TJ_CELL_BOSS) {
         hp_pct = g_config.boss_hp_pct;
         atk_pct = g_config.boss_atk_pct;
-        rolelbl = "Босс";
+        rolelbl = pick_lang("Boss", "Босс", "Patron");
     }
     /* Super-linear late ramp: base scales with diff (linear in circle), then a
      * per-circle %-bonus on top. Gentle early, biting by the late circles. */
@@ -882,17 +883,17 @@ static void start_combat(tj_run_t *r, int tile, tj_cell_role_t role) {
         if (finalboss) {
             hp = hp * g_config.arch_fat_hp_pct / 100;
             atk = atk * g_config.arch_fierce_atk_pct / 100;
-            archlbl = "Хранитель Кольца";
+            archlbl = pick_lang("Ring Keeper", "Хранитель Кольца", "Halka Bekçisi");
         } else if (arch == 0) {
             hp = hp * g_config.arch_fat_hp_pct / 100;
-            archlbl = "Толстяк";
+            archlbl = pick_lang("Fatso", "Толстяк", "Şişko");
         } else if (arch == 1) {
             interval = interval * (float)g_config.arch_fast_interval_pct / 100.0F;
             hp = hp * g_config.arch_fast_hp_pct / 100;
-            archlbl = "Шустрый";
+            archlbl = pick_lang("Swift one", "Шустрый", "Çevik");
         } else {
             atk = atk * g_config.arch_fierce_atk_pct / 100;
-            archlbl = "Лютый";
+            archlbl = pick_lang("Fierce one", "Лютый", "Vahşi");
         }
     }
     if (hp < 1) {
@@ -925,7 +926,7 @@ static void enter_combat_win(tj_run_t *r) {
     r->win_wis = t->wisdom;
     r->win_glory = t->glory;
     r->win_sta = t->stamina_restore;
-    tj_journal_push(TJ_LOG_GOOD, "%s повержен", t->name);
+    tj_journal_push(TJ_LOG_GOOD, "%s %s", t->name, pick_lang("defeated", "повержен", "yenildi"));
 }
 
 /* Celebration timer: when it elapses the loot lands (+ a card in the pouch) and the walk resumes. */
@@ -992,18 +993,18 @@ static void start_event(tj_run_t *r) {
     const int die = (g_config.event_die > 1) ? g_config.event_die : 10;
     const int pick = rng_range_int(0, 2);
     tj_stat_t st = TJ_STAT_BODY;
-    const char *ename = "Завал";
-    const char *sname = "Сабля";
+    const char *ename = pick_lang("Rockfall", "Завал", "Heyelan");
+    const char *sname = pick_lang("Sabre", "Сабля", "Kilic");
     int bonus = r->bonus_force;
     if (pick == 1) {
         st = TJ_STAT_MIND;
-        ename = "Погоня";
-        sname = "Конь";
+        ename = pick_lang("Chase", "Погоня", "Takip");
+        sname = pick_lang("Horse", "Конь", "At");
         bonus = r->bonus_speed;
     } else if (pick == 2) {
         st = TJ_STAT_SPIRIT;
-        ename = "Буря";
-        sname = "Оберег";
+        ename = pick_lang("Storm", "Буря", "Firtina");
+        sname = pick_lang("Amulet", "Оберег", "Tumar");
         bonus = r->bonus_vigor;
     }
     const int stat = tj_hero_stat(r, st) + bonus; /* effective stat (base + buildings) */
@@ -1036,10 +1037,11 @@ static void event_finish(tj_run_t *r) {
     r->in_event = false;
     if (r->ev_pass) {
         r->supplies += r->ev_gain;
-        tj_journal_push(TJ_LOG_GOOD, "%s: %s d%d->%d — успех (+%d)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, r->ev_gain);
+        tj_journal_push(TJ_LOG_GOOD, "%s: %s d%d->%d — %s (+%d)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, pick_lang("success", "успех", "basari"), r->ev_gain);
     } else {
         r->stamina -= g_config.event_fail_hp;
-        tj_journal_push(TJ_LOG_BAD, "%s: %s d%d->%d — провал (-%d ХП)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, g_config.event_fail_hp);
+        tj_journal_push(TJ_LOG_BAD, "%s: %s d%d->%d — %s (-%d %s)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, pick_lang("fail", "провал", "basarisiz"), g_config.event_fail_hp,
+                        pick_lang("HP", "ХП", "CAN"));
         if (r->stamina <= 0) {
             r->stamina = 0;
             r->alive = false;
@@ -1087,7 +1089,7 @@ static void resolve_cell(tj_run_t *r) {
         if (r->stamina > r->stamina_max) {
             r->stamina = r->stamina_max;
         }
-        tj_journal_push(TJ_LOG_GOOD, "Привал: +%d ХП (впереди босс)", heal);
+        tj_journal_push(TJ_LOG_GOOD, "%s +%d %s", pick_lang("Rest:", "Привал:", "Mola:"), heal, pick_lang("HP (boss ahead)", "ХП (впереди босс)", "CAN (patron yakin)"));
     } else {
         r->supplies += 1; /* trail: silent micro-pickup, no dead air */
     }
@@ -1099,7 +1101,7 @@ static void push_pack(tj_run_t *r) {
         return;
     }
     r->pouch += g_config.pouch_per_circle;
-    tj_journal_push(TJ_LOG_GOOD, "Дар за круг: +%d в мешочек", g_config.pouch_per_circle);
+    tj_journal_push(TJ_LOG_GOOD, "%s +%d %s", pick_lang("Lap gift:", "Дар за круг:", "Tur hediyesi:"), g_config.pouch_per_circle, pick_lang("to the pouch", "в мешочек", "torbaya"));
 }
 
 void tj_run_open_pack(tj_run_t *r) {
@@ -1198,7 +1200,7 @@ void tj_run_tick(tj_run_t *r, float dt) {
             r->circle++;
             if (r->circle > g_config.laps_to_win) {
                 r->won = true;
-                tj_journal_push(TJ_LOG_BIG, "Кольцо разорвано! Род свободен.");
+                tj_journal_push(TJ_LOG_BIG, "%s", pick_lang("The loop is broken! The clan is free.", "Кольцо разорвано! Род свободен.", "Dongu kirildi! Soy ozgur."));
                 return;
             }
             log_event("lap_complete", &(tj_log_ctx_t){.circle = r->circle - 1});
@@ -1263,7 +1265,7 @@ bool tj_run_pickup_field(tj_run_t *r, int gx, int gy) {
     r->field_tile[idx] = -1;
     r->hand_cards[r->hand_count++] = t;
     recompute_field_bonuses(r);
-    tj_journal_push(TJ_LOG_PLAIN, "Поднял: %s", g_config.tiles[t].name);
+    tj_journal_push(TJ_LOG_PLAIN, "%s %s", pick_lang("Picked up:", "Поднял:", "Alindi:"), g_config.tiles[t].name);
     return true;
 }
 
