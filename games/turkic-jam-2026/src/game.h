@@ -67,6 +67,15 @@ typedef struct game_ctx {
     uint32_t tile_mirage;
     uint32_t tile_storm;
     uint32_t tile_last_tamga;
+    uint32_t tile_war[3];
+    uint32_t tile_horse[3];
+    uint32_t tile_steppe[3];
+    uint32_t tile_home[3];
+    uint32_t tile_water[3];
+    uint32_t boss_fat;
+    uint32_t boss_swift;
+    uint32_t boss_fierce;
+    uint32_t boss_ring_keeper;
     uint32_t tile_well_01;
     uint32_t tile_watchtower_01;
     uint32_t tile_pack_01;
@@ -92,6 +101,9 @@ typedef struct game_ctx {
     uint32_t ui_slot_equipment_64;
     uint32_t ui_chip_resource_64;
     uint32_t ui_tooltip_dark_64;
+    uint32_t die_d[6];
+    uint32_t pouch_closed;
+    uint32_t pouch_open[4];
     uint32_t ui_card_back_96x128;
     uint32_t ui_button_dark_64;
     uint32_t ui_finger_pointer_128; /* tutorial finger that points at the active control */
@@ -145,6 +157,7 @@ typedef struct game_ctx {
     uint32_t fx_invalid_cell[2];
     float logical_w, logical_h;
     bool resources_ready;
+    bool settings_open; /* settings modal is up; pauses the run while open */
     int score;
     int best;
     int chosen_heir;    /* archetype picked on the heir-select screen */
@@ -163,7 +176,6 @@ extern const scene_t SCENE_MENU;
 extern const scene_t SCENE_HEIR_SELECT;
 extern const scene_t SCENE_GAME;
 extern const scene_t SCENE_VISUAL_QA;
-extern const scene_t SCENE_SETTINGS;
 extern const scene_t SCENE_GAMEOVER;
 extern const scene_t SCENE_PAUSE;
 

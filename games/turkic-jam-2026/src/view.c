@@ -16,10 +16,12 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_label.h"
 
+#include "audio_assets.h"
 #include "aul.h"
 #include "config.h"
 #include "i18n.h"
 #include "journal.h"
+#include "save.h"
 #include "ui_kit.h"
 
 // #region styles
@@ -37,6 +39,7 @@ static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color
 static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_die = {.font_id = 0, .font_size = 44, .color = {40.0F, 28.0F, 18.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_die_event = {.font_id = 0, .font_size = 34, .color = {244.0F, 224.0F, 174.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
 #define TJ_PANEL_BG {35.0F, 31.0F, 24.0F, 255.0F}
 #define TJ_BAR_BG {31.0F, 28.0F, 22.0F, 255.0F}
@@ -223,7 +226,86 @@ static uint32_t decor_region_for_cell(const game_ctx_t *g, int gx, int gy) {
     return decor[(uint32_t)((gx * 17) + (gy * 31)) % (uint32_t)(sizeof decor / sizeof decor[0])];
 }
 
+static int tier_id_index(const char *id, const char *prefix) {
+    const size_t n = strlen(prefix);
+    if (strncmp(id, prefix, n) != 0) {
+        return -1;
+    }
+    if (id[n] < '1' || id[n] > '3' || id[n + 1] != '\0') {
+        return -1;
+    }
+    return id[n] - '1';
+}
+
+static uint32_t merge_tile_region_for_id(const game_ctx_t *g, const char *id) {
+    int tier = tier_id_index(id, "war_");
+    if (tier >= 0) {
+        return g->tile_war[tier];
+    }
+    tier = tier_id_index(id, "horse_");
+    if (tier >= 0) {
+        return g->tile_horse[tier];
+    }
+    tier = tier_id_index(id, "steppe_");
+    if (tier >= 0) {
+        return g->tile_steppe[tier];
+    }
+    tier = tier_id_index(id, "home_");
+    if (tier >= 0) {
+        return g->tile_home[tier];
+    }
+    tier = tier_id_index(id, "water_");
+    if (tier >= 0) {
+        return g->tile_water[tier];
+    }
+    return NT_ATLAS_INVALID_REGION;
+}
+
+static uint32_t boss_region_for_circle(const game_ctx_t *g, int circle) {
+    if (circle >= g_config.laps_to_win) {
+        return g->boss_ring_keeper;
+    }
+    switch ((circle - 1) % 3) {
+    case 0:
+        return g->boss_fat;
+    case 1:
+        return g->boss_swift;
+    default:
+        return g->boss_fierce;
+    }
+}
+
+static tj_cell_role_t current_cell_role(const tj_run_t *run) {
+    if (run->cell < 0 || run->cell >= run->path_cells || run->cell >= TJ_MAX_PATH) {
+        return TJ_CELL_TRAIL;
+    }
+    return (tj_cell_role_t)run->cell_role[run->cell];
+}
+
+static uint32_t die_region_for_sides(const game_ctx_t *g, int sides) {
+    switch (sides) {
+    case 4:
+        return g->die_d[0];
+    case 6:
+        return g->die_d[1];
+    case 8:
+        return g->die_d[2];
+    case 10:
+        return g->die_d[3];
+    case 12:
+        return g->die_d[4];
+    case 20:
+        return g->die_d[5];
+    default:
+        return NT_ATLAS_INVALID_REGION;
+    }
+}
+
 static uint32_t tile_region_for_id(const game_ctx_t *g, const char *id) {
+    const uint32_t merge = merge_tile_region_for_id(g, id);
+    if (has_region(merge)) {
+        return merge;
+    }
     if (strcmp(id, "saxaul") == 0) {
         return g->tile_saxaul;
     }
@@ -259,6 +341,10 @@ static uint32_t tile_region_for_index(const game_ctx_t *g, int tile_idx) {
 }
 
 static uint32_t card_art_region_for_id(const game_ctx_t *g, const char *id) {
+    const uint32_t merge = merge_tile_region_for_id(g, id);
+    if (has_region(merge)) {
+        return merge;
+    }
     if (strcmp(id, "saxaul") == 0) {
         return g->card_art_saxaul_64;
     }
@@ -501,7 +587,8 @@ static void draw_road_events(game_ctx_t *g, const tj_run_t *run, float pitch) {
                 sz = pitch * 1.06F;
                 fb = (Clay_Color){214.0F, 72.0F, 70.0F, 255.0F};
             }
-            const uint32_t region = tile_region_for_index(g, run->tile_at[i]);
+            const uint32_t boss_region = (role == TJ_CELL_BOSS) ? boss_region_for_circle(g, run->circle) : NT_ATLAS_INVALID_REGION;
+            const uint32_t region = has_region(boss_region) ? boss_region : tile_region_for_index(g, run->tile_at[i]);
             if (has_region(region)) {
                 map_sprite(g, region, sz, sz, x, y, 6);
             } else {
@@ -1071,10 +1158,11 @@ static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
               .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
               .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->ev_name, &s_panel_title);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = {232.0F, 224.0F, 206.0F, 255.0F},
-                  .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dnum, &s_die);
+            CLAY(
+                {.layout = {.sizing = {CLAY_SIZING_FIXED(108), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                 .backgroundColor = {24.0F, 18.0F, 12.0F, 0.0F}}) {
+                inline_sprite(g, die_region_for_sides(g, run->ev_die), 88.0F, 88.0F);
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dnum, &s_die_event);
             }
             if (show_math) {
                 nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
@@ -1107,7 +1195,8 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
     (void)snprintf(ehpv, sizeof ehpv, "%d/%d", ehp, emax);
     (void)snprintf(hdmg, sizeof hdmg, "-%d", run->fx_hero_dmg);
     (void)snprintf(edmg, sizeof edmg, "-%d", run->fx_enemy_dmg);
-    const uint32_t eregion = tile_region_for_index(g, run->combat_tile);
+    const uint32_t boss_region = (current_cell_role(run) == TJ_CELL_BOSS) ? boss_region_for_circle(g, run->circle) : NT_ATLAS_INVALID_REGION;
+    const uint32_t eregion = has_region(boss_region) ? boss_region : tile_region_for_index(g, run->combat_tile);
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_BOTTOM, .parent = CLAY_ATTACH_POINT_RIGHT_BOTTOM},
                        .offset = {-14.0F, -172.0F}, /* bottom-right corner, just above the hand bar */
@@ -1138,7 +1227,7 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
 #define FAN_STEP 74.0F      /* per-card step (overlapping fan) */
 #define FAN_LIFT 30.0F      /* hovered/selected card rises this much */
 #define FAN_BOTTOM 164.0F   /* resting top-left y measured up from the viewport bottom */
-#define FAN_LEFT_MIN 212.0F /* never slide left under the pouch button */
+#define FAN_LEFT_MIN 292.0F /* never slide left under the pouch controls */
 
 /* Fan base = top-left of card 0, derived from the live viewport + hand size.
  * Centred horizontally, clamped to clear the pouch, pinned above the bottom bar. */
@@ -1261,6 +1350,7 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial
                      .childGap = 14,
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_BAR_BG}) {
+        inline_sprite(g, run->pouch > 0 ? g->pouch_open[3] : g->pouch_closed, 72.0F, 72.0F);
         if (tj_button(g, "pull_pouch", pouchlbl, 190, 96, TJ_BTN_PRIMARY)) {
             tj_run_pull_pouch(run); /* draw one card from the pouch into the fan */
         }
@@ -1536,5 +1626,125 @@ void tj_view_intro_banner(game_ctx_t *g, const char *text) {
           .border = {.color = {198.0F, 154.0F, 55.0F, 230.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
     }
+}
+// #endregion
+
+// #region settings modal
+#define TJ_RESET_HOLD_SECONDS 5.0F
+
+static float s_settings_reset_hold;
+
+static int settings_pct(float v01) { return (int)((v01 * 100.0F) + 0.5F); }
+
+static void settings_set_lang(i18n_lang_t lang) {
+    i18n_set(lang);
+    save_set_int("lang", (int)lang);
+    save_flush();
+}
+
+static tj_btn_variant_t settings_lang_variant(i18n_lang_t lang) { return i18n_get() == lang ? TJ_BTN_PRIMARY : TJ_BTN_SECONDARY; }
+
+/* Full reset: wipe progress (best + aul + tamga), keep UI prefs (lang+volumes),
+ * close the modal, and drop back to the menu at zero. */
+static void settings_full_reset(game_ctx_t *g) {
+    const int lang = save_get_int("lang", LANG_RU);
+    const int music = save_get_int("music_vol", 60);
+    const int sfx = save_get_int("sfx_vol", 70);
+    save_clear();
+    save_set_int("lang", lang);
+    save_set_int("music_vol", music);
+    save_set_int("sfx_vol", sfx);
+    save_flush();
+    tj_aul_load();
+    g->best = 0;
+    g->score = 0;
+    g->settings_open = false;
+    game_goto(g, &SCENE_MENU);
+}
+
+static void settings_volume_row(game_ctx_t *g, const char *label, const char *slider_id, const char *save_key, float cur, void (*apply)(float)) {
+    float nv = cur;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 18, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), label, &s_stat);
+        }
+        nv = tj_slider(g, slider_id, cur);
+    }
+    if (settings_pct(nv) != settings_pct(cur)) {
+        apply(nv);
+        save_set_int(save_key, settings_pct(nv));
+        save_flush();
+    }
+}
+
+/* Gear button, top-right (left of the "?" help button). True on click. */
+bool tj_view_settings_button(game_ctx_t *g) {
+    bool clicked = false;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}, .offset = {-64.0F, 12.0F}, .zIndex = 52},
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
+        const nt_ui_button_style_t style = {
+            .idle = {.atlas = g->atlas, .bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 1.0F, .opacity = 1.0F},
+            .hover = {.bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 1.06F, .opacity = 1.0F},
+            .pressed = {.bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 0.95F, .offset_y = 3.0F, .opacity = 1.0F},
+            .disabled = {.bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 1.0F, .opacity = 0.4F},
+            .transition_speed = 12.0F,
+            .hit_padding_lrtb = {8, 8, 8, 8},
+            .slice9_scale = 1.0F,
+        };
+        const Clay_ElementDeclaration decl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}};
+        nt_ui_button_begin(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), nt_ui_id("settings_gear"), &style, &decl, true);
+        if (g->icon_settings_32 != 0U && g->icon_settings_32 != NT_ATLAS_INVALID_REGION) {
+            const nt_ui_image_style_t img = nt_ui_image_style_defaults();
+            const Clay_ElementDeclaration idecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32)}}};
+            nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), g->atlas, g->icon_settings_32, &img, &idecl);
+        }
+        clicked = nt_ui_button_end(g->ui);
+    }
+    return clicked;
+}
+
+/* Settings modal: scrim + card with music/SFX sliders, language, and a 5s
+ * hold-to-reset. Returns true when the player closes it. */
+bool tj_view_settings_modal(game_ctx_t *g, float dt) {
+    bool close = false;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 80},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {16.0F, 12.0F, 8.0F, 210.0F}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)},
+                         .padding = CLAY_PADDING_ALL(28),
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 18,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {40.0F, 34.0F, 24.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(18.0F),
+              .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), i18n(T_SETTINGS), &TJ_STYLE_HEADING);
+
+            settings_volume_row(g, i18n(T_MUSIC), "set_music_vol", "music_vol", tj_audio_get_music_volume(), tj_audio_set_music_volume);
+            settings_volume_row(g, i18n(T_SFX), "set_sfx_vol", "sfx_vol", tj_audio_get_sfx_volume(), tj_audio_set_sfx_volume);
+
+            CLAY(
+                {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                if (tj_button(g, "set_en", i18n_lang_label(LANG_EN), 170, 54, settings_lang_variant(LANG_EN))) {
+                    settings_set_lang(LANG_EN);
+                }
+                if (tj_button(g, "set_ru", i18n_lang_label(LANG_RU), 170, 54, settings_lang_variant(LANG_RU))) {
+                    settings_set_lang(LANG_RU);
+                }
+                if (tj_button(g, "set_tr", i18n_lang_label(LANG_TR), 170, 54, settings_lang_variant(LANG_TR))) {
+                    settings_set_lang(LANG_TR);
+                }
+            }
+
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), i18n(T_RESET_HINT), &s_dim);
+            if (tj_hold_button(g, "set_hold_reset", i18n(T_RESET), dt, TJ_RESET_HOLD_SECONDS, &s_settings_reset_hold)) {
+                settings_full_reset(g);
+            }
+
+            close = tj_button(g, "set_close", i18n(T_BACK), 240, 60, TJ_BTN_SECONDARY);
+        }
+    }
+    return close;
 }
 // #endregion

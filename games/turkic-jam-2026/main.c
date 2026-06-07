@@ -5,6 +5,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "audio/nt_audio.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -30,6 +31,7 @@
 #include "nt_pack_format.h"
 #include "turkic_jam_assets.h"
 
+#include "audio_assets.h"
 #include "aul.h"
 #include "config.h"
 #include "game.h"
@@ -167,6 +169,25 @@ static uint32_t find_atlas_region(const char *name) {
     TJ_FIND_REGION("tile_mirage_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_MIRAGE_01);
     TJ_FIND_REGION("tile_storm_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STORM_01);
     TJ_FIND_REGION("tile_last_tamga_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_LAST_TAMGA_01);
+    TJ_FIND_REGION("tile_war_1", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_1);
+    TJ_FIND_REGION("tile_war_2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_2);
+    TJ_FIND_REGION("tile_war_3", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_3);
+    TJ_FIND_REGION("tile_horse_1", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_1);
+    TJ_FIND_REGION("tile_horse_2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_2);
+    TJ_FIND_REGION("tile_horse_3", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_3);
+    TJ_FIND_REGION("tile_steppe_1", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_1);
+    TJ_FIND_REGION("tile_steppe_2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_2);
+    TJ_FIND_REGION("tile_steppe_3", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_3);
+    TJ_FIND_REGION("tile_home_1", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_1);
+    TJ_FIND_REGION("tile_home_2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_2);
+    TJ_FIND_REGION("tile_home_3", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_3);
+    TJ_FIND_REGION("tile_water_1", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_1);
+    TJ_FIND_REGION("tile_water_2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_2);
+    TJ_FIND_REGION("tile_water_3", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_3);
+    TJ_FIND_REGION("boss_fat", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BOSS_FAT);
+    TJ_FIND_REGION("boss_swift", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BOSS_SWIFT);
+    TJ_FIND_REGION("boss_fierce", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BOSS_FIERCE);
+    TJ_FIND_REGION("boss_ring_keeper", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_BOSS_RING_KEEPER);
     TJ_FIND_REGION("tile_well_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WELL_01);
     TJ_FIND_REGION("tile_watchtower_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATCHTOWER_01);
     TJ_FIND_REGION("tile_pack_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_PACK_01);
@@ -192,6 +213,17 @@ static uint32_t find_atlas_region(const char *name) {
     TJ_FIND_REGION("ui_slot_equipment_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_SLOT_EQUIPMENT_64);
     TJ_FIND_REGION("ui_chip_resource_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CHIP_RESOURCE_64);
     TJ_FIND_REGION("ui_tooltip_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_TOOLTIP_DARK_64);
+    TJ_FIND_REGION("die_d4", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D4);
+    TJ_FIND_REGION("die_d6", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D6);
+    TJ_FIND_REGION("die_d8", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D8);
+    TJ_FIND_REGION("die_d10", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D10);
+    TJ_FIND_REGION("die_d12", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D12);
+    TJ_FIND_REGION("die_d20", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_DIE_D20);
+    TJ_FIND_REGION("pouch_closed", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_POUCH_CLOSED);
+    TJ_FIND_REGION("pouch_open_0", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_POUCH_OPEN_0);
+    TJ_FIND_REGION("pouch_open_1", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_POUCH_OPEN_1);
+    TJ_FIND_REGION("pouch_open_2", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_POUCH_OPEN_2);
+    TJ_FIND_REGION("pouch_open_3", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_POUCH_OPEN_3);
     TJ_FIND_REGION("ui_card_back_96x128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_BACK_96X128);
     TJ_FIND_REGION("ui_button_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_BUTTON_DARK_64);
     TJ_FIND_REGION("ui_finger_pointer_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_FINGER_POINTER_128);
@@ -327,6 +359,25 @@ static int ep_visual_qa_status(int c, char **v, char *o, int cap, void *u) {
         g.tile_mirage,
         g.tile_storm,
         g.tile_last_tamga,
+        g.tile_war[0],
+        g.tile_war[1],
+        g.tile_war[2],
+        g.tile_horse[0],
+        g.tile_horse[1],
+        g.tile_horse[2],
+        g.tile_steppe[0],
+        g.tile_steppe[1],
+        g.tile_steppe[2],
+        g.tile_home[0],
+        g.tile_home[1],
+        g.tile_home[2],
+        g.tile_water[0],
+        g.tile_water[1],
+        g.tile_water[2],
+        g.boss_fat,
+        g.boss_swift,
+        g.boss_fierce,
+        g.boss_ring_keeper,
         g.hero_wayfarer_idle_s,
         g.hero_wayfarer_walk_s,
         g.hero_wayfarer_walk_e,
@@ -340,6 +391,17 @@ static int ep_visual_qa_status(int c, char **v, char *o, int cap, void *u) {
         g.ui_slot_equipment_64,
         g.ui_chip_resource_64,
         g.ui_tooltip_dark_64,
+        g.die_d[0],
+        g.die_d[1],
+        g.die_d[2],
+        g.die_d[3],
+        g.die_d[4],
+        g.die_d[5],
+        g.pouch_closed,
+        g.pouch_open[0],
+        g.pouch_open[1],
+        g.pouch_open[2],
+        g.pouch_open[3],
     };
     const uint32_t batch_b_regions[] = {
         g.ui_card_back_96x128,
@@ -457,6 +519,25 @@ static void bind_optional_world_regions(void) {
     g.tile_mirage = find_atlas_region("tile_mirage_01");
     g.tile_storm = find_atlas_region("tile_storm_01");
     g.tile_last_tamga = find_atlas_region("tile_last_tamga_01");
+    g.tile_war[0] = find_atlas_region("tile_war_1");
+    g.tile_war[1] = find_atlas_region("tile_war_2");
+    g.tile_war[2] = find_atlas_region("tile_war_3");
+    g.tile_horse[0] = find_atlas_region("tile_horse_1");
+    g.tile_horse[1] = find_atlas_region("tile_horse_2");
+    g.tile_horse[2] = find_atlas_region("tile_horse_3");
+    g.tile_steppe[0] = find_atlas_region("tile_steppe_1");
+    g.tile_steppe[1] = find_atlas_region("tile_steppe_2");
+    g.tile_steppe[2] = find_atlas_region("tile_steppe_3");
+    g.tile_home[0] = find_atlas_region("tile_home_1");
+    g.tile_home[1] = find_atlas_region("tile_home_2");
+    g.tile_home[2] = find_atlas_region("tile_home_3");
+    g.tile_water[0] = find_atlas_region("tile_water_1");
+    g.tile_water[1] = find_atlas_region("tile_water_2");
+    g.tile_water[2] = find_atlas_region("tile_water_3");
+    g.boss_fat = find_atlas_region("boss_fat");
+    g.boss_swift = find_atlas_region("boss_swift");
+    g.boss_fierce = find_atlas_region("boss_fierce");
+    g.boss_ring_keeper = find_atlas_region("boss_ring_keeper");
     g.tile_well_01 = find_atlas_region("tile_well_01");
     g.tile_watchtower_01 = find_atlas_region("tile_watchtower_01");
     g.tile_pack_01 = find_atlas_region("tile_pack_01");
@@ -482,6 +563,17 @@ static void bind_optional_world_regions(void) {
     g.ui_slot_equipment_64 = find_atlas_region("ui_slot_equipment_64");
     g.ui_chip_resource_64 = find_atlas_region("ui_chip_resource_64");
     g.ui_tooltip_dark_64 = find_atlas_region("ui_tooltip_dark_64");
+    g.die_d[0] = find_atlas_region("die_d4");
+    g.die_d[1] = find_atlas_region("die_d6");
+    g.die_d[2] = find_atlas_region("die_d8");
+    g.die_d[3] = find_atlas_region("die_d10");
+    g.die_d[4] = find_atlas_region("die_d12");
+    g.die_d[5] = find_atlas_region("die_d20");
+    g.pouch_closed = find_atlas_region("pouch_closed");
+    g.pouch_open[0] = find_atlas_region("pouch_open_0");
+    g.pouch_open[1] = find_atlas_region("pouch_open_1");
+    g.pouch_open[2] = find_atlas_region("pouch_open_2");
+    g.pouch_open[3] = find_atlas_region("pouch_open_3");
     g.ui_card_back_96x128 = find_atlas_region("ui_card_back_96x128");
     g.ui_button_dark_64 = find_atlas_region("ui_button_dark_64");
     g.ui_finger_pointer_128 = find_atlas_region("ui_finger_pointer_128");
@@ -577,6 +669,25 @@ static void bind_optional_world_regions(void) {
         g.tile_mirage,
         g.tile_storm,
         g.tile_last_tamga,
+        g.tile_war[0],
+        g.tile_war[1],
+        g.tile_war[2],
+        g.tile_horse[0],
+        g.tile_horse[1],
+        g.tile_horse[2],
+        g.tile_steppe[0],
+        g.tile_steppe[1],
+        g.tile_steppe[2],
+        g.tile_home[0],
+        g.tile_home[1],
+        g.tile_home[2],
+        g.tile_water[0],
+        g.tile_water[1],
+        g.tile_water[2],
+        g.boss_fat,
+        g.boss_swift,
+        g.boss_fierce,
+        g.boss_ring_keeper,
         g.hero_wayfarer_idle_s,
         g.hero_wayfarer_walk_s,
         g.hero_wayfarer_walk_e,
@@ -590,6 +701,17 @@ static void bind_optional_world_regions(void) {
         g.ui_slot_equipment_64,
         g.ui_chip_resource_64,
         g.ui_tooltip_dark_64,
+        g.die_d[0],
+        g.die_d[1],
+        g.die_d[2],
+        g.die_d[3],
+        g.die_d[4],
+        g.die_d[5],
+        g.pouch_closed,
+        g.pouch_open[0],
+        g.pouch_open[1],
+        g.pouch_open[2],
+        g.pouch_open[3],
     };
     nt_log_info("turkic_jam: optional Batch A atlas regions %u/%u", count_bound_regions(batch_a_regions, (uint32_t)(sizeof(batch_a_regions) / sizeof(batch_a_regions[0]))),
                 (unsigned)(sizeof(batch_a_regions) / sizeof(batch_a_regions[0])));
@@ -688,6 +810,11 @@ static void build_scene_shell(const nt_ui_transform_t *shake_xform) {
                      .padding = fullscreen ? CLAY_PADDING_ALL(0) : CLAY_PADDING_ALL(24),
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = {18.0F, 16.0F, 14.0F, 255.0F}}) {
+        /* Settings modal floats above whichever scene is active. Built first so
+           its controls win pointer capture; scene_game pauses on g.settings_open. */
+        if (g.settings_open && tj_view_settings_modal(&g, g_nt_app.dt)) {
+            g.settings_open = false;
+        }
         if (fullscreen) {
             if (g.scene->on_update) {
                 g.scene->on_update(&g, g_nt_app.dt);
@@ -802,6 +929,18 @@ static bool dump_frame_png(const char *path, uint32_t width, uint32_t height) {
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
+
+    /* Audio: resume on the first user gesture (web autoplay policy), advance
+       async loads + reap voices, and click SFX on press. */
+    if (nt_audio_get_state() == NT_AUDIO_SUSPENDED && nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        nt_audio_try_resume();
+    }
+    nt_audio_update();
+    tj_audio_assets_poll();
+    if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        tj_audio_play_click();
+    }
+
     nt_devapi_apply_pending(); /* inject queued synthetic input (no-op unless devapi on) */
     nt_devapi_net_poll();      /* serve debug/bot commands */
     nt_mem_scratch_reset();
@@ -972,6 +1111,8 @@ int main(int argc, char *argv[]) {
 
     nt_http_init();
     nt_fs_init();
+    nt_audio_init();
+    tj_audio_assets_init(); /* kicks off async music/SFX loads (fs/http ready above) */
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_mem_scratch_init(TJ_SCRATCH_ARENA_SIZE);
@@ -1056,6 +1197,7 @@ int main(int argc, char *argv[]) {
     /* Persistence + restore last language before the first frame. */
     rng_seed(0xC0FFEEU);
     save_init();
+    tj_audio_load_volumes_from_save();
     i18n_set((i18n_lang_t)save_get_int("lang", LANG_RU));
 
     tj_config_load(config_dir);
@@ -1101,6 +1243,7 @@ int main(int argc, char *argv[]) {
 #ifndef NT_PLATFORM_WEB
     nt_devapi_net_stop();
     nt_devapi_shutdown();
+    nt_audio_shutdown();
     nt_ui_destroy_context(g.ui);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();

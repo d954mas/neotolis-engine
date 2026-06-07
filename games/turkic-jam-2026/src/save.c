@@ -125,6 +125,11 @@ void save_init(void) {
     parse(blob);
 }
 
+void save_clear(void) {
+    s_count = 0;
+    save_flush();
+}
+
 void save_flush(void) {
     static char blob[TJ_SAVE_BLOB_LEN];
     size_t off = 0;

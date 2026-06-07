@@ -25,4 +25,13 @@ extern const nt_ui_label_style_t TJ_STYLE_HINT;
  * Call inside a CLAY parent; id_str must be stable across frames. */
 bool tj_button(game_ctx_t *g, const char *id_str, const char *text, int w, int h, tj_btn_variant_t variant);
 
+/* Horizontal volume-style slider. Drag anywhere on the track; returns the new
+ * value in [0,1]. id_str must be stable across frames. */
+float tj_slider(game_ctx_t *g, const char *id_str, float value);
+
+/* Press-and-hold button: a red bar fills over `hold_seconds` while held;
+ * releasing early resets. Returns true on the single frame the hold completes.
+ * `accum` is caller-owned elapsed-hold state (one float, persisted by caller). */
+bool tj_hold_button(game_ctx_t *g, const char *id_str, const char *text, float dt, float hold_seconds, float *accum);
+
 #endif /* TJ_UI_KIT_H */

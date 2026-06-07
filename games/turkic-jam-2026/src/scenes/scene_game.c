@@ -358,26 +358,29 @@ static void draw_intro_overlays(game_ctx_t *g) {
 }
 
 static void on_update(game_ctx_t *g, float dt) {
-    if (nt_input_key_is_pressed(NT_KEY_P)) {
+    const bool paused = g->settings_open; /* settings modal freezes the run */
+    if (!paused && nt_input_key_is_pressed(NT_KEY_P)) {
         game_goto(g, &SCENE_PAUSE);
     }
 
     const bool in_intro = s_ftue_active && s_ftue_step == 0; /* dawn reveal -> send -> walkout */
     const bool intro_walkout = in_intro && (s_run.phase == TJ_PHASE_AUL_EXIT || s_run.phase == TJ_PHASE_ROAD_ENTRY);
 
-    /* Tick rules: normal play ticks; the intro walkout ticks (hero leaves the aul); the
-     * wait-at-fire and the merge lessons stay paused (no time pressure while learning). */
-    if (!s_ftue_active || intro_walkout) {
+    /* Tick rules: the settings modal freezes everything; otherwise normal play ticks, the
+     * intro walkout ticks (hero leaves the aul), and the wait-at-fire + merge lessons stay
+     * paused (no time pressure while learning). */
+    if (!paused && (!s_ftue_active || intro_walkout)) {
         tj_run_tick(&s_run, dt);
     }
     if (s_run.fx_cell_t > 0.0F) {
         s_run.fx_cell_t -= dt; /* place/merge pop decays every frame, even while the run is paused */
     }
-    if (!in_intro) {
-        handle_map_input(g, dt); /* camera + cards are locked during the intro */
+    if (!paused && !in_intro) {
+        handle_map_input(g, dt); /* camera + cards are locked during the intro / settings */
     }
-
-    ftue_step_tick(dt);
+    if (!paused) {
+        ftue_step_tick(dt);
+    }
 
     /* Full-screen frame: top HUD, then [log | map | hero], then card hand. During the
      * first-run intro everything but the world + launch panel is hidden (progressive
@@ -403,8 +406,11 @@ static void on_update(game_ctx_t *g, float dt) {
         }
         if (!in_intro) {
             tj_view_card_hand(g, &s_run, s_drag_card, s_ftue_active);
-            if (tj_view_help_button(g)) {
+            if (!paused && tj_view_help_button(g)) {
                 s_help_open = !s_help_open; /* "?" toggles the how-to modal */
+            }
+            if (tj_view_settings_button(g)) {
+                g->settings_open = true; /* gear opens the settings modal (pauses the run) */
             }
             if (s_help_open && tj_view_help_modal(g)) {
                 s_help_open = false; /* "Понятно" closes it */
@@ -442,7 +448,7 @@ static void on_update(game_ctx_t *g, float dt) {
         }
         s_banked = true;
     }
-    if (!s_run.alive || s_run.won) {
+    if (!paused && (!s_run.alive || s_run.won)) {
         s_run.death_t += dt; /* drive the run-over veil animation */
     }
 }

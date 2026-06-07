@@ -35,6 +35,7 @@ SYSTEM_DEPS=(
     "$ROOT_DIR/deps/cgltf"
     "$ROOT_DIR/deps/mikktspace"
     "$ROOT_DIR/deps/stb"
+    "$ROOT_DIR/deps/miniaudio"
     "$ROOT_DIR/deps/clay"
     "$ROOT_DIR/deps/clipper2/CPP"
     "$ROOT_DIR/deps/glfw/include"
