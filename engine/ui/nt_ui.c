@@ -1828,7 +1828,9 @@ static void mat4_inv_trs(const float m[16], float out[16]) {
  * then inverse-transform the hit point into widget-local Clay coords for bbox check.
  * Returns local hit (lx, ly) in widget-local space; caller pads + bbox-tests against Clay bbox.
  * inv_view_proj caller-chosen: game view_proj for layer < 240, inspector ortho for inspector layers. */
-static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t *baked, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly) {
+/* out_t (nullable): ray parameter at the hit = world distance from the near point along the ray —
+ * used by the input resolve to pick the nearest widget and to compare against an occlusion cutoff. */
+static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t *baked, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly, float *out_t) {
     /* Screen → NDC: (-1..1, -1..1). Note Clay px is Y-down; NDC Y is up — flip. */
     const float px_ndc = ((px / screen_w) * 2.0F) - 1.0F;
     const float py_ndc = 1.0F - ((py / screen_h) * 2.0F);
@@ -1876,6 +1878,9 @@ static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t
     mat4_inv_trs(baked->m, inv);
     *out_lx = (inv[0] * hx) + (inv[4] * hy) + (inv[8] * hz) + inv[12];
     *out_ly = (inv[1] * hx) + (inv[5] * hy) + (inv[9] * hz) + inv[13];
+    if (out_t != NULL) {
+        *out_t = t;
+    }
     return true;
 }
 
@@ -1917,7 +1922,7 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
                 iv = ctx->inv_inspector_view_proj;
             }
 #endif
-            if (!raycast_hit(iv, &cb, px, py, screen_w, screen_h, &clx, &cly)) {
+            if (!raycast_hit(iv, &cb, px, py, screen_w, screen_h, &clx, &cly, NULL)) {
                 return false;
             }
         } else {
@@ -1940,8 +1945,9 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
     return true;
 }
 
+/* out_t (nullable): world ray distance to the hit in 3D ctx; 0 in 2D ctx (no depth). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t) {
     if (id == 0U) {
         return false;
     }
@@ -1984,7 +1990,7 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
             iv = ctx->inv_inspector_view_proj;
         }
 #endif
-        if (!raycast_hit(iv, &b, px, py, screen_w, screen_h, &lx, &ly)) {
+        if (!raycast_hit(iv, &b, px, py, screen_w, screen_h, &lx, &ly, out_t)) {
             return false;
         }
     } else {
@@ -1998,6 +2004,9 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
         const float ry = py - b.m[13];
         lx = (inv_a * rx) + (inv_b * ry);
         ly = (inv_c * rx) + (inv_d * ry);
+        if (out_t != NULL) {
+            *out_t = 0.0F; /* 2D ctx has no depth */
+        }
     }
 
     const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
@@ -2029,7 +2038,7 @@ uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float
         memcpy(b.m, z->m, sizeof b.m);
         float lx;
         float ly;
-        if (!raycast_hit(ctx->inv_view_proj, &b, px, py, screen_w, screen_h, &lx, &ly)) {
+        if (!raycast_hit(ctx->inv_view_proj, &b, px, py, screen_w, screen_h, &lx, &ly, NULL)) {
             continue;
         }
         if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
@@ -2073,7 +2082,7 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
         if (cap->active_id != 0U && cap->active_id != id) {
             continue; /* α: pointer bound elsewhere, invisible to this widget */
         }
-        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL);
         if (!over) {
             continue;
         }
@@ -2133,7 +2142,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         const nt_ui_capture_t *cap = &ctx->captures[pidx];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
-        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
+        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL);
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
         out.pressed_now = s.new_capture;
@@ -2423,7 +2432,7 @@ bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit: ctx must be non-NULL");
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
-    const bool hit = ui_hit_test(ctx, id, px, py, NULL);
+    const bool hit = ui_hit_test(ctx, id, px, py, NULL, NULL);
     Clay_SetCurrentContext(saved);
     return hit;
 }
@@ -2432,7 +2441,7 @@ bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit_padded: ctx must be non-NULL");
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
-    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb);
+    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL);
     Clay_SetCurrentContext(saved);
     return hit;
 }
