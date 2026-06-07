@@ -171,7 +171,6 @@
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_PLAYABLE_96X128 ((nt_hash64_t){0x16B71A47FDE068E2ULL}) /* turkic_jam_atlas/ui_card_playable_96x128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_SELECTED_96X128 ((nt_hash64_t){0xA365300739BA8C6EULL}) /* turkic_jam_atlas/ui_card_selected_96x128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CHIP_RESOURCE_64 ((nt_hash64_t){0xFE1CEB29A2C83620ULL}) /* turkic_jam_atlas/ui_chip_resource_64 */
-#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_FINGER_POINTER_128 ((nt_hash64_t){0x5FDAE3B82044A8BFULL}) /* turkic_jam_atlas/ui_finger_pointer_128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_HOVER_CELL_OVERLAY_128 ((nt_hash64_t){0xF789BA5603A285B0ULL}) /* turkic_jam_atlas/ui_hover_cell_overlay_128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_INVALID_CELL_OVERLAY_128 ((nt_hash64_t){0xC5746976CE685039ULL}) /* turkic_jam_atlas/ui_invalid_cell_overlay_128 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_PANEL_FELT_DARK_96 ((nt_hash64_t){0x7D0822339B0CE9EAULL}) /* turkic_jam_atlas/ui_panel_felt_dark_96 */
@@ -339,7 +338,6 @@ static inline void turkic_jam_assets_register_labels(void) {
     (void)nt_hash64_str("turkic_jam_atlas/ui_card_playable_96x128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_card_selected_96x128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_chip_resource_64");
-    (void)nt_hash64_str("turkic_jam_atlas/ui_finger_pointer_128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_hover_cell_overlay_128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_invalid_cell_overlay_128");
     (void)nt_hash64_str("turkic_jam_atlas/ui_panel_felt_dark_96");
