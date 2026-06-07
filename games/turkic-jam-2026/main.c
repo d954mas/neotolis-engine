@@ -1105,7 +1105,7 @@ int main(int argc, char *argv[]) {
 
     g_nt_window.width = 1280;
     g_nt_window.height = 720;
-    g_nt_window.title = "Песнь Тамги";
+    g_nt_window.title = "Кочевая петля";
     nt_window_init();
     nt_input_init();
 

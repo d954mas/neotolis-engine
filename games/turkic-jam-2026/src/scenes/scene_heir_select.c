@@ -48,21 +48,21 @@ static const char *stat_body(i18n_lang_t lang) {
     if (lang == LANG_TR) {
         return "Kilic";
     }
-    return lang == LANG_RU ? "Клинок" : "Blade";
+    return lang == LANG_RU ? "Сабля" : "Sabre";
 }
 
 static const char *stat_mind(i18n_lang_t lang) {
     if (lang == LANG_TR) {
         return "At";
     }
-    return lang == LANG_RU ? "Скакун" : "Steed";
+    return lang == LANG_RU ? "Конь" : "Horse";
 }
 
 static const char *stat_spirit(i18n_lang_t lang) {
     if (lang == LANG_TR) {
-        return "Kut";
+        return "Tumar";
     }
-    return lang == LANG_RU ? "Кут" : "Kut";
+    return lang == LANG_RU ? "Оберег" : "Amulet";
 }
 
 static const char *heir_name(const tj_heir_def_t *h) {
@@ -125,10 +125,7 @@ static void stat_icon(game_ctx_t *g, uint32_t region) {
 }
 
 static void stat_chip(game_ctx_t *g, uint32_t icon, const char *text) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(28)},
-                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                     .childGap = 4,
-                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(28)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         stat_icon(g, icon);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
     }

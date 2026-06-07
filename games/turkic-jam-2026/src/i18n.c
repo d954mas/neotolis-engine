@@ -5,8 +5,8 @@
 static const char *s_table[LANG_COUNT][T_COUNT] = {
     [LANG_EN] =
         {
-            [T_TITLE] = "SONG OF TAMGA",
-            [T_SUBTITLE] = "A steppe loop-builder about memory, road and clan",
+            [T_TITLE] = "NOMAD LOOP",
+            [T_SUBTITLE] = "A nomad loop-builder: the wayfarer walks the ring, the clan endures",
             [T_START] = "START",
             [T_LANGUAGE] = "Language",
             [T_GAME_TITLE] = "On the Road",
@@ -23,15 +23,15 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_LOSE] = "End Run",
             [T_RESET] = "Reset progress",
             [T_CHOOSE] = "Choose",
-            [T_HEIR_TITLE] = "Choose an Heir",
+            [T_HEIR_TITLE] = "Choose a Batyr",
             [T_MUSIC] = "Music",
             [T_SFX] = "Sound",
-            [T_RESET_HINT] = "Hold 5s to reset",
+            [T_RESET_HINT] = "Hold to reset",
         },
     [LANG_RU] =
         {
-            [T_TITLE] = "ПЕСНЬ ТАМГИ",
-            [T_SUBTITLE] = "Степной loop-builder о памяти, дороге и роде",
+            [T_TITLE] = "КОЧЕВАЯ ПЕТЛЯ",
+            [T_SUBTITLE] = "Кочевой loop-builder: батыр идёт по кругу, род помнит дорогу",
             [T_START] = "НАЧАТЬ",
             [T_LANGUAGE] = "Язык",
             [T_GAME_TITLE] = "В пути",
@@ -48,15 +48,15 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_LOSE] = "Завершить путь",
             [T_RESET] = "Сбросить прогресс",
             [T_CHOOSE] = "Выбрать",
-            [T_HEIR_TITLE] = "Выбери наследника",
+            [T_HEIR_TITLE] = "Выбери батыра",
             [T_MUSIC] = "Музыка",
             [T_SFX] = "Звук",
-            [T_RESET_HINT] = "Зажми на 5с для сброса",
+            [T_RESET_HINT] = "Зажми и держи для сброса",
         },
     [LANG_TR] =
         {
-            [T_TITLE] = "TAMGA EZGISI",
-            [T_SUBTITLE] = "Bellek, yol ve oba hakkında bozkır loop-builder",
+            [T_TITLE] = "GÖÇEBE DÖNGÜSÜ",
+            [T_SUBTITLE] = "Göçebe loop-builder: yolcu halkayı yürür, oba yolu hatırlar",
             [T_START] = "BAŞLA",
             [T_LANGUAGE] = "Dil",
             [T_GAME_TITLE] = "Yolda",
@@ -73,10 +73,10 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_LOSE] = "Yolu Bitir",
             [T_RESET] = "İlerlemeyi sıfırla",
             [T_CHOOSE] = "Seç",
-            [T_HEIR_TITLE] = "Varis Seç",
+            [T_HEIR_TITLE] = "Batır Seç",
             [T_MUSIC] = "Müzik",
             [T_SFX] = "Ses",
-            [T_RESET_HINT] = "Sıfırlamak için 5sn basılı tut",
+            [T_RESET_HINT] = "Sıfırlamak için basılı tut",
         },
 };
 

@@ -1233,12 +1233,12 @@ static const char *tj_hero_name(const tj_run_t *run) {
     if (run->heir_index >= 0 && run->heir_index < g_config.heir_count) {
         return g_config.heirs[run->heir_index].name;
     }
-    return pick_lang("Heir", "Наследник", "Varis");
+    return pick_lang("Batyr", "Батыр", "Batır");
 }
 
-static const char *stat_blade(void) { return pick_lang("Blade", "Клинок", "Kilic"); }
-static const char *stat_steed(void) { return pick_lang("Steed", "Скакун", "At"); }
-static const char *stat_kut(void) { return pick_lang("Kut", "Кут", "Kut"); }
+static const char *stat_sabre(void) { return pick_lang("Sabre", "Сабля", "Kilic"); }
+static const char *stat_horse(void) { return pick_lang("Horse", "Конь", "At"); }
+static const char *stat_amulet(void) { return pick_lang("Amulet", "Оберег", "Tumar"); }
 
 /* Horizontal fill bar (HP / enemy HP): dark track + colored fill by fraction. */
 static void hp_bar(float frac, Clay_Color fill, float total) {
@@ -1255,17 +1255,17 @@ static void hp_bar(float frac, Clay_Color fill, float total) {
 
 static void stat_tooltip(game_ctx_t *g, const char *title, const char *body) {
     nt_ui_label_style_t tip_title = s_panel_title;
-    tip_title.font_size = 16;
+    tip_title.font_size = 18;
     tip_title.align = CLAY_TEXT_ALIGN_LEFT;
     nt_ui_label_style_t tip_body = s_dim;
-    tip_body.font_size = 14;
+    tip_body.font_size = 16;
     tip_body.align = CLAY_TEXT_ALIGN_LEFT;
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
-                       .offset = {8.0F, 0.0F},
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER},
+                       .offset = {-10.0F, 0.0F},
                        .zIndex = 80,
                        .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(214), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(10), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(276), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6},
           .backgroundColor = {30.0F, 24.0F, 18.0F, 245.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
           .border = {.color = {116.0F, 78.0F, 38.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
@@ -1278,9 +1278,10 @@ static void hero_stat_row(game_ctx_t *g, const char *id_str, uint32_t icon, cons
     const uint32_t id = nt_ui_id(id_str);
     CLAY({.id = (Clay_ElementId){.id = id},
           .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        const bool hovered = Clay_Hovered();
         inline_sprite(g, icon, 28.0F, 28.0F);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
-        if (nt_ui_query_interaction(g->ui, id).hovered) {
+        if (hovered) {
             stat_tooltip(g, text, tip);
         }
     }
@@ -1412,12 +1413,12 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     static char vigor[40];
     static char sta[40];
     static char cellinfo[40];
-    const char *blade_tip = pick_lang("+damage; used in rockfall checks", "+урон; проверки завала", "+hasar; kaya sinavi");
-    const char *steed_tip = pick_lang("faster attacks; used in chase checks", "чаще атаки; проверки погони", "hizli saldiri; kovalamaca");
-    const char *kut_tip = pick_lang("+max HP and defense; storm checks", "+макс. ХП и защита; проверки бури", "+can ve savunma; firtina");
-    (void)snprintf(force, sizeof force, "%s %d", stat_blade(), run->body + run->bonus_force);
-    (void)snprintf(speed, sizeof speed, "%s %d", stat_steed(), run->mind + run->bonus_speed);
-    (void)snprintf(vigor, sizeof vigor, "%s %d", stat_kut(), run->spirit + run->bonus_vigor);
+    const char *sabre_tip = pick_lang("+damage; used in rockfall checks", "+урон; проверки завала", "+hasar; kaya sinavi");
+    const char *horse_tip = pick_lang("faster attacks; used in chase checks", "чаще атаки; проверки погони", "hizli saldiri; kovalamaca");
+    const char *amulet_tip = pick_lang("+max HP and defense; storm checks", "+макс. ХП и защита; проверки бури", "+can ve savunma; firtina");
+    (void)snprintf(force, sizeof force, "%s %d", stat_sabre(), run->body + run->bonus_force);
+    (void)snprintf(speed, sizeof speed, "%s %d", stat_horse(), run->mind + run->bonus_speed);
+    (void)snprintf(vigor, sizeof vigor, "%s %d", stat_amulet(), run->spirit + run->bonus_vigor);
     (void)snprintf(sta, sizeof sta, "%s %d/%d", pick_lang("HP", "ХП", "CAN"), run->stamina, run->stamina_max);
     (void)snprintf(cellinfo, sizeof cellinfo, "%s %d / %d", pick_lang("Cell", "Клетка", "Hucre"), run->cell + 1, run->path_cells);
     const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
@@ -1443,9 +1444,9 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
             }
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
             hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 250.0F);
-            hero_stat_row(g, "stat_blade_tip", g->icon_body_32, force, blade_tip);
-            hero_stat_row(g, "stat_steed_tip", g->icon_mind_32, speed, steed_tip);
-            hero_stat_row(g, "stat_kut_tip", g->icon_spirit_32, vigor, kut_tip);
+            hero_stat_row(g, "stat_sabre_tip", g->icon_body_32, force, sabre_tip);
+            hero_stat_row(g, "stat_horse_tip", g->icon_mind_32, speed, horse_tip);
+            hero_stat_row(g, "stat_amulet_tip", g->icon_spirit_32, vigor, amulet_tip);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cellinfo, &s_dim);
         }
     }
@@ -1463,8 +1464,8 @@ bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
                      .childGap = 14,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Кольцо разорвано!" : "Наследник пал", &s_panel_title);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Тамга рода вписана в степь." : "Песок укрыл его следы, и всё, что он возвёл.", &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Петля разорвана!" : "Батыр пал", &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Имя батыра вписано в степь." : "Песок укрыл его следы, и всё, что он возвёл.", &s_dim);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), res, &s_stat);
         if (tj_button(g, "death_next", run->won ? "Дальше" : "В аул", 258, 56, TJ_BTN_PRIMARY)) {
             next = true;
@@ -1474,7 +1475,7 @@ bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
 }
 
 /* Run-over step 2 (right panel): the aul — banked supplies + heritage upgrades + send the next
- * heir. Returns true if the player pressed "Отправить путника". */
+ * heir. Returns true if the player pressed "Отправить батыра". */
 bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     (void)run;
     static char sup[40];
@@ -1483,9 +1484,9 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     static char u2[48];
     static char u3[48];
     (void)snprintf(sup, sizeof sup, "Припасы аула: %d", g_aul.supplies);
-    (void)snprintf(u0, sizeof u0, "%s  ур.%d  —  %d", stat_blade(), g_aul.up_force, tj_aul_upgrade_cost(0));
-    (void)snprintf(u1, sizeof u1, "%s  ур.%d  —  %d", stat_steed(), g_aul.up_speed, tj_aul_upgrade_cost(1));
-    (void)snprintf(u2, sizeof u2, "%s  ур.%d  —  %d", stat_kut(), g_aul.up_vigor, tj_aul_upgrade_cost(2));
+    (void)snprintf(u0, sizeof u0, "%s  ур.%d  —  %d", stat_sabre(), g_aul.up_force, tj_aul_upgrade_cost(0));
+    (void)snprintf(u1, sizeof u1, "%s  ур.%d  —  %d", stat_horse(), g_aul.up_speed, tj_aul_upgrade_cost(1));
+    (void)snprintf(u2, sizeof u2, "%s  ур.%d  —  %d", stat_amulet(), g_aul.up_vigor, tj_aul_upgrade_cost(2));
     (void)snprintf(u3, sizeof u3, "Наследие  ур.%d  -  %d", g_aul.up_keep, tj_aul_upgrade_cost(3));
     bool newrun = false;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
@@ -1509,7 +1510,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
         if (tj_button(g, "aul_k", u3, 290, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(3);
         }
-        if (tj_button(g, "aul_new", "Отправить путника", 290, 58, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "aul_new", "Отправить батыра", 290, 58, TJ_BTN_PRIMARY)) {
             newrun = true;
         }
     }
@@ -1844,7 +1845,7 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial
         if (!tutorial) { /* during FTUE the staged panel already gives the instruction */
             const char *hint;
             if (run->hand_count > 0) {
-                hint = pick_lang("drag a card onto a green cell; line up 3 alike to merge", "тяни карту на зелёную клетку · собери 3 одинаковых рядом → апгрейд", "karti yesil hucreye surukle");
+                hint = pick_lang("drag a card onto a green cell; line up 3 alike to merge", "тяни карту на зелёную клетку , собери 3 одинаковых рядом -> апгрейд", "karti yesil hucreye surukle");
             } else if (run->pouch > 0) {
                 hint = pick_lang("tap the Pouch to draw a card", "жми «Мешочек» — вытяни карту", "kart cek");
             } else {
@@ -1904,12 +1905,13 @@ bool tj_view_help_modal(game_ctx_t *g) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The hero walks the ring and fights on his own.", "Герой идёт по кольцу и сам сражается.", "Kahraman kendi savasir."),
                         &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
-                        pick_lang("- Pouch: draw a card, drag it onto a green field cell", "• «Мешочек»: вытяни карту и тяни её на зелёную клетку поля", "- torba"), &s_stat);
+                        pick_lang("- Pouch: draw a card, drag it onto a green field cell", "- «Мешочек»: вытяни карту и тяни её на зелёную клетку поля", "- torba"), &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
-                        pick_lang("- 3 alike in a row merge into a stronger one (upgrades you)", "• 3 одинаковых рядом сливаются в сильнее (качают героя)", "- 3 ayni"), &s_stat);
+                        pick_lang("- 3 alike in a row merge into a stronger one (upgrades you)", "- 3 одинаковых рядом сливаются в сильнее (качают героя)", "- 3 ayni"), &s_stat);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
-                        pick_lang("- Events are dice rolls; a boss waits at the end of each lap", "• События — бросок кубика; в конце круга — босс", "- olaylar"), &s_stat);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("- On death: upgrade the aul on the right, then a new run", "• Умер → прокачай аул справа → новый забег", "- aul"), &s_stat);
+                        pick_lang("- Events are dice rolls; a boss waits at the end of each lap", "- События — бросок кубика; в конце круга — босс", "- olaylar"), &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("- On death: upgrade the aul on the right, then a new run", "- Умер -> прокачай аул справа -> новый забег", "- aul"),
+                        &s_stat);
             close = tj_button(g, "help_close", pick_lang("Got it", "Понятно", "Tamam"), 200, 54, TJ_BTN_PRIMARY);
         }
     }
@@ -2029,10 +2031,10 @@ bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
                      .childGap = 12,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Champion of the clan", "Чемпион рода", "Soyun sampiyonu"), &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Batyr of the clan", "Батыр рода", "Soyun batırı"), &s_panel_title);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Ready at the fire.", "Готов у костра.", "Ates basinda."), &s_dim);
         CLAY({.id = CLAY_ID("intro_send_box"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
-            send = tj_button(g, "intro_send", pick_lang("Set out", "Отправить путника", "Yola cikar"), 258, 60, TJ_BTN_PRIMARY);
+            send = tj_button(g, "intro_send", pick_lang("Set out", "Отправить батыра", "Yola cikar"), 258, 60, TJ_BTN_PRIMARY);
         }
     }
     if (!armed) {
@@ -2097,7 +2099,7 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
                        .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Sand erases every footprint.", "Песок стирает следы.", "Kum izleri siler."), &l1);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The path awaits its first wayfarer.", "Путь ждёт первого путника.", "Yol ilk yolcusunu bekliyor."), &l2);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The path awaits its first batyr.", "Путь ждёт первого батыра.", "Yol ilk batırını bekliyor."), &l2);
     }
     if (t < 1.9F) {
         return; /* let the lines land before inviting the tap */

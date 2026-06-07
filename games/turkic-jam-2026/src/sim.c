@@ -498,7 +498,7 @@ static void tick_intro(tj_run_t *r, float dt) {
         if (r->intro_t >= dur) {
             r->intro_t = 0.0F;
             r->phase = TJ_PHASE_ROAD_ENTRY;
-            tj_journal_push(TJ_LOG_PLAIN, "Путник вступает на кольцевую дорогу.");
+            tj_journal_push(TJ_LOG_PLAIN, "Батыр выходит на дорогу.");
         }
         return;
     }
@@ -706,7 +706,7 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     tj_journal_clear();
     /* FTUE: a heir is read as a generic "путник", not a personal name (GDD). */
     if (g_aul.deaths == 0) {
-        log_event("run_start", &(tj_log_ctx_t){.hero = "Первый путник"});
+        log_event("run_start", &(tj_log_ctx_t){.hero = "Первый батыр"});
     } else {
         log_event("new_heir", NULL);
     }
@@ -897,17 +897,17 @@ static void start_event(tj_run_t *r) {
     const int pick = rng_range_int(0, 2);
     tj_stat_t st = TJ_STAT_BODY;
     const char *ename = "Завал";
-    const char *sname = "Клинок";
+    const char *sname = "Сабля";
     int bonus = r->bonus_force;
     if (pick == 1) {
         st = TJ_STAT_MIND;
         ename = "Погоня";
-        sname = "Скакун";
+        sname = "Конь";
         bonus = r->bonus_speed;
     } else if (pick == 2) {
         st = TJ_STAT_SPIRIT;
         ename = "Буря";
-        sname = "Кут";
+        sname = "Оберег";
         bonus = r->bonus_vigor;
     }
     const int stat = tj_hero_stat(r, st) + bonus; /* effective stat (base + buildings) */
@@ -940,10 +940,10 @@ static void event_finish(tj_run_t *r) {
     r->in_event = false;
     if (r->ev_pass) {
         r->supplies += r->ev_gain;
-        tj_journal_push(TJ_LOG_GOOD, "%s: %s d%d→%d — успех (+%d)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, r->ev_gain);
+        tj_journal_push(TJ_LOG_GOOD, "%s: %s d%d->%d — успех (+%d)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, r->ev_gain);
     } else {
         r->stamina -= g_config.event_fail_hp;
-        tj_journal_push(TJ_LOG_BAD, "%s: %s d%d→%d — провал (-%d ХП)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, g_config.event_fail_hp);
+        tj_journal_push(TJ_LOG_BAD, "%s: %s d%d->%d — провал (-%d ХП)", r->ev_name, r->ev_statname, r->ev_die, r->ev_roll, g_config.event_fail_hp);
         if (r->stamina <= 0) {
             r->stamina = 0;
             r->alive = false;

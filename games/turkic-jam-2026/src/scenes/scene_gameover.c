@@ -12,9 +12,9 @@
 #include "i18n.h"
 #include "ui_kit.h"
 
-static const char *stat_blade(i18n_lang_t lang) { return lang == LANG_TR ? "Kilic" : (lang == LANG_RU ? "Клинок" : "Blade"); }
-static const char *stat_steed(i18n_lang_t lang) { return lang == LANG_TR ? "At" : (lang == LANG_RU ? "Скакун" : "Steed"); }
-static const char *stat_kut(i18n_lang_t lang) { return lang == LANG_TR ? "Kut" : (lang == LANG_RU ? "Кут" : "Kut"); }
+static const char *stat_sabre(i18n_lang_t lang) { return lang == LANG_TR ? "Kilic" : (lang == LANG_RU ? "Сабля" : "Sabre"); }
+static const char *stat_horse(i18n_lang_t lang) { return lang == LANG_TR ? "At" : (lang == LANG_RU ? "Конь" : "Horse"); }
+static const char *stat_amulet(i18n_lang_t lang) { return lang == LANG_TR ? "Tumar" : (lang == LANG_RU ? "Оберег" : "Amulet"); }
 
 static void on_update(game_ctx_t *g, float dt) {
     (void)dt;
@@ -53,9 +53,9 @@ static void on_update(game_ctx_t *g, float dt) {
     static char u1[56];
     static char u2[56];
     static char u3[56];
-    (void)snprintf(u0, sizeof u0, "+%s  ур.%d  (%d)", stat_blade(lang), g_aul.up_force, tj_aul_upgrade_cost(0));
-    (void)snprintf(u1, sizeof u1, "+%s  ур.%d  (%d)", stat_steed(lang), g_aul.up_speed, tj_aul_upgrade_cost(1));
-    (void)snprintf(u2, sizeof u2, "+%s  ур.%d  (%d)", stat_kut(lang), g_aul.up_vigor, tj_aul_upgrade_cost(2));
+    (void)snprintf(u0, sizeof u0, "+%s  ур.%d  (%d)", stat_sabre(lang), g_aul.up_force, tj_aul_upgrade_cost(0));
+    (void)snprintf(u1, sizeof u1, "+%s  ур.%d  (%d)", stat_horse(lang), g_aul.up_speed, tj_aul_upgrade_cost(1));
+    (void)snprintf(u2, sizeof u2, "+%s  ур.%d  (%d)", stat_amulet(lang), g_aul.up_vigor, tj_aul_upgrade_cost(2));
     (void)snprintf(u3, sizeof u3, "+Наследие  ур.%d  (%d)", g_aul.up_keep, tj_aul_upgrade_cost(3));
     if (tj_button(g, "up_f", u0, 360, 54, TJ_BTN_SECONDARY)) {
         tj_aul_upgrade(0);

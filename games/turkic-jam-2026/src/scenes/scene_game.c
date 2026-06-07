@@ -363,7 +363,7 @@ static void draw_intro_overlays(game_ctx_t *g) {
     if (s_run.phase != TJ_PHASE_AUL_READY) {
         tj_view_intro_banner(g, "Путь ведёт его сам.");
     } else if (s_intro_t >= TJ_REVEAL_SECONDS) {
-        tj_view_intro_banner(g, "Путь ждёт первого путника. Отправь его в дорогу.");
+        tj_view_intro_banner(g, "Путь ждёт первого батыра. Отправь его в дорогу.");
     }
 }
 

@@ -1,7 +1,7 @@
 #ifndef TJ_CONFIG_H
 #define TJ_CONFIG_H
 
-/* Runtime balance config for "Песнь Тамги". All gameplay numbers live in text
+/* Runtime balance config for "Кочевая петля". All gameplay numbers live in text
  * files under config/ (.ini + .tsv) authored by the GDD side; the core
  * hardcodes nothing from balance. See config/CONFIG.md for the contract. */
 
