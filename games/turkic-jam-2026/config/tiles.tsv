@@ -32,12 +32,13 @@ steppe_3 | Твердыня| support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field 
 steppe_4 | Крепость| support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 4 | spirit | 42
 steppe_5 | Вечный оплот | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 5 | spirit | 135
 
-# --- линия 4: Жильё -> припасы за круг ---
-home_1 | Саксаул     | support | none | 0 | 0 | 2  | 0 | 0 | 0 | 0 | field | 4 | 1 | none | 0
-home_2 | Юрта        | support | none | 0 | 0 | 7  | 0 | 0 | 0 | 0 | field | 4 | 2 | none | 0
-home_3 | Аул-стоянка | support | none | 0 | 0 | 20 | 0 | 0 | 0 | 0 | field | 4 | 3 | none | 0
-home_4 | Зимовка     | support | none | 0 | 0 | 62 | 0 | 0 | 0 | 0 | field | 4 | 4 | none | 0
-home_5 | Столица степи | support | none | 0 | 0 | 190 | 0 | 0 | 0 | 0 | field | 4 | 5 | none | 0
+# --- линия 4: Жильё -> припасы РАЗОВО при смерти (банкуется в аул, НЕ за круг) ---
+# Каждый тир > 3x предыдущего -> мердж всегда выгоднее по припасам + освобождает клетки.
+home_1 | Саксаул     | support | none | 0 | 0 | 6   | 0 | 0 | 0 | 0 | field | 4 | 1 | none | 0
+home_2 | Юрта        | support | none | 0 | 0 | 20  | 0 | 0 | 0 | 0 | field | 4 | 2 | none | 0
+home_3 | Аул-стоянка | support | none | 0 | 0 | 65  | 0 | 0 | 0 | 0 | field | 4 | 3 | none | 0
+home_4 | Зимовка     | support | none | 0 | 0 | 210 | 0 | 0 | 0 | 0 | field | 4 | 4 | none | 0
+home_5 | Столица степи | support | none | 0 | 0 | 650 | 0 | 0 | 0 | 0 | field | 4 | 5 | none | 0
 
 # --- линия 5: Вода -> восстановление ХП за круг ---
 water_1 | Лужа        | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 2  | field | 5 | 1 | none | 0
