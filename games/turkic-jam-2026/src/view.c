@@ -787,8 +787,8 @@ static void draw_hero(game_ctx_t *g, const tj_run_t *run, float pitch) {
     }
     const uint32_t region = hero_region(g, run);
     if (has_region(region)) {
-        /* Hero a bit larger than a cell and lifted so it stands ON the trail, not in it. */
-        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy - (pitch * 0.18F) + bob, 6);
+        /* Hero a bit larger than a cell, lifted slightly so its feet sit ON the trail (was over-lifted). */
+        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy - (pitch * 0.08F) + bob, 6);
     } else {
         map_rect_sprite(g, (Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}, hs, hs, hx, hy);
     }
@@ -1236,6 +1236,10 @@ static const char *tj_hero_name(const tj_run_t *run) {
     return pick_lang("Heir", "Наследник", "Varis");
 }
 
+static const char *stat_blade(void) { return pick_lang("Blade", "Клинок", "Kilic"); }
+static const char *stat_steed(void) { return pick_lang("Steed", "Скакун", "At"); }
+static const char *stat_kut(void) { return pick_lang("Kut", "Кут", "Kut"); }
+
 /* Horizontal fill bar (HP / enemy HP): dark track + colored fill by fraction. */
 static void hp_bar(float frac, Clay_Color fill, float total) {
     if (frac < 0.0F) {
@@ -1246,6 +1250,39 @@ static void hp_bar(float frac, Clay_Color fill, float total) {
     }
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(total), CLAY_SIZING_FIXED(14)}}, .backgroundColor = {40.0F, 28.0F, 20.0F, 255.0F}, .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(total * frac), CLAY_SIZING_FIXED(14)}}, .backgroundColor = fill, .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {}
+    }
+}
+
+static void stat_tooltip(game_ctx_t *g, const char *title, const char *body) {
+    nt_ui_label_style_t tip_title = s_panel_title;
+    tip_title.font_size = 16;
+    tip_title.align = CLAY_TEXT_ALIGN_LEFT;
+    nt_ui_label_style_t tip_body = s_dim;
+    tip_body.font_size = 14;
+    tip_body.align = CLAY_TEXT_ALIGN_LEFT;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
+                       .offset = {8.0F, 0.0F},
+                       .zIndex = 80,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(214), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(10), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4},
+          .backgroundColor = {30.0F, 24.0F, 18.0F, 245.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
+          .border = {.color = {116.0F, 78.0F, 38.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), title, &tip_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), body, &tip_body);
+    }
+}
+
+static void hero_stat_row(game_ctx_t *g, const char *id_str, uint32_t icon, const char *text, const char *tip) {
+    const uint32_t id = nt_ui_id(id_str);
+    CLAY({.id = (Clay_ElementId){.id = id},
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        inline_sprite(g, icon, 28.0F, 28.0F);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
+        if (nt_ui_query_interaction(g->ui, id).hovered) {
+            stat_tooltip(g, text, tip);
+        }
     }
 }
 
@@ -1375,9 +1412,12 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     static char vigor[40];
     static char sta[40];
     static char cellinfo[40];
-    (void)snprintf(force, sizeof force, "%s %d", pick_lang("Force", "Сила", "Kuvvet"), run->body + run->bonus_force);
-    (void)snprintf(speed, sizeof speed, "%s %d", pick_lang("Speed", "Скорость", "Hiz"), run->mind + run->bonus_speed);
-    (void)snprintf(vigor, sizeof vigor, "%s %d", pick_lang("Vigor", "Выносливость", "Dayanma"), run->spirit + run->bonus_vigor);
+    const char *blade_tip = pick_lang("+damage; used in rockfall checks", "+урон; проверки завала", "+hasar; kaya sinavi");
+    const char *steed_tip = pick_lang("faster attacks; used in chase checks", "чаще атаки; проверки погони", "hizli saldiri; kovalamaca");
+    const char *kut_tip = pick_lang("+max HP and defense; storm checks", "+макс. ХП и защита; проверки бури", "+can ve savunma; firtina");
+    (void)snprintf(force, sizeof force, "%s %d", stat_blade(), run->body + run->bonus_force);
+    (void)snprintf(speed, sizeof speed, "%s %d", stat_steed(), run->mind + run->bonus_speed);
+    (void)snprintf(vigor, sizeof vigor, "%s %d", stat_kut(), run->spirit + run->bonus_vigor);
     (void)snprintf(sta, sizeof sta, "%s %d/%d", pick_lang("HP", "ХП", "CAN"), run->stamina, run->stamina_max);
     (void)snprintf(cellinfo, sizeof cellinfo, "%s %d / %d", pick_lang("Cell", "Клетка", "Hucre"), run->cell + 1, run->path_cells);
     const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
@@ -1403,9 +1443,9 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
             }
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
             hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 250.0F);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), force, &s_stat);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), speed, &s_stat);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), vigor, &s_stat);
+            hero_stat_row(g, "stat_blade_tip", g->icon_body_32, force, blade_tip);
+            hero_stat_row(g, "stat_steed_tip", g->icon_mind_32, speed, steed_tip);
+            hero_stat_row(g, "stat_kut_tip", g->icon_spirit_32, vigor, kut_tip);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cellinfo, &s_dim);
         }
     }
@@ -1424,7 +1464,7 @@ bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Кольцо разорвано!" : "Наследник пал", &s_panel_title);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Тамга рода вписана в степь." : "Песок укрыл его следы — и всё, что он возвёл.", &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Тамга рода вписана в степь." : "Песок укрыл его следы, и всё, что он возвёл.", &s_dim);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), res, &s_stat);
         if (tj_button(g, "death_next", run->won ? "Дальше" : "В аул", 258, 56, TJ_BTN_PRIMARY)) {
             next = true;
@@ -1443,10 +1483,10 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     static char u2[48];
     static char u3[48];
     (void)snprintf(sup, sizeof sup, "Припасы аула: %d", g_aul.supplies);
-    (void)snprintf(u0, sizeof u0, "Сила  ур.%d  —  %d", g_aul.up_force, tj_aul_upgrade_cost(0));
-    (void)snprintf(u1, sizeof u1, "Скорость  ур.%d  —  %d", g_aul.up_speed, tj_aul_upgrade_cost(1));
-    (void)snprintf(u2, sizeof u2, "Выносл.  ур.%d  —  %d", g_aul.up_vigor, tj_aul_upgrade_cost(2));
-    (void)snprintf(u3, sizeof u3, "Наследие  ур.%d  —  %d", g_aul.up_keep, tj_aul_upgrade_cost(3));
+    (void)snprintf(u0, sizeof u0, "%s  ур.%d  —  %d", stat_blade(), g_aul.up_force, tj_aul_upgrade_cost(0));
+    (void)snprintf(u1, sizeof u1, "%s  ур.%d  —  %d", stat_steed(), g_aul.up_speed, tj_aul_upgrade_cost(1));
+    (void)snprintf(u2, sizeof u2, "%s  ур.%d  —  %d", stat_kut(), g_aul.up_vigor, tj_aul_upgrade_cost(2));
+    (void)snprintf(u3, sizeof u3, "Наследие  ур.%d  -  %d", g_aul.up_keep, tj_aul_upgrade_cost(3));
     bool newrun = false;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
