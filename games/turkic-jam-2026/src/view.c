@@ -634,7 +634,7 @@ static void hero_exit_pos(const tj_run_t *run, float pitch, float *hx, float *hy
 }
 
 static uint32_t hero_region(const game_ctx_t *g, const tj_run_t *run) {
-    if (run->phase == TJ_PHASE_AUL_EXIT) {
+    if (run->phase == TJ_PHASE_AUL_EXIT || run->phase == TJ_PHASE_AUL_READY) {
         /* Face the way out (toward road cell 0) instead of a fixed idle, so leaving
          * the aul reads as walking, not sliding. */
         const float acx = (float)run->aul_x0 + ((float)(run->aul_w - 1) * 0.5F);
@@ -669,7 +669,7 @@ static uint32_t hero_region(const game_ctx_t *g, const tj_run_t *run) {
 static void draw_hero(game_ctx_t *g, const tj_run_t *run, float pitch) {
     float hx;
     float hy;
-    if (run->phase == TJ_PHASE_AUL_EXIT) {
+    if (run->phase == TJ_PHASE_AUL_EXIT || run->phase == TJ_PHASE_AUL_READY) {
         hero_exit_pos(run, pitch, &hx, &hy);
     } else {
         hero_walk_pos(run, pitch, &hx, &hy);
@@ -988,7 +988,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
         if (tj_button(g, "aul_k", u3, 258, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(3);
         }
-        if (tj_button(g, "aul_new", "Новый забег", 258, 58, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "aul_new", "Отправить путника", 258, 58, TJ_BTN_PRIMARY)) {
             newrun = true;
         }
     }
@@ -1402,7 +1402,13 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
     }
 
     static char stepnum[24];
-    (void)snprintf(stepnum, sizeof stepnum, "%s %d/4", pick_lang("Tutorial", "Обучение", "Egitim"), (step < 4) ? (step + 1) : 4);
+    int shown_step = step; /* pull/place/merge = 1..3 (intro is a separate stage, not numbered) */
+    if (shown_step < 1) {
+        shown_step = 1;
+    } else if (shown_step > 3) {
+        shown_step = 3;
+    }
+    (void)snprintf(stepnum, sizeof stepnum, "%s %d/3", pick_lang("Tutorial", "Обучение", "Egitim"), shown_step);
     const bool action_step = (step == 0 || step >= 4);
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_TOP}, .offset = {0.0F, 74.0F}, .zIndex = 82},
           .layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)},
@@ -1426,3 +1432,107 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
     }
     return result;
 }
+
+// #region first-run intro (dawn reveal -> send the wayfarer from the aul)
+/* Dawn-from-darkness: a warm-dark veil lifts off the already-placed world, the opening
+ * line fading in over the dark then out as it clears. t = seconds since intro start. */
+void tj_view_reveal_veil(game_ctx_t *g, float t) {
+    float va = 1.0F - (t / TJ_REVEAL_SECONDS);
+    if (va > 0.0F) {
+        if (va > 1.0F) {
+            va = 1.0F;
+        }
+        const Clay_Color veil = {20.0F, 13.0F, 8.0F, 255.0F * (va * va)}; /* ease-out: lingers dark, clears fast */
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                           .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                           .zIndex = 70,
+                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+              .backgroundColor = veil}) {}
+    }
+    float la = 1.0F; /* opening line: in over the dark, hold, out as the veil clears */
+    if (t < 0.4F) {
+        la = t / 0.4F;
+    } else if (t > 2.0F) {
+        la = 0.0F;
+    } else if (t > 1.4F) {
+        la = 1.0F - ((t - 1.4F) / 0.6F);
+    }
+    if (la > 0.0F) {
+        const nt_ui_label_style_t st = {.font_id = 0, .font_size = 30, .color = {238.0F, 216.0F, 172.0F, 255.0F * la}, .align = CLAY_TEXT_ALIGN_CENTER};
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                           .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                           .offset = {0.0F, -44.0F},
+                           .zIndex = 84,
+                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Sand erases every footprint.", "Песок стирает следы.", "Kum izleri siler."), &st);
+        }
+    }
+}
+
+/* Right "launch" panel (first run): the hero waits at the fire; the player sends him off.
+ * Once the reveal clears, a pulsing ring + a tutorial finger draw the eye to the button.
+ * Returns true on press. The same verb repeats in the aul panel (unified launch ritual). */
+bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
+    (void)run;
+    bool send = false;
+    const bool armed = t >= TJ_REVEAL_SECONDS; /* button cues appear after the world is revealed */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
+                     .padding = CLAY_PADDING_ALL(16),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 12,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = TJ_PANEL_BG}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Champion of the clan", "Чемпион рода", "Soyun sampiyonu"), &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Ready at the fire.", "Готов у костра.", "Ates basinda."), &s_dim);
+        CLAY({.id = CLAY_ID("intro_send_box"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
+            send = tj_button(g, "intro_send", pick_lang("Set out", "Отправить путника", "Yola cikar"), 258, 60, TJ_BTN_PRIMARY);
+        }
+    }
+    if (!armed) {
+        return false; /* still revealing the world; no press cues yet */
+    }
+    const float pulse = 0.5F + (0.5F * sinf(t * 4.5F)); /* pulsing ring hugs the button */
+    const Clay_Color ring = {255.0F, 214.0F, 110.0F, 150.0F + (95.0F * pulse)};
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID,
+                       .parentId = CLAY_ID("intro_send_box").id,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                       .zIndex = 82,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(274.0F), CLAY_SIZING_FIXED(76.0F)}},
+          .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
+          .border = {.color = ring, .width = CLAY_BORDER_OUTSIDE(3 + (int)(3.0F * pulse))}}) {}
+    if (has_region(g->ui_finger_pointer_128)) {
+        const float bob = 2.0F + (8.0F * (0.5F + (0.5F * sinf(t * 4.0F)))); /* finger taps up toward the button */
+        const nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        const Clay_ElementDeclaration fdecl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(76.0F), CLAY_SIZING_FIXED(76.0F)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID,
+                         .parentId = CLAY_ID("intro_send_box").id,
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
+                         .offset = {6.0F, bob},
+                         .zIndex = 86,
+                         .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+        };
+        nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, g->ui_finger_pointer_128, &fimg, &fdecl);
+    }
+    return send;
+}
+
+/* Centered intro banner (the tooltip while waiting, the walkout line after): one short
+ * on-theme line in a soft panel near the top so the campfire stays visible. */
+void tj_view_intro_banner(game_ctx_t *g, const char *text) {
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_TOP},
+                       .offset = {0.0F, 92.0F},
+                       .zIndex = 83,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(560), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(16), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {30.0F, 24.0F, 16.0F, 225.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
+          .border = {.color = {198.0F, 154.0F, 55.0F, 230.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
+    }
+}
+// #endregion

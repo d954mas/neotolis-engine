@@ -194,6 +194,7 @@ static uint32_t find_atlas_region(const char *name) {
     TJ_FIND_REGION("ui_tooltip_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_TOOLTIP_DARK_64);
     TJ_FIND_REGION("ui_card_back_96x128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_CARD_BACK_96X128);
     TJ_FIND_REGION("ui_button_dark_64", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_BUTTON_DARK_64);
+    TJ_FIND_REGION("ui_finger_pointer_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_FINGER_POINTER_128);
     TJ_FIND_REGION("ui_valid_cell_overlay_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_VALID_CELL_OVERLAY_128);
     TJ_FIND_REGION("ui_invalid_cell_overlay_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_INVALID_CELL_OVERLAY_128);
     TJ_FIND_REGION("ui_hover_cell_overlay_128", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_UI_HOVER_CELL_OVERLAY_128);
@@ -463,6 +464,7 @@ static void bind_optional_world_regions(void) {
     g.ui_tooltip_dark_64 = find_atlas_region("ui_tooltip_dark_64");
     g.ui_card_back_96x128 = find_atlas_region("ui_card_back_96x128");
     g.ui_button_dark_64 = find_atlas_region("ui_button_dark_64");
+    g.ui_finger_pointer_128 = find_atlas_region("ui_finger_pointer_128");
     g.ui_valid_cell_overlay_128 = find_atlas_region("ui_valid_cell_overlay_128");
     g.ui_invalid_cell_overlay_128 = find_atlas_region("ui_invalid_cell_overlay_128");
     g.ui_hover_cell_overlay_128 = find_atlas_region("ui_hover_cell_overlay_128");
@@ -1050,9 +1052,11 @@ int main(int argc, char *argv[]) {
 
     /* Initial scene; its on_enter may register more endpoints (e.g. game.run),
      * so it must run AFTER nt_devapi_init() clears the registry. */
-    /* start_in_game -> heir select (the run's real start), unless there's only one heir. */
+    /* The cinematic intro is the front door now; SCENE_MENU is deprecated and no longer
+     * a boot target. Go straight into the run (heir-select only if multiple heirs exist);
+     * visual_qa stays a debug override. */
     const scene_t *boot = (g_config.heir_count > 1) ? &SCENE_HEIR_SELECT : &SCENE_GAME;
-    g.scene = visual_qa ? &SCENE_VISUAL_QA : (g_config.start_in_game ? boot : &SCENE_MENU);
+    g.scene = visual_qa ? &SCENE_VISUAL_QA : boot;
     if (g.scene->on_enter) {
         g.scene->on_enter(&g);
     }

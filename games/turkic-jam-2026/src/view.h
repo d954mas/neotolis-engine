@@ -26,5 +26,9 @@ void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx);    
 bool tj_view_help_button(game_ctx_t *g);                                                 /* "?" button top-right; true on click */
 bool tj_view_help_modal(game_ctx_t *g);                                                  /* how-to modal; true when closed */
 int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t);         /* first-run tutorial; 1=advance 2=skip 0=none */
+#define TJ_REVEAL_SECONDS 1.6F                                                           /* dawn-reveal duration; button cues + tooltip appear after it */
+void tj_view_reveal_veil(game_ctx_t *g, float t);                                        /* first-run dawn reveal veil + opening line */
+bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t);                  /* first-run right panel: send the wayfarer (finger + glow); true on press */
+void tj_view_intro_banner(game_ctx_t *g, const char *text);                              /* centered on-theme intro line (tooltip / walkout hint) */
 
 #endif /* TJ_VIEW_H */

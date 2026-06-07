@@ -94,6 +94,7 @@ typedef struct game_ctx {
     uint32_t ui_tooltip_dark_64;
     uint32_t ui_card_back_96x128;
     uint32_t ui_button_dark_64;
+    uint32_t ui_finger_pointer_128; /* tutorial finger that points at the active control */
     uint32_t ui_valid_cell_overlay_128;
     uint32_t ui_invalid_cell_overlay_128;
     uint32_t ui_hover_cell_overlay_128;

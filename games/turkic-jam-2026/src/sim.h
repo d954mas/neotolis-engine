@@ -18,11 +18,13 @@
 #define TJ_MAX_HAND 16  /* cards held in the fan at once */
 #define TJ_NO_SLOT 0xFF /* slot_g* sentinel: this road cell has no build slot */
 
-/* Run phase: a new heir first leaves the aul, steps onto the road, then loops. */
+/* Run phase: a new heir waits at the campfire, is sent off, leaves the aul, steps
+ * onto the road, then loops. AUL_READY is the player-gated launch (FTUE intro). */
 typedef enum {
-    TJ_PHASE_AUL_EXIT = 0, /* walking from the aul out to the road (no loop tick) */
-    TJ_PHASE_ROAD_ENTRY,   /* standing on the first road cell */
-    TJ_PHASE_WALK,         /* normal auto-walk around the loop */
+    TJ_PHASE_AUL_READY = 0, /* hero waits at the campfire; player presses "Отправить путника" to begin */
+    TJ_PHASE_AUL_EXIT,      /* walking from the aul out to the road (no loop tick) */
+    TJ_PHASE_ROAD_ENTRY,    /* standing on the first road cell */
+    TJ_PHASE_WALK,          /* normal auto-walk around the loop */
 } tj_phase_t;
 
 /* Per road-cell rhythm role (Capybara-Go cadence): no dead cells. */
@@ -109,6 +111,9 @@ typedef struct {
 } tj_run_t;
 
 void tj_run_start(tj_run_t *r, int heir_index);
+/* Send the waiting hero out of the aul (AUL_READY -> AUL_EXIT). The FTUE intro and
+ * the aul "Отправить путника" button call this; no-op if not waiting. */
+void tj_run_send_wayfarer(tj_run_t *r);
 void tj_run_place_tile(tj_run_t *r, int cell, int tile_index);
 /* Place the held card into the field cell (gx,gy). Persists across circles.
  * Returns false if hand empty, out of zone, on road/aul, or the cell is taken. */

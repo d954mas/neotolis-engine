@@ -31,8 +31,9 @@ static bool s_banked = false;      /* death banked into the aul once per run */
 static int s_drag_card = -1;       /* hand card being dragged onto the field (-1 = none) */
 static bool s_help_open = false;   /* "?" how-to modal toggled open */
 static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
-static int s_ftue_step = 0;        /* 0 intro, 1 pull, 2 place, 3 merge, 4 done */
+static int s_ftue_step = 0;        /* 0 intro (reveal->send->walkout), 1 pull, 2 place, 3 merge, 4 done */
 static float s_ftue_t = 0.0F;      /* tutorial animation clock (highlight pulse) */
+static float s_intro_t = 0.0F;     /* first-run intro clock: dawn reveal + send-the-wayfarer cues */
 
 #if NT_DEVAPI_ENABLED
 /* devapi: live run state for bots/tests. */
@@ -195,6 +196,8 @@ static void ftue_begin(void) {
     s_ftue_active = true;
     s_ftue_step = 0;
     s_ftue_t = 0.0F;
+    s_intro_t = 0.0F;
+    s_run.phase = TJ_PHASE_AUL_READY;                       /* hero waits at the fire until the player sends him */
     s_run.forced_pull_tile = tj_config_tile_index("war_1"); /* always Точило -> 3-in-a-row merges cleanly */
     s_run.pouch += 4;                                       /* headroom so a misplace can be retried */
 }
@@ -320,59 +323,99 @@ static void handle_map_input(game_ctx_t *g, float dt) {
     }
 }
 
+/* First-run tutorial clocks + state-driven step gates (action steps advance on the
+ * real action, not a timer). Intro: dawn reveal -> send -> walkout, then the pull lesson. */
+static void ftue_step_tick(float dt) {
+    if (!s_ftue_active) {
+        return;
+    }
+    s_ftue_t += dt;
+    if (s_ftue_step == 0) {
+        s_intro_t += dt;
+        if (s_run.phase == TJ_PHASE_AUL_READY && s_intro_t < TJ_REVEAL_SECONDS && nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+            s_intro_t = TJ_REVEAL_SECONDS; /* a tap skips ahead to the end of the dawn reveal */
+        }
+        if (s_run.phase == TJ_PHASE_WALK) {
+            s_ftue_step = 1; /* walkout done -> begin the pull lesson */
+        }
+    } else if (s_ftue_step == 1 && s_run.hand_count > 0) {
+        s_ftue_step = 2;
+    } else if (s_ftue_step == 2 && field_has_any_tile()) {
+        s_ftue_step = 3;
+    } else if (s_ftue_step == 3 && s_run.merges_done > 0) {
+        s_ftue_step = 4;
+    }
+}
+
+/* Intro overlays over the world: the dawn veil + the on-theme line for the moment. */
+static void draw_intro_overlays(game_ctx_t *g) {
+    tj_view_reveal_veil(g, s_intro_t);
+    if (s_run.phase != TJ_PHASE_AUL_READY) {
+        tj_view_intro_banner(g, "Путь ведёт его сам.");
+    } else if (s_intro_t >= TJ_REVEAL_SECONDS) {
+        tj_view_intro_banner(g, "Путь ждёт первого путника. Отправь его в дорогу.");
+    }
+}
+
 static void on_update(game_ctx_t *g, float dt) {
     if (nt_input_key_is_pressed(NT_KEY_P)) {
         game_goto(g, &SCENE_PAUSE);
     }
 
-    if (!s_ftue_active) {
-        tj_run_tick(&s_run, dt); /* tutorial pauses the run: no time pressure while learning */
+    const bool in_intro = s_ftue_active && s_ftue_step == 0; /* dawn reveal -> send -> walkout */
+    const bool intro_walkout = in_intro && (s_run.phase == TJ_PHASE_AUL_EXIT || s_run.phase == TJ_PHASE_ROAD_ENTRY);
+
+    /* Tick rules: normal play ticks; the intro walkout ticks (hero leaves the aul); the
+     * wait-at-fire and the merge lessons stay paused (no time pressure while learning). */
+    if (!s_ftue_active || intro_walkout) {
+        tj_run_tick(&s_run, dt);
     }
     if (s_run.fx_cell_t > 0.0F) {
         s_run.fx_cell_t -= dt; /* place/merge pop decays every frame, even while the run is paused */
     }
-    handle_map_input(g, dt);
-
-    if (s_ftue_active) { /* state-driven step advance (action steps advance via the overlay button) */
-        s_ftue_t += dt;
-        if (s_ftue_step == 1 && s_run.hand_count > 0) {
-            s_ftue_step = 2;
-        } else if (s_ftue_step == 2 && field_has_any_tile()) {
-            s_ftue_step = 3;
-        } else if (s_ftue_step == 3 && s_run.merges_done > 0) {
-            s_ftue_step = 4;
-        }
+    if (!in_intro) {
+        handle_map_input(g, dt); /* camera + cards are locked during the intro */
     }
 
-    /* Full-screen frame: top HUD, then [log | map | hero], then card hand. */
+    ftue_step_tick(dt);
+
+    /* Full-screen frame: top HUD, then [log | map | hero], then card hand. During the
+     * first-run intro everything but the world + launch panel is hidden (progressive
+     * disclosure: UI opens up step by step as the player needs it). */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-        tj_view_top_hud(g, &s_run);
+        if (!in_intro) {
+            tj_view_top_hud(g, &s_run);
+        }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
-            tj_view_log(g, 10);
+            if (!in_intro) {
+                tj_view_log(g, 10);
+            }
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { tj_view_map(g, &s_run); }
-            if (s_run.alive && !s_run.won) {
+            if (in_intro) {
+                if (s_run.phase == TJ_PHASE_AUL_READY && tj_view_launch_panel(g, &s_run, s_intro_t)) {
+                    tj_run_send_wayfarer(&s_run); /* "Отправить путника" -> hero walks out */
+                }
+            } else if (s_run.alive && !s_run.won) {
                 tj_view_hero_panel(g, &s_run);
             } else if (tj_view_aul_panel(g, &s_run)) {
                 start_new_run(g); /* "Новый забег" pressed in the aul panel */
             }
         }
-        tj_view_card_hand(g, &s_run, s_drag_card);
-        if (tj_view_help_button(g)) {
-            s_help_open = !s_help_open; /* "?" toggles the how-to modal */
+        if (!in_intro) {
+            tj_view_card_hand(g, &s_run, s_drag_card);
+            if (tj_view_help_button(g)) {
+                s_help_open = !s_help_open; /* "?" toggles the how-to modal */
+            }
+            if (s_help_open && tj_view_help_modal(g)) {
+                s_help_open = false; /* "Понятно" closes it */
+            }
         }
-        if (s_help_open && tj_view_help_modal(g)) {
-            s_help_open = false; /* "Понятно" closes it */
-        }
-        if (s_ftue_active) {
+        if (in_intro) {
+            draw_intro_overlays(g);
+        } else if (s_ftue_active) {
             const int fr = tj_view_ftue_overlay(g, &s_run, s_ftue_step, s_ftue_t);
-            if (fr == 1) { /* action button: advance intro, or finish on the last card */
-                if (s_ftue_step == 0) {
-                    s_ftue_step = 1;
-                } else {
-                    ftue_finish();
-                }
-            } else if (fr == 2) {
-                ftue_finish(); /* skipped */
+            if (fr != 0) {
+                ftue_finish(); /* "Играть" on the last card, or "Пропустить" */
             }
         }
         tj_view_action_overlay(g, &s_run); /* combat / dice window, above the map */

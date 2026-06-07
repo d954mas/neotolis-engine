@@ -320,6 +320,7 @@ int main(int argc, char *argv[]) {
     const tj_atlas_asset_t ui_assets[] = {
         {"ui", "games/turkic-jam-2026/raw/ui/ui_card_back_96x128.png", "ui_card_back_96x128", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_button_dark_64.png", "ui_button_dark_64", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/ui_finger_pointer_128.png", "ui_finger_pointer_128", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_valid_cell_overlay_128.png", "ui_valid_cell_overlay_128", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_invalid_cell_overlay_128.png", "ui_invalid_cell_overlay_128", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_hover_cell_overlay_128.png", "ui_hover_cell_overlay_128", 0.5F, 0.5F},

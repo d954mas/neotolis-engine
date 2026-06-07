@@ -489,6 +489,9 @@ static void gen_loop(tj_run_t *r) {
 /* Advance the pre-loop intro: aul_exit -> road_entry -> walk. No loop tick here,
  * so the loading-settle dt never drifts the hero onto the loop. */
 static void tick_intro(tj_run_t *r, float dt) {
+    if (r->phase == TJ_PHASE_AUL_READY) {
+        return; /* waiting at the campfire; the player sends the wayfarer off (tj_run_send_wayfarer) */
+    }
     r->intro_t += dt;
     if (r->phase == TJ_PHASE_AUL_EXIT) {
         const float dur = (g_config.aul_exit_seconds > 0.0F) ? g_config.aul_exit_seconds : 2.0F;
@@ -503,6 +506,13 @@ static void tick_intro(tj_run_t *r, float dt) {
     if (r->intro_t >= dur) {
         r->intro_t = 0.0F;
         r->phase = TJ_PHASE_WALK;
+    }
+}
+
+void tj_run_send_wayfarer(tj_run_t *r) {
+    if (r->phase == TJ_PHASE_AUL_READY) {
+        r->phase = TJ_PHASE_AUL_EXIT;
+        r->intro_t = 0.0F;
     }
 }
 // #endregion
