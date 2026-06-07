@@ -15,7 +15,7 @@ void tj_aul_load(void) {
     g_aul.up_force = save_get_int("aul_up_force", 0);
     g_aul.up_speed = save_get_int("aul_up_speed", 0);
     g_aul.up_vigor = save_get_int("aul_up_vigor", 0);
-    g_aul.up_keep = save_get_int("aul_up_keep", 0);
+    g_aul.up_hand = save_get_int("aul_up_hand", 0);
     g_aul.tamga_pending = save_get_int("tamga_pending", 0);
     g_aul.tamga_cell = save_get_int("tamga_cell", 0);
     g_aul.tamga_wisdom = save_get_int("tamga_wisdom", 0);
@@ -54,7 +54,7 @@ static int *aul_track(int track) {
     case 2:
         return &g_aul.up_vigor;
     case 3:
-        return &g_aul.up_keep;
+        return &g_aul.up_hand;
     default:
         return NULL;
     }
@@ -69,15 +69,26 @@ static const char *aul_track_key(int track) {
     case 2:
         return "aul_up_vigor";
     case 3:
-        return "aul_up_keep";
+        return "aul_up_hand";
     default:
         return NULL;
     }
 }
 
+/* Non-linear flat head start: each level gifts +1 more than the last, so totals are
+   1,3,6,10,15,... — early ranks are gentle, maxed (~+15) rivals a tier-3 building. */
+int tj_aul_stat_bonus(int level) { return (level > 0) ? (level * (level + 1) / 2) : 0; }
+
 int tj_aul_upgrade_cost(int track) {
     const int *p = aul_track(track);
-    return p ? (8 * (*p + 1)) : 0; /* cost rises each level */
+    if (!p) {
+        return 0;
+    }
+    const int lvl = *p;
+    if (track == 3) {
+        return 10 + (8 * lvl); /* Рука: starting cards — pricier (10, 18, 26, ...) */
+    }
+    return 8 + (6 * lvl); /* stat tracks: 8, 14, 20, 26, ... (rises with the bigger gift) */
 }
 
 bool tj_aul_upgrade(int track) {
@@ -98,7 +109,7 @@ bool tj_aul_upgrade(int track) {
 }
 
 void tj_aul_add_from_run(int run_supplies, int run_wisdom, int run_glory) {
-    int keep = g_config.death_keep_supplies_pct + (g_aul.up_keep * 10); /* Наследие: +10%/lvl */
+    int keep = g_config.death_keep_supplies_pct; /* base keep (100%); the Рука track replaced the old keep upgrade */
     if (keep > 100) {
         keep = 100;
     }

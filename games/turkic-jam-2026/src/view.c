@@ -1703,9 +1703,14 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     static char sup[16];
     static char lvl[4][12];
     static char cost[4][12];
-    const int lv[4] = {g_aul.up_force, g_aul.up_speed, g_aul.up_vigor, g_aul.up_keep};
+    static char eff[4][28];
+    const int lv[4] = {g_aul.up_force, g_aul.up_speed, g_aul.up_vigor, g_aul.up_hand};
     const int c[4] = {tj_aul_upgrade_cost(0), tj_aul_upgrade_cost(1), tj_aul_upgrade_cost(2), tj_aul_upgrade_cost(3)};
     (void)snprintf(sup, sizeof sup, "%d", g_aul.supplies);
+    (void)snprintf(eff[0], sizeof eff[0], "%s +%d", pick_lang("damage", "урон", "hasar"), tj_aul_stat_bonus(lv[0]));
+    (void)snprintf(eff[1], sizeof eff[1], "%s +%d", pick_lang("speed", "скорость", "hiz"), tj_aul_stat_bonus(lv[1]));
+    (void)snprintf(eff[2], sizeof eff[2], "%s +%d", pick_lang("defense", "защита", "savunma"), tj_aul_stat_bonus(lv[2]));
+    (void)snprintf(eff[3], sizeof eff[3], "+%d %s", lv[3], pick_lang("in hand", "в руку", "ele"));
     for (int i = 0; i < 4; i++) {
         (void)snprintf(lvl[i], sizeof lvl[i], "ур.%d", lv[i]);
         (void)snprintf(cost[i], sizeof cost[i], "%d", c[i]);
@@ -1729,18 +1734,17 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sup, &s_sup_big);
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("supplies", "припасы", "erzak"), &s_dim);
         }
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Heritage upgrades", "Прокачка наследия", "Miras"), &s_dim);
-        if (aul_upgrade_button(g, "aul_f", g->icon_body_32, stat_sabre(), pick_lang("combat damage", "урон в бою", "hasar"), lvl[0], cost[0], g_aul.supplies >= c[0])) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Upgrades for the next batyr", "Прокачка для батыра", "Yukseltme"), &s_dim);
+        if (aul_upgrade_button(g, "aul_f", g->icon_body_32, stat_sabre(), eff[0], lvl[0], cost[0], g_aul.supplies >= c[0])) {
             tj_aul_upgrade(0);
         }
-        if (aul_upgrade_button(g, "aul_s", g->icon_mind_32, stat_horse(), pick_lang("attack speed", "скорость атак", "hiz"), lvl[1], cost[1], g_aul.supplies >= c[1])) {
+        if (aul_upgrade_button(g, "aul_s", g->icon_mind_32, stat_horse(), eff[1], lvl[1], cost[1], g_aul.supplies >= c[1])) {
             tj_aul_upgrade(1);
         }
-        if (aul_upgrade_button(g, "aul_v", g->icon_spirit_32, stat_amulet(), pick_lang("defense", "защита", "savunma"), lvl[2], cost[2], g_aul.supplies >= c[2])) {
+        if (aul_upgrade_button(g, "aul_v", g->icon_spirit_32, stat_amulet(), eff[2], lvl[2], cost[2], g_aul.supplies >= c[2])) {
             tj_aul_upgrade(2);
         }
-        if (aul_upgrade_button(g, "aul_k", g->icon_supplies_32, pick_lang("Heritage", "Наследие", "Miras"), pick_lang("keep supplies on death", "припасы при смерти", "erzak"), lvl[3], cost[3],
-                               g_aul.supplies >= c[3])) {
+        if (aul_upgrade_button(g, "aul_h", g->icon_deck_32, pick_lang("Hand", "Рука", "El"), eff[3], lvl[3], cost[3], g_aul.supplies >= c[3])) {
             tj_aul_upgrade(3);
         }
         if (tj_button(g, "aul_new", "Отправить батыра", 300, 64, TJ_BTN_PRIMARY)) {

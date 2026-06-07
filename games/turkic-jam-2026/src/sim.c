@@ -778,9 +778,9 @@ void tj_run_start(tj_run_t *r, int heir_index) {
         r->spirit = h->spirit;
         r->stamina += h->stamina_bonus;
     }
-    r->body += g_aul.up_force; /* aul meta upgrades (permanent, between runs) */
-    r->mind += g_aul.up_speed;
-    r->spirit += g_aul.up_vigor;
+    r->body += tj_aul_stat_bonus(g_aul.up_force); /* aul meta upgrades (permanent): non-linear flat head start */
+    r->mind += tj_aul_stat_bonus(g_aul.up_speed);
+    r->spirit += tj_aul_stat_bonus(g_aul.up_vigor);
     r->stamina += r->spirit * g_config.combat_vit_hp; /* Выносливость -> max HP */
     r->stamina_max = r->stamina;
     r->base_max = r->stamina;
@@ -808,7 +808,13 @@ void tj_run_start(tj_run_t *r, int heir_index) {
     r->fx_cell_t = 0.0F;
     r->fx_cell_mag = 0.0F;
     r->pouch = g_config.pouch_start; /* start with a pouch of cards to pull */
-    recompute_field_bonuses(r);      /* empty field at start: bonuses 0, but keep state consistent */
+    for (int hi = 0; hi < g_aul.up_hand && r->hand_count < TJ_MAX_HAND; hi++) {
+        const int c = pick_field_card(r->circle); /* Рука upgrade: begin the run with cards already in hand */
+        if (c >= 0) {
+            r->hand_cards[r->hand_count++] = c;
+        }
+    }
+    recompute_field_bonuses(r); /* empty field at start: bonuses 0, but keep state consistent */
     r->tamga_cell = -1;
     if (g_aul.tamga_pending && r->path_cells > 0) {
         r->tamga_cell = g_aul.tamga_cell % r->path_cells; /* wrap a prior loop's cell into this loop */
