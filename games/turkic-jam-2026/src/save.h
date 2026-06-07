@@ -9,6 +9,7 @@
 
 void save_init(void);  /* load backing store into memory */
 void save_flush(void); /* persist memory to backing store */
+void save_clear(void); /* wipe all keys and persist (full reset) */
 
 void save_set_int(const char *key, int value);
 int save_get_int(const char *key, int fallback);

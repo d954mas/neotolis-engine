@@ -109,7 +109,7 @@ static void on_update(game_ctx_t *g, float dt) {
             }
 
             if (tj_button(g, "menu_settings", i18n(T_SETTINGS), 320, 62, TJ_BTN_SECONDARY)) {
-                game_goto(g, &SCENE_SETTINGS);
+                g->settings_open = true;
             }
 
             if (tj_button(g, "menu_lang", i18n_lang_label(i18n_get()), 320, 62, TJ_BTN_SECONDARY)) {

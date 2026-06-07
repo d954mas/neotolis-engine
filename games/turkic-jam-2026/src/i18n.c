@@ -24,6 +24,9 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_RESET] = "Reset progress",
             [T_CHOOSE] = "Choose",
             [T_HEIR_TITLE] = "Choose an Heir",
+            [T_MUSIC] = "Music",
+            [T_SFX] = "Sound",
+            [T_RESET_HINT] = "Hold 5s to reset",
         },
     [LANG_RU] =
         {
@@ -46,6 +49,9 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_RESET] = "Сбросить прогресс",
             [T_CHOOSE] = "Выбрать",
             [T_HEIR_TITLE] = "Выбери наследника",
+            [T_MUSIC] = "Музыка",
+            [T_SFX] = "Звук",
+            [T_RESET_HINT] = "Зажми на 5с для сброса",
         },
     [LANG_TR] =
         {
@@ -68,6 +74,9 @@ static const char *s_table[LANG_COUNT][T_COUNT] = {
             [T_RESET] = "İlerlemeyi sıfırla",
             [T_CHOOSE] = "Seç",
             [T_HEIR_TITLE] = "Varis Seç",
+            [T_MUSIC] = "Müzik",
+            [T_SFX] = "Ses",
+            [T_RESET_HINT] = "Sıfırlamak için 5sn basılı tut",
         },
 };
 

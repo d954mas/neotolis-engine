@@ -29,7 +29,6 @@ add_executable(turkic_jam
     src/scenes/scene_heir_select.c
     src/scenes/scene_game.c
     src/scenes/scene_visual_qa.c
-    src/scenes/scene_settings.c
     src/scenes/scene_gameover.c
     src/scenes/scene_pause.c
 )

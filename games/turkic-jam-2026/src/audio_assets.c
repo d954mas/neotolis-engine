@@ -4,6 +4,8 @@
 #include "core/nt_platform.h"
 #include "log/nt_log.h"
 
+#include "save.h"
+
 #ifdef NT_PLATFORM_WEB
 #include "http/nt_http.h"
 #else
@@ -38,6 +40,22 @@ typedef struct {
 
 static tj_audio_entry_t s_entries[TJ_AUDIO_COUNT];
 static bool s_music_started;
+static nt_audio_voice_t s_music_voice = NT_AUDIO_VOICE_INVALID;
+
+/* Two independent buses (0..1); the engine master stays at 1.0 so these are the
+   only controls. SFX volume is baked into each play; music is live-adjustable. */
+static float s_music_vol = 0.6F;
+static float s_sfx_vol = 0.7F;
+
+static float clamp01(float v) {
+    if (v < 0.0F) {
+        return 0.0F;
+    }
+    if (v > 1.0F) {
+        return 1.0F;
+    }
+    return v;
+}
 
 /* ---- Platform request wrappers (fs on native, http on web) ---- */
 
@@ -90,7 +108,7 @@ static void req_free(uint32_t id) {
 /* ---- Public API ---- */
 
 void tj_audio_assets_init(void) {
-    nt_audio_set_master_volume(0.8F);
+    nt_audio_set_master_volume(1.0F); /* buses (music/sfx) are the real controls */
 
     s_entries[TJ_AUDIO_CLICK] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "click.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
     s_entries[TJ_AUDIO_MUSIC] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "music.mp3", .music = true, .clip = NT_AUDIO_CLIP_INVALID};
@@ -136,7 +154,7 @@ void tj_audio_assets_poll(void) {
     if (!s_music_started) {
         tj_audio_entry_t *m = &s_entries[TJ_AUDIO_MUSIC];
         if (m->done && TJ_CLIP_IS_VALID(m->clip) && nt_audio_get_state() == NT_AUDIO_RUNNING) {
-            nt_audio_play(m->clip, 0.6F, 1.0F, true);
+            s_music_voice = nt_audio_play(m->clip, s_music_vol, 1.0F, true);
             s_music_started = true;
         }
     }
@@ -145,6 +163,26 @@ void tj_audio_assets_poll(void) {
 void tj_audio_play_click(void) {
     tj_audio_entry_t *c = &s_entries[TJ_AUDIO_CLICK];
     if (c->done && TJ_CLIP_IS_VALID(c->clip)) {
-        nt_audio_play(c->clip, 0.7F, 1.0F, false);
+        nt_audio_play(c->clip, s_sfx_vol, 1.0F, false);
+    }
+}
+
+void tj_audio_set_music_volume(float v01) {
+    s_music_vol = clamp01(v01);
+    if (s_music_started) {
+        nt_audio_set_volume(s_music_voice, s_music_vol);
+    }
+}
+
+void tj_audio_set_sfx_volume(float v01) { s_sfx_vol = clamp01(v01); }
+
+float tj_audio_get_music_volume(void) { return s_music_vol; }
+float tj_audio_get_sfx_volume(void) { return s_sfx_vol; }
+
+void tj_audio_load_volumes_from_save(void) {
+    s_music_vol = clamp01((float)save_get_int("music_vol", 60) / 100.0F);
+    s_sfx_vol = clamp01((float)save_get_int("sfx_vol", 70) / 100.0F);
+    if (s_music_started) {
+        nt_audio_set_volume(s_music_voice, s_music_vol);
     }
 }

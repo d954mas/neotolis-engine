@@ -788,6 +788,11 @@ static void build_scene_shell(const nt_ui_transform_t *shake_xform) {
                      .padding = fullscreen ? CLAY_PADDING_ALL(0) : CLAY_PADDING_ALL(24),
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = {18.0F, 16.0F, 14.0F, 255.0F}}) {
+        /* Settings modal floats above whichever scene is active. Built first so
+           its controls win pointer capture; scene_game pauses on g.settings_open. */
+        if (g.settings_open && tj_view_settings_modal(&g, g_nt_app.dt)) {
+            g.settings_open = false;
+        }
         if (fullscreen) {
             if (g.scene->on_update) {
                 g.scene->on_update(&g, g_nt_app.dt);
@@ -1169,6 +1174,7 @@ int main(int argc, char *argv[]) {
     /* Persistence + restore last language before the first frame. */
     rng_seed(0xC0FFEEU);
     save_init();
+    tj_audio_load_volumes_from_save();
     i18n_set((i18n_lang_t)save_get_int("lang", LANG_RU));
 
     tj_config_load(config_dir);

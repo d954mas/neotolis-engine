@@ -156,6 +156,7 @@ typedef struct game_ctx {
     uint32_t fx_invalid_cell[2];
     float logical_w, logical_h;
     bool resources_ready;
+    bool settings_open; /* settings modal is up; pauses the run while open */
     int score;
     int best;
     int chosen_heir;    /* archetype picked on the heir-select screen */
@@ -174,7 +175,6 @@ extern const scene_t SCENE_MENU;
 extern const scene_t SCENE_HEIR_SELECT;
 extern const scene_t SCENE_GAME;
 extern const scene_t SCENE_VISUAL_QA;
-extern const scene_t SCENE_SETTINGS;
 extern const scene_t SCENE_GAMEOVER;
 extern const scene_t SCENE_PAUSE;
 

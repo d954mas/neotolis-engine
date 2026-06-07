@@ -16,10 +16,12 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_label.h"
 
+#include "audio_assets.h"
 #include "aul.h"
 #include "config.h"
 #include "i18n.h"
 #include "journal.h"
+#include "save.h"
 #include "ui_kit.h"
 
 // #region styles
@@ -1407,3 +1409,123 @@ bool tj_view_help_modal(game_ctx_t *g) {
     }
     return close;
 }
+
+// #region settings modal
+#define TJ_RESET_HOLD_SECONDS 5.0F
+
+static float s_settings_reset_hold;
+
+static int settings_pct(float v01) { return (int)((v01 * 100.0F) + 0.5F); }
+
+static void settings_set_lang(i18n_lang_t lang) {
+    i18n_set(lang);
+    save_set_int("lang", (int)lang);
+    save_flush();
+}
+
+static tj_btn_variant_t settings_lang_variant(i18n_lang_t lang) { return i18n_get() == lang ? TJ_BTN_PRIMARY : TJ_BTN_SECONDARY; }
+
+/* Full reset: wipe progress (best + aul + tamga), keep UI prefs (lang+volumes),
+ * close the modal, and drop back to the menu at zero. */
+static void settings_full_reset(game_ctx_t *g) {
+    const int lang = save_get_int("lang", LANG_RU);
+    const int music = save_get_int("music_vol", 60);
+    const int sfx = save_get_int("sfx_vol", 70);
+    save_clear();
+    save_set_int("lang", lang);
+    save_set_int("music_vol", music);
+    save_set_int("sfx_vol", sfx);
+    save_flush();
+    tj_aul_load();
+    g->best = 0;
+    g->score = 0;
+    g->settings_open = false;
+    game_goto(g, &SCENE_MENU);
+}
+
+static void settings_volume_row(game_ctx_t *g, const char *label, const char *slider_id, const char *save_key, float cur, void (*apply)(float)) {
+    float nv = cur;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 18, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), label, &s_stat);
+        }
+        nv = tj_slider(g, slider_id, cur);
+    }
+    if (settings_pct(nv) != settings_pct(cur)) {
+        apply(nv);
+        save_set_int(save_key, settings_pct(nv));
+        save_flush();
+    }
+}
+
+/* Gear button, top-right (left of the "?" help button). True on click. */
+bool tj_view_settings_button(game_ctx_t *g) {
+    bool clicked = false;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}, .offset = {-64.0F, 12.0F}, .zIndex = 52},
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
+        const nt_ui_button_style_t style = {
+            .idle = {.atlas = g->atlas, .bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 1.0F, .opacity = 1.0F},
+            .hover = {.bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 1.06F, .opacity = 1.0F},
+            .pressed = {.bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 0.95F, .offset_y = 3.0F, .opacity = 1.0F},
+            .disabled = {.bg_region = g->ui_button_dark_64, .bg_tint = 0xFF3A5A8AU, .scale = 1.0F, .opacity = 0.4F},
+            .transition_speed = 12.0F,
+            .hit_padding_lrtb = {8, 8, 8, 8},
+            .slice9_scale = 1.0F,
+        };
+        const Clay_ElementDeclaration decl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}};
+        nt_ui_button_begin(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), nt_ui_id("settings_gear"), &style, &decl, true);
+        if (g->icon_settings_32 != 0U && g->icon_settings_32 != NT_ATLAS_INVALID_REGION) {
+            const nt_ui_image_style_t img = nt_ui_image_style_defaults();
+            const Clay_ElementDeclaration idecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32)}}};
+            nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), g->atlas, g->icon_settings_32, &img, &idecl);
+        }
+        clicked = nt_ui_button_end(g->ui);
+    }
+    return clicked;
+}
+
+/* Settings modal: scrim + card with music/SFX sliders, language, and a 5s
+ * hold-to-reset. Returns true when the player closes it. */
+bool tj_view_settings_modal(game_ctx_t *g, float dt) {
+    bool close = false;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 80},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {16.0F, 12.0F, 8.0F, 210.0F}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIT(0)},
+                         .padding = CLAY_PADDING_ALL(28),
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 18,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {40.0F, 34.0F, 24.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(18.0F),
+              .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), i18n(T_SETTINGS), &TJ_STYLE_HEADING);
+
+            settings_volume_row(g, i18n(T_MUSIC), "set_music_vol", "music_vol", tj_audio_get_music_volume(), tj_audio_set_music_volume);
+            settings_volume_row(g, i18n(T_SFX), "set_sfx_vol", "sfx_vol", tj_audio_get_sfx_volume(), tj_audio_set_sfx_volume);
+
+            CLAY(
+                {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                if (tj_button(g, "set_en", i18n_lang_label(LANG_EN), 170, 54, settings_lang_variant(LANG_EN))) {
+                    settings_set_lang(LANG_EN);
+                }
+                if (tj_button(g, "set_ru", i18n_lang_label(LANG_RU), 170, 54, settings_lang_variant(LANG_RU))) {
+                    settings_set_lang(LANG_RU);
+                }
+                if (tj_button(g, "set_tr", i18n_lang_label(LANG_TR), 170, 54, settings_lang_variant(LANG_TR))) {
+                    settings_set_lang(LANG_TR);
+                }
+            }
+
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), i18n(T_RESET_HINT), &s_dim);
+            if (tj_hold_button(g, "set_hold_reset", i18n(T_RESET), dt, TJ_RESET_HOLD_SECONDS, &s_settings_reset_hold)) {
+                settings_full_reset(g);
+            }
+
+            close = tj_button(g, "set_close", i18n(T_BACK), 240, 60, TJ_BTN_SECONDARY);
+        }
+    }
+    return close;
+}
+// #endregion

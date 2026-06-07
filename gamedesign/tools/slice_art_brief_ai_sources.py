@@ -11,6 +11,13 @@ SRC = ROOT / "tmp" / "art_brief_ai_sources"
 
 
 MAGENTA = (255, 0, 255)
+NO_RIM_SPRITES = {
+    "aul_ground_2x2",
+    "aul_yurt_small_01",
+    "aul_yurt_small_02",
+    "aul_fire_01",
+    "aul_tamga_post_01",
+}
 
 
 def key_to_alpha(img: Image.Image) -> Image.Image:
@@ -66,10 +73,13 @@ def keep_main_components(img: Image.Image) -> Image.Image:
     comps.sort(key=lambda item: item[0], reverse=True)
     keep = set()
     main = comps[0][0]
-    for area, x0, _y0, x1, _y1, comp in comps:
+    for area, x0, y0, x1, y1, comp in comps:
         cx = (x0 + x1) * 0.5 / w
         central = cx > 0.08 and cx < 0.92
-        if area == main or (central and area >= main * 0.04):
+        comp_w = x1 - x0 + 1
+        comp_h = y1 - y0 + 1
+        divider = comp_w <= max(3, w // 28) and comp_h >= h // 2
+        if area == main or (central and area >= main * 0.04 and not divider):
             keep.update(comp)
     out = img.copy()
     px = out.load()
@@ -194,18 +204,18 @@ def slice_grid_to_rows(sheet_name: str, cols: int, rows: int, specs: list[tuple[
     return items
 
 
-def slice_grid_rect_to(sheet_name: str, cols: int, specs: list[tuple[int, str, str, int, int, float]]) -> list[tuple[str, Image.Image]]:
+def slice_grid_rect_to(sheet_name: str, cols: int, specs: list[tuple[int, str, str, int, int, float]], inset_ratio: float = 0.08) -> list[tuple[str, Image.Image]]:
     sheet = Image.open(SRC / sheet_name).convert("RGBA")
     rows = (max(idx for idx, _name, _folder, _w, _h, _fill in specs) // cols) + 1
-    return slice_grid_rect_to_rows(sheet_name, cols, rows, specs)
+    return slice_grid_rect_to_rows(sheet_name, cols, rows, specs, inset_ratio)
 
 
-def slice_grid_rect_to_rows(sheet_name: str, cols: int, rows: int, specs: list[tuple[int, str, str, int, int, float]]) -> list[tuple[str, Image.Image]]:
+def slice_grid_rect_to_rows(sheet_name: str, cols: int, rows: int, specs: list[tuple[int, str, str, int, int, float]], inset_ratio: float = 0.08) -> list[tuple[str, Image.Image]]:
     sheet = Image.open(SRC / sheet_name).convert("RGBA")
     cell_w = sheet.width / cols
     cell_h = sheet.height / rows
-    inset_x = max(4, int(round(cell_w * 0.08)))
-    inset_y = max(4, int(round(cell_h * 0.08)))
+    inset_x = int(round(cell_w * inset_ratio))
+    inset_y = int(round(cell_h * inset_ratio))
     items = []
     for cell_idx, out_name, folder, width, height, fill in specs:
         col = cell_idx % cols
@@ -344,10 +354,91 @@ def warm_magenta_noise(img: Image.Image) -> Image.Image:
     return out
 
 
+def remove_sticker_rim(img: Image.Image) -> Image.Image:
+    out = img.convert("RGBA")
+    px = out.load()
+    alpha = out.getchannel("A")
+    w, h = out.size
+    radius = min(8, max(3, min(w, h) // 18))
+    remove = bytearray(w * h)
+
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            light_rim = r > 178 and g > 125 and b > 70 and (r - b) < 140
+            ochre_rim = r > 150 and g > 95 and b < 95 and r > g + 22
+            pale_rim = r > 200 and g > 150 and b > 95
+            neutral_rim = r > 185 and g > 170 and b > 140
+            if not (light_rim or ochre_rim or pale_rim or neutral_rim):
+                continue
+            touches_empty = False
+            for dy in range(-radius, radius + 1):
+                if touches_empty:
+                    break
+                ny = y + dy
+                if ny < 0 or ny >= h:
+                    continue
+                for dx in range(-radius, radius + 1):
+                    nx = x + dx
+                    if nx < 0 or nx >= w:
+                        continue
+                    if dx * dx + dy * dy > radius * radius:
+                        continue
+                    if alpha.getpixel((nx, ny)) <= 80:
+                        touches_empty = True
+                        break
+            if touches_empty:
+                remove[y * w + x] = 1
+
+    for y in range(h):
+        for x in range(w):
+            if remove[y * w + x]:
+                r, g, b, _a = px[x, y]
+                px[x, y] = (r, g, b, 0)
+
+    alpha = out.getchannel("A")
+    edge_cut = min(3, max(1, min(w, h) // 64))
+    trim = bytearray(w * h)
+    for y in range(h):
+        for x in range(w):
+            if alpha.getpixel((x, y)) == 0:
+                continue
+            touches_empty = False
+            for dy in range(-edge_cut, edge_cut + 1):
+                if touches_empty:
+                    break
+                ny = y + dy
+                if ny < 0 or ny >= h:
+                    touches_empty = True
+                    break
+                for dx in range(-edge_cut, edge_cut + 1):
+                    nx = x + dx
+                    if nx < 0 or nx >= w or alpha.getpixel((nx, ny)) <= 80:
+                        touches_empty = True
+                        break
+            if touches_empty:
+                trim[y * w + x] = 1
+
+    for y in range(h):
+        for x in range(w):
+            if trim[y * w + x]:
+                r, g, b, _a = px[x, y]
+                px[x, y] = (r, g, b, 0)
+    return out
+
+
 def warm_saved(paths: list[Path]) -> list[tuple[str, Image.Image]]:
     items = []
     for path in paths:
         sprite = warm_magenta_noise(Image.open(path).convert("RGBA"))
+        if path.stem == "ground_sand_base_01":
+            sprite.putalpha(255)
+        elif path.stem in NO_RIM_SPRITES:
+            pass
+        else:
+            sprite = remove_sticker_rim(sprite)
         sprite.save(path)
         items.append((path.stem, sprite))
     return items
@@ -413,7 +504,8 @@ def main() -> None:
         (3, "aul_fire_01", "aul", 128, 128, 0.82),
         (4, "aul_tamga_post_01", "aul", 128, 128, 0.88),
     ]
-    aul_items = slice_grid_rect_to("aul_components_sticker_sheet_ai.png", 5, aul_component_specs)
+    aul_items = slice_grid_rect_to("aul_components_sticker_sheet_ai.png", 5, aul_component_specs[:1], 0.0)
+    aul_items.extend(slice_grid_rect_to("aul_components_sticker_sheet_ai.png", 5, aul_component_specs[1:]))
     aul_progression_specs = [
         (0, "aul_stage_01_camp", "aul", 256, 256, 0.92),
         (1, "aul_stage_02_settlement", "aul", 256, 256, 0.92),

@@ -31,6 +31,9 @@ typedef enum {
     T_RESET,
     T_CHOOSE,
     T_HEIR_TITLE,
+    T_MUSIC,
+    T_SFX,
+    T_RESET_HINT,
     T_COUNT,
 } i18n_key_t;
 
