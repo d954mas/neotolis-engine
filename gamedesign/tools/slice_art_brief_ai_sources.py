@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
+import random
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageStat
+from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,6 +105,38 @@ NO_RIM_SPRITES = {
     "equip_clothes_cloak_01",
     "equip_tamga_charm_01",
     "equip_tool_satchel_01",
+    "die_d4",
+    "die_d6",
+    "die_d8",
+    "die_d10",
+    "die_d12",
+    "die_d20",
+    "pouch_closed",
+    "pouch_open_0",
+    "pouch_open_1",
+    "pouch_open_2",
+    "pouch_open_3",
+    "ev_storm_32",
+    "ev_rockfall_32",
+    "ev_chase_32",
+    "aul_force_32",
+    "aul_speed_32",
+    "aul_vigor_32",
+    "aul_keep_32",
+    "icon_aul_upgrade_32",
+    "icon_card_gain_32",
+    "icon_deck_32",
+    "icon_map_32",
+    "icon_memory_32",
+    "icon_warning_32",
+    "fx_merge_0",
+    "fx_merge_1",
+    "fx_merge_2",
+    "fx_merge_3",
+    "fx_hit_0",
+    "fx_hit_1",
+    "fx_hit_2",
+    "fx_hit_3",
 }
 
 
@@ -550,6 +584,251 @@ def validate_rect(specs: list[tuple[Path, int, int]]) -> None:
         raise SystemExit(f"invalid sliced assets: {bad}")
 
 
+def mirror_saved_sprite(src: str, dst: str, folder: str) -> None:
+    src_path = RAW / folder / f"{src}.png"
+    dst_path = RAW / folder / f"{dst}.png"
+    Image.open(src_path).convert("RGBA").transpose(Image.Transpose.FLIP_LEFT_RIGHT).save(dst_path)
+
+
+def key_old_road_background(sprite: Image.Image) -> Image.Image:
+    out = sprite.convert("RGBA")
+    pixels = out.load()
+    w, h = out.size
+    samples = []
+    for y in range(h):
+        for x in range(w):
+            if x not in (0, 1, w - 2, w - 1) and y not in (0, 1, h - 2, h - 1):
+                continue
+            r, g, b, a = pixels[x, y]
+            if a == 0 or (r > 160 and b > 120 and g < 130):
+                continue
+            samples.append((r, g, b))
+    if not samples:
+        return out
+    samples.sort()
+    bg = samples[len(samples) // 2]
+    remove = bytearray(w * h)
+    stack = []
+    for x in range(w):
+        stack.append((x, 0))
+        stack.append((x, h - 1))
+    for y in range(1, h - 1):
+        stack.append((0, y))
+        stack.append((w - 1, y))
+
+    while stack:
+        x, y = stack.pop()
+        idx = y * w + x
+        if remove[idx]:
+            continue
+        r, g, b, a = pixels[x, y]
+        magenta_grid = r > 160 and b > 120 and g < 130
+        bg_like = abs(r - bg[0]) <= 48 and abs(g - bg[1]) <= 48 and abs(b - bg[2]) <= 48
+        if a == 0 or magenta_grid or bg_like:
+            remove[idx] = 1
+            if x > 0:
+                stack.append((x - 1, y))
+            if x + 1 < w:
+                stack.append((x + 1, y))
+            if y > 0:
+                stack.append((x, y - 1))
+            if y + 1 < h:
+                stack.append((x, y + 1))
+
+    for y in range(h):
+        for x in range(w):
+            if remove[y * w + x]:
+                r, g, b, _a = pixels[x, y]
+                pixels[x, y] = (r, g, b, 0)
+    return out
+
+
+def sample_old_road_pixels(sheet: Image.Image) -> list[tuple[int, int, int]]:
+    samples = []
+    cell_w = sheet.width // 3
+    cell_h = sheet.height // 3
+    for col, row in ((0, 0), (1, 0), (2, 0), (0, 1), (0, 2), (1, 2), (2, 2)):
+        sprite = key_old_road_background(sheet.crop((col * cell_w, row * cell_h, (col + 1) * cell_w, (row + 1) * cell_h)))
+        for r, g, b, a in sprite.getdata():
+            if a > 96 and 82 <= r <= 180 and 58 <= g <= 135 and 38 <= b <= 105:
+                samples.append((min(178, r + 12), min(140, g + 9), min(104, b + 7)))
+    return samples or [(142, 96, 62), (155, 108, 68), (118, 80, 54)]
+
+
+def road_path_points(kind: str, scale: int) -> list[tuple[int, int]]:
+    s = 128 * scale
+    c = s // 2
+    if kind == "road_straight_ew":
+        return [(-20 * scale, c), (s + (20 * scale), c)]
+    if kind == "road_straight_ns":
+        return [(c, -20 * scale), (c, s + (20 * scale))]
+
+    arcs = {
+        "road_corner_ne": ((s, 0), 180.0, 90.0),
+        "road_corner_es": ((s, s), 270.0, 180.0),
+        "road_corner_sw": ((0, s), 0.0, -90.0),
+        "road_corner_wn": ((0, 0), 90.0, 0.0),
+    }
+    (cx, cy), a0, a1 = arcs[kind]
+    pts = []
+    steps = 24
+    for i in range(steps + 1):
+        t = float(i) / float(steps)
+        a = math.radians(a0 + ((a1 - a0) * t))
+        pts.append((int(round(cx + (c * math.cos(a)))), int(round(cy + (c * math.sin(a))))))
+    return pts
+
+
+def point_along_polyline(pts: list[tuple[int, int]], t: float) -> tuple[float, float, float, float]:
+    lengths = []
+    total = 0.0
+    for i in range(len(pts) - 1):
+        ax, ay = pts[i]
+        bx, by = pts[i + 1]
+        length = math.hypot(float(bx - ax), float(by - ay))
+        lengths.append(length)
+        total += length
+    want = max(0.0, min(total, t * total))
+    acc = 0.0
+    for i, length in enumerate(lengths):
+        if acc + length >= want or i == len(lengths) - 1:
+            local = 0.0 if length <= 0.0 else (want - acc) / length
+            ax, ay = pts[i]
+            bx, by = pts[i + 1]
+            dx = float(bx - ax)
+            dy = float(by - ay)
+            inv = 1.0 / max(1.0, math.hypot(dx, dy))
+            return float(ax) + (dx * local), float(ay) + (dy * local), dx * inv, dy * inv
+        acc += length
+    ax, ay = pts[-1]
+    return float(ax), float(ay), 1.0, 0.0
+
+
+def draw_centered_road_tile(kind: str, samples: list[tuple[int, int, int]]) -> Image.Image:
+    scale = 4
+    size = 128 * scale
+    rng = random.Random(3107 + sum(ord(ch) for ch in kind))
+    pts = road_path_points(kind, scale)
+
+    mask = Image.new("L", (size, size), 0)
+    md = ImageDraw.Draw(mask)
+    md.line(pts, fill=255, width=54 * scale, joint="curve")
+    for _ in range(58):
+        x, y, dx, dy = point_along_polyline(pts, rng.random())
+        nx = -dy
+        ny = dx
+        spread = rng.uniform(-24.0, 24.0) * float(scale)
+        rr = rng.randint(1 * scale, 4 * scale)
+        cx = int(round(x + (nx * spread) + rng.uniform(-3.0, 3.0) * float(scale)))
+        cy = int(round(y + (ny * spread) + rng.uniform(-3.0, 3.0) * float(scale)))
+        md.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=rng.randint(60, 120))
+    mask = mask.filter(ImageFilter.GaussianBlur(1.15 * scale))
+
+    eroded = mask.filter(ImageFilter.MinFilter(17))
+    edge = Image.new("L", (size, size), 0)
+    edge_px = edge.load()
+    mask_px = mask.load()
+    erode_px = eroded.load()
+    for y in range(size):
+        for x in range(size):
+            edge_px[x, y] = max(0, mask_px[x, y] - erode_px[x, y])
+
+    road = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out_px = road.load()
+    sample_count = len(samples)
+    for y in range(size):
+        for x in range(size):
+            a = mask_px[x, y]
+            if a == 0:
+                continue
+            r, g, b = samples[((x * 37) + (y * 61) + ((x ^ y) * 13)) % sample_count]
+            wave = int(math.sin(float(x) * 0.04) * 3.0 + math.cos(float(y) * 0.035) * 3.0)
+            grain = (((x * 17) ^ (y * 43) ^ ((x + y) * 7)) & 7) - 3
+            shade = wave + grain
+            out_px[x, y] = (max(76, min(188, r + shade)), max(52, min(146, g + shade)), max(36, min(112, b + shade)), a)
+
+    rd = ImageDraw.Draw(road, "RGBA")
+    for _ in range(24):
+        t = rng.random()
+        x, y, dx, dy = point_along_polyline(pts, t)
+        nx = -dy
+        ny = dx
+        side = rng.choice((-1.0, 1.0))
+        offset = side * rng.uniform(8.0, 17.0) * float(scale)
+        length = rng.uniform(9.0, 22.0) * float(scale)
+        cx = x + (nx * offset)
+        cy = y + (ny * offset)
+        rd.line(
+            [(cx - (dx * length * 0.5), cy - (dy * length * 0.5)), (cx + (dx * length * 0.5), cy + (dy * length * 0.5))],
+            fill=(72, 50, 36, rng.randint(22, 42)),
+            width=rng.randint(1 * scale, 3 * scale),
+        )
+
+    edge_px = edge.load()
+    for _ in range(80):
+        x = rng.randrange(size)
+        y = rng.randrange(size)
+        if edge_px[x, y] < 32:
+            continue
+        rr = rng.randint(1 * scale, 3 * scale)
+        col = rng.choice(((156, 111, 70, 180), (188, 139, 78, 150), (91, 67, 50, 145)))
+        rd.ellipse((x - rr, y - rr, x + rr, y + rr), fill=col)
+
+    road.putalpha(mask)
+    return road.resize((128, 128), Image.Resampling.LANCZOS)
+
+
+def write_old_working_roads() -> None:
+    src = RAW / "_source" / "road_grid_old_working.png"
+    if not src.exists():
+        src = ROOT / "tmp" / "pass13_v3_road_grid_preview.png"
+    if not src.exists():
+        return
+    sheet = Image.open(src).convert("RGBA")
+    samples = sample_old_road_pixels(sheet)
+    tiles = {}
+    for name in ("road_straight_ns", "road_straight_ew", "road_corner_ne", "road_corner_es", "road_corner_sw", "road_corner_wn"):
+        tiles[name] = draw_centered_road_tile(name, samples)
+        tiles[name].save(RAW / "road" / f"{name}.png")
+    tiles["road_straight_ns"].save(RAW / "road" / "road_entry_aul.png")
+    tiles["road_straight_ns"].save(RAW / "road" / "road_current_highlight.png")
+
+
+def fit_stat_icon(cell: Image.Image) -> Image.Image:
+    keyed = key_to_alpha(cell)
+    alpha = keyed.getchannel("A").filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(0.35))
+    keyed.putalpha(alpha)
+    bbox = alpha.getbbox()
+    if bbox is None:
+        raise RuntimeError("empty stat icon")
+    cropped = keyed.crop(bbox)
+    rgb = ImageOps.autocontrast(cropped.convert("RGB"), cutoff=1)
+    rgb.putalpha(cropped.getchannel("A"))
+    cropped = rgb
+    cropped.thumbnail((34, 34), Image.Resampling.LANCZOS)
+    framed = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+    framed.alpha_composite(cropped, ((40 - cropped.width) // 2, (40 - cropped.height) // 2))
+    return framed.resize((32, 32), Image.Resampling.LANCZOS)
+
+
+def write_stat_icons() -> None:
+    src = RAW / "_source" / "stat_icons_generated_sheet.png"
+    if not src.exists():
+        return
+    sheet_img = Image.open(src).convert("RGBA")
+    names = ["icon_body_32", "icon_mind_32", "icon_spirit_32"]
+    items = []
+    cell_w = sheet_img.width // len(names)
+    out_dir = RAW / "icons"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for idx, name in enumerate(names):
+        cell = sheet_img.crop((idx * cell_w, 0, (idx + 1) * cell_w, sheet_img.height))
+        icon = fit_stat_icon(cell)
+        icon.save(out_dir / f"{name}.png")
+        items.append((name, icon))
+    sheet(items, RAW / "_review" / "art_brief_stat_icons_sheet.png", 48, 3)
+
+
 def main() -> None:
     hero_specs = [
         (0, "hero_wayfarer_idle_s", "hero", 128, 128, 0.9),
@@ -567,6 +846,7 @@ def main() -> None:
     ]
     hero_items.extend(slice_grid_rect_to("hero_portraits_sticker_sheet_ai.png", 4, hero_panel_specs))
     hero_specs.extend(hero_panel_specs)
+    mirror_saved_sprite("hero_wayfarer_walk_e", "hero_wayfarer_walk_w", "hero")
     hero_items = warm_saved([RAW / folder / f"{name}.png" for _idx, name, folder, _w, _h, _fill in hero_specs])
     scale_sheet(hero_items, RAW / "_review" / "art_brief_hero_ingame_scale.png", 72, 5)
     validate_rect([(RAW / folder / f"{name}.png", w, h) for _idx, name, folder, w, h, _fill in hero_specs])
@@ -628,6 +908,7 @@ def main() -> None:
     world_items = slice_grid_to("world_sticker_sheet_ai.png", 5, world_specs)
     ground_item = write_full_bleed_ground("world_sticker_sheet_ai.png", 5, 18)
     world_items = [item if item[0] != "ground_sand_base_01" else ground_item for item in world_items]
+    write_old_working_roads()
     world_items = warm_saved([RAW / folder / f"{name}.png" for _idx, name, folder, _size, _fill in world_specs])
     scale_sheet(world_items, RAW / "_review" / "art_brief_world_ingame_scale.png", 56, 5)
     validate([RAW / folder / f"{name}.png" for _idx, name, folder, _size, _fill in world_specs], 128)
@@ -720,6 +1001,8 @@ def main() -> None:
     icon_items = slice_overlap_row_to("icons_sheet_ai.png", 7, icon_specs, 1.35)
     sheet(icon_items, RAW / "_review" / "art_brief_icons_sheet.png", 48, 7)
     validate([RAW / "icons" / f"{name}.png" for name in icon_names], 32)
+    write_stat_icons()
+    validate([RAW / "icons" / f"{name}.png" for name in ["icon_body_32", "icon_mind_32", "icon_spirit_32"]], 32)
 
     card_art_names = [
         "card_art_saxaul_64",

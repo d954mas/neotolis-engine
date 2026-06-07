@@ -783,12 +783,11 @@ static void draw_hero(game_ctx_t *g, const tj_run_t *run, float pitch) {
     /* Walk bob: a small up-down spring while moving so the hero reads as alive. */
     float bob = 0.0F;
     if (run->phase == TJ_PHASE_WALK && !run->in_combat && !run->in_event) {
-        bob = -fabsf(sinf(run->move_t * 6.2832F)) * (pitch * 0.08F);
+        bob = -fabsf(sinf(run->move_t * 6.2832F)) * (pitch * 0.03F);
     }
     const uint32_t region = hero_region(g, run);
     if (has_region(region)) {
-        /* Hero a bit larger than a cell, lifted slightly so its feet sit ON the trail (was over-lifted). */
-        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy - (pitch * 0.08F) + bob, 6);
+        map_sprite(g, region, pitch * 1.3F, pitch * 1.3F, hx, hy + bob, 6);
     } else {
         map_rect_sprite(g, (Clay_Color){255.0F, 212.0F, 96.0F, 255.0F}, hs, hs, hx, hy);
     }
