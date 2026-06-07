@@ -81,6 +81,13 @@ static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     return bx;
 }
 
+/* Per-frame record of an interactive widget (one per step_interaction), used next frame by the
+ * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
+typedef struct {
+    uint32_t id;
+    int16_t pad[4]; /* hit padding L/R/T/B */
+} nt_ui_interactive_t;
+
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -127,7 +134,15 @@ struct nt_ui_context {
     nt_ui_baked_xform_t *hit_baked;
     uint32_t *hit_clip_parent_id;
     uint32_t *hit_generation;
+
+    /* Double-buffered interactive-widget registry (always-on). step_interaction appends to _cur this
+     * frame; the hot resolve reads _prev (last frame). Buffers swap each begin. Arena-allocated. */
+    nt_ui_interactive_t *interactive_prev;
+    nt_ui_interactive_t *interactive_cur;
+
     uint32_t current_generation;
+    uint32_t interactive_prev_count;
+    uint32_t interactive_cur_count;
 
     /* Per-walk metrics. */
     uint32_t last_walk_draw_call_delta;

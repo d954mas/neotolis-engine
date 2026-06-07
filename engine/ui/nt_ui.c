@@ -173,6 +173,8 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t hit_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_clip_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_clip_parent_id) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
+    /* Double-buffered interactive registry (always-on). */
+    const size_t interactive_bytes = NT_ALIGN_UP(sizeof(nt_ui_interactive_t) * desc->max_elements, NT_UI_CACHE_LINE);
 #if NT_UI_DEBUG_TOOLS
     const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
     const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
@@ -185,8 +187,8 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t debug_zones_bytes = 0U;
     const size_t inspector_collapsed_bytes = 0U;
 #endif
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes +
-           widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + clay_bytes;
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes +
+           (2U * interactive_bytes) + hit_layer_bytes + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -232,6 +234,11 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t hit_layer_bytes = 0U;
 #endif
     const size_t after_tree = ctx_size + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes + hit_layer_bytes;
+    /* Always-on interactive registry (double buffer) carved before the debug-only block. */
+    const size_t interactive_bytes = NT_ALIGN_UP(sizeof(nt_ui_interactive_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    ctx->interactive_prev = (nt_ui_interactive_t *)((char *)arena + after_tree);
+    ctx->interactive_cur = (nt_ui_interactive_t *)((char *)arena + after_tree + interactive_bytes);
+    const size_t after_interactive = after_tree + (2U * interactive_bytes);
 #if NT_UI_DEBUG_TOOLS
     ctx->widget_registry_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
     ctx->widget_registry_mask = ctx->widget_registry_cap - 1U;
@@ -240,12 +247,12 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap, NT_UI_CACHE_LINE);
     const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_tree);
-    ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_tree + widget_registry_bytes);
-    ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_tree + widget_registry_bytes + debug_zones_bytes);
-    const size_t after_debug = after_tree + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes;
+    ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_interactive);
+    ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_interactive + widget_registry_bytes);
+    ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_interactive + widget_registry_bytes + debug_zones_bytes);
+    const size_t after_debug = after_interactive + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes;
 #else
-    const size_t after_debug = after_tree;
+    const size_t after_debug = after_interactive;
 #endif
     void *clay_mem = (char *)arena + after_debug;
     const size_t clay_size = arena_size - after_debug;
@@ -326,6 +333,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
+
+    /* Swap the interactive registry: this frame's resolve reads last frame's set (now _prev); _cur is
+     * refilled by this frame's step_interaction calls. */
+    nt_ui_interactive_t *interactive_swap = ctx->interactive_prev;
+    ctx->interactive_prev = ctx->interactive_cur;
+    ctx->interactive_cur = interactive_swap;
+    ctx->interactive_prev_count = ctx->interactive_cur_count;
+    ctx->interactive_cur_count = 0U;
 
 #if NT_UI_DEBUG_TOOLS
     ctx->debug_zone_count = 0U;
@@ -2193,6 +2208,18 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
 
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
+
+    /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
+     * so recording an id that later vanishes is harmless). Capped at max_elements. */
+    if (ctx->interactive_cur_count < ctx->max_elements) {
+        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
+        rec->id = id;
+        if (pad_lrtb != NULL) {
+            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
+        } else {
+            memset(rec->pad, 0, sizeof rec->pad);
+        }
+    }
 
 #if NT_UI_DEBUG_TOOLS
     /* capture_seen stays 0 so next begin's orphan cleanup wipes in-progress capture (no phantom drag). */
