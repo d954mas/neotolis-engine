@@ -818,12 +818,32 @@ static void start_combat(tj_run_t *r, int tile, tj_cell_role_t role) {
     tj_journal_push((role == TJ_CELL_BOSS) ? TJ_LOG_BIG : TJ_LOG_BAD, "%s (%s)", r->combat_label, t->name);
 }
 
-static void end_combat_win(tj_run_t *r) {
+/* Enemy down: pause on a victory celebration. Loot is snapshot for the readout now but
+ * only applied when the celebration ends (combat_win_tick) — the reward lands "after a beat". */
+static void enter_combat_win(tj_run_t *r) {
     const tj_tile_def_t *t = &g_config.tiles[r->combat_tile];
     r->in_combat = false;
-    grant_rewards(r, t);
+    r->combat_win = true;
+    r->combat_win_t = (g_config.combat_win_seconds > 0.1F) ? g_config.combat_win_seconds : 1.2F;
+    r->win_sup = t->supplies;
+    r->win_wis = t->wisdom;
+    r->win_glory = t->glory;
+    r->win_sta = t->stamina_restore;
     tj_journal_push(TJ_LOG_GOOD, "%s повержен", t->name);
-    r->pouch += 1; /* combat drops a card into the pouch (pull it from the hand bar) */
+}
+
+/* Celebration timer: when it elapses the loot lands (+ a card in the pouch) and the walk resumes. */
+static void combat_win_tick(tj_run_t *r, float dt) {
+    r->combat_win_t -= dt;
+    if (r->fx_enemy_t > 0.0F) {
+        r->fx_enemy_t -= dt; /* let the killing-blow number finish floating */
+    }
+    if (r->combat_win_t <= 0.0F) {
+        grant_rewards(r, &g_config.tiles[r->combat_tile]);
+        r->pouch += 1; /* combat drops a card into the pouch (pull it from the hand bar) */
+        r->combat_win = false;
+        r->combat_tile = -1;
+    }
 }
 
 /* Hero strikes first each frame; whoever's ATB timer fills lands a hit. Deterministic. */
@@ -846,7 +866,7 @@ static void combat_tick(tj_run_t *r, float dt) {
         r->fx_enemy_t = 0.6F;
     }
     if (r->combat_enemy_hp <= 0) {
-        end_combat_win(r);
+        enter_combat_win(r);
         return;
     }
     for (int guard = 0; r->enemy_atk_t >= ei && r->alive && guard < 64; guard++) {
@@ -1059,6 +1079,10 @@ void tj_run_tick(tj_run_t *r, float dt) {
     }
     if (r->in_combat) {
         combat_tick(r, dt); /* walk is paused while fighting */
+        return;
+    }
+    if (r->combat_win) {
+        combat_win_tick(r, dt); /* victory celebration; walk paused until the loot lands */
         return;
     }
     if (r->in_event) {

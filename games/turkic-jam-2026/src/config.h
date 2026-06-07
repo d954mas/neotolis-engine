@@ -126,6 +126,7 @@ typedef struct {
     float combat_spd_mul;                                       /* interval = combat_atk_base / (1 + Скорость*combat_spd_mul) */
     int combat_vit_hp;                                          /* max HP bonus = Выносливость*combat_vit_hp */
     int combat_vit_def;                                         /* flat defense = Выносливость*combat_vit_def */
+    float combat_win_seconds;                                   /* victory celebration before loot is applied */
     float enemy_atk_interval;                                   /* enemy attack interval (s) */
     int enemy_hp_base, enemy_hp_per_diff;                       /* enemy HP = base + per_diff*tile_diff */
     int enemy_atk_base, enemy_atk_per_diff;                     /* enemy hit dmg = base + per_diff*tile_diff */

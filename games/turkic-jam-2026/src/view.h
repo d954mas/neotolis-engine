@@ -16,8 +16,9 @@ void tj_view_map(game_ctx_t *g, tj_run_t *run);                                 
 void tj_view_world_pan(float dx, float dy);                                              /* pan the map camera (world px), clamped */
 bool tj_view_world_cell_at(float lx, float ly, int *gx, int *gy);                        /* logical point -> grid cell; false if outside */
 void tj_view_pack_overlay(game_ctx_t *g, tj_run_t *run);                                 /* reward-chooser modal; call at scene root, above the clipped map */
-void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run);                         /* centered combat window (hero vs enemy, HP, damage) */
-void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run);                             /* right: doll, stats, current cell */
+void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run);                         /* centered dice-event window (combat now lives in the hero panel) */
+void tj_view_battle_tick(game_ctx_t *g, const tj_run_t *run, float dt);                  /* advance the combat-stage particles/shake; spawn sparks on hits + a victory burst */
+void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run);                             /* right: hero name, battle stage (hero vs enemy), stats, current cell */
 bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run);                              /* right panel when run over: result + upgrades + new-run (true on "Новый забег") */
 void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run);                          /* fullscreen run-over veil + verdict */
 void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial);       /* bottom: pouch + fan of cards (drag_idx drawn at cursor); tutorial hides the stock hint */

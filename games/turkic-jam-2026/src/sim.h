@@ -78,6 +78,10 @@ typedef struct {
     char combat_label[40];         /* "Босс-Толстяк" etc. for the fight readout */
     int fx_hero_dmg, fx_enemy_dmg; /* last damage to each side (floating numbers) */
     float fx_hero_t, fx_enemy_t;   /* fade timers for the damage numbers */
+    /* Victory celebration: enemy down, walk still paused, loot shown but applied only when it ends. */
+    bool combat_win;
+    float combat_win_t;
+    int win_sup, win_wis, win_glory, win_sta; /* loot snapshot for the flying reward labels */
     /* Timed dice-event reveal (animated; walk paused). Result is precomputed. */
     bool in_event;
     float event_t;

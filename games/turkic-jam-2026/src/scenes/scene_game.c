@@ -44,10 +44,10 @@ static int ep_run(int c, char **v, char *o, int cap, void *u) {
     (void)u;
     return snprintf(
         o, (size_t)cap,
-        "{\"circle\":%d,\"day\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"hand_count\":%d,\"pouch\":%d,\"in_combat\":%s,\"in_event\":%s,\"tamga_cell\":%d,\"stamina\":%d,\"stamina_max\":%d,"
-        "\"supplies\":%d,\"alive\":%s,\"won\":%s}",
-        s_run.circle, s_run.day, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.hand_count, s_run.pouch, s_run.in_combat ? "true" : "false", s_run.in_event ? "true" : "false", s_run.tamga_cell,
-        s_run.stamina, s_run.stamina_max, s_run.supplies, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
+        "{\"circle\":%d,\"day\":%d,\"cell\":%d,\"path_cells\":%d,\"phase\":%d,\"hand_count\":%d,\"pouch\":%d,\"in_combat\":%s,\"combat_win\":%s,\"in_event\":%s,\"tamga_cell\":%d,\"stamina\":%d,"
+        "\"stamina_max\":%d,\"supplies\":%d,\"alive\":%s,\"won\":%s}",
+        s_run.circle, s_run.day, s_run.cell, s_run.path_cells, (int)s_run.phase, s_run.hand_count, s_run.pouch, s_run.in_combat ? "true" : "false", s_run.combat_win ? "true" : "false",
+        s_run.in_event ? "true" : "false", s_run.tamga_cell, s_run.stamina, s_run.stamina_max, s_run.supplies, s_run.alive ? "true" : "false", s_run.won ? "true" : "false");
 }
 
 /* devapi: recent event-log lines (newest last), for reading the run narrative. */
@@ -388,6 +388,7 @@ static void on_update(game_ctx_t *g, float dt) {
     }
     if (!paused) {
         ftue_step_tick(dt);
+        tj_view_battle_tick(g, &s_run, dt); /* combat-stage particles/shake + hit/victory bursts */
     }
 
     /* Hand the intro state to the sprite world pass (it draws the black screen + sand +

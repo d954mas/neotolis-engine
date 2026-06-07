@@ -21,6 +21,7 @@
 #include "config.h"
 #include "i18n.h"
 #include "journal.h"
+#include "rng.h"
 #include "save.h"
 #include "ui_kit.h"
 
@@ -101,6 +102,43 @@ static float s_map_extent = 360.0F; /* maxdim * pitch; bounds the camera pan. */
 static int s_map_cols = 8;          /* grid dims captured for click->cell picking. */
 static int s_map_rows = 8;          //
 
+// #region battle stage state (combat drawn by the sprite renderer inside the hero panel)
+/* Nominal stage size (px). The panel is 332 wide, padding 16 -> 300 inner; height fixed.
+ * Sprite pass uses the live bbox (s_bat_*); Clay overlays use these constants — they match. */
+#define BAT_W 300.0F
+#define BAT_H 240.0F
+static char s_battle_tag;        /* CUSTOM data sentinel: marks the arena element, not the map. */
+static float s_bat_cx, s_bat_cy; /* stage centre (logical coords), from the element bbox. */
+static float s_bat_w = BAT_W;    /* live stage size (px). */
+static float s_bat_h = BAT_H;    //
+static float s_bat_m[16];        /* LAYOUT -> GL world matrix for the stage (own bbox, no camera). */
+static float s_bat_clock;        /* free-running stage clock (idle bob), advanced by the tick. */
+static tj_shake_t s_bat_shake;   /* local arena trauma: punches the sprites on every blow. */
+
+/* Cosmetic combat particles (impact sparks + victory burst). View-owned so the sim stays
+ * deterministic; positions are stage-local px (origin = stage centre, +y down). */
+#define TJ_BAT_PARTS 64 /* power-of-2: the ring-buffer index masks cleanly. */
+typedef struct {
+    float x, y, vx, vy;
+    float life, life0, size;
+    Clay_Color col;
+} tj_bat_part_t;
+static tj_bat_part_t s_parts[TJ_BAT_PARTS];
+static int s_part_head;
+static float s_prev_hero_t, s_prev_enemy_t; /* edge-detect a fresh blow (timer jumps back up). */
+static bool s_prev_win;                     /* edge-detect the victory moment. */
+// #endregion
+
+static float clampf(float v, float lo, float hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
 static uint8_t clamp_u8(float v) {
     if (v <= 0.0F) {
         return 0U;
@@ -113,10 +151,11 @@ static uint8_t clamp_u8(float v) {
 
 static uint32_t pack_clay_color(Clay_Color c) { return (uint32_t)clamp_u8(c.r) | ((uint32_t)clamp_u8(c.g) << 8) | ((uint32_t)clamp_u8(c.b) << 16) | ((uint32_t)clamp_u8(c.a) << 24); }
 
-/* Emit one w*h quad of `region`, centred at the map centre + (ox, oy), tinted by
- * `color`. Mirrors nt_ui's plain-region image path (ipu/source/origin) so map
- * sprites scale and anchor exactly like UI images, minus the Clay element. */
-static void emit_map_quad(game_ctx_t *g, uint32_t region, uint32_t color, float w, float h, float ox, float oy) {
+/* Core sprite emit: one w*h quad of `region` tinted by `color`, centred at (cx, cy) in the
+ * given LAYOUT->world matrix. Mirrors nt_ui's plain-region image path (ipu/source/origin) so
+ * sprites scale and anchor exactly like UI images. The map (camera-panned) and the battle
+ * stage (own bbox, no pan) both build on this. */
+static void emit_quad(game_ctx_t *g, uint32_t region, uint32_t color, float w, float h, float cx, float cy, const float world_m[16]) {
     if (!has_region(region)) {
         return;
     }
@@ -127,17 +166,18 @@ static void emit_map_quad(game_ctx_t *g, uint32_t region, uint32_t color, float 
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(g->atlas);
     const float sx = w / ((float)r->source_w * ipu);
     const float sy = h / ((float)r->source_h * ipu);
-    const float cx = s_map_cx + ox;
-    const float cy = s_map_cy + oy;
     float m[16];
     for (int rr = 0; rr < 4; ++rr) {
-        m[rr] = sx * s_world_m[rr];
-        m[4 + rr] = -sy * s_world_m[4 + rr];
-        m[8 + rr] = s_world_m[8 + rr];
-        m[12 + rr] = (cx * s_world_m[rr]) + (cy * s_world_m[4 + rr]) + s_world_m[12 + rr];
+        m[rr] = sx * world_m[rr];
+        m[4 + rr] = -sy * world_m[4 + rr];
+        m[8 + rr] = world_m[8 + rr];
+        m[12 + rr] = (cx * world_m[rr]) + (cy * world_m[4 + rr]) + world_m[12 + rr];
     }
     nt_sprite_renderer_emit_region(g->atlas, region, m, r->origin_x, r->origin_y, color, 0U);
 }
+
+/* Emit centred at the map centre + (ox, oy). */
+static void emit_map_quad(game_ctx_t *g, uint32_t region, uint32_t color, float w, float h, float ox, float oy) { emit_quad(g, region, color, w, h, s_map_cx + ox, s_map_cy + oy, s_world_m); }
 
 /* z is now painter order (draw-call order), not a Clay zIndex — kept in the
  * signature so the per-element call sites stay untouched. */
@@ -148,6 +188,10 @@ static void map_sprite(game_ctx_t *g, uint32_t region, float w, float h, float o
 
 /* Solid colour map marker (events/landmarks/fallbacks) via the white pixel. */
 static void map_rect_sprite(game_ctx_t *g, Clay_Color col, float w, float h, float ox, float oy) { emit_map_quad(g, g->white_region, pack_clay_color(col), w, h, ox, oy); }
+
+/* Battle-stage sprite + solid rect (offset in px from the arena centre, +y down). */
+static void bat_sprite(game_ctx_t *g, uint32_t region, uint32_t color, float w, float h, float ox, float oy) { emit_quad(g, region, color, w, h, s_bat_cx + ox, s_bat_cy + oy, s_bat_m); }
+static void bat_rect(game_ctx_t *g, Clay_Color col, float w, float h, float ox, float oy) { emit_quad(g, g->white_region, pack_clay_color(col), w, h, s_bat_cx + ox, s_bat_cy + oy, s_bat_m); }
 
 /* Set the world transform + viewport centre from the CUSTOM-element frame. The
  * walk supplies the layout->GL world_mat4 (Y-flip baked) and the element bbox
@@ -193,18 +237,6 @@ static void inline_sprite(game_ctx_t *g, uint32_t region, float w, float h) {
     }
     const nt_ui_image_style_t img = nt_ui_image_style_defaults();
     const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}}};
-    nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
-}
-
-static void floating_center_sprite(game_ctx_t *g, uint32_t region, float w, float h, int16_t z) {
-    if (!has_region(region)) {
-        return;
-    }
-    const nt_ui_image_style_t img = nt_ui_image_style_defaults();
-    const Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = z},
-    };
     nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
 }
 
@@ -931,6 +963,191 @@ static void draw_intro_fx(game_ctx_t *g) {
     }
 }
 
+// #region battle stage (sprite-pass arena hosted inside the hero panel)
+/* Capture the arena element's bbox + transform. No camera pan: the stage is fixed in the panel. */
+static void set_battle_from_frame(const nt_ui_custom_frame_t *frame) {
+    const Clay_RenderCommand *cmd = (const Clay_RenderCommand *)frame->clay_cmd;
+    const Clay_BoundingBox bb = cmd->boundingBox;
+    s_bat_cx = bb.x + (bb.width * 0.5F);
+    s_bat_cy = bb.y + (bb.height * 0.5F);
+    s_bat_w = bb.width;
+    s_bat_h = bb.height;
+    memcpy(s_bat_m, frame->world_mat4, sizeof s_bat_m);
+}
+
+/* Fighter stations + ground line, from the live bbox (origin = centre, +y down). */
+static void bat_layout(float *hero_x, float *enemy_x, float *ground_y, float *box_h) {
+    *box_h = s_bat_h * 0.70F;    /* target fighter height (each sprite is aspect-fit within this) */
+    *ground_y = s_bat_h * 0.33F; /* shared ground line; both fighters rest their feet here */
+    *hero_x = -s_bat_w * 0.26F;
+    *enemy_x = s_bat_w * 0.26F;
+}
+
+/* Draw a fighter aspect-correct, fit into (box_w x box_h), with its VISIBLE feet on ground_y.
+ * `foot_pad` = transparent fraction below the art's feet (hero art is top-weighted, like the map
+ * which lifts it 0.18*pitch); enemies mostly fill the frame. `scl` grows about the feet, `extra_oy`
+ * nudges vertically (idle bob / death sink). */
+static void bat_fighter(game_ctx_t *g, uint32_t region, uint32_t color, float box_w, float box_h, float ox, float ground_y, float extra_oy, float foot_pad, float scl) {
+    float aspect = 1.0F;
+    if (has_region(region)) {
+        const nt_texture_region_t *r = nt_atlas_get_region(g->atlas, region);
+        if (r->source_h > 0U) {
+            aspect = (float)r->source_w / (float)r->source_h;
+        }
+    }
+    float w = box_h * aspect;
+    float h = box_h;
+    if (w > box_w) { /* too wide: clamp by width, keep aspect */
+        w = box_w;
+        h = box_w / aspect;
+    }
+    w *= scl;
+    h *= scl;
+    const float cy = (ground_y - (h * (0.5F - foot_pad))) + extra_oy; /* visible feet land on the ground line */
+    bat_sprite(g, region, color, w, h, ox, cy);
+}
+
+/* Push one cosmetic particle into the ring buffer (stage-local px). */
+static void bat_spawn(float x, float y, float vx, float vy, float life, float size, Clay_Color col) {
+    tj_bat_part_t *p = &s_parts[s_part_head];
+    s_part_head = (s_part_head + 1) & (TJ_BAT_PARTS - 1);
+    *p = (tj_bat_part_t){.x = x, .y = y, .vx = vx, .vy = vy, .life = life, .life0 = life, .size = size, .col = col};
+}
+
+/* A small spray of sparks at (x, y), biased upward (a clean hit pops). */
+static void bat_sparks(float x, float y, int n, Clay_Color col) {
+    for (int i = 0; i < n; i++) {
+        const float ang = rng_range(0.0F, 6.2832F);
+        const float spd = rng_range(40.0F, 150.0F);
+        bat_spawn(x, y, cosf(ang) * spd, (sinf(ang) * spd) - 60.0F, rng_range(0.30F, 0.55F), rng_range(3.0F, 6.0F), col);
+    }
+}
+
+/* Per-frame: advance particles + local trauma, and spawn bursts on the rising edge of a blow
+ * or the victory moment (the sim drives the timers; the view only reacts). */
+void tj_view_battle_tick(game_ctx_t *g, const tj_run_t *run, float dt) {
+    (void)g;
+    s_bat_clock += dt;
+    tj_shake_update(&s_bat_shake, dt);
+    for (int i = 0; i < TJ_BAT_PARTS; i++) {
+        tj_bat_part_t *p = &s_parts[i];
+        if (p->life <= 0.0F) {
+            continue;
+        }
+        p->life -= dt;
+        p->x += p->vx * dt;
+        p->y += p->vy * dt;
+        p->vy += 520.0F * dt;       /* gravity: sparks arc down */
+        p->vx -= p->vx * 2.4F * dt; /* air drag */
+    }
+    if (s_bat_w <= 1.0F) {
+        return; /* stage not laid out yet (first frame) */
+    }
+    float hero_x;
+    float enemy_x;
+    float ground_y;
+    float box_h;
+    bat_layout(&hero_x, &enemy_x, &ground_y, &box_h);
+    const float hit_y = ground_y - (box_h * 0.45F); /* mid-body, where blows land */
+    if (run->fx_enemy_t > s_prev_enemy_t + 0.01F) { /* hero just struck the enemy */
+        bat_sparks(enemy_x, hit_y, 7, (Clay_Color){255.0F, 232.0F, 150.0F, 255.0F});
+        tj_shake_add(&s_bat_shake, 0.35F);
+    }
+    if (run->fx_hero_t > s_prev_hero_t + 0.01F) { /* enemy just struck the hero */
+        bat_sparks(hero_x, hit_y, 7, (Clay_Color){255.0F, 120.0F, 96.0F, 255.0F});
+        tj_shake_add(&s_bat_shake, 0.5F);
+    }
+    s_prev_enemy_t = run->fx_enemy_t;
+    s_prev_hero_t = run->fx_hero_t;
+    if (run->combat_win && !s_prev_win) { /* victory: golden burst from the falling enemy */
+        for (int i = 0; i < 24; i++) {
+            const float ang = rng_range(0.0F, 6.2832F);
+            const float spd = rng_range(60.0F, 230.0F);
+            bat_spawn(enemy_x, hit_y, cosf(ang) * spd, (sinf(ang) * spd) - 120.0F, rng_range(0.5F, 1.0F), rng_range(3.0F, 7.0F), (Clay_Color){255.0F, 214.0F, 96.0F, 255.0F});
+        }
+        tj_shake_add(&s_bat_shake, 0.6F);
+    }
+    s_prev_win = run->combat_win;
+}
+
+/* Hero faces east, toward the enemy. Lunges on its own swing (fx_enemy_t), flinches/flashes
+ * when struck (fx_hero_t); breathes when idle. */
+static void draw_battle_hero(game_ctx_t *g, const tj_run_t *run, float hero_x, float ground_y, float box_h, float shx, float shy, bool active) {
+    const float hero_atk = (run->fx_enemy_t > 0.0F) ? (run->fx_enemy_t / 0.6F) : 0.0F;
+    const float hero_dmg = (run->fx_hero_t > 0.0F) ? (run->fx_hero_t / 0.6F) : 0.0F;
+    const float ox = hero_x + (tj_ease_out_back(hero_atk) * s_bat_w * 0.12F) - (hero_dmg * s_bat_w * 0.05F);
+    const float scl = 1.0F + (hero_dmg * 0.10F);
+    const float bob = active ? 0.0F : (sinf(s_bat_clock * 2.2F) * s_bat_h * 0.02F);
+    const Clay_Color tint = {255.0F, 255.0F - (hero_dmg * 90.0F), 255.0F - (hero_dmg * 90.0F), 255.0F};
+    bat_fighter(g, g->hero_wayfarer_walk_e, pack_clay_color(tint), s_bat_w * 0.42F, box_h, ox + shx, ground_y + shy, bob, 0.36F, scl);
+}
+
+/* Enemy lunges on its swing (fx_hero_t), flashes when struck (fx_enemy_t), and fades+sinks
+ * during the victory celebration. */
+static void draw_battle_enemy(game_ctx_t *g, const tj_run_t *run, float enemy_x, float ground_y, float box_h, float shx, float shy) {
+    const float atk = (run->fx_hero_t > 0.0F) ? (run->fx_hero_t / 0.6F) : 0.0F;
+    const float dmg = (run->fx_enemy_t > 0.0F) ? (run->fx_enemy_t / 0.6F) : 0.0F;
+    const float ox = enemy_x - (tj_ease_out_back(atk) * s_bat_w * 0.12F) + (dmg * s_bat_w * 0.05F);
+    float sink = 0.0F;
+    float alpha = 1.0F;
+    float scl = 1.0F + (dmg * 0.10F);
+    if (run->combat_win) {
+        const float dur = (g_config.combat_win_seconds > 0.1F) ? g_config.combat_win_seconds : 1.2F;
+        const float p = clampf(1.0F - (run->combat_win_t / dur), 0.0F, 1.0F);
+        alpha = 1.0F - p;
+        sink = p * s_bat_h * 0.16F;
+        scl = 1.0F - (p * 0.35F);
+    }
+    const uint32_t boss_region = (current_cell_role(run) == TJ_CELL_BOSS) ? boss_region_for_circle(g, run->circle) : NT_ATLAS_INVALID_REGION;
+    const uint32_t eregion = has_region(boss_region) ? boss_region : tile_region_for_index(g, run->combat_tile);
+    if (has_region(eregion)) {
+        const Clay_Color tint = {255.0F, 255.0F - (dmg * 60.0F), 255.0F - (dmg * 60.0F), 255.0F * alpha};
+        bat_fighter(g, eregion, pack_clay_color(tint), s_bat_w * 0.42F, box_h, ox + shx, ground_y + shy, sink, 0.06F, scl);
+    } else {
+        const float h = box_h * scl;
+        bat_rect(g, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F * alpha}, h * 0.7F, h, ox + shx, ((ground_y - (h * 0.5F)) + sink) + shy);
+    }
+}
+
+static void draw_battle_particles(game_ctx_t *g, float shx, float shy) {
+    for (int i = 0; i < TJ_BAT_PARTS; i++) {
+        const tj_bat_part_t *p = &s_parts[i];
+        if (p->life <= 0.0F) {
+            continue;
+        }
+        const float a = p->life / p->life0;
+        bat_rect(g, (Clay_Color){p->col.r, p->col.g, p->col.b, p->col.a * a}, p->size, p->size, p->x + shx, p->y + shy);
+    }
+}
+
+/* Draw the arena: ground, hero, enemy (lunge/hit-flash/victory fade), then particles. */
+static void draw_battle_stage(game_ctx_t *g, const nt_ui_custom_frame_t *frame) {
+    const tj_run_t *run = (const tj_run_t *)g->run;
+    if (run == NULL) {
+        return;
+    }
+    set_battle_from_frame(frame);
+    nt_sprite_renderer_set_material(g->sprite_material);
+    float hero_x;
+    float enemy_x;
+    float ground_y;
+    float box_h;
+    bat_layout(&hero_x, &enemy_x, &ground_y, &box_h);
+    float shx;
+    float shy;
+    float shdeg;
+    tj_shake_sample(&s_bat_shake, s_bat_h * 0.05F, 0.0F, &shx, &shy, &shdeg);
+    (void)shdeg;
+    const bool active = run->in_combat || run->combat_win;
+    bat_rect(g, (Clay_Color){48.0F, 34.0F, 22.0F, 255.0F}, s_bat_w * 0.94F, s_bat_h * 0.06F, 0.0F, ground_y + shy);
+    draw_battle_hero(g, run, hero_x, ground_y, box_h, shx, shy, active);
+    if (active) {
+        draw_battle_enemy(g, run, enemy_x, ground_y, box_h, shx, shy);
+    }
+    draw_battle_particles(g, shx, shy);
+}
+// #endregion
+
 /* The map WORLD: ground/road/aul/field/hero drawn by the sprite renderer. Invoked
  * by nt_ui_walk as a CUSTOM render command (NT_UI_CUSTOM_TYPE_GAME) — during the
  * walk the GL viewport + frame state are set up, so a standalone sprite emit is
@@ -938,6 +1155,13 @@ static void draw_intro_fx(game_ctx_t *g) {
  * HUD/panels because later UI commands draw on top. */
 static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
     game_ctx_t *g = (game_ctx_t *)userdata;
+    /* One global handler serves every CUSTOM element; the arena is told apart by its data tag. */
+    const Clay_RenderCommand *cmd = (const Clay_RenderCommand *)frame->clay_cmd;
+    const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)cmd->renderData.custom.customData;
+    if (cd != NULL && cd->data == &s_battle_tag) {
+        draw_battle_stage(g, frame);
+        return;
+    }
     const tj_run_t *run = (const tj_run_t *)g->run;
     if (run == NULL || run->grid_cols < 2 || run->grid_rows < 2 || run->path_cells < 1) {
         return;
@@ -1027,12 +1251,128 @@ static void hp_bar(float frac, Clay_Color fill, float total) {
     }
 }
 
+/* A floating element pinned over the arena, centred at the stage centre + (ox, oy) px. */
+#define BAT_FLOAT(ox, oy, z)                                                                                                                                                                           \
+    {                                                                                                                                                                                                  \
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,                                                                                                                                                \
+                     .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},                                                                          \
+                     .offset = {(ox), (oy)},                                                                                                                                                           \
+                     .zIndex = (int16_t)(z),                                                                                                                                                           \
+                     .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},                                                                                                                     \
+        .layout = {                                                                                                                                                                                    \
+            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}                                                                                                                               \
+        }                                                                                                                                                                                              \
+    }
+
+/* One bright loot chip (icon + "+N") in the victory column; `fade` ramps it in. */
+static void bat_reward_chip(game_ctx_t *g, uint32_t icon, const char *text, float fade) {
+    nt_ui_label_style_t st = s_chip;
+    st.color = (Clay_Color){255.0F, 240.0F, 200.0F, 255.0F * fade};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .padding = {8, 8, 2, 2}, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {40.0F, 28.0F, 16.0F, 170.0F * fade},
+          .cornerRadius = CLAY_CORNER_RADIUS(8.0F)}) {
+        inline_sprite(g, icon, 22.0F, 22.0F);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &st);
+    }
+}
+
+/* The flying loot labels shown during the victory celebration (loot lands when it ends). */
+static void bat_reward_column(game_ctx_t *g, const tj_run_t *run, float fade, float rise) {
+    static char ls[16];
+    static char lw[16];
+    static char lg[16];
+    static char lh[16];
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                       .offset = {0.0F, (BAT_H * 0.10F) - rise},
+                       .zIndex = 34,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        if (run->win_sup > 0) {
+            (void)snprintf(ls, sizeof ls, "+%d", run->win_sup);
+            bat_reward_chip(g, g->icon_supplies_32, ls, fade);
+        }
+        if (run->win_wis > 0) {
+            (void)snprintf(lw, sizeof lw, "+%d", run->win_wis);
+            bat_reward_chip(g, g->icon_wisdom_32, lw, fade);
+        }
+        if (run->win_glory > 0) {
+            (void)snprintf(lg, sizeof lg, "+%d", run->win_glory);
+            bat_reward_chip(g, g->icon_glory_32, lg, fade);
+        }
+        if (run->win_sta > 0) {
+            (void)snprintf(lh, sizeof lh, "+%d", run->win_sta);
+            bat_reward_chip(g, g->icon_stamina_32, lh, fade);
+        }
+        bat_reward_chip(g, g->pouch_closed, pick_lang("+pouch", "+мешок", "+torba"), fade);
+    }
+}
+
+/* Clay layer over the sprite arena: HP bars above each head, rising damage numbers, and the
+ * victory header + loot labels. Geometry mirrors bat_layout (BAT_W/BAT_H constants). */
+/* Two rising, fading damage numbers (hero + enemy). Distinct static buffers: Clay keeps the ptr. */
+static void battle_dmg_numbers(game_ctx_t *g, const tj_run_t *run, float hero_x, float enemy_x) {
+    static char hdmg[12];
+    static char edmg[12];
+    if (run->fx_hero_t > 0.0F && run->fx_hero_dmg > 0) {
+        const float t = run->fx_hero_t / 0.6F;
+        nt_ui_label_style_t st = s_log_styles[TJ_LOG_BAD];
+        st.font_size = 22;
+        st.color.a = 255.0F * t;
+        (void)snprintf(hdmg, sizeof hdmg, "-%d", run->fx_hero_dmg);
+        CLAY(BAT_FLOAT(hero_x, (-BAT_H * 0.30F) - ((1.0F - t) * 30.0F), 32)) { nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hdmg, &st); }
+    }
+    if (run->fx_enemy_t > 0.0F && run->fx_enemy_dmg > 0) {
+        const float t = run->fx_enemy_t / 0.6F;
+        nt_ui_label_style_t st = s_stat;
+        st.font_size = 22;
+        st.color = (Clay_Color){250.0F, 230.0F, 150.0F, 255.0F * t};
+        (void)snprintf(edmg, sizeof edmg, "-%d", run->fx_enemy_dmg);
+        CLAY(BAT_FLOAT(enemy_x, (-BAT_H * 0.30F) - ((1.0F - t) * 30.0F), 32)) { nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), edmg, &st); }
+    }
+}
+
+/* Victory header ("ПОБЕДА") + flying loot labels, ramped in over the celebration. */
+static void battle_victory(game_ctx_t *g, const tj_run_t *run) {
+    const float dur = (g_config.combat_win_seconds > 0.1F) ? g_config.combat_win_seconds : 1.2F;
+    const float p = clampf(1.0F - (run->combat_win_t / dur), 0.0F, 1.0F);
+    const float fade = (p < 0.25F) ? (p / 0.25F) : 1.0F; /* quick fade-in, then hold */
+    const float rise = p * 18.0F;
+    nt_ui_label_style_t hd = s_panel_title;
+    hd.font_size = 26;
+    hd.color = (Clay_Color){255.0F, 224.0F, 120.0F, 255.0F * fade};
+    hd.align = CLAY_TEXT_ALIGN_CENTER;
+    CLAY(BAT_FLOAT(0.0F, (-BAT_H * 0.44F) - rise, 33)) { nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("VICTORY", "ПОБЕДА", "ZAFER"), &hd); }
+    bat_reward_column(g, run, fade, rise);
+}
+
+static void battle_overlays(game_ctx_t *g, const tj_run_t *run) {
+    const bool fighting = run->in_combat;
+    const bool celebrating = run->combat_win;
+    if (!fighting && !celebrating) {
+        return; /* idle: just the lone hero on the stage */
+    }
+    const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
+    const int emax = (run->combat_enemy_max > 0) ? run->combat_enemy_max : 1;
+    const int ehp = (run->combat_enemy_hp < 0) ? 0 : run->combat_enemy_hp;
+    const float hero_x = -BAT_W * 0.26F;
+    const float enemy_x = BAT_W * 0.26F;
+    CLAY(BAT_FLOAT(hero_x, -BAT_H * 0.24F, 30)) { hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 108.0F); }
+    if (fighting) {
+        CLAY(BAT_FLOAT(enemy_x, -BAT_H * 0.24F, 30)) { hp_bar((float)ehp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, 108.0F); }
+        CLAY(BAT_FLOAT(0.0F, -BAT_H * 0.46F, 31)) { nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->combat_label[0] ? run->combat_label : "Бой", &s_dim); }
+    }
+    battle_dmg_numbers(g, run, hero_x, enemy_x);
+    if (celebrating) {
+        battle_victory(g, run);
+    }
+}
+
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     static char force[40];
     static char speed[40];
     static char vigor[40];
     static char sta[40];
-    static char enemyline[48];
     static char cellinfo[40];
     (void)snprintf(force, sizeof force, "%s %d", pick_lang("Force", "Сила", "Kuvvet"), run->body + run->bonus_force);
     (void)snprintf(speed, sizeof speed, "%s %d", pick_lang("Speed", "Скорость", "Hiz"), run->mind + run->bonus_speed);
@@ -1040,27 +1380,25 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     (void)snprintf(sta, sizeof sta, "%s %d/%d", pick_lang("HP", "ХП", "CAN"), run->stamina, run->stamina_max);
     (void)snprintf(cellinfo, sizeof cellinfo, "%s %d / %d", pick_lang("Cell", "Клетка", "Hucre"), run->cell + 1, run->path_cells);
     const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
-    const bool fighting = run->in_combat && run->combat_tile >= 0 && run->combat_tile < g_config.tile_count;
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 10,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tj_hero_name(run), &s_panel_title);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(150)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {70.0F, 48.0F, 32.0F, 255.0F},
-              .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
-            floating_center_sprite(g, g->hero_wayfarer_panel, 96.0F, 132.0F, 0);
+        /* Battle arena: hero vs enemy drawn by the sprite renderer (draw_battle_stage), with HP
+         * bars / damage numbers / loot labels layered on top as Clay (battle_overlays). */
+        CLAY({.id = CLAY_ID("battlestage"),
+              .layout = {.sizing = {CLAY_SIZING_FIXED(BAT_W), CLAY_SIZING_FIXED(BAT_H)}},
+              .backgroundColor = {58.0F, 42.0F, 28.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(12.0F),
+              .clip = {.horizontal = true, .vertical = true}}) {
+            nt_ui_custom(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), &s_battle_tag);
+            battle_overlays(g, run);
         }
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
         hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 250.0F);
-        if (fighting) {
-            const int emax = (run->combat_enemy_max > 0) ? run->combat_enemy_max : 1;
-            (void)snprintf(enemyline, sizeof enemyline, "%s", run->combat_label[0] ? run->combat_label : g_config.tiles[run->combat_tile].name);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), enemyline, &s_stat);
-            hp_bar((float)run->combat_enemy_hp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, 250.0F);
-        }
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), force, &s_stat);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), speed, &s_stat);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), vigor, &s_stat);
@@ -1086,7 +1424,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     (void)snprintf(u2, sizeof u2, "+Выносл.  ур.%d  (%d)", g_aul.up_vigor, tj_aul_upgrade_cost(2));
     (void)snprintf(u3, sizeof u3, "+Наследие  ур.%d  (%d)", g_aul.up_keep, tj_aul_upgrade_cost(3));
     bool newrun = false;
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 8,
@@ -1131,30 +1469,6 @@ void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run) {
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = veil}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), won ? "ПОБЕДА" : "СМЕРТЬ", &s_die);
-    }
-}
-
-/* One fighter line in the corner combat window: small portrait + name + HP bar + value/dmg. */
-static void compact_fighter(game_ctx_t *g, uint32_t sprite, const char *name, float frac, Clay_Color hpcol, const char *hpval, const char *dmg, bool show_dmg, const nt_ui_label_style_t *dmgstyle,
-                            float punch) {
-    const float psz = 44.0F * (1.0F + (0.20F * punch)); /* portrait punches outward on a fresh hit */
-    const Clay_Color box = {60.0F + (40.0F * punch), 42.0F + (18.0F * punch), 28.0F, 255.0F};
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(54)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = box,
-              .cornerRadius = CLAY_CORNER_RADIUS(8.0F)}) {
-            floating_center_sprite(g, sprite, psz, psz, 0);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), name, &s_stat);
-            hp_bar(frac, hpcol, 200.0F);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hpval, &s_dim);
-                if (show_dmg) {
-                    nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dmg, dmgstyle);
-                }
-            }
-        }
     }
 }
 
@@ -1333,49 +1647,11 @@ static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
     }
 }
 
-/* Centered combat window: hero vs enemy, HP bars, floating damage numbers. */
+/* Centered dice-event window. Combat now renders inside the hero panel (tj_view_hero_panel ->
+ * the battle stage), so this overlay only carries the dice event. */
 void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
     if (run->in_event) {
         event_overlay(g, run);
-        return;
-    }
-    if (!run->in_combat) {
-        return;
-    }
-    static char hpv[24];
-    static char ehpv[24];
-    static char hdmg[12];
-    static char edmg[12];
-    const int smax = (run->stamina_max > 0) ? run->stamina_max : 1;
-    const int emax = (run->combat_enemy_max > 0) ? run->combat_enemy_max : 1;
-    const int ehp = (run->combat_enemy_hp < 0) ? 0 : run->combat_enemy_hp;
-    const char *ename = (run->combat_tile >= 0 && run->combat_tile < g_config.tile_count) ? g_config.tiles[run->combat_tile].name : "Враг";
-    (void)snprintf(hpv, sizeof hpv, "%d/%d", run->stamina, smax);
-    (void)snprintf(ehpv, sizeof ehpv, "%d/%d", ehp, emax);
-    (void)snprintf(hdmg, sizeof hdmg, "-%d", run->fx_hero_dmg);
-    (void)snprintf(edmg, sizeof edmg, "-%d", run->fx_enemy_dmg);
-    const uint32_t boss_region = (current_cell_role(run) == TJ_CELL_BOSS) ? boss_region_for_circle(g, run->circle) : NT_ATLAS_INVALID_REGION;
-    const uint32_t eregion = has_region(boss_region) ? boss_region : tile_region_for_index(g, run->combat_tile);
-    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_BOTTOM, .parent = CLAY_ATTACH_POINT_RIGHT_BOTTOM},
-                       .offset = {-14.0F, -172.0F}, /* bottom-right corner, just above the hand bar */
-                       .zIndex = 58,
-                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH}, /* don't block merging on the field */
-          .layout = {.sizing = {CLAY_SIZING_FIXED(330), CLAY_SIZING_FIT(0)},
-                     .padding = CLAY_PADDING_ALL(12),
-                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 8,
-                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {42.0F, 30.0F, 22.0F, 248.0F},
-          .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
-          .border = {.color = {200.0F, 90.0F, 70.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->combat_label[0] ? run->combat_label : "Бой", &s_panel_title);
-        const float hero_punch = (run->fx_hero_t > 0.0F) ? (run->fx_hero_t / 0.6F) : 0.0F; /* portrait punch on a fresh hit */
-        const float enemy_punch = (run->fx_enemy_t > 0.0F) ? (run->fx_enemy_t / 0.6F) : 0.0F;
-        compact_fighter(g, g->hero_wayfarer_panel, pick_lang("Hero", "Чемпион", "Kahraman"), (float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, hpv, hdmg,
-                        run->fx_hero_t > 0.0F && run->fx_hero_dmg > 0, &s_log_styles[TJ_LOG_BAD], hero_punch);
-        compact_fighter(g, has_region(eregion) ? eregion : 0U, ename, (float)ehp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, ehpv, edmg, run->fx_enemy_t > 0.0F && run->fx_enemy_dmg > 0,
-                        &s_log_styles[TJ_LOG_GOOD], enemy_punch);
     }
 }
 
@@ -1695,7 +1971,7 @@ bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
     (void)run;
     bool send = false;
     const bool armed = t >= TJ_REVEAL_SECONDS; /* button cues appear after the world is revealed */
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)},
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 12,

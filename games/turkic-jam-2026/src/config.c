@@ -138,6 +138,7 @@ static void set_defaults(void) {
     g_config.combat_spd_mul = 0.35F;
     g_config.combat_vit_hp = 2;
     g_config.combat_vit_def = 1;
+    g_config.combat_win_seconds = 1.2F;
     g_config.enemy_atk_interval = 0.85F;
     g_config.enemy_hp_base = 3;
     g_config.enemy_hp_per_diff = 2;
@@ -210,6 +211,7 @@ static void apply_ini(const char *k, const char *v) {
         {"combat_spd_mul", NULL, &g_config.combat_spd_mul},
         {"combat_vit_hp", &g_config.combat_vit_hp, NULL},
         {"combat_vit_def", &g_config.combat_vit_def, NULL},
+        {"combat_win_seconds", NULL, &g_config.combat_win_seconds},
         {"enemy_atk_interval", NULL, &g_config.enemy_atk_interval},
         {"enemy_hp_base", &g_config.enemy_hp_base, NULL},
         {"enemy_hp_per_diff", &g_config.enemy_hp_per_diff, NULL},
