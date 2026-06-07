@@ -202,7 +202,8 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 }
                 if (n > 0) {
                     /* Label in Clay px at the top-left, mapped by m onto the element; col1 negated so
-                     * glyphs read upright — same convention as the walker's emit_text. */
+                     * glyphs read upright (same col1-flip as emit_text; no text_scale to divide out
+                     * here — label_size is already in renderer units). */
                     const float ox = vl + 2.0F;
                     const float oy = vt + label_size + 2.0F;
                     float tm[16];

@@ -136,7 +136,7 @@ static void create_pipeline(void) {
 
 // #region Lifecycle
 /* GPU resources only — the pipeline is created lazily in flush, so this owns just the buffers + index
- * pattern. Split out so restore_gpu can rebuild them WITHOUT touching s_text's logical fields. */
+ * pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
 static void create_gpu_resources(void) {
     generate_quad_indices();
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -193,7 +193,7 @@ void nt_text_renderer_restore_gpu(void) {
     }
     /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
      * glyph_depth_bias) is left untouched, so it survives by default — no save/restore list to forget
-     * when a field is added (the bug that made glyph_depth_bias drop before this split). */
+     * when a field is added. */
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
