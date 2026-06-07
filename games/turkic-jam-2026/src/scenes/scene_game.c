@@ -34,6 +34,7 @@ static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the
 static int s_ftue_step = 0;        /* 0 intro (reveal->send->walkout), 1 pull, 2 place, 3 merge, 4 done */
 static float s_ftue_t = 0.0F;      /* tutorial animation clock (highlight pulse) */
 static float s_intro_t = 0.0F;     /* first-run intro clock: dawn reveal + send-the-wayfarer cues */
+static bool s_intro_black = false; /* first-run: holding the black-screen open until the player taps */
 
 #if NT_DEVAPI_ENABLED
 /* devapi: live run state for bots/tests. */
@@ -197,6 +198,7 @@ static void ftue_begin(void) {
     s_ftue_step = 0;
     s_ftue_t = 0.0F;
     s_intro_t = 0.0F;
+    s_intro_black = true;                                   /* open on a black screen; the first tap unlocks web audio + starts the reveal */
     s_run.phase = TJ_PHASE_AUL_READY;                       /* hero waits at the fire until the player sends him */
     s_run.forced_pull_tile = tj_config_tile_index("war_1"); /* always Точило -> 3-in-a-row merges cleanly */
     s_run.pouch += 4;                                       /* headroom so a misplace can be retried */
@@ -331,6 +333,12 @@ static void ftue_step_tick(float dt) {
     }
     s_ftue_t += dt;
     if (s_ftue_step == 0) {
+        if (s_intro_black) {
+            if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+                s_intro_black = false; /* first tap: unlocks web audio (main.c resume) + starts the dawn reveal */
+            }
+            return; /* hold on the black screen until the tap; consume it so the reveal isn't skipped */
+        }
         s_intro_t += dt;
         if (s_run.phase == TJ_PHASE_AUL_READY && s_intro_t < TJ_REVEAL_SECONDS && nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
             s_intro_t = TJ_REVEAL_SECONDS; /* a tap skips ahead to the end of the dawn reveal */
@@ -395,7 +403,7 @@ static void on_update(game_ctx_t *g, float dt) {
             }
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { tj_view_map(g, &s_run); }
             if (in_intro) {
-                if (s_run.phase == TJ_PHASE_AUL_READY && tj_view_launch_panel(g, &s_run, s_intro_t)) {
+                if (!s_intro_black && s_run.phase == TJ_PHASE_AUL_READY && tj_view_launch_panel(g, &s_run, s_intro_t)) {
                     tj_run_send_wayfarer(&s_run); /* "Отправить путника" -> hero walks out */
                 }
             } else if (s_run.alive && !s_run.won) {
@@ -416,7 +424,9 @@ static void on_update(game_ctx_t *g, float dt) {
                 s_help_open = false; /* "Понятно" closes it */
             }
         }
-        if (in_intro) {
+        if (in_intro && s_intro_black) {
+            tj_view_intro_black(g, s_ftue_t); /* black-screen open; tap continues (handled in ftue_step_tick) */
+        } else if (in_intro) {
             draw_intro_overlays(g);
         } else if (s_ftue_active) {
             const int fr = tj_view_ftue_overlay(g, &s_run, s_ftue_step, s_ftue_t);

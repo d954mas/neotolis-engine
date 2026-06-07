@@ -1542,25 +1542,6 @@ void tj_view_reveal_veil(game_ctx_t *g, float t) {
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .backgroundColor = veil}) {}
     }
-    float la = 1.0F; /* opening line: in over the dark, hold, out as the veil clears */
-    if (t < 0.4F) {
-        la = t / 0.4F;
-    } else if (t > 2.0F) {
-        la = 0.0F;
-    } else if (t > 1.4F) {
-        la = 1.0F - ((t - 1.4F) / 0.6F);
-    }
-    if (la > 0.0F) {
-        const nt_ui_label_style_t st = {.font_id = 0, .font_size = 30, .color = {238.0F, 216.0F, 172.0F, 255.0F * la}, .align = CLAY_TEXT_ALIGN_CENTER};
-        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                           .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
-                           .offset = {0.0F, -44.0F},
-                           .zIndex = 84,
-                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Sand erases every footprint.", "Песок стирает следы.", "Kum izleri siler."), &st);
-        }
-    }
 }
 
 /* Right "launch" panel (first run): the hero waits at the fire; the player sends him off.
@@ -1625,6 +1606,51 @@ void tj_view_intro_banner(game_ctx_t *g, const char *text) {
           .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
           .border = {.color = {198.0F, 154.0F, 55.0F, 230.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
+    }
+}
+
+/* First-run black-screen open: full black, the opening lines fade in, then a "tap to
+ * continue" prompt + finger. The player's tap unlocks web audio (main.c resume) and
+ * starts the dawn reveal. t = seconds since the screen appeared. */
+void tj_view_intro_black(game_ctx_t *g, float t) {
+    const float a1 = (t < 0.4F) ? (t / 0.4F) : 1.0F;                                /* "следы" fades in 0..0.4 */
+    const float a2 = (t < 1.0F) ? 0.0F : ((t < 1.6F) ? ((t - 1.0F) / 0.6F) : 1.0F); /* "путника" 1.0..1.6 */
+    const nt_ui_label_style_t l1 = {.font_id = 0, .font_size = 32, .color = {236.0F, 214.0F, 170.0F, 255.0F * a1}, .align = CLAY_TEXT_ALIGN_CENTER};
+    const nt_ui_label_style_t l2 = {.font_id = 0, .font_size = 26, .color = {214.0F, 188.0F, 150.0F, 255.0F * a2}, .align = CLAY_TEXT_ALIGN_CENTER};
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                       .zIndex = 88,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {8.0F, 6.0F, 4.0F, 255.0F}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Sand erases every footprint.", "Песок стирает следы.", "Kum izleri siler."), &l1);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("The path awaits its first wayfarer.", "Путь ждёт первого путника.", "Yol ilk yolcusunu bekliyor."), &l2);
+    }
+    if (t < 1.9F) {
+        return; /* let the lines land before inviting the tap */
+    }
+    const float pulse = 0.55F + (0.45F * sinf(t * 3.2F));
+    const nt_ui_label_style_t hint = {.font_id = 0, .font_size = 18, .color = {198.0F, 178.0F, 140.0F, 120.0F + (135.0F * pulse)}, .align = CLAY_TEXT_ALIGN_CENTER};
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_BOTTOM, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
+                       .offset = {0.0F, -96.0F},
+                       .zIndex = 89,
+                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("tap to continue", "нажми, чтобы продолжить", "devam icin dokun"), &hint);
+    }
+    if (has_region(g->ui_finger_pointer_128)) {
+        const float bob = sinf(t * 3.2F) * 7.0F;
+        const nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        const Clay_ElementDeclaration fdecl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(72.0F), CLAY_SIZING_FIXED(72.0F)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
+                         .offset = {120.0F, -88.0F + bob},
+                         .zIndex = 90,
+                         .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+        };
+        nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, g->ui_finger_pointer_128, &fimg, &fdecl);
     }
 }
 // #endregion
