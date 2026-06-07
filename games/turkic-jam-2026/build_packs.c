@@ -258,7 +258,8 @@ int main(int argc, char *argv[]) {
     atlas_opts.margin = 2;
     atlas_opts.extrude = 1;
     atlas_opts.premultiplied = true;
-    atlas_opts.compress = NULL;
+    static const nt_tex_compress_opts_t s_atlas_compress = {.mode = NT_TEX_COMPRESS_UASTC, .quality = 3, .endpoint_rdo_quality = 0.5F};
+    atlas_opts.compress = &s_atlas_compress; /* Basis UASTC (high): ~4x smaller atlas, high quality (runtime transcodes) */
     atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
@@ -337,6 +338,7 @@ int main(int argc, char *argv[]) {
         {"ui", "games/turkic-jam-2026/raw/ui/ui_slot_equipment_64.png", "ui_slot_equipment_64", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_chip_resource_64.png", "ui_chip_resource_64", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_tooltip_dark_64.png", "ui_tooltip_dark_64", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/ui_fortune_wheel_384.png", "ui_fortune_wheel_384", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/die_d4.png", "die_d4", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/die_d6.png", "die_d6", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/die_d8.png", "die_d8", 0.5F, 0.5F},
