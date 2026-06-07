@@ -2198,6 +2198,46 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
 
+/* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
+ * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
+ * distance within the occlusion cutoff; 2D: last-in-declaration-order hit (~ topmost). Registry holds
+ * game-layer widgets only, so their distances share one view_proj and compare cleanly. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
+    if (ctx->hot_resolved) {
+        return;
+    }
+    ctx->hot_resolved = true;
+    for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
+        const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        nt_ui_hot_t best = {0};
+        bool found = false;
+        for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
+            const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
+            float t = 0.0F;
+            if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, &t)) {
+                continue;
+            }
+            if (ctx->use_raycast_input) {
+                if (t > ctx->pointer_occlusion[pidx]) {
+                    continue; /* behind the game-fed cutoff (e.g. a wall) */
+                }
+                if (!found || t < best.distance) {
+                    best.id = rec->id;
+                    best.distance = t;
+                    found = true;
+                }
+            } else {
+                /* 2D: no depth — later-declared (drawn-on-top) hit wins; overwrite on each hit. */
+                best.id = rec->id;
+                best.distance = 0.0F;
+                found = true;
+            }
+        }
+        ctx->pointer_hot[pidx] = best;
+    }
+}
+
 /* Same compute as query_padded plus state-machine commits; ONCE per widget per frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
@@ -2206,6 +2246,8 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
     NT_ASSERT(id != 0U && "nt_ui_step_interaction_padded: id must be non-zero (0 = no widget)");
     NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
+
+    resolve_hot_if_needed(ctx); /* once per frame, from prev-frame registry; view_proj is set by now */
 
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
 
@@ -2378,7 +2420,7 @@ void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, f
 nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index) {
     NT_ASSERT(ctx != NULL && "nt_ui_pointer_hot: ctx must be non-NULL");
     NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_pointer_hot: pointer_index out of range");
-    /* Lazy resolve wired in a later slice; for now returns the per-frame default until then. */
+    resolve_hot_if_needed(ctx); /* lazy: first step OR this query triggers the once-per-frame resolve */
     return ctx->pointer_hot[pointer_index];
 }
 // #endregion
