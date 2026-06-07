@@ -408,7 +408,7 @@ static void hud_chip(game_ctx_t *g, uint32_t icon_region, const char *text) {
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_CHIP_BG,
           .cornerRadius = CLAY_CORNER_RADIUS(9.0F)}) {
-        inline_sprite(g, icon_region, 24.0F, 24.0F);
+        inline_sprite(g, icon_region, 32.0F, 32.0F);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_chip);
     }
 }
@@ -432,12 +432,11 @@ static const char *pick_lang(const char *en, const char *ru, const char *tr) {
 void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
     static char circle[40];
     static char sup[28];
-    static char sta[28];
     static char day[24];
     (void)snprintf(circle, sizeof circle, "%s %d/%d", pick_lang("Circle", "Круг", "Dongu"), run->circle, g_config.laps_to_win);
     (void)snprintf(sup, sizeof sup, "%s %d", pick_lang("Supplies", "Припасы", "Azik"), run->supplies);
-    (void)snprintf(sta, sizeof sta, "%s %d/%d", pick_lang("HP", "ХП", "CAN"), run->stamina, run->stamina_max);
     (void)snprintf(day, sizeof day, "%s %d", pick_lang("Day", "День", "Gun"), run->day);
+    /* Supplies pinned left, Circle+Day centred (HP lives in the hero panel), speed pinned right. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64)},
                      .padding = {16, 16, 10, 10},
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
@@ -446,10 +445,11 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
           .backgroundColor = TJ_BAR_BG}) {
         hud_chip(g, g->icon_supplies_32, sup);
         hud_spacer();
-        hud_chip(g, g->icon_circle_32, circle);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            hud_chip(g, g->icon_circle_32, circle);
+            hud_chip(g, g->icon_day_32, day);
+        }
         hud_spacer();
-        hud_chip(g, g->icon_day_32, day);
-        hud_chip(g, g->icon_stamina_32, sta);
         hud_chip(g, g->icon_speed_32, "x1");
     }
 }
@@ -583,8 +583,9 @@ static void draw_road(game_ctx_t *g, const tj_run_t *run, float pitch) {
     }
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
+    const float road_pitch = pitch * 1.04F;
     for (int i = 0; i < run->path_cells && i < TJ_MAX_PATH; i++) {
-        map_sprite(g, road_region_for_path_cell(g, run, i), pitch, pitch, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 2);
+        map_sprite(g, road_region_for_path_cell(g, run, i), road_pitch, road_pitch, grid_x(run->path_gx[i], cols, pitch), grid_y(run->path_gy[i], rows, pitch), 2);
     }
 }
 
@@ -1823,7 +1824,7 @@ bool tj_view_help_button(game_ctx_t *g) {
     bool clicked = false;
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}, .offset = {-12.0F, 12.0F}, .zIndex = 52},
           .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
-        clicked = tj_button(g, "help_q", "?", 44, 44, TJ_BTN_SECONDARY);
+        clicked = tj_button(g, "help_q", "?", 40, 40, TJ_BTN_SECONDARY);
     }
     return clicked;
 }
@@ -2135,11 +2136,11 @@ bool tj_view_settings_button(game_ctx_t *g) {
             .slice9_scale = 1.0F,
         };
         const Clay_ElementDeclaration decl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}};
+            .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}};
         nt_ui_button_begin(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), nt_ui_id("settings_gear"), &style, &decl, true);
         if (g->icon_settings_32 != 0U && g->icon_settings_32 != NT_ATLAS_INVALID_REGION) {
             const nt_ui_image_style_t img = nt_ui_image_style_defaults();
-            const Clay_ElementDeclaration idecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32)}}};
+            const Clay_ElementDeclaration idecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28)}}};
             nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), g->atlas, g->icon_settings_32, &img, &idecl);
         }
         clicked = nt_ui_button_end(g->ui);
