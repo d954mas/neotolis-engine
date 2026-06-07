@@ -897,17 +897,17 @@ static void start_event(tj_run_t *r) {
     const int pick = rng_range_int(0, 2);
     tj_stat_t st = TJ_STAT_BODY;
     const char *ename = "Завал";
-    const char *sname = "Сила";
+    const char *sname = "Клинок";
     int bonus = r->bonus_force;
     if (pick == 1) {
         st = TJ_STAT_MIND;
         ename = "Погоня";
-        sname = "Скорость";
+        sname = "Скакун";
         bonus = r->bonus_speed;
     } else if (pick == 2) {
         st = TJ_STAT_SPIRIT;
         ename = "Буря";
-        sname = "Выносливость";
+        sname = "Кут";
         bonus = r->bonus_vigor;
     }
     const int stat = tj_hero_stat(r, st) + bonus; /* effective stat (base + buildings) */

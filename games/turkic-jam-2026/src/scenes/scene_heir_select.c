@@ -46,23 +46,23 @@ static void heir_image(game_ctx_t *g, int i) {
 
 static const char *stat_body(i18n_lang_t lang) {
     if (lang == LANG_TR) {
-        return "Beden";
+        return "Kilic";
     }
-    return lang == LANG_RU ? "Тело" : "Body";
+    return lang == LANG_RU ? "Клинок" : "Blade";
 }
 
 static const char *stat_mind(i18n_lang_t lang) {
     if (lang == LANG_TR) {
-        return "Akıl";
+        return "At";
     }
-    return lang == LANG_RU ? "Ум" : "Mind";
+    return lang == LANG_RU ? "Скакун" : "Steed";
 }
 
 static const char *stat_spirit(i18n_lang_t lang) {
     if (lang == LANG_TR) {
-        return "Ruh";
+        return "Kut";
     }
-    return lang == LANG_RU ? "Дух" : "Spirit";
+    return lang == LANG_RU ? "Кут" : "Kut";
 }
 
 static const char *heir_name(const tj_heir_def_t *h) {
@@ -115,13 +115,36 @@ static void perk_fmt(char *buf, size_t cap, tj_perk_t perk, int v) {
     }
 }
 
+static void stat_icon(game_ctx_t *g, uint32_t region) {
+    if (!has_region(region)) {
+        return;
+    }
+    const nt_ui_image_style_t img = nt_ui_image_style_defaults();
+    const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}};
+    nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
+}
+
+static void stat_chip(game_ctx_t *g, uint32_t icon, const char *text) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(28)},
+                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                     .childGap = 4,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        stat_icon(g, icon);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
+    }
+}
+
 static void hero_card(game_ctx_t *g, int i) {
     const tj_heir_def_t *h = &g_config.heirs[i];
-    static char stat[TJ_MAX_HEIRS][64];
+    static char blade[TJ_MAX_HEIRS][24];
+    static char steed[TJ_MAX_HEIRS][24];
+    static char kut[TJ_MAX_HEIRS][24];
     static char perk[TJ_MAX_HEIRS][56];
     static char id[TJ_MAX_HEIRS][16];
     const i18n_lang_t lang = i18n_get();
-    (void)snprintf(stat[i], sizeof stat[i], "%s %d   %s %d   %s %d", stat_body(lang), h->body, stat_mind(lang), h->mind, stat_spirit(lang), h->spirit);
+    (void)snprintf(blade[i], sizeof blade[i], "%s %d", stat_body(lang), h->body);
+    (void)snprintf(steed[i], sizeof steed[i], "%s %d", stat_mind(lang), h->mind);
+    (void)snprintf(kut[i], sizeof kut[i], "%s %d", stat_spirit(lang), h->spirit);
     perk_fmt(perk[i], sizeof perk[i], h->perk, h->perk_value);
     (void)snprintf(id[i], sizeof id[i], "heir%d", i);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(270), CLAY_SIZING_FIT(0)},
@@ -137,7 +160,11 @@ static void hero_card(game_ctx_t *g, int i) {
             heir_image(g, i);
         }
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), heir_name(h), &s_name);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), stat[i], &s_stat);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            stat_chip(g, g->icon_body_32, blade[i]);
+            stat_chip(g, g->icon_mind_32, steed[i]);
+            stat_chip(g, g->icon_spirit_32, kut[i]);
+        }
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), perk[i], &s_perk);
         if (tj_button(g, id[i], i18n(T_CHOOSE), 200, 54, TJ_BTN_PRIMARY)) {
             g->chosen_heir = i;
