@@ -115,6 +115,9 @@ if(EMSCRIPTEN)
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"
+        # Bundle config/ into the virtual FS so tj_config_load's fopen("config/...") works on web
+        # (no real filesystem; without this the game silently falls back to built-in defaults).
+        "SHELL:--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/config@/config"
     )
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_options(turkic_jam PRIVATE
