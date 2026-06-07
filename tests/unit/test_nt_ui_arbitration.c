@@ -1,9 +1,9 @@
 /* Front-most input arbitration (2D ctx).
  *
- * Two fully-overlapping interactive widgets: only the front-most (last-declared, drawn-on-top in 2D)
- * may hover/press a free pointer; the one behind it is gated off. Arbitration uses the PREVIOUS
- * frame's interactive registry, so frame 1 (empty registry) falls back to the raw hit — both react —
- * and arbitration kicks in from frame 2. */
+ * Among overlapping interactive widgets only the front-most (highest effective Clay zIndex; equal
+ * zIndex → last-declared) may hover/press a free pointer; those behind it are gated off. Arbitration
+ * uses the PREVIOUS frame's interactive registry, so frame 1 (empty registry) falls back to the raw
+ * hit — both react — and arbitration kicks in from frame 2. */
 
 #include <stdalign.h>
 #include <stdbool.h>
