@@ -1606,7 +1606,8 @@ bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
           .border = {.color = ring, .width = CLAY_BORDER_OUTSIDE(3 + (int)(3.0F * pulse))}}) {}
     if (has_region(g->ui_finger_pointer_128)) {
         const float bob = 2.0F + (8.0F * (0.5F + (0.5F * sinf(t * 4.0F)))); /* finger taps up toward the button */
-        const nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        fimg.color_packed = 0xFFAAD6ECU; /* warm tint for the white Kenney finger glyph */
         const Clay_ElementDeclaration fdecl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(76.0F), CLAY_SIZING_FIXED(76.0F)}},
             .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID,
@@ -1669,7 +1670,8 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
     }
     if (has_region(g->ui_finger_pointer_128)) {
         const float bob = sinf(t * 3.2F) * 7.0F;
-        const nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        fimg.color_packed = 0xFFAAD6ECU; /* warm tint for the white Kenney finger glyph */
         const Clay_ElementDeclaration fdecl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(72.0F), CLAY_SIZING_FIXED(72.0F)}},
             .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
