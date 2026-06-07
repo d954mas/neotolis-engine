@@ -37,7 +37,7 @@ const nt_ui_label_style_t TJ_STYLE_HINT = {
 
 static const nt_ui_label_style_t s_btn_label = {
     .font_id = 0,
-    .font_size = 36,
+    .font_size = 28,
     .color = {255.0F, 255.0F, 255.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };

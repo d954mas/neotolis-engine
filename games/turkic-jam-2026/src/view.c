@@ -2320,6 +2320,20 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
               .cornerRadius = CLAY_CORNER_RADIUS(12.0F),
               .border = {.color = ring, .width = CLAY_BORDER_OUTSIDE(3 + (int)(3.0F * pulse))}}) {}
     }
+    if (step == 2 && has_region(g->ui_finger_pointer_128)) { /* finger taps down onto the «Мешочек» button */
+        const float bob = 4.0F + (8.0F * (0.5F + (0.5F * sinf(t * 4.0F))));
+        nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
+        fimg.flip_bits = 2U; /* NT_SPRITE_FLAG_FLIP_Y: point the hand down at the pouch below it */
+        const Clay_ElementDeclaration fdecl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(64.0F), CLAY_SIZING_FIXED(76.0F)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+                         .offset = {hx + 66.0F, hy - 80.0F - bob},
+                         .zIndex = 86,
+                         .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
+        };
+        nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, g->ui_finger_pointer_128, &fimg, &fdecl);
+    }
 
     const char *body;
     switch (step) {
