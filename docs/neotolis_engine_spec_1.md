@@ -169,7 +169,11 @@ If a decision can be deferred without loss of base architecture — it is deferr
     from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
     a separate final screen-space pass. The game binds a 2D UI projection
     first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard
-    Y-up orthographic matrix used by 2D demos.
+    Y-up orthographic matrix used by 2D demos. The post-walk highlight
+    overlay (`nt_ui_inspector_overlay_draw`) differs: in 3D ctx it emits the
+    hovered element's bbox under that element's `hit_baked` world matrix, so
+    the game binds the perspective VP for it while the sidebar tree stays
+    orthographic.
 
   Both modes use the same `tree_baked[layout_idx]` + per-id mirror
   `hit_baked[slot]` (Clay's hashmap is persistent across frames;
