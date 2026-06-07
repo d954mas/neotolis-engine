@@ -354,14 +354,36 @@ static void apply_tile_income(tj_run_t *r, int idx) {
     log_event("resource_gain", &(tj_log_ctx_t){.supplies = t->supplies, .wisdom = t->wisdom, .glory = t->glory});
 }
 
-/* Apply the player's persistent field builds (global income) for this circle. */
+/* Per-circle effect of the player's persistent field builds: Вода heals each circle, but
+ * Жильё's припасы no longer tick here — they pay out once when the heir falls
+ * (tj_run_field_supplies banked at death), so income doesn't compound into a fat per-circle
+ * stream. */
 static void apply_field(tj_run_t *r) {
     const int n = r->grid_cols * r->grid_rows;
     for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
-        if (r->field_tile[i] >= 0 && r->field_tile[i] < g_config.tile_count) {
-            apply_tile_income(r, r->field_tile[i]);
+        const int t = r->field_tile[i];
+        if (t < 0 || t >= g_config.tile_count || g_config.tiles[t].stamina_restore <= 0) {
+            continue;
+        }
+        r->stamina += g_config.tiles[t].stamina_restore; /* Вода: per-circle heal */
+        if (r->stamina > r->stamina_max) {
+            r->stamina = r->stamina_max;
         }
     }
+}
+
+/* Total припасы the placed buildings pay into the aul when the heir falls — a one-time
+ * legacy payout (Жильё = savings), not a compounding per-circle stream. */
+int tj_run_field_supplies(const tj_run_t *r) {
+    int sum = 0;
+    const int n = r->grid_cols * r->grid_rows;
+    for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
+        const int t = r->field_tile[i];
+        if (t >= 0 && t < g_config.tile_count) {
+            sum += g_config.tiles[t].supplies;
+        }
+    }
+    return sum;
 }
 
 /* Fill this circle's road pool (road reshuffles); the field is persistent. */

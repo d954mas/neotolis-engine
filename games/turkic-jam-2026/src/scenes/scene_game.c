@@ -34,7 +34,7 @@ static int s_drag_card = -1;       /* hand card being dragged onto the field (-1
 static int s_prev_merges = 0;      /* edge-detect new merges this frame -> screen-shake punch */
 static bool s_help_open = false;   /* "?" how-to modal toggled open */
 static bool s_ftue_active = false; /* first-run tutorial in progress (pauses the run) */
-static int s_ftue_step = 0;        /* 0 intro (reveal->send->walkout), 1 pull, 2 place, 3 merge, 4 done */
+static int s_ftue_step = 0;        /* 0 intro, 1 watch (walk+fight to 1st pouch), 2 pull, 3 place, 4 merge, 5 done */
 static float s_ftue_t = 0.0F;      /* tutorial animation clock (highlight pulse) */
 static float s_intro_t = 0.0F;     /* first-run intro clock: dawn reveal + send-the-wayfarer cues */
 static bool s_intro_black = false; /* first-run: holding the black-screen open until the player taps */
@@ -347,14 +347,16 @@ static void ftue_step_tick(float dt) {
             s_intro_t = TJ_REVEAL_SECONDS; /* a tap skips ahead to the end of the dawn reveal */
         }
         if (s_run.phase == TJ_PHASE_WALK) {
-            s_ftue_step = 1; /* walkout done -> begin the pull lesson */
+            s_ftue_step = 1; /* walkout done -> watch phase: batyr walks + fights on his own */
         }
-    } else if (s_ftue_step == 1 && s_run.hand_count > 0) {
-        s_ftue_step = 2;
-    } else if (s_ftue_step == 2 && field_has_any_tile()) {
+    } else if (s_ftue_step == 1 && s_run.pouch > 0) {
+        s_ftue_step = 2; /* first pouch earned in combat -> teach the pull */
+    } else if (s_ftue_step == 2 && s_run.hand_count > 0) {
         s_ftue_step = 3;
-    } else if (s_ftue_step == 3 && s_run.merges_done > 0) {
+    } else if (s_ftue_step == 3 && field_has_any_tile()) {
         s_ftue_step = 4;
+    } else if (s_ftue_step == 4 && s_run.merges_done > 0) {
+        s_ftue_step = 5;
     }
 }
 
@@ -418,11 +420,12 @@ static void on_update(game_ctx_t *g, float dt) {
 
     const bool in_intro = s_ftue_active && s_ftue_step == 0; /* dawn reveal -> send -> walkout */
     const bool intro_walkout = in_intro && (s_run.phase == TJ_PHASE_AUL_EXIT || s_run.phase == TJ_PHASE_ROAD_ENTRY);
+    const bool ftue_watch = s_ftue_active && s_ftue_step == 1; /* batyr walks + fights on his own until the first pouch */
 
-    /* Tick rules: the settings modal freezes everything; otherwise normal play ticks, the
-     * intro walkout ticks (hero leaves the aul), and the wait-at-fire + merge lessons stay
-     * paused (no time pressure while learning). */
-    if (!paused && (!s_ftue_active || intro_walkout)) {
+    /* Tick rules: the settings modal freezes everything; otherwise normal play ticks, the intro
+     * walkout + the FTUE "watch" phase tick (batyr moves/fights), and the pull/place/merge lessons
+     * stay paused (no time pressure while learning). */
+    if (!paused && (!s_ftue_active || intro_walkout || ftue_watch)) {
         tj_run_tick(&s_run, dt);
     }
     if (s_run.fx_cell_t > 0.0F) {
@@ -523,6 +526,7 @@ static void on_update(game_ctx_t *g, float dt) {
         if (!s_run.alive) {
             tj_tamga_spawn(s_run.cell, s_run.circle); /* leave the Last Tamga where the heir fell */
         }
+        s_run.supplies += tj_run_field_supplies(&s_run);                /* Жильё legacy payout: cashes out once now, not per circle */
         tj_aul_add_from_run(s_run.supplies, s_run.wisdom, s_run.glory); /* bank into the aul (meta) */
         s_run.supplies = 0;                                             /* haul is now in the aul; HUD shows g_aul.supplies + run->supplies, no double-count */
         g->score = s_run.circle;
