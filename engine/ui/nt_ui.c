@@ -321,8 +321,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
             ctx->captures[i].active_id = 0U;
         }
         ctx->capture_seen[i] = 0U;
+        ctx->pointer_hot[i] = (nt_ui_hot_t){0}; /* resolved lazily on first step/query this frame */
+        ctx->pointer_occlusion[i] = INFINITY;   /* game re-feeds per frame; default = no cutoff */
     }
     ctx->pointer_over_any = false;
+    ctx->hot_resolved = false;
 
 #if NT_UI_DEBUG_TOOLS
     ctx->debug_zone_count = 0U;
@@ -2335,6 +2338,21 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
         }
     }
     return false;
+}
+
+void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_pointer_occlusion: ctx must be non-NULL");
+    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_pointer_occlusion: only meaningful in 3D ctx (use_raycast_input)");
+    NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_set_pointer_occlusion: pointer_index out of range");
+    /* Negative = occlude everything (all hits have t >= 0); the game owns that choice, so no assert. */
+    ctx->pointer_occlusion[pointer_index] = max_world_distance;
+}
+
+nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index) {
+    NT_ASSERT(ctx != NULL && "nt_ui_pointer_hot: ctx must be non-NULL");
+    NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_pointer_hot: pointer_index out of range");
+    /* Lazy resolve wired in a later slice; for now returns the per-frame default until then. */
+    return ctx->pointer_hot[pointer_index];
 }
 // #endregion
 

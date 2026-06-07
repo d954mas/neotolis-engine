@@ -93,8 +93,14 @@ struct nt_ui_context {
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
+    /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved lazily once
+     * per frame from prev-frame layout (3D: nearest ray-t within cutoff; 2D: top zIndex). Ordered here
+     * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
+    nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
+    float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
+    bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
 
     /* Buttons do not nest (asserted). */
     struct {
