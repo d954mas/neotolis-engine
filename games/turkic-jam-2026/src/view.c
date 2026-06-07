@@ -2032,15 +2032,21 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
             event_info_card(g, pick_lang("My stat", "Мой параметр", "Nitelik"), show_stat ? statbuf : "?", (Clay_Color){116.0F, 176.0F, 210.0F, 255.0F},
                             show_stat ? event_stat_icon(g, run->ev_kind) : 0U);
         }
-        if (show_wheel) {
-            event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
+        /* Reserve the wheel + result space from the first frame so the staged reveal never grows
+           the card (the column was visibly jumping down then back up as lines appeared). */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(214.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            if (show_wheel) {
+                event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
+            }
         }
-        if (show_math) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_ev_check);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), compareline, &s_stat);
-        }
-        if (show_res) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_ev_good : &s_ev_bad);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64.0F)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+            if (show_math) {
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_ev_check);
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), compareline, &s_stat);
+            }
+            if (show_res) {
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_ev_good : &s_ev_bad);
+            }
         }
     }
 }
