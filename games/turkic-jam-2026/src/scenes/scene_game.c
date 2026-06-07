@@ -276,7 +276,10 @@ static void handle_map_input(game_ctx_t *g, float dt) {
     static float press_y = 0.0F;
     static float last_x = 0.0F;
     static float last_y = 0.0F;
-    camera_keys(dt);
+    const bool cam_locked = s_ftue_active && s_ftue_step == 3; /* keep the merge-gap on screen during the lesson */
+    if (!cam_locked) {
+        camera_keys(dt);
+    }
     const float mx = g->ptr_x;
     const float my = g->ptr_y;
     if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
@@ -290,7 +293,7 @@ static void handle_map_input(game_ctx_t *g, float dt) {
         return;
     }
     if (press_active && nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
-        if (s_drag_card < 0) { /* map press: a move past threshold = camera scroll */
+        if (s_drag_card < 0 && !cam_locked) { /* map press: a move past threshold = camera scroll */
             if (!dragged && (fabsf(mx - press_x) + fabsf(my - press_y)) > 8.0F) {
                 dragged = true;
             }
