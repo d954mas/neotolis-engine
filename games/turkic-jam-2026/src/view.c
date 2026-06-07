@@ -55,6 +55,10 @@ static const nt_ui_label_style_t s_ev_value = {.font_id = 0, .font_size = 24, .c
 static const nt_ui_label_style_t s_wheel_chip = {.font_id = 0, .font_size = 15, .color = {210.0F, 196.0F, 166.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_wheel_chip_sel = {.font_id = 0, .font_size = 16, .color = {32.0F, 24.0F, 12.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_wheel_hub = {.font_id = 0, .font_size = 32, .color = {245.0F, 232.0F, 200.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+/* Bigger intro/launch text — the opening moment reads large, not like dense HUD copy. */
+static const nt_ui_label_style_t s_intro_title = {.font_id = 0, .font_size = 30, .color = {236.0F, 210.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_intro_sub = {.font_id = 0, .font_size = 21, .color = {200.0F, 184.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_banner = {.font_id = 0, .font_size = 25, .color = {234.0F, 222.0F, 198.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_ev_good = {.font_id = 0, .font_size = 24, .color = {126.0F, 200.0F, 134.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_ev_bad = {.font_id = 0, .font_size = 24, .color = {230.0F, 110.0F, 78.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
@@ -1642,7 +1646,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
         if (tj_button(g, "aul_k", u3, 290, 44, TJ_BTN_SECONDARY)) {
             tj_aul_upgrade(3);
         }
-        if (tj_button(g, "aul_new", "Отправить батыра", 290, 58, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "aul_new", "Отправить батыра", 290, 76, TJ_BTN_PRIMARY)) {
             newrun = true;
         }
     }
@@ -1722,13 +1726,15 @@ static void event_result_text(const tj_run_t *run, int die, const char *statname
     int eff = (int)((float)run->ev_stat * mult);
     if (run->ev_roll <= 1) {
         eff = 0;
-        (void)snprintf(mathline, ml, "%s %d * 0 = 0", statname, run->ev_stat);
+        (void)snprintf(mathline, ml, "%s %d * %s = 0", statname, run->ev_stat, pick_lang("miss", "мимо", "iska"));
+        (void)snprintf(compareline, cl, "%s 0 < %s %d", pick_lang("Total", "Итог", "Toplam"), pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     } else if (run->ev_roll >= die) {
-        (void)snprintf(mathline, ml, "%s %d * x%g = %d", statname, run->ev_stat, (double)mult, eff);
+        (void)snprintf(mathline, ml, "%s %d * %s = %s", statname, run->ev_stat, pick_lang("max", "куш", "kazanc"), pick_lang("success", "успех", "basari"));
+        (void)snprintf(compareline, cl, "%s: %s > %s %d", pick_lang("Total", "Итог", "Toplam"), pick_lang("max", "куш", "kazanc"), pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     } else {
         (void)snprintf(mathline, ml, "%s %d * x%g = %d", statname, run->ev_stat, (double)mult, eff);
+        (void)snprintf(compareline, cl, "%s %d %s %s %d", pick_lang("Total", "Итог", "Toplam"), eff, run->ev_pass ? ">=" : "<", pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     }
-    (void)snprintf(compareline, cl, "%s %d %s %s %d", pick_lang("Total", "Итог", "Toplam"), eff, run->ev_pass ? ">" : "<", pick_lang("Difficulty", "Сложность", "Zorluk"), run->ev_dc);
     if (run->ev_pass) {
         (void)snprintf(resline, rl, "%s   +%d", pick_lang("SUCCESS", "УСПЕХ", "BASARI"), run->ev_gain);
     } else {
@@ -1815,7 +1821,7 @@ static void event_step(game_ctx_t *g, const char *text, bool active, bool done) 
     }
 }
 
-static void event_info_card(game_ctx_t *g, const char *label, const char *value, Clay_Color accent) {
+static void event_info_card(game_ctx_t *g, const char *label, const char *value, Clay_Color accent, uint32_t icon) {
     nt_ui_label_style_t lbl = s_dim;
     lbl.font_size = 14;
     nt_ui_label_style_t val = s_ev_value;
@@ -1828,18 +1834,33 @@ static void event_info_card(game_ctx_t *g, const char *label, const char *value,
           .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
           .border = {.color = accent, .width = CLAY_BORDER_OUTSIDE(2)}}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), label, &lbl);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), value, &val);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            if (has_region(icon)) {
+                inline_sprite(g, icon, 24.0F, 24.0F);
+            }
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), value, &val);
+        }
     }
+}
+
+static uint32_t event_stat_icon(const game_ctx_t *g, int kind) {
+    if (kind == 1) {
+        return g->icon_mind_32;
+    }
+    if (kind == 2) {
+        return g->icon_spirit_32;
+    }
+    return g->icon_body_32;
 }
 
 static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
     static char chiptext[24][16];
     static char dcbuf[32];
     static char statbuf[40];
-    static char rollbuf[32];
     static char phasebuf[64];
     static char hubval[8];
     static char mathline[88];
+    static char compareline[64];
     static char resline[56];
     const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 3.0F;
     float f = (dur > 0.0F) ? (run->event_t / dur) : 1.0F; /* normalized reveal progress */
@@ -1862,7 +1883,6 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
     statname = run->ev_statname[0] ? run->ev_statname : statname;
     (void)snprintf(dcbuf, sizeof dcbuf, "%d", run->ev_dc);
     (void)snprintf(statbuf, sizeof statbuf, "%s %d", statname, run->ev_stat);
-    (void)snprintf(rollbuf, sizeof rollbuf, "d%d", die);
     if (!show_stat) {
         (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Threat appears", "Сначала: событие и сложность", "Tehlike"));
     } else if (!show_wheel) {
@@ -1873,7 +1893,7 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
         (void)snprintf(phasebuf, sizeof phasebuf, "%s", pick_lang("Compare and resolve", "Сравнение и итог", "Sonuc"));
     }
     (void)snprintf(hubval, sizeof hubval, "%d", run->ev_stat);
-    event_result_text(run, die, statname, mathline, sizeof mathline, resline, sizeof resline);
+    event_result_text(run, die, statname, mathline, sizeof mathline, compareline, sizeof compareline, resline, sizeof resline);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300.0F), CLAY_SIZING_FIT(0)},
                      .padding = CLAY_PADDING_ALL(10),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1891,15 +1911,16 @@ static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
             event_step(g, pick_lang("Wheel", "Колесо", "Cark"), show_wheel && !show_math, show_math);
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            event_info_card(g, pick_lang("Difficulty", "Сложность", "Zorluk"), dcbuf, (Clay_Color){202.0F, 114.0F, 78.0F, 255.0F});
-            event_info_card(g, pick_lang("Your stat", "Твой параметр", "Nitelik"), show_stat ? statbuf : "?", (Clay_Color){116.0F, 176.0F, 210.0F, 255.0F});
+            event_info_card(g, pick_lang("Difficulty", "Сложность", "Zorluk"), dcbuf, (Clay_Color){202.0F, 114.0F, 78.0F, 255.0F}, 0U);
+            event_info_card(g, pick_lang("Your stat", "Твой параметр", "Nitelik"), show_stat ? statbuf : "?", (Clay_Color){116.0F, 176.0F, 210.0F, 255.0F},
+                            show_stat ? event_stat_icon(g, run->ev_kind) : 0U);
         }
-        event_info_card(g, pick_lang("Wheel die", "Колесо", "Cark"), show_wheel ? rollbuf : "?", (Clay_Color){218.0F, 170.0F, 76.0F, 255.0F});
         if (show_wheel) {
             event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
         }
         if (show_math) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_ev_check);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), compareline, &s_stat);
         }
         if (show_res) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_ev_good : &s_ev_bad);
@@ -2376,10 +2397,10 @@ bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
                      .childGap = 12,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Batyr of the clan", "Батыр рода", "Soyun batırı"), &s_panel_title);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Ready at the fire.", "Готов у костра.", "Ates basinda."), &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Batyr of the clan", "Батыр рода", "Soyun batırı"), &s_intro_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Ready at the fire.", "Готов у костра.", "Ates basinda."), &s_intro_sub);
         CLAY({.id = CLAY_ID("intro_send_box"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
-            send = tj_button(g, "intro_send", pick_lang("Set out", "Отправить батыра", "Yola cikar"), 258, 60, TJ_BTN_PRIMARY);
+            send = tj_button(g, "intro_send", pick_lang("Set out", "Отправить батыра", "Yola cikar"), 258, 76, TJ_BTN_PRIMARY);
         }
     }
     if (!armed) {
@@ -2425,7 +2446,7 @@ void tj_view_intro_banner(game_ctx_t *g, const char *text) {
           .backgroundColor = {30.0F, 24.0F, 16.0F, 225.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(14.0F),
           .border = {.color = {198.0F, 154.0F, 55.0F, 230.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_stat);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, &s_banner);
     }
 }
 
