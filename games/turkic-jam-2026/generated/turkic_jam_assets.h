@@ -83,6 +83,8 @@
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_GAIN_POPUP_02 ((nt_hash64_t){0x01CD2B0F4C2BFCF4ULL}) /* turkic_jam_atlas/fx_gain_popup_02 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_INVALID_CELL_00 ((nt_hash64_t){0xB91AEDC3CB0E783FULL}) /* turkic_jam_atlas/fx_invalid_cell_00 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_INVALID_CELL_01 ((nt_hash64_t){0x6641E66E9F51E4E4ULL}) /* turkic_jam_atlas/fx_invalid_cell_01 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_SAND_GRAIN_01 ((nt_hash64_t){0xB1CF368F0C945796ULL}) /* turkic_jam_atlas/fx_sand_grain_01 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_SOLID_01 ((nt_hash64_t){0x1FAAAE3BD2171FACULL}) /* turkic_jam_atlas/fx_solid_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_00 ((nt_hash64_t){0x2E95EC893EF6C1CAULL}) /* turkic_jam_atlas/fx_tile_placed_00 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_01 ((nt_hash64_t){0x8C39F19E4086E69BULL}) /* turkic_jam_atlas/fx_tile_placed_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_TILE_PLACED_02 ((nt_hash64_t){0x167433044A6F21F5ULL}) /* turkic_jam_atlas/fx_tile_placed_02 */
@@ -248,6 +250,8 @@ static inline void turkic_jam_assets_register_labels(void) {
     (void)nt_hash64_str("turkic_jam_atlas/fx_gain_popup_02");
     (void)nt_hash64_str("turkic_jam_atlas/fx_invalid_cell_00");
     (void)nt_hash64_str("turkic_jam_atlas/fx_invalid_cell_01");
+    (void)nt_hash64_str("turkic_jam_atlas/fx_sand_grain_01");
+    (void)nt_hash64_str("turkic_jam_atlas/fx_solid_01");
     (void)nt_hash64_str("turkic_jam_atlas/fx_tile_placed_00");
     (void)nt_hash64_str("turkic_jam_atlas/fx_tile_placed_01");
     (void)nt_hash64_str("turkic_jam_atlas/fx_tile_placed_02");

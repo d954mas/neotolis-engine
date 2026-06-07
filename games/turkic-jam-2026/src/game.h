@@ -155,6 +155,8 @@ typedef struct game_ctx {
     uint32_t fx_tile_trigger[4];
     uint32_t fx_gain_popup[3];
     uint32_t fx_invalid_cell[2];
+    uint32_t fx_solid_01;      /* small solid-white quad (has geometry) for sprite-pass fills */
+    uint32_t fx_sand_grain_01; /* soft round particle (Kenney CC0) for drifting intro sand */
     float logical_w, logical_h;
     bool resources_ready;
     bool settings_open; /* settings modal is up; pauses the run while open */
@@ -163,6 +165,12 @@ typedef struct game_ctx {
     int chosen_heir;    /* archetype picked on the heir-select screen */
     const void *run;    /* &tj_run_t while in SCENE_GAME (else NULL); for the world sprite pass */
     float ptr_x, ptr_y; /* pointer in logical coords (set each frame); for map click->cell + hover */
+    /* First-run intro, set by scene_game each frame so the sprite world pass can draw the
+     * black screen + drifting sand + dawn-reveal veil (Clay = UI only; scene/fx = sprites). */
+    bool intro_active;  /* the first-run intro is showing */
+    bool intro_black;   /* holding the black screen before the first tap */
+    float intro_t;      /* dawn-reveal progress (0 while black) */
+    float intro_anim_t; /* free-running clock for the drifting sand */
     tj_shake_t shake;
     const scene_t *scene;
     const scene_t *prev; /* scene we transitioned from (lets Pause resume cleanly) */

@@ -383,6 +383,8 @@ int main(int argc, char *argv[]) {
         {"icons", "games/turkic-jam-2026/raw/icons/icon_last_tamga_32.png", "icon_last_tamga_32", 0.5F, 0.5F},
         {"icons", "games/turkic-jam-2026/raw/icons/icon_settings_32.png", "icon_settings_32", 0.5F, 0.5F},
         {"icons", "games/turkic-jam-2026/raw/icons/icon_speed_32.png", "icon_speed_32", 0.5F, 0.5F},
+        {"fx", "games/turkic-jam-2026/raw/fx/fx_solid_01.png", "fx_solid_01", 0.5F, 0.5F},
+        {"fx", "games/turkic-jam-2026/raw/fx/fx_sand_grain_01.png", "fx_sand_grain_01", 0.5F, 0.5F},
         {"fx", "games/turkic-jam-2026/raw/fx/fx_dust_step_00.png", "fx_dust_step_00", 0.5F, 0.5F},
         {"fx", "games/turkic-jam-2026/raw/fx/fx_dust_step_01.png", "fx_dust_step_01", 0.5F, 0.5F},
         {"fx", "games/turkic-jam-2026/raw/fx/fx_dust_step_02.png", "fx_dust_step_02", 0.5F, 0.5F},

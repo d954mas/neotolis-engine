@@ -907,6 +907,41 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
     cell_overlay(g, region, fb, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
 }
 
+/* First-run intro effects, drawn in the SPRITE world pass (Clay = UI only): the black
+ * screen, drifting warm sand, and the dawn-reveal veil. Reads g->intro_* (set by the
+ * scene). Sand is a soft round particle (Kenney CC0) tinted warm, alpha-blended on black
+ * so it reads as glowing dust. */
+static void draw_intro_fx(game_ctx_t *g) {
+    float va = 1.0F; /* veil alpha: full black while waiting; eases off once the player taps */
+    if (!g->intro_black) {
+        const float k = 1.0F - (g->intro_t / TJ_REVEAL_SECONDS);
+        va = (k > 0.0F) ? (k * k) : 0.0F;
+    }
+    if (va <= 0.004F) {
+        return;
+    }
+    if (has_region(g->fx_solid_01)) { /* solid quad has geometry (white_region doesn't render via the sprite path) */
+        emit_map_quad(g, g->fx_solid_01, pack_clay_color((Clay_Color){8.0F, 6.0F, 4.0F, 255.0F * va}), s_map_vw + 8.0F, s_map_vh + 8.0F, 0.0F, 0.0F);
+    }
+    if (!has_region(g->fx_sand_grain_01)) {
+        return;
+    }
+    const float t = g->intro_anim_t;
+    const float vw = s_map_vw;
+    const float vh = s_map_vh;
+    for (int i = 0; i < 24; i++) {
+        const float spd = 14.0F + ((float)(i % 5) * 12.0F); /* wind: grains drift rightward */
+        const float bx = (float)((i * 131) % 1000) / 1000.0F * vw;
+        const float by = (float)((i * 197) % 1000) / 1000.0F * vh;
+        const float gx = fmodf(bx + (t * spd), vw) - (vw * 0.5F);
+        const float gy = (by - (vh * 0.5F)) + (sinf((t * 0.5F) + (float)i) * 10.0F);
+        const float sz = 10.0F + ((float)(i % 3) * 6.0F);
+        const float al = (40.0F + ((float)(i % 4) * 34.0F)) * va;
+        const uint32_t col = pack_clay_color((Clay_Color){214.0F, 190.0F, 150.0F, al});
+        emit_map_quad(g, g->fx_sand_grain_01, col, sz, sz, gx, gy);
+    }
+}
+
 /* The map WORLD: ground/road/aul/field/hero drawn by the sprite renderer. Invoked
  * by nt_ui_walk as a CUSTOM render command (NT_UI_CUSTOM_TYPE_GAME) — during the
  * walk the GL viewport + frame state are set up, so a standalone sprite emit is
@@ -930,6 +965,11 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     s_map_rows = run->grid_rows;
     const float tile = pitch * 0.66F;
     nt_sprite_renderer_set_material(g->sprite_material);
+    if (g->intro_black) {
+        draw_intro_fx(g); /* black screen + sand; the world stays hidden until the player sends the hero */
+        nt_sprite_renderer_flush();
+        return;
+    }
     draw_ground(g, run, pitch, tile);
     draw_base_decor(g, run, pitch, tile);
     draw_aul(g, run, pitch);
@@ -941,6 +981,9 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     draw_build_hints(g, run, pitch);
     draw_tamga(g, run, pitch);
     draw_hero(g, run, pitch);
+    if (g->intro_active) {
+        draw_intro_fx(g); /* dawn-reveal veil + sand lifting off the revealed world */
+    }
     nt_sprite_renderer_flush();
 }
 
@@ -1526,23 +1569,8 @@ int tj_view_ftue_overlay(game_ctx_t *g, const tj_run_t *run, int step, float t) 
 }
 
 // #region first-run intro (dawn reveal -> send the wayfarer from the aul)
-/* Dawn-from-darkness: a warm-dark veil lifts off the already-placed world, the opening
- * line fading in over the dark then out as it clears. t = seconds since intro start. */
-void tj_view_reveal_veil(game_ctx_t *g, float t) {
-    float va = 1.0F - (t / TJ_REVEAL_SECONDS);
-    if (va > 0.0F) {
-        if (va > 1.0F) {
-            va = 1.0F;
-        }
-        const Clay_Color veil = {20.0F, 13.0F, 8.0F, 255.0F * (va * va)}; /* ease-out: lingers dark, clears fast */
-        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                           .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
-                           .zIndex = 70,
-                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-              .backgroundColor = veil}) {}
-    }
-}
+/* The black screen, drifting sand and the dawn-reveal veil are drawn in the sprite world
+ * pass (draw_intro_fx). Clay carries only the intro UI (text, buttons, finger). */
 
 /* Right "launch" panel (first run): the hero waits at the fire; the player sends him off.
  * Once the reveal clears, a pulsing ring + a tutorial finger draw the eye to the button.
@@ -1609,45 +1637,15 @@ void tj_view_intro_banner(game_ctx_t *g, const char *text) {
     }
 }
 
-/* First-run black-screen open: full black, the opening lines fade in, then a "tap to
- * continue" prompt + finger. The player's tap unlocks web audio (main.c resume) and
- * starts the dawn reveal. t = seconds since the screen appeared. */
-/* Warm sand grains drifting on the wind across the black screen (procedural, no asset:
- * tinted rounded Clay rects, deterministic drift by index + time). */
-static void draw_intro_sand(game_ctx_t *g, float t) {
-    const float vw = g->logical_w;
-    const float vh = g->logical_h;
-    for (int i = 0; i < 30; i++) {
-        const float bx = (float)((i * 131) % 1000) / 1000.0F * vw;
-        const float by = (float)((i * 197) % 1000) / 1000.0F * vh;
-        const float spd = 16.0F + ((float)(i % 5) * 13.0F); /* wind: grains drift rightward */
-        const float gx = fmodf(bx + (t * spd), vw + 6.0F) - 3.0F;
-        const float gy = by + (sinf((t * 0.6F) + (float)i) * 9.0F);
-        const float sz = 2.0F + (float)(i % 3);
-        const float al = 28.0F + ((float)(i % 4) * 30.0F);
-        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                           .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
-                           .offset = {gx, gy},
-                           .zIndex = 89,
-                           .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
-              .backgroundColor = {206.0F, 184.0F, 142.0F, al},
-              .cornerRadius = CLAY_CORNER_RADIUS(sz * 0.5F)}) {}
-    }
-}
-
+/* First-run black-screen open (UI layer only): the opening lines fade in, then a
+ * "tap to continue" prompt + finger. The black backdrop + drifting sand are drawn by
+ * the sprite world pass (draw_intro_fx); Clay carries UI only. The tap unlocks web audio
+ * (main.c resume) and starts the dawn reveal. t = seconds since the screen appeared. */
 void tj_view_intro_black(game_ctx_t *g, float t) {
     const float a1 = (t < 0.4F) ? (t / 0.4F) : 1.0F;                                /* "следы" fades in 0..0.4 */
     const float a2 = (t < 1.0F) ? 0.0F : ((t < 1.6F) ? ((t - 1.0F) / 0.6F) : 1.0F); /* "путника" 1.0..1.6 */
     const nt_ui_label_style_t l1 = {.font_id = 0, .font_size = 32, .color = {236.0F, 214.0F, 170.0F, 255.0F * a1}, .align = CLAY_TEXT_ALIGN_CENTER};
     const nt_ui_label_style_t l2 = {.font_id = 0, .font_size = 26, .color = {214.0F, 188.0F, 150.0F, 255.0F * a2}, .align = CLAY_TEXT_ALIGN_CENTER};
-    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
-                       .zIndex = 88,
-                       .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-          .backgroundColor = {8.0F, 6.0F, 4.0F, 255.0F}}) {}
-    draw_intro_sand(g, t); /* drifting sand on the wind */
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
                        .zIndex = 90,

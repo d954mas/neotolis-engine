@@ -270,6 +270,8 @@ static uint32_t find_atlas_region(const char *name) {
     TJ_FIND_REGION("icon_map_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_MAP_32);
     TJ_FIND_REGION("icon_memory_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_MEMORY_32);
     TJ_FIND_REGION("icon_warning_32", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_ICON_WARNING_32);
+    TJ_FIND_REGION("fx_solid_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_SOLID_01);
+    TJ_FIND_REGION("fx_sand_grain_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_SAND_GRAIN_01);
     TJ_FIND_REGION("fx_dust_step_00", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_00);
     TJ_FIND_REGION("fx_dust_step_01", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_01);
     TJ_FIND_REGION("fx_dust_step_02", ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_FX_DUST_STEP_02);
@@ -620,6 +622,8 @@ static void bind_optional_world_regions(void) {
     g.icon_map_32 = find_atlas_region("icon_map_32");
     g.icon_memory_32 = find_atlas_region("icon_memory_32");
     g.icon_warning_32 = find_atlas_region("icon_warning_32");
+    g.fx_solid_01 = find_atlas_region("fx_solid_01");
+    g.fx_sand_grain_01 = find_atlas_region("fx_sand_grain_01");
     g.fx_dust_step[0] = find_atlas_region("fx_dust_step_00");
     g.fx_dust_step[1] = find_atlas_region("fx_dust_step_01");
     g.fx_dust_step[2] = find_atlas_region("fx_dust_step_02");

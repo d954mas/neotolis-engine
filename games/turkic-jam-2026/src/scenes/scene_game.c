@@ -355,9 +355,9 @@ static void ftue_step_tick(float dt) {
     }
 }
 
-/* Intro overlays over the world: the dawn veil + the on-theme line for the moment. */
+/* Intro UI over the world: the on-theme line for the moment (the dawn veil + sand are
+ * drawn in the sprite world pass, not here). */
 static void draw_intro_overlays(game_ctx_t *g) {
-    tj_view_reveal_veil(g, s_intro_t);
     if (s_run.phase != TJ_PHASE_AUL_READY) {
         tj_view_intro_banner(g, "Путь ведёт его сам.");
     } else if (s_intro_t >= TJ_REVEAL_SECONDS) {
@@ -389,6 +389,13 @@ static void on_update(game_ctx_t *g, float dt) {
     if (!paused) {
         ftue_step_tick(dt);
     }
+
+    /* Hand the intro state to the sprite world pass (it draws the black screen + sand +
+     * dawn veil; Clay carries only the UI). */
+    g->intro_active = in_intro;
+    g->intro_black = in_intro && s_intro_black;
+    g->intro_t = s_intro_t;
+    g->intro_anim_t = s_ftue_t;
 
     /* Full-screen frame: top HUD, then [log | map | hero], then card hand. During the
      * first-run intro everything but the world + launch panel is hidden (progressive
