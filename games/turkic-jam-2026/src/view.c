@@ -1368,6 +1368,9 @@ static void battle_overlays(game_ctx_t *g, const tj_run_t *run) {
     }
 }
 
+/* The dice event renders inside the hero panel (the unified stage); defined below, after the wheel helpers. */
+static void draw_event_panel(game_ctx_t *g, const tj_run_t *run);
+
 void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
     static char force[40];
     static char speed[40];
@@ -1387,22 +1390,26 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = TJ_PANEL_BG}) {
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), tj_hero_name(run), &s_panel_title);
-        /* Battle arena: hero vs enemy drawn by the sprite renderer (draw_battle_stage), with HP
-         * bars / damage numbers / loot labels layered on top as Clay (battle_overlays). */
-        CLAY({.id = CLAY_ID("battlestage"),
-              .layout = {.sizing = {CLAY_SIZING_FIXED(BAT_W), CLAY_SIZING_FIXED(BAT_H)}},
-              .backgroundColor = {58.0F, 42.0F, 28.0F, 255.0F},
-              .cornerRadius = CLAY_CORNER_RADIUS(12.0F),
-              .clip = {.horizontal = true, .vertical = true}}) {
-            nt_ui_custom(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), &s_battle_tag);
-            battle_overlays(g, run);
+        if (run->in_event) {
+            draw_event_panel(g, run); /* the dice event takes over the stage; combat/idle render below otherwise */
+        } else {
+            /* Battle arena: hero vs enemy drawn by the sprite renderer (draw_battle_stage), with HP
+             * bars / damage numbers / loot labels layered on top as Clay (battle_overlays). */
+            CLAY({.id = CLAY_ID("battlestage"),
+                  .layout = {.sizing = {CLAY_SIZING_FIXED(BAT_W), CLAY_SIZING_FIXED(BAT_H)}},
+                  .backgroundColor = {58.0F, 42.0F, 28.0F, 255.0F},
+                  .cornerRadius = CLAY_CORNER_RADIUS(12.0F),
+                  .clip = {.horizontal = true, .vertical = true}}) {
+                nt_ui_custom(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), &s_battle_tag);
+                battle_overlays(g, run);
+            }
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
+            hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 250.0F);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), force, &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), speed, &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), vigor, &s_stat);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cellinfo, &s_dim);
         }
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), sta, &s_stat);
-        hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 250.0F);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), force, &s_stat);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), speed, &s_stat);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), vigor, &s_stat);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), cellinfo, &s_dim);
     }
 }
 
@@ -1600,7 +1607,7 @@ static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchi
     }
 }
 
-static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
+static void draw_event_panel(game_ctx_t *g, const tj_run_t *run) {
     static char chiptext[24][16];
     static char checkbuf[48];
     static char hubval[8];
@@ -1622,37 +1629,25 @@ static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
     (void)snprintf(checkbuf, sizeof checkbuf, "%s: %s", pick_lang("Test", "Проверка", "Sinav"), statname);
     (void)snprintf(hubval, sizeof hubval, "%d", run->ev_stat);
     event_result_text(run, die, statname, mathline, sizeof mathline, resline, sizeof resline);
-    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 60},
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {16.0F, 12.0F, 8.0F, 175.0F}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)},
-                         .padding = CLAY_PADDING_ALL(20),
-                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 12,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {40.0F, 34.0F, 24.0F, 255.0F},
-              .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
-              .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), title, &s_ev_title);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), desc, &s_dim);
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), checkbuf, &s_ev_check);
-            event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
-            if (show_math) {
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
-            }
-            if (show_res) {
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_ev_good : &s_ev_bad);
-            }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), title, &s_ev_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), desc, &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), checkbuf, &s_ev_check);
+        event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
+        if (show_math) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
+        }
+        if (show_res) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_ev_good : &s_ev_bad);
         }
     }
 }
 
-/* Centered dice-event window. Combat now renders inside the hero panel (tj_view_hero_panel ->
- * the battle stage), so this overlay only carries the dice event. */
+/* Both combat and the dice event now render inside the hero panel (the unified stage),
+ * so this scene-level overlay is intentionally empty. Kept for API/back-compat. */
 void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
-    if (run->in_event) {
-        event_overlay(g, run);
-    }
+    (void)g;
+    (void)run;
 }
 
 /* Hand fan layout (screen/logical coords). The fan is pinned to the viewport
