@@ -2083,11 +2083,12 @@ typedef struct {
     int32_t first_hover_pidx; /* fallback for pos/id when no owner */
     bool any_hovered;
     bool new_capture; /* effective_pidx is a fresh press_now capture (no prior holder) */
+    float distance;   /* world hit distance for the first hovering pidx (3D); 0 in 2D / no hover */
 } nt_ui_widget_pidx_state_t;
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    nt_ui_widget_pidx_state_t s = {.effective_pidx = -1, .first_hover_pidx = -1, .any_hovered = false, .new_capture = false};
+    nt_ui_widget_pidx_state_t s = {.effective_pidx = -1, .first_hover_pidx = -1, .any_hovered = false, .new_capture = false, .distance = 0.0F};
     int32_t holder = -1;
     int32_t candidate = -1;
     /* Pass 1: existing holder. */
@@ -2109,12 +2110,14 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
          * raw hit so newly-shown widgets still work; a capture holder always keeps the pointer. */
         const uint32_t hot = ctx->pointer_hot[i].id;
         const bool arbitrated_ok = (hot == 0U) || (hot == id) || (cap->active_id == id);
-        const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL);
+        float hit_t = 0.0F;
+        const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, &hit_t);
         if (!over) {
             continue;
         }
         if (s.first_hover_pidx < 0) {
             s.first_hover_pidx = (int32_t)i;
+            s.distance = hit_t; /* near-plane-relative world distance in 3D, 0 in 2D */
         }
         s.any_hovered = true;
         if (holder < 0 && candidate < 0 && cap->active_id == 0U) {
@@ -2160,6 +2163,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
     const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
     out.hovered = s.any_hovered;
+    out.distance = s.distance; /* world hit distance (3D); 0 in 2D or when not hovered */
     if (s.any_hovered) {
         ctx->pointer_over_any = true;
     }
@@ -2203,6 +2207,11 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
 
+/* Sentinel hot id: a pointer hit one or more widgets but all were beyond the occlusion cutoff. Stored
+ * so the gate's hot==0 fallback can't re-admit the occluded widget. A real Clay id is never UINT32_MAX
+ * with meaningful probability; nt_ui_pointer_hot maps it back to 0 for callers. */
+#define NT_UI_HOT_BLOCKED UINT32_MAX
+
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
  * distance within the occlusion cutoff; 2D: last-in-declaration-order hit (~ topmost). Registry holds
@@ -2217,6 +2226,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_hot_t best = {0};
         bool found = false;
+        bool occluded = false; /* hit >= 1 widget, but the cutoff blocked all of them */
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
@@ -2225,7 +2235,8 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
             }
             if (ctx->use_raycast_input) {
                 if (t > ctx->pointer_occlusion[pidx]) {
-                    continue; /* behind the game-fed cutoff (e.g. a wall) */
+                    occluded = true; /* behind the game-fed cutoff (e.g. a wall) */
+                    continue;
                 }
                 if (!found || t < best.distance) {
                     best.id = rec->id;
@@ -2238,6 +2249,11 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
                 best.distance = 0.0F;
                 found = true;
             }
+        }
+        /* Hit something but the cutoff blocked all of it → block (don't let hot==0 fallback re-admit
+         * it). True hot==0 (nothing was under the pointer) still falls back so new widgets work. */
+        if (!found && occluded) {
+            best.id = NT_UI_HOT_BLOCKED;
         }
         ctx->pointer_hot[pidx] = best;
     }
@@ -2426,7 +2442,11 @@ nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index) {
     NT_ASSERT(ctx != NULL && "nt_ui_pointer_hot: ctx must be non-NULL");
     NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_pointer_hot: pointer_index out of range");
     resolve_hot_if_needed(ctx); /* lazy: first step OR this query triggers the once-per-frame resolve */
-    return ctx->pointer_hot[pointer_index];
+    nt_ui_hot_t hot = ctx->pointer_hot[pointer_index];
+    if (hot.id == NT_UI_HOT_BLOCKED) {
+        return (nt_ui_hot_t){0}; /* occlusion-blocked reads as "nothing" to the game */
+    }
+    return hot;
 }
 // #endregion
 

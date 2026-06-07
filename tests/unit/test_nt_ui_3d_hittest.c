@@ -75,6 +75,48 @@ static void declare_bbox_3d(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* One frame: begin + view_proj (+ optional occlusion cutoff) + declare hit3d + step. occlusion < 0
+ * leaves the default (+inf, no cutoff). */
+static nt_ui_interaction_t step_bbox_3d(float px, float py, float occlusion) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_pointer_t mouse = {0};
+    mouse.x = px;
+    mouse.y = py;
+    mouse.active = true;
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+    if (occlusion >= 0.0F) {
+        nt_ui_set_pointer_occlusion(s_fx.ctx, 0U, occlusion);
+    }
+    CLAY({.id = CLAY_ID("hit3d"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
+    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hit3d"));
+    nt_ui_end(s_fx.ctx);
+    return in;
+}
+
+/* Widget sits at world distance ~1.0 (ortho near=-1/far=+1, Clay z=0 → t=0.5, dist=0.5*2). A cutoff
+ * below that occludes it: the pointer hits nothing valid, and the gate's hot==0 fallback must NOT
+ * re-admit it (this is the regression that shipped the occlusion feature broken). */
+static void test_occlusion_blocks_widget_beyond_cutoff(void) {
+    const float cx = BBOX_X + (BBOX_W * 0.5F);
+    const float cy = BBOX_Y + (BBOX_H * 0.5F);
+    declare_bbox_3d();                                        /* frame 1: bake bbox */
+    step_bbox_3d(cx, cy, -1.0F);                              /* frame 2: register (resolve sees empty registry → fallback) */
+    nt_ui_interaction_t blocked = step_bbox_3d(cx, cy, 0.5F); /* frame 3: cutoff 0.5 < dist 1.0 */
+    TEST_ASSERT_FALSE(blocked.hovered);
+}
+
+/* A cutoff beyond the widget distance leaves it interactive. */
+static void test_occlusion_allows_widget_within_cutoff(void) {
+    const float cx = BBOX_X + (BBOX_W * 0.5F);
+    const float cy = BBOX_Y + (BBOX_H * 0.5F);
+    declare_bbox_3d();
+    step_bbox_3d(cx, cy, -1.0F);
+    nt_ui_interaction_t allowed = step_bbox_3d(cx, cy, 2.0F); /* cutoff 2.0 > dist 1.0 */
+    TEST_ASSERT_TRUE(allowed.hovered);
+}
+
 /* ---- Test 1: view_proj setter caches inverse + flag, and round-trip is sane. ---- */
 static void test_view_proj_set_caches_inverse(void) {
     float vp[16];
@@ -185,5 +227,7 @@ int main(void) {
     RUN_TEST(test_hit_test_asserts_when_view_proj_not_set);
     RUN_TEST(test_set_view_proj_asserts_on_2d_ctx);
     RUN_TEST(test_raycast_hit_perspective);
+    RUN_TEST(test_occlusion_blocks_widget_beyond_cutoff);
+    RUN_TEST(test_occlusion_allows_widget_within_cutoff);
     return UNITY_END();
 }

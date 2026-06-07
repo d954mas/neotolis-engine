@@ -376,8 +376,10 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
  * wall) and/or an interaction range. Default +inf = no cutoff. Reset each nt_ui_begin. */
 void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance);
 
-/* Front-most interactive widget under the pointer this frame (3D: nearest within the cutoff; 2D: top
- * zIndex). Resolved lazily from prev-frame layout on the first step/query (mutating). id 0 = none. */
+/* Front-most interactive widget under the pointer this frame (3D: nearest within the cutoff; 2D:
+ * last-declared/paint-order). Resolved lazily from the prev-frame registry on the first step/query
+ * (mutating). Only widgets that called step_interaction last frame are candidates. In 3D ctx call
+ * nt_ui_set_view_proj first — the lazy resolve hit-tests, which asserts view_proj is set. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion
 
