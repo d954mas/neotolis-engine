@@ -270,6 +270,26 @@ static uint32_t count_bound_regions(const uint32_t *regions, uint32_t count) {
 }
 
 #if NT_DEVAPI_ENABLED
+#ifndef NT_PLATFORM_WEB
+/* devapi: dump the next rendered frame to a PNG (re-arms each call). "visual_qa.dump path=<file>"
+ * Reuses the engine framebuffer readback; the file path is relative to the exe cwd. */
+static char s_devapi_dump_path[260];
+static int ep_dump_frame(int c, char **v, char *o, int cap, void *u) {
+    (void)u;
+    const char *path = "devapi_frame.png";
+    for (int i = 0; i < c; i++) {
+        if (strncmp(v[i], "path=", 5) == 0) {
+            path = v[i] + 5;
+        }
+    }
+    (void)snprintf(s_devapi_dump_path, sizeof s_devapi_dump_path, "%s", path);
+    s_dump_frame_path = s_devapi_dump_path;
+    s_dump_frame_after = 0U;
+    s_dump_frame_done = false; /* re-arm: the frame loop dumps on the next renderable frame */
+    return snprintf(o, (size_t)cap, "{\"dump\":\"%s\"}", s_devapi_dump_path);
+}
+#endif
+
 /* QA-only evidence endpoint: proves the desktop runtime reached the visual QA scene. */
 static int ep_visual_qa_status(int c, char **v, char *o, int cap, void *u) {
     (void)c;
@@ -1048,6 +1068,9 @@ int main(int argc, char *argv[]) {
 #if NT_DEVAPI_ENABLED
     nt_devapi_register("game.config", ep_game_config, NULL);
     nt_devapi_register("visual_qa.status", ep_visual_qa_status, NULL);
+#ifndef NT_PLATFORM_WEB
+    nt_devapi_register("visual_qa.dump", ep_dump_frame, NULL);
+#endif
 #endif
 
     /* Initial scene; its on_enter may register more endpoints (e.g. game.run),
