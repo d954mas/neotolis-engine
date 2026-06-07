@@ -11,6 +11,7 @@
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
 
+#include "audio_assets.h"
 #include "aul.h"
 #include "config.h"
 #include "game.h"
@@ -366,6 +367,36 @@ static void draw_intro_overlays(game_ctx_t *g) {
     }
 }
 
+/* One-shot SFX on game-state rising edges. New-run resets (merges/fx back to 0) self-correct
+ * via the end-of-frame prev capture, so they don't mis-fire. */
+static void sfx_tick(void) {
+    static int prev_merges = 0;
+    static bool prev_win = false;
+    static bool prev_event = false;
+    static bool prev_alive = true;
+    static float prev_enemy_fx = 0.0F;
+    if (s_run.merges_done > prev_merges) {
+        tj_audio_play_sfx(TJ_SFX_MERGE);
+    }
+    if (s_run.combat_win && !prev_win) {
+        tj_audio_play_sfx(TJ_SFX_VICTORY);
+    }
+    if (s_run.in_event && !prev_event) {
+        tj_audio_play_sfx(TJ_SFX_EVENT);
+    }
+    if (!s_run.alive && prev_alive) {
+        tj_audio_play_sfx(TJ_SFX_DEATH);
+    }
+    if (s_run.fx_enemy_t > prev_enemy_fx + 0.01F) {
+        tj_audio_play_sfx(TJ_SFX_HIT); /* hero just landed a blow on the enemy */
+    }
+    prev_merges = s_run.merges_done;
+    prev_win = s_run.combat_win;
+    prev_event = s_run.in_event;
+    prev_alive = s_run.alive;
+    prev_enemy_fx = s_run.fx_enemy_t;
+}
+
 static void on_update(game_ctx_t *g, float dt) {
     const bool paused = g->settings_open; /* settings modal freezes the run */
     if (!paused && nt_input_key_is_pressed(NT_KEY_P)) {
@@ -390,6 +421,7 @@ static void on_update(game_ctx_t *g, float dt) {
     if (!paused) {
         ftue_step_tick(dt);
         tj_view_battle_tick(g, &s_run, dt); /* combat-stage particles/shake + hit/victory bursts */
+        sfx_tick();                         /* one-shot SFX on state edges */
     }
 
     /* Hand the intro state to the sprite world pass (it draws the black screen + sand +

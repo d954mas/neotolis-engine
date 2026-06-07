@@ -27,7 +27,8 @@
 
 #define TJ_CLIP_IS_VALID(c) ((c).index != 0xFFFFU)
 
-enum { TJ_AUDIO_CLICK, TJ_AUDIO_MUSIC, TJ_AUDIO_COUNT };
+/* SFX first (must match tj_sfx_t in the header), MUSIC last. */
+enum { TJ_AUDIO_CLICK, TJ_AUDIO_MERGE, TJ_AUDIO_HIT, TJ_AUDIO_VICTORY, TJ_AUDIO_DICE, TJ_AUDIO_EVENT, TJ_AUDIO_DEATH, TJ_AUDIO_MUSIC, TJ_AUDIO_COUNT };
 
 typedef struct {
     const char *path;
@@ -111,6 +112,12 @@ void tj_audio_assets_init(void) {
     nt_audio_set_master_volume(1.0F); /* buses (music/sfx) are the real controls */
 
     s_entries[TJ_AUDIO_CLICK] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "click.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
+    s_entries[TJ_AUDIO_MERGE] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "merge.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
+    s_entries[TJ_AUDIO_HIT] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "hit.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
+    s_entries[TJ_AUDIO_VICTORY] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "victory.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
+    s_entries[TJ_AUDIO_DICE] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "dice.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
+    s_entries[TJ_AUDIO_EVENT] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "event.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
+    s_entries[TJ_AUDIO_DEATH] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "death.wav", .music = false, .clip = NT_AUDIO_CLIP_INVALID};
     s_entries[TJ_AUDIO_MUSIC] = (tj_audio_entry_t){.path = TJ_AUDIO_DIR "music.mp3", .music = true, .clip = NT_AUDIO_CLIP_INVALID};
 
     for (int i = 0; i < TJ_AUDIO_COUNT; ++i) {
@@ -160,12 +167,17 @@ void tj_audio_assets_poll(void) {
     }
 }
 
-void tj_audio_play_click(void) {
-    tj_audio_entry_t *c = &s_entries[TJ_AUDIO_CLICK];
-    if (c->done && TJ_CLIP_IS_VALID(c->clip)) {
-        nt_audio_play(c->clip, s_sfx_vol, 1.0F, false);
+void tj_audio_play_sfx(tj_sfx_t id) {
+    if ((int)id < 0 || (int)id >= TJ_AUDIO_MUSIC) {
+        return; /* music is not a one-shot SFX */
+    }
+    tj_audio_entry_t *e = &s_entries[id];
+    if (e->done && TJ_CLIP_IS_VALID(e->clip)) {
+        nt_audio_play(e->clip, s_sfx_vol, 1.0F, false);
     }
 }
+
+void tj_audio_play_click(void) { tj_audio_play_sfx(TJ_SFX_CLICK); }
 
 void tj_audio_set_music_volume(float v01) {
     s_music_vol = clamp01(v01);
