@@ -430,3 +430,20 @@ int tj_config_tile_index(const char *id) {
     }
     return -1;
 }
+
+int tj_config_tile_upgrade(int tile_index) {
+    if (tile_index < 0 || tile_index >= g_config.tile_count) {
+        return -1;
+    }
+    const int line = g_config.tiles[tile_index].line;
+    const int tier = g_config.tiles[tile_index].tier;
+    if (line <= 0) {
+        return -1; /* enemies / non-merge tiles never upgrade */
+    }
+    for (int i = 0; i < g_config.tile_count; i++) {
+        if (g_config.tiles[i].line == line && g_config.tiles[i].tier == tier + 1) {
+            return i;
+        }
+    }
+    return -1; /* already the top tier of its line */
+}

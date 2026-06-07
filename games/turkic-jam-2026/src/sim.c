@@ -672,6 +672,74 @@ static void try_merge_at(tj_run_t *r, int gx, int gy) {
         /* loop: the upgraded tile may complete another triple (cascade) */
     }
 }
+
+/* Non-mutating telegraph: if `tile` were placed at (gx,gy), how big is the connected
+ * same-line+tier group (counting the placed tile)? Fills group[] (cell indices) up to
+ * group_cap and sets *out_result to the tier+1 tile when the group would fuse (>=3 and a
+ * higher tier exists), else -1. Returns 0 if the cell isn't buildable or tile has no line.
+ * Mirrors try_merge_at's connectivity so the preview never lies. */
+int tj_run_merge_preview(const tj_run_t *r, int tile, int gx, int gy, int *group, int group_cap, int *out_result) {
+    if (out_result != NULL) {
+        *out_result = -1;
+    }
+    if (tile < 0 || tile >= g_config.tile_count || g_config.tiles[tile].line <= 0) {
+        return 0;
+    }
+    if (!tj_run_cell_buildable(r, gx, gy)) {
+        return 0;
+    }
+    const int line = g_config.tiles[tile].line;
+    const int tier = g_config.tiles[tile].tier;
+    const int cols = r->grid_cols;
+    const int start = (gy * cols) + gx;
+    if (start < 0 || start >= TJ_ZONE_CELLS) {
+        return 0;
+    }
+    int stackx[TJ_ZONE_CELLS];
+    int stacky[TJ_ZONE_CELLS];
+    bool seen[TJ_ZONE_CELLS];
+    for (int i = 0; i < TJ_ZONE_CELLS; i++) {
+        seen[i] = false;
+    }
+    int sn = 0;
+    int cnt = 0;
+    stackx[sn] = gx;
+    stacky[sn] = gy;
+    sn++;
+    seen[start] = true;
+    static const int nb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    while (sn > 0) {
+        sn--;
+        const int x = stackx[sn];
+        const int y = stacky[sn];
+        if (group != NULL && cnt < group_cap) {
+            group[cnt] = (y * cols) + x;
+        }
+        cnt++;
+        for (int k = 0; k < 4; k++) {
+            const int xx = x + nb[k][0];
+            const int yy = y + nb[k][1];
+            if (xx < 0 || yy < 0 || xx >= cols || yy >= r->grid_rows) {
+                continue;
+            }
+            const int ni = (yy * cols) + xx;
+            if (seen[ni]) {
+                continue;
+            }
+            const int nt = r->field_tile[ni];
+            if (nt >= 0 && nt < g_config.tile_count && g_config.tiles[nt].line == line && g_config.tiles[nt].tier == tier) {
+                seen[ni] = true;
+                stackx[sn] = xx;
+                stacky[sn] = yy;
+                sn++;
+            }
+        }
+    }
+    if (cnt >= 3 && out_result != NULL) {
+        *out_result = tj_config_tile_upgrade(tile);
+    }
+    return cnt;
+}
 // #endregion
 
 void tj_run_start(tj_run_t *r, int heir_index) {

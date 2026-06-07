@@ -13,6 +13,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
+#include "ui/nt_ui_fit.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_label.h"
 
@@ -38,6 +39,13 @@ static const nt_ui_label_style_t s_chip = {.font_id = 0, .font_size = 19, .color
 static const nt_ui_label_style_t s_panel_title = {.font_id = 0, .font_size = 20, .color = {224.0F, 198.0F, 142.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
 static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color = {232.0F, 222.0F, 202.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+/* Field building level badges: cream digit on a dark pill; dark digit on a gold pill at max tier. */
+static const nt_ui_label_style_t s_badge_num = {.font_id = 0, .font_size = 18, .color = {248.0F, 240.0F, 222.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_badge_num_max = {.font_id = 0, .font_size = 18, .color = {44.0F, 32.0F, 12.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+/* Card effect line + hover tooltip text. */
+static const nt_ui_label_style_t s_card_eff = {.font_id = 0, .font_size = 14, .color = {214.0F, 198.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_tip_name = {.font_id = 0, .font_size = 18, .color = {245.0F, 232.0F, 200.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
+static const nt_ui_label_style_t s_tip_eff = {.font_id = 0, .font_size = 15, .color = {206.0F, 224.0F, 196.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_LEFT};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_die = {.font_id = 0, .font_size = 44, .color = {40.0F, 28.0F, 18.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 /* Dice-event "wheel of fate" window. */
@@ -70,6 +78,29 @@ static Clay_Color cell_color(int tile_idx) {
         return (Clay_Color){140.0F, 124.0F, 96.0F, 255.0F};
     }
 }
+
+/* Merge-line family colour (the pedestal/base tint). Война/Табун/Степь/Жильё/Вода. The
+ * base disc under each building reads its family at a glance — the key "what stat is
+ * this" cue when lining up triples. */
+static Clay_Color line_color(int line) {
+    switch (line) {
+    case 1:
+        return (Clay_Color){198.0F, 78.0F, 54.0F, 255.0F}; /* Война -> Сила: ember red */
+    case 2:
+        return (Clay_Color){196.0F, 150.0F, 86.0F, 255.0F}; /* Табун -> Скорость: sandy tan */
+    case 3:
+        return (Clay_Color){108.0F, 168.0F, 96.0F, 255.0F}; /* Степь -> Выносл.: steppe green */
+    case 4:
+        return (Clay_Color){214.0F, 176.0F, 72.0F, 255.0F}; /* Жильё -> припасы: gold */
+    case 5:
+        return (Clay_Color){86.0F, 166.0F, 178.0F, 255.0F}; /* Вода -> хил: teal */
+    default:
+        return (Clay_Color){150.0F, 134.0F, 104.0F, 255.0F};
+    }
+}
+
+/* Gold used for the maxed-tier aura/crown and the "this will merge" telegraph. */
+static const Clay_Color TJ_GOLD = {246.0F, 206.0F, 96.0F, 255.0F};
 
 /* Floating rect (w x h, corner radius cr), offset from the map centre. */
 #define MAP_RECT(w, h, col, cr, ox, oy, z)                                                                                                                                                             \
@@ -265,37 +296,47 @@ static uint32_t decor_region_for_cell(const game_ctx_t *g, int gx, int gy) {
     return decor[(uint32_t)((gx * 17) + (gy * 31)) % (uint32_t)(sizeof decor / sizeof decor[0])];
 }
 
+/* 0-based tier from an id like "war_4" (supports tiers 1..9), or -1 if not this prefix. */
 static int tier_id_index(const char *id, const char *prefix) {
     const size_t n = strlen(prefix);
     if (strncmp(id, prefix, n) != 0) {
         return -1;
     }
-    if (id[n] < '1' || id[n] > '3' || id[n + 1] != '\0') {
+    if (id[n] < '1' || id[n] > '9' || id[n + 1] != '\0') {
         return -1;
     }
     return id[n] - '1';
 }
 
+/* Only tiers 1..3 have dedicated art; higher tiers reuse the top sprite and lean on the
+ * pedestal colour + level number for identity. */
+static uint32_t tier_sprite(const uint32_t arr[3], int tier0) {
+    if (tier0 < 0) {
+        return NT_ATLAS_INVALID_REGION;
+    }
+    return arr[(tier0 > 2) ? 2 : tier0];
+}
+
 static uint32_t merge_tile_region_for_id(const game_ctx_t *g, const char *id) {
     int tier = tier_id_index(id, "war_");
     if (tier >= 0) {
-        return g->tile_war[tier];
+        return tier_sprite(g->tile_war, tier);
     }
     tier = tier_id_index(id, "horse_");
     if (tier >= 0) {
-        return g->tile_horse[tier];
+        return tier_sprite(g->tile_horse, tier);
     }
     tier = tier_id_index(id, "steppe_");
     if (tier >= 0) {
-        return g->tile_steppe[tier];
+        return tier_sprite(g->tile_steppe, tier);
     }
     tier = tier_id_index(id, "home_");
     if (tier >= 0) {
-        return g->tile_home[tier];
+        return tier_sprite(g->tile_home, tier);
     }
     tier = tier_id_index(id, "water_");
     if (tier >= 0) {
-        return g->tile_water[tier];
+        return tier_sprite(g->tile_water, tier);
     }
     return NT_ATLAS_INVALID_REGION;
 }
@@ -426,6 +467,29 @@ static const char *pick_lang(const char *en, const char *ru, const char *tr) {
     case LANG_EN:
     default:
         return en;
+    }
+}
+
+/* Short "what it gives" line for a building/card -> caller's buffer (so several can coexist
+ * in one frame). Live stat boost, per-circle income, or per-circle heal. */
+static void tile_effect_str(int tile, char *out, size_t cap) {
+    if (tile < 0 || tile >= g_config.tile_count) {
+        out[0] = '\0';
+        return;
+    }
+    const tj_tile_def_t *t = &g_config.tiles[tile];
+    if (t->boost_stat == TJ_STAT_BODY) {
+        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Force", "Сила", "Guc"));
+    } else if (t->boost_stat == TJ_STAT_MIND) {
+        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Speed", "Скорость", "Hiz"));
+    } else if (t->boost_stat == TJ_STAT_SPIRIT) {
+        (void)snprintf(out, cap, "+%d %s", t->boost_amount, pick_lang("Vigor", "Выносл.", "Daya"));
+    } else if (t->supplies > 0) {
+        (void)snprintf(out, cap, "+%d %s", t->supplies, pick_lang("supplies/lap", "припас/круг", "erzak/tur"));
+    } else if (t->stamina_restore > 0) {
+        (void)snprintf(out, cap, "+%d %s", t->stamina_restore, pick_lang("HP/lap", "ХП/круг", "CAN/tur"));
+    } else {
+        out[0] = '\0';
     }
 }
 
@@ -670,28 +734,72 @@ static void draw_tamga(game_ctx_t *g, const tj_run_t *run, float pitch) {
 }
 
 /* Persistent player builds in the desert (survive the per-circle road reshuffle). */
+/* Soft round glow/pad via the Kenney soft-circle (CC0). Used for the building pedestal,
+ * drop shadow, the maxed-tier aura and the drag match-glow. No-ops if the region is
+ * missing (the building sprite still reads). */
+static void cell_glow(game_ctx_t *g, Clay_Color col, float w, float h, float ox, float oy) {
+    uint32_t r = g->fx_sand_grain_01;
+    if (!has_region(r)) {
+        r = g->fx_solid_01; /* fallback to the solid quad if the soft circle isn't in the atlas */
+    }
+    emit_map_quad(g, r, pack_clay_color(col), w, h, ox, oy);
+}
+
+/* Crisp solid quad (fx_solid_01) — a defined plinth, vs the soft cell_glow halo. */
+static void cell_plinth(game_ctx_t *g, Clay_Color col, float w, float h, float ox, float oy) { emit_map_quad(g, g->fx_solid_01, pack_clay_color(col), w, h, ox, oy); }
+
+/* Placed buildings: a drop shadow + family-colour pedestal pad lift each piece off the
+ * sand and show its line at a glance. Maxed tiles get a pulsing gold aura; while a card
+ * is dragged, every building sharing its line+tier gets a pulsing family glow ("these
+ * merge with what you hold"). Tier number + crown ride on top as Clay (tj_view_field_badges). */
 static void draw_field(game_ctx_t *g, const tj_run_t *run, float pitch, float tile) {
     const int cols = run->grid_cols;
     const int rows = run->grid_rows;
     const int n = cols * rows;
+    const float pulse = 0.5F + (0.5F * sinf(g->anim_t * 4.5F));
+    int drag_line = -1;
+    int drag_tier = -1;
+    if (g->drag_tile >= 0 && g->drag_tile < g_config.tile_count) {
+        drag_line = g_config.tiles[g->drag_tile].line;
+        drag_tier = g_config.tiles[g->drag_tile].tier;
+    }
     for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
-        if (run->field_tile[i] < 0) {
+        const int tidx = run->field_tile[i];
+        if (tidx < 0) {
             continue;
         }
         const int gx = i % cols;
         const int gy = i / cols;
+        const float ox = grid_x(gx, cols, pitch);
+        const float oy = grid_y(gy, rows, pitch);
         float ts = tile;
         if (i == run->fx_cell && run->fx_cell_t > 0.0F) { /* place/merge pop: settle from big -> normal */
             const float dur = (run->fx_cell_mag > 0.5F) ? 0.45F : 0.30F;
             float p = 1.0F - (run->fx_cell_t / dur);
             p = (p < 0.0F) ? 0.0F : ((p > 1.0F) ? 1.0F : p);
-            ts = tile * (1.0F + (run->fx_cell_mag * (1.0F - (p * (2.0F - p))))); /* 1-(ease_out_quad) */
+            ts = tile * (1.0F + (run->fx_cell_mag * (1.0F - (p * (2.0F - p))))); /* pop: big -> settle (1-ease_out_quad) */
         }
-        const uint32_t region = tile_region_for_index(g, run->field_tile[i]);
+        const int line = (tidx < g_config.tile_count) ? g_config.tiles[tidx].line : 0;
+        cell_glow(g, (Clay_Color){0.0F, 0.0F, 0.0F, 120.0F}, tile * 1.2F, tile * 0.7F, ox, oy + (tile * 0.36F)); /* drop shadow */
+        if (line > 0) {
+            const Clay_Color lc = line_color(line);
+            if (tj_config_tile_upgrade(tidx) < 0) { /* maxed: pulsing gold aura */
+                cell_glow(g, (Clay_Color){TJ_GOLD.r, TJ_GOLD.g, TJ_GOLD.b, 150.0F + (90.0F * pulse)}, tile * (1.7F + (0.14F * pulse)), tile * (1.7F + (0.14F * pulse)), ox, oy);
+            }
+            if (drag_line > 0 && line == drag_line && g_config.tiles[tidx].tier == drag_tier) { /* mergeable with held card */
+                cell_glow(g, (Clay_Color){lc.r, lc.g, lc.b, 160.0F + (90.0F * pulse)}, tile * (1.55F + (0.12F * pulse)), tile * (1.55F + (0.12F * pulse)), ox, oy);
+            }
+            /* family pedestal: a soft colour halo + a crisp solid plinth at the feet, so the
+             * building clearly stands on a coloured base instead of floating on the sand */
+            cell_glow(g, (Clay_Color){lc.r, lc.g, lc.b, 150.0F}, tile * 1.55F, tile * 1.55F, ox, oy);
+            cell_plinth(g, (Clay_Color){lc.r * 0.42F, lc.g * 0.42F, lc.b * 0.42F, 255.0F}, tile * 1.2F, tile * 0.52F, ox, oy + (tile * 0.3F));
+            cell_plinth(g, (Clay_Color){lc.r, lc.g, lc.b, 255.0F}, tile * 1.04F, tile * 0.4F, ox, oy + (tile * 0.26F));
+        }
+        const uint32_t region = tile_region_for_index(g, tidx);
         if (has_region(region)) {
-            map_sprite(g, region, ts, ts, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch), 4);
+            map_sprite(g, region, ts, ts, ox, oy, 4);
         } else {
-            map_rect_sprite(g, cell_color(run->field_tile[i]), ts, ts, grid_x(gx, cols, pitch), grid_y(gy, rows, pitch));
+            map_rect_sprite(g, cell_color(tidx), ts * 0.82F, ts * 0.82F, ox, oy);
         }
     }
 }
@@ -897,10 +1005,11 @@ static void cell_overlay(game_ctx_t *g, uint32_t region, Clay_Color fallback, fl
     }
 }
 
-/* Placement cue while a card is held: a faint green frame on EVERY buildable cell
- * (so "where do I build?" reads instantly), plus a stronger frame under the cursor. */
+/* Placement cue, shown ONLY while a card is being dragged (not just held): a faint green
+ * frame on every buildable cell, a stronger cue under the cursor, and the gold merge
+ * telegraph. Dragging is the moment "where can I build?" matters; otherwise it's noise. */
 static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
-    if (run->hand_count <= 0) {
+    if (g->drag_tile < 0) {
         return;
     }
     const int cols = run->grid_cols;
@@ -919,9 +1028,31 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
         return;
     }
     const bool ok = is_build_cell(run, hgx, hgy);
+    const float hox = grid_x(hgx, cols, pitch);
+    const float hoy = grid_y(hgy, rows, pitch);
+    /* Drag + hover over a buildable cell that would FUSE: gold telegraph on the whole
+     * group + the tier+1 result drawn as a faded ghost on the drop cell. The "+N" badge
+     * rides on top in Clay (tj_view_drag_overlay). */
+    if (g->drag_tile >= 0 && ok) {
+        int group[24];
+        int result = -1;
+        const int gn = tj_run_merge_preview(run, g->drag_tile, hgx, hgy, group, 24, &result);
+        if (result >= 0) {
+            const float pulse = 0.5F + (0.5F * sinf(g->anim_t * 7.0F));
+            for (int k = 0; k < gn && k < 24; k++) {
+                cell_glow(g, (Clay_Color){TJ_GOLD.r, TJ_GOLD.g, TJ_GOLD.b, 150.0F + (80.0F * pulse)}, pitch * 1.06F, pitch * 1.06F, grid_x(group[k] % cols, cols, pitch),
+                          grid_y(group[k] / cols, rows, pitch));
+            }
+            const uint32_t rg = tile_region_for_index(g, result);
+            if (has_region(rg)) {
+                emit_map_quad(g, rg, pack_clay_color((Clay_Color){255.0F, 255.0F, 255.0F, 160.0F + (60.0F * pulse)}), pitch * 0.7F, pitch * 0.7F, hox, hoy);
+            }
+            return;
+        }
+    }
     const uint32_t region = ok ? g->ui_hover_cell_overlay_128 : g->ui_invalid_cell_overlay_128;
     const Clay_Color fb = ok ? (Clay_Color){160.0F, 255.0F, 175.0F, 220.0F} : (Clay_Color){236.0F, 110.0F, 92.0F, 180.0F};
-    cell_overlay(g, region, fb, pitch, grid_x(hgx, cols, pitch), grid_y(hgy, rows, pitch));
+    cell_overlay(g, region, fb, pitch, hox, hoy);
 }
 
 /* First-run intro effects, drawn in the SPRITE world pass (Clay = UI only): the black
@@ -1165,10 +1296,11 @@ static void world_custom_handler(const nt_ui_custom_frame_t *frame, void *userda
     }
     set_world_from_frame(frame);
     const int maxdim = (run->grid_cols > run->grid_rows) ? run->grid_cols : run->grid_rows;
-    /* Big tiles: ~6 cells across the viewport short side; the large zone scrolls
-     * (camera pan/drag). A small zone that already fits gets the larger fit pitch. */
+    /* ~9 cells across the viewport short side so the aul + road band + the first ring of
+     * buildable desert are all on screen by default (else "where do I build?" is off-camera).
+     * The large zone still scrolls; a small zone that fits gets the larger fit pitch. */
     const float vmin = fminf(s_map_vw, s_map_vh);
-    const float pitch = fmaxf(floorf(vmin / 6.0F), floorf(vmin / (float)(maxdim + 1)));
+    const float pitch = fmaxf(floorf(vmin / 9.0F), floorf(vmin / (float)(maxdim + 1)));
     s_map_pitch = pitch;
     s_map_extent = (float)maxdim * pitch;
     s_map_cols = run->grid_cols;
@@ -1709,11 +1841,11 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
 
 /* Hand fan layout (screen/logical coords). The fan is pinned to the viewport
  * bottom and centred, so it tracks window resizes instead of drifting off. */
-#define FAN_CARD_W 100.0F
-#define FAN_CARD_H 124.0F
-#define FAN_STEP 74.0F      /* per-card step (overlapping fan) */
-#define FAN_LIFT 30.0F      /* hovered/selected card rises this much */
-#define FAN_BOTTOM 164.0F   /* resting top-left y measured up from the viewport bottom */
+#define FAN_CARD_W 120.0F
+#define FAN_CARD_H 150.0F
+#define FAN_STEP 86.0F      /* per-card step (overlapping fan) */
+#define FAN_LIFT 34.0F      /* hovered/selected card rises this much */
+#define FAN_BOTTOM 190.0F   /* resting top-left y measured up from the viewport bottom */
 #define FAN_LEFT_MIN 292.0F /* never slide left under the pouch controls */
 
 /* Fan base = top-left of card 0, derived from the live viewport + hand size.
@@ -1754,42 +1886,39 @@ int tj_view_hand_index_at(const game_ctx_t *g, const tj_run_t *run, float lx, fl
     return -1;
 }
 
-/* Clay floating image at a pixel offset from the parent centre (card art/badges).
- * Cards live in the UI tree, so they stay Clay images — unlike the sprite-rendered
- * map. (This was map_sprite before the map moved to the sprite renderer.) */
-static void card_sprite(game_ctx_t *g, uint32_t region, float w, float h, float ox, float oy, int16_t z) {
-    if (!has_region(region)) {
-        return;
-    }
-    const nt_ui_image_style_t img = nt_ui_image_style_defaults();
-    const Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {ox, oy}, .zIndex = z},
-    };
-    nt_ui_image(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_IMG), g->atlas, region, &img, &decl);
-}
-
-/* One card at an absolute screen position (floating to root) so the fan can overlap
- * and the hovered/dragged card can lift out. */
-static void draw_fan_card(game_ctx_t *g, int tile, float x, float y, bool active, const nt_ui_transform_t *xf) {
+/* One hand card at an absolute screen position (floats to root so the fan can overlap and a
+ * card can lift). Shows the building PICTURE + NAME (type) + INFO line (level + effect). All
+ * children are non-floating: floating-to-parent images don't render in this Clay pass, which
+ * is why cards used to come up blank. `info` is the caller's "Ур.N · +M ..." string. */
+static void draw_fan_card(game_ctx_t *g, int tile, float x, float y, bool active, const nt_ui_transform_t *xf, const char *info) {
     const bool has = tile >= 0 && tile < g_config.tile_count;
-    const uint32_t surface = has ? (active ? g->ui_card_selected_96x128 : g->ui_card_playable_96x128) : g->ui_card_back_96x128;
-    const uint32_t art = has ? card_art_region_for_id(g, g_config.tiles[tile].id) : NT_ATLAS_INVALID_REGION;
+    const uint32_t art = has ? card_art_region_for_id(g, g_config.tiles[tile].id) : g->ui_card_back_96x128;
+    const Clay_Color lc = line_color(has ? g_config.tiles[tile].line : 0);
     const Clay_Color bg = active ? (Clay_Color){82.0F, 68.0F, 38.0F, 255.0F} : (Clay_Color){46.0F, 36.0F, 26.0F, 255.0F};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(FAN_CARD_W), CLAY_SIZING_FIXED(FAN_CARD_H)},
-                     .padding = CLAY_PADDING_ALL(6),
+                     .padding = CLAY_PADDING_ALL(7),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_BOTTOM}},
+                     .childGap = 4,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}, .offset = {x, y}, .zIndex = active ? 36 : 20},
           .backgroundColor = bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10.0F),
           .border = {.color = active ? (Clay_Color){198.0F, 154.0F, 55.0F, 255.0F} : (Clay_Color){104.0F, 76.0F, 42.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)},
           .userData = (void *)NT_UI_DATA_XFORM(0U, xf, 1.0F)}) {
-        card_sprite(g, surface, FAN_CARD_W - 8.0F, FAN_CARD_H - 8.0F, 0.0F, 0.0F, 0);
-        if (has) {
-            card_sprite(g, art, 58.0F, 58.0F, 0.0F, -18.0F, 1);
+        /* picture box tinted by family colour -> the line reads even before the name */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(70.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {lc.r * 0.5F, lc.g * 0.5F, lc.b * 0.5F, has ? 255.0F : 60.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(7.0F)}) {
+            inline_sprite(g, art, 58.0F, 58.0F);
         }
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), has ? g_config.tiles[tile].name : "", active ? &s_card_name : &s_dim);
+        /* auto-shrink the name + info so long building names never clip the card */
+        const char *nm = has ? g_config.tiles[tile].name : "";
+        const float tw = FAN_CARD_W - 16.0F;
+        const uint16_t nsz = nt_ui_fit_width(g->ui, s_card_name.font_id, nm, tw, 12, (uint16_t)s_card_name.font_size, (float)s_card_name.letter_tracking);
+        nt_ui_label_sized(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), nm, &s_card_name, (float)nsz);
+        const char *inf = info ? info : "";
+        const uint16_t isz = nt_ui_fit_width(g->ui, s_card_eff.font_id, inf, tw, 10, (uint16_t)s_card_eff.font_size, (float)s_card_eff.letter_tracking);
+        nt_ui_label_sized(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), inf, &s_card_eff, (float)isz);
     }
 }
 
@@ -1799,6 +1928,108 @@ static void floating_screen_dot(float cx, float cy, float d, Clay_Color col) {
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_TOP}, .offset = {cx, cy}, .zIndex = 38},
           .backgroundColor = col,
           .cornerRadius = CLAY_CORNER_RADIUS(d * 0.5F)}) {}
+}
+
+/* Small floating pill at a logical (root-space) point: rounded chip + centred text.
+ * Used for the per-building level number and the drag "+N" merge-result badge. */
+static void floating_pill(game_ctx_t *g, float lx, float ly, float w, float h, const char *text, Clay_Color bg, Clay_Color border, const nt_ui_label_style_t *style, int16_t z) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_TOP}, .offset = {lx, ly}, .zIndex = z},
+          .backgroundColor = bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(h * 0.5F),
+          .border = {.color = border, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, style);
+    }
+}
+
+/* Per-building Clay overlays on top of the sprite world: the tier-level number on every
+ * placed merge building, plus a gold crown (diamond) on maxed buildings (no higher tier).
+ * Positioned from last frame's map transform (1-frame lag is invisible — same basis the
+ * drag arrow uses). Called at the scene root, after the map element. */
+void tj_view_field_badges(game_ctx_t *g, const tj_run_t *run) {
+    if (run->grid_cols < 2 || s_map_pitch <= 0.0F) {
+        return;
+    }
+    static char s_num[TJ_ZONE_CELLS][4];
+    const int cols = run->grid_cols;
+    const int rows = run->grid_rows;
+    const int n = cols * rows;
+    const float pitch = s_map_pitch;
+    const float bw = fmaxf(18.0F, pitch * 0.36F);
+    const float ins_x = (s_map_vw * 0.5F) - (pitch * 0.3F); /* keep badges inside the map area, off the side panels */
+    const float ins_y = (s_map_vh * 0.5F) - (pitch * 0.3F);
+    for (int i = 0; i < n && i < TJ_ZONE_CELLS; i++) {
+        const int tidx = run->field_tile[i];
+        if (tidx < 0 || tidx >= g_config.tile_count || g_config.tiles[tidx].line <= 0) {
+            continue;
+        }
+        const int gx = i % cols;
+        const int gy = i / cols;
+        const float cxp = grid_x(gx, cols, pitch);
+        const float cyp = grid_y(gy, rows, pitch);
+        if (fabsf(cxp) > ins_x || fabsf(cyp) > ins_y) {
+            continue;
+        }
+        const float lx = s_map_cx + cxp;
+        const float ly = s_map_cy + cyp;
+        (void)snprintf(s_num[i], sizeof s_num[i], "%d", g_config.tiles[tidx].tier);
+        const bool maxed = tj_config_tile_upgrade(tidx) < 0;
+        if (maxed) {
+            static nt_ui_transform_t s_crown_xf;
+            s_crown_xf = nt_ui_transform_defaults();
+            s_crown_xf.rotation_z = 0.785F; /* 45deg -> diamond "crown" jewel */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(bw * 0.62F), CLAY_SIZING_FIXED(bw * 0.62F)}},
+                  .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                               .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+                               .offset = {lx, ly - (pitch * 0.44F)},
+                               .zIndex = 14},
+                  .backgroundColor = {TJ_GOLD.r, TJ_GOLD.g, TJ_GOLD.b, 255.0F},
+                  .cornerRadius = CLAY_CORNER_RADIUS(2.0F),
+                  .userData = (void *)NT_UI_DATA_XFORM(0U, &s_crown_xf, 1.0F)}) {}
+            floating_pill(g, lx + (pitch * 0.28F), ly + (pitch * 0.28F), bw, bw, s_num[i], (Clay_Color){TJ_GOLD.r, TJ_GOLD.g, TJ_GOLD.b, 255.0F}, (Clay_Color){120.0F, 86.0F, 24.0F, 255.0F},
+                          &s_badge_num_max, 14);
+        } else {
+            floating_pill(g, lx + (pitch * 0.28F), ly + (pitch * 0.28F), bw, bw, s_num[i], (Clay_Color){34.0F, 26.0F, 18.0F, 235.0F}, (Clay_Color){198.0F, 166.0F, 96.0F, 230.0F}, &s_badge_num, 14);
+        }
+    }
+}
+
+/* Hover tooltip: when not dragging, hovering a placed building shows a small card near the
+ * cursor with its name + level + what it gives. Reads the last frame's map transform. */
+void tj_view_field_tooltip(game_ctx_t *g, const tj_run_t *run) {
+    if (g->drag_tile >= 0 || s_map_pitch <= 0.0F) {
+        return;
+    }
+    int gx = -1;
+    int gy = -1;
+    if (!tj_view_world_cell_at(g->ptr_x, g->ptr_y, &gx, &gy)) {
+        return;
+    }
+    const int idx = (gy * run->grid_cols) + gx;
+    if (idx < 0 || idx >= TJ_ZONE_CELLS) {
+        return;
+    }
+    const int t = run->field_tile[idx];
+    if (t < 0 || t >= g_config.tile_count || g_config.tiles[t].line <= 0) {
+        return;
+    }
+    static char nm[72];
+    static char eff[40];
+    tile_effect_str(t, eff, sizeof eff);
+    (void)snprintf(nm, sizeof nm, "%s  %s%d", g_config.tiles[t].name, pick_lang("lv.", "ур.", "sv."), g_config.tiles[t].tier);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .padding = {10, 10, 8, 8}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 3},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+                       .offset = {g->ptr_x + 18.0F, g->ptr_y + 18.0F},
+                       .zIndex = 45},
+          .backgroundColor = {28.0F, 22.0F, 14.0F, 242.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(8.0F),
+          .border = {.color = {150.0F, 116.0F, 54.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(1)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), nm, &s_tip_name);
+        if (eff[0] != '\0') {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), eff, &s_tip_eff);
+        }
+    }
 }
 
 /* While dragging a card: a dotted arrow from its fan slot to the cursor, plus the
@@ -1822,7 +2053,33 @@ void tj_view_drag_overlay(game_ctx_t *g, const tj_run_t *run, int drag_idx) {
     s_ghost_xf.rotation_z = 0.05F; /* slight tilt while dragging */
     s_ghost_xf.scale_x = 1.06F;
     s_ghost_xf.scale_y = 1.06F;
-    draw_fan_card(g, run->hand_cards[drag_idx], px - (FAN_CARD_W * 0.5F), py - (FAN_CARD_H * 0.6F), true, &s_ghost_xf);
+    static char s_ghost_info[40];
+    const int gt = run->hand_cards[drag_idx];
+    char geff[28];
+    tile_effect_str(gt, geff, sizeof geff);
+    const char *glv = pick_lang("lv.", "ур.", "sv.");
+    if (geff[0] != '\0') {
+        (void)snprintf(s_ghost_info, sizeof s_ghost_info, "%s%d  %s", glv, g_config.tiles[gt].tier, geff);
+    } else {
+        (void)snprintf(s_ghost_info, sizeof s_ghost_info, "%s%d", glv, g_config.tiles[gt].tier);
+    }
+    draw_fan_card(g, gt, px - (FAN_CARD_W * 0.5F), py - (FAN_CARD_H * 0.6F), true, &s_ghost_xf, s_ghost_info);
+    /* Drop would fuse: a gold pill with the resulting level above the target cell
+     * (pairs with the result-ghost sprite drawn in the world pass). */
+    int hgx = -1;
+    int hgy = -1;
+    if (g->drag_tile >= 0 && s_map_pitch > 0.0F && tj_view_world_cell_at(px, py, &hgx, &hgy)) {
+        int result = -1;
+        (void)tj_run_merge_preview(run, g->drag_tile, hgx, hgy, NULL, 0, &result);
+        if (result >= 0) {
+            static char s_res[6];
+            (void)snprintf(s_res, sizeof s_res, "%d", g_config.tiles[result].tier);
+            const float lx = s_map_cx + grid_x(hgx, run->grid_cols, s_map_pitch);
+            const float ly = s_map_cy + grid_y(hgy, run->grid_rows, s_map_pitch);
+            const float bw = fmaxf(24.0F, s_map_pitch * 0.42F);
+            floating_pill(g, lx, ly - (s_map_pitch * 0.46F), bw, bw, s_res, (Clay_Color){TJ_GOLD.r, TJ_GOLD.g, TJ_GOLD.b, 255.0F}, (Clay_Color){120.0F, 86.0F, 24.0F, 255.0F}, &s_badge_num_max, 40);
+        }
+    }
 }
 
 /* Bottom hand: pouch button + a fan of held cards (drag one onto a field cell).
@@ -1854,6 +2111,7 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial
         }
     }
     static nt_ui_transform_t s_fan_xf[TJ_MAX_HAND];
+    static char s_card_info[TJ_MAX_HAND][40]; /* "Ур.N · +M ..." per card; must outlive the frame */
     float fx0;
     float fy;
     fan_base(g, run->hand_count, &fx0, &fy);
@@ -1871,7 +2129,16 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx, bool tutorial
             s_fan_xf[i].scale_y = 1.14F;
         }
         const float yarc = (off * off) * 1.7F; /* edges sit lower -> fan arc */
-        draw_fan_card(g, run->hand_cards[i], fx0 + ((float)i * FAN_STEP), (lift ? fy - FAN_LIFT : fy) + yarc, lift, &s_fan_xf[i]);
+        const int t = run->hand_cards[i];
+        char eff[28];
+        tile_effect_str(t, eff, sizeof eff);
+        const char *lv = pick_lang("lv.", "ур.", "sv.");
+        if (eff[0] != '\0') {
+            (void)snprintf(s_card_info[i], sizeof s_card_info[i], "%s%d  %s", lv, g_config.tiles[t].tier, eff);
+        } else {
+            (void)snprintf(s_card_info[i], sizeof s_card_info[i], "%s%d", lv, g_config.tiles[t].tier);
+        }
+        draw_fan_card(g, t, fx0 + ((float)i * FAN_STEP), (lift ? fy - FAN_LIFT : fy) + yarc, lift, &s_fan_xf[i], s_card_info[i]);
     }
 }
 

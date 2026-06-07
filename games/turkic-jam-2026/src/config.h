@@ -160,6 +160,7 @@ extern tj_config_t g_config;
 bool tj_config_load(const char *dir);
 
 int tj_config_tile_index(const char *id);                  /* -1 if absent */
+int tj_config_tile_upgrade(int tile_index);                /* tile of same line, tier+1; -1 if top tier / non-merge */
 const tj_log_event_t *tj_config_log_event(const char *id); /* NULL if absent */
 
 #endif /* TJ_CONFIG_H */

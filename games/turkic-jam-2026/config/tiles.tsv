@@ -15,23 +15,33 @@ storm      | Дух бури  | check | spirit | 3 | 1 | 3 | 0 | 0 | 0 | 0 | roa
 war_1   | Точило   | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 1 | 1 | body | 1
 war_2   | Кузня    | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 1 | 2 | body | 4
 war_3   | Арсенал  | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 1 | 3 | body | 13
+war_4   | Оружейная| support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 1 | 4 | body | 42
+war_5   | Цитадель | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 1 | 5 | body | 135
 
 # --- линия 2: Табун -> Скорость (живой бонус) ---
 horse_1 | Коновязь | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 2 | 1 | mind | 1
 horse_2 | Табун    | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 2 | 2 | mind | 4
 horse_3 | Орда     | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 2 | 3 | mind | 13
+horse_4 | Тумен    | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 2 | 4 | mind | 42
+horse_5 | Великая Орда | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 2 | 5 | mind | 135
 
 # --- линия 3: Степь -> Выносливость (живой бонус, +макс ХП) ---
 steppe_1 | Привал  | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 1 | spirit | 1
 steppe_2 | Стан    | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 2 | spirit | 4
 steppe_3 | Твердыня| support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 3 | spirit | 13
+steppe_4 | Крепость| support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 4 | spirit | 42
+steppe_5 | Вечный оплот | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 0 | field | 3 | 5 | spirit | 135
 
 # --- линия 4: Жильё -> припасы за круг ---
 home_1 | Саксаул     | support | none | 0 | 0 | 2  | 0 | 0 | 0 | 0 | field | 4 | 1 | none | 0
 home_2 | Юрта        | support | none | 0 | 0 | 7  | 0 | 0 | 0 | 0 | field | 4 | 2 | none | 0
 home_3 | Аул-стоянка | support | none | 0 | 0 | 20 | 0 | 0 | 0 | 0 | field | 4 | 3 | none | 0
+home_4 | Зимовка     | support | none | 0 | 0 | 62 | 0 | 0 | 0 | 0 | field | 4 | 4 | none | 0
+home_5 | Столица степи | support | none | 0 | 0 | 190 | 0 | 0 | 0 | 0 | field | 4 | 5 | none | 0
 
 # --- линия 5: Вода -> восстановление ХП за круг ---
 water_1 | Лужа        | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 2  | field | 5 | 1 | none | 0
 water_2 | Родник      | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 7  | field | 5 | 2 | none | 0
 water_3 | Озеро жизни | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 20 | field | 5 | 3 | none | 0
+water_4 | Река        | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 62 | field | 5 | 4 | none | 0
+water_5 | Живая вода  | support | none | 0 | 0 | 0 | 0 | 0 | 0 | 190 | field | 5 | 5 | none | 0
