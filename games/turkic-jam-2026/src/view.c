@@ -39,7 +39,14 @@ static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color
 static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_die = {.font_id = 0, .font_size = 44, .color = {40.0F, 28.0F, 18.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
-static const nt_ui_label_style_t s_die_event = {.font_id = 0, .font_size = 34, .color = {244.0F, 224.0F, 174.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+/* Dice-event "wheel of fate" window. */
+static const nt_ui_label_style_t s_ev_title = {.font_id = 0, .font_size = 28, .color = {240.0F, 212.0F, 150.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_ev_check = {.font_id = 0, .font_size = 18, .color = {226.0F, 196.0F, 120.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_wheel_chip = {.font_id = 0, .font_size = 15, .color = {210.0F, 196.0F, 166.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_wheel_chip_sel = {.font_id = 0, .font_size = 16, .color = {32.0F, 24.0F, 12.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_wheel_hub = {.font_id = 0, .font_size = 32, .color = {245.0F, 232.0F, 200.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_ev_good = {.font_id = 0, .font_size = 24, .color = {126.0F, 200.0F, 134.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_ev_bad = {.font_id = 0, .font_size = 24, .color = {230.0F, 110.0F, 78.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
 #define TJ_PANEL_BG {35.0F, 31.0F, 24.0F, 255.0F}
 #define TJ_BAR_BG {31.0F, 28.0F, 22.0F, 255.0F}
@@ -280,25 +287,6 @@ static tj_cell_role_t current_cell_role(const tj_run_t *run) {
         return TJ_CELL_TRAIL;
     }
     return (tj_cell_role_t)run->cell_role[run->cell];
-}
-
-static uint32_t die_region_for_sides(const game_ctx_t *g, int sides) {
-    switch (sides) {
-    case 4:
-        return g->die_d[0];
-    case 6:
-        return g->die_d[1];
-    case 8:
-        return g->die_d[2];
-    case 10:
-        return g->die_d[3];
-    case 12:
-        return g->die_d[4];
-    case 20:
-        return g->die_d[5];
-    default:
-        return NT_ATLAS_INVALID_REGION;
-    }
 }
 
 static uint32_t tile_region_for_id(const game_ctx_t *g, const char *id) {
@@ -908,9 +896,9 @@ static void draw_build_hints(game_ctx_t *g, const tj_run_t *run, float pitch) {
 }
 
 /* First-run intro effects, drawn in the SPRITE world pass (Clay = UI only): the black
- * screen, drifting warm sand, and the dawn-reveal veil. Reads g->intro_* (set by the
- * scene). Sand is a soft round particle (Kenney CC0) tinted warm, alpha-blended on black
- * so it reads as glowing dust. */
+ * screen, drifting warm dust haze, and the dawn-reveal veil. Reads g->intro_* (set by the
+ * scene). Haze is a soft smoke puff (Kenney CC0) tinted warm, alpha-blended on black at low
+ * opacity so it reads as airborne dust without washing out the intro text. */
 static void draw_intro_fx(game_ctx_t *g) {
     float va = 1.0F; /* veil alpha: full black while waiting; eases off once the player taps */
     if (!g->intro_black) {
@@ -929,15 +917,16 @@ static void draw_intro_fx(game_ctx_t *g) {
     const float t = g->intro_anim_t;
     const float vw = s_map_vw;
     const float vh = s_map_vh;
-    for (int i = 0; i < 24; i++) {
-        const float spd = 14.0F + ((float)(i % 5) * 12.0F); /* wind: grains drift rightward */
+    const float vmin = fminf(vw, vh); /* size haze relative to the viewport so it scales */
+    for (int i = 0; i < 16; i++) {
+        const float spd = 6.0F + ((float)(i % 5) * 5.0F); /* wind: dust haze drifts slowly rightward */
         const float bx = (float)((i * 131) % 1000) / 1000.0F * vw;
         const float by = (float)((i * 197) % 1000) / 1000.0F * vh;
         const float gx = fmodf(bx + (t * spd), vw) - (vw * 0.5F);
-        const float gy = (by - (vh * 0.5F)) + (sinf((t * 0.5F) + (float)i) * 10.0F);
-        const float sz = 10.0F + ((float)(i % 3) * 6.0F);
-        const float al = (40.0F + ((float)(i % 4) * 34.0F)) * va;
-        const uint32_t col = pack_clay_color((Clay_Color){214.0F, 190.0F, 150.0F, al});
+        const float gy = (by - (vh * 0.5F)) + (sinf((t * 0.35F) + (float)i) * 14.0F);
+        const float sz = (vmin * 0.16F) + ((float)(i % 4) * vmin * 0.05F);
+        const float al = (10.0F + ((float)(i % 5) * 8.0F)) * va; /* low: intro text stays clean over the haze */
+        const uint32_t col = pack_clay_color((Clay_Color){206.0F, 184.0F, 148.0F, al});
         emit_map_quad(g, g->fx_sand_grain_01, col, sz, sz, gx, gy);
     }
 }
@@ -1169,49 +1158,176 @@ static void compact_fighter(game_ctx_t *g, uint32_t sprite, const char *name, fl
     }
 }
 
-/* Centered dice-event window: die rolls (spins then locks), then stat x multiplier
- * = effect vs DC, then success/fail — revealed over run->event_t. */
-static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
-    static char dnum[8];
-    static char mathline[56];
-    static char resline[40];
-    const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 1.5F;
-    const float t = run->event_t;
-    const bool spinning = t < dur * 0.45F;
-    const bool show_math = t >= dur * 0.45F;
-    const bool show_res = t >= dur * 0.72F;
-    int shown = run->ev_roll;
-    if (spinning && run->ev_die > 0) {
-        shown = ((int)(t * 53.0F) % run->ev_die) + 1; /* cycling face while rolling */
+/* Localized window text per event kind (start_event's pick: 0=Завал/Сила,
+ * 1=Погоня/Скорость, 2=Буря/Выносливость). */
+static void event_strings(int kind, const char **title, const char **desc, const char **stat) {
+    switch (kind) {
+    case 1:
+        *title = pick_lang("Chase", "Погоня", "Takip");
+        *desc = pick_lang("Enemies hard on your heels.", "Враги гонятся по пятам.", "Dusmanlar pesinde.");
+        *stat = pick_lang("SPEED", "СКОРОСТЬ", "HIZ");
+        return;
+    case 2:
+        *title = pick_lang("Storm", "Буря", "Firtina");
+        *desc = pick_lang("A sandstorm saps your strength.", "Песчаная буря выматывает.", "Kum firtinasi yorar.");
+        *stat = pick_lang("VIGOR", "ВЫНОСЛИВОСТЬ", "DAYANIKLILIK");
+        return;
+    default:
+        *title = pick_lang("Rockfall", "Завал", "Heyelan");
+        *desc = pick_lang("Stones block the trail.", "Камни перекрыли тропу.", "Taslar yolu kapadi.");
+        *stat = pick_lang("STRENGTH", "СИЛА", "GUC");
+        return;
     }
-    (void)snprintf(dnum, sizeof dnum, "%d", shown);
+}
+
+/* "Wheel of fate" event window, staged over run->event_t: first the tested stat
+ * (title/threat/value), then the wheel spins and eases onto the precomputed roll
+ * (each face = a multiplier; 1 = miss, max = win), then stat x mult vs DC, then the
+ * outcome. Spin + chip positions are derived from event_t; the sim stores only the
+ * result. The winning face rests under the fixed top pointer. */
+/* Spin angle (radians) at reveal progress f: still during the intro beat, then a
+ * cubic ease-out over [0.14, 0.66] that lands face `target` under the top pointer
+ * (4 full turns first, so the deceleration reads as a real spin). */
+static float event_spin_amount(float f, int target, int die) {
+    const float two_pi = 6.2831853F;
+    const float step = two_pi / (float)die;
+    const float s_final = (two_pi * 4.0F) - ((float)target * step);
+    const float lo = 0.14F;
+    const float hi = 0.66F;
+    if (f <= lo) {
+        return 0.0F;
+    }
+    if (f >= hi) {
+        return s_final;
+    }
+    const float local = (f - lo) / (hi - lo);
+    const float inv = 1.0F - local;
+    return (1.0F - (inv * inv * inv)) * s_final;
+}
+
+/* Post-spin math + outcome lines. ev_roll 1 = miss, max = win, else stat x mult vs DC. */
+static void event_result_text(const tj_run_t *run, int die, const char *statname, char *mathline, size_t ml, char *resline, size_t rl) {
     const float mult = 1.0F + (g_config.event_dice_coeff * (float)run->ev_roll);
     const int eff = (int)((float)run->ev_stat * mult);
-    (void)snprintf(mathline, sizeof mathline, "%s %d  x%.2f  = %d", run->ev_statname, run->ev_stat, (double)mult, eff);
-    (void)snprintf(resline, sizeof resline, "DC %d  ->  %s", run->ev_dc, run->ev_pass ? "УСПЕХ" : "ПРОВАЛ");
+    if (run->ev_roll <= 1) {
+        (void)snprintf(mathline, ml, "%s", pick_lang("Natural 1 - miss", "Выпала 1 - провал", "Dogal 1 - iska"));
+    } else if (run->ev_roll >= die) {
+        (void)snprintf(mathline, ml, "%s", pick_lang("Maximum - hit!", "Максимум - успех!", "Maksimum!"));
+    } else {
+        (void)snprintf(mathline, ml, "%s %d  x%g  = %d   (DC %d)", statname, run->ev_stat, (double)mult, eff, run->ev_dc);
+    }
+    if (run->ev_pass) {
+        (void)snprintf(resline, rl, "%s   +%d", pick_lang("SUCCESS", "УСПЕХ", "BASARI"), run->ev_gain);
+    } else {
+        (void)snprintf(resline, rl, "%s   -%d HP", pick_lang("FAIL", "ПРОВАЛ", "BASARISIZ"), g_config.event_fail_hp);
+    }
+}
+
+/* One wheel face at (dx,dy) from the disc centre: roll = i+1 (1 = miss/red,
+ * die = win/green, else a multiplier); `sel` = resting under the pointer. `text`
+ * must outlive the frame — the caller owns the buffer (Clay stores it by pointer). */
+static void event_wheel_chip(game_ctx_t *g, int roll, int die, bool sel, float dx, float dy, char *text, size_t cap) {
+    if (roll <= 1) {
+        (void)snprintf(text, cap, "%s", pick_lang("miss", "мимо", "iska"));
+    } else if (roll >= die) {
+        (void)snprintf(text, cap, "%s", pick_lang("win", "куш", "kazanc"));
+    } else {
+        (void)snprintf(text, cap, "x%g", (double)(1.0F + (g_config.event_dice_coeff * (float)roll)));
+    }
+    Clay_Color bg = {58.0F, 46.0F, 30.0F, 240.0F};
+    if (sel) {
+        bg = (Clay_Color){236.0F, 196.0F, 96.0F, 255.0F};
+    } else if (roll <= 1) {
+        bg = (Clay_Color){96.0F, 44.0F, 36.0F, 240.0F};
+    } else if (roll >= die) {
+        bg = (Clay_Color){46.0F, 82.0F, 48.0F, 240.0F};
+    }
+    const Clay_Color bord = sel ? (Clay_Color){250.0F, 230.0F, 170.0F, 255.0F} : (Clay_Color){92.0F, 72.0F, 42.0F, 200.0F};
+    const float csz = sel ? 50.0F : 42.0F;
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .offset = {dx, dy}, .zIndex = 62},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(csz), CLAY_SIZING_FIXED(csz)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(csz * 0.5F),
+          .border = {.color = bord, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), text, sel ? &s_wheel_chip_sel : &s_wheel_chip);
+    }
+}
+
+/* The fate wheel: a disc with the multiplier faces around the rim (rotated by
+ * `spin`), the tested stat in the hub, and a fixed pointer at the top. */
+static void event_wheel(game_ctx_t *g, float spin, int hi_idx, int die, int nchips, const char *hubval, char chiptext[][16]) {
+    const float wheel = 250.0F;
+    const float ring_r = 96.0F;
+    const float step = 6.2831853F / (float)die;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(wheel), CLAY_SIZING_FIXED(wheel)}},
+          .backgroundColor = {26.0F, 20.0F, 13.0F, 255.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(wheel * 0.5F),
+          .border = {.color = {150.0F, 112.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(3)}}) {
+        for (int i = 0; i < nchips; i++) {
+            const float ang = ((float)i * step) + spin;
+            event_wheel_chip(g, i + 1, die, i == hi_idx, ring_r * sinf(ang), -ring_r * cosf(ang), chiptext[i], sizeof chiptext[i]);
+        }
+        /* hub: the stat under test, shown from the first beat */
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 63},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(80.0F), CLAY_SIZING_FIXED(80.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {62.0F, 46.0F, 28.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(40.0F),
+              .border = {.color = {150.0F, 112.0F, 48.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), hubval, &s_wheel_hub);
+        }
+        /* fixed pointer near 12 o'clock — the face resting here is the result */
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                           .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER},
+                           .offset = {0.0F, -(ring_r + 20.0F)},
+                           .zIndex = 64},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(16.0F), CLAY_SIZING_FIXED(16.0F)}},
+              .backgroundColor = {250.0F, 220.0F, 120.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(4.0F)}) {}
+    }
+}
+
+static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
+    static char chiptext[24][16];
+    static char checkbuf[48];
+    static char hubval[8];
+    static char mathline[64];
+    static char resline[48];
+    const float dur = (g_config.event_reveal_seconds > 0.1F) ? g_config.event_reveal_seconds : 3.0F;
+    const float f = (dur > 0.0F) ? (run->event_t / dur) : 1.0F; /* normalized reveal progress */
+    const int die = (run->ev_die > 1) ? run->ev_die : 10;
+    const int nchips = (die < 24) ? die : 24;
+    const int target = ((run->ev_roll >= 1) ? run->ev_roll : 1) - 1; /* 0-based landing face */
+    const float spin = event_spin_amount(f, target, die);
+    const int hi_idx = (f >= 0.66F) ? target : -1; /* the winner highlights once it settles */
+    const bool show_math = f >= 0.78F;
+    const bool show_res = f >= 0.90F;
+    const char *title = NULL;
+    const char *desc = NULL;
+    const char *statname = NULL;
+    event_strings(run->ev_kind, &title, &desc, &statname);
+    (void)snprintf(checkbuf, sizeof checkbuf, "%s: %s", pick_lang("Test", "Проверка", "Sinav"), statname);
+    (void)snprintf(hubval, sizeof hubval, "%d", run->ev_stat);
+    event_result_text(run, die, statname, mathline, sizeof mathline, resline, sizeof resline);
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = 60},
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = {16.0F, 12.0F, 8.0F, 150.0F}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(460), CLAY_SIZING_FIT(0)},
-                         .padding = CLAY_PADDING_ALL(22),
+          .backgroundColor = {16.0F, 12.0F, 8.0F, 175.0F}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)},
+                         .padding = CLAY_PADDING_ALL(20),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 14,
+                         .childGap = 12,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = {40.0F, 34.0F, 24.0F, 255.0F},
               .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
               .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
-            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->ev_name, &s_panel_title);
-            CLAY(
-                {.layout = {.sizing = {CLAY_SIZING_FIXED(108), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                 .backgroundColor = {24.0F, 18.0F, 12.0F, 0.0F}}) {
-                inline_sprite(g, die_region_for_sides(g, run->ev_die), 88.0F, 88.0F);
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dnum, &s_die_event);
-            }
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), title, &s_ev_title);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), desc, &s_dim);
+            nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), checkbuf, &s_ev_check);
+            event_wheel(g, spin, hi_idx, die, nchips, hubval, chiptext);
             if (show_math) {
                 nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
             }
             if (show_res) {
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_log_styles[TJ_LOG_GOOD] : &s_log_styles[TJ_LOG_BAD]);
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), resline, run->ev_pass ? &s_ev_good : &s_ev_bad);
             }
         }
     }
@@ -1607,9 +1723,9 @@ bool tj_view_launch_panel(game_ctx_t *g, const tj_run_t *run, float t) {
     if (has_region(g->ui_finger_pointer_128)) {
         const float bob = 2.0F + (8.0F * (0.5F + (0.5F * sinf(t * 4.0F)))); /* finger taps up toward the button */
         nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
-        fimg.color_packed = 0xFFAAD6ECU; /* warm tint for the white Kenney finger glyph */
+        fimg.color_packed = 0xFFFFFFFFU; /* untinted: black-outline hand renders as-is */
         const Clay_ElementDeclaration fdecl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(76.0F), CLAY_SIZING_FIXED(76.0F)}},
+            .layout = {.sizing = {CLAY_SIZING_FIXED(75.0F), CLAY_SIZING_FIXED(88.0F)}}, /* keep the hand's 160x188 aspect */
             .floating = {.attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID,
                          .parentId = CLAY_ID("intro_send_box").id,
                          .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
@@ -1661,8 +1777,8 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
     const float pulse = 0.55F + (0.45F * sinf(t * 3.2F));
     const nt_ui_label_style_t hint = {.font_id = 0, .font_size = 18, .color = {198.0F, 178.0F, 140.0F, 120.0F + (135.0F * pulse)}, .align = CLAY_TEXT_ALIGN_CENTER};
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_BOTTOM, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
-                       .offset = {0.0F, -96.0F},
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
+                       .offset = {0.0F, -84.0F},
                        .zIndex = 91,
                        .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
           .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
@@ -1671,12 +1787,12 @@ void tj_view_intro_black(game_ctx_t *g, float t) {
     if (has_region(g->ui_finger_pointer_128)) {
         const float bob = sinf(t * 3.2F) * 7.0F;
         nt_ui_image_style_t fimg = nt_ui_image_style_defaults();
-        fimg.color_packed = 0xFFAAD6ECU; /* warm tint for the white Kenney finger glyph */
+        fimg.color_packed = 0xFFFFFFFFU; /* untinted: black-outline hand renders as-is */
         const Clay_ElementDeclaration fdecl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(72.0F), CLAY_SIZING_FIXED(72.0F)}},
+            .layout = {.sizing = {CLAY_SIZING_FIXED(72.0F), CLAY_SIZING_FIXED(84.0F)}}, /* keep the hand's 160x188 aspect */
             .floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                          .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_TOP, .parent = CLAY_ATTACH_POINT_CENTER_BOTTOM},
-                         .offset = {120.0F, -88.0F + bob},
+                         .offset = {0.0F, -176.0F + bob},
                          .zIndex = 92,
                          .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
         };
