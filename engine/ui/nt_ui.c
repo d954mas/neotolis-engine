@@ -2104,7 +2104,12 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
         if (cap->active_id != 0U && cap->active_id != id) {
             continue; /* α: pointer bound elsewhere, invisible to this widget */
         }
-        const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL);
+        /* Front-most arbitration: a free pointer drives this widget only if it is the resolved hot
+         * widget. hot == 0 (nothing resolved yet — first frame / freshly-appeared) falls back to the
+         * raw hit so newly-shown widgets still work; a capture holder always keeps the pointer. */
+        const uint32_t hot = ctx->pointer_hot[i].id;
+        const bool arbitrated_ok = (hot == 0U) || (hot == id) || (cap->active_id == id);
+        const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL);
         if (!over) {
             continue;
         }
