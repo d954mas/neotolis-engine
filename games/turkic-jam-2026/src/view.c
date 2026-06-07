@@ -434,9 +434,10 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
     static char sup[28];
     static char day[24];
     (void)snprintf(circle, sizeof circle, "%s %d/%d", pick_lang("Circle", "Круг", "Dongu"), run->circle, g_config.laps_to_win);
-    (void)snprintf(sup, sizeof sup, "%s %d", pick_lang("Supplies", "Припасы", "Azik"), run->supplies);
+    (void)snprintf(sup, sizeof sup, "%s %d", pick_lang("Supplies", "Припасы", "Azik"), g_aul.supplies + run->supplies);
     (void)snprintf(day, sizeof day, "%s %d", pick_lang("Day", "День", "Gun"), run->day);
-    /* Supplies pinned left, Circle+Day centred (HP lives in the hero panel), speed pinned right. */
+    /* Supplies = persistent aul bank + this run's haul: one number that never resets to 0.
+     * Supplies pinned left, Circle+Day centred (HP lives in the hero panel). */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(64)},
                      .padding = {16, 16, 10, 10},
                      .layoutDirection = CLAY_LEFT_TO_RIGHT,
@@ -450,7 +451,6 @@ void tj_view_top_hud(game_ctx_t *g, const tj_run_t *run) {
             hud_chip(g, g->icon_day_32, day);
         }
         hud_spacer();
-        hud_chip(g, g->icon_speed_32, "x1");
     }
 }
 
@@ -531,9 +531,6 @@ static void draw_road_fallback(game_ctx_t *g, const tj_run_t *run, float pitch) 
 }
 
 static uint32_t road_region_for_path_cell(const game_ctx_t *g, const tj_run_t *run, int i) {
-    if (i == 0 && has_region(g->road_entry_aul)) {
-        return g->road_entry_aul;
-    }
     const int n = run->path_cells;
     const int p = (i + n - 1) % n;
     const int q = (i + 1) % n;

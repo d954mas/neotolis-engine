@@ -509,6 +509,7 @@ static void on_update(game_ctx_t *g, float dt) {
             tj_tamga_spawn(s_run.cell, s_run.circle); /* leave the Last Tamga where the heir fell */
         }
         tj_aul_add_from_run(s_run.supplies, s_run.wisdom, s_run.glory); /* bank into the aul (meta) */
+        s_run.supplies = 0;                                             /* haul is now in the aul; HUD shows g_aul.supplies + run->supplies, no double-count */
         g->score = s_run.circle;
         if (g->score > g->best) {
             g->best = g->score;
