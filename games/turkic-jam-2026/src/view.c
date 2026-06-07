@@ -37,6 +37,7 @@ static const nt_ui_label_style_t s_stat = {.font_id = 0, .font_size = 20, .color
 static const nt_ui_label_style_t s_dim = {.font_id = 0, .font_size = 17, .color = {176.0F, 160.0F, 135.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_card_name = {.font_id = 0, .font_size = 19, .color = {245.0F, 236.0F, 214.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 static const nt_ui_label_style_t s_die = {.font_id = 0, .font_size = 44, .color = {40.0F, 28.0F, 18.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
+static const nt_ui_label_style_t s_die_event = {.font_id = 0, .font_size = 34, .color = {244.0F, 224.0F, 174.0F, 255.0F}, .align = CLAY_TEXT_ALIGN_CENTER};
 
 #define TJ_PANEL_BG {35.0F, 31.0F, 24.0F, 255.0F}
 #define TJ_BAR_BG {31.0F, 28.0F, 22.0F, 255.0F}
@@ -223,7 +224,86 @@ static uint32_t decor_region_for_cell(const game_ctx_t *g, int gx, int gy) {
     return decor[(uint32_t)((gx * 17) + (gy * 31)) % (uint32_t)(sizeof decor / sizeof decor[0])];
 }
 
+static int tier_id_index(const char *id, const char *prefix) {
+    const size_t n = strlen(prefix);
+    if (strncmp(id, prefix, n) != 0) {
+        return -1;
+    }
+    if (id[n] < '1' || id[n] > '3' || id[n + 1] != '\0') {
+        return -1;
+    }
+    return id[n] - '1';
+}
+
+static uint32_t merge_tile_region_for_id(const game_ctx_t *g, const char *id) {
+    int tier = tier_id_index(id, "war_");
+    if (tier >= 0) {
+        return g->tile_war[tier];
+    }
+    tier = tier_id_index(id, "horse_");
+    if (tier >= 0) {
+        return g->tile_horse[tier];
+    }
+    tier = tier_id_index(id, "steppe_");
+    if (tier >= 0) {
+        return g->tile_steppe[tier];
+    }
+    tier = tier_id_index(id, "home_");
+    if (tier >= 0) {
+        return g->tile_home[tier];
+    }
+    tier = tier_id_index(id, "water_");
+    if (tier >= 0) {
+        return g->tile_water[tier];
+    }
+    return NT_ATLAS_INVALID_REGION;
+}
+
+static uint32_t boss_region_for_circle(const game_ctx_t *g, int circle) {
+    if (circle >= g_config.laps_to_win) {
+        return g->boss_ring_keeper;
+    }
+    switch ((circle - 1) % 3) {
+    case 0:
+        return g->boss_fat;
+    case 1:
+        return g->boss_swift;
+    default:
+        return g->boss_fierce;
+    }
+}
+
+static tj_cell_role_t current_cell_role(const tj_run_t *run) {
+    if (run->cell < 0 || run->cell >= run->path_cells || run->cell >= TJ_MAX_PATH) {
+        return TJ_CELL_TRAIL;
+    }
+    return (tj_cell_role_t)run->cell_role[run->cell];
+}
+
+static uint32_t die_region_for_sides(const game_ctx_t *g, int sides) {
+    switch (sides) {
+    case 4:
+        return g->die_d[0];
+    case 6:
+        return g->die_d[1];
+    case 8:
+        return g->die_d[2];
+    case 10:
+        return g->die_d[3];
+    case 12:
+        return g->die_d[4];
+    case 20:
+        return g->die_d[5];
+    default:
+        return NT_ATLAS_INVALID_REGION;
+    }
+}
+
 static uint32_t tile_region_for_id(const game_ctx_t *g, const char *id) {
+    const uint32_t merge = merge_tile_region_for_id(g, id);
+    if (has_region(merge)) {
+        return merge;
+    }
     if (strcmp(id, "saxaul") == 0) {
         return g->tile_saxaul;
     }
@@ -259,6 +339,10 @@ static uint32_t tile_region_for_index(const game_ctx_t *g, int tile_idx) {
 }
 
 static uint32_t card_art_region_for_id(const game_ctx_t *g, const char *id) {
+    const uint32_t merge = merge_tile_region_for_id(g, id);
+    if (has_region(merge)) {
+        return merge;
+    }
     if (strcmp(id, "saxaul") == 0) {
         return g->card_art_saxaul_64;
     }
@@ -501,7 +585,8 @@ static void draw_road_events(game_ctx_t *g, const tj_run_t *run, float pitch) {
                 sz = pitch * 1.06F;
                 fb = (Clay_Color){214.0F, 72.0F, 70.0F, 255.0F};
             }
-            const uint32_t region = tile_region_for_index(g, run->tile_at[i]);
+            const uint32_t boss_region = (role == TJ_CELL_BOSS) ? boss_region_for_circle(g, run->circle) : NT_ATLAS_INVALID_REGION;
+            const uint32_t region = has_region(boss_region) ? boss_region : tile_region_for_index(g, run->tile_at[i]);
             if (has_region(region)) {
                 map_sprite(g, region, sz, sz, x, y, 6);
             } else {
@@ -1056,10 +1141,11 @@ static void event_overlay(game_ctx_t *g, const tj_run_t *run) {
               .cornerRadius = CLAY_CORNER_RADIUS(16.0F),
               .border = {.color = {198.0F, 154.0F, 55.0F, 255.0F}, .width = CLAY_BORDER_OUTSIDE(2)}}) {
             nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->ev_name, &s_panel_title);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = {232.0F, 224.0F, 206.0F, 255.0F},
-                  .cornerRadius = CLAY_CORNER_RADIUS(14.0F)}) {
-                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dnum, &s_die);
+            CLAY(
+                {.layout = {.sizing = {CLAY_SIZING_FIXED(108), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                 .backgroundColor = {24.0F, 18.0F, 12.0F, 0.0F}}) {
+                inline_sprite(g, die_region_for_sides(g, run->ev_die), 88.0F, 88.0F);
+                nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), dnum, &s_die_event);
             }
             if (show_math) {
                 nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), mathline, &s_stat);
@@ -1092,7 +1178,8 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
     (void)snprintf(ehpv, sizeof ehpv, "%d/%d", ehp, emax);
     (void)snprintf(hdmg, sizeof hdmg, "-%d", run->fx_hero_dmg);
     (void)snprintf(edmg, sizeof edmg, "-%d", run->fx_enemy_dmg);
-    const uint32_t eregion = tile_region_for_index(g, run->combat_tile);
+    const uint32_t boss_region = (current_cell_role(run) == TJ_CELL_BOSS) ? boss_region_for_circle(g, run->circle) : NT_ATLAS_INVALID_REGION;
+    const uint32_t eregion = has_region(boss_region) ? boss_region : tile_region_for_index(g, run->combat_tile);
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_BOTTOM, .parent = CLAY_ATTACH_POINT_RIGHT_BOTTOM},
                        .offset = {-14.0F, -172.0F}, /* bottom-right corner, just above the hand bar */
@@ -1121,7 +1208,7 @@ void tj_view_action_overlay(game_ctx_t *g, const tj_run_t *run) {
 #define FAN_STEP 74.0F      /* per-card step (overlapping fan) */
 #define FAN_LIFT 30.0F      /* hovered/selected card rises this much */
 #define FAN_BOTTOM 164.0F   /* resting top-left y measured up from the viewport bottom */
-#define FAN_LEFT_MIN 212.0F /* never slide left under the pouch button */
+#define FAN_LEFT_MIN 292.0F /* never slide left under the pouch controls */
 
 /* Fan base = top-left of card 0, derived from the live viewport + hand size.
  * Centred horizontally, clamped to clear the pouch, pinned above the bottom bar. */
@@ -1244,6 +1331,7 @@ void tj_view_card_hand(game_ctx_t *g, tj_run_t *run, int drag_idx) {
                      .childGap = 14,
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_BAR_BG}) {
+        inline_sprite(g, run->pouch > 0 ? g->pouch_open[3] : g->pouch_closed, 72.0F, 72.0F);
         if (tj_button(g, "pull_pouch", pouchlbl, 190, 96, TJ_BTN_PRIMARY)) {
             tj_run_pull_pouch(run); /* draw one card from the pouch into the fan */
         }

@@ -216,6 +216,7 @@ int main(int argc, char *argv[]) {
     MKDIR("games/turkic-jam-2026/raw/decor");
     MKDIR("games/turkic-jam-2026/raw/road");
     MKDIR("games/turkic-jam-2026/raw/tiles");
+    MKDIR("games/turkic-jam-2026/raw/enemies");
     MKDIR("games/turkic-jam-2026/raw/aul");
     MKDIR("games/turkic-jam-2026/raw/hero");
     MKDIR("games/turkic-jam-2026/raw/ui");
@@ -303,6 +304,25 @@ int main(int argc, char *argv[]) {
         {"tiles", "games/turkic-jam-2026/raw/tiles/tile_mirage_01.png", "tile_mirage_01", 0.5F, 0.5F},
         {"tiles", "games/turkic-jam-2026/raw/tiles/tile_storm_01.png", "tile_storm_01", 0.5F, 0.5F},
         {"tiles", "games/turkic-jam-2026/raw/tiles/tile_last_tamga_01.png", "tile_last_tamga_01", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_war_1.png", "tile_war_1", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_war_2.png", "tile_war_2", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_war_3.png", "tile_war_3", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_horse_1.png", "tile_horse_1", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_horse_2.png", "tile_horse_2", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_horse_3.png", "tile_horse_3", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_steppe_1.png", "tile_steppe_1", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_steppe_2.png", "tile_steppe_2", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_steppe_3.png", "tile_steppe_3", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_home_1.png", "tile_home_1", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_home_2.png", "tile_home_2", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_home_3.png", "tile_home_3", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_water_1.png", "tile_water_1", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_water_2.png", "tile_water_2", 0.5F, 0.5F},
+        {"tiles", "games/turkic-jam-2026/raw/tiles/tile_water_3.png", "tile_water_3", 0.5F, 0.5F},
+        {"enemies", "games/turkic-jam-2026/raw/enemies/boss_fat.png", "boss_fat", 0.5F, 0.5F},
+        {"enemies", "games/turkic-jam-2026/raw/enemies/boss_swift.png", "boss_swift", 0.5F, 0.5F},
+        {"enemies", "games/turkic-jam-2026/raw/enemies/boss_fierce.png", "boss_fierce", 0.5F, 0.5F},
+        {"enemies", "games/turkic-jam-2026/raw/enemies/boss_ring_keeper.png", "boss_ring_keeper", 0.5F, 0.5F},
         {"hero", "games/turkic-jam-2026/raw/hero/hero_wayfarer_idle_s.png", "hero_wayfarer_idle_s", 0.5F, 1.0F},
         {"hero", "games/turkic-jam-2026/raw/hero/hero_wayfarer_walk_s.png", "hero_wayfarer_walk_s", 0.5F, 1.0F},
         {"hero", "games/turkic-jam-2026/raw/hero/hero_wayfarer_walk_e.png", "hero_wayfarer_walk_e", 0.5F, 1.0F},
@@ -316,6 +336,17 @@ int main(int argc, char *argv[]) {
         {"ui", "games/turkic-jam-2026/raw/ui/ui_slot_equipment_64.png", "ui_slot_equipment_64", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_chip_resource_64.png", "ui_chip_resource_64", 0.5F, 0.5F},
         {"ui", "games/turkic-jam-2026/raw/ui/ui_tooltip_dark_64.png", "ui_tooltip_dark_64", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/die_d4.png", "die_d4", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/die_d6.png", "die_d6", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/die_d8.png", "die_d8", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/die_d10.png", "die_d10", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/die_d12.png", "die_d12", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/die_d20.png", "die_d20", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/pouch_closed.png", "pouch_closed", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/pouch_open_0.png", "pouch_open_0", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/pouch_open_1.png", "pouch_open_1", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/pouch_open_2.png", "pouch_open_2", 0.5F, 0.5F},
+        {"ui", "games/turkic-jam-2026/raw/ui/pouch_open_3.png", "pouch_open_3", 0.5F, 0.5F},
     };
     const tj_atlas_asset_t ui_assets[] = {
         {"ui", "games/turkic-jam-2026/raw/ui/ui_card_back_96x128.png", "ui_card_back_96x128", 0.5F, 0.5F},
