@@ -41,7 +41,7 @@ static struct {
     nt_material_t material;
     nt_font_t font;
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
-     * fringes; 0 = off, signed. Lives in s_text so init/shutdown/restore_gpu memset clears it. */
+     * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
     float glyph_depth_bias;
 
     /* Cached pipeline state */
@@ -135,27 +135,16 @@ static void create_pipeline(void) {
 // #endregion
 
 // #region Lifecycle
-void nt_text_renderer_init(void) {
-    NT_ASSERT(!s_text.initialized);
-    memset(&s_text, 0, sizeof(s_text));
-
-    /* Generate quad indices */
+/* GPU resources only — the pipeline is created lazily in flush, so this owns just the buffers + index
+ * pattern. Split out so restore_gpu can rebuild them WITHOUT touching s_text's logical fields. */
+static void create_gpu_resources(void) {
     generate_quad_indices();
-
-    /* Register pre-flush callback so font cache clears draw our staging
-     * buffer while texture offsets are still valid. Safe when staging is
-     * empty — flush does early return on glyph_count == 0. */
-    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
-
-    /* Create dynamic vertex buffer */
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_DYNAMIC,
         .size = NT_TEXT_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_text_vertex_t),
         .label = "text_vbo",
     });
-
-    /* Create immutable index buffer with pre-generated quad pattern */
     s_text.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX,
         .usage = NT_USAGE_IMMUTABLE,
@@ -164,7 +153,28 @@ void nt_text_renderer_init(void) {
         .index_type = NT_INDEX_UINT16,
         .label = "text_ibo",
     });
+}
 
+static void destroy_gpu_resources(void) {
+    if (s_text.pipeline.id != 0) {
+        nt_gfx_destroy_pipeline(s_text.pipeline);
+        s_text.pipeline = (nt_pipeline_t){0};
+    }
+    nt_gfx_destroy_buffer(s_text.vbo);
+    nt_gfx_destroy_buffer(s_text.ibo);
+    s_text.vbo = (nt_buffer_t){0};
+    s_text.ibo = (nt_buffer_t){0};
+}
+
+void nt_text_renderer_init(void) {
+    NT_ASSERT(!s_text.initialized);
+    memset(&s_text, 0, sizeof(s_text)); /* cold start: clear everything, GPU + logical */
+
+    /* Pre-flush hook so font-cache evictions flush our staging while texture offsets are still valid.
+     * Safe when staging is empty (flush early-returns on glyph_count == 0). */
+    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
+
+    create_gpu_resources();
     s_text.initialized = true;
 }
 
@@ -172,11 +182,7 @@ void nt_text_renderer_shutdown(void) {
     if (!s_text.initialized) {
         return;
     }
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
-    }
-    nt_gfx_destroy_buffer(s_text.vbo);
-    nt_gfx_destroy_buffer(s_text.ibo);
+    destroy_gpu_resources();
     nt_font_set_pre_flush_callback(NULL);
     memset(&s_text, 0, sizeof(s_text));
 }
@@ -185,21 +191,14 @@ void nt_text_renderer_restore_gpu(void) {
     if (!s_text.initialized) {
         return;
     }
-
-    /* Save state that survives context loss */
-    nt_material_t saved_material = s_text.material;
-    nt_font_t saved_font = s_text.font;
-    float saved_glyph_depth_bias = s_text.glyph_depth_bias;
-
-    /* Full shutdown → init cycle (frees pool slots, no leaks) */
-    nt_text_renderer_shutdown();
-    nt_text_renderer_init();
-
-    /* Restore state */
-    s_text.material = saved_material;
-    s_text.font = saved_font;
-    s_text.glyph_depth_bias = saved_glyph_depth_bias; /* logical state survives restore, like material/font */
-    s_text.pipeline_material_version = 0;             /* force pipeline recreation on next flush */
+    /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
+     * glyph_depth_bias) is left untouched, so it survives by default — no save/restore list to forget
+     * when a field is added (the bug that made glyph_depth_bias drop before this split). */
+    destroy_gpu_resources();
+    create_gpu_resources();
+    s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
+    s_text.glyph_count = 0;
+    s_text.pipeline_material_version = 0; /* pipeline destroyed above → flush rebuilds it lazily */
 }
 // #endregion
 
