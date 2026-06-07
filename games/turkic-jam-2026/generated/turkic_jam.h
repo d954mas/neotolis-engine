@@ -140,9 +140,13 @@
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_1 ((nt_hash64_t){0xF56689832A433070ULL}) /* turkic_jam_atlas/tile_home_1 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_2 ((nt_hash64_t){0xB695340F2285E459ULL}) /* turkic_jam_atlas/tile_home_2 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_3 ((nt_hash64_t){0x06FF661B7E50AEE1ULL}) /* turkic_jam_atlas/tile_home_3 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_4 ((nt_hash64_t){0xF83EBF54C99B9481ULL}) /* turkic_jam_atlas/tile_home_4 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HOME_5 ((nt_hash64_t){0xE16D63B0EB806A43ULL}) /* turkic_jam_atlas/tile_home_5 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_1 ((nt_hash64_t){0x425E54BB5D816CFEULL}) /* turkic_jam_atlas/tile_horse_1 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_2 ((nt_hash64_t){0x516813FBB9C923F7ULL}) /* turkic_jam_atlas/tile_horse_2 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_3 ((nt_hash64_t){0x3302D68D44227B17ULL}) /* turkic_jam_atlas/tile_horse_3 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_4 ((nt_hash64_t){0xE231C6E8217F9A22ULL}) /* turkic_jam_atlas/tile_horse_4 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HORSE_5 ((nt_hash64_t){0x28A3FF34CD433A43ULL}) /* turkic_jam_atlas/tile_horse_5 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_HUNTING_TRAIL_01 ((nt_hash64_t){0x2607826E5B96419AULL}) /* turkic_jam_atlas/tile_hunting_trail_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_LAST_TAMGA_01 ((nt_hash64_t){0xB438065DB97157EAULL}) /* turkic_jam_atlas/tile_last_tamga_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_MIRAGE_01 ((nt_hash64_t){0x2FDE6E7DCF010536ULL}) /* turkic_jam_atlas/tile_mirage_01 */
@@ -153,16 +157,22 @@
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_1 ((nt_hash64_t){0xC661B456244A4497ULL}) /* turkic_jam_atlas/tile_steppe_1 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_2 ((nt_hash64_t){0xE51D8ADD3B1A7FD4ULL}) /* turkic_jam_atlas/tile_steppe_2 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_3 ((nt_hash64_t){0xC47882101E3D7836ULL}) /* turkic_jam_atlas/tile_steppe_3 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_4 ((nt_hash64_t){0x4264E2B0FC289E85ULL}) /* turkic_jam_atlas/tile_steppe_4 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STEPPE_5 ((nt_hash64_t){0xE903959ADDB3CB63ULL}) /* turkic_jam_atlas/tile_steppe_5 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_STORM_01 ((nt_hash64_t){0x35085A5794BF282EULL}) /* turkic_jam_atlas/tile_storm_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_TAMGA_STONE_01 ((nt_hash64_t){0x5E58720F7908BB60ULL}) /* turkic_jam_atlas/tile_tamga_stone_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_VISION_01 ((nt_hash64_t){0x0C7367F1C1FB5618ULL}) /* turkic_jam_atlas/tile_vision_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_1 ((nt_hash64_t){0x7FC3A9934A9E45E0ULL}) /* turkic_jam_atlas/tile_war_1 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_2 ((nt_hash64_t){0x8424C9762D3AE827ULL}) /* turkic_jam_atlas/tile_war_2 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_3 ((nt_hash64_t){0x065E776DB29A882AULL}) /* turkic_jam_atlas/tile_war_3 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_4 ((nt_hash64_t){0xB1AC1F29A287772AULL}) /* turkic_jam_atlas/tile_war_4 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WAR_5 ((nt_hash64_t){0x5A1C08B7905F87A2ULL}) /* turkic_jam_atlas/tile_war_5 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATCHTOWER_01 ((nt_hash64_t){0xF8C0A60CFE03736EULL}) /* turkic_jam_atlas/tile_watchtower_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_1 ((nt_hash64_t){0x525ED18D6AFF52B5ULL}) /* turkic_jam_atlas/tile_water_1 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_2 ((nt_hash64_t){0x98637799E4D52E22ULL}) /* turkic_jam_atlas/tile_water_2 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_3 ((nt_hash64_t){0x6A9EE402F8FA27EEULL}) /* turkic_jam_atlas/tile_water_3 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_4 ((nt_hash64_t){0x5F71E07948C70229ULL}) /* turkic_jam_atlas/tile_water_4 */
+#define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WATER_5 ((nt_hash64_t){0xB67A6117D50B5109ULL}) /* turkic_jam_atlas/tile_water_5 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WELL_01 ((nt_hash64_t){0x89F75F06D6D66EA7ULL}) /* turkic_jam_atlas/tile_well_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_WOLF_TRACK_01 ((nt_hash64_t){0xF682D67BAD5368FDULL}) /* turkic_jam_atlas/tile_wolf_track_01 */
 #define ASSET_ATLAS_REGION_TURKIC_JAM_ATLAS_TILE_YURT_01 ((nt_hash64_t){0xB04BCF19F167B10FULL}) /* turkic_jam_atlas/tile_yurt_01 */
@@ -309,9 +319,13 @@ static inline void turkic_jam_register_labels(void) {
     (void)nt_hash64_str("turkic_jam_atlas/tile_home_1");
     (void)nt_hash64_str("turkic_jam_atlas/tile_home_2");
     (void)nt_hash64_str("turkic_jam_atlas/tile_home_3");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_home_4");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_home_5");
     (void)nt_hash64_str("turkic_jam_atlas/tile_horse_1");
     (void)nt_hash64_str("turkic_jam_atlas/tile_horse_2");
     (void)nt_hash64_str("turkic_jam_atlas/tile_horse_3");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_horse_4");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_horse_5");
     (void)nt_hash64_str("turkic_jam_atlas/tile_hunting_trail_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_last_tamga_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_mirage_01");
@@ -322,16 +336,22 @@ static inline void turkic_jam_register_labels(void) {
     (void)nt_hash64_str("turkic_jam_atlas/tile_steppe_1");
     (void)nt_hash64_str("turkic_jam_atlas/tile_steppe_2");
     (void)nt_hash64_str("turkic_jam_atlas/tile_steppe_3");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_steppe_4");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_steppe_5");
     (void)nt_hash64_str("turkic_jam_atlas/tile_storm_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_tamga_stone_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_vision_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_war_1");
     (void)nt_hash64_str("turkic_jam_atlas/tile_war_2");
     (void)nt_hash64_str("turkic_jam_atlas/tile_war_3");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_war_4");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_war_5");
     (void)nt_hash64_str("turkic_jam_atlas/tile_watchtower_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_water_1");
     (void)nt_hash64_str("turkic_jam_atlas/tile_water_2");
     (void)nt_hash64_str("turkic_jam_atlas/tile_water_3");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_water_4");
+    (void)nt_hash64_str("turkic_jam_atlas/tile_water_5");
     (void)nt_hash64_str("turkic_jam_atlas/tile_well_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_wolf_track_01");
     (void)nt_hash64_str("turkic_jam_atlas/tile_yurt_01");

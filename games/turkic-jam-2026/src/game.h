@@ -67,11 +67,11 @@ typedef struct game_ctx {
     uint32_t tile_mirage;
     uint32_t tile_storm;
     uint32_t tile_last_tamga;
-    uint32_t tile_war[3];
-    uint32_t tile_horse[3];
-    uint32_t tile_steppe[3];
-    uint32_t tile_home[3];
-    uint32_t tile_water[3];
+    uint32_t tile_war[5];
+    uint32_t tile_horse[5];
+    uint32_t tile_steppe[5];
+    uint32_t tile_home[5];
+    uint32_t tile_water[5];
     uint32_t boss_fat;
     uint32_t boss_swift;
     uint32_t boss_fierce;
@@ -101,6 +101,7 @@ typedef struct game_ctx {
     uint32_t ui_slot_equipment_64;
     uint32_t ui_chip_resource_64;
     uint32_t ui_tooltip_dark_64;
+    uint32_t ui_fortune_wheel_384;
     uint32_t die_d[6];
     uint32_t pouch_closed;
     uint32_t pouch_open[4];
