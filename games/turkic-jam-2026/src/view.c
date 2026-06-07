@@ -931,7 +931,7 @@ static void draw_storm(const tj_run_t *run) {
 static void pack_card(game_ctx_t *g, tj_run_t *run, int i) {
     const int ti = run->pack_offer[0][i];
     const bool has = ti >= 0 && ti < g_config.tile_count;
-    const char *name = has ? g_config.tiles[ti].name : "-";
+    const char *name = has ? tj_tile_disp(&g_config.tiles[ti]) : "-";
     const uint32_t art = has ? card_art_region_for_id(g, g_config.tiles[ti].id) : NT_ATLAS_INVALID_REGION;
     static const char *ids[3] = {"tj_packcard0", "tj_packcard1", "tj_packcard2"};
     const nt_ui_button_style_t st = {
@@ -1398,7 +1398,7 @@ void tj_view_log(game_ctx_t *g, int max_lines) {
 
 static const char *tj_hero_name(const tj_run_t *run) {
     if (run->heir_index >= 0 && run->heir_index < g_config.heir_count) {
-        return g_config.heirs[run->heir_index].name;
+        return tj_heir_disp(&g_config.heirs[run->heir_index]);
     }
     return pick_lang("Batyr", "Батыр", "Batır");
 }
@@ -2121,7 +2121,7 @@ static void draw_fan_card(game_ctx_t *g, int tile, float x, float y, bool active
             inline_sprite(g, art, 58.0F, 58.0F);
         }
         /* auto-shrink the name + info so long building names never clip the card */
-        const char *nm = has ? g_config.tiles[tile].name : "";
+        const char *nm = has ? tj_tile_disp(&g_config.tiles[tile]) : "";
         const float tw = FAN_CARD_W - 16.0F;
         const uint16_t nsz = nt_ui_fit_width(g->ui, s_card_name.font_id, nm, tw, 12, (uint16_t)s_card_name.font_size, (float)s_card_name.letter_tracking);
         nt_ui_label_sized(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), nm, &s_card_name, (float)nsz);
@@ -2225,7 +2225,7 @@ void tj_view_field_tooltip(game_ctx_t *g, const tj_run_t *run) {
     static char nm[72];
     static char eff[40];
     tile_effect_str(t, eff, sizeof eff);
-    (void)snprintf(nm, sizeof nm, "%s  %s%d", g_config.tiles[t].name, pick_lang("lv.", "ур.", "sv."), g_config.tiles[t].tier);
+    (void)snprintf(nm, sizeof nm, "%s  %s%d", tj_tile_disp(&g_config.tiles[t]), pick_lang("lv.", "ур.", "sv."), g_config.tiles[t].tier);
     /* Edge-aware: in the right half grow toward centre (off the hero panel); near the bottom grow up
        (off the hand). The cursor anchor flips so the box never bleeds onto the side panels. */
     const bool flip_x = g->ptr_x > g->logical_w * 0.5F;

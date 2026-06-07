@@ -38,7 +38,9 @@ typedef enum {
 
 typedef struct {
     char id[TJ_ID_LEN];
-    char name[TJ_NAME_LEN];
+    char name[TJ_NAME_LEN];    /* RU display name (col 1) */
+    char name_en[TJ_NAME_LEN]; /* localized names; empty -> fall back to name */
+    char name_tr[TJ_NAME_LEN];
     tj_tile_kind_t kind;
     tj_stat_t check;
     tj_placement_t placement;
@@ -62,7 +64,9 @@ typedef enum {
 
 typedef struct {
     char id[TJ_ID_LEN];
-    char name[TJ_NAME_LEN];
+    char name[TJ_NAME_LEN];    /* RU display name (col 1) */
+    char name_en[TJ_NAME_LEN]; /* localized names; empty -> fall back to name */
+    char name_tr[TJ_NAME_LEN];
     int body, mind, spirit, stamina_bonus;
     tj_perk_t perk;
     int perk_value;
@@ -162,5 +166,7 @@ bool tj_config_load(const char *dir);
 int tj_config_tile_index(const char *id);                  /* -1 if absent */
 int tj_config_tile_upgrade(int tile_index);                /* tile of same line, tier+1; -1 if top tier / non-merge */
 const tj_log_event_t *tj_config_log_event(const char *id); /* NULL if absent */
+const char *tj_tile_disp(const tj_tile_def_t *d);          /* localized tile display name (by i18n_get) */
+const char *tj_heir_disp(const tj_heir_def_t *d);          /* localized heir display name (by i18n_get) */
 
 #endif /* TJ_CONFIG_H */

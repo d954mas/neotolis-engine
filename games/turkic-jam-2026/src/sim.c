@@ -691,7 +691,7 @@ static void try_merge_at(tj_run_t *r, int gx, int gy) {
         r->fx_cell = start; /* merge pop: bigger than a plain placement */
         r->fx_cell_t = 0.45F;
         r->fx_cell_mag = 0.60F;
-        tj_journal_push(TJ_LOG_GOOD, "%s %s", pick_lang("Merge:", "Мердж:", "Birleşme:"), g_config.tiles[up].name);
+        tj_journal_push(TJ_LOG_GOOD, "%s %s", pick_lang("Merge:", "Мердж:", "Birleşme:"), tj_tile_disp(&g_config.tiles[up]));
         /* loop: the upgraded tile may complete another triple (cascade) */
     }
 }
@@ -926,7 +926,7 @@ static void enter_combat_win(tj_run_t *r) {
     r->win_wis = t->wisdom;
     r->win_glory = t->glory;
     r->win_sta = t->stamina_restore;
-    tj_journal_push(TJ_LOG_GOOD, "%s %s", t->name, pick_lang("defeated", "повержен", "yenildi"));
+    tj_journal_push(TJ_LOG_GOOD, "%s %s", tj_tile_disp(t), pick_lang("defeated", "повержен", "yenildi"));
 }
 
 /* Celebration timer: when it elapses the loot lands (+ a card in the pouch) and the walk resumes. */
@@ -1126,7 +1126,7 @@ void tj_run_choose_card(tj_run_t *r, int idx) {
     r->packs--;
     r->pack_open = (r->packs > 0); /* keep the chooser up if more packs queued */
     if (t >= 0 && t < g_config.tile_count) {
-        log_event("card_gain", &(tj_log_ctx_t){.tile = g_config.tiles[t].name});
+        log_event("card_gain", &(tj_log_ctx_t){.tile = tj_tile_disp(&g_config.tiles[t])});
     }
 }
 
@@ -1238,7 +1238,7 @@ bool tj_run_place_card(tj_run_t *r, int hand_idx, int gx, int gy) {
     r->fx_cell = idx; /* placement pop (a merge below overrides with a bigger one) */
     r->fx_cell_t = 0.30F;
     r->fx_cell_mag = 0.35F;
-    log_event("card_placed", &(tj_log_ctx_t){.tile = g_config.tiles[tile].name});
+    log_event("card_placed", &(tj_log_ctx_t){.tile = tj_tile_disp(&g_config.tiles[tile])});
     for (int k = hand_idx; k < r->hand_count - 1; k++) {
         r->hand_cards[k] = r->hand_cards[k + 1]; /* remove from the fan */
     }
@@ -1265,7 +1265,7 @@ bool tj_run_pickup_field(tj_run_t *r, int gx, int gy) {
     r->field_tile[idx] = -1;
     r->hand_cards[r->hand_count++] = t;
     recompute_field_bonuses(r);
-    tj_journal_push(TJ_LOG_PLAIN, "%s %s", pick_lang("Picked up:", "Поднял:", "Alindi:"), g_config.tiles[t].name);
+    tj_journal_push(TJ_LOG_PLAIN, "%s %s", pick_lang("Picked up:", "Поднял:", "Alindi:"), tj_tile_disp(&g_config.tiles[t]));
     return true;
 }
 
@@ -1279,5 +1279,5 @@ void tj_run_pull_pouch(tj_run_t *r) {
     }
     r->hand_cards[r->hand_count++] = c;
     r->pouch--;
-    log_event("card_gain", &(tj_log_ctx_t){.tile = g_config.tiles[c].name});
+    log_event("card_gain", &(tj_log_ctx_t){.tile = tj_tile_disp(&g_config.tiles[c])});
 }

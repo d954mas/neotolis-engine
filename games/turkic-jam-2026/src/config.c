@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "i18n.h"
+
 tj_config_t g_config;
 
 // #region text helpers
@@ -303,6 +305,8 @@ static void parse_heirs(const char *path) {
         d->stamina_bonus = to_int(fld[5]);
         d->perk = (n >= 7) ? perk_from(fld[6]) : TJ_PERK_NONE;
         d->perk_value = (n >= 8) ? to_int(fld[7]) : 0;
+        (void)snprintf(d->name_en, sizeof d->name_en, "%s", (n >= 9) ? fld[8] : "");
+        (void)snprintf(d->name_tr, sizeof d->name_tr, "%s", (n >= 10) ? fld[9] : "");
     }
     (void)fclose(f);
 }
@@ -318,8 +322,8 @@ static void parse_tiles(const char *path) {
         if (*t == '\0' || *t == '#') {
             continue;
         }
-        char *fld[16];
-        int n = split_pipe(t, fld, 16);
+        char *fld[18];
+        int n = split_pipe(t, fld, 18);
         if (n < 11 || g_config.tile_count >= TJ_MAX_TILES) {
             continue;
         }
@@ -340,6 +344,8 @@ static void parse_tiles(const char *path) {
         d->tier = (n >= 14) ? to_int(fld[13]) : 0;
         d->boost_stat = (n >= 15) ? stat_from(fld[14]) : TJ_STAT_NONE;
         d->boost_amount = (n >= 16) ? to_int(fld[15]) : 0;
+        (void)snprintf(d->name_en, sizeof d->name_en, "%s", (n >= 17) ? fld[16] : "");
+        (void)snprintf(d->name_tr, sizeof d->name_tr, "%s", (n >= 18) ? fld[17] : "");
     }
     (void)fclose(f);
 }
@@ -423,6 +429,10 @@ const tj_log_event_t *tj_config_log_event(const char *id) {
     }
     return NULL;
 }
+
+const char *tj_tile_disp(const tj_tile_def_t *d) { return pick_lang(d->name_en[0] ? d->name_en : d->name, d->name, d->name_tr[0] ? d->name_tr : d->name); }
+
+const char *tj_heir_disp(const tj_heir_def_t *d) { return pick_lang(d->name_en[0] ? d->name_en : d->name, d->name, d->name_tr[0] ? d->name_tr : d->name); }
 
 int tj_config_tile_index(const char *id) {
     for (int i = 0; i < g_config.tile_count; i++) {
