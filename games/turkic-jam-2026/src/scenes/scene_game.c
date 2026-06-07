@@ -319,9 +319,12 @@ static void handle_map_input(game_ctx_t *g, float dt) {
         if (s_drag_card >= 0) {
             const bool ftue_lock = s_ftue_active && s_ftue_step == 3 && s_ftue_target_gx >= 0;
             if (ftue_lock && (!on_cell || gx != s_ftue_target_gx || gy != s_ftue_target_gy)) {
-                tj_journal_push(TJ_LOG_BAD, "Тяни карту на подсвеченную клетку."); /* lesson: only the gold gap accepts it */
+                tj_journal_push(TJ_LOG_BAD, "%s",
+                                pick_lang("Drag the card onto the glowing cell.", "Тяни карту на подсвеченную клетку.", "Karti parlayan hucreye surukle.")); /* lesson: only the gold gap accepts it */
             } else if (on_cell && !tj_run_place_card(&s_run, s_drag_card, gx, gy)) {
-                tj_journal_push(TJ_LOG_BAD, "Сюда нельзя — тяни на зелёную клетку за дорогой.");
+                tj_journal_push(
+                    TJ_LOG_BAD, "%s",
+                    pick_lang("Not here — drag onto a green cell past the road.", "Сюда нельзя — тяни на зелёную клетку за дорогой.", "Buraya olmaz — yol otesindeki yesil hucreye surukle."));
             }
             s_drag_card = -1; /* dropped: placed, or snapped back to the fan */
         } else if (!dragged && on_cell) {
@@ -409,9 +412,9 @@ static void ftue_step_tick(float dt) {
  * drawn in the sprite world pass, not here). */
 static void draw_intro_overlays(game_ctx_t *g) {
     if (s_run.phase != TJ_PHASE_AUL_READY) {
-        tj_view_intro_banner(g, "Путь ведёт его сам.");
+        tj_view_intro_banner(g, pick_lang("The path leads him on.", "Путь ведёт его сам.", "Yol onu goturuyor."));
     } else if (s_intro_t >= TJ_REVEAL_SECONDS) {
-        tj_view_intro_banner(g, "Путь ждёт первого батыра. Отправь его в дорогу.");
+        tj_view_intro_banner(g, pick_lang("The path awaits the first batyr. Send him on his way.", "Путь ждёт первого батыра. Отправь его в дорогу.", "Yol ilk batiri bekliyor. Onu yola cikar."));
     }
 }
 

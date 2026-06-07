@@ -1563,7 +1563,7 @@ static void battle_overlays(game_ctx_t *g, const tj_run_t *run) {
     CLAY(BAT_FLOAT(hero_x, -BAT_H * 0.24F, 30)) { hp_bar((float)run->stamina / (float)smax, (Clay_Color){120.0F, 180.0F, 90.0F, 255.0F}, 108.0F); }
     if (fighting) {
         CLAY(BAT_FLOAT(enemy_x, -BAT_H * 0.24F, 30)) { hp_bar((float)ehp / (float)emax, (Clay_Color){200.0F, 80.0F, 70.0F, 255.0F}, 108.0F); }
-        CLAY(BAT_FLOAT(0.0F, -BAT_H * 0.46F, 31)) { nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->combat_label[0] ? run->combat_label : "Бой", &s_dim); }
+        CLAY(BAT_FLOAT(0.0F, -BAT_H * 0.46F, 31)) { nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->combat_label[0] ? run->combat_label : pick_lang("Fight", "Бой", "Savas"), &s_dim); }
     }
     battle_dmg_numbers(g, run, hero_x, enemy_x);
     if (celebrating) {
@@ -1623,7 +1623,7 @@ void tj_view_hero_panel(game_ctx_t *g, const tj_run_t *run) {
  * then a button. Returns true once the player acknowledges and moves on to the aul. */
 bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
     static char res[40];
-    (void)snprintf(res, sizeof res, "Дошёл до круга %d", run->circle);
+    (void)snprintf(res, sizeof res, "%s %d", pick_lang("Reached circle", "Дошёл до круга", "Ulasilan tur"), run->circle);
     bool next = false;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(332), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(20),
@@ -1631,10 +1631,14 @@ bool tj_view_death_panel(game_ctx_t *g, const tj_run_t *run) {
                      .childGap = 14,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Петля разорвана!" : "Батыр пал", &s_panel_title);
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? "Имя батыра вписано в степь." : "Песок укрыл его следы, и всё, что он возвёл.", &s_dim);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), run->won ? pick_lang("The loop is broken!", "Петля разорвана!", "Dongu kirildi!") : pick_lang("The batyr fell", "Батыр пал", "Batir dustu"),
+                    &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT),
+                    run->won ? pick_lang("The batyr's name is written into the steppe.", "Имя батыра вписано в степь.", "Batirin adi bozkira yazildi.")
+                             : pick_lang("The sand covered his tracks, and all he had built.", "Песок укрыл его следы, и всё, что он возвёл.", "Kum izlerini ve tum yaptiklarini ortuyor."),
+                    &s_dim);
         nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), res, &s_stat);
-        if (tj_button(g, "death_next", run->won ? "Дальше" : "В аул", 258, 56, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "death_next", run->won ? pick_lang("Next", "Дальше", "Devam") : pick_lang("To the aul", "В аул", "Aula"), 258, 56, TJ_BTN_PRIMARY)) {
             next = true;
         }
     }
@@ -1698,7 +1702,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
     (void)snprintf(eff[2], sizeof eff[2], "%s +%d", pick_lang("defense", "защита", "savunma"), tj_aul_stat_bonus(lv[2]));
     (void)snprintf(eff[3], sizeof eff[3], "+%d %s", lv[3], pick_lang("in hand", "в руку", "ele"));
     for (int i = 0; i < 4; i++) {
-        (void)snprintf(lvl[i], sizeof lvl[i], "ур.%d", lv[i]);
+        (void)snprintf(lvl[i], sizeof lvl[i], "%s%d", pick_lang("lv.", "ур.", "sv."), lv[i]);
         (void)snprintf(cost[i], sizeof cost[i], "%d", c[i]);
     }
     bool newrun = false;
@@ -1708,7 +1712,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
                      .childGap = 7,
                      .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = TJ_PANEL_BG}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), "Аул", &s_panel_title);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), pick_lang("Aul", "Аул", "Aul"), &s_panel_title);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIT(0)},
                          .padding = {10, 10, 6, 6},
                          .layoutDirection = CLAY_LEFT_TO_RIGHT,
@@ -1733,7 +1737,7 @@ bool tj_view_aul_panel(game_ctx_t *g, const tj_run_t *run) {
         if (aul_upgrade_button(g, "aul_h", g->icon_deck_32, pick_lang("Hand", "Рука", "El"), eff[3], lvl[3], cost[3], g_aul.supplies >= c[3])) {
             tj_aul_upgrade(3);
         }
-        if (tj_button(g, "aul_new", "Отправить батыра", 300, 64, TJ_BTN_PRIMARY)) {
+        if (tj_button(g, "aul_new", pick_lang("Send the batyr", "Отправить батыра", "Batiri yolla"), 300, 64, TJ_BTN_PRIMARY)) {
             newrun = true;
         }
     }
@@ -1756,7 +1760,7 @@ void tj_view_death_overlay(game_ctx_t *g, const tj_run_t *run) {
                        .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH},
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = veil}) {
-        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), won ? "ПОБЕДА" : "СМЕРТЬ", &s_die);
+        nt_ui_label(g->ui, NT_UI_DATA_LAYER(TJ_LAYER_TEXT), won ? pick_lang("VICTORY", "ПОБЕДА", "ZAFER") : pick_lang("DEATH", "СМЕРТЬ", "OLUM"), &s_die);
     }
 }
 
