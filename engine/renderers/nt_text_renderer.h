@@ -25,12 +25,10 @@ void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
-/* The bound material uses the slug_text vs/fs, ALPHA blend, cull NONE. The alpha-clip is OPT-IN:
- * the renderer binds only the params the material declares (it never injects a default), so declaring
- *     .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}}, .param_count = 1,
- * enables the frag's `discard coverage < u_alpha_cutoff.x`. Omit it and the uniform stays 0 (GL-spec
- * default for an unset uniform) → no discard. Depth-writing world-space text should declare it; see
- * NT_TEXT_ALPHA_CUTOFF_DEFAULT for the cutoff value. Both setters auto-flush on change. */
+/* Material must use the slug_text vs/fs, ALPHA blend, cull NONE. u_alpha_cutoff is an opt-in param:
+ * declare it (value = NT_TEXT_ALPHA_CUTOFF_DEFAULT) to enable the frag's coverage discard; omit it and
+ * the unset uniform reads 0 → no discard (the renderer binds only declared params). Both setters
+ * auto-flush staging on change. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
