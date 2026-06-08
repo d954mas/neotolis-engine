@@ -118,6 +118,7 @@ static bool cb_frame(const nt_pointer_t *p, bool *value, bool enabled) {
 
 /* ---- Test 1: press→release inside the BOX toggles *value, returns true on the
  *      release frame only; the press-down-only frame returns false (SC #1). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_click_box_toggles_value(void) {
     bool value = false;
 
