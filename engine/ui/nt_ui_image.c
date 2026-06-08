@@ -16,11 +16,11 @@ const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
+void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_image: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_image: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_image: style must be non-NULL");
-    NT_ASSERT(atlas.id != 0 && "nt_ui_image: invalid atlas handle");
+    NT_ASSERT(region.atlas.id != 0 && "nt_ui_image: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_image: style.slice9_scale must be finite > 0");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
@@ -35,8 +35,8 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(p != NULL && "nt_ui_image: scratch alloc failed");
     *p = (nt_ui_image_payload_t){
-        .atlas = atlas,
-        .region_index = region_index,
+        .atlas = region.atlas,
+        .region_index = region.region,
         .origin_x = style->origin_x,
         .origin_y = style->origin_y,
         .slice9_scale = style->slice9_scale,

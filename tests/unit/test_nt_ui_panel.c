@@ -69,7 +69,7 @@ static void test_panel_begin_end_balanced(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
+        nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_panel_style, NULL);
         {
             nt_ui_label(s_fx.ctx, NULL, "Inside panel", &s_label_style);
         }
@@ -91,7 +91,7 @@ static void test_panel_with_transform(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root"), .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 1.0F)}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
+        nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_panel_style, NULL);
         {
             nt_ui_label(s_fx.ctx, NULL, "Offset", &s_label_style);
         }
@@ -108,7 +108,7 @@ static void test_panel_no_transform(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
+        nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_panel_style, NULL);
         nt_ui_panel_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -175,7 +175,7 @@ static void test_panel_payload_carries_atlas(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
+        nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_panel_style, NULL);
         nt_ui_panel_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -193,7 +193,7 @@ static void test_nested_panel_group(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL);
+        nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_panel_style, NULL);
         {
             CLAY({.userData = (void *)NT_UI_DATA_XFORM(0U, &identity, 0.8F)}) {
                 nt_ui_group_begin(s_fx.ctx, NULL, NULL);
@@ -225,7 +225,7 @@ static void test_panel_payload_flags_origin(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s, NULL);
+        nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s, NULL);
         nt_ui_panel_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -245,7 +245,7 @@ static void test_panel_payload_flags_origin(void) {
 static void test_panel_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, 0}, NULL, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -254,7 +254,7 @@ static void test_panel_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, bad, 0, &s_panel_style, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, (nt_atlas_region_ref_t){bad, 0}, &s_panel_style, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 

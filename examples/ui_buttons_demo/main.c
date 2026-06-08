@@ -117,10 +117,10 @@ static const nt_ui_image_style_t g_btn_icon_style = {
 
 /* (a) STANDARD: eased baseline. */
 static const nt_ui_button_style_t g_btn_standard_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
     .slice9_scale = 1.0F,
@@ -128,10 +128,10 @@ static const nt_ui_button_style_t g_btn_standard_style = {
 
 /* (b) SCALE: exaggerated scale per state. */
 static const nt_ui_button_style_t g_btn_scale_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.20F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.80F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.20F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.80F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
     .slice9_scale = 1.0F,
@@ -140,10 +140,10 @@ static const nt_ui_button_style_t g_btn_scale_style = {
 /* (c) VISUAL SWAP: bg_region differs per state (blue/green/red); bg_region 0
  * in the const = sentinel, patched at runtime once atlas indices are known. */
 static const nt_ui_button_style_t g_btn_swap_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
     .slice9_scale = 1.0F,
@@ -152,10 +152,10 @@ static const nt_ui_button_style_t g_btn_swap_style = {
 /* Variant (d)(e) ICON / ICON+TEXT: same shape as STANDARD but NO touch padding,
  * so the difference visual=hit (no pad) vs visual<hit (pad) is plain. */
 static const nt_ui_button_style_t g_btn_nopad_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {0, 0, 0, 0},
     .slice9_scale = 1.0F,
@@ -165,10 +165,10 @@ static const nt_ui_button_style_t g_btn_nopad_style = {
  * 0.25 / 1.0 / 4.0 so the user can see baked atlas border (~16 px) scale to
  * 4 / 16 / 64 px. Base template shared; per-cell copies patch slice9_scale. */
 static const nt_ui_button_style_t g_btn_s9_base = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
     .slice9_scale = 1.0F, /* template; patched per-cell. */
@@ -282,60 +282,60 @@ static void try_bind_resources(void) {
 
         /* Patch each variant's bg_region from the templates. */
         s_btn_standard = g_btn_standard_style;
-        s_btn_standard.idle.bg_region = s_button_blue_idx;
-        s_btn_standard.hover.bg_region = s_button_blue_idx;
-        s_btn_standard.pressed.bg_region = s_button_blue_idx;
-        s_btn_standard.disabled.bg_region = s_button_blue_idx;
+        s_btn_standard.idle.bg.region = s_button_blue_idx;
+        s_btn_standard.hover.bg.region = s_button_blue_idx;
+        s_btn_standard.pressed.bg.region = s_button_blue_idx;
+        s_btn_standard.disabled.bg.region = s_button_blue_idx;
 
         s_btn_scale = g_btn_scale_style;
-        s_btn_scale.idle.bg_region = s_button_blue_idx;
-        s_btn_scale.hover.bg_region = s_button_blue_idx;
-        s_btn_scale.pressed.bg_region = s_button_blue_idx;
-        s_btn_scale.disabled.bg_region = s_button_blue_idx;
+        s_btn_scale.idle.bg.region = s_button_blue_idx;
+        s_btn_scale.hover.bg.region = s_button_blue_idx;
+        s_btn_scale.pressed.bg.region = s_button_blue_idx;
+        s_btn_scale.disabled.bg.region = s_button_blue_idx;
 
         /* VISUAL-SWAP: blue idle/disabled, green hover/pressed. */
         s_btn_swap = g_btn_swap_style;
-        s_btn_swap.idle.bg_region = s_button_blue_idx;
-        s_btn_swap.hover.bg_region = s_button_green_idx;
-        s_btn_swap.pressed.bg_region = s_button_red_idx;
-        s_btn_swap.disabled.bg_region = s_button_blue_idx;
+        s_btn_swap.idle.bg.region = s_button_blue_idx;
+        s_btn_swap.hover.bg.region = s_button_green_idx;
+        s_btn_swap.pressed.bg.region = s_button_red_idx;
+        s_btn_swap.disabled.bg.region = s_button_blue_idx;
 
         s_btn_nopad = g_btn_nopad_style;
-        s_btn_nopad.idle.bg_region = s_button_blue_idx;
-        s_btn_nopad.hover.bg_region = s_button_blue_idx;
-        s_btn_nopad.pressed.bg_region = s_button_blue_idx;
-        s_btn_nopad.disabled.bg_region = s_button_blue_idx;
+        s_btn_nopad.idle.bg.region = s_button_blue_idx;
+        s_btn_nopad.hover.bg.region = s_button_blue_idx;
+        s_btn_nopad.pressed.bg.region = s_button_blue_idx;
+        s_btn_nopad.disabled.bg.region = s_button_blue_idx;
 
         /* (g) SLICE9_SCALE row — same blue art, only slice9_scale differs. */
         s_btn_s9_quarter = g_btn_s9_base;
-        s_btn_s9_quarter.idle.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.hover.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.pressed.bg_region = s_button_blue_idx;
-        s_btn_s9_quarter.disabled.bg_region = s_button_blue_idx;
+        s_btn_s9_quarter.idle.bg.region = s_button_blue_idx;
+        s_btn_s9_quarter.hover.bg.region = s_button_blue_idx;
+        s_btn_s9_quarter.pressed.bg.region = s_button_blue_idx;
+        s_btn_s9_quarter.disabled.bg.region = s_button_blue_idx;
         s_btn_s9_quarter.slice9_scale = 0.25F;
 
         s_btn_s9_one = g_btn_s9_base;
-        s_btn_s9_one.idle.bg_region = s_button_blue_idx;
-        s_btn_s9_one.hover.bg_region = s_button_blue_idx;
-        s_btn_s9_one.pressed.bg_region = s_button_blue_idx;
-        s_btn_s9_one.disabled.bg_region = s_button_blue_idx;
+        s_btn_s9_one.idle.bg.region = s_button_blue_idx;
+        s_btn_s9_one.hover.bg.region = s_button_blue_idx;
+        s_btn_s9_one.pressed.bg.region = s_button_blue_idx;
+        s_btn_s9_one.disabled.bg.region = s_button_blue_idx;
         s_btn_s9_one.slice9_scale = 1.0F;
 
         s_btn_s9_four = g_btn_s9_base;
-        s_btn_s9_four.idle.bg_region = s_button_blue_idx;
-        s_btn_s9_four.hover.bg_region = s_button_blue_idx;
-        s_btn_s9_four.pressed.bg_region = s_button_blue_idx;
-        s_btn_s9_four.disabled.bg_region = s_button_blue_idx;
+        s_btn_s9_four.idle.bg.region = s_button_blue_idx;
+        s_btn_s9_four.hover.bg.region = s_button_blue_idx;
+        s_btn_s9_four.pressed.bg.region = s_button_blue_idx;
+        s_btn_s9_four.disabled.bg.region = s_button_blue_idx;
         s_btn_s9_four.slice9_scale = 4.0F;
 
         /* All 7 styles share the demo atlas; per-state atlas inherits idle. */
-        s_btn_standard.idle.atlas = s_atlas_handle;
-        s_btn_scale.idle.atlas = s_atlas_handle;
-        s_btn_swap.idle.atlas = s_atlas_handle;
-        s_btn_nopad.idle.atlas = s_atlas_handle;
-        s_btn_s9_quarter.idle.atlas = s_atlas_handle;
-        s_btn_s9_one.idle.atlas = s_atlas_handle;
-        s_btn_s9_four.idle.atlas = s_atlas_handle;
+        s_btn_standard.idle.bg.atlas = s_atlas_handle;
+        s_btn_scale.idle.bg.atlas = s_atlas_handle;
+        s_btn_swap.idle.bg.atlas = s_atlas_handle;
+        s_btn_nopad.idle.bg.atlas = s_atlas_handle;
+        s_btn_s9_quarter.idle.bg.atlas = s_atlas_handle;
+        s_btn_s9_one.idle.bg.atlas = s_atlas_handle;
+        s_btn_s9_four.idle.bg.atlas = s_atlas_handle;
 
         s_atlas_bound = true;
         nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white + icon_bunny)");
@@ -478,7 +478,7 @@ static void declare_reference_buttons(void) {
                 CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, &s_btn_nopad, &s_btn_decl, true);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
-                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style, NULL);
+                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_icon_bunny_idx}, &g_btn_icon_style, NULL);
                     }
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_icon++;
@@ -505,7 +505,7 @@ static void declare_reference_buttons(void) {
                     };
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, &s_btn_nopad, &s_btn_decl_icontext, true);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
-                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style, NULL);
+                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_icon_bunny_idx}, &g_btn_icon_style, NULL);
                     }
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
