@@ -18,6 +18,14 @@
 
 /* ---- Public types ---- */
 
+/* Canonical "sprite-in-atlas" identity — an atlas resource handle paired with a region index.
+ * id==0 (non-idle widget cell) = inherit; id==0 (idle terminal) = no art. */
+typedef struct {
+    nt_resource_t atlas;
+    uint32_t region;
+} nt_atlas_region_ref_t;
+_Static_assert(sizeof(nt_atlas_region_ref_t) == 8, "nt_atlas_region_ref_t stable ABI (4B handle + 4B region)");
+
 /* Mirrors NtAtlasVertex from shared/include/nt_atlas_format.h (8 bytes, same field order).
  * Runtime stores it identically; nt_atlas precomputes float positions/UVs before sprite batching.
  * Update both structs together when changing fields. */
