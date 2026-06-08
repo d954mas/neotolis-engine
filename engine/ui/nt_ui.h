@@ -356,7 +356,9 @@ typedef struct {
     float distance; /* world distance in 3D ctx; 0 in 2D */
 } nt_ui_hot_t;
 
-/* PURE query (no mutation). Safe to call N times per frame; safe outside begin/end. */
+/* Idempotent query: same result N times per frame; safe outside begin/end. Side effects are
+ * frame-scoped only (hover observability + the once-per-frame arbitration resolve), never capture or
+ * button-edge state — those live in step_interaction. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
 /* Inflates bbox BEFORE the inverse-affine for mobile touch-friendly hit areas.
@@ -374,12 +376,12 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 /* 3D ctx only (asserts use_raycast_input): max world distance the pointer's ray may travel before UI
  * stops registering. Feed the nearest world-geometry hit (so the player can't click UI through a
  * wall) and/or an interaction range. Default +inf = no cutoff. Reset each nt_ui_begin; feed it BEFORE
- * this frame's first step_interaction / nt_ui_pointer_hot (the per-frame resolve latches once). */
+ * this frame's first step_interaction / query / nt_ui_pointer_hot (the per-frame resolve latches once). */
 void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance);
 
 /* Front-most interactive widget under the pointer this frame (3D: nearest within the cutoff; 2D:
- * last-declared/paint-order). Resolved lazily from the prev-frame registry on the first step/query
- * (mutating). Only widgets that called step_interaction last frame are candidates. In 3D ctx call
+ * highest effective zIndex, tie → last-declared). Resolved lazily from the prev-frame registry on the
+ * first step/query (mutating). Only widgets that called step_interaction last frame are candidates. In 3D ctx call
  * nt_ui_set_view_proj first — the lazy resolve hit-tests, which asserts view_proj is set. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion

@@ -2110,10 +2110,11 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
             continue; /* α: pointer bound elsewhere, invisible to this widget */
         }
         /* Front-most arbitration: a free pointer drives this widget only if it is the resolved hot
-         * widget. hot == 0 (nothing resolved yet — first frame / freshly-appeared) falls back to the
-         * raw hit so newly-shown widgets still work; a capture holder always keeps the pointer. */
+         * widget (or this widget holds capture). hot == 0 (no interactive widget was under the pointer
+         * last frame) gates OFF — a freshly-shown / just-moved widget waits one frame to register
+         * before it can react. Reliability over instant first-frame response (matches Dear ImGui). */
         const uint32_t hot = ctx->pointer_hot[i].id;
-        const bool arbitrated_ok = (hot == 0U) || (hot == id) || (cap->active_id == id);
+        const bool arbitrated_ok = (hot == id) || (cap->active_id == id);
         float hit_t = 0.0F;
         const bool over = arbitrated_ok && ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, &hit_t, NULL);
         if (!over) {
@@ -2136,9 +2137,12 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
     return s;
 }
 
-/* Compute-pure: same returned struct N calls per frame. The only side effect
- * is an idempotent OR of pointer_over_any (observability for nt_ui_wants_pointer);
- * state-machine writes (capture, button edges) live in step_interaction_padded. */
+static void resolve_hot_if_needed(nt_ui_context_t *ctx); /* defined below; query triggers it too */
+
+/* Compute-pure: same returned struct N calls per frame. Side effects are idempotent and frame-scoped:
+ * an OR of pointer_over_any (observability for nt_ui_wants_pointer) and the once-per-frame hot resolve
+ * (so a query-only frame still arbitrates); state-machine writes (capture, button edges) live in
+ * step_interaction_padded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
@@ -2165,6 +2169,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         return out;
     }
 
+    resolve_hot_if_needed(ctx); /* once per frame; lets a query-only frame arbitrate (no step needed) */
     const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
     out.hovered = s.any_hovered;
     out.distance = s.distance; /* world hit distance (3D); 0 in 2D or when not hovered */
@@ -2211,15 +2216,16 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
 
-/* Sentinel hot id: a pointer hit one or more widgets but all were beyond the occlusion cutoff. Stored
- * so the gate's hot==0 fallback can't re-admit the occluded widget. A real Clay id is never UINT32_MAX
- * with meaningful probability; nt_ui_pointer_hot maps it back to 0 for callers. */
+/* Sentinel hot id: a pointer hit one or more widgets but all were beyond the occlusion cutoff. Kept
+ * distinct from hot==0 (nothing under the pointer) so the resolve's occluded≠empty intent stays
+ * explicit, though both now gate to "skip". A real Clay id is never UINT32_MAX with meaningful
+ * probability; nt_ui_pointer_hot maps it back to 0 for callers. */
 #define NT_UI_HOT_BLOCKED UINT32_MAX
 
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
- * distance within the occlusion cutoff; 2D: last-in-declaration-order hit (~ topmost). Registry holds
- * game-layer widgets only, so their distances share one view_proj and compare cleanly. */
+ * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-declared). Registry
+ * holds game-layer widgets only, so their distances share one view_proj and compare cleanly. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
     if (ctx->hot_resolved) {
@@ -2260,8 +2266,8 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
                 }
             }
         }
-        /* Hit something but the cutoff blocked all of it → block (don't let hot==0 fallback re-admit
-         * it). True hot==0 (nothing was under the pointer) still falls back so new widgets work. */
+        /* Hit something but the cutoff blocked all of it → mark blocked (occluded ≠ empty). Both a
+         * blocked region and a true hot==0 gate to skip; a new widget just waits a frame to register. */
         if (!found && occluded) {
             best.id = NT_UI_HOT_BLOCKED;
         }

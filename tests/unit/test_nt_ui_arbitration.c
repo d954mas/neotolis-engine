@@ -2,8 +2,8 @@
  *
  * Among overlapping interactive widgets only the front-most (highest effective Clay zIndex; equal
  * zIndex → last-declared) may hover/press a free pointer; those behind it are gated off. Arbitration
- * uses the PREVIOUS frame's interactive registry, so frame 1 (empty registry) falls back to the raw
- * hit — both react — and arbitration kicks in from frame 2. */
+ * uses the PREVIOUS frame's interactive registry, so on frame 1 (empty registry) nothing reacts;
+ * each widget registers on its first step and becomes eligible from the next frame. */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -71,15 +71,16 @@ static void step_two(const nt_pointer_t *p, nt_ui_interaction_t *bottom, nt_ui_i
     nt_ui_end(s_fx.ctx);
 }
 
-/* Registry empty (nothing stepped last frame) → hot==0 fallback → both overlapping widgets hover. */
-void test_empty_registry_fallback_both_hover(void) {
+/* Registry empty (nothing stepped last frame) → hot==0 → skip: neither overlapping widget reacts
+ * before it has registered (reliability over instant first-frame response). */
+void test_empty_registry_no_react(void) {
     nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
     nt_ui_interaction_t bottom;
     nt_ui_interaction_t top;
     declare_only(&over);            /* frame 1: bake bboxes, no registry */
-    step_two(&over, &bottom, &top); /* frame 2: resolve sees empty registry → fallback */
-    TEST_ASSERT_TRUE(bottom.hovered);
-    TEST_ASSERT_TRUE(top.hovered);
+    step_two(&over, &bottom, &top); /* frame 2: resolve sees empty registry → skip */
+    TEST_ASSERT_FALSE(bottom.hovered);
+    TEST_ASSERT_FALSE(top.hovered);
 }
 
 /* Once both are in the registry, the resolve makes "top" (last-declared) hot; "bottom" is gated off. */
@@ -144,7 +145,7 @@ void test_overlap_top_wins_press(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_empty_registry_fallback_both_hover);
+    RUN_TEST(test_empty_registry_no_react);
     RUN_TEST(test_overlap_top_wins_hover);
     RUN_TEST(test_higher_zindex_wins_despite_earlier_declaration);
     RUN_TEST(test_overlap_top_wins_press);
