@@ -298,10 +298,12 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     /* Frame 1: declare both + step both so they register for next-frame arbitration. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
-    CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}){}(
-        void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}){}(
-        void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    }
+    CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    }
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: press inside A -> A begins capture. Query A and B in declaration

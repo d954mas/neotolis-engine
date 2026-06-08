@@ -2216,12 +2216,6 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
 
-/* Sentinel hot id: a pointer hit one or more widgets but all were beyond the occlusion cutoff. Kept
- * distinct from hot==0 (nothing under the pointer) so the resolve's occluded≠empty intent stays
- * explicit, though both now gate to "skip". A real Clay id is never UINT32_MAX with meaningful
- * probability; nt_ui_pointer_hot maps it back to 0 for callers. */
-#define NT_UI_HOT_BLOCKED UINT32_MAX
-
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
  * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-declared). Registry
@@ -2236,7 +2230,6 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_hot_t best = {0};
         bool found = false;
-        bool occluded = false;           /* hit >= 1 widget, but the cutoff blocked all of them */
         int16_t best_zindex = INT16_MIN; /* 2D: highest effective zIndex seen so far */
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
@@ -2247,8 +2240,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
             }
             if (ctx->use_raycast_input) {
                 if (t > ctx->pointer_occlusion[pidx]) {
-                    occluded = true; /* behind the game-fed cutoff (e.g. a wall) */
-                    continue;
+                    continue; /* behind the game-fed cutoff (e.g. a wall) → occluded, leaves hot=0 (skip) */
                 }
                 if (!found || t < best.distance) {
                     best.id = rec->id;
@@ -2266,11 +2258,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
                 }
             }
         }
-        /* Hit something but the cutoff blocked all of it → mark blocked (occluded ≠ empty). Both a
-         * blocked region and a true hot==0 gate to skip; a new widget just waits a frame to register. */
-        if (!found && occluded) {
-            best.id = NT_UI_HOT_BLOCKED;
-        }
+        /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
     }
 }
@@ -2284,8 +2272,8 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
     NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
 
-    resolve_hot_if_needed(ctx); /* once per frame, from prev-frame registry; view_proj is set by now */
-
+    /* query_padded triggers the once-per-frame hot resolve; step reaches resolve_widget_pidx_state
+     * (which reads pointer_hot) only when query did NOT early-return, i.e. after that resolve ran. */
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
@@ -2458,11 +2446,7 @@ nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index) {
     NT_ASSERT(ctx != NULL && "nt_ui_pointer_hot: ctx must be non-NULL");
     NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_pointer_hot: pointer_index out of range");
     resolve_hot_if_needed(ctx); /* lazy: first step OR this query triggers the once-per-frame resolve */
-    nt_ui_hot_t hot = ctx->pointer_hot[pointer_index];
-    if (hot.id == NT_UI_HOT_BLOCKED) {
-        return (nt_ui_hot_t){0}; /* occlusion-blocked reads as "nothing" to the game */
-    }
-    return hot;
+    return ctx->pointer_hot[pointer_index];
 }
 // #endregion
 
