@@ -1,14 +1,78 @@
-[{
-  "commit": "ff622dc",
-  "date": "2026-06-05T13:03:08Z",
-  "files": {
-    "index.html": { "raw": 2561, "gzip": 1287 },
-    "index_simd.wasm": { "raw": 1113281, "gzip": 416042 },
-    "index.wasm": { "raw": 1008095, "gzip": 398405 },
-    "index_simd.js": { "raw": 26788, "gzip": 10776 },
-    "index.js": { "raw": 26788, "gzip": 10771 }
+[
+  {
+    "commit": "ff622dc",
+    "date": "2026-06-05T13:03:08Z",
+    "files": {
+      "index.html": {
+        "raw": 2561,
+        "gzip": 1287
+      },
+      "index_simd.wasm": {
+        "raw": 1113281,
+        "gzip": 416042
+      },
+      "index.wasm": {
+        "raw": 1008095,
+        "gzip": 398405
+      },
+      "index_simd.js": {
+        "raw": 26788,
+        "gzip": 10776
+      },
+      "index.js": {
+        "raw": 26788,
+        "gzip": 10771
+      }
+    },
+    "engine": {
+      "raw": 1142630,
+      "gzip": 428105
+    },
+    "resources": {
+      "raw": 0,
+      "gzip": 0
+    },
+    "total": {
+      "raw": 1142630,
+      "gzip": 428105
+    }
   },
-  "engine": { "raw": 1142630, "gzip": 428105 },
-  "resources": { "raw": 0, "gzip": 0 },
-  "total": { "raw": 1142630, "gzip": 428105 }
-}]
+  {
+    "commit": "f7f198b",
+    "date": "2026-06-08T13:02:09Z",
+    "files": {
+      "index.html": {
+        "raw": 2561,
+        "gzip": 1287
+      },
+      "index_simd.wasm": {
+        "raw": 1116803,
+        "gzip": 420272
+      },
+      "index.wasm": {
+        "raw": 1011764,
+        "gzip": 399808
+      },
+      "index_simd.js": {
+        "raw": 26788,
+        "gzip": 10775
+      },
+      "index.js": {
+        "raw": 26788,
+        "gzip": 10770
+      }
+    },
+    "engine": {
+      "raw": 1146152,
+      "gzip": 432334
+    },
+    "resources": {
+      "raw": 0,
+      "gzip": 0
+    },
+    "total": {
+      "raw": 1146152,
+      "gzip": 432334
+    }
+  }
+]

@@ -1,22 +1,22 @@
 # Size Report: ui_buttons_demo (wasm-analysis-paired)
-# Commit: ff622dc
+# Commit: f7f198b
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 631 B
+Type                 643 B
 Import               619 B
-Function             398 B
+Function             400 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                94 B
 Elem                 149 B
-Code              873271 B
-Data              238062 B
+Code              876748 B
+Data              238093 B
 ---------------- ----------
-TOTAL            1113245 B
+TOTAL            1116767 B
 
 ## Top 30 Functions by Size
 
