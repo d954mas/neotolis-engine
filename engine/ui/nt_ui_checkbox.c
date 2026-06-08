@@ -93,11 +93,14 @@ typedef struct {
  * the widget id + hit-test so box OR label clicks the same widget (D-58-05). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void cb_emit_box(const cb_emit_args_t *e) {
+    /* Toggle: thumb is LEFT-anchored so OFF sits at x=0 and the offset_x DELTA
+     * slides it right (D-58-16). Checkbox/radio: center the dot in the box. */
+    const Clay_LayoutAlignmentX align_x = e->is_toggle ? CLAY_ALIGN_X_LEFT : CLAY_ALIGN_X_CENTER;
     Clay_ElementDeclaration box_decl = {
         .layout =
             {
                 .sizing = {CLAY_SIZING_FIXED(e->style->box_w), CLAY_SIZING_FIXED(e->style->box_h)},
-                .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+                .childAlignment = {align_x, CLAY_ALIGN_Y_CENTER},
             },
     };
     /* No-art terminal: resolved box atlas.id == 0 => skip the IMAGE (D-58-10). */
@@ -111,8 +114,11 @@ static void cb_emit_box(const cb_emit_args_t *e) {
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(box_decl);
 
-    /* Overlay child: emit only when eased value is past eps AND there is art. */
-    if (e->eased_value > NT_UI_CB_OVERLAY_EPS && e->check_ref.atlas.id != 0U) {
+    /* Overlay child. Checkbox/radio: value-gated pop (skip when eased value is
+     * below eps). Toggle: the thumb is ALWAYS visible (the SLIDE, not appearance,
+     * is the affordance) — emit whenever there is art, regardless of value_t. */
+    const bool overlay_visible = e->is_toggle ? (e->check_ref.atlas.id != 0U) : (e->eased_value > NT_UI_CB_OVERLAY_EPS && e->check_ref.atlas.id != 0U);
+    if (overlay_visible) {
         nt_ui_transform_t ov_t = nt_ui_transform_defaults();
         if (e->is_toggle) {
             /* Left-anchored layout; slide is a render-only offset DELTA (D-58-16). */
@@ -124,7 +130,9 @@ static void cb_emit_box(const cb_emit_args_t *e) {
             ov_t.scale_x = s;
             ov_t.scale_y = s;
         }
-        nt_ui_element_data_t *ov_data = make_xform_data(NULL, &ov_t, e->eased_value);
+        /* Toggle thumb is opaque at both ends; checkbox/radio dot fades in by value_t. */
+        const float ov_opacity = e->is_toggle ? 1.0F : e->eased_value;
+        nt_ui_element_data_t *ov_data = make_xform_data(NULL, &ov_t, ov_opacity);
 
         nt_ui_image_style_t ov_style = nt_ui_image_style_defaults();
         ov_style.color_packed = e->cell->check_tint;
@@ -299,6 +307,20 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_
     /* Re-selecting the already-selected option is a no-op (no flicker, D-58-05). */
     if (clicked && *selected != my_value) {
         *selected = my_value;
+        return true;
+    }
+    return false;
+}
+
+bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl,
+                  bool enabled) {
+    NT_ASSERT(value != NULL && "nt_ui_toggle: value must be non-NULL");
+    /* Same value logic as checkbox; is_toggle=true drives the always-visible
+     * thumb + render-only offset_x slide DELTA in cb_emit_box (D-58-16). */
+    bool clicked = false;
+    cb_core(ctx, data, id, label, *value, true, style, decl, enabled, &clicked);
+    if (clicked) {
+        *value = !*value;
         return true;
     }
     return false;
