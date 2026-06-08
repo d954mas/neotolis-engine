@@ -1,7 +1,8 @@
 /* Front-most input arbitration (2D ctx).
  *
  * Among overlapping interactive widgets only the front-most (highest effective Clay zIndex; equal
- * zIndex → last-declared) may hover/press a free pointer; those behind it are gated off. Arbitration
+ * zIndex → last-registered, i.e. the later step_interaction call) may hover/press a free pointer;
+ * those behind it are gated off. Arbitration
  * uses the PREVIOUS frame's interactive registry, so on frame 1 (empty registry) nothing reacts;
  * each widget registers on its first step and becomes eligible from the next frame. */
 
@@ -83,7 +84,8 @@ void test_empty_registry_no_react(void) {
     TEST_ASSERT_FALSE(top.hovered);
 }
 
-/* Once both are in the registry, the resolve makes "top" (last-declared) hot; "bottom" is gated off. */
+/* Once both are in the registry, the resolve makes "top" (last-registered: stepped after "bottom",
+ * equal zIndex) hot; "bottom" is gated off. */
 void test_overlap_top_wins_hover(void) {
     nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
     nt_ui_interaction_t bottom;
@@ -95,8 +97,8 @@ void test_overlap_top_wins_hover(void) {
     TEST_ASSERT_FALSE(bottom.hovered);
 }
 
-/* Two overlapping floating widgets where the HIGHER zIndex is declared FIRST: true z-order must pick
- * it (the old "last-declared wins" would wrongly pick the later, lower-z one). */
+/* Two overlapping floating widgets where the HIGHER zIndex is declared/stepped FIRST: zIndex must beat
+ * registration order — picking the later-registered, lower-z widget would be wrong. */
 static void declare_zindexed(void) {
     CLAY({.id = CLAY_ID("hiz"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10, .offset = {.x = BOT_X, .y = BOT_Y}},

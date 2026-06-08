@@ -2218,8 +2218,9 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
 
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
- * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-declared). Registry
- * holds game-layer widgets only, so their distances share one view_proj and compare cleanly. */
+ * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-registered, i.e.
+ * later step_interaction call). Registry holds game-layer widgets only, so their distances share one
+ * view_proj and compare cleanly. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
     if (ctx->hot_resolved) {

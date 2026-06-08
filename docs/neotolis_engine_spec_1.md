@@ -200,7 +200,9 @@ If a decision can be deferred without loss of base architecture — it is deferr
   begin) so UI can't be clicked through world geometry — the game owns the
   raycast, the engine only takes the cutoff distance; `nt_ui_interaction_t.distance`
   reports the hit distance. 2D ctx: highest effective Clay zIndex (tie →
-  last-declared). A free pointer drives a widget only if it is the resolved hot
+  last-registered, i.e. the later `step_interaction` call; widget code should step
+  in declaration order so this matches paint order). A free pointer drives a
+  widget only if it is the resolved hot
   widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
   Consequence: a freshly-shown widget registers on its first step and only
   becomes eligible the NEXT frame; on the first frame (empty registry) nothing
