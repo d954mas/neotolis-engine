@@ -2252,8 +2252,9 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
                     found = true;
                 }
             } else {
-                /* 2D: highest effective zIndex wins; >= so a later-declared tie still overwrites,
-                 * preserving paint-order behavior within one z tier. */
+                /* 2D: highest effective zIndex wins; >= so a later-registered tie overwrites. Registry
+                 * order = step_interaction call order = declaration (paint) order when the game steps in
+                 * declaration order — the normal pattern. */
                 if (!found || zi >= best_zindex) {
                     best.id = rec->id;
                     best.distance = 0.0F;

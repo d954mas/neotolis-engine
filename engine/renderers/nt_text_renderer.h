@@ -18,7 +18,9 @@
 _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPHS > 16383 overflows uint16 index buffer");
 
 /* Default for the slug_text `u_alpha_cutoff.x` param: discards only fully-empty glyph-quad pixels.
- * World-space text that writes depth should raise this (~0.5) so AA edges don't write depth and halo. */
+ * Good even for depth-writing world text: pair it with a per-glyph depth bias
+ * (nt_text_renderer_set_glyph_depth_bias) to separate overlapping glyphs — raising the cutoff would
+ * harden AA edges without removing a real halo. */
 #define NT_TEXT_ALPHA_CUTOFF_DEFAULT (1.0F / 255.0F)
 
 void nt_text_renderer_init(void);

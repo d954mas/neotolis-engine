@@ -89,7 +89,7 @@ void test_overlap_top_wins_hover(void) {
     nt_ui_interaction_t bottom;
     nt_ui_interaction_t top;
     declare_only(&over);            /* frame 1: bake bboxes */
-    step_two(&over, &bottom, &top); /* frame 2: register both (still fallback) */
+    step_two(&over, &bottom, &top); /* frame 2: register both (empty registry → both skip) */
     step_two(&over, &bottom, &top); /* frame 3: arbitrated from frame-2 registry */
     TEST_ASSERT_TRUE(top.hovered);
     TEST_ASSERT_FALSE(bottom.hovered);
@@ -123,7 +123,7 @@ void test_higher_zindex_wins_despite_earlier_declaration(void) {
     nt_ui_interaction_t hiz;
     nt_ui_interaction_t lowz;
     declare_zindexed_only(&over);      /* frame 1: bake */
-    step_zindexed(&over, &hiz, &lowz); /* frame 2: register (still fallback) */
+    step_zindexed(&over, &hiz, &lowz); /* frame 2: register (empty registry → both skip) */
     step_zindexed(&over, &hiz, &lowz); /* frame 3: arbitrated by zIndex */
     TEST_ASSERT_TRUE(hiz.hovered);     /* z=10 wins even though declared first */
     TEST_ASSERT_FALSE(lowz.hovered);

@@ -96,13 +96,13 @@ static nt_ui_interaction_t step_bbox_3d(float px, float py, float occlusion) {
 }
 
 /* Widget sits at world distance ~1.0 (ortho near=-1/far=+1, Clay z=0 → t=0.5, dist=0.5*2). A cutoff
- * below that occludes it: the pointer hits nothing valid, and the gate's hot==0 fallback must NOT
- * re-admit it (this is the regression that shipped the occlusion feature broken). */
+ * below that occludes the only hit, so the resolve finds nothing in range → hot stays 0 → the gate
+ * skips the widget. */
 static void test_occlusion_blocks_widget_beyond_cutoff(void) {
     const float cx = BBOX_X + (BBOX_W * 0.5F);
     const float cy = BBOX_Y + (BBOX_H * 0.5F);
     declare_bbox_3d();                                        /* frame 1: bake bbox */
-    step_bbox_3d(cx, cy, -1.0F);                              /* frame 2: register (resolve sees empty registry → fallback) */
+    step_bbox_3d(cx, cy, -1.0F);                              /* frame 2: register (empty registry → skip; no cutoff) */
     nt_ui_interaction_t blocked = step_bbox_3d(cx, cy, 0.5F); /* frame 3: cutoff 0.5 < dist 1.0 */
     TEST_ASSERT_FALSE(blocked.hovered);
 }
