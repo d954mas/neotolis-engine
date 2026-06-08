@@ -458,6 +458,9 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_clip_hittest
         test_nt_ui_anim
         test_nt_ui_button
+        test_nt_ui_checkbox
+        test_nt_ui_radio
+        test_nt_ui_toggle
         test_nt_ui_tree_build
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
