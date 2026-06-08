@@ -2054,7 +2054,7 @@ uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float
     NT_ASSERT(ctx->view_proj_set && "nt_ui_internal_pick_zone_3d: 3D ctx but nt_ui_set_view_proj was not called this frame");
     const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
     const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
-    /* Reverse order: deepest-declared zone wins, matching the 2D scan. */
+    /* Reverse order: deepest-recorded zone wins (record/step order), matching the 2D scan. */
     for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
         const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
         if (z->id == 0U) {
@@ -2110,9 +2110,9 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
             continue; /* α: pointer bound elsewhere, invisible to this widget */
         }
         /* Front-most arbitration: a free pointer drives this widget only if it is the resolved hot
-         * widget (or this widget holds capture). hot == 0 (no interactive widget was under the pointer
-         * last frame) gates OFF — a freshly-shown / just-moved widget waits one frame to register
-         * before it can react. Reliability over instant first-frame response (matches Dear ImGui). */
+         * widget (or this widget holds capture). hot == 0 (nothing under the pointer last frame, or in
+         * 3D all hits beyond the occlusion cutoff) gates OFF — a freshly-shown / just-moved widget waits
+         * one frame to register before it can react. Reliability over instant first-frame response (matches Dear ImGui). */
         const uint32_t hot = ctx->pointer_hot[i].id;
         const bool arbitrated_ok = (hot == id) || (cap->active_id == id);
         float hit_t = 0.0F;

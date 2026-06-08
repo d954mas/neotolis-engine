@@ -1049,7 +1049,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 highlightedElementId = nt_ui_internal_pick_zone_3d(ctx, px, py);
             }
         } else {
-            /* Transform-aware; LAST hit wins (deepest in declaration order). */
+            /* Transform-aware; LAST hit wins (deepest in record/step order). */
             for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
                 const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
                 if (z->id == 0U) {

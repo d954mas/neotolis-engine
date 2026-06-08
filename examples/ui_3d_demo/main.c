@@ -1013,7 +1013,7 @@ int main(int argc, char *argv[]) {
 
     /* World-mounted UI: depth_write ON so overlapping panels sort by depth (nearer occludes farther
      * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
-     * they don't punch depth; the per-element bias keeps each panel's labels above its own bg. */
+     * they don't punch depth; the per-element depth bias (element_depth_bias_ndc) keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
         .fs = s_sprite_cutoff_fs_handle,

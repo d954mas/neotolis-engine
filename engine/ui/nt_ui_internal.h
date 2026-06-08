@@ -285,7 +285,7 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
-/* 3D-ctx inspector viewport pick: last-declared zone the cursor ray hits, game view_proj (declaration
+/* 3D-ctx inspector viewport pick: last-recorded zone the cursor ray hits, game view_proj (record/step
  * order, not camera distance). Scope: recorded debug_zones only (interactive widgets) — non-interactive
  * elements are tree-selectable, not scene-hover-pickable. 0 = none. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
