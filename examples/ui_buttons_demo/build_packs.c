@@ -65,9 +65,11 @@ int main(int argc, char *argv[]) {
     // #region shaders (sprite for UI rects + Slug for text)
     nt_builder_add_shader(ctx, "assets/shaders/sprite.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
+    /* Depth-writing world UI (ui_3d_demo overlapping panels) uses this alpha-cutoff sprite variant. */
+    nt_builder_add_shader(ctx, "assets/shaders/sprite_cutoff.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 4 (sprite + slug_text)\n");
+    (void)printf("  Shaders added: 5 (sprite + sprite_cutoff + slug_text)\n");
     // #endregion
 
     // #region atlas: button_blue (slice9) + white pixel

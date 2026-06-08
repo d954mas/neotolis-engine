@@ -135,6 +135,7 @@ static bool s_debug_overlay;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_sprite_vs_handle;
 static nt_resource_t s_sprite_fs_handle;
+static nt_resource_t s_sprite_cutoff_fs_handle; /* alpha-cutoff sprite variant for depth-writing UI */
 static nt_resource_t s_text_vs_handle;
 static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_atlas_handle;
@@ -1003,6 +1004,7 @@ int main(int argc, char *argv[]) {
 
     s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
     s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_cutoff_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
     s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_BUTTONS_DEMO_ATLAS, NT_ASSET_ATLAS);
@@ -1010,17 +1012,19 @@ int main(int argc, char *argv[]) {
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
 
     /* World-mounted UI: depth_write ON so overlapping panels sort by depth (nearer occludes farther
-     * across sprite+text layers). sprite.frag has no alpha cutoff, so transparent button corners also
-     * write depth — fine here (back-to-front draw order), but a trap for future translucent overlap. */
+     * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
+     * they don't punch depth; the per-element bias keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
+        .fs = s_sprite_cutoff_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend_mode = NT_BLEND_MODE_ALPHA,
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {1.0F / 255.0F}},
+        .param_count = 1,
         .label = "ui_3d_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
