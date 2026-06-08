@@ -2,6 +2,11 @@
  * panels. Left wall hosts the SHAPE panel (CUBE / SPHERE / CAPSULE); right wall hosts the
  * SPEED panel (STOP / SLOW / MEDIUM / FAST). Same controls remain on keyboard for parity.
  *
+ * Behind the central object sit two overlapping test panels, NEAR and FAR (each A/B buttons),
+ * to exercise input arbitration: aiming THROUGH the object occludes their buttons (can't click
+ * through it), and where the two overlap only NEAR's button reacts (front-most wins). The HUD's
+ * "picked" line shows which button last fired. Strafe (A/D) so the object stops blocking to test.
+ *
  * Controls:
  *   WASD            walk along yaw (no collisions)
  *   Space / Shift   fly up / down
@@ -90,8 +95,16 @@
 #define BTN_H 64
 #define PANEL_SCALE 0.012F
 
+/* Occlusion / arbitration test panels, mounted BEHIND the central object. */
+#define TPANEL_W 240
+#define TPANEL_H 240
+#define TPANEL_TITLE_H 40
+#define TBTN_W 180
+#define TBTN_H 56
+
 enum { SHAPE_CUBE = 0, SHAPE_SPHERE, SHAPE_CAPSULE, SHAPE_COUNT };
 enum { SPEED_STOP = 0, SPEED_SLOW, SPEED_MED, SPEED_FAST, SPEED_COUNT };
+enum { TPICK_A = 0, TPICK_B, TPICK_COUNT };
 // #endregion
 
 // #region tables
@@ -169,7 +182,23 @@ static nt_ui_label_style_t s_btn_label_style = {
 /* Stable widget ids. */
 static uint32_t s_id_shape_btn[SHAPE_COUNT];
 static uint32_t s_id_speed_btn[SPEED_COUNT];
+static uint32_t s_id_near_btn[TPICK_COUNT];
+static uint32_t s_id_far_btn[TPICK_COUNT];
 static bool s_ids_ready;
+
+/* Occlusion/arbitration test panels: last-clicked button per panel (green highlight) + HUD readout. */
+static int s_near_sel = -1;
+static int s_far_sel = -1;
+static char s_last_pick[24] = "-";
+
+static const Clay_ElementDeclaration s_tbtn_decl = {
+    .layout =
+        {
+            .sizing = {CLAY_SIZING_FIXED(TBTN_W), CLAY_SIZING_FIXED(TBTN_H)},
+            .padding = CLAY_PADDING_ALL(6),
+            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+        },
+};
 // #endregion
 
 // #region helpers
@@ -488,7 +517,74 @@ static void ensure_ids(void) {
     s_id_speed_btn[SPEED_SLOW] = nt_ui_id("btn_speed_slow");
     s_id_speed_btn[SPEED_MED] = nt_ui_id("btn_speed_med");
     s_id_speed_btn[SPEED_FAST] = nt_ui_id("btn_speed_fast");
+    s_id_near_btn[TPICK_A] = nt_ui_id("btn_near_a");
+    s_id_near_btn[TPICK_B] = nt_ui_id("btn_near_b");
+    s_id_far_btn[TPICK_A] = nt_ui_id("btn_far_a");
+    s_id_far_btn[TPICK_B] = nt_ui_id("btn_far_b");
     s_ids_ready = true;
+}
+
+/* Emits the title + two buttons of a test panel; returns the index clicked this frame (or -1).
+ * `sel` gets the green "active" art so the last pick stays visible on the panel itself. */
+static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], int sel) {
+    int clicked = -1;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TPANEL_TITLE_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), title, &s_panel_title_style);
+    }
+    for (int i = 0; i < TPICK_COUNT; ++i) {
+        const nt_ui_button_style_t *style = (i == sel) ? &s_btn_active : &s_btn_idle;
+        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), (i == TPICK_A) ? "A" : "B", &s_btn_label_style);
+        if (nt_ui_button_end(s_ctx)) {
+            clicked = i;
+        }
+    }
+    return clicked;
+}
+
+/* Two panels mounted BEHIND the central object so the cursor ray must pass it to reach them. NEAR
+ * (z=-2.5) sits slightly left, FAR (z=-4.0) slightly right → they overlap along the sightline.
+ *   - Aim THROUGH the object → buttons are occluded (set_pointer_occlusion blocks the click).
+ *   - Where NEAR & FAR overlap → only NEAR's button reacts (front-most arbitration); strafe (A/D)
+ *     so the object stops blocking to see it. The side that sticks out belongs to one panel only.
+ * Declared inside ui3d-root (floating, bbox at 0,0); the XFORM maps each to its world mount. */
+static void declare_test_panels(void) {
+    const float cy = ROOM_H * 0.5F;
+    const nt_ui_transform_t xf_far = make_wall_xform(0.7F, cy, -4.0F, 0.0F, (float)TPANEL_W, (float)TPANEL_H);
+    const nt_ui_transform_t xf_near = make_wall_xform(-0.7F, cy, -2.5F, 0.0F, (float)TPANEL_W, (float)TPANEL_H);
+
+    /* FAR first — declared/drawn under NEAR and farther along the ray, so it loses the overlap. */
+    CLAY({.id = CLAY_ID("test-far"),
+          .userData = (void *)NT_UI_DATA_XFORM(LAYER_PANEL, &xf_far, 1.0F),
+          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(TPANEL_W), CLAY_SIZING_FIXED(TPANEL_H)},
+                     .padding = CLAY_PADDING_ALL(10),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 10,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = {52.0F, 30.0F, 34.0F, 235.0F}}) {
+        const int hit = test_panel_body("FAR", s_id_far_btn, s_far_sel);
+        if (hit >= 0) {
+            s_far_sel = hit;
+            (void)snprintf(s_last_pick, sizeof s_last_pick, "FAR %c", (char)('A' + hit));
+        }
+    }
+    /* NEAR second — drawn on top, nearer along the ray → wins arbitration in the overlap. */
+    CLAY({.id = CLAY_ID("test-near"),
+          .userData = (void *)NT_UI_DATA_XFORM(LAYER_PANEL, &xf_near, 1.0F),
+          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(TPANEL_W), CLAY_SIZING_FIXED(TPANEL_H)},
+                     .padding = CLAY_PADDING_ALL(10),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 10,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = {30.0F, 38.0F, 52.0F, 235.0F}}) {
+        const int hit = test_panel_body("NEAR", s_id_near_btn, s_near_sel);
+        if (hit >= 0) {
+            s_near_sel = hit;
+            (void)snprintf(s_last_pick, sizeof s_last_pick, "NEAR %c", (char)('A' + hit));
+        }
+    }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -554,6 +650,9 @@ static void declare_panels(void) {
                 }
             }
         }
+
+        /* Occlusion / arbitration test panels, mounted behind the central object. */
+        declare_test_panels();
     }
 }
 // #endregion
@@ -612,6 +711,12 @@ static void draw_hud(float fb_w, float fb_h) {
     char status[64];
     (void)snprintf(status, sizeof status, "shape: %-7s   speed: %s", s_shape_labels[s_shape_kind], s_speed_labels[s_speed_kind]);
     draw_hud_block(status, right_x, ry, HUD_SIZE, accent);
+    ry -= HUD_SIZE + 2.0F;
+
+    /* Which test-panel button last received a click (NEAR vs FAR proves front-most arbitration). */
+    char pick_line[48];
+    (void)snprintf(pick_line, sizeof pick_line, "picked: %s", s_last_pick);
+    draw_hud_block(pick_line, right_x, ry, HUD_SIZE, white);
 
     if (s_debug_overlay) {
         /* Anchor the debug block ABOVE the bottom; nt_stats is ~6 lines so allow ~110 px. */
@@ -772,11 +877,15 @@ static void frame(void) {
         declare_panels();
         nt_ui_end(s_ctx);
 
+        /* UI labels now write depth (world panels sort by depth) → bias glyph quads apart so their AA
+         * fringes don't z-fight; the walker emits text with the renderer's current bias. Reset after. */
+        nt_text_renderer_set_glyph_depth_bias(0.0001F);
         nt_ui_walk(s_ctx, &target);
         /* Flush UI draws under VP_3D BEFORE switching uniforms; otherwise labels emitted
          * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
+        nt_text_renderer_set_glyph_depth_bias(0.0F);
 
         /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
          * quads from z-fighting at their AA fringes (set before the draw, reset after). */
@@ -900,6 +1009,9 @@ int main(int argc, char *argv[]) {
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
 
+    /* World-mounted UI: depth_write ON so overlapping panels sort by depth (nearer occludes farther
+     * across sprite+text layers). sprite.frag has no alpha cutoff, so transparent button corners also
+     * write depth — fine here (back-to-front draw order), but a trap for future translucent overlap. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
         .fs = s_sprite_fs_handle,
@@ -907,7 +1019,7 @@ int main(int argc, char *argv[]) {
         .texture_count = 1,
         .blend_mode = NT_BLEND_MODE_ALPHA,
         .depth_test = true,
-        .depth_write = false,
+        .depth_write = true,
         .cull_mode = NT_CULL_NONE,
         .label = "ui_3d_demo_sprite",
     });
@@ -935,7 +1047,9 @@ int main(int argc, char *argv[]) {
     });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
+    /* UI labels use the depth-writing text material so they sort with the panels (overlapping world
+     * panels). The HUD/stats keep s_text_material (depth_write=false) — they're a flat screen overlay. */
+    nt_ui_set_text_material(s_ctx, s_text_material_3d);
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
