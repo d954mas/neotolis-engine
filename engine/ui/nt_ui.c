@@ -2444,6 +2444,7 @@ void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, f
     NT_ASSERT(ctx != NULL && "nt_ui_set_pointer_occlusion: ctx must be non-NULL");
     NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_pointer_occlusion: only meaningful in 3D ctx (use_raycast_input)");
     NT_ASSERT(ctx->in_frame && "nt_ui_set_pointer_occlusion: call between nt_ui_begin and the first step/query (reset each begin)");
+    NT_ASSERT(!ctx->hot_resolved && "nt_ui_set_pointer_occlusion: fed too late — the hot resolve already latched this frame; feed BEFORE the first step/query/pointer_hot");
     NT_ASSERT(pointer_index < ctx->frame_pointer_count && "nt_ui_set_pointer_occlusion: pointer_index is not an active frame pointer");
     /* NaN makes the `t > cutoff` test always false, silently disabling occlusion (click-through-wall);
      * a broken game raycast must trip here. ±inf are valid (+inf = no cutoff, -inf/negative = occlude all). */
