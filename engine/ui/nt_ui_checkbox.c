@@ -287,3 +287,19 @@ bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     }
     return false;
 }
+
+bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
+                 const Clay_ElementDeclaration *decl, bool enabled) {
+    NT_ASSERT(selected != NULL && "nt_ui_radio: selected must be non-NULL");
+    /* Exclusivity is FREE: every radio in the group reads the same *selected, so
+     * no engine-side group state is needed (D-58-01/05). value row = am I it? */
+    const bool value_is_checked = (*selected == my_value);
+    bool clicked = false;
+    cb_core(ctx, data, id, label, value_is_checked, false, style, decl, enabled, &clicked);
+    /* Re-selecting the already-selected option is a no-op (no flicker, D-58-05). */
+    if (clicked && *selected != my_value) {
+        *selected = my_value;
+        return true;
+    }
+    return false;
+}
