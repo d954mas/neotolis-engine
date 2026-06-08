@@ -9,7 +9,7 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 #ifndef NT_UI_ANIM_SLOTS
-#define NT_UI_ANIM_SLOTS 64 /* power-of-2 for the slot mask; ~52 B/slot post-3D-extension */
+#define NT_UI_ANIM_SLOTS 64 /* power-of-2 for the slot mask; ~56 B/slot post-value_t extension */
 #endif
 _Static_assert((NT_UI_ANIM_SLOTS & (NT_UI_ANIM_SLOTS - 1)) == 0, "NT_UI_ANIM_SLOTS must be power-of-2 (slot = id & (N-1))");
 
@@ -28,7 +28,8 @@ typedef struct {
     float off_x, off_y, off_z;
     float rot_x, rot_y, rot_z;
     float opacity;
-    float tint_t; /* 0..1 (game maps to a color) */
+    float tint_t;  /* 0..1 (game maps to a color) */
+    float value_t; /* 0..1 generic scalar eased at value_speed (overlay-pop, thumb-slide) */
     bool valid;
 } nt_ui_anim_interaction_t;
 
@@ -38,9 +39,11 @@ typedef struct {
     float rot_x, rot_y, rot_z;
     float opacity;
     float tint_t;
+    float value_t; /* 0..1 generic scalar; eased independently at value_speed */
 } nt_ui_anim_target_t;
 
-/* transition_speed==0 → instant; returns the post-ease slot. */
-const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *target, float transition_speed);
+/* state_speed eases the 11 transform/opacity/tint fields; value_speed eases value_t
+ * independently (either 0 → instant snap). Returns the post-ease slot. */
+const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *target, float state_speed, float value_speed);
 
 #endif /* NT_UI_ANIM_H */
