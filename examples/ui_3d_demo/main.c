@@ -2,6 +2,11 @@
  * panels. Left wall hosts the SHAPE panel (CUBE / SPHERE / CAPSULE); right wall hosts the
  * SPEED panel (STOP / SLOW / MEDIUM / FAST). Same controls remain on keyboard for parity.
  *
+ * Behind the central object sit two overlapping test panels, NEAR and FAR (each A/B buttons),
+ * to exercise input arbitration: aiming THROUGH the object occludes their buttons (can't click
+ * through it), and where the two overlap only NEAR's button reacts (front-most wins). The HUD's
+ * "picked" line shows which button last fired. Strafe (A/D) so the object stops blocking to test.
+ *
  * Controls:
  *   WASD            walk along yaw (no collisions)
  *   Space / Shift   fly up / down
@@ -90,8 +95,16 @@
 #define BTN_H 64
 #define PANEL_SCALE 0.012F
 
+/* Occlusion / arbitration test panels, mounted BEHIND the central object. */
+#define TPANEL_W 240
+#define TPANEL_H 240
+#define TPANEL_TITLE_H 40
+#define TBTN_W 180
+#define TBTN_H 56
+
 enum { SHAPE_CUBE = 0, SHAPE_SPHERE, SHAPE_CAPSULE, SHAPE_COUNT };
 enum { SPEED_STOP = 0, SPEED_SLOW, SPEED_MED, SPEED_FAST, SPEED_COUNT };
+enum { TPICK_A = 0, TPICK_B, TPICK_COUNT };
 // #endregion
 
 // #region tables
@@ -122,6 +135,7 @@ static bool s_debug_overlay;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_sprite_vs_handle;
 static nt_resource_t s_sprite_fs_handle;
+static nt_resource_t s_sprite_cutoff_fs_handle; /* alpha-cutoff sprite variant for depth-writing UI */
 static nt_resource_t s_text_vs_handle;
 static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_atlas_handle;
@@ -129,6 +143,9 @@ static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
+static nt_material_t s_text_material_3d;          /* world-space text that writes + tests depth */
+static nt_material_t s_inspector_sprite_material; /* depth-off overlay materials for the F2 inspector */
+static nt_material_t s_inspector_text_material;
 static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
@@ -166,7 +183,23 @@ static nt_ui_label_style_t s_btn_label_style = {
 /* Stable widget ids. */
 static uint32_t s_id_shape_btn[SHAPE_COUNT];
 static uint32_t s_id_speed_btn[SPEED_COUNT];
+static uint32_t s_id_near_btn[TPICK_COUNT];
+static uint32_t s_id_far_btn[TPICK_COUNT];
 static bool s_ids_ready;
+
+/* Occlusion/arbitration test panels: last-clicked button per panel (green highlight) + HUD readout. */
+static int s_near_sel = -1;
+static int s_far_sel = -1;
+static char s_last_pick[24] = "-";
+
+static const Clay_ElementDeclaration s_tbtn_decl = {
+    .layout =
+        {
+            .sizing = {CLAY_SIZING_FIXED(TBTN_W), CLAY_SIZING_FIXED(TBTN_H)},
+            .padding = CLAY_PADDING_ALL(6),
+            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+        },
+};
 // #endregion
 
 // #region helpers
@@ -322,6 +355,26 @@ static void draw_room(void) {
     nt_shape_renderer_rect_rot(right_pos, wall_sz_lr, side_rot, wall_col);
 }
 
+/* Backing board behind each UI panel — visual reference to judge panel fit/alignment. */
+static void draw_boards(void) {
+    const float board_col[4] = {0.42F, 0.28F, 0.14F, 1.0F};
+    const float frame_col[4] = {0.22F, 0.14F, 0.07F, 1.0F};
+    const float hd = ROOM_D * 0.5F;
+    const float bz = -hd + 0.03F; /* between wall (-hd) and panel (-hd+0.05) */
+    const float fz = bz - 0.01F;
+    const float bw = (PANEL_W * PANEL_SCALE) + 0.5F;
+    const float bh = (PANEL_H * PANEL_SCALE) + 0.5F;
+    const float board_sz[2] = {bw, bh};
+    const float frame_sz[2] = {bw + 0.18F, bh + 0.18F};
+    const float xs[2] = {-4.5F, 4.5F};
+    for (int i = 0; i < 2; ++i) {
+        const float frame_pos[3] = {xs[i], 2.8F, fz};
+        const float board_pos[3] = {xs[i], 2.8F, bz};
+        nt_shape_renderer_rect(frame_pos, frame_sz, frame_col);
+        nt_shape_renderer_rect(board_pos, board_sz, board_col);
+    }
+}
+
 static void draw_shape(void) {
     const float pos[3] = {0.0F, ROOM_H * 0.5F, 0.0F};
     versor q;
@@ -348,6 +401,51 @@ static void draw_shape(void) {
     default:
         break;
     }
+}
+
+/* Cursor ray vs the central object's bounding sphere. *out_dist = world distance from the near plane
+ * to the front hit (same metric as the UI hit distance), or false on miss. Fed to
+ * nt_ui_set_pointer_occlusion so a panel directly behind the object can't be clicked through it. */
+static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, const mat4 vp, float *out_dist) {
+    if (fb_w <= 0.0F || fb_h <= 0.0F) {
+        return false;
+    }
+    mat4 vp_copy;
+    memcpy(vp_copy, vp, sizeof vp_copy);
+    mat4 inv;
+    glm_mat4_inv(vp_copy, inv);
+    const float ndc_x = ((px / fb_w) * 2.0F) - 1.0F;
+    const float ndc_y = 1.0F - ((py / fb_h) * 2.0F); /* screen Y-down -> NDC Y-up */
+    vec4 np = {ndc_x, ndc_y, -1.0F, 1.0F};
+    vec4 fp = {ndc_x, ndc_y, 1.0F, 1.0F};
+    vec4 nw;
+    vec4 fw;
+    glm_mat4_mulv(inv, np, nw);
+    glm_mat4_mulv(inv, fp, fw);
+    if (nw[3] == 0.0F || fw[3] == 0.0F) {
+        return false;
+    }
+    vec3 o = {nw[0] / nw[3], nw[1] / nw[3], nw[2] / nw[3]};
+    vec3 fpt = {fw[0] / fw[3], fw[1] / fw[3], fw[2] / fw[3]};
+    vec3 dir;
+    glm_vec3_sub(fpt, o, dir);
+    vec3 center = {0.0F, ROOM_H * 0.5F, 0.0F};
+    const float radius = 1.7F; /* bounding sphere over cube/sphere/capsule */
+    vec3 oc;
+    glm_vec3_sub(o, center, oc);
+    const float a = glm_vec3_dot(dir, dir);
+    const float b = 2.0F * glm_vec3_dot(oc, dir);
+    const float c = glm_vec3_dot(oc, oc) - (radius * radius);
+    const float disc = (b * b) - (4.0F * a * c);
+    if (a <= 0.0F || disc < 0.0F) {
+        return false;
+    }
+    const float s = (-b - sqrtf(disc)) / (2.0F * a); /* nearest root along near->far */
+    if (s < 0.0F) {
+        return false; /* sphere behind the near plane */
+    }
+    *out_dist = s * sqrtf(a); /* ray param -> world distance from the near plane */
+    return true;
 }
 // #endregion
 
@@ -393,7 +491,8 @@ static void try_bind_resources(void) {
 
 // #region UI panels
 /* Wall-mount XFORM: panel local Clay-bbox center maps to world `wx,wy,wz`.
- * Scale stays positive; rotation_x handles Clay Y-down -> world Y-up. */
+ * Negative scale_y reflects Clay Y-down -> world Y-up while keeping normal +Z (player-facing)
+ * and X un-mirrored — a rotation can't satisfy all three at once. */
 static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw, float panel_w_px, float panel_h_px) {
     nt_ui_transform_t t = nt_ui_transform_defaults();
     const float cx = panel_w_px * 0.5F;
@@ -401,10 +500,9 @@ static nt_ui_transform_t make_wall_xform(float wx, float wy, float wz, float yaw
     t.offset_x = wx - cx;
     t.offset_y = wy - cy;
     t.offset_z = wz;
-    t.rotation_x = NT_PI;
     t.rotation_y = yaw;
     t.scale_x = PANEL_SCALE;
-    t.scale_y = PANEL_SCALE;
+    t.scale_y = -PANEL_SCALE;
     t.scale_z = PANEL_SCALE;
     return t;
 }
@@ -420,7 +518,74 @@ static void ensure_ids(void) {
     s_id_speed_btn[SPEED_SLOW] = nt_ui_id("btn_speed_slow");
     s_id_speed_btn[SPEED_MED] = nt_ui_id("btn_speed_med");
     s_id_speed_btn[SPEED_FAST] = nt_ui_id("btn_speed_fast");
+    s_id_near_btn[TPICK_A] = nt_ui_id("btn_near_a");
+    s_id_near_btn[TPICK_B] = nt_ui_id("btn_near_b");
+    s_id_far_btn[TPICK_A] = nt_ui_id("btn_far_a");
+    s_id_far_btn[TPICK_B] = nt_ui_id("btn_far_b");
     s_ids_ready = true;
+}
+
+/* Emits the title + two buttons of a test panel; returns the index clicked this frame (or -1).
+ * `sel` gets the green "active" art so the last pick stays visible on the panel itself. */
+static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], int sel) {
+    int clicked = -1;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(TPANEL_TITLE_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), title, &s_panel_title_style);
+    }
+    for (int i = 0; i < TPICK_COUNT; ++i) {
+        const nt_ui_button_style_t *style = (i == sel) ? &s_btn_active : &s_btn_idle;
+        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), (i == TPICK_A) ? "A" : "B", &s_btn_label_style);
+        if (nt_ui_button_end(s_ctx)) {
+            clicked = i;
+        }
+    }
+    return clicked;
+}
+
+/* Two panels mounted BEHIND the central object so the cursor ray must pass it to reach them. NEAR
+ * (z=-2.5) sits slightly left, FAR (z=-4.0) slightly right → they overlap along the sightline.
+ *   - Aim THROUGH the object → buttons are occluded (set_pointer_occlusion blocks the click).
+ *   - Where NEAR & FAR overlap → only NEAR's button reacts (front-most arbitration); strafe (A/D)
+ *     so the object stops blocking to see it. The side that sticks out belongs to one panel only.
+ * Declared inside ui3d-root (floating, bbox at 0,0); the XFORM maps each to its world mount. */
+static void declare_test_panels(void) {
+    const float cy = ROOM_H * 0.5F;
+    const nt_ui_transform_t xf_far = make_wall_xform(0.7F, cy, -4.0F, 0.0F, (float)TPANEL_W, (float)TPANEL_H);
+    const nt_ui_transform_t xf_near = make_wall_xform(-0.7F, cy, -2.5F, 0.0F, (float)TPANEL_W, (float)TPANEL_H);
+
+    /* FAR first — declared/drawn under NEAR and farther along the ray, so it loses the overlap. */
+    CLAY({.id = CLAY_ID("test-far"),
+          .userData = (void *)NT_UI_DATA_XFORM(LAYER_PANEL, &xf_far, 1.0F),
+          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(TPANEL_W), CLAY_SIZING_FIXED(TPANEL_H)},
+                     .padding = CLAY_PADDING_ALL(10),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 10,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = {52.0F, 30.0F, 34.0F, 235.0F}}) {
+        const int hit = test_panel_body("FAR", s_id_far_btn, s_far_sel);
+        if (hit >= 0) {
+            s_far_sel = hit;
+            (void)snprintf(s_last_pick, sizeof s_last_pick, "FAR %c", (char)('A' + hit));
+        }
+    }
+    /* NEAR second — drawn on top, nearer along the ray → wins arbitration in the overlap. */
+    CLAY({.id = CLAY_ID("test-near"),
+          .userData = (void *)NT_UI_DATA_XFORM(LAYER_PANEL, &xf_near, 1.0F),
+          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(TPANEL_W), CLAY_SIZING_FIXED(TPANEL_H)},
+                     .padding = CLAY_PADDING_ALL(10),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 10,
+                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = {30.0F, 38.0F, 52.0F, 235.0F}}) {
+        const int hit = test_panel_body("NEAR", s_id_near_btn, s_near_sel);
+        if (hit >= 0) {
+            s_near_sel = hit;
+            (void)snprintf(s_last_pick, sizeof s_last_pick, "NEAR %c", (char)('A' + hit));
+        }
+    }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -486,6 +651,9 @@ static void declare_panels(void) {
                 }
             }
         }
+
+        /* Occlusion / arbitration test panels, mounted behind the central object. */
+        declare_test_panels();
     }
 }
 // #endregion
@@ -544,6 +712,12 @@ static void draw_hud(float fb_w, float fb_h) {
     char status[64];
     (void)snprintf(status, sizeof status, "shape: %-7s   speed: %s", s_shape_labels[s_shape_kind], s_speed_labels[s_speed_kind]);
     draw_hud_block(status, right_x, ry, HUD_SIZE, accent);
+    ry -= HUD_SIZE + 2.0F;
+
+    /* Which test-panel button last received a click (NEAR vs FAR proves front-most arbitration). */
+    char pick_line[48];
+    (void)snprintf(pick_line, sizeof pick_line, "picked: %s", s_last_pick);
+    draw_hud_block(pick_line, right_x, ry, HUD_SIZE, white);
 
     if (s_debug_overlay) {
         /* Anchor the debug block ABOVE the bottom; nt_stats is ~6 lines so allow ~110 px. */
@@ -679,6 +853,7 @@ static void frame(void) {
     nt_shape_renderer_set_cam_pos(cam_pos);
     nt_shape_renderer_set_depth(true);
     draw_room();
+    draw_boards();
     draw_shape();
     nt_shape_renderer_flush();
 
@@ -694,26 +869,37 @@ static void frame(void) {
         const nt_pointer_t mouse_phys = g_nt_input.pointers[0];
         nt_ui_begin(s_ctx, fb_w, fb_h, dt, &mouse_phys, 1);
         nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
+        /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel
+         * behind the object can't be clicked through it (game owns the world raycast). */
+        float occl_dist = 0.0F;
+        if (cursor_object_distance(mouse_phys.x, mouse_phys.y, fb_w, fb_h, vp_3d, &occl_dist)) {
+            nt_ui_set_pointer_occlusion(s_ctx, 0, occl_dist);
+        }
         declare_panels();
         nt_ui_end(s_ctx);
 
+        /* UI labels now write depth (world panels sort by depth) → bias glyph quads apart so their AA
+         * fringes don't z-fight; the walker emits text with the renderer's current bias. Reset after. */
+        nt_text_renderer_set_glyph_depth_bias(0.0001F);
         nt_ui_walk(s_ctx, &target);
         /* Flush UI draws under VP_3D BEFORE switching uniforms; otherwise labels emitted
          * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
+        nt_text_renderer_set_glyph_depth_bias(0.0F);
 
-        /* DEBUG: standalone text directly in world space at (0, 4, 0). If this shows up,
-         * text material + font + VP_3D plumbing work — panel labels then disappear due to a
-         * walker emit issue. If this is also invisible, the bug is below nt_ui. */
+        /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
+         * quads from z-fighting at their AA fringes (set before the draw, reset after). */
         if (s_font_bound) {
-            mat4 debug_model;
-            glm_mat4_identity(debug_model);
-            glm_translate(debug_model, (vec3){-2.5F, 4.0F, 0.0F});
             const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
-            nt_text_renderer_set_material(s_text_material);
+            nt_text_renderer_set_material(s_text_material_3d);
             nt_text_renderer_set_font(s_font);
-            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)debug_model, 0.6F, yellow, 0.0F, 0.0F);
+            nt_text_renderer_set_glyph_depth_bias(0.0001F);
+            mat4 text_model;
+            glm_mat4_identity(text_model);
+            glm_translate(text_model, (vec3){-7.0F, 4.0F, 0.0F});
+            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)text_model, 0.8F, yellow, 0.0F, 0.0F);
+            nt_text_renderer_set_glyph_depth_bias(0.0F);
             nt_text_renderer_flush();
         }
     }
@@ -727,9 +913,17 @@ static void frame(void) {
     }
 
     if (ui_can_render && nt_ui_inspector_is_active(s_ctx)) {
+        /* Sidebar tree is its own screen-space pass (ortho). */
         nt_gfx_update_buffer(s_frame_ubo, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         nt_ui_debug_inspector_walk(s_ctx, &target);
+        nt_sprite_renderer_flush();
+        nt_text_renderer_flush();
+
+        /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
+         * so it lands on the panel; the depth-off inspector materials keep it on top. */
+        nt_gfx_update_buffer(s_frame_ubo, &uniforms_3d, sizeof uniforms_3d);
+        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
@@ -775,7 +969,7 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
     nt_atlas_init();
-    nt_material_init(&(nt_material_desc_t){.max_materials = 4});
+    nt_material_init(&(nt_material_desc_t){.max_materials = 6}); /* sprite, text, text_3d, inspector sprite+text, + margin */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_shape_renderer_init();
@@ -810,21 +1004,27 @@ int main(int argc, char *argv[]) {
 
     s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
     s_sprite_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
+    s_sprite_cutoff_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
     s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_BUTTONS_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
 
+    /* World-mounted UI: depth_write ON so overlapping panels sort by depth (nearer occludes farther
+     * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
+     * they don't punch depth; the per-element depth bias (element_depth_bias_ndc) keeps each panel's labels above its own bg. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
-        .fs = s_sprite_fs_handle,
+        .fs = s_sprite_cutoff_fs_handle,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend_mode = NT_BLEND_MODE_ALPHA,
         .depth_test = true,
-        .depth_write = false,
+        .depth_write = true,
         .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {1.0F / 255.0F}},
+        .param_count = 1,
         .label = "ui_3d_demo_sprite",
     });
     s_text_material = nt_material_create(&(nt_material_create_desc_t){
@@ -834,11 +1034,51 @@ int main(int argc, char *argv[]) {
         .depth_test = true,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
         .label = "ui_3d_demo_text",
+    });
+    s_text_material_3d = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_text_vs_handle,
+        .fs = s_text_fs_handle,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = true,
+        .depth_write = true,
+        .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
+        .label = "ui_3d_demo_text_3d",
     });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
+    /* UI labels use the depth-writing text material so they sort with the panels (overlapping world
+     * panels). The HUD/stats keep s_text_material (depth_write=false) — they're a flat screen overlay. */
+    nt_ui_set_text_material(s_ctx, s_text_material_3d);
+    /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
+     * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
+    s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_sprite_vs_handle,
+        .fs = s_sprite_fs_handle,
+        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
+        .texture_count = 1,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .label = "ui_3d_demo_inspector_sprite",
+    });
+    s_inspector_text_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_text_vs_handle,
+        .fs = s_text_fs_handle,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
+        .label = "ui_3d_demo_inspector_text",
+    });
+    nt_ui_inspector_set_materials(s_ctx, s_inspector_sprite_material, s_inspector_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .curve_texture_width = 1024,
@@ -870,6 +1110,9 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_material_destroy(s_text_material_3d);
+    nt_material_destroy(s_inspector_sprite_material);
+    nt_material_destroy(s_inspector_text_material);
     nt_material_shutdown();
     nt_stats_shutdown();
     nt_mem_scratch_shutdown();

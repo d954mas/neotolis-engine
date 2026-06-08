@@ -8,6 +8,7 @@ precision highp int;
 uniform sampler2D u_curve_texture;       // RGBA16F -- curve control points as float16
 uniform highp usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
 uniform int u_curve_tex_width;           // For linear-to-2D addressing
+uniform vec4 u_alpha_cutoff;             // .x = coverage discard threshold (set per material; 0 disables)
 
 in vec2 v_texcoord;
 flat in uvec4 v_glyph;       // curve_offset_y, band_row, curve_offset_x, band_count
@@ -163,7 +164,7 @@ float SlugRender(vec2 coord) {
 void main() {
     float coverage = SlugRender(v_texcoord);
 
-    if (coverage < 1.0 / 255.0)
+    if (coverage < u_alpha_cutoff.x)
         discard;
 
     // Premultiplied alpha output

@@ -17,11 +17,20 @@
 /* uint16 index buffer: base = glyph_index * 4, must not overflow */
 _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPHS > 16383 overflows uint16 index buffer");
 
+/* Default for the slug_text `u_alpha_cutoff.x` param: discards only fully-empty glyph-quad pixels.
+ * Good even for depth-writing world text: pair it with a per-glyph depth bias
+ * (nt_text_renderer_set_glyph_depth_bias) to separate overlapping glyphs — raising the cutoff would
+ * harden AA edges without removing a real halo. */
+#define NT_TEXT_ALPHA_CUTOFF_DEFAULT (1.0F / 255.0F)
+
 void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
-/* Both setters auto-flush staging on change. */
+/* Material must use the slug_text vs/fs, ALPHA blend, cull NONE. u_alpha_cutoff is an opt-in param:
+ * declare it (value = NT_TEXT_ALPHA_CUTOFF_DEFAULT) to enable the frag's coverage discard; omit it and
+ * the unset uniform reads 0 → no discard (the renderer binds only declared params). Both setters
+ * auto-flush staging on change. */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
@@ -34,6 +43,12 @@ void nt_text_renderer_set_font(nt_font_t font);
  *   0 = font's natural line advance. Positive = loose, negative = tight. */
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
+
+/* Per-glyph clip-space depth bias toward the near plane — the VS does gl_Position.z -= bias * w, NOT a
+ * world/model-space +Z offset. With depth_write, coplanar glyph quads z-fight at overlapping AA fringes;
+ * a small per-glyph bias separates them by draw order. Signed. 0 (default) = off. Persists until changed
+ * (kept across restore_gpu, cleared on cold init/shutdown). */
+void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
 
 void nt_text_renderer_flush(void);
 
@@ -52,6 +67,7 @@ void nt_text_renderer_test_reset_call_counters(void);
  * Lets tests pin nt_ui's emit_text mat4 construction without needing a real font. */
 const float *nt_text_renderer_test_last_model(void);
 uint32_t nt_text_renderer_test_draw_n_calls(void);
+float nt_text_renderer_test_glyph_depth_bias(void);
 #endif
 // #endregion
 

@@ -423,7 +423,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed) {
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
@@ -460,6 +460,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             memcpy(ctx->tree_baked[f->elem_idx].m, m_cur, sizeof m_cur);
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
+            ctx->tree_baked[f->elem_idx].zindex = root_zindex; /* uniform per Clay tree root */
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
@@ -526,6 +527,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         if (root_idx < 0) {
             continue;
         }
+        /* Effective Clay zIndex is uniform per tree root (Clay tags every command of a root with it). */
+        const int16_t root_zindex = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx)->zIndex;
 
         nt_ui_baked_xform_t seed;
         if (root_idx == 0) {
@@ -549,7 +552,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                 }
             }
         }
-        bt_dfs_subtree(ctx, cc, elem_idx, &seed);
+        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex);
     }
     // #endregion
 
@@ -1035,70 +1038,80 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
-        /* Transform-aware; LAST hit wins (deepest in declaration order). */
         const float px = context->pointerInfo.position.x;
         const float py = context->pointerInfo.position.y;
-        for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
-            const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
-            if (z->id == 0U) {
-                continue;
-            }
-            /* Forward-transform the visual center; panel filter operates in screen space.
-             * Extract 2D affine subset from the recorded mat4 (a=m[0], b=m[4], c=m[1], d=m[5]). */
-            const float a = z->m[0];
-            const float b = z->m[4];
-            const float c = z->m[1];
-            const float dd = z->m[5];
-            const float tx = z->m[12];
-            const float ty = z->m[13];
-            const float screen_cx = (z->center_x * a) + (z->center_y * b) + tx;
-            if (screen_cx >= panel_left_x) {
-                continue;
-            }
-            const float det = (a * dd) - (b * c);
-            if (det == 0.0F) {
-                continue;
-            }
-            const float inv_a = dd / det;
-            const float inv_b = -b / det;
-            const float inv_c = -c / det;
-            const float inv_d = a / det;
-            const float rx = px - tx;
-            const float ry = py - ty;
-            const float lx = (inv_a * rx) + (inv_b * ry);
-            const float ly = (inv_c * rx) + (inv_d * ry);
-            if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
-                highlightedElementId = z->id;
-                break;
-            }
-        }
 
-        /* Prefer a registered-widget id so panel/group/image/label surface over their wrappers. */
-        if (highlightedElementId == 0U) {
-            uint32_t fallback_id = 0U;
-            for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
-                const Clay_ElementId *eid = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
-                if (cdv_is_inspector_owned_id(eid->id)) {
+        if (ctx->use_raycast_input) {
+            /* 3D ctx: the 2D-affine screen scan below can't apply (z->m maps Clay→world, not
+             * Clay→screen). Pick via ray-vs-zone-plane with the game view_proj; skip the
+             * pointerOverIds fallback — that list is 2D and would grab the GROW root. */
+            if (px < panel_left_x) {
+                highlightedElementId = nt_ui_internal_pick_zone_3d(ctx, px, py);
+            }
+        } else {
+            /* Transform-aware; LAST hit wins (deepest in record/step order). */
+            for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
+                const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
+                if (z->id == 0U) {
                     continue;
                 }
-                const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
-                if (item == NULL) {
+                /* Forward-transform the visual center; panel filter operates in screen space.
+                 * Extract 2D affine subset from the recorded mat4 (a=m[0], b=m[4], c=m[1], d=m[5]). */
+                const float a = z->m[0];
+                const float b = z->m[4];
+                const float c = z->m[1];
+                const float dd = z->m[5];
+                const float tx = z->m[12];
+                const float ty = z->m[13];
+                const float screen_cx = (z->center_x * a) + (z->center_y * b) + tx;
+                if (screen_cx >= panel_left_x) {
                     continue;
                 }
-                /* Skip anything inside the panel footprint — the named-id set is not exhaustive. */
-                if (item->boundingBox.x >= panel_left_x) {
+                const float det = (a * dd) - (b * c);
+                if (det == 0.0F) {
                     continue;
                 }
-                if (nt_ui_widget_lookup(ctx, eid->id) != NULL) {
-                    highlightedElementId = eid->id;
+                const float inv_a = dd / det;
+                const float inv_b = -b / det;
+                const float inv_c = -c / det;
+                const float inv_d = a / det;
+                const float rx = px - tx;
+                const float ry = py - ty;
+                const float lx = (inv_a * rx) + (inv_b * ry);
+                const float ly = (inv_c * rx) + (inv_d * ry);
+                if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
+                    highlightedElementId = z->id;
                     break;
                 }
-                if (fallback_id == 0U) {
-                    fallback_id = eid->id;
-                }
             }
-            if (highlightedElementId == 0U && fallback_id != 0U) {
-                highlightedElementId = fallback_id;
+
+            /* Prefer a registered-widget id so panel/group/image/label surface over their wrappers. */
+            if (highlightedElementId == 0U) {
+                uint32_t fallback_id = 0U;
+                for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
+                    const Clay_ElementId *eid = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
+                    if (cdv_is_inspector_owned_id(eid->id)) {
+                        continue;
+                    }
+                    const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
+                    if (item == NULL) {
+                        continue;
+                    }
+                    /* Skip anything inside the panel footprint — the named-id set is not exhaustive. */
+                    if (item->boundingBox.x >= panel_left_x) {
+                        continue;
+                    }
+                    if (nt_ui_widget_lookup(ctx, eid->id) != NULL) {
+                        highlightedElementId = eid->id;
+                        break;
+                    }
+                    if (fallback_id == 0U) {
+                        fallback_id = eid->id;
+                    }
+                }
+                if (highlightedElementId == 0U && fallback_id != 0U) {
+                    highlightedElementId = fallback_id;
+                }
             }
         }
     }

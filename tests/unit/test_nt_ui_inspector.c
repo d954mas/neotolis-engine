@@ -406,11 +406,13 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
     const float btn_cx = btn_x + (btn_w * 0.5F);
     const float btn_cy = btn_y + (btn_h * 0.5F);
 
-    /* Frame 1: declare bbox so the next frame has a hit-target. */
+    /* Frame 1: declare bbox + step so the button registers (front-most arbitration reads the
+     * prev-frame interactive registry; a widget reacts only once registered). */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY(
         {.id = CLAY_ID("visible_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("visible_btn"));
     }
     nt_ui_end(s_fx.ctx);
 

@@ -55,7 +55,7 @@ typedef struct {
     float m[16];
     float opacity;
     uint16_t hierarchy_depth;
-    uint16_t _reserved;
+    int16_t zindex; /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
     float _pad[2];
 } nt_ui_baked_xform_t;
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
@@ -77,9 +77,16 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B"
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     nt_ui_baked_xform_t bx = {
-        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, ._reserved = 0U, ._pad = {0.0F, 0.0F}};
+        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, .zindex = 0, ._pad = {0.0F, 0.0F}};
     return bx;
 }
+
+/* Per-frame record of an interactive widget (one per step_interaction), used next frame by the
+ * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
+typedef struct {
+    uint32_t id;
+    int16_t pad[4]; /* hit padding L/R/T/B */
+} nt_ui_interactive_t;
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
@@ -93,8 +100,14 @@ struct nt_ui_context {
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
+    /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved lazily once
+     * per frame from prev-frame layout (3D: nearest ray-t within cutoff; 2D: top zIndex). Ordered here
+     * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
+    nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
+    float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
+    bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
 
     /* Buttons do not nest (asserted). */
     struct {
@@ -121,7 +134,15 @@ struct nt_ui_context {
     nt_ui_baked_xform_t *hit_baked;
     uint32_t *hit_clip_parent_id;
     uint32_t *hit_generation;
+
+    /* Double-buffered interactive-widget registry (always-on). step_interaction appends to _cur this
+     * frame; the hot resolve reads _prev (last frame). Buffers swap each begin. Arena-allocated. */
+    nt_ui_interactive_t *interactive_prev;
+    nt_ui_interactive_t *interactive_cur;
+
     uint32_t current_generation;
+    uint32_t interactive_prev_count;
+    uint32_t interactive_cur_count;
 
     /* Per-walk metrics. */
     uint32_t last_walk_draw_call_delta;
@@ -191,6 +212,9 @@ struct nt_ui_context {
     uint32_t inspector_collapsed_count;
 
     nt_ui_inspector_metrics_t inspector_metrics;
+    /* Optional overlay materials (typically depth_test=false); 0 = fall back to the game's sprite/text material. */
+    nt_material_t inspector_sprite_material;
+    nt_material_t inspector_text_material;
 #endif /* NT_UI_DEBUG_TOOLS */
 
     Clay_Arena clay_arena;
@@ -261,11 +285,23 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
+/* 3D-ctx inspector viewport pick: last-recorded zone the cursor ray hits, game view_proj (record/step
+ * order, not camera distance). Scope: recorded debug_zones only (interactive widgets) — non-interactive
+ * elements are tree-selectable, not scene-hover-pickable. 0 = none. */
+uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
+
 void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y);
 
 void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color);
 
 void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color);
+
+/* 3D-ctx variants: corners stay in the element's Clay-layout space and `model` (the recorded world
+ * mat4) maps them into the scene. Caller binds the perspective view_proj so the debug overlay lands
+ * on the element in 3D. The 2D-ctx helpers above pre-project to screen and emit under identity. */
+void nt_ui_internal_emit_filled_quad_m(nt_resource_t atlas, uint32_t region, const float v[4][2], const float model[16], uint32_t color);
+
+void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, const float model[16], uint32_t color);
 
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);

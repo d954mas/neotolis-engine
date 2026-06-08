@@ -9,18 +9,20 @@
 
 #include "utf8/nt_utf8.h"
 
+#include <math.h>
 #include <string.h>
 
 // #region Vertex format
-/* 68 bytes per vertex, matching slug_text.vert contract */
+/* 72 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
     float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_offset_x, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     float color[4];        /* 16B: RGBA float */
+    float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 68, "text vertex stride must be 68 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 72, "text vertex stride must be 72 bytes");
 // #endregion
 
 // #region Module state
@@ -38,6 +40,9 @@ static struct {
     /* Current state */
     nt_material_t material;
     nt_font_t font;
+    /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
+     * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
+    float glyph_depth_bias;
 
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
@@ -86,10 +91,10 @@ static void create_pipeline(void) {
         nt_gfx_destroy_pipeline(s_text.pipeline);
     }
 
-    /* Slug vertex layout: 5 attributes, stride = 68 bytes */
+    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
     nt_vertex_layout_t layout = {
-        .attr_count = 5,
-        .stride = 68,
+        .attr_count = 6,
+        .stride = 72,
         .attrs =
             {
                 {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},  /* a_position */
@@ -97,6 +102,7 @@ static void create_pipeline(void) {
                 {.location = 2, .format = NT_FORMAT_FLOAT4, .offset = 20}, /* a_glyph_data */
                 {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 36}, /* a_glyph_bounds */
                 {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 52}, /* a_color */
+                {.location = 5, .format = NT_FORMAT_FLOAT, .offset = 68},  /* a_depth_bias */
             },
     };
 
@@ -129,27 +135,16 @@ static void create_pipeline(void) {
 // #endregion
 
 // #region Lifecycle
-void nt_text_renderer_init(void) {
-    NT_ASSERT(!s_text.initialized);
-    memset(&s_text, 0, sizeof(s_text));
-
-    /* Generate quad indices */
+/* GPU resources only — the pipeline is created lazily in flush, so this owns just the buffers + index
+ * pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
+static void create_gpu_resources(void) {
     generate_quad_indices();
-
-    /* Register pre-flush callback so font cache clears draw our staging
-     * buffer while texture offsets are still valid. Safe when staging is
-     * empty — flush does early return on glyph_count == 0. */
-    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
-
-    /* Create dynamic vertex buffer */
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_DYNAMIC,
         .size = NT_TEXT_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_text_vertex_t),
         .label = "text_vbo",
     });
-
-    /* Create immutable index buffer with pre-generated quad pattern */
     s_text.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX,
         .usage = NT_USAGE_IMMUTABLE,
@@ -158,7 +153,28 @@ void nt_text_renderer_init(void) {
         .index_type = NT_INDEX_UINT16,
         .label = "text_ibo",
     });
+}
 
+static void destroy_gpu_resources(void) {
+    if (s_text.pipeline.id != 0) {
+        nt_gfx_destroy_pipeline(s_text.pipeline);
+        s_text.pipeline = (nt_pipeline_t){0};
+    }
+    nt_gfx_destroy_buffer(s_text.vbo);
+    nt_gfx_destroy_buffer(s_text.ibo);
+    s_text.vbo = (nt_buffer_t){0};
+    s_text.ibo = (nt_buffer_t){0};
+}
+
+void nt_text_renderer_init(void) {
+    NT_ASSERT(!s_text.initialized);
+    memset(&s_text, 0, sizeof(s_text)); /* cold start: clear everything, GPU + logical */
+
+    /* Pre-flush hook so font-cache evictions flush our staging while texture offsets are still valid.
+     * Safe when staging is empty (flush early-returns on glyph_count == 0). */
+    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
+
+    create_gpu_resources();
     s_text.initialized = true;
 }
 
@@ -166,11 +182,7 @@ void nt_text_renderer_shutdown(void) {
     if (!s_text.initialized) {
         return;
     }
-    if (s_text.pipeline.id != 0) {
-        nt_gfx_destroy_pipeline(s_text.pipeline);
-    }
-    nt_gfx_destroy_buffer(s_text.vbo);
-    nt_gfx_destroy_buffer(s_text.ibo);
+    destroy_gpu_resources();
     nt_font_set_pre_flush_callback(NULL);
     memset(&s_text, 0, sizeof(s_text));
 }
@@ -179,19 +191,14 @@ void nt_text_renderer_restore_gpu(void) {
     if (!s_text.initialized) {
         return;
     }
-
-    /* Save state that survives context loss */
-    nt_material_t saved_material = s_text.material;
-    nt_font_t saved_font = s_text.font;
-
-    /* Full shutdown → init cycle (frees pool slots, no leaks) */
-    nt_text_renderer_shutdown();
-    nt_text_renderer_init();
-
-    /* Restore state */
-    s_text.material = saved_material;
-    s_text.font = saved_font;
-    s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
+    /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
+     * glyph_depth_bias) is left untouched, so it survives by default — no save/restore list to forget
+     * when a field is added. */
+    destroy_gpu_resources();
+    create_gpu_resources();
+    s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
+    s_text.glyph_count = 0;
+    s_text.pipeline_material_version = 0; /* pipeline destroyed above → flush rebuilds it lazily */
 }
 // #endregion
 
@@ -248,7 +255,7 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
@@ -294,6 +301,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     v[0].glyph_bounds[2] = (float)g->bbox_x1;
     v[0].glyph_bounds[3] = (float)g->bbox_y1;
     memcpy(v[0].color, color, 16);
+    v[0].depth_bias = glyph_bias;
     v[1] = v[0];
     v[2] = v[0];
     v[3] = v[0];
@@ -351,6 +359,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     uint32_t prev_cp = 0;
     float pen_x = 0.0F;
     float pen_y = 0.0F;
+    float glyph_bias = 0.0F; /* accumulates per emitted glyph (clip-space depth bias) */
     /* Natural line advance from font metrics, plus user-supplied leading. */
     const float natural_line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
     const float line_advance = natural_line_advance + line_leading;
@@ -397,13 +406,20 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x, pen_y, color, band_count);
+            emit_quad(g, model, scale, pen_x, pen_y, color, band_count, glyph_bias);
+            glyph_bias += s_text.glyph_depth_bias;
         }
 
         pen_x += (float)g->advance * scale;
         prev_cp = codepoint;
         had_glyph_on_line = true;
     }
+}
+
+void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
+    NT_ASSERT(s_text.initialized);
+    NT_ASSERT(isfinite(bias_per_glyph) && "nt_text_renderer_set_glyph_depth_bias: bias must be finite");
+    s_text.glyph_depth_bias = bias_per_glyph; /* signed: subtracted from NDC z in the VS */
 }
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
@@ -448,6 +464,19 @@ void nt_text_renderer_flush(void) {
         nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
     }
 
+    /* Re-read material vec4 params every flush (e.g. u_alpha_cutoff) — same contract sprite/mesh
+     * renderers honor; without this the shader sees uninitialized uniforms. */
+    if (s_text.material.id != 0) {
+        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
+        if (mi != NULL) {
+            for (uint8_t p = 0; p < mi->param_count; p++) {
+                if (mi->param_names[p] != NULL) {
+                    nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
+                }
+            }
+        }
+    }
+
     /* Single draw call per flush */
     nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
 
@@ -472,5 +501,6 @@ void nt_text_renderer_test_reset_call_counters(void) {
 }
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
+float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
 #endif
 // #endregion

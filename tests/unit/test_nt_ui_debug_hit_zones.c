@@ -87,12 +87,17 @@ static void test_debug_recording_off_no_capture(void) {
 /* ---- Test 2: recording ON, 3 distinct queries -> count==3, ids match ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_recording_on_records_zones(void) {
-    /* Frame 1: declare 3 elements at distinct positions. */
+    /* Frame 1: declare 3 elements + step them so they enter the interactive registry (front-most
+     * arbitration reads the prev-frame registry; a widget reacts only once registered). */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
     declare_btn("btnC", BTN_X, BTN_Y + 100.0F);
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    const int16_t pad_warm[4] = {8, 8, 8, 8};
+    (void)nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btnC"), pad_warm);
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: turn recording on, query all 3. */
@@ -185,11 +190,14 @@ static void test_debug_draw_off_mode_silent(void) {
 /* ---- Test 6: mode filter HOVER returns only zones with HOVERED flag ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_mode_filter(void) {
-    /* Two buttons. Pointer hovers only btnA. */
+    /* Two buttons. Pointer hovers only btnA. Frame 1 steps both so they register for next-frame
+     * arbitration (a widget reacts only once it is in the prev-frame interactive registry). */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 300.0F, BTN_Y);
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
     nt_ui_end(s_fx.ctx);
 
     nt_ui_debug_set_recording(s_fx.ctx, true);

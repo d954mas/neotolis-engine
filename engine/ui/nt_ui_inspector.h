@@ -32,6 +32,11 @@ extern const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT;
 
 void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics);
 
+/* Optional overlay materials for the inspector — typically depth_test=false so the debug view stays
+ * on top without testing the game's 3D depth (a passive overlay, no depth-buffer side effects).
+ * Pass NT_MATERIAL_INVALID for either to fall back to the game's sprite/text material. */
+void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text);
+
 /* Called by nt_ui_end if active; not for game code. */
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
 
@@ -39,7 +44,10 @@ void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
  * screen-space view_proj first, e.g. nt_ui_make_screen_view_proj(...). */
 void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
-/* Call AFTER debug inspector walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label. */
+/* Call AFTER debug inspector walk, BEFORE nt_gfx_end_pass. label_size <= 0 skips label.
+ * Side effect: leaves the sprite/text renderers bound to the inspector (or game) materials and does
+ * NOT restore the prior binding — call it as the terminal UI draw of the pass, or rebind your own
+ * materials afterward. */
 void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
 
 #else /* NT_UI_DEBUG_TOOLS */
@@ -66,6 +74,11 @@ static inline void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui
     (void)ctx;
     (void)metrics;
     nt_log_warn("nt_ui_inspector: NT_UI_DEBUG_TOOLS=OFF in this build — metrics ignored. Rebuild with -DNT_UI_DEBUG_TOOLS=ON.");
+}
+static inline void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text) {
+    (void)ctx;
+    (void)sprite;
+    (void)text;
 }
 static inline void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) { (void)ctx; }
 static inline void nt_ui_debug_inspector_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {

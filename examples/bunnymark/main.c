@@ -591,6 +591,8 @@ int main(void) {
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
+        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
+        .param_count = 1,
         .label = "stats_overlay",
     });
     s_overlay_font = nt_font_create(&(nt_font_create_desc_t){

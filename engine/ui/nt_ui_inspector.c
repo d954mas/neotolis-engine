@@ -36,6 +36,14 @@ void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_met
     NT_ASSERT(metrics->font_size > 0U && "nt_ui_inspector_set_metrics: font_size must be > 0");
     ctx->inspector_metrics = *metrics;
 }
+
+void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text) {
+    NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_materials: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_inspector_set_materials: must be called outside begin/end");
+    /* 0 handles fall back to the game's sprite/text material at walk time. */
+    ctx->inspector_sprite_material = sprite;
+    ctx->inspector_text_material = text;
+}
 // #endregion
 
 // #region toggle + getters
@@ -142,16 +150,89 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_gfx_set_scissor_enabled(true);
     }
 
-    /* Fall back to axis-aligned bbox for plain Clay elements without a recorded zone. */
+    /* Inspector text material when set, else the game's (mirrors draw_hit_zones). Gate can_label on
+     * the resolved one so a depth-off-only inspector material still draws the label. */
+    const nt_material_t tmat = (ctx->inspector_text_material.id != 0U) ? ctx->inspector_text_material : ctx->text_material;
+    const bool can_label = tmat.id != 0U && font.id != 0U && label_size > 0.0F;
+    const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+
+    if (ctx->use_raycast_input) {
+        /* 3D ctx: every walked element (not only interactive widgets) has its world mat4 snapshotted
+         * in hit_baked, so fetch it by id and emit the element's Clay bbox under it. Caller binds the
+         * perspective view_proj; the depth-off inspector material keeps the highlight on top. */
+        const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, ctx->inspector_highlight_id);
+        const bool slot_ok = (slot >= 0) && (slot < (int32_t)ctx->max_elements) && (ctx->hit_generation[slot] == ctx->current_generation);
+        const float *m = slot_ok ? ctx->hit_baked[slot].m : NULL;
+        /* Identity affine + zero translation = no 3D placement (e.g. the GROW root): its full-canvas
+         * bbox would map to a screen-filling quad, so only highlight elements that carry a transform. */
+        const bool placed = (m != NULL) && (m[0] != 1.0F || m[4] != 0.0F || m[1] != 0.0F || m[5] != 1.0F || m[12] != 0.0F || m[13] != 0.0F || m[14] != 0.0F);
+        if (placed) {
+            const nt_material_t smat = (ctx->inspector_sprite_material.id != 0U) ? ctx->inspector_sprite_material : ctx->sprite_material;
+            nt_sprite_renderer_set_material(smat);
+
+            const float vl = info.bbox_x;
+            const float vt = info.bbox_y;
+            const float vr = info.bbox_x + info.bbox_w;
+            const float vb = info.bbox_y + info.bbox_h;
+
+            int16_t pad[4] = {0, 0, 0, 0};
+            if (nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0)) {
+                const float pad_corners[4][2] = {
+                    {vl - (float)pad[0], vt - (float)pad[2]},
+                    {vr + (float)pad[1], vt - (float)pad[2]},
+                    {vr + (float)pad[1], vb + (float)pad[3]},
+                    {vl - (float)pad[0], vb + (float)pad[3]},
+                };
+                nt_ui_internal_emit_filled_quad_m(ctx->atlas, ctx->white_region, pad_corners, m, 0x6033FFFFU);
+                nt_ui_internal_emit_outline_m(ctx->atlas, ctx->white_region, pad_corners, 2.0F, m, 0xFF00FFFFU);
+            }
+            const float vis_corners[4][2] = {{vl, vt}, {vr, vt}, {vr, vb}, {vl, vb}};
+            nt_ui_internal_emit_filled_quad_m(ctx->atlas, ctx->white_region, vis_corners, m, 0x641C42A8U);
+            nt_ui_internal_emit_outline_m(ctx->atlas, ctx->white_region, vis_corners, 2.0F, m, 0xFFFFFFFFU);
+            nt_sprite_renderer_flush();
+
+            if (can_label) {
+                char buf[80];
+                int n;
+                if (info.id_string_len > 0U && info.id_string != NULL) {
+                    const int slen = (info.id_string_len > 48U) ? 48 : (int)info.id_string_len;
+                    n = snprintf(buf, sizeof buf, "id=%.*s", slen, info.id_string);
+                } else {
+                    n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
+                }
+                if (n > 0) {
+                    /* Label in Clay px at the top-left, mapped by m onto the element; col1 negated so
+                     * glyphs read upright (same col1-flip as emit_text; no text_scale to divide out
+                     * here — label_size is already in renderer units). */
+                    const float ox = vl + 2.0F;
+                    const float oy = vt + label_size + 2.0F;
+                    float tm[16];
+                    for (int rr = 0; rr < 4; ++rr) {
+                        tm[rr] = m[rr];
+                        tm[4 + rr] = -m[4 + rr];
+                        tm[8 + rr] = m[8 + rr];
+                        tm[12 + rr] = (ox * m[rr]) + (oy * m[4 + rr]) + m[12 + rr];
+                    }
+                    nt_text_renderer_set_material(tmat);
+                    nt_text_renderer_set_font(font);
+                    nt_text_renderer_draw_n(buf, (size_t)n, tm, label_size, white, 0.0F, 0.0F);
+                    nt_text_renderer_flush();
+                }
+            }
+        }
+        if (scissor_w > 0 && scissor_h > 0) {
+            nt_gfx_set_scissor_enabled(false);
+        }
+        return;
+    }
+
+    /* 2D ctx: project the composed affine subset to screen and emit under identity. */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(ctx, ctx->inspector_highlight_id);
-    /* Skip projection when composed mat4 is identity (top-left 2×2 + col3 subset). */
     const bool z_has_xform = (z != NULL) && (z->m[0] != 1.0F || z->m[4] != 0.0F || z->m[1] != 0.0F || z->m[5] != 1.0F || z->m[12] != 0.0F || z->m[13] != 0.0F);
     if (z_has_xform) {
         nt_sprite_renderer_set_material(ctx->sprite_material);
-
         int16_t pad[4] = {0, 0, 0, 0};
         const bool has_pad = nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0);
-
         if (has_pad) {
             float pad_corners[4][2] = {
                 {z->layout_l, z->layout_t},
@@ -165,7 +246,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, pad_corners, 0x6033FFFFU);
             nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, pad_corners, 1.0F, 0xFF00FFFFU);
         }
-
         float vis_corners[4][2] = {
             {z->visual_l, z->visual_t},
             {z->visual_r, z->visual_t},
@@ -179,7 +259,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, 0xFFFFFFFFU);
 
         /* Label at corner with max y (GL-Y-up TOP of projected quad). */
-        if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+        if (can_label) {
             float top_x = vis_corners[0][0];
             float top_y = vis_corners[0][1];
             for (uint32_t k = 1; k < 4U; ++k) {
@@ -197,16 +277,11 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
             }
             if (n > 0) {
-                const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-                overlay_draw_text(ctx->text_material, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, color, buf, (size_t)n);
+                overlay_draw_text(tmat, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
             }
         }
-
         nt_sprite_renderer_flush();
-        if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
-            nt_text_renderer_flush();
-        }
-        /* Flush BEFORE disable so panel-clipped staging carries the scissor. */
+        nt_text_renderer_flush();
         if (scissor_w > 0 && scissor_h > 0) {
             nt_gfx_set_scissor_enabled(false);
         }
@@ -240,7 +315,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 0x641C42A8U);
     overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, 0xFFFFFFFFU);
 
-    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+    if (can_label) {
         char buf[80];
         int n;
         if (info.id_string_len > 0U && info.id_string != NULL) {
@@ -250,13 +325,12 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
         }
         if (n > 0) {
-            const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-            overlay_draw_text(ctx->text_material, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, color, buf, (size_t)n);
+            overlay_draw_text(tmat, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, white, buf, (size_t)n);
         }
     }
 
     nt_sprite_renderer_flush();
-    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+    if (can_label) {
         nt_text_renderer_flush();
     }
     if (scissor_w > 0 && scissor_h > 0) {
