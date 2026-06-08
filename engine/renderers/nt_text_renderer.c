@@ -417,6 +417,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 }
 
 void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
+    NT_ASSERT(s_text.initialized);
     NT_ASSERT(isfinite(bias_per_glyph) && "nt_text_renderer_set_glyph_depth_bias: bias must be finite");
     s_text.glyph_depth_bias = bias_per_glyph; /* signed: subtracted from NDC z in the VS */
 }

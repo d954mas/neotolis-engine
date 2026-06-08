@@ -190,6 +190,23 @@ If a decision can be deferred without loss of base architecture — it is deferr
   Result: 1-frame IM-lag is intrinsic (current frame reads previous
   frame's bbox); no stuck input on widget disappearance.
 
+  **Front-most arbitration.** When interactive widgets overlap a pointer, only
+  the front-most may react; the rest are gated off. The hot widget per pointer
+  is resolved once per frame — lazily, on the first `step_interaction` /
+  `query_interaction` / `nt_ui_pointer_hot` — from the PREVIOUS frame's
+  interactive registry; only widgets that called `nt_ui_step_interaction` last
+  frame are candidates. 3D ctx (`use_raycast_input`): nearest world ray-distance
+  within a game-fed occlusion cutoff (`nt_ui_set_pointer_occlusion`, reset each
+  begin) so UI can't be clicked through world geometry — the game owns the
+  raycast, the engine only takes the cutoff distance; `nt_ui_interaction_t.distance`
+  reports the hit distance. 2D ctx: highest effective Clay zIndex (tie →
+  last-declared). A free pointer drives a widget only if it is the resolved hot
+  widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
+  Consequence: a freshly-shown widget registers on its first step and only
+  becomes eligible the NEXT frame; on the first frame (empty registry) nothing
+  reacts — reliability over instant first-frame response, no raw-hit fallback
+  (matches Dear ImGui). This trades immediacy for unambiguous overlap/occlusion.
+
   **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
   visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
   default 64); 4-probe chain; full-chain collision evicts the LAST

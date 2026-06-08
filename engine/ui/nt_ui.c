@@ -2226,6 +2226,10 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
         return;
     }
     ctx->hot_resolved = true;
+    /* ui_hit_test -> Clay_GetElementData reads the GLOBAL current Clay ctx, so make the resolve robust
+     * to nt_ui_pointer_hot being called outside the frame or under a different current ctx. */
+    Clay_Context *saved_clay = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_hot_t best = {0};
@@ -2261,6 +2265,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
     }
+    Clay_SetCurrentContext(saved_clay);
 }
 
 /* Same compute as query_padded plus state-machine commits; ONCE per widget per frame. */
@@ -2434,11 +2439,15 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     return false;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
 void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_pointer_occlusion: ctx must be non-NULL");
     NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_pointer_occlusion: only meaningful in 3D ctx (use_raycast_input)");
-    NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_set_pointer_occlusion: pointer_index out of range");
-    /* Negative = occlude everything (all hits have t >= 0); the game owns that choice, so no assert. */
+    NT_ASSERT(ctx->in_frame && "nt_ui_set_pointer_occlusion: call between nt_ui_begin and the first step/query (reset each begin)");
+    NT_ASSERT(pointer_index < ctx->frame_pointer_count && "nt_ui_set_pointer_occlusion: pointer_index is not an active frame pointer");
+    /* NaN makes the `t > cutoff` test always false, silently disabling occlusion (click-through-wall);
+     * a broken game raycast must trip here. ±inf are valid (+inf = no cutoff, -inf/negative = occlude all). */
+    NT_ASSERT(!isnan(max_world_distance) && "nt_ui_set_pointer_occlusion: max_world_distance must not be NaN");
     ctx->pointer_occlusion[pointer_index] = max_world_distance;
 }
 
