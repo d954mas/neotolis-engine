@@ -58,8 +58,8 @@ static const nt_ui_label_style_t s_label_style = {
 
 static void init_style(void) {
     s_style = (nt_ui_checkbox_style_t){0};
-    const nt_atlas_region_ref_t track = {s_fx.atlas.handle, s_fx.atlas.white_region_idx};
-    const nt_atlas_region_ref_t thumb = {s_fx.atlas.handle, s_fx.atlas.white_region_idx};
+    const nt_atlas_region_ref_t track = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    const nt_atlas_region_ref_t thumb = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     /* Both rows carry the thumb art so the thumb is present at BOTH ends. */
     for (int i = 0; i < 4; ++i) {
         s_style.unchecked[i] = (nt_ui_cb_state_t){.box = track, .check = thumb, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};

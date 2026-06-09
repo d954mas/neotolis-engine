@@ -77,16 +77,16 @@ _Static_assert(sizeof(nt_ui_checkbox_style_t) == 584, "nt_ui_checkbox_style_t st
  * data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY (the widget owns these).
  * box_w/box_h > 0 required; each value row needs box.idle OR check.idle non-zero.
  * enabled=false short-circuits interaction + forces the disabled cell. */
-bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, nt_ui_checkbox_style_t *style,
                     const Clay_ElementDeclaration *decl, bool enabled);
 
 /* Exclusive single-choice over a shared int*. changed when *selected flips to my_value. */
-bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *selected, int my_value, nt_ui_checkbox_style_t *style,
                  const Clay_ElementDeclaration *decl, bool enabled);
 
 /* Sliding-thumb boolean. Same return contract as checkbox; the thumb x is a
  * render-only offset DELTA eased by value_t. */
-bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, nt_ui_checkbox_style_t *style,
                   const Clay_ElementDeclaration *decl, bool enabled);
 
 /* A valid baseline style: every cell scale/opacity = 1, no tint, sensible sizes and

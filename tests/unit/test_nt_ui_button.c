@@ -134,7 +134,7 @@ static void test_button_icon_only_children(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
-        nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_img_style, NULL);
+        nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
         (void)nt_ui_button_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -150,7 +150,7 @@ static void test_button_icon_and_text_children(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
-        nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_img_style, NULL);
+        nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
         nt_ui_label(s_fx.ctx, NULL, "Save", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -275,7 +275,7 @@ static void test_button_slice9_scale_asserts_negative(void) {
 }
 
 /* Per-state visual fields must be finite + in range. */
-static void try_bad_state(const nt_ui_button_style_t *bad) {
+static void try_bad_state(nt_ui_button_style_t *bad) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), bad, NULL, true)); }

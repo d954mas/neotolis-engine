@@ -30,7 +30,7 @@ static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
+void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_button_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_button_begin: style must be non-NULL");
@@ -64,8 +64,8 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
     }
 
-    /* Priority: disabled → pressed → hover → idle. */
-    const nt_ui_btn_state_t *st = &style->idle;
+    /* Priority: disabled → pressed → hover → idle. Non-const so the resolve memoizes into the style. */
+    nt_ui_btn_state_t *st = &style->idle;
     if (!enabled) {
         st = &style->disabled;
     } else if (in.pressed) {
@@ -107,6 +107,10 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const nt_ui_element_data_t *btn_data = nt_ui_make_element_data_xform((data != NULL) ? data->layer : 0U, (data != NULL) ? data->user_data : NULL, &btn_t, a->opacity);
     // #endregion
     // #region open_clay_image
+    /* Resolve the STYLE-OWNED refs in place FIRST (memoizes into the style), then inherit by value —
+     * resolving the by-value bg would lose the memoize (Pitfall 1). */
+    nt_atlas_resolve_ref(&st->bg);
+    nt_atlas_resolve_ref(&style->idle.bg);
     /* Atomic ref: a non-idle state with atlas.id==0 inherits the idle state's whole ref. */
     const nt_atlas_region_ref_t bg = nt_ui_ref_or(st->bg, style->idle.bg);
     const nt_resource_t st_atlas = bg.atlas;
@@ -116,8 +120,9 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.id = (Clay_ElementId){.id = id};
-    /* Resolved atlas.id == 0 = text-only button: no background art, no IMAGE payload. */
-    if (st_atlas.id != 0U) {
+    /* Resolved atlas.id == 0 = text-only button (no art). region still INVALID = atlas not ready yet:
+     * skip the IMAGE this frame (mirror the image skip) rather than emit an invalid region_index. */
+    if (st_atlas.id != 0U && region != NT_ATLAS_INVALID_REGION) {
         nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
         NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed (image_payload)");
         *p = (nt_ui_image_payload_t){
@@ -152,7 +157,7 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
     return clicked;
 }
 
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
+bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     nt_ui_button_begin(ctx, data, id, style, decl, enabled);
     return nt_ui_button_end(ctx);
 }

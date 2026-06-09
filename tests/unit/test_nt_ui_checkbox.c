@@ -52,8 +52,8 @@ static const nt_ui_label_style_t s_label_style = {
 
 static void init_style(void) {
     s_style = (nt_ui_checkbox_style_t){0};
-    const nt_atlas_region_ref_t box = {s_fx.atlas.handle, s_fx.atlas.white_region_idx};
-    const nt_atlas_region_ref_t check = {s_fx.atlas.handle, s_fx.atlas.white_region_idx};
+    const nt_atlas_region_ref_t box = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    const nt_atlas_region_ref_t check = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     for (int i = 0; i < 4; ++i) {
         s_style.unchecked[i] = (nt_ui_cb_state_t){.box = box, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
         s_style.checked[i] = (nt_ui_cb_state_t){.box = box, .check = check, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
@@ -348,7 +348,7 @@ static void test_style_defaults_valid_baseline(void) {
     }
     TEST_ASSERT_TRUE(s.box_w > 0.0F && s.box_h > 0.0F);
     /* Defaults leave art refs zero; supply idle art so the value row is valid. */
-    const nt_atlas_region_ref_t art = {s_fx.atlas.handle, s_fx.atlas.white_region_idx};
+    const nt_atlas_region_ref_t art = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     s.unchecked[NT_UI_CB_IDLE].box = art;
     s.checked[NT_UI_CB_IDLE].box = art;
     s.checked[NT_UI_CB_IDLE].check = art;
