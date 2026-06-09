@@ -31,7 +31,8 @@ _Static_assert(sizeof(nt_ui_image_style_t) <= 28, "nt_ui_image_style_t fits in 2
 /* Use instead of bare {0} — color_packed=0 would render fully transparent. */
 static inline nt_ui_image_style_t nt_ui_image_style_defaults(void) { return (nt_ui_image_style_t){.color_packed = 0xFFFFFFFF, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F}; }
 
-/* decl may be NULL (GROW/GROW); engine owns image/backgroundColor/userData. */
-void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
+/* decl may be NULL (GROW/GROW); engine owns image/backgroundColor/userData.
+ * region is by-pointer: the engine resolves it lazily and memoizes the index into *region. */
+void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 
 #endif /* NT_UI_IMAGE_H */

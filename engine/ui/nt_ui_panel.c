@@ -21,11 +21,11 @@ const nt_ui_widget_def_t NT_UI_GROUP_DEF = {
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
+void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_panel_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
-    NT_ASSERT(region.atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
+    NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_panel_begin: style.slice9_scale must be finite > 0");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_panel_begin: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
@@ -37,25 +37,29 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
         NT_ASSERT(decl->userData == NULL && "nt_ui_panel_begin: decl->userData must be NULL (data param controls)");
     }
 
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_panel_begin: scratch alloc failed");
-    *p = (nt_ui_image_payload_t){
-        .atlas = region.atlas,
-        .region_index = region.region,
-        .origin_x = style->origin_x,
-        .origin_y = style->origin_y,
-        .slice9_scale = style->slice9_scale,
-        .flip_bits = style->flip_bits,
-        .flags = style->flags,
-    };
-    memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
-
     const Clay_Color tint = nt_ui_unpack_tint(style->color_packed);
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.backgroundColor = tint;
-    final.image = (Clay_ImageElementConfig){.imageData = p};
     final.userData = (void *)data;
+
+    /* Late-bind: resolve lazily, memoize into *region. Unresolved -> open the container with no bg IMAGE. */
+    nt_atlas_resolve_ref(region);
+    if (region->region != NT_ATLAS_INVALID_REGION) {
+        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(p != NULL && "nt_ui_panel_begin: scratch alloc failed");
+        *p = (nt_ui_image_payload_t){
+            .atlas = region->atlas,
+            .region_index = region->region,
+            .origin_x = style->origin_x,
+            .origin_y = style->origin_y,
+            .slice9_scale = style->slice9_scale,
+            .flip_bits = style->flip_bits,
+            .flags = style->flags,
+        };
+        memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
+        final.image = (Clay_ImageElementConfig){.imageData = p};
+    }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(final);
 

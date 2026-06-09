@@ -49,7 +49,8 @@ static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx
 static void test_image_basic(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_style_default, NULL); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -72,7 +73,8 @@ static void test_image_slice9_override(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s, NULL); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -94,7 +96,8 @@ static void test_image_tint_color(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s, NULL); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -111,7 +114,8 @@ static void test_image_element_data_passthrough(void) {
     int marker = 77;
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_style_default, NULL); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), &ref, &s_style_default, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -132,7 +136,8 @@ static void test_image_flip_bits(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s, NULL); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -153,7 +158,8 @@ static void test_image_flags_origin(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s, NULL); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s, NULL); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
@@ -174,6 +180,43 @@ static void test_image_style_defaults(void) {
     TEST_ASSERT_EQUAL_UINT8(0, d.flip_bits);
 }
 
+/* Fixture white region 0 is registered under this name hash (ui_atlas.c region0). */
+#define UI_ATLAS_WHITE_HASH 0x57484954454E4555ULL /* "WHITEENU" */
+
+/* ---- Test 8: ref built unresolved resolves to the white index under a ready atlas + memoizes ---- */
+static void test_image_resolves_from_invalid_under_ready_atlas(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    /* Constructed unresolved (region == INVALID); the fixture atlas is READY so the engine resolves it. */
+    nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, UI_ATLAS_WHITE_HASH);
+    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, ref.region);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL); }
+    nt_ui_end(s_fx.ctx);
+
+    /* (a) an IMAGE command was emitted. */
+    const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    /* (b) the payload resolved to the white region index. */
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.white_region_idx, p->region_index);
+    /* (c) the ref was memoized back (no longer INVALID). */
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.white_region_idx, ref.region);
+}
+
+/* ---- Test 9: ref with a name never present skips emit, no assert (NOT a death test) ---- */
+static void test_image_unresolved_skips_emit_no_assert(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    /* Atlas is READY so resolve runs, but find_region returns INVALID for a never-present name. */
+    nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, 0xDEADBEEFCAFEBABEULL);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL); }
+    nt_ui_end(s_fx.ctx);
+
+    /* No IMAGE command emitted; the ref stays INVALID; reaching here means no assert fired. */
+    TEST_ASSERT_NULL(find_first_image_cmd(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, ref.region);
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -181,7 +224,8 @@ static void test_image_style_defaults(void) {
 static void test_image_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, 0}, NULL, NULL)); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, 0);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, &ref, NULL, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -190,7 +234,8 @@ static void test_image_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){bad, 0}, &s_style_default, NULL)); }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(bad, 0, 0);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_image(s_fx.ctx, NULL, &ref, &s_style_default, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -205,6 +250,8 @@ int main(void) {
     RUN_TEST(test_image_flip_bits);
     RUN_TEST(test_image_flags_origin);
     RUN_TEST(test_image_style_defaults);
+    RUN_TEST(test_image_resolves_from_invalid_under_ready_atlas);
+    RUN_TEST(test_image_unresolved_skips_emit_no_assert);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_image_null_style_asserts);
     RUN_TEST(test_image_invalid_atlas_asserts);

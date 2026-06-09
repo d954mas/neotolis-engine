@@ -37,7 +37,7 @@ typedef struct {
     float scale, offset_x, offset_y; /* whole-widget render-only transform */
     float opacity;                   /* whole-widget, INHERITS to children */
 } nt_ui_cb_state_t;
-_Static_assert(sizeof(nt_ui_cb_state_t) == 44, "nt_ui_cb_state_t stable ABI (2x8 ref + 3 tint + 4 float)");
+_Static_assert(sizeof(nt_ui_cb_state_t) == 64, "nt_ui_cb_state_t stable ABI (2x16 ref + 3 tint + 4 float + 8B align pad)");
 
 /* ONE shared style for all three widgets (strict superset). Layout
  * sizing/padding live on the Clay decl; the FIXED box_w/box_h size only the
@@ -58,7 +58,7 @@ typedef struct {
 /* scale_label occupies one of label_side's former tail padding bytes -> size unchanged.
  * Layers are NOT in the style (mirrors button/label): the indicator layer comes from
  * data->layer, the label layer from the label_layer function arg. */
-_Static_assert(sizeof(nt_ui_checkbox_style_t) == 420, "nt_ui_checkbox_style_t stable ABI");
+_Static_assert(sizeof(nt_ui_checkbox_style_t) == 584, "nt_ui_checkbox_style_t stable ABI");
 
 /* All three are LEAF widgets (no begin/end). Returns `changed` = the frame the value
  * flipped (checkbox/toggle: *value = !*value; radio: *selected = my_value).

@@ -15,8 +15,10 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_PANEL_DEF;
 extern const nt_ui_widget_def_t NT_UI_GROUP_DEF;
 
-/* Engine OWNS .image / .backgroundColor / .userData on the decl. */
-void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
+/* Engine OWNS .image / .backgroundColor / .userData on the decl.
+ * region is by-pointer: the engine resolves it lazily and memoizes the index into *region;
+ * an unresolved ref opens the container with no bg IMAGE (still balanced for end). */
+void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 void nt_ui_panel_end(nt_ui_context_t *ctx);
 
 /* Engine OWNS .custom (anchor) + .userData on the decl. */

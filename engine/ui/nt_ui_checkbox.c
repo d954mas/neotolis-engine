@@ -143,7 +143,9 @@ static void cb_emit_box(const cb_emit_args_t *e) {
         const Clay_ElementDeclaration ov_decl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(e->style->overlay_w), CLAY_SIZING_FIXED(e->style->overlay_h)}},
         };
-        nt_ui_image(e->ctx, ov_data, e->check_ref, &ov_style, &ov_decl);
+        /* check_ref is already resolved in cb_core; the by-pointer image API needs a mutable lvalue. */
+        nt_atlas_region_ref_t ov_ref = e->check_ref;
+        nt_ui_image(e->ctx, ov_data, &ov_ref, &ov_style, &ov_decl);
     }
 
     nt_ui_clay_priv_close_element();
