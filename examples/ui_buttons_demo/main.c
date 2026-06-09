@@ -328,10 +328,13 @@ static void try_bind_resources(void) {
         s_btn_s9_four.disabled.bg.region = s_button_blue_idx;
         s_btn_s9_four.slice9_scale = 4.0F;
 
-        /* All 7 styles share the demo atlas; per-state atlas inherits idle. */
+        /* All 7 styles share the demo atlas; non-idle states inherit idle's whole ref
+         * unless they set their own atlas -- SWAP wants distinct hover/pressed art, so it does. */
         s_btn_standard.idle.bg.atlas = s_atlas_handle;
         s_btn_scale.idle.bg.atlas = s_atlas_handle;
         s_btn_swap.idle.bg.atlas = s_atlas_handle;
+        s_btn_swap.hover.bg.atlas = s_atlas_handle;
+        s_btn_swap.pressed.bg.atlas = s_atlas_handle;
         s_btn_nopad.idle.bg.atlas = s_atlas_handle;
         s_btn_s9_quarter.idle.bg.atlas = s_atlas_handle;
         s_btn_s9_one.idle.bg.atlas = s_atlas_handle;

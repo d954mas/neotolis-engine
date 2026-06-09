@@ -218,9 +218,9 @@ static bool s_ids_ready;
 
 // #region binding
 static void patch_row_atlas(nt_ui_cb_state_t row[4], nt_resource_t atlas, uint32_t box_region, uint32_t check_region) {
-    /* Only the IDLE cell carries the atlas refs; non-idle cells inherit it
-     * (resolve_ref). check_region==0 means "no overlay art" (e.g. radio ring
-     * unchecked row has no dot). */
+    /* Only the IDLE cell carries the atlas refs; non-idle cells inherit the whole ref
+     * (resolve_ref). check_region == NT_ATLAS_INVALID_REGION = no overlay art (e.g. the
+     * radio unchecked row has no dot). */
     row[NT_UI_CB_IDLE].box = (nt_atlas_region_ref_t){atlas, box_region};
     if (check_region != NT_ATLAS_INVALID_REGION) {
         row[NT_UI_CB_IDLE].check = (nt_atlas_region_ref_t){atlas, check_region};
