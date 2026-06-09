@@ -93,4 +93,9 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
 bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
                   const Clay_ElementDeclaration *decl, bool enabled);
 
+/* A valid baseline style: every cell scale/opacity = 1, no tint, sensible sizes and
+ * speeds. The caller still supplies art (box/check refs) and overrides any field.
+ * Avoids the zero-init trap (a {0} style trips the cell scale > 0 assert). */
+nt_ui_checkbox_style_t nt_ui_checkbox_style_defaults(void);
+
 #endif /* NT_UI_CHECKBOX_H */

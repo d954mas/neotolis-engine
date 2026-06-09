@@ -339,6 +339,27 @@ static void test_text_color_override(void) {
     TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.a, (int32_t)c.a);
 }
 
+/* ---- Test: nt_ui_checkbox_style_defaults() is a valid baseline that renders. ---- */
+static void test_style_defaults_valid_baseline(void) {
+    nt_ui_checkbox_style_t s = nt_ui_checkbox_style_defaults();
+    for (int i = 0; i < 4; ++i) {
+        TEST_ASSERT_TRUE(s.unchecked[i].scale > 0.0F);
+        TEST_ASSERT_TRUE(s.checked[i].scale > 0.0F);
+    }
+    TEST_ASSERT_TRUE(s.box_w > 0.0F && s.box_h > 0.0F);
+    /* Defaults leave art refs zero; supply idle art so the value row is valid. */
+    const nt_atlas_region_ref_t art = {s_fx.atlas.handle, s_fx.atlas.white_region_idx};
+    s.unchecked[NT_UI_CB_IDLE].box = art;
+    s.checked[NT_UI_CB_IDLE].box = art;
+    s.checked[NT_UI_CB_IDLE].check = art;
+    bool value = false;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("def"), NULL, &value, &s, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE));
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -478,6 +499,7 @@ int main(void) {
     RUN_TEST(test_scale_label_routing);
     RUN_TEST(test_label_side_order);
     RUN_TEST(test_text_color_override);
+    RUN_TEST(test_style_defaults_valid_baseline);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_data_flags_transform);
     RUN_TEST(test_assert_box_w_zero);

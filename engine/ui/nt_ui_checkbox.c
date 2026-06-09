@@ -368,3 +368,25 @@ bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_
     }
     return false;
 }
+
+nt_ui_checkbox_style_t nt_ui_checkbox_style_defaults(void) {
+    /* Valid baseline: every cell scale/opacity = 1, no tint. Caller supplies art. */
+    const nt_ui_cb_state_t cell = {.box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .text_color = 0U, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F};
+    nt_ui_checkbox_style_t s = {0};
+    for (int i = 0; i < 4; ++i) {
+        s.unchecked[i] = cell;
+        s.checked[i] = cell;
+    }
+    s.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+    s.box_w = 32.0F;
+    s.box_h = 32.0F;
+    s.overlay_w = 24.0F;
+    s.overlay_h = 24.0F;
+    s.thumb_pad = 0.0F;
+    s.gap = 8.0F;
+    s.label_side = 0;
+    s.scale_label = false;
+    s.state_speed = 16.0F;
+    s.value_speed = 16.0F;
+    return s;
+}
