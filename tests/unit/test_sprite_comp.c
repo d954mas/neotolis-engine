@@ -501,9 +501,11 @@ static uint32_t build_fixture_atlas_blob_r0_only(uint8_t *atlas_blob, uint32_t c
     return build_mock_atlas_blob(atlas_blob, cap, &spec);
 }
 
-/* ---- Test 12: republish that tombstones a bound region clears RESOLVED and origin ---- */
+/* ---- Test 12: republish that removes a bound region keeps it resolved at its
+ * stable (dead) index — the region zero-draws via vertex_count==0. Tombstone-
+ * reclaim makes find_region return the stable index, so the sprite stays bound. ---- */
 
-void test_sprite_sync_clears_resolved_when_region_tombstoned(void) {
+void test_sprite_sync_keeps_resolved_when_region_removed(void) {
     setup_atlas_fixture(true);
 
     nt_entity_t e = nt_entity_create();
@@ -511,6 +513,7 @@ void test_sprite_sync_clears_resolved_when_region_tombstoned(void) {
     nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
     nt_sprite_comp_sync_resources();
     TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+    const uint16_t r1_idx = *nt_sprite_comp_region_index(e);
 
     uint8_t atlas_blob[1024];
     uint32_t atlas_blob_size = build_fixture_atlas_blob_r0_only(atlas_blob, sizeof(atlas_blob));
@@ -522,13 +525,16 @@ void test_sprite_sync_clears_resolved_when_region_tombstoned(void) {
     nt_resource_step();
     nt_sprite_comp_sync_resources();
 
-    TEST_ASSERT_FALSE(nt_sprite_comp_is_resolved(e));
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_RESOLVED, 0, *nt_sprite_comp_flags(e));
+    /* R1 removed but its name + index are retained → sprite stays resolved at
+     * the SAME index; the region is dead (vertex_count==0) so it zero-draws. */
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_RESOLVED, NT_SPRITE_FLAG_RESOLVED, *nt_sprite_comp_flags(e));
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_R1_HASH, *nt_sprite_comp_region_hash(e)); /* identity preserved */
+    TEST_ASSERT_EQUAL_UINT16(r1_idx, *nt_sprite_comp_region_index(e));         /* stable index */
 
-    const float *origin_after = nt_sprite_comp_origin(e);
-    TEST_ASSERT_TRUE(origin_after[0] == 0.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(origin_after[1] == 0.0F); /* NOLINT */
+    const nt_texture_region_t *region = nt_atlas_get_region(s_atlas_res, *nt_sprite_comp_region_index(e));
+    TEST_ASSERT_NOT_NULL(region);
+    TEST_ASSERT_EQUAL_UINT8(0, region->vertex_count); /* dead → zero-draw */
 }
 
 /* ---- Test 13: set_flip sets bits correctly and isolates from other flags ---- */
@@ -709,7 +715,7 @@ int main(void) {
     RUN_TEST(test_sprite_swap_and_pop_preserves_state);
     RUN_TEST(test_sprite_sync_refreshes_authored_origin_on_atlas_republish);
     RUN_TEST(test_sprite_sync_preserves_override_on_atlas_republish);
-    RUN_TEST(test_sprite_sync_clears_resolved_when_region_tombstoned);
+    RUN_TEST(test_sprite_sync_keeps_resolved_when_region_removed);
     RUN_TEST(test_sprite_set_flip_bit_isolation);
     RUN_TEST(test_sprite_view_matches_per_entity_reads);
     RUN_TEST(test_entity_destroy_removes_sprite);

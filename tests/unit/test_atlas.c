@@ -683,7 +683,9 @@ void test_atlas_merge_new_region_appends_with_fresh_index(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_find_region_raw(ad, 0xCCCULL)); /* fresh index == previous region_count */
 }
 
-/* ---- Test 9: removed region becomes a tombstone (stable indices) ---- */
+/* ---- Test 9: removed region keeps name + vertex_count==0, then revives in
+ * place (same index) on re-add. Index is stable across remove/re-add. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_merge_removed_region_becomes_tombstone(void) {
     /* Pages omitted. */
 
@@ -706,29 +708,40 @@ void test_atlas_merge_removed_region_becomes_tombstone(void) {
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
+    const uint32_t b_idx = nt_atlas_test_find_region_raw(ad, 0xBBBULL);
+    TEST_ASSERT_EQUAL_UINT32(1, b_idx);
 
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
 
-    /* Tombstones don't shrink the count — region_count stays at 3. */
+    /* Dead slots don't shrink the count — region_count stays at 3. */
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
 
     /* Surviving indices are NOT renumbered. */
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_find_region_raw(ad, 0xAAAULL));
     TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_find_region_raw(ad, 0xCCCULL));
-    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
 
-    /* Slot 1 is a tombstone: NT_ATLAS_TOMBSTONE_HASH, zero counts. */
-    const nt_texture_region_t *r1 = nt_atlas_test_get_region_raw(ad, 1);
+    /* B is dead but its NAME is retained and still resolves to the SAME index. */
+    TEST_ASSERT_EQUAL_UINT32(b_idx, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
+    const nt_texture_region_t *r1 = nt_atlas_test_get_region_raw(ad, b_idx);
     TEST_ASSERT_NOT_NULL(r1);
-    TEST_ASSERT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r1->name_hash);
+    TEST_ASSERT_EQUAL_UINT64(0xBBBULL, r1->name_hash);
+    TEST_ASSERT_NOT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r1->name_hash);
     TEST_ASSERT_EQUAL_UINT8(0, r1->vertex_count);
     TEST_ASSERT_EQUAL_UINT8(0, r1->index_count);
+
+    /* Re-add B → revives the SAME index in place; region_count does NOT grow. */
+    nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(b_idx, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
+    const nt_texture_region_t *r1_revived = nt_atlas_test_get_region_raw(ad, b_idx);
+    TEST_ASSERT_TRUE(r1_revived->vertex_count > 0);
 }
 
-/* ---- Test 9: find_region returns INVALID for a tombstoned hash across
- * multiple merges; re-adding a previously-tombstoned hash creates a NEW
- * region at a fresh monotonic index — the old tombstone stays dead. ---- */
-void test_atlas_find_region_returns_invalid_for_tombstone(void) {
+/* ---- Test 9: find_region returns a STABLE index for a removed-then-readded
+ * hash across multiple merges; re-adding a removed hash revives the SAME index
+ * in place — region_count never grows for a name that was ever present. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_find_region_returns_same_index_after_revive(void) {
     /* Pages omitted. */
 
     merge_region_spec_t only_a[1] = {
@@ -751,24 +764,21 @@ void test_atlas_find_region_returns_invalid_for_tombstone(void) {
     const uint32_t b_first_idx = nt_atlas_test_find_region_raw(ad, 0xBBBULL);
     TEST_ASSERT_EQUAL_UINT32(1, b_first_idx);
 
-    /* Merge 2: {A} — B is tombstoned. */
+    /* Merge 2: {A} — B removed, but its name stays → still resolves to b_first_idx. */
     nt_atlas_test_drive_resolve(buf_a, size_a, &s_user_data);
     TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_region_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
+    TEST_ASSERT_EQUAL_UINT32(b_first_idx, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
 
-    /* Merge 3: {A, B} — re-adding B MUST create a fresh index (monotonic). */
+    /* Merge 3: {A, B} — re-adding B revives the SAME index; count does NOT grow. */
     nt_atlas_test_drive_resolve(buf_ab, size_ab, &s_user_data);
     const uint32_t b_second_idx = nt_atlas_test_find_region_raw(ad, 0xBBBULL);
-    TEST_ASSERT_NOT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, b_second_idx);
-    /* The old tombstone at index 1 stays dead, new B lives at a higher
-     * index. region_count must have grown by exactly 1. */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
-    TEST_ASSERT_TRUE_MESSAGE(b_second_idx > b_first_idx, "re-added region must get a strictly higher index");
+    TEST_ASSERT_EQUAL_UINT32(b_first_idx, b_second_idx);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_region_count(ad));
 
-    /* Merge 4: {A} — tombstone the re-added B again. */
+    /* Merge 4: {A} — remove the revived B again; index still stable. */
     nt_atlas_test_drive_resolve(buf_a, size_a, &s_user_data);
-    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
-    TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(b_first_idx, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_region_count(ad));
 
     /* A stayed at index 0 through the whole chain. */
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_find_region_raw(ad, 0xAAAULL));
@@ -800,12 +810,14 @@ void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
 
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
 
-    /* get_region(1) on the tombstone returns non-NULL with zero counts. */
+    /* get_region(1) on the dead slot returns non-NULL with zero counts;
+     * the name (0xBBB) is RETAINED for revive-by-name. */
     const nt_texture_region_t *r1 = nt_atlas_test_get_region_raw(ad, 1);
     TEST_ASSERT_NOT_NULL(r1); /* no NULL branch in the hot path */
     TEST_ASSERT_EQUAL_UINT8(0, r1->vertex_count);
     TEST_ASSERT_EQUAL_UINT8(0, r1->index_count);
-    TEST_ASSERT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r1->name_hash);
+    TEST_ASSERT_NOT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r1->name_hash);
+    TEST_ASSERT_EQUAL_UINT64(0xBBBULL, r1->name_hash);
 }
 
 /* ---- Test 11: Hash collisions resolve correctly via linear probing ----
@@ -1042,12 +1054,13 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
     /* region_count should be 1500: original 1000 + 500 new (1001..1500) */
     TEST_ASSERT_EQUAL_UINT32(1500, nt_atlas_test_region_count(ad));
 
-    /* Regions [0..499] (hashes 1..500) should be tombstoned. */
+    /* Regions [0..499] (hashes 1..500) are removed: name retained, dead via
+     * vertex_count==0, and still resolve to their original stable index. */
     for (uint32_t i = 0; i < 500; i++) {
         uint32_t idx = nt_atlas_test_find_region_raw(ad, (uint64_t)i + 1U);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_INVALID_REGION, idx, "tombstoned region still findable");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(i, idx, "removed region must keep its stable index");
         const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, i);
-        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, r->vertex_count, "tombstoned region vertex_count != 0");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, r->vertex_count, "removed region vertex_count != 0");
     }
 
     /* Regions [500..999] (hashes 501..1000) are common — indices unchanged. */
@@ -1920,8 +1933,9 @@ void test_atlas_tombstone_cached_zero(void) {
 
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     const nt_texture_region_t *r0 = nt_atlas_test_get_region_raw(ad, 0);
-    /* AAA tombstoned → vertex_count==0, vertex_start==0. */
-    TEST_ASSERT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r0->name_hash);
+    /* AAA removed → name retained, vertex_count==0, vertex_start==0. */
+    TEST_ASSERT_NOT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r0->name_hash);
+    TEST_ASSERT_EQUAL_UINT64(0xAAAULL, r0->name_hash);
     TEST_ASSERT_EQUAL_UINT8(0, r0->vertex_count);
     TEST_ASSERT_EQUAL_UINT32(0, r0->vertex_start);
 
@@ -2236,7 +2250,7 @@ int main(void) {
     RUN_TEST(test_atlas_merge_preserves_shared_payload_slices);
     RUN_TEST(test_atlas_merge_new_region_appends_with_fresh_index);
     RUN_TEST(test_atlas_merge_removed_region_becomes_tombstone);
-    RUN_TEST(test_atlas_find_region_returns_invalid_for_tombstone);
+    RUN_TEST(test_atlas_find_region_returns_same_index_after_revive);
     RUN_TEST(test_atlas_get_region_returns_vertex_count_zero_for_tombstone);
     RUN_TEST(test_atlas_hash_collisions_probe_correctly);
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
