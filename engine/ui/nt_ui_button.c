@@ -118,13 +118,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const nt_resource_t st_atlas = (st->bg.atlas.id != 0U) ? st->bg.atlas : style->idle.bg.atlas;
     const uint32_t region = (st->bg.region != 0U) ? st->bg.region : style->idle.bg.region;
 
-    Clay_Color tint = {0};
-    if (st->bg_tint != 0xFFFFFFFF) {
-        tint.r = (float)(st->bg_tint & 0xFFU);
-        tint.g = (float)((st->bg_tint >> 8) & 0xFFU);
-        tint.b = (float)((st->bg_tint >> 16) & 0xFFU);
-        tint.a = (float)((st->bg_tint >> 24) & 0xFFU);
-    }
+    const Clay_Color tint = (st->bg_tint == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(st->bg_tint);
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.id = (Clay_ElementId){.id = id};

@@ -39,30 +39,14 @@ static void assert_row_valid(const nt_ui_cb_state_t row[4]) {
     }
 }
 
-/* Packed 0xAABBGGRR -> Clay_Color (0..255); 0xFFFFFFFF = no tint ({0}).
- * For IMAGE tints only: the walker maps {0,0,0,0} backgroundColor back to white. */
-static Clay_Color unpack_tint(uint32_t packed) {
-    Clay_Color tint = {0};
-    if (packed != 0xFFFFFFFFU) {
-        tint.r = (float)(packed & 0xFFU);
-        tint.g = (float)((packed >> 8) & 0xFFU);
-        tint.b = (float)((packed >> 16) & 0xFFU);
-        tint.a = (float)((packed >> 24) & 0xFFU);
-    }
-    return tint;
-}
+/* 0xAABBGGRR -> Clay_Color; 0xFFFFFFFF = no tint ({0}). For IMAGE tints only:
+ * the walker maps {0,0,0,0} backgroundColor back to white. */
+static Clay_Color unpack_tint(uint32_t packed) { return (packed == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(packed); }
 
-/* Literal 0xAABBGGRR -> Clay_Color (0..255), NO 0xFFFFFFFF sentinel. Text has no
- * "untinted" rescue (that is image-only), so 0xFFFFFFFF must mean opaque white;
- * the "use text_base" sentinel is text_color==0, handled by the caller's guard. */
-static Clay_Color unpack_color(uint32_t packed) {
-    return (Clay_Color){
-        .r = (float)(packed & 0xFFU),
-        .g = (float)((packed >> 8) & 0xFFU),
-        .b = (float)((packed >> 16) & 0xFFU),
-        .a = (float)((packed >> 24) & 0xFFU),
-    };
-}
+/* Literal 0xAABBGGRR (NO 0xFFFFFFFF sentinel). Text has no "untinted" rescue (that
+ * is image-only), so 0xFFFFFFFF must mean opaque white; the "use text_base"
+ * sentinel is text_color==0, handled by the caller's guard. */
+static Clay_Color unpack_color(uint32_t packed) { return nt_ui_unpack_abgr(packed); }
 
 /* Inherit a non-idle ref from the row idle when its atlas.id is 0 (region==0 is
  * inherit too — NEVER a "no overlay" sentinel; that is value-gating / no-art). */

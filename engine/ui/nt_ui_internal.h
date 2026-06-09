@@ -74,6 +74,17 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B"
  *   a = m[0], b = m[4], c = m[1], d = m[5], tx = m[12], ty = m[13]
  * Callers (walker, hit-test, debug_zone fill) inline this indexing directly. */
 
+/* Packed 0xAABBGGRR -> Clay_Color (0..255), literal (no sentinel). Callers that
+ * treat 0xFFFFFFFF as "no tint" must guard it before calling. */
+static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
+    return (Clay_Color){
+        .r = (float)(packed & 0xFFU),
+        .g = (float)((packed >> 8) & 0xFFU),
+        .b = (float)((packed >> 16) & 0xFFU),
+        .a = (float)((packed >> 24) & 0xFFU),
+    };
+}
+
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     nt_ui_baked_xform_t bx = {
