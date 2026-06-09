@@ -372,7 +372,8 @@ bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_
 nt_ui_checkbox_style_t nt_ui_checkbox_style_defaults(void) {
     /* Valid baseline: every cell scale/opacity = 1, no tint. Caller supplies art. */
     const nt_ui_cb_state_t cell = {.box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .text_color = 0U, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F};
-    nt_ui_checkbox_style_t s = {0};
+    nt_ui_checkbox_style_t s; /* memset, not = {0}: emscripten -Werror rejects {0} on this aggregate-first struct */
+    memset(&s, 0, sizeof s);
     for (int i = 0; i < 4; ++i) {
         s.unchecked[i] = cell;
         s.checked[i] = cell;
