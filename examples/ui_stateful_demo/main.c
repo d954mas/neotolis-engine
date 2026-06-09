@@ -1,20 +1,6 @@
-/* UI Stateful Demo — the settings-menu worked example.
- *
- * Proves the three stateful widgets on one screen:
- *   - nt_ui_checkbox  "Enable VSync"      (checkmark POPS in/out)
- *   - nt_ui_toggle    "Dark Mode"         (thumb SLIDES left<->right)
- *   - nt_ui_radio x3  "Low / Med / High"  (shared &g_quality, free exclusivity)
- *   - nt_ui_checkbox  table-cell          (label==NULL, indicator only)
- *   - one DISABLED checkbox               (forced-disabled dim, no click)
- *
- * Value lives in the GAME (Model D): the engine stores no logical value, only
- * the transient eased pop/slide. Logic is covered by ctest; the eased
- * slide/pop/dim polish is the user's eyes only (feedback_visual_check_user_only).
- *
- * Keys:
- *   Esc   quit (native)
- *   D     toggle inspector
- *
+/* UI Stateful Demo — settings-menu worked example for checkbox/toggle/radio.
+ * Value lives in the GAME (Model D): the engine stores no logical value, only the
+ * transient eased pop/slide. Keys: Esc quit (native), D toggle inspector.
  * Build packs: build_ui_stateful_demo_packs build/examples/ui_stateful_demo */
 
 // #region includes
@@ -88,10 +74,9 @@ static const nt_ui_label_style_t g_help_style = {
 // #endregion
 
 // #region widget style templates
-/* Box/check atlas refs are patched per-cell at runtime (region indices come from
- * the bound atlas). Every cell sets scale=1 / opacity=1 to satisfy the per-cell
- * asserts (assert_cell_valid: scale > 0, opacity in [0,1]); pressed dips scale,
- * disabled dips opacity. text_base color is the resting label color. */
+/* Box/check atlas refs are patched per-cell at runtime (region indices come from the
+ * bound atlas). Every cell sets scale=1 / opacity=1 to satisfy assert_cell_valid;
+ * pressed dips scale, disabled dips opacity. */
 
 /* ---- checkbox: checkmark pops in (fast value pop) ---- */
 static const nt_ui_checkbox_style_t g_check_tmpl = {

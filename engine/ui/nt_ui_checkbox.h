@@ -2,9 +2,8 @@
 #define NT_UI_CHECKBOX_H
 
 /* Stateful boolean / single-choice widgets sharing one internal core (cb_core).
- * checkbox = core + bool toggle; radio = core + exclusive-set; toggle = core +
- * sliding thumb. Value lives in the GAME (bool* / int*); the engine stores no
- * logical value -- only the transient eased visual via nt_ui_anim. */
+ * Value lives in the GAME (bool* / int*); the engine stores no logical value --
+ * only the transient eased visual via nt_ui_anim. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,8 +26,8 @@ extern const nt_ui_widget_def_t NT_UI_TOGGLE_DEF;
 enum { NT_UI_CB_IDLE = 0, NT_UI_CB_HOVER, NT_UI_CB_PRESSED, NT_UI_CB_DISABLED };
 
 /* One cell of the 2x4 grid. box/check are atomic nt_atlas_region_ref_t:
- *   non-idle cell atlas.id==0 -> inherit the value-row idle cell's WHOLE ref;
- *   non-idle cell atlas.id!=0 -> use this ref verbatim (region 0 is a valid index);
+ *   non-idle atlas.id==0 -> inherit the value-row idle cell's WHOLE ref (region 0 is
+ *   a valid index, so it can't double as a per-field sentinel);
  *   idle terminal atlas.id==0 -> NO ART (skip that part's IMAGE). */
 typedef struct {
     nt_atlas_region_ref_t box;   /* indicator / track background */
@@ -61,26 +60,21 @@ typedef struct {
  * data->layer, the label layer from the label_layer function arg. */
 _Static_assert(sizeof(nt_ui_checkbox_style_t) == 420, "nt_ui_checkbox_style_t stable ABI");
 
-/* All three are LEAF widgets (no begin/end): box -> overlay child -> text child,
- * opened and closed within the one call. Return `changed` = the frame the value
+/* All three are LEAF widgets (no begin/end). Returns `changed` = the frame the value
  * flipped (checkbox/toggle: *value = !*value; radio: *selected = my_value).
  * Box OR label is one clickable id; label == NULL = indicator only.
  *
- * Layers: the indicator (box + overlay) draws on data->layer (like button/label);
- * the label draws on the label_layer arg -- pass the same value as data->layer for a
- * single-layer widget, or a separate one to batch sprite-then-text. value_t fade-out
- * on uncheck only plays if the unchecked row also carries check art (Model D: the game
- * owns per-row art); otherwise the overlay drops the frame the value flips. Radio
- * writes *selected immediately, so a newly-selected sibling can render checked one
- * frame before the old one renders unchecked (standard immediate-mode 1-frame lag).
+ * Layers: the indicator draws on data->layer; the label on label_layer -- pass them
+ * equal for a single-layer widget, or split to batch sprite-then-text. value_t uncheck
+ * fade-out only plays if the unchecked row also carries check art; else the overlay
+ * drops the frame the value flips. Radio writes *selected immediately, so a newly-
+ * selected sibling can render checked one frame before the old renders unchecked.
  *
- * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl AND forces the
- * row's layoutDirection (LEFT_TO_RIGHT) + vertical childAlignment (CENTER) — it is a
- * box<->label row; the caller's decl supplies sizing/padding only.
+ * Engine OWNS .id/.image/.backgroundColor/.userData on the decl AND forces the row's
+ * layoutDirection + childAlignment; the caller's decl supplies sizing/padding only.
  * data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY (the widget owns these).
- * style->box_w/box_h > 0 required; per value row at least box.idle OR check.idle
- * must be non-zero. enabled=false short-circuits interaction + forces the
- * disabled cell while keeping the Clay open/close balanced. */
+ * box_w/box_h > 0 required; each value row needs box.idle OR check.idle non-zero.
+ * enabled=false short-circuits interaction + forces the disabled cell. */
 bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
                     const Clay_ElementDeclaration *decl, bool enabled);
 

@@ -63,11 +63,9 @@ static Clay_Color unpack_color(uint32_t packed) { return nt_ui_unpack_abgr(packe
  * (Per-field inherit would make region 0 — a valid index — unreachable as an override.) */
 static nt_atlas_region_ref_t resolve_ref(nt_atlas_region_ref_t cell, nt_atlas_region_ref_t idle) { return (cell.atlas.id != 0U) ? cell : idle; }
 
-/* Build a scratch element_data carrying any subset of {layer, transform, opacity}:
- * t == NULL -> no transform; opacity < 0 -> no opacity (inherits from the parent).
- * The public nt_ui_make_element_data_xform forces BOTH transform+opacity; the box
- * needs layer + transform WITHOUT its own opacity (opacity inherits from the row),
- * so the widget keeps this local builder. */
+/* Scratch element_data with any subset of {layer, transform, opacity}: t==NULL -> no
+ * transform; opacity<0 -> no opacity (inherits parent). Local builder because the
+ * public xform helper forces BOTH, but the box needs transform WITHOUT own opacity. */
 static nt_ui_element_data_t *cb_make_data(void *user_data, uint8_t layer, const nt_ui_transform_t *t, float opacity) {
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     NT_ASSERT(d != NULL && "nt_ui_checkbox: scratch alloc failed (element_data)");
@@ -105,10 +103,8 @@ typedef struct {
     const nt_ui_transform_t *box_xform; /* non-NULL = put the eased state transform on the box (indicator-only scale) */
 } cb_emit_args_t;
 
-/* Open the box CHILD (childAlignment CENTER, FIXED box_w x box_h), emit box IMAGE
- * (skip no-art terminal), emit the overlay as a Clay child of the box (skip when
- * value <= eps or no check art), close the box. The box has NO id — the ROW owns
- * the widget id + hit-test so box OR label clicks the same widget. */
+/* The box has NO id — the ROW owns the widget id + hit-test, so box OR label clicks
+ * the same widget. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void cb_emit_box(const cb_emit_args_t *e) {
     /* Toggle: thumb is LEFT-anchored so OFF sits at x=0 and the offset_x DELTA
@@ -191,8 +187,7 @@ static void cb_emit_text(const cb_emit_args_t *e) {
     }
 }
 
-/* The single shared composition path. LEAF: opens the box, emits the
- * box IMAGE + overlay child + text child, closes the box — all in one call.
+/* The single shared composition path for all three widgets.
  *   value_is_checked   selects the value row (game owns the bool/int).
  *   is_toggle          drives the thumb slide instead of centered pop.
  *   out_clicked        receives the release-over-widget edge for the wrapper. */
@@ -272,10 +267,9 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     const float eased_value = a->value_t;
     // #endregion
     // #region open ROW (registered widget; opacity always rides the row, transform conditionally)
-    /* The ROW is the registered widget: box OR label clicks the same id.
-     * Opacity ALWAYS rides the row -> inherits to box/overlay/text (whole-widget dim).
-     * The eased state transform rides the row only when scale_label; otherwise
-     * it rides the box (indicator-only scale) so the label does not pop. */
+    /* The ROW is the registered widget. Opacity ALWAYS rides the row (whole-widget dim);
+     * the eased state transform rides the row only when scale_label, else the box, so
+     * the label does not pop. */
     nt_ui_transform_t state_t = nt_ui_transform_defaults();
     state_t.scale_x = a->scale_x;
     state_t.scale_y = a->scale_y;
