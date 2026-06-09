@@ -248,7 +248,7 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
     NT_ASSERT(region_index < nt_atlas_region_count(atlas) && "sprite region index out of range");
 
     const nt_texture_region_t *region = nt_atlas_get_region(atlas, region_index);
-    NT_ASSERT(region->name_hash != NT_ATLAS_TOMBSTONE_HASH && "sprite region points at a tombstone");
+    NT_ASSERT(region->vertex_count != 0 && "sprite region is dead/removed (vertex_count==0, draws nothing)");
 
     s_atlas[idx] = atlas;
     s_region_hash[idx] = region->name_hash;
