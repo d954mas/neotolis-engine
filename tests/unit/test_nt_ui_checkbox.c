@@ -100,6 +100,18 @@ static uint32_t count_cmd_of_type(const nt_ui_context_t *ctx, Clay_RenderCommand
     return n;
 }
 
+/* First frozen command of `type`, or NULL. The widget emits one box IMAGE +
+ * (when checked) one overlay IMAGE; FIRST IMAGE is the box, so callers wanting
+ * the box use this and callers wanting the label use the TEXT lookup. */
+static const Clay_RenderCommand *first_cmd_of_type(const nt_ui_context_t *ctx, Clay_RenderCommandType type) {
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        if (ctx->frozen_cmds.internalArray[i].commandType == type) {
+            return &ctx->frozen_cmds.internalArray[i];
+        }
+    }
+    return NULL;
+}
+
 /* Pin the row at a fixed bbox so the synthetic pointer lands inside; the checkbox
  * decl carries a FIXED row size, the outer floating CLAY anchors its position. */
 static const Clay_ElementDeclaration s_row_decl = {
@@ -202,6 +214,131 @@ static void test_disabled_no_click_balanced(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE));
 }
 
+/* ---- Test 5: the indicator (box + overlay IMAGEs) draws on data->layer; the
+ *      label TEXT draws on the separate label_layer arg (sprite-then-text batch). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_layer_propagation(void) {
+    bool value = true; /* box IMAGE + overlay IMAGE + label TEXT all emit */
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NT_UI_DATA_LAYER(5), 7, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+
+    uint32_t image_seen = 0;
+    uint32_t text_seen = 0;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        const nt_ui_element_data_t *d = (const nt_ui_element_data_t *)c->userData;
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            TEST_ASSERT_NOT_NULL(d);
+            TEST_ASSERT_EQUAL_UINT8(5U, d->layer); /* indicator layer from data->layer */
+            ++image_seen;
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
+            TEST_ASSERT_NOT_NULL(d);
+            TEST_ASSERT_EQUAL_UINT8(7U, d->layer); /* label layer from label_layer arg */
+            ++text_seen;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2U, image_seen); /* box + overlay */
+    TEST_ASSERT_EQUAL_UINT32(1U, text_seen);  /* label */
+}
+
+/* Drive one pressed frame deterministically (state_speed/value_speed already 0 in
+ * s_style) and return the box IMAGE command's userData flags. */
+static uint8_t pressed_box_flags(void) {
+    bool value = false;
+    /* Frame 1: warm-up so Clay caches the row bbox for next frame's hit-test. */
+    nt_pointer_t f1 = make_pointer(CB_CX, CB_CY, false, false, false);
+    (void)cb_frame(&f1, &value, true);
+    /* Frame 2: pressed (down) over the row. */
+    nt_pointer_t f2 = make_pointer(CB_CX, CB_CY, true, true, false);
+    (void)cb_frame(&f2, &value, true);
+    const Clay_RenderCommand *box = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE);
+    TEST_ASSERT_NOT_NULL(box);
+    const nt_ui_element_data_t *d = (const nt_ui_element_data_t *)box->userData;
+    TEST_ASSERT_NOT_NULL(d);
+    return d->flags;
+}
+
+/* ---- Test 6: scale_label routes the eased press/hover transform. false (default)
+ *      -> transform rides the BOX (box IMAGE has HAS_TRANSFORM); true -> transform
+ *      moves to the ROW (box IMAGE no longer carries it). The row emits no command,
+ *      so the box is the observable proxy. ---- */
+static void test_scale_label_routing(void) {
+    s_style.unchecked[NT_UI_CB_PRESSED].scale = 0.8F; /* a non-identity pressed scale */
+
+    s_style.scale_label = false; /* indicator-only scale -> transform on the box */
+    const uint8_t flags_box = pressed_box_flags();
+    TEST_ASSERT_TRUE((flags_box & NT_UI_ELEM_FLAG_HAS_TRANSFORM) != 0U);
+
+    s_style.scale_label = true; /* whole-row scale -> transform moves off the box */
+    const uint8_t flags_row = pressed_box_flags();
+    TEST_ASSERT_FALSE((flags_row & NT_UI_ELEM_FLAG_HAS_TRANSFORM) != 0U);
+}
+
+/* Emit one indicator+label frame and return the box IMAGE x / label TEXT x. */
+static void box_and_text_x(uint8_t label_side, float *out_box_x, float *out_text_x) {
+    s_style.label_side = label_side;
+    bool value = false;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+    const Clay_RenderCommand *box = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE);
+    const Clay_RenderCommand *text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
+    TEST_ASSERT_NOT_NULL(box);
+    TEST_ASSERT_NOT_NULL(text);
+    *out_box_x = box->boundingBox.x;
+    *out_text_x = text->boundingBox.x;
+}
+
+/* ---- Test 7: label_side = 1 puts the TEXT left of the box; label_side = 0 puts
+ *      it right. Asserted via the emitted bounding-box X order. ---- */
+static void test_label_side_order(void) {
+    float box_x = 0.0F;
+    float text_x = 0.0F;
+
+    box_and_text_x(1U, &box_x, &text_x); /* text-left */
+    TEST_ASSERT_TRUE(text_x < box_x);
+
+    box_and_text_x(0U, &box_x, &text_x); /* text-right */
+    TEST_ASSERT_TRUE(text_x > box_x);
+}
+
+/* ---- Test 8: per-cell text_color overrides text_base; 0 inherits text_base.color.
+ *      Pins the literal-unpack fix (0xFFFFFFFF must mean white, 0 = inherit). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_text_color_override(void) {
+    /* Distinct packed AABBGGRR: a=0xFF b=0x33 g=0x99 r=0xCC. */
+    s_style.checked[NT_UI_CB_IDLE].text_color = 0xFF3399CCU;
+    bool value = true;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+    const Clay_RenderCommand *text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
+    TEST_ASSERT_NOT_NULL(text);
+    /* Unity built with UNITY_EXCLUDE_FLOAT -> compare integer-valued components as int32_t. */
+    Clay_Color c = text->renderData.text.textColor;
+    TEST_ASSERT_EQUAL_INT32(204, (int32_t)c.r); /* 0xCC */
+    TEST_ASSERT_EQUAL_INT32(153, (int32_t)c.g); /* 0x99 */
+    TEST_ASSERT_EQUAL_INT32(51, (int32_t)c.b);  /* 0x33 */
+    TEST_ASSERT_EQUAL_INT32(255, (int32_t)c.a); /* 0xFF */
+
+    /* text_color 0 -> inherit text_base.color (white). */
+    s_style.checked[NT_UI_CB_IDLE].text_color = 0U;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+    text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
+    TEST_ASSERT_NOT_NULL(text);
+    c = text->renderData.text.textColor;
+    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.r, (int32_t)c.r);
+    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.g, (int32_t)c.g);
+    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.b, (int32_t)c.b);
+    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.a, (int32_t)c.a);
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -252,6 +389,39 @@ static void test_assert_empty_value_row(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* overlay_w < 0 -> assert. */
+static void test_assert_overlay_w_negative(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.overlay_w = -1.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* state_speed < 0 -> assert. */
+static void test_assert_state_speed_negative(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.state_speed = -1.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* value_speed < 0 -> assert. */
+static void test_assert_value_speed_negative(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.value_speed = -1.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -260,11 +430,18 @@ int main(void) {
     RUN_TEST(test_click_label_toggles_value);
     RUN_TEST(test_indicator_only_no_text);
     RUN_TEST(test_disabled_no_click_balanced);
+    RUN_TEST(test_layer_propagation);
+    RUN_TEST(test_scale_label_routing);
+    RUN_TEST(test_label_side_order);
+    RUN_TEST(test_text_color_override);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_data_flags_transform);
     RUN_TEST(test_assert_box_w_zero);
     RUN_TEST(test_assert_box_h_zero);
     RUN_TEST(test_assert_empty_value_row);
+    RUN_TEST(test_assert_overlay_w_negative);
+    RUN_TEST(test_assert_state_speed_negative);
+    RUN_TEST(test_assert_value_speed_negative);
 #endif
     return UNITY_END();
 }

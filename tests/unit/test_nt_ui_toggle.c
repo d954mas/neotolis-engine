@@ -2,11 +2,12 @@
  *
  * Leaf widget: nt_ui_toggle(...) flips *value with the SAME return contract as
  * checkbox (changed exactly on the release frame). The thumb overlay is ALWAYS
- * visible (unlike the checkmark pop) and carries a render-only offset_x DELTA
- * eased by value_t: OFF (value_t 0) -> x = 0, ON (value_t 1) -> x = box_w -
- * overlay_w - 2*thumb_pad. With value_speed == 0 the slide snaps to its endpoint,
- * so the DELTA is logic-assertable by reading the thumb's emitted vertex X.
- * The smooth eased slide itself is user-visual-only (58-VALIDATION.md). */
+ * visible (unlike the checkmark pop) and carries a render-only offset_x eased by
+ * value_t. The base offset is symmetric: OFF (value_t 0) -> x = thumb_pad, ON
+ * (value_t 1) -> x = thumb_pad + (box_w - overlay_w - 2*thumb_pad). With
+ * value_speed == 0 the slide snaps to its endpoint, so both the symmetric base
+ * offset and the slide DELTA are logic-assertable by reading the thumb's emitted
+ * vertex X. The smooth eased slide itself is user-visual-only (58-VALIDATION.md). */
 
 #include <math.h>
 #include <stdalign.h>
@@ -179,6 +180,19 @@ static void test_thumb_slide_delta_endpoints(void) {
     /* The thumb must be present at BOTH ends (2 IMAGE cmds: track + thumb each). */
 }
 
+/* ---- Test 2b: OFF thumb sits at the SYMMETRIC base offset (thumb_pad from the
+ *      box left), not flush at x=0. Pins the symmetric base-offset fix (the base
+ *      offset_x was 0 before). The box left edge == the row's left == TG_X (box is
+ *      the first/only child); the emitted V0 is the quad CENTER, so the expected
+ *      X is box_left + thumb_pad + overlay_w/2. ---- */
+static void test_thumb_off_position_symmetric(void) {
+    const float x_off = thumb_emit_x(false); /* value_t snaps to 0 */
+    const float expected = TG_X + TG_THUMB_PAD + (TG_THUMB * 0.5F);
+    char msg[160];
+    (void)snprintf(msg, sizeof msg, "OFF thumb x expected %f (box_left + thumb_pad + overlay_w/2), got %f", (double)expected, (double)x_off);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(x_off - expected) <= 0.5F, msg);
+}
+
 /* ---- Test 3: thumb present at OFF -> both ends draw track + thumb (always
  *      visible, unlike the checkmark pop). 2 IMAGE, 0 TEXT in indicator mode. ---- */
 static void test_thumb_visible_at_off(void) {
@@ -210,11 +224,43 @@ static void test_disabled_toggle_balanced(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE));
 }
 
+/* ---- Death tests (NT_ASSERT_FULL only) ---- */
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+
+/* Toggle thumb travel must be >= 0: overlay_w + 2*thumb_pad > box_w -> assert. */
+static void test_assert_thumb_travel_negative(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.overlay_w = bad.box_w; /* overlay_w + 2*thumb_pad > box_w */
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* thumb_pad < 0 -> assert. */
+static void test_assert_thumb_pad_negative(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.thumb_pad = -1.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_toggle_flip_release_edge);
     RUN_TEST(test_thumb_slide_delta_endpoints);
+    RUN_TEST(test_thumb_off_position_symmetric);
     RUN_TEST(test_thumb_visible_at_off);
     RUN_TEST(test_disabled_toggle_balanced);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_assert_thumb_travel_negative);
+    RUN_TEST(test_assert_thumb_pad_negative);
+#endif
     return UNITY_END();
 }
