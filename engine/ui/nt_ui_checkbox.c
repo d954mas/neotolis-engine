@@ -39,7 +39,8 @@ static void assert_row_valid(const nt_ui_cb_state_t row[4]) {
     }
 }
 
-/* Packed 0xAABBGGRR -> Clay_Color (0..255); 0xFFFFFFFF = no tint ({0}). */
+/* Packed 0xAABBGGRR -> Clay_Color (0..255); 0xFFFFFFFF = no tint ({0}).
+ * For IMAGE tints only: the walker maps {0,0,0,0} backgroundColor back to white. */
 static Clay_Color unpack_tint(uint32_t packed) {
     Clay_Color tint = {0};
     if (packed != 0xFFFFFFFFU) {
@@ -49,6 +50,18 @@ static Clay_Color unpack_tint(uint32_t packed) {
         tint.a = (float)((packed >> 24) & 0xFFU);
     }
     return tint;
+}
+
+/* Literal 0xAABBGGRR -> Clay_Color (0..255), NO 0xFFFFFFFF sentinel. Text has no
+ * "untinted" rescue (that is image-only), so 0xFFFFFFFF must mean opaque white;
+ * the "use text_base" sentinel is text_color==0, handled by the caller's guard. */
+static Clay_Color unpack_color(uint32_t packed) {
+    return (Clay_Color){
+        .r = (float)(packed & 0xFFU),
+        .g = (float)((packed >> 8) & 0xFFU),
+        .b = (float)((packed >> 16) & 0xFFU),
+        .a = (float)((packed >> 24) & 0xFFU),
+    };
 }
 
 /* Inherit a non-idle ref from the row idle when its atlas.id is 0 (region==0 is
@@ -149,7 +162,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
 static void cb_emit_text(const cb_emit_args_t *e) {
     nt_ui_label_style_t text_style = e->style->text_base;
     if (e->cell->text_color != 0U) {
-        text_style.color = unpack_tint(e->cell->text_color);
+        text_style.color = unpack_color(e->cell->text_color);
     }
     const Clay_ElementDeclaration gap_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(e->style->gap), CLAY_SIZING_FIXED(0)}},
