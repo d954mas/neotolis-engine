@@ -336,36 +336,26 @@ static void declare_menu(void) {
         // #region general (checkbox + toggle)
         section_label("General");
 
-        CLAY(s_row_decl) {
-            if (nt_ui_checkbox(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_vsync, "Enable VSync", &s_vsync, &s_check, &s_row_decl, true)) {
-                nt_log_info("ui_stateful_demo: VSync -> %s", s_vsync ? "ON" : "off");
-            }
+        if (nt_ui_checkbox(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_vsync, "Enable VSync", &s_vsync, &s_check, &s_row_decl, true)) {
+            nt_log_info("ui_stateful_demo: VSync -> %s", s_vsync ? "ON" : "off");
         }
 
-        CLAY(s_row_decl) {
-            if (nt_ui_toggle(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dark, "Dark Mode", &s_dark, &s_switch, &s_row_decl, true)) {
-                nt_log_info("ui_stateful_demo: Dark Mode -> %s", s_dark ? "ON" : "off");
-            }
+        if (nt_ui_toggle(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dark, "Dark Mode", &s_dark, &s_switch, &s_row_decl, true)) {
+            nt_log_info("ui_stateful_demo: Dark Mode -> %s", s_dark ? "ON" : "off");
         }
         // #endregion
 
         // #region quality (shared-int radio group)
         section_label("Quality (exclusive group)");
 
-        CLAY(s_row_decl) {
-            if (nt_ui_radio(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_q_low, "Low", &s_quality, 0, &s_radio, &s_row_decl, true)) {
-                nt_log_info("ui_stateful_demo: quality -> Low");
-            }
+        if (nt_ui_radio(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_q_low, "Low", &s_quality, 0, &s_radio, &s_row_decl, true)) {
+            nt_log_info("ui_stateful_demo: quality -> Low");
         }
-        CLAY(s_row_decl) {
-            if (nt_ui_radio(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_q_med, "Med", &s_quality, 1, &s_radio, &s_row_decl, true)) {
-                nt_log_info("ui_stateful_demo: quality -> Med");
-            }
+        if (nt_ui_radio(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_q_med, "Med", &s_quality, 1, &s_radio, &s_row_decl, true)) {
+            nt_log_info("ui_stateful_demo: quality -> Med");
         }
-        CLAY(s_row_decl) {
-            if (nt_ui_radio(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_q_high, "High", &s_quality, 2, &s_radio, &s_row_decl, true)) {
-                nt_log_info("ui_stateful_demo: quality -> High");
-            }
+        if (nt_ui_radio(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_q_high, "High", &s_quality, 2, &s_radio, &s_row_decl, true)) {
+            nt_log_info("ui_stateful_demo: quality -> High");
         }
         // #endregion
 
@@ -378,10 +368,8 @@ static void declare_menu(void) {
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "<- no-label cell", &g_help_style);
         }
 
-        CLAY(s_row_decl) {
-            /* DISABLED checkbox: enabled=false forces the dim cell + no click. */
-            nt_ui_checkbox(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_locked, "Locked (disabled)", &s_locked, &s_check, &s_row_decl, false);
-        }
+        /* DISABLED checkbox: enabled=false forces the dim cell + no click. */
+        nt_ui_checkbox(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_locked, "Locked (disabled)", &s_locked, &s_check, &s_row_decl, false);
         // #endregion
     }
 }
