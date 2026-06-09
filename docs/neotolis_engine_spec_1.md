@@ -219,6 +219,30 @@ If a decision can be deferred without loss of base architecture — it is deferr
   counter surfaces this degradation; game polls the delta to size
   `NT_UI_ANIM_SLOTS`.
 
+  **Stateful widgets.** `nt_ui_checkbox` / `nt_ui_radio` / `nt_ui_toggle`
+  are leaf widgets over one shared core. Per code-first /
+  explicit-over-implicit, the engine stores NO logical value — the game owns
+  it: `bool*` for checkbox/toggle, a shared `int*` for radio (exclusivity is
+  free — every radio compares `*selected == my_value`, no engine-side group
+  state). Each returns `changed` only on the release-over-widget frame. One
+  shared `nt_ui_checkbox_style_t` (strict superset for all three) holds, per
+  interaction state (idle/hover/pressed/disabled) × value row
+  (unchecked/checked), the art refs + tint + transform + opacity; only
+  transient visual easing lives in the engine (the anim cache above). The
+  indicator (box + overlay) draws on `data->layer`; the label on a separate
+  `label_layer` arg, so games may batch sprite-then-text. `scale_label`
+  chooses whether press/hover scales the whole row or only the indicator
+  (opacity/dim is always whole-widget). Toggle adds a render-only sliding
+  thumb with a symmetric `thumb_pad` end-margin.
+
+  **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
+  uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
+  is the unset handle; consumers assign their own meaning). The widget APIs
+  that take atlas art — `nt_ui_image`, `nt_ui_panel_begin`, and the
+  button/checkbox style structs — take this single ref rather than separate
+  `(atlas, region_index)` arguments. This is a breaking change versus the
+  earlier surface; callers pass one `nt_atlas_region_ref_t`.
+
   **Scissor limitation.** GL scissor is axis-aligned in framebuffer
   space. A rotated scroll container is clipped by the AABB of its
   rotated corners, so content can poke past the visual corners.
