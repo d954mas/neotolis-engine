@@ -95,32 +95,24 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     // #endregion
     // #region build_element_data
     /* Parent xform requires wrapping with a CLAY block — build_tree composes downward. */
-    nt_ui_element_data_t *btn_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(btn_data != NULL && "nt_ui_button_begin: scratch alloc failed (element_data)");
-    *btn_data = (nt_ui_element_data_t){
-        .user_data = (data != NULL) ? data->user_data : NULL,
-        .layer = (data != NULL) ? data->layer : 0U,
-        .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
-        .transform = {.scale_x = a->scale_x,
-                      .scale_y = a->scale_y,
-                      .scale_z = a->scale_z,
-                      .offset_x = a->off_x,
-                      .offset_y = a->off_y,
-                      .offset_z = a->off_z,
-                      .rotation_x = a->rot_x,
-                      .rotation_y = a->rot_y,
-                      .rotation_z = a->rot_z},
-        .opacity = a->opacity,
-    };
+    const nt_ui_transform_t btn_t = {.scale_x = a->scale_x,
+                                     .scale_y = a->scale_y,
+                                     .scale_z = a->scale_z,
+                                     .offset_x = a->off_x,
+                                     .offset_y = a->off_y,
+                                     .offset_z = a->off_z,
+                                     .rotation_x = a->rot_x,
+                                     .rotation_y = a->rot_y,
+                                     .rotation_z = a->rot_z};
+    const nt_ui_element_data_t *btn_data = nt_ui_make_element_data_xform((data != NULL) ? data->layer : 0U, (data != NULL) ? data->user_data : NULL, &btn_t, a->opacity);
     // #endregion
     // #region open_clay_image
-    /* A bg ref is atomic {atlas, region}: a non-idle state with atlas.id==0 inherits the
-     * idle state's whole ref (region 0 is a valid index, so it can't double as the sentinel). */
-    const nt_atlas_region_ref_t bg = (st->bg.atlas.id != 0U) ? st->bg : style->idle.bg;
+    /* Atomic ref: a non-idle state with atlas.id==0 inherits the idle state's whole ref. */
+    const nt_atlas_region_ref_t bg = nt_ui_ref_or(st->bg, style->idle.bg);
     const nt_resource_t st_atlas = bg.atlas;
     const uint32_t region = bg.region;
 
-    const Clay_Color tint = (st->bg_tint == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(st->bg_tint);
+    const Clay_Color tint = nt_ui_unpack_tint(st->bg_tint);
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.id = (Clay_ElementId){.id = id};

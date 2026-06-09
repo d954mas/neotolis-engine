@@ -45,8 +45,8 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atla
     };
     memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 
-    /* 0xFFFFFFFF = untinted (pass {0,0,0,0}). Transparency lives in opacity. */
-    const Clay_Color tint = (style->color_packed == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(style->color_packed);
+    /* Transparency lives in opacity, not tint alpha. */
+    const Clay_Color tint = nt_ui_unpack_tint(style->color_packed);
 
     /* decl == NULL falls back to GROW/GROW; decl != NULL is respected verbatim. */
     Clay_ElementDeclaration final;

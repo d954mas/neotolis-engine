@@ -49,20 +49,6 @@ static void assert_row_valid(const nt_ui_cb_state_t row[4]) {
     }
 }
 
-/* 0xAABBGGRR -> Clay_Color; 0xFFFFFFFF = no tint ({0}). For IMAGE tints only:
- * the walker maps {0,0,0,0} backgroundColor back to white. */
-static Clay_Color unpack_tint(uint32_t packed) { return (packed == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(packed); }
-
-/* Literal 0xAABBGGRR (NO 0xFFFFFFFF sentinel). Text has no "untinted" rescue (that
- * is image-only), so 0xFFFFFFFF must mean opaque white; the "use text_base"
- * sentinel is text_color==0, handled by the caller's guard. */
-static Clay_Color unpack_color(uint32_t packed) { return nt_ui_unpack_abgr(packed); }
-
-/* A ref is an atomic {atlas, region}: a non-idle cell either fully specifies its
- * own ref or leaves atlas.id==0 to inherit the value-row idle cell whole.
- * (Per-field inherit would make region 0 — a valid index — unreachable as an override.) */
-static nt_atlas_region_ref_t resolve_ref(nt_atlas_region_ref_t cell, nt_atlas_region_ref_t idle) { return (cell.atlas.id != 0U) ? cell : idle; }
-
 /* Scratch element_data with any subset of {layer, transform, opacity}: t==NULL -> no
  * transform; opacity<0 -> no opacity (inherits parent). Local builder because the
  * public xform helper forces BOTH, but the box needs transform WITHOUT own opacity. */
@@ -124,7 +110,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
         *p = (nt_ui_image_payload_t){.atlas = e->box_ref.atlas, .region_index = e->box_ref.region, .slice9_scale = 1.0F};
         box_decl.image = (Clay_ImageElementConfig){.imageData = p};
     }
-    box_decl.backgroundColor = unpack_tint(e->cell->box_tint);
+    box_decl.backgroundColor = nt_ui_unpack_tint(e->cell->box_tint);
     /* Box (and its overlay child) draw on the indicator layer; box_xform != NULL puts
      * the eased state transform here so only the indicator scales, not the label. */
     box_decl.userData = (void *)cb_make_data(NULL, e->indicator_layer, e->box_xform, -1.0F);
@@ -166,8 +152,10 @@ static void cb_emit_box(const cb_emit_args_t *e) {
 /* gap spacer + the label text child. Per-cell text_color overrides text_base. */
 static void cb_emit_text(const cb_emit_args_t *e) {
     nt_ui_label_style_t text_style = e->style->text_base;
+    /* Literal unpack (text has no image "untinted" rescue): 0xFFFFFFFF = white; the
+     * "inherit text_base" sentinel is text_color==0, guarded here. */
     if (e->cell->text_color != 0U) {
-        text_style.color = unpack_color(e->cell->text_color);
+        text_style.color = nt_ui_unpack_abgr(e->cell->text_color);
     }
     /* Label draws on its own layer; no transform/opacity of its own (whole-widget
      * opacity inherits from the row; scale stays on the indicator unless scale_label). */
@@ -244,8 +232,8 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
         state = NT_UI_CB_HOVER;
     }
     const nt_ui_cb_state_t *cell = &row[state];
-    const nt_atlas_region_ref_t box_ref = resolve_ref(cell->box, row[NT_UI_CB_IDLE].box);
-    const nt_atlas_region_ref_t check_ref = resolve_ref(cell->check, row[NT_UI_CB_IDLE].check);
+    const nt_atlas_region_ref_t box_ref = nt_ui_ref_or(cell->box, row[NT_UI_CB_IDLE].box);
+    const nt_atlas_region_ref_t check_ref = nt_ui_ref_or(cell->check, row[NT_UI_CB_IDLE].check);
     // #endregion
     // #region one anim call
     /* ONE combined target: state group at state_speed + value_t at value_speed. */

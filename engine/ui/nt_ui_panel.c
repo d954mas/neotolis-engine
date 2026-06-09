@@ -50,7 +50,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     };
     memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 
-    const Clay_Color tint = (style->color_packed == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(style->color_packed);
+    const Clay_Color tint = nt_ui_unpack_tint(style->color_packed);
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.backgroundColor = tint;
