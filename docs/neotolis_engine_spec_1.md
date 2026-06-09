@@ -208,6 +208,10 @@ If a decision can be deferred without loss of base architecture — it is deferr
   becomes eligible the NEXT frame; on the first frame (empty registry) nothing
   reacts — reliability over instant first-frame response, no raw-hit fallback
   (matches Dear ImGui). This trades immediacy for unambiguous overlap/occlusion.
+  Symmetrically, a widget that interacted last frame but is gone or disabled this
+  frame stays a hot candidate for that ONE transition frame (it can gate widgets
+  beneath it but itself reacts to nothing), then orphan cleanup drops it next frame.
+  A statically-disabled widget never registers, so never gates.
 
   **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
   visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
