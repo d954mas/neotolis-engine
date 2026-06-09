@@ -199,8 +199,10 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     NT_ASSERT(id != 0U && "nt_ui_checkbox: id 0 is the no-widget sentinel");
     NT_ASSERT(isfinite(style->state_speed) && style->state_speed >= 0.0F && "nt_ui_checkbox: style.state_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->value_speed) && style->value_speed >= 0.0F && "nt_ui_checkbox: style.value_speed must be finite >= 0");
-    NT_ASSERT(style->box_w > 0.0F && style->box_h > 0.0F && "nt_ui_checkbox: style.box_w/box_h must be > 0 (D-58-14)");
-    NT_ASSERT(style->overlay_w >= 0.0F && style->overlay_h >= 0.0F && "nt_ui_checkbox: style.overlay_w/h must be >= 0");
+    NT_ASSERT(isfinite(style->box_w) && style->box_w > 0.0F && isfinite(style->box_h) && style->box_h > 0.0F && "nt_ui_checkbox: style.box_w/box_h must be finite > 0");
+    NT_ASSERT(isfinite(style->overlay_w) && style->overlay_w >= 0.0F && isfinite(style->overlay_h) && style->overlay_h >= 0.0F && "nt_ui_checkbox: style.overlay_w/h must be finite >= 0");
+    NT_ASSERT(isfinite(style->gap) && style->gap >= 0.0F && "nt_ui_checkbox: style.gap must be finite >= 0");
+    NT_ASSERT(style->label_side <= 1U && "nt_ui_checkbox: style.label_side must be 0 (text right) or 1 (text left)");
     NT_ASSERT(isfinite(style->thumb_pad) && style->thumb_pad >= 0.0F && "nt_ui_checkbox: style.thumb_pad must be finite >= 0");
     NT_ASSERT((!is_toggle || (style->overlay_w + (2.0F * style->thumb_pad) <= style->box_w)) && "nt_ui_toggle: overlay_w + 2*thumb_pad must fit in box_w (thumb travel >= 0)");
     assert_row_valid(style->unchecked);

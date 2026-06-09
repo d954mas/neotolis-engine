@@ -19,7 +19,7 @@
 /* ---- Public types ---- */
 
 /* Canonical "sprite-in-atlas" identity — an atlas resource handle paired with a region index.
- * id==0 (non-idle widget cell) = inherit; id==0 (idle terminal) = no art. */
+ * atlas.id == 0 is the unset/invalid handle; consumers assign their own meaning to it. */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region;
