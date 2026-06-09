@@ -119,7 +119,7 @@ static void test_anim_open_address_coexists(void) {
     TEST_ASSERT_TRUE(float_near(r3->scale_x, 1.0F, 1e-6F));
 }
 
-/* All NT_UI_ANIM_PROBE_MAX consecutive slots full with other ids → evict base. */
+/* All NT_UI_ANIM_PROBE_MAX consecutive slots full with other ids → evict tail. */
 static void test_anim_evicts_when_probes_exhausted(void) {
     s_fx.ctx->frame_dt = 1.0F / 60.0F;
     nt_ui_anim_target_t t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
@@ -128,7 +128,7 @@ static void test_anim_evicts_when_probes_exhausted(void) {
         const uint32_t id = 1U + (k * NT_UI_ANIM_SLOTS);
         (void)nt_ui_anim(s_fx.ctx, id, &t, 0.0F, 0.0F);
     }
-    /* New id hashing to same base: all probes occupied → evict base. */
+    /* New id hashing to same base: all probes occupied → evict the tail slot. */
     const uint32_t bumped = 1U + (NT_UI_ANIM_PROBE_MAX * NT_UI_ANIM_SLOTS);
     nt_ui_anim_target_t t_new = {.scale_x = 0.25F, .scale_y = 0.25F, .scale_z = 1.0F, .opacity = 1.0F};
     const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, bumped, &t_new, 10.0F, 0.0F);

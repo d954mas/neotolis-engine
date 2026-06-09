@@ -17,14 +17,18 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* "nt_" prefix disambiguates from Clay's own config-type pills. */
+/* "nt_" prefix disambiguates from Clay's own config-type pills. One def per widget
+ * so the inspector labels radio/toggle distinctly (not all as "nt_checkbox"). */
 extern const nt_ui_widget_def_t NT_UI_CHECKBOX_DEF;
+extern const nt_ui_widget_def_t NT_UI_RADIO_DEF;
+extern const nt_ui_widget_def_t NT_UI_TOGGLE_DEF;
 
 /* 2x4 grid index: value(unchecked/checked) x interaction. */
 enum { NT_UI_CB_IDLE = 0, NT_UI_CB_HOVER, NT_UI_CB_PRESSED, NT_UI_CB_DISABLED };
 
-/* One cell of the 2x4 grid. box/check are nt_atlas_region_ref_t:
- *   non-idle cell atlas.id==0 -> inherit the value-row idle cell;
+/* One cell of the 2x4 grid. box/check are atomic nt_atlas_region_ref_t:
+ *   non-idle cell atlas.id==0 -> inherit the value-row idle cell's WHOLE ref;
+ *   non-idle cell atlas.id!=0 -> use this ref verbatim (region 0 is a valid index);
  *   idle terminal atlas.id==0 -> NO ART (skip that part's IMAGE). */
 typedef struct {
     nt_atlas_region_ref_t box;   /* indicator / track background */
@@ -70,7 +74,9 @@ _Static_assert(sizeof(nt_ui_checkbox_style_t) == 420, "nt_ui_checkbox_style_t st
  * writes *selected immediately, so a newly-selected sibling can render checked one
  * frame before the old one renders unchecked (standard immediate-mode 1-frame lag).
  *
- * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl.
+ * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl AND forces the
+ * row's layoutDirection (LEFT_TO_RIGHT) + vertical childAlignment (CENTER) — it is a
+ * box<->label row; the caller's decl supplies sizing/padding only.
  * data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY (the widget owns these).
  * style->box_w/box_h > 0 required; per value row at least box.idle OR check.idle
  * must be non-zero. enabled=false short-circuits interaction + forces the

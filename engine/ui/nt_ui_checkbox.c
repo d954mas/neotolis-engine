@@ -18,6 +18,16 @@ const nt_ui_widget_def_t NT_UI_CHECKBOX_DEF = {
     .pill_color = 0xFF70B0D0U,
     ._reserved = 0U,
 };
+const nt_ui_widget_def_t NT_UI_RADIO_DEF = {
+    .name = "nt_radio",
+    .pill_color = 0xFF70D0A0U,
+    ._reserved = 0U,
+};
+const nt_ui_widget_def_t NT_UI_TOGGLE_DEF = {
+    .name = "nt_toggle",
+    .pill_color = 0xFF70D0D0U,
+    ._reserved = 0U,
+};
 
 /* Below this eased value the overlay is not worth a draw call — skip its emit. */
 #define NT_UI_CB_OVERLAY_EPS 0.01F
@@ -48,13 +58,10 @@ static Clay_Color unpack_tint(uint32_t packed) { return (packed == 0xFFFFFFFFU) 
  * sentinel is text_color==0, handled by the caller's guard. */
 static Clay_Color unpack_color(uint32_t packed) { return nt_ui_unpack_abgr(packed); }
 
-/* Inherit a non-idle ref from the row idle when its atlas.id is 0 (region==0 is
- * inherit too — NEVER a "no overlay" sentinel; that is value-gating / no-art). */
-static nt_atlas_region_ref_t resolve_ref(nt_atlas_region_ref_t cell, nt_atlas_region_ref_t idle) {
-    const nt_resource_t atlas = (cell.atlas.id != 0U) ? cell.atlas : idle.atlas;
-    const uint32_t region = (cell.region != 0U) ? cell.region : idle.region;
-    return (nt_atlas_region_ref_t){atlas, region};
-}
+/* A ref is an atomic {atlas, region}: a non-idle cell either fully specifies its
+ * own ref or leaves atlas.id==0 to inherit the value-row idle cell whole.
+ * (Per-field inherit would make region 0 — a valid index — unreachable as an override.) */
+static nt_atlas_region_ref_t resolve_ref(nt_atlas_region_ref_t cell, nt_atlas_region_ref_t idle) { return (cell.atlas.id != 0U) ? cell : idle; }
 
 /* Build a scratch element_data carrying any subset of {layer, transform, opacity}:
  * t == NULL -> no transform; opacity < 0 -> no opacity (inherits from the parent).
@@ -190,7 +197,7 @@ static void cb_emit_text(const cb_emit_args_t *e) {
  *   is_toggle          drives the thumb slide instead of centered pop.
  *   out_clicked        receives the release-over-widget edge for the wrapper. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool value_is_checked, bool is_toggle,
+static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool value_is_checked, bool is_toggle, const nt_ui_widget_def_t *def,
                     const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_clicked) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_checkbox: ctx must be non-NULL");
@@ -290,7 +297,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     row_decl.userData = (void *)row_data;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(row_decl);
-    nt_ui_widget_register(ctx, id, &NT_UI_CHECKBOX_DEF, NULL);
+    nt_ui_widget_register(ctx, id, def, NULL);
     // #endregion
     // #region ordered children (text-side first, then box; or box, then text)
     cb_emit_args_t args = {
@@ -324,7 +331,7 @@ bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
                     const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_checkbox: value must be non-NULL");
     bool clicked = false;
-    cb_core(ctx, data, label_layer, id, label, *value, false, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, *value, false, &NT_UI_CHECKBOX_DEF, style, decl, enabled, &clicked);
     if (clicked) {
         *value = !*value;
         return true;
@@ -339,7 +346,7 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
      * no engine-side group state is needed. value row = am I it? */
     const bool value_is_checked = (*selected == my_value);
     bool clicked = false;
-    cb_core(ctx, data, label_layer, id, label, value_is_checked, false, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, value_is_checked, false, &NT_UI_RADIO_DEF, style, decl, enabled, &clicked);
     /* Re-selecting the already-selected option is a no-op (no flicker). */
     if (clicked && *selected != my_value) {
         *selected = my_value;
@@ -354,7 +361,7 @@ bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_
     /* Same value logic as checkbox; is_toggle=true drives the always-visible
      * thumb + render-only offset_x slide DELTA in cb_emit_box. */
     bool clicked = false;
-    cb_core(ctx, data, label_layer, id, label, *value, true, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, *value, true, &NT_UI_TOGGLE_DEF, style, decl, enabled, &clicked);
     if (clicked) {
         *value = !*value;
         return true;
