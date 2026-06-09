@@ -47,7 +47,7 @@ typedef struct {
  *
  * Total: 48 bytes on 64-bit (uint64_t alignment drives 8-byte boundary). */
 typedef struct {
-    uint64_t name_hash;      /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
+    uint64_t name_hash;      /*  0: xxh64 of region name (always a real hash at runtime) */
     uint32_t vertex_start;   /*  8: index into nt_atlas_data_t.vertices[] */
     uint32_t index_start;    /* 12: index into nt_atlas_data_t.indices[]  */
     float origin_x;          /* 16: normalized pivot 0..1 (may lie outside) */
@@ -56,7 +56,7 @@ typedef struct {
     uint16_t source_h;       /* 26 */
     int16_t trim_offset_x;   /* 28: pixels stripped from left edge */
     int16_t trim_offset_y;   /* 30 */
-    uint8_t vertex_count;    /* 32: 0 = tombstone (and also degenerate) */
+    uint8_t vertex_count;    /* 32: 0 = dead marker (removed by merge or degenerate) */
     uint8_t index_count;     /* 33 */
     uint8_t page_index;      /* 34 */
     uint8_t transform;       /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
@@ -83,12 +83,13 @@ uint32_t nt_atlas_region_count(nt_resource_t atlas);
 uint8_t nt_atlas_page_count(nt_resource_t atlas);
 
 /* O(1) amortized lookup of a region by its name hash.
- * Returns NT_ATLAS_INVALID_REGION if the hash is not present (including
- * tombstoned regions that have been removed by a later merge). */
+ * Returns a stable index for any name that was ever present (alive -> live
+ * index; removed -> dead index that draws nothing; revived -> the SAME index).
+ * NT_ATLAS_INVALID_REGION only for names never present. */
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash);
 
 /* O(1) pointer access by region index.
- * Always returns a non-NULL pointer when index < region_count. Tombstoned
+ * Always returns a non-NULL pointer when index < region_count. Dead/removed
  * regions return a struct with vertex_count==0 / index_count==0 — the renderer
  * naturally produces zero draws without a NULL branch in the hot path.
  * Out-of-range indices trip NT_ASSERT (caller bug). */
