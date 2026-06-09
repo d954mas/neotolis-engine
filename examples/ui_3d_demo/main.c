@@ -464,9 +464,9 @@ static void try_bind_resources(void) {
         /* IDLE: blue everywhere with a small hover-press ease. */
         s_btn_idle = (nt_ui_button_style_t){
             .idle = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
-            .hover = {.bg.region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 1.04F, .opacity = 1.0F},
-            .pressed = {.bg.region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 0.96F, .opacity = 1.0F},
-            .disabled = {.bg.region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
+            .hover = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.04F, .opacity = 1.0F},
+            .pressed = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 0.96F, .opacity = 1.0F},
+            .disabled = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
             .transition_speed = 8.0F,
             .slice9_scale = 1.0F,
         };
