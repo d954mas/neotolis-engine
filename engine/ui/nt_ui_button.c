@@ -34,7 +34,6 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(ctx != NULL && "nt_ui_button_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_button_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_button_begin: style must be non-NULL");
-    NT_ASSERT(style->idle.atlas.id != 0 && "nt_ui_button_begin: style.idle.atlas must be valid (other states inherit when their atlas.id == 0)");
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
     NT_ASSERT(isfinite(style->transition_speed) && style->transition_speed >= 0.0F && "nt_ui_button_begin: style.transition_speed must be finite >= 0");
@@ -91,52 +90,43 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .opacity = st->opacity,
         .tint_t = 0.0F,
     };
-    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->transition_speed);
+    /* Button is value_t-agnostic: pass value_t=0 (in tgt) + value_speed=0. */
+    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->transition_speed, 0.0F);
     // #endregion
     // #region build_element_data
     /* Parent xform requires wrapping with a CLAY block — build_tree composes downward. */
-    nt_ui_element_data_t *btn_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(btn_data != NULL && "nt_ui_button_begin: scratch alloc failed (element_data)");
-    *btn_data = (nt_ui_element_data_t){
-        .user_data = (data != NULL) ? data->user_data : NULL,
-        .layer = (data != NULL) ? data->layer : 0U,
-        .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
-        .transform = {.scale_x = a->scale_x,
-                      .scale_y = a->scale_y,
-                      .scale_z = a->scale_z,
-                      .offset_x = a->off_x,
-                      .offset_y = a->off_y,
-                      .offset_z = a->off_z,
-                      .rotation_x = a->rot_x,
-                      .rotation_y = a->rot_y,
-                      .rotation_z = a->rot_z},
-        .opacity = a->opacity,
-    };
+    const nt_ui_transform_t btn_t = {.scale_x = a->scale_x,
+                                     .scale_y = a->scale_y,
+                                     .scale_z = a->scale_z,
+                                     .offset_x = a->off_x,
+                                     .offset_y = a->off_y,
+                                     .offset_z = a->off_z,
+                                     .rotation_x = a->rot_x,
+                                     .rotation_y = a->rot_y,
+                                     .rotation_z = a->rot_z};
+    const nt_ui_element_data_t *btn_data = nt_ui_make_element_data_xform((data != NULL) ? data->layer : 0U, (data != NULL) ? data->user_data : NULL, &btn_t, a->opacity);
     // #endregion
     // #region open_clay_image
-    /* atlas/bg_region 0 falls back to idle. */
-    const nt_resource_t st_atlas = (st->atlas.id != 0U) ? st->atlas : style->idle.atlas;
-    const uint32_t region = (st->bg_region != 0U) ? st->bg_region : style->idle.bg_region;
+    /* Atomic ref: a non-idle state with atlas.id==0 inherits the idle state's whole ref. */
+    const nt_atlas_region_ref_t bg = nt_ui_ref_or(st->bg, style->idle.bg);
+    const nt_resource_t st_atlas = bg.atlas;
+    const uint32_t region = bg.region;
 
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed (image_payload)");
-    *p = (nt_ui_image_payload_t){
-        .atlas = st_atlas,
-        .region_index = region,
-        .slice9_scale = style->slice9_scale,
-    };
-
-    Clay_Color tint = {0};
-    if (st->bg_tint != 0xFFFFFFFF) {
-        tint.r = (float)(st->bg_tint & 0xFFU);
-        tint.g = (float)((st->bg_tint >> 8) & 0xFFU);
-        tint.b = (float)((st->bg_tint >> 16) & 0xFFU);
-        tint.a = (float)((st->bg_tint >> 24) & 0xFFU);
-    }
+    const Clay_Color tint = nt_ui_unpack_tint(st->bg_tint);
 
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.id = (Clay_ElementId){.id = id};
-    final.image = (Clay_ImageElementConfig){.imageData = p};
+    /* Resolved atlas.id == 0 = text-only button: no background art, no IMAGE payload. */
+    if (st_atlas.id != 0U) {
+        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(p != NULL && "nt_ui_button_begin: scratch alloc failed (image_payload)");
+        *p = (nt_ui_image_payload_t){
+            .atlas = st_atlas,
+            .region_index = region,
+            .slice9_scale = style->slice9_scale,
+        };
+        final.image = (Clay_ImageElementConfig){.imageData = p};
+    }
     final.backgroundColor = tint;
     final.userData = (void *)btn_data;
     nt_ui_clay_priv_open_element();

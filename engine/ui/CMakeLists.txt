@@ -56,6 +56,8 @@ set(NT_UI_SOURCES
     nt_ui_anim.h
     nt_ui_button.c
     nt_ui_button.h
+    nt_ui_checkbox.c
+    nt_ui_checkbox.h
     nt_ui_debug_hit_zones.c
     nt_ui_debug_hit_zones.h
     nt_ui_inspector.c
@@ -105,11 +107,13 @@ target_link_libraries(nt_ui
         nt_material
         nt_input
         nt_mem_scratch
+        # PUBLIC: nt_atlas_region_ref_t appears in public widget headers
+        # (nt_ui_button.h / nt_ui_image.h / nt_ui_panel.h).
+        nt_atlas
     PRIVATE
         nt_gfx
         nt_sprite_renderer
         nt_text_renderer
-        nt_atlas
         nt_time
         nt_math
 )

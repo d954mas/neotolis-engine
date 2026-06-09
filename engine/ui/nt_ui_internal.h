@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "atlas/nt_atlas.h"
 #include "clay.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
@@ -73,6 +74,25 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B"
 /* 2D affine extraction from column-major mat4 (matches [a b tx; c d ty]·[x;y;1] applied to (x,y,0,1)):
  *   a = m[0], b = m[4], c = m[1], d = m[5], tx = m[12], ty = m[13]
  * Callers (walker, hit-test, debug_zone fill) inline this indexing directly. */
+
+/* Packed 0xAABBGGRR -> Clay_Color (0..255), literal (no sentinel). Callers that
+ * treat 0xFFFFFFFF as "no tint" must guard it before calling. */
+static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
+    return (Clay_Color){
+        .r = (float)(packed & 0xFFU),
+        .g = (float)((packed >> 8) & 0xFFU),
+        .b = (float)((packed >> 16) & 0xFFU),
+        .a = (float)((packed >> 24) & 0xFFU),
+    };
+}
+
+/* 0xAABBGGRR -> Clay_Color with the IMAGE "no tint" sentinel: 0xFFFFFFFF -> {0}
+ * (the walker maps a {0,0,0,0} backgroundColor back to white). Text must NOT use this. */
+static inline Clay_Color nt_ui_unpack_tint(uint32_t packed) { return (packed == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(packed); }
+
+/* Atomic ref inherit: `ref` if its atlas is set, else `fallback`. Keyed on atlas.id
+ * (region 0 is a valid index, so it can't double as the "unset" sentinel). */
+static inline nt_atlas_region_ref_t nt_ui_ref_or(nt_atlas_region_ref_t ref, nt_atlas_region_ref_t fallback) { return (ref.atlas.id != 0U) ? ref : fallback; }
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {

@@ -800,6 +800,125 @@
             "dependsOn": ["Build wasm-release-paired", "Ensure server ui_buttons_demo (release :8099)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_stateful_demo packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_ui_stateful_demo_packs && build\\examples\\ui_stateful_demo\\native-debug\\build_ui_stateful_demo_packs.exe build/examples/ui_stateful_demo",
+            "dependsOn": ["Configure native-debug"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run ui_stateful_demo packs (release)",
+            "dependsOn": [
+                "Configure native-release",
+                "Build & run ui_stateful_demo packs (release command)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_stateful_demo packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_ui_stateful_demo_packs && build\\examples\\ui_stateful_demo\\native-release\\build_ui_stateful_demo_packs.exe build/examples/ui_stateful_demo",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build ui_stateful_demo (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target ui_stateful_demo",
+            "dependsOn": ["Build & run ui_stateful_demo packs (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build ui_stateful_demo (release)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target ui_stateful_demo",
+            "dependsOn": ["Build & run ui_stateful_demo packs (release)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Run ui_stateful_demo (native-debug)",
+            "type": "shell",
+            "command": "build\\examples\\ui_stateful_demo\\native-debug\\ui_stateful_demo.exe",
+            "dependsOn": ["Build ui_stateful_demo (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "presentation": { "panel": "dedicated", "reveal": "always" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run ui_stateful_demo (native-release)",
+            "type": "shell",
+            "command": "build\\examples\\ui_stateful_demo\\native-release\\ui_stateful_demo.exe",
+            "dependsOn": ["Build ui_stateful_demo (release)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "presentation": { "panel": "dedicated", "reveal": "always" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server ui_stateful_demo (debug :8100)",
+            "type": "shell",
+            "command": "python -m http.server 8100 -d \"${workspaceFolder}/build/examples/ui_stateful_demo/wasm-debug-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Ensure server ui_stateful_demo (release :8101)",
+            "type": "shell",
+            "command": "python -m http.server 8101 -d \"${workspaceFolder}/build/examples/ui_stateful_demo/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve ui_stateful_demo (debug)",
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server ui_stateful_demo (debug :8100)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve ui_stateful_demo (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server ui_stateful_demo (release :8101)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

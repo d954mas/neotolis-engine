@@ -463,19 +463,19 @@ static void try_bind_resources(void) {
 
         /* IDLE: blue everywhere with a small hover-press ease. */
         s_btn_idle = (nt_ui_button_style_t){
-            .idle = {.atlas = s_atlas_handle, .bg_region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
-            .hover = {.bg_region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 1.04F, .opacity = 1.0F},
-            .pressed = {.bg_region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 0.96F, .opacity = 1.0F},
-            .disabled = {.bg_region = s_button_blue_idx, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
+            .idle = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
+            .hover = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.04F, .opacity = 1.0F},
+            .pressed = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 0.96F, .opacity = 1.0F},
+            .disabled = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
             .transition_speed = 8.0F,
             .slice9_scale = 1.0F,
         };
         /* ACTIVE: green (currently-selected) — same animation but different art. */
         s_btn_active = s_btn_idle;
-        s_btn_active.idle.bg_region = s_button_green_idx;
-        s_btn_active.hover.bg_region = s_button_green_idx;
-        s_btn_active.pressed.bg_region = s_button_green_idx;
-        s_btn_active.disabled.bg_region = s_button_green_idx;
+        s_btn_active.idle.bg.region = s_button_green_idx;
+        s_btn_active.hover.bg.region = s_button_green_idx;
+        s_btn_active.pressed.bg.region = s_button_green_idx;
+        s_btn_active.disabled.bg.region = s_button_green_idx;
 
         s_atlas_bound = true;
         nt_log_info("ui_3d_demo: atlas bound");

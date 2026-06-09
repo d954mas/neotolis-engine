@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui.h" /* nt_ui_element_data_t */
@@ -17,9 +18,8 @@ extern const nt_ui_widget_def_t NT_UI_BUTTON_DEF;
 
 /* Layout/sizing/padding live on the Clay begin element, not on the style. */
 typedef struct {
-    nt_resource_t atlas; /* {id=0} = inherit idle.atlas */
-    uint32_t bg_region;  /* slice9 region; 0 = inherit idle.bg_region */
-    uint32_t bg_tint;    /* 0xAABBGGRR */
+    nt_atlas_region_ref_t bg; /* atomic ref; atlas.id==0 = inherit idle.bg whole (region 0 is a valid index) */
+    uint32_t bg_tint;         /* 0xAABBGGRR */
     float scale;
     float offset_x, offset_y;
     float opacity; /* inherits to content */
@@ -36,7 +36,8 @@ typedef struct {
 
 /* enabled=false short-circuits interaction and forces the disabled visual.
  * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl.
- * style->idle.atlas MUST be valid; other states inherit when their atlas.id == 0. */
+ * style->idle.bg.atlas.id == 0 = text-only button (no background IMAGE emitted);
+ * other states inherit idle when their bg.atlas.id == 0. */
 void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
 

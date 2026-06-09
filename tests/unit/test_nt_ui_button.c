@@ -27,10 +27,10 @@ static ui_walker_fixture_t s_fx;
 /* Non-degenerate per-state visuals; transition_speed 0 = instant (deterministic
  * for a 1-frame test). idle/hover opaque; pressed shrinks; disabled dims. */
 static nt_ui_button_style_t s_btn_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 0.5F},
+    .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 1.0F},
+    .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .opacity = 1.0F},
+    .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.95F, .opacity = 1.0F},
+    .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 0.5F},
     .transition_speed = 0.0F,
     .slice9_scale = 1.0F,
 };
@@ -51,7 +51,7 @@ static const nt_ui_image_style_t s_img_style = {
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    s_btn_style.idle.atlas = s_fx.atlas.handle;
+    s_btn_style.idle.bg.atlas = s_fx.atlas.handle;
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -105,13 +105,36 @@ static void test_button_text_only_children(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT));
 }
 
+/* ---- Test 1b: text-only button (idle.bg.atlas.id == 0) emits NO background IMAGE ----
+ *      An idle terminal with atlas.id == 0 = no art; skip the IMAGE emit
+ *      (no assert fire). The label child still produces exactly one TEXT command. */
+static void test_button_text_only_no_bg_image(void) {
+    nt_ui_button_style_t no_art = s_btn_style;
+    no_art.idle.bg = (nt_atlas_region_ref_t){0}; /* atlas.id == 0 => text-only */
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("txtbtn"), &no_art, NULL, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx); /* must NOT assert (old idle.atlas != 0 invariant removed) */
+
+    /* No background art -> zero IMAGE commands; the label child still emits TEXT. */
+    TEST_ASSERT_NULL(find_first_image_cmd(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE));
+    TEST_ASSERT_NOT_NULL(find_first_text_cmd(s_fx.ctx));
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT));
+}
+
 /* ---- Test 2: icon-only button emits IMAGE child (>=2 IMAGE, 0 TEXT) ---- */
 static void test_button_icon_only_children(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
+        nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_img_style, NULL);
         (void)nt_ui_button_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -127,7 +150,7 @@ static void test_button_icon_and_text_children(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
-        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style, NULL);
+        nt_ui_image(s_fx.ctx, NULL, (nt_atlas_region_ref_t){s_fx.atlas.handle, s_fx.atlas.white_region_idx}, &s_img_style, NULL);
         nt_ui_label(s_fx.ctx, NULL, "Save", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -403,6 +426,7 @@ static void test_button_recovers_after_simulated_mid_button_state(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_button_text_only_children);
+    RUN_TEST(test_button_text_only_no_bg_image);
     RUN_TEST(test_button_icon_only_children);
     RUN_TEST(test_button_icon_and_text_children);
     RUN_TEST(test_button_stack_balanced);

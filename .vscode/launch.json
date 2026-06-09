@@ -466,6 +466,52 @@
             "webRoot": "${workspaceFolder}/build/examples/ui_buttons_demo/wasm-release-paired",
             "preLaunchTask": "Build & Serve ui_buttons_demo (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Build UI Stateful Demo Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_stateful_demo/native-release/build_ui_stateful_demo_packs.exe",
+            "args": ["build/examples/ui_stateful_demo"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build & run ui_stateful_demo packs (release)"
+        },
+        {
+            "name": "Debug Desktop ui_stateful_demo",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_stateful_demo/native-debug/ui_stateful_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_stateful_demo/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build ui_stateful_demo (debug)"
+        },
+        {
+            "name": "Run Desktop ui_stateful_demo (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_stateful_demo/native-release/ui_stateful_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_stateful_demo/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build ui_stateful_demo (release)"
+        },
+        {
+            "name": "Debug WASM ui_stateful_demo",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8100/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/ui_stateful_demo/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve ui_stateful_demo (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM ui_stateful_demo (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8101/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/ui_stateful_demo/wasm-release-paired",
+            "preLaunchTask": "Build & Serve ui_stateful_demo (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
