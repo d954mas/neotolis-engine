@@ -18,13 +18,23 @@
 
 /* ---- Public types ---- */
 
-/* Canonical "sprite-in-atlas" identity — an atlas resource handle paired with a region index.
- * atlas.id == 0 is the unset/invalid handle; consumers assign their own meaning to it. */
+/* Self-resolving "sprite-in-atlas" handle. region==NT_ATLAS_INVALID_REGION resolves lazily under
+ * is_ready and memoizes back into ref->region (the type's defined contract, not a hidden side-effect);
+ * atlas.id==0 = unset/no-art. Field order {name_hash, atlas, region} packs to 16 B with zero padding. */
 typedef struct {
-    nt_resource_t atlas;
-    uint32_t region;
+    uint64_t name_hash;  /*  0: xxh64 of region name (stable identity) */
+    nt_resource_t atlas; /*  8: handle; may be set BEFORE atlas data loads */
+    uint32_t region;     /* 12: NT_ATLAS_INVALID_REGION = resolve lazily; else resolved index */
 } nt_atlas_region_ref_t;
-_Static_assert(sizeof(nt_atlas_region_ref_t) == 8, "nt_atlas_region_ref_t stable ABI (4B handle + 4B region)");
+_Static_assert(sizeof(nt_atlas_region_ref_t) == 16, "nt_atlas_region_ref_t stable ABI (8B hash + 4B handle + 4B region)");
+
+/* Construct unresolved: region=INVALID resolves lazily on first emit under a ready atlas. */
+static inline nt_atlas_region_ref_t nt_atlas_ref(nt_resource_t atlas, uint64_t name_hash) { return (nt_atlas_region_ref_t){.name_hash = name_hash, .atlas = atlas, .region = NT_ATLAS_INVALID_REGION}; }
+
+/* Construct pre-resolved with a known index (skips the lazy probe). */
+static inline nt_atlas_region_ref_t nt_atlas_ref_idx(nt_resource_t atlas, uint64_t name_hash, uint32_t region) {
+    return (nt_atlas_region_ref_t){.name_hash = name_hash, .atlas = atlas, .region = region};
+}
 
 /* Mirrors NtAtlasVertex from shared/include/nt_atlas_format.h (8 bytes, same field order).
  * Runtime stores it identically; nt_atlas precomputes float positions/UVs before sprite batching.
@@ -87,6 +97,16 @@ uint8_t nt_atlas_page_count(nt_resource_t atlas);
  * index; removed -> dead index that draws nothing; revived -> the SAME index).
  * NT_ATLAS_INVALID_REGION only for names never present. */
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash);
+
+/* Resolve-and-memoize: if unresolved and the atlas is ready, find by name and write the index back
+ * into the ref. After return, region is a valid index (emit) or still INVALID (caller skips emit:
+ * atlas not ready or bad name). One-shot — tombstone-reclaim keeps the index stable for life, so
+ * there is no revision compare. */
+static inline void nt_atlas_resolve_ref(nt_atlas_region_ref_t *ref) {
+    if (ref->region == NT_ATLAS_INVALID_REGION && ref->atlas.id != 0U && nt_resource_is_ready(ref->atlas)) {
+        ref->region = nt_atlas_find_region(ref->atlas, ref->name_hash);
+    }
+}
 
 /* O(1) pointer access by region index.
  * Always returns a non-NULL pointer when index < region_count. Dead/removed
