@@ -137,8 +137,8 @@ static const nt_ui_button_style_t g_btn_scale_style = {
     .slice9_scale = 1.0F,
 };
 
-/* (c) VISUAL SWAP: bg_region differs per state (blue/green/red); bg_region 0
- * in the const = sentinel, patched at runtime once atlas indices are known. */
+/* (c) VISUAL SWAP: bg differs per state (blue/green/red); bg left unset in the const
+ * template and filled upfront with late-bound refs in init_button_styles. */
 static const nt_ui_button_style_t g_btn_swap_style = {
     .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
@@ -201,13 +201,13 @@ static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
 static uint32_t s_white_region_idx;
-static uint32_t s_button_blue_idx;
-static uint32_t s_button_green_idx;
-static uint32_t s_button_red_idx;
-static uint32_t s_icon_bunny_idx;
 
-/* Reference-button runtime styles: const templates copied + bg_region patched
- * once the atlas binds. ids precomputed via nt_ui_id on the first Clay frame. */
+/* Late-bound icon ref filled upfront; mutable so the engine memoizes its resolved index. */
+static nt_atlas_region_ref_t s_icon_bunny_ref;
+
+/* Reference-button runtime styles: const templates copied + bg refs filled upfront
+ * (init_button_styles); mutable so the engine memoizes the resolved index in place.
+ * ids precomputed via nt_ui_id on the first Clay frame. */
 static nt_ui_button_style_t s_btn_standard;
 static nt_ui_button_style_t s_btn_scale;
 static nt_ui_button_style_t s_btn_swap;
@@ -256,7 +256,48 @@ static float s_xform_deg;
 // #endregion
 
 // #region binding
+/* Fill each variant's bg refs upfront from the const templates. The handle is valid before
+ * the atlas data loads (D-58.1-01); the widget resolves + memoizes the region lazily. Only
+ * the IDLE bg carries the ref — non-idle states inherit it via nt_ui_ref_or unless they set
+ * their own (SWAP wants distinct hover/pressed art, so it does). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void init_button_styles(void) {
+    const nt_atlas_region_ref_t blue = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value);
+    const nt_atlas_region_ref_t green = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
+    const nt_atlas_region_ref_t red = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_RED.value);
+
+    s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_ICON_BUNNY.value);
+
+    s_btn_standard = g_btn_standard_style;
+    s_btn_standard.idle.bg = blue;
+
+    s_btn_scale = g_btn_scale_style;
+    s_btn_scale.idle.bg = blue;
+
+    /* VISUAL-SWAP: blue idle/disabled, green hover, red pressed. */
+    s_btn_swap = g_btn_swap_style;
+    s_btn_swap.idle.bg = blue;
+    s_btn_swap.hover.bg = green;
+    s_btn_swap.pressed.bg = red;
+
+    s_btn_nopad = g_btn_nopad_style;
+    s_btn_nopad.idle.bg = blue;
+
+    /* (g) SLICE9_SCALE row — same blue art, only slice9_scale differs. */
+    s_btn_s9_quarter = g_btn_s9_base;
+    s_btn_s9_quarter.idle.bg = blue;
+    s_btn_s9_quarter.slice9_scale = 0.25F;
+
+    s_btn_s9_one = g_btn_s9_base;
+    s_btn_s9_one.idle.bg = blue;
+    s_btn_s9_one.slice9_scale = 1.0F;
+
+    s_btn_s9_four = g_btn_s9_base;
+    s_btn_s9_four.idle.bg = blue;
+    s_btn_s9_four.slice9_scale = 4.0F;
+}
+
+/* White-region + font stay is_ready-gated (white is the deferred path; font needs the loaded resource). */
 static void try_bind_resources(void) {
     if (s_atlas_bound && s_font_bound) {
         return;
@@ -265,83 +306,9 @@ static void try_bind_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS__WHITE.value);
         NT_ASSERT(s_white_region_idx != NT_ATLAS_INVALID_REGION);
-
-        s_button_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value);
-        NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
-
-        s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
-        NT_ASSERT(s_button_green_idx != NT_ATLAS_INVALID_REGION);
-
-        s_button_red_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_RED.value);
-        NT_ASSERT(s_button_red_idx != NT_ATLAS_INVALID_REGION);
-
-        s_icon_bunny_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_ICON_BUNNY.value);
-        NT_ASSERT(s_icon_bunny_idx != NT_ATLAS_INVALID_REGION);
-
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
-
-        /* Patch each variant's bg_region from the templates. */
-        s_btn_standard = g_btn_standard_style;
-        s_btn_standard.idle.bg.region = s_button_blue_idx;
-        s_btn_standard.hover.bg.region = s_button_blue_idx;
-        s_btn_standard.pressed.bg.region = s_button_blue_idx;
-        s_btn_standard.disabled.bg.region = s_button_blue_idx;
-
-        s_btn_scale = g_btn_scale_style;
-        s_btn_scale.idle.bg.region = s_button_blue_idx;
-        s_btn_scale.hover.bg.region = s_button_blue_idx;
-        s_btn_scale.pressed.bg.region = s_button_blue_idx;
-        s_btn_scale.disabled.bg.region = s_button_blue_idx;
-
-        /* VISUAL-SWAP: blue idle/disabled, green hover/pressed. */
-        s_btn_swap = g_btn_swap_style;
-        s_btn_swap.idle.bg.region = s_button_blue_idx;
-        s_btn_swap.hover.bg.region = s_button_green_idx;
-        s_btn_swap.pressed.bg.region = s_button_red_idx;
-        s_btn_swap.disabled.bg.region = s_button_blue_idx;
-
-        s_btn_nopad = g_btn_nopad_style;
-        s_btn_nopad.idle.bg.region = s_button_blue_idx;
-        s_btn_nopad.hover.bg.region = s_button_blue_idx;
-        s_btn_nopad.pressed.bg.region = s_button_blue_idx;
-        s_btn_nopad.disabled.bg.region = s_button_blue_idx;
-
-        /* (g) SLICE9_SCALE row — same blue art, only slice9_scale differs. */
-        s_btn_s9_quarter = g_btn_s9_base;
-        s_btn_s9_quarter.idle.bg.region = s_button_blue_idx;
-        s_btn_s9_quarter.hover.bg.region = s_button_blue_idx;
-        s_btn_s9_quarter.pressed.bg.region = s_button_blue_idx;
-        s_btn_s9_quarter.disabled.bg.region = s_button_blue_idx;
-        s_btn_s9_quarter.slice9_scale = 0.25F;
-
-        s_btn_s9_one = g_btn_s9_base;
-        s_btn_s9_one.idle.bg.region = s_button_blue_idx;
-        s_btn_s9_one.hover.bg.region = s_button_blue_idx;
-        s_btn_s9_one.pressed.bg.region = s_button_blue_idx;
-        s_btn_s9_one.disabled.bg.region = s_button_blue_idx;
-        s_btn_s9_one.slice9_scale = 1.0F;
-
-        s_btn_s9_four = g_btn_s9_base;
-        s_btn_s9_four.idle.bg.region = s_button_blue_idx;
-        s_btn_s9_four.hover.bg.region = s_button_blue_idx;
-        s_btn_s9_four.pressed.bg.region = s_button_blue_idx;
-        s_btn_s9_four.disabled.bg.region = s_button_blue_idx;
-        s_btn_s9_four.slice9_scale = 4.0F;
-
-        /* All 7 styles share the demo atlas; non-idle states inherit idle's whole ref
-         * unless they set their own atlas -- SWAP wants distinct hover/pressed art, so it does. */
-        s_btn_standard.idle.bg.atlas = s_atlas_handle;
-        s_btn_scale.idle.bg.atlas = s_atlas_handle;
-        s_btn_swap.idle.bg.atlas = s_atlas_handle;
-        s_btn_swap.hover.bg.atlas = s_atlas_handle;
-        s_btn_swap.pressed.bg.atlas = s_atlas_handle;
-        s_btn_nopad.idle.bg.atlas = s_atlas_handle;
-        s_btn_s9_quarter.idle.bg.atlas = s_atlas_handle;
-        s_btn_s9_one.idle.bg.atlas = s_atlas_handle;
-        s_btn_s9_four.idle.bg.atlas = s_atlas_handle;
-
         s_atlas_bound = true;
-        nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white + icon_bunny)");
+        nt_log_info("ui_buttons_demo: atlas white region bound");
     }
 
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
@@ -480,9 +447,7 @@ static void declare_reference_buttons(void) {
                 CELL_LABELS("ICON ONLY", "no padding");
                 CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, &s_btn_nopad, &s_btn_decl, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
-                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_icon_bunny_idx}, &g_btn_icon_style, NULL);
-                    }
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_btn_icon_style, NULL); }
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_icon++;
                     }
@@ -507,9 +472,7 @@ static void declare_reference_buttons(void) {
                             },
                     };
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, &s_btn_nopad, &s_btn_decl_icontext, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
-                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_icon_bunny_idx}, &g_btn_icon_style, NULL);
-                    }
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_btn_icon_style, NULL); }
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_icontext++;
@@ -899,6 +862,9 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_BUTTONS_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
+
+    /* Handle is valid immediately (D-58.1-01); fill late-bound bg + icon refs upfront. */
+    init_button_styles();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,

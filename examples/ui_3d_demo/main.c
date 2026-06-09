@@ -155,8 +155,7 @@ static nt_buffer_t s_frame_ubo;
 static nt_ui_context_t *s_ctx;
 _Alignas(16) static uint8_t s_ui_arena[UI_ARENA_SIZE];
 static uint32_t s_white_region_idx;
-static uint32_t s_button_blue_idx;
-static uint32_t s_button_green_idx;
+/* Mutable so the engine memoizes the resolved region in place; bg refs filled upfront. */
 static nt_ui_button_style_t s_btn_idle;
 static nt_ui_button_style_t s_btn_active; /* highlighted for current selection */
 static const Clay_ElementDeclaration s_btn_decl = {
@@ -450,35 +449,37 @@ static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, c
 // #endregion
 
 // #region resource binding
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Fill the button-bg refs upfront; the handle is valid before the atlas data loads
+ * (D-58.1-01) and the widget resolves + memoizes the region lazily. */
+static void init_button_styles(void) {
+    const uint64_t blue = ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value;
+    const uint64_t green = ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value;
+
+    /* IDLE: blue everywhere with a small hover-press ease. */
+    s_btn_idle = (nt_ui_button_style_t){
+        .idle = {.bg = nt_atlas_ref(s_atlas_handle, blue), .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
+        .hover = {.bg = nt_atlas_ref(s_atlas_handle, blue), .bg_tint = 0xFFFFFFFFU, .scale = 1.04F, .opacity = 1.0F},
+        .pressed = {.bg = nt_atlas_ref(s_atlas_handle, blue), .bg_tint = 0xFFFFFFFFU, .scale = 0.96F, .opacity = 1.0F},
+        .disabled = {.bg = nt_atlas_ref(s_atlas_handle, blue), .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
+        .transition_speed = 8.0F,
+        .slice9_scale = 1.0F,
+    };
+    /* ACTIVE: green (currently-selected) — same animation but different art. */
+    s_btn_active = s_btn_idle;
+    s_btn_active.idle.bg = nt_atlas_ref(s_atlas_handle, green);
+    s_btn_active.hover.bg = nt_atlas_ref(s_atlas_handle, green);
+    s_btn_active.pressed.bg = nt_atlas_ref(s_atlas_handle, green);
+    s_btn_active.disabled.bg = nt_atlas_ref(s_atlas_handle, green);
+}
+
+/* White-region + font stay is_ready-gated (white is the deferred path; font needs the loaded resource). */
 static void try_bind_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS__WHITE.value);
         NT_ASSERT(s_white_region_idx != NT_ATLAS_INVALID_REGION);
-        s_button_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value);
-        NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
-        s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
-        NT_ASSERT(s_button_green_idx != NT_ATLAS_INVALID_REGION);
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
-
-        /* IDLE: blue everywhere with a small hover-press ease. */
-        s_btn_idle = (nt_ui_button_style_t){
-            .idle = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
-            .hover = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.04F, .opacity = 1.0F},
-            .pressed = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 0.96F, .opacity = 1.0F},
-            .disabled = {.bg = {.atlas = s_atlas_handle, .region = s_button_blue_idx}, .bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
-            .transition_speed = 8.0F,
-            .slice9_scale = 1.0F,
-        };
-        /* ACTIVE: green (currently-selected) — same animation but different art. */
-        s_btn_active = s_btn_idle;
-        s_btn_active.idle.bg.region = s_button_green_idx;
-        s_btn_active.hover.bg.region = s_button_green_idx;
-        s_btn_active.pressed.bg.region = s_button_green_idx;
-        s_btn_active.disabled.bg.region = s_button_green_idx;
-
         s_atlas_bound = true;
-        nt_log_info("ui_3d_demo: atlas bound");
+        nt_log_info("ui_3d_demo: atlas white region bound");
     }
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
         nt_font_add(s_font, s_font_resource);
@@ -533,7 +534,7 @@ static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], i
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), title, &s_panel_title_style);
     }
     for (int i = 0; i < TPICK_COUNT; ++i) {
-        const nt_ui_button_style_t *style = (i == sel) ? &s_btn_active : &s_btn_idle;
+        nt_ui_button_style_t *style = (i == sel) ? &s_btn_active : &s_btn_idle;
         nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true);
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), (i == TPICK_A) ? "A" : "B", &s_btn_label_style);
         if (nt_ui_button_end(s_ctx)) {
@@ -619,7 +620,7 @@ static void declare_panels(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), "SHAPE", &s_panel_title_style);
             }
             for (int i = 0; i < SHAPE_COUNT; ++i) {
-                const nt_ui_button_style_t *style = (i == s_shape_kind) ? &s_btn_active : &s_btn_idle;
+                nt_ui_button_style_t *style = (i == s_shape_kind) ? &s_btn_active : &s_btn_idle;
                 nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_shape_btn[i], style, &s_btn_decl, true);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), s_shape_labels[i], &s_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
@@ -643,7 +644,7 @@ static void declare_panels(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), "SPEED", &s_panel_title_style);
             }
             for (int i = 0; i < SPEED_COUNT; ++i) {
-                const nt_ui_button_style_t *style = (i == s_speed_kind) ? &s_btn_active : &s_btn_idle;
+                nt_ui_button_style_t *style = (i == s_speed_kind) ? &s_btn_active : &s_btn_idle;
                 nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_speed_btn[i], style, &s_btn_decl, true);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), s_speed_labels[i], &s_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
@@ -1010,6 +1011,9 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_BUTTONS_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
+
+    /* Handle is valid immediately (D-58.1-01); fill late-bound button-bg refs upfront. */
+    init_button_styles();
 
     /* World-mounted UI: depth_write ON so overlapping panels sort by depth (nearer occludes farther
      * across sprite+text layers). The cutoff sprite variant discards transparent button corners so
