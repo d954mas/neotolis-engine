@@ -32,6 +32,7 @@ typedef struct {
     float value_t; /* 0..1 generic scalar eased at value_speed (overlay-pop, thumb-slide) */
     bool valid;
 } nt_ui_anim_interaction_t;
+_Static_assert(sizeof(nt_ui_anim_interaction_t) == 56, "nt_ui_anim_interaction_t slot size (NT_UI_ANIM_SLOTS budget); update if fields change");
 
 typedef struct {
     float scale_x, scale_y, scale_z;

@@ -72,16 +72,27 @@ static nt_atlas_region_ref_t resolve_ref(nt_atlas_region_ref_t cell, nt_atlas_re
     return (nt_atlas_region_ref_t){atlas, region};
 }
 
-/* Build a render-only element_data carrying transform + opacity. */
-static nt_ui_element_data_t *make_xform_data(const nt_ui_element_data_t *src, const nt_ui_transform_t *t, float opacity) {
+/* Build a scratch element_data carrying any subset of {layer, transform, opacity}:
+ * t == NULL -> no transform; opacity < 0 -> no opacity (inherits from the parent).
+ * The public nt_ui_make_element_data_xform forces BOTH transform+opacity; the box
+ * needs layer + transform WITHOUT its own opacity (opacity inherits from the row),
+ * so the widget keeps this local builder. */
+static nt_ui_element_data_t *cb_make_data(void *user_data, uint8_t layer, const nt_ui_transform_t *t, float opacity) {
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     NT_ASSERT(d != NULL && "nt_ui_checkbox: scratch alloc failed (element_data)");
+    uint32_t flags = 0U;
+    if (t != NULL) {
+        flags |= NT_UI_ELEM_FLAG_HAS_TRANSFORM;
+    }
+    if (opacity >= 0.0F) {
+        flags |= NT_UI_ELEM_FLAG_HAS_OPACITY;
+    }
     *d = (nt_ui_element_data_t){
-        .user_data = (src != NULL) ? src->user_data : NULL,
-        .layer = (src != NULL) ? src->layer : 0U,
-        .flags = NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY,
-        .transform = *t,
-        .opacity = opacity,
+        .user_data = user_data,
+        .layer = layer,
+        .flags = (uint8_t)flags,
+        .transform = (t != NULL) ? *t : nt_ui_transform_defaults(),
+        .opacity = (opacity >= 0.0F) ? opacity : 1.0F,
     };
     return d;
 }
@@ -98,6 +109,9 @@ typedef struct {
     nt_atlas_region_ref_t check_ref;
     float eased_value;
     bool is_toggle;
+    uint8_t indicator_layer;            /* box + overlay draw here (from data->layer) */
+    uint8_t label_layer;                /* label text draws here (function arg) */
+    const nt_ui_transform_t *box_xform; /* non-NULL = put the eased state transform on the box (indicator-only scale) */
 } cb_emit_args_t;
 
 /* Open the box CHILD (childAlignment CENTER, FIXED box_w x box_h), emit box IMAGE
@@ -124,6 +138,9 @@ static void cb_emit_box(const cb_emit_args_t *e) {
         box_decl.image = (Clay_ImageElementConfig){.imageData = p};
     }
     box_decl.backgroundColor = unpack_tint(e->cell->box_tint);
+    /* Box (and its overlay child) draw on the indicator layer; box_xform != NULL puts
+     * the eased state transform here so only the indicator scales, not the label. */
+    box_decl.userData = (void *)cb_make_data(NULL, e->indicator_layer, e->box_xform, -1.0F);
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(box_decl);
 
@@ -134,9 +151,10 @@ static void cb_emit_box(const cb_emit_args_t *e) {
     if (overlay_visible) {
         nt_ui_transform_t ov_t = nt_ui_transform_defaults();
         if (e->is_toggle) {
-            /* Left-anchored layout; slide is a render-only offset DELTA (D-58-16). */
+            /* Left-anchored; base offset = thumb_pad gives a symmetric end-margin (OFF
+             * sits thumb_pad from the left), and the slide is the render-only DELTA (D-58-16). */
             const float slide = e->style->box_w - e->style->overlay_w - (2.0F * e->style->thumb_pad);
-            ov_t.offset_x = e->eased_value * slide;
+            ov_t.offset_x = e->style->thumb_pad + (e->eased_value * slide);
         } else {
             /* Centered pop: scale 0.6->1.0 mapped from value_t. */
             const float s = NT_UI_CB_OVERLAY_POP_MIN_SCALE + ((1.0F - NT_UI_CB_OVERLAY_POP_MIN_SCALE) * e->eased_value);
@@ -145,7 +163,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
         }
         /* Toggle thumb is opaque at both ends; checkbox/radio dot fades in by value_t. */
         const float ov_opacity = e->is_toggle ? 1.0F : e->eased_value;
-        nt_ui_element_data_t *ov_data = make_xform_data(NULL, &ov_t, ov_opacity);
+        nt_ui_element_data_t *ov_data = cb_make_data(NULL, e->indicator_layer, &ov_t, ov_opacity);
 
         nt_ui_image_style_t ov_style = nt_ui_image_style_defaults();
         ov_style.color_packed = e->cell->check_tint;
@@ -164,6 +182,9 @@ static void cb_emit_text(const cb_emit_args_t *e) {
     if (e->cell->text_color != 0U) {
         text_style.color = unpack_color(e->cell->text_color);
     }
+    /* Label draws on its own layer; no transform/opacity of its own (whole-widget
+     * opacity inherits from the row; scale stays on the indicator unless scale_label). */
+    nt_ui_element_data_t *text_data = cb_make_data(NULL, e->label_layer, NULL, -1.0F);
     const Clay_ElementDeclaration gap_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(e->style->gap), CLAY_SIZING_FIXED(0)}},
     };
@@ -171,11 +192,11 @@ static void cb_emit_text(const cb_emit_args_t *e) {
      * (label_side != 0), BEFORE it for text-right. Otherwise text-left would
      * push the gap to the row's outer edge and butt the label against the box. */
     if (e->style->label_side != 0U) {
-        nt_ui_label(e->ctx, NULL, e->label, &text_style);
+        nt_ui_label(e->ctx, text_data, e->label, &text_style);
         CLAY(gap_decl) {}
     } else {
         CLAY(gap_decl) {}
-        nt_ui_label(e->ctx, NULL, e->label, &text_style);
+        nt_ui_label(e->ctx, text_data, e->label, &text_style);
     }
 }
 
@@ -185,8 +206,8 @@ static void cb_emit_text(const cb_emit_args_t *e) {
  *   is_toggle          drives the thumb slide instead of centered pop.
  *   out_clicked        receives the release-over-widget edge for the wrapper. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, bool value_is_checked, bool is_toggle, const nt_ui_checkbox_style_t *style,
-                    const Clay_ElementDeclaration *decl, bool enabled, bool *out_clicked) {
+static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool value_is_checked, bool is_toggle,
+                    const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_clicked) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_checkbox: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_checkbox: must be called between nt_ui_begin and nt_ui_end on the active ctx");
@@ -196,6 +217,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     NT_ASSERT(isfinite(style->value_speed) && style->value_speed >= 0.0F && "nt_ui_checkbox: style.value_speed must be finite >= 0");
     NT_ASSERT(style->box_w > 0.0F && style->box_h > 0.0F && "nt_ui_checkbox: style.box_w/box_h must be > 0 (D-58-14)");
     NT_ASSERT(style->overlay_w >= 0.0F && style->overlay_h >= 0.0F && "nt_ui_checkbox: style.overlay_w/h must be >= 0");
+    NT_ASSERT(isfinite(style->thumb_pad) && style->thumb_pad >= 0.0F && "nt_ui_checkbox: style.thumb_pad must be finite >= 0");
     NT_ASSERT((!is_toggle || (style->overlay_w + (2.0F * style->thumb_pad) <= style->box_w)) && "nt_ui_toggle: overlay_w + 2*thumb_pad must fit in box_w (thumb travel >= 0)");
     assert_row_valid(style->unchecked);
     assert_row_valid(style->checked);
@@ -256,21 +278,24 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, style->value_speed);
     const float eased_value = a->value_t;
     // #endregion
-    // #region open ROW (carries id + hit-test + whole-widget transform/opacity)
+    // #region open ROW (registered widget; opacity always rides the row, transform conditionally)
     /* The ROW is the registered widget: box OR label clicks the same id (D-58-05).
-     * Whole-widget state-group transform + opacity ride the row; opacity inherits
-     * down to box/overlay/text (D-58-11). Box/overlay/text are plain children. */
-    nt_ui_transform_t row_t = nt_ui_transform_defaults();
-    row_t.scale_x = a->scale_x;
-    row_t.scale_y = a->scale_y;
-    row_t.scale_z = a->scale_z;
-    row_t.offset_x = a->off_x;
-    row_t.offset_y = a->off_y;
-    row_t.offset_z = a->off_z;
-    row_t.rotation_x = a->rot_x;
-    row_t.rotation_y = a->rot_y;
-    row_t.rotation_z = a->rot_z;
-    nt_ui_element_data_t *row_data = make_xform_data(data, &row_t, a->opacity);
+     * Opacity ALWAYS rides the row -> inherits to box/overlay/text (whole-widget dim,
+     * D-58-11). The eased state transform rides the row only when scale_label; otherwise
+     * it rides the box (indicator-only scale) so the label does not pop. */
+    nt_ui_transform_t state_t = nt_ui_transform_defaults();
+    state_t.scale_x = a->scale_x;
+    state_t.scale_y = a->scale_y;
+    state_t.scale_z = a->scale_z;
+    state_t.offset_x = a->off_x;
+    state_t.offset_y = a->off_y;
+    state_t.offset_z = a->off_z;
+    state_t.rotation_x = a->rot_x;
+    state_t.rotation_y = a->rot_y;
+    state_t.rotation_z = a->rot_z;
+    void *row_user = (data != NULL) ? data->user_data : NULL;
+    const uint8_t indicator_layer = (data != NULL) ? data->layer : 0U;
+    nt_ui_element_data_t *row_data = cb_make_data(row_user, indicator_layer, style->scale_label ? &state_t : NULL, a->opacity);
 
     Clay_ElementDeclaration row_decl = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     row_decl.id = (Clay_ElementId){.id = id};
@@ -292,6 +317,9 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
         .check_ref = check_ref,
         .eased_value = eased_value,
         .is_toggle = is_toggle,
+        .indicator_layer = indicator_layer,
+        .label_layer = label_layer,
+        .box_xform = style->scale_label ? NULL : &state_t,
     };
     if (label != NULL && style->label_side != 0U) {
         cb_emit_text(&args); /* text on the LEFT */
@@ -306,11 +334,11 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     nt_ui_clay_priv_close_element(); /* close ROW */
 }
 
-bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl,
-                    bool enabled) {
+bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+                    const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_checkbox: value must be non-NULL");
     bool clicked = false;
-    cb_core(ctx, data, id, label, *value, false, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, *value, false, style, decl, enabled, &clicked);
     if (clicked) {
         *value = !*value;
         return true;
@@ -318,14 +346,14 @@ bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     return false;
 }
 
-bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
                  const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(selected != NULL && "nt_ui_radio: selected must be non-NULL");
     /* Exclusivity is FREE: every radio in the group reads the same *selected, so
      * no engine-side group state is needed (D-58-01/05). value row = am I it? */
     const bool value_is_checked = (*selected == my_value);
     bool clicked = false;
-    cb_core(ctx, data, id, label, value_is_checked, false, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, value_is_checked, false, style, decl, enabled, &clicked);
     /* Re-selecting the already-selected option is a no-op (no flicker, D-58-05). */
     if (clicked && *selected != my_value) {
         *selected = my_value;
@@ -334,13 +362,13 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_
     return false;
 }
 
-bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl,
-                  bool enabled) {
+bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+                  const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_toggle: value must be non-NULL");
     /* Same value logic as checkbox; is_toggle=true drives the always-visible
      * thumb + render-only offset_x slide DELTA in cb_emit_box (D-58-16). */
     bool clicked = false;
-    cb_core(ctx, data, id, label, *value, true, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, *value, true, style, decl, enabled, &clicked);
     if (clicked) {
         *value = !*value;
         return true;

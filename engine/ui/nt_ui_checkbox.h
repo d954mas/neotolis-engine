@@ -48,9 +48,13 @@ typedef struct {
     float thumb_pad;               /* TOGGLE only: symmetric L/R end-margin */
     float gap;                     /* box<->text spacing px */
     uint8_t label_side;            /* 0 = text right, 1 = text left */
+    bool scale_label;              /* false (default) = press/hover scale only the indicator; true = whole row incl. label. Opacity/dim is ALWAYS whole-widget. */
     float state_speed;             /* eases hover/press/disabled (nt_ui_anim state group) */
     float value_speed;             /* eases overlay pop / thumb slide (nt_ui_anim value_t); 0 = instant */
 } nt_ui_checkbox_style_t;
+/* scale_label occupies one of label_side's former tail padding bytes -> size unchanged.
+ * Layers are NOT in the style (mirrors button/label): the indicator layer comes from
+ * data->layer, the label layer from the label_layer function arg. */
 _Static_assert(sizeof(nt_ui_checkbox_style_t) == 420, "nt_ui_checkbox_style_t stable ABI");
 
 /* All three are LEAF widgets (no begin/end): box -> overlay child -> text child,
@@ -58,23 +62,29 @@ _Static_assert(sizeof(nt_ui_checkbox_style_t) == 420, "nt_ui_checkbox_style_t st
  * flipped (checkbox/toggle: *value = !*value; radio: *selected = my_value).
  * Box OR label is one clickable id; label == NULL = indicator only.
  *
+ * Layers: the indicator (box + overlay) draws on data->layer (like button/label);
+ * the label draws on the label_layer arg -- pass the same value as data->layer for a
+ * single-layer widget, or a separate one to batch sprite-then-text. value_t fade-out
+ * on uncheck only plays if the unchecked row also carries check art (Model D: the game
+ * owns per-row art); otherwise the overlay drops the frame the value flips. Radio
+ * writes *selected immediately, so a newly-selected sibling can render checked one
+ * frame before the old one renders unchecked (standard immediate-mode 1-frame lag).
+ *
  * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl.
  * data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY (the widget owns these).
  * style->box_w/box_h > 0 required; per value row at least box.idle OR check.idle
  * must be non-zero. enabled=false short-circuits interaction + forces the
  * disabled cell while keeping the Clay open/close balanced. */
-bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl,
-                    bool enabled);
+bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+                    const Clay_ElementDeclaration *decl, bool enabled);
 
-/* Exclusive single-choice over a shared int*. changed when *selected flips to
- * my_value. Bodies land in Plan 58-03; declared here so the radio/toggle test
- * stubs link against the header. */
-bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
+/* Exclusive single-choice over a shared int*. changed when *selected flips to my_value. */
+bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
                  const Clay_ElementDeclaration *decl, bool enabled);
 
 /* Sliding-thumb boolean. Same return contract as checkbox; the thumb x is a
- * render-only offset DELTA eased by value_t. Body lands in Plan 58-03. */
-bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl,
-                  bool enabled);
+ * render-only offset DELTA eased by value_t. */
+bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+                  const Clay_ElementDeclaration *decl, bool enabled);
 
 #endif /* NT_UI_CHECKBOX_H */

@@ -115,7 +115,7 @@ static bool tg_frame(const nt_pointer_t *p, bool *value, bool enabled) {
     bool changed = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = TG_X, .y = TG_Y}}}) {
-        changed = nt_ui_toggle(s_fx.ctx, NULL, nt_ui_id("tg"), "Mute", value, &s_style, &s_row_decl, enabled);
+        changed = nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg"), "Mute", value, &s_style, &s_row_decl, enabled);
     }
     nt_ui_end(s_fx.ctx);
     return changed;
@@ -127,7 +127,7 @@ static float thumb_emit_x(bool value) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = TG_X, .y = TG_Y}}}) {
-        (void)nt_ui_toggle(s_fx.ctx, NULL, nt_ui_id("tgx"), NULL, &value, &s_style, &s_row_decl, true);
+        (void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tgx"), NULL, &value, &s_style, &s_row_decl, true);
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -185,7 +185,7 @@ static void test_thumb_visible_at_off(void) {
     bool value = false; /* OFF */
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_toggle(s_fx.ctx, NULL, nt_ui_id("tg_off"), NULL, &value, &s_style, &s_row_decl, true); }
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_toggle(s_fx.ctx, NULL, 0, nt_ui_id("tg_off"), NULL, &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(0U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT));
     TEST_ASSERT_EQUAL_UINT32(2U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE)); /* track + thumb at OFF */
