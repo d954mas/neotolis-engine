@@ -3,9 +3,13 @@
 
 #include <stdint.h>
 
+#include "core/nt_assert.h" /* NT_ASSERT_MODE gates the dev-only resolve warn below */
 #include "core/nt_types.h"
 #include "nt_atlas_format.h"
 #include "resource/nt_resource.h"
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+#include "log/nt_log.h"
+#endif
 
 /* ---- Public constants ---- */
 
@@ -105,6 +109,15 @@ uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash);
 static inline void nt_atlas_resolve_ref(nt_atlas_region_ref_t *ref) {
     if (ref->region == NT_ATLAS_INVALID_REGION && ref->atlas.id != 0U && nt_resource_is_ready(ref->atlas)) {
         ref->region = nt_atlas_find_region(ref->atlas, ref->name_hash);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+        /* Ready atlas + name never present = a typo'd name_hash, not a load race: a removed region keeps a
+         * valid (dead) index, so INVALID here means the name was never packed. Dev-only warn; release stays a
+         * silent skip so a missing optional asset never traps a shipped game. */
+        if (ref->region == NT_ATLAS_INVALID_REGION) {
+            /* Plain (domain-less) variant: this inline is included by game/example TUs that do not define NT_LOG_DOMAIN. */
+            nt_log_warn_once("nt_atlas_resolve_ref: name_hash 0x%016llx not present in ready atlas %u (typo?)", (unsigned long long)ref->name_hash, (unsigned)ref->atlas.id);
+        }
+#endif
     }
 }
 
