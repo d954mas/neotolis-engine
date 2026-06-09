@@ -134,7 +134,7 @@ static float s_time;
 
 // #region binding
 /* Fill the late-bound art refs upfront; the handle is valid before the data loads
- * (D-58.1-01) and the widget resolves + memoizes the region lazily. */
+ * and the widget resolves + memoizes the region lazily. */
 static void init_atlas_refs(void) {
     s_panel_beige_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BEIGE.value);
     s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BLUE.value);
@@ -540,7 +540,7 @@ int main(int argc, char *argv[]) {
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_SLICE9_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_SLICE9_DEMO_FONT, NT_ASSET_FONT);
 
-    /* Handle is valid immediately (D-58.1-01); fill late-bound art refs upfront. */
+    /* Handle is valid immediately; fill late-bound art refs upfront. */
     init_atlas_refs();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){

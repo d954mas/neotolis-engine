@@ -450,7 +450,7 @@ static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, c
 
 // #region resource binding
 /* Fill the button-bg refs upfront; the handle is valid before the atlas data loads
- * (D-58.1-01) and the widget resolves + memoizes the region lazily. */
+ * and the widget resolves + memoizes the region lazily. */
 static void init_button_styles(void) {
     const uint64_t blue = ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value;
     const uint64_t green = ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value;
@@ -1012,7 +1012,7 @@ int main(int argc, char *argv[]) {
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
 
-    /* Handle is valid immediately (D-58.1-01); fill late-bound button-bg refs upfront. */
+    /* Handle is valid immediately; fill late-bound button-bg refs upfront. */
     init_button_styles();
 
     /* World-mounted UI: depth_write ON so overlapping panels sort by depth (nearer occludes farther

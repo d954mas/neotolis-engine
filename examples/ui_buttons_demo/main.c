@@ -257,7 +257,7 @@ static float s_xform_deg;
 
 // #region binding
 /* Fill each variant's bg refs upfront from the const templates. The handle is valid before
- * the atlas data loads (D-58.1-01); the widget resolves + memoizes the region lazily. Only
+ * the atlas data loads; the widget resolves + memoizes the region lazily. Only
  * the IDLE bg carries the ref — non-idle states inherit it via nt_ui_ref_or unless they set
  * their own (SWAP wants distinct hover/pressed art, so it does). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -863,7 +863,7 @@ int main(int argc, char *argv[]) {
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
 
-    /* Handle is valid immediately (D-58.1-01); fill late-bound bg + icon refs upfront. */
+    /* Handle is valid immediately; fill late-bound bg + icon refs upfront. */
     init_button_styles();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){

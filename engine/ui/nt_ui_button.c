@@ -108,7 +108,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     // #endregion
     // #region open_clay_image
     /* Resolve the STYLE-OWNED refs in place FIRST (memoizes into the style), then inherit by value —
-     * resolving the by-value bg would lose the memoize (Pitfall 1). */
+     * resolving the by-value bg would lose the memoize. */
     nt_atlas_resolve_ref(&st->bg);
     nt_atlas_resolve_ref(&style->idle.bg);
     /* Atomic ref: a non-idle state with atlas.id==0 inherits the idle state's whole ref. */

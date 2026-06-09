@@ -224,7 +224,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     *out_clicked = in.clicked;
     // #endregion
     // #region value-row + state pick
-    /* Non-const row so the resolve memoizes into the style-owned cell refs (Pitfall 1). */
+    /* Non-const row so the resolve memoizes into the style-owned cell refs. */
     nt_ui_cb_state_t *row = value_is_checked ? style->checked : style->unchecked;
     int state = NT_UI_CB_IDLE;
     if (!enabled) {

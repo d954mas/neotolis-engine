@@ -554,7 +554,7 @@ int main(int argc, char *argv[]) {
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_STATEFUL_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_STATEFUL_DEMO_FONT, NT_ASSET_FONT);
 
-    /* Handle is valid immediately (D-58.1-01); fill late-bound widget refs upfront. */
+    /* Handle is valid immediately; fill late-bound widget refs upfront. */
     init_widget_styles();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
