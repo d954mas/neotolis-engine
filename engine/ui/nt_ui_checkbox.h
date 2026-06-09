@@ -62,7 +62,9 @@ _Static_assert(sizeof(nt_ui_checkbox_style_t) == 420, "nt_ui_checkbox_style_t st
 
 /* All three are LEAF widgets (no begin/end). Returns `changed` = the frame the value
  * flipped (checkbox/toggle: *value = !*value; radio: *selected = my_value).
- * Box OR label is one clickable id; label == NULL = indicator only.
+ * Box OR label is one clickable id; label == NULL = indicator only. On the release
+ * frame the widget renders the PRE-flip value (it returns `changed` AFTER drawing),
+ * so the pop/slide begins the next frame -- standard 1-frame IM lag, accepted.
  *
  * Layers: the indicator draws on data->layer; the label on label_layer -- pass them
  * equal for a single-layer widget, or split to batch sprite-then-text. value_t uncheck

@@ -18,7 +18,7 @@ extern const nt_ui_widget_def_t NT_UI_BUTTON_DEF;
 
 /* Layout/sizing/padding live on the Clay begin element, not on the style. */
 typedef struct {
-    nt_atlas_region_ref_t bg; /* atlas.id=0 = inherit idle.bg (region 0 also inherits idle) */
+    nt_atlas_region_ref_t bg; /* atomic ref; atlas.id==0 = inherit idle.bg whole (region 0 is a valid index) */
     uint32_t bg_tint;         /* 0xAABBGGRR */
     float scale;
     float offset_x, offset_y;

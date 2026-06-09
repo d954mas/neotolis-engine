@@ -237,7 +237,10 @@ If a decision can be deferred without loss of base architecture — it is deferr
   `label_layer` arg, so games may batch sprite-then-text. `scale_label`
   chooses whether press/hover scales the whole row or only the indicator
   (opacity/dim is always whole-widget). Toggle adds a render-only sliding
-  thumb with a symmetric `thumb_pad` end-margin.
+  thumb with a symmetric `thumb_pad` end-margin. On the click-release frame the
+  widget renders the PRE-flip value and returns `changed` after drawing, so the
+  pop/slide animation begins the next frame — the same intrinsic 1-frame IM lag as
+  hit-test and arbitration.
 
   **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
   uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
