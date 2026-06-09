@@ -114,9 +114,11 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     };
     // #endregion
     // #region open_clay_image
-    /* atlas/region 0 falls back to idle. */
-    const nt_resource_t st_atlas = (st->bg.atlas.id != 0U) ? st->bg.atlas : style->idle.bg.atlas;
-    const uint32_t region = (st->bg.region != 0U) ? st->bg.region : style->idle.bg.region;
+    /* A bg ref is atomic {atlas, region}: a non-idle state with atlas.id==0 inherits the
+     * idle state's whole ref (region 0 is a valid index, so it can't double as the sentinel). */
+    const nt_atlas_region_ref_t bg = (st->bg.atlas.id != 0U) ? st->bg : style->idle.bg;
+    const nt_resource_t st_atlas = bg.atlas;
+    const uint32_t region = bg.region;
 
     const Clay_Color tint = (st->bg_tint == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(st->bg_tint);
 

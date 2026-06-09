@@ -2284,7 +2284,8 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
-     * so recording an id that later vanishes is harmless). Capped at max_elements. */
+     * so recording an id that later vanishes is harmless). Silently capped at max_elements —
+     * graceful degradation (some ctx configs size the registry to 0), not a hard error. */
     if (ctx->interactive_cur_count < ctx->max_elements) {
         nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
         rec->id = id;
