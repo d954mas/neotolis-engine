@@ -161,8 +161,9 @@ static void test_toggle_flip_release_edge(void) {
 }
 
 /* ---- Test 2: thumb is ALWAYS visible AND its offset_x DELTA snaps to its
- *      endpoints. value_t 0 -> x=0; value_t 1 -> x = box_w - overlay_w -
- *      2*thumb_pad. Asserted via the walker-emitted thumb vertex X delta. ---- */
+ *      endpoints. value_t 0 -> x = thumb_pad (symmetric base); value_t 1 ->
+ *      x = thumb_pad + (box_w - overlay_w - 2*thumb_pad). This test asserts the
+ *      DELTA; test 2b asserts the symmetric base offset. ---- */
 static void test_thumb_slide_delta_endpoints(void) {
     /* Warm-up so Clay caches the row bbox (hit-test not needed, but stable layout). */
     nt_pointer_t mouse = {0};

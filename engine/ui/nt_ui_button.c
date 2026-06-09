@@ -90,7 +90,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .opacity = st->opacity,
         .tint_t = 0.0F,
     };
-    /* Button is value_t-agnostic: pass value_t=0 (in tgt) + value_speed=0 (D-58-22). */
+    /* Button is value_t-agnostic: pass value_t=0 (in tgt) + value_speed=0. */
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->transition_speed, 0.0F);
     // #endregion
     // #region build_element_data

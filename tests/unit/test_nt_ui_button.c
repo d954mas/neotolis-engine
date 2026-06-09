@@ -106,7 +106,7 @@ static void test_button_text_only_children(void) {
 }
 
 /* ---- Test 1b: text-only button (idle.bg.atlas.id == 0) emits NO background IMAGE ----
- *      D-58-21: an idle terminal with atlas.id == 0 = no art; skip the IMAGE emit
+ *      An idle terminal with atlas.id == 0 = no art; skip the IMAGE emit
  *      (no assert fire). The label child still produces exactly one TEXT command. */
 static void test_button_text_only_no_bg_image(void) {
     nt_ui_button_style_t no_art = s_btn_style;
