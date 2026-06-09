@@ -167,8 +167,16 @@ static void cb_emit_text(const cb_emit_args_t *e) {
     const Clay_ElementDeclaration gap_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(e->style->gap), CLAY_SIZING_FIXED(0)}},
     };
-    CLAY(gap_decl) {}
-    nt_ui_label(e->ctx, NULL, e->label, &text_style);
+    /* Gap sits on the box-facing side of the label: AFTER it for text-left
+     * (label_side != 0), BEFORE it for text-right. Otherwise text-left would
+     * push the gap to the row's outer edge and butt the label against the box. */
+    if (e->style->label_side != 0U) {
+        nt_ui_label(e->ctx, NULL, e->label, &text_style);
+        CLAY(gap_decl) {}
+    } else {
+        CLAY(gap_decl) {}
+        nt_ui_label(e->ctx, NULL, e->label, &text_style);
+    }
 }
 
 /* The single shared composition path (D-58-02). LEAF: opens the box, emits the
@@ -188,6 +196,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     NT_ASSERT(isfinite(style->value_speed) && style->value_speed >= 0.0F && "nt_ui_checkbox: style.value_speed must be finite >= 0");
     NT_ASSERT(style->box_w > 0.0F && style->box_h > 0.0F && "nt_ui_checkbox: style.box_w/box_h must be > 0 (D-58-14)");
     NT_ASSERT(style->overlay_w >= 0.0F && style->overlay_h >= 0.0F && "nt_ui_checkbox: style.overlay_w/h must be >= 0");
+    NT_ASSERT((!is_toggle || (style->overlay_w + (2.0F * style->thumb_pad) <= style->box_w)) && "nt_ui_toggle: overlay_w + 2*thumb_pad must fit in box_w (thumb travel >= 0)");
     assert_row_valid(style->unchecked);
     assert_row_valid(style->checked);
     /* Engine owns id/image/backgroundColor/userData; caller's decl must leave these zero. */
