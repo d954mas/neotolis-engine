@@ -23,7 +23,7 @@ extern const nt_ui_widget_def_t NT_UI_CHECKBOX_DEF;
 /* 2x4 grid index: value(unchecked/checked) x interaction. */
 enum { NT_UI_CB_IDLE = 0, NT_UI_CB_HOVER, NT_UI_CB_PRESSED, NT_UI_CB_DISABLED };
 
-/* One cell of the 2x4 grid. box/check are nt_atlas_region_ref_t (Plan 01):
+/* One cell of the 2x4 grid. box/check are nt_atlas_region_ref_t:
  *   non-idle cell atlas.id==0 -> inherit the value-row idle cell;
  *   idle terminal atlas.id==0 -> NO ART (skip that part's IMAGE). */
 typedef struct {
@@ -36,7 +36,7 @@ typedef struct {
 } nt_ui_cb_state_t;
 _Static_assert(sizeof(nt_ui_cb_state_t) == 44, "nt_ui_cb_state_t stable ABI (2x8 ref + 3 tint + 4 float)");
 
-/* ONE shared style for all three widgets (strict superset, D-58-12). Layout
+/* ONE shared style for all three widgets (strict superset). Layout
  * sizing/padding live on the Clay decl; the FIXED box_w/box_h size only the
  * indicator/track, never the row. */
 typedef struct {

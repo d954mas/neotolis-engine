@@ -1,4 +1,4 @@
-/* Toggle widget tests (WIDGET-12 + SC#3 logic over the shared cb_core).
+/* Toggle widget tests: logic over the shared cb_core.
  *
  * Leaf widget: nt_ui_toggle(...) flips *value with the SAME return contract as
  * checkbox (changed exactly on the release frame). The thumb overlay is ALWAYS
@@ -7,7 +7,7 @@
  * (value_t 1) -> x = thumb_pad + (box_w - overlay_w - 2*thumb_pad). With
  * value_speed == 0 the slide snaps to its endpoint, so both the symmetric base
  * offset and the slide DELTA are logic-assertable by reading the thumb's emitted
- * vertex X. The smooth eased slide itself is user-visual-only (58-VALIDATION.md). */
+ * vertex X. The smooth eased slide itself is user-visual-only. */
 
 #include <math.h>
 #include <stdalign.h>

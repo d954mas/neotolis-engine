@@ -1,4 +1,4 @@
-/* Checkbox widget tests (WIDGET-10 + SC#1/#4 + death tests D-58-04/10/14).
+/* Checkbox widget tests.
  *
  * Leaf widget: nt_ui_checkbox(...) returns `changed`. A press-then-release over
  * the row (box OR label) flips *value and returns true exactly on the release
@@ -129,7 +129,7 @@ static bool cb_frame(const nt_pointer_t *p, bool *value, bool enabled) {
 }
 
 /* ---- Test 1: press→release inside the BOX toggles *value, returns true on the
- *      release frame only; the press-down-only frame returns false (SC #1). ---- */
+ *      release frame only; the press-down-only frame returns false. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_click_box_toggles_value(void) {
     bool value = false;
@@ -156,7 +156,7 @@ static void test_click_box_toggles_value(void) {
 }
 
 /* ---- Test 2: press→release over the LABEL region (not the box) toggles the
- *      same id -- the whole row is one clickable area (D-58-05). ---- */
+ *      same id -- the whole row is one clickable area. ---- */
 static void test_click_label_toggles_value(void) {
     bool value = false;
 
@@ -172,7 +172,7 @@ static void test_click_label_toggles_value(void) {
 }
 
 /* ---- Test 3: indicator-only (label==NULL) emits a box IMAGE (+overlay IMAGE
- *      when checked) and 0 TEXT commands (WIDGET-10). ---- */
+ *      when checked) and 0 TEXT commands. ---- */
 static void test_indicator_only_no_text(void) {
     bool value = false;
 
@@ -194,7 +194,7 @@ static void test_indicator_only_no_text(void) {
 }
 
 /* ---- Test 4: disabled -> click attempt returns false, *value unchanged, the
- *      disabled cell is forced, and the Clay open/close stays balanced (SC #4). ---- */
+ *      disabled cell is forced, and the Clay open/close stays balanced. ---- */
 static void test_disabled_no_click_balanced(void) {
     bool value = false;
 
@@ -342,7 +342,7 @@ static void test_text_color_override(void) {
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
-/* data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY -- the widget owns those (D-58-04). */
+/* data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY -- the widget owns those. */
 static void test_assert_data_flags_transform(void) {
     bool value = false;
     nt_ui_transform_t t = nt_ui_transform_defaults();
@@ -355,7 +355,7 @@ static void test_assert_data_flags_transform(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* box_w <= 0 -> assert (D-58-14). */
+/* box_w <= 0 -> assert. */
 static void test_assert_box_w_zero(void) {
     bool value = false;
     nt_ui_checkbox_style_t bad = s_style;
@@ -366,7 +366,7 @@ static void test_assert_box_w_zero(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* box_h <= 0 -> assert (D-58-14). */
+/* box_h <= 0 -> assert. */
 static void test_assert_box_h_zero(void) {
     bool value = false;
     nt_ui_checkbox_style_t bad = s_style;
@@ -377,7 +377,7 @@ static void test_assert_box_h_zero(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* A value row with neither box.idle nor check.idle art -> assert (D-58-10). */
+/* A value row with neither box.idle nor check.idle art -> assert. */
 static void test_assert_empty_value_row(void) {
     bool value = false;
     nt_ui_checkbox_style_t bad = s_style;
@@ -422,6 +422,50 @@ static void test_assert_value_speed_negative(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* gap < 0 -> assert. */
+static void test_assert_gap_negative(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.gap = -1.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* label_side > 1 -> assert. */
+static void test_assert_label_side_invalid(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.label_side = 2;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* box_w non-finite -> assert. */
+static void test_assert_box_w_inf(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.box_w = INFINITY;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* overlay_w non-finite -> assert. */
+static void test_assert_overlay_w_inf(void) {
+    bool value = false;
+    nt_ui_checkbox_style_t bad = s_style;
+    bad.overlay_w = INFINITY;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "x", &value, &bad, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -442,6 +486,10 @@ int main(void) {
     RUN_TEST(test_assert_overlay_w_negative);
     RUN_TEST(test_assert_state_speed_negative);
     RUN_TEST(test_assert_value_speed_negative);
+    RUN_TEST(test_assert_gap_negative);
+    RUN_TEST(test_assert_label_side_invalid);
+    RUN_TEST(test_assert_box_w_inf);
+    RUN_TEST(test_assert_overlay_w_inf);
 #endif
     return UNITY_END();
 }

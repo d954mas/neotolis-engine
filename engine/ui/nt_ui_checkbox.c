@@ -33,7 +33,7 @@ static void assert_cell_valid(const nt_ui_cb_state_t *st) {
 
 /* A value row (unchecked/checked) needs SOME art at idle: box or check non-zero. */
 static void assert_row_valid(const nt_ui_cb_state_t row[4]) {
-    NT_ASSERT((row[NT_UI_CB_IDLE].box.atlas.id != 0U || row[NT_UI_CB_IDLE].check.atlas.id != 0U) && "nt_ui_checkbox: value row idle must have box or check art (D-58-10)");
+    NT_ASSERT((row[NT_UI_CB_IDLE].box.atlas.id != 0U || row[NT_UI_CB_IDLE].check.atlas.id != 0U) && "nt_ui_checkbox: value row idle must have box or check art");
     for (int i = 0; i < 4; ++i) {
         assert_cell_valid(&row[i]);
     }
@@ -101,11 +101,11 @@ typedef struct {
 /* Open the box CHILD (childAlignment CENTER, FIXED box_w x box_h), emit box IMAGE
  * (skip no-art terminal), emit the overlay as a Clay child of the box (skip when
  * value <= eps or no check art), close the box. The box has NO id — the ROW owns
- * the widget id + hit-test so box OR label clicks the same widget (D-58-05). */
+ * the widget id + hit-test so box OR label clicks the same widget. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void cb_emit_box(const cb_emit_args_t *e) {
     /* Toggle: thumb is LEFT-anchored so OFF sits at x=0 and the offset_x DELTA
-     * slides it right (D-58-16). Checkbox/radio: center the dot in the box. */
+     * slides it right. Checkbox/radio: center the dot in the box. */
     const Clay_LayoutAlignmentX align_x = e->is_toggle ? CLAY_ALIGN_X_LEFT : CLAY_ALIGN_X_CENTER;
     Clay_ElementDeclaration box_decl = {
         .layout =
@@ -114,7 +114,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
                 .childAlignment = {align_x, CLAY_ALIGN_Y_CENTER},
             },
     };
-    /* No-art terminal: resolved box atlas.id == 0 => skip the IMAGE (D-58-10). */
+    /* No-art terminal: resolved box atlas.id == 0 => skip the IMAGE. */
     if (e->box_ref.atlas.id != 0U) {
         nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
         NT_ASSERT(p != NULL && "nt_ui_checkbox: scratch alloc failed (box payload)");
@@ -136,7 +136,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
         nt_ui_transform_t ov_t = nt_ui_transform_defaults();
         if (e->is_toggle) {
             /* Left-anchored; base offset = thumb_pad gives a symmetric end-margin (OFF
-             * sits thumb_pad from the left), and the slide is the render-only DELTA (D-58-16). */
+             * sits thumb_pad from the left), and the slide is the render-only DELTA. */
             const float slide = e->style->box_w - e->style->overlay_w - (2.0F * e->style->thumb_pad);
             ov_t.offset_x = e->style->thumb_pad + (e->eased_value * slide);
         } else {
@@ -184,7 +184,7 @@ static void cb_emit_text(const cb_emit_args_t *e) {
     }
 }
 
-/* The single shared composition path (D-58-02). LEAF: opens the box, emits the
+/* The single shared composition path. LEAF: opens the box, emits the
  * box IMAGE + overlay child + text child, closes the box — all in one call.
  *   value_is_checked   selects the value row (game owns the bool/int).
  *   is_toggle          drives the thumb slide instead of centered pop.
@@ -217,7 +217,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     /* Widget owns transform/opacity; caller may pass layer/user_data in data. */
     if (data != NULL) {
         NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U &&
-                  "nt_ui_checkbox: data->flags must not set HAS_TRANSFORM/HAS_OPACITY (widget owns these); wrap with a CLAY xform parent instead (D-58-04)");
+                  "nt_ui_checkbox: data->flags must not set HAS_TRANSFORM/HAS_OPACITY (widget owns these); wrap with a CLAY xform parent instead");
     }
     // #endregion
     // #region interaction
@@ -246,7 +246,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     const nt_atlas_region_ref_t check_ref = resolve_ref(cell->check, row[NT_UI_CB_IDLE].check);
     // #endregion
     // #region one anim call
-    /* ONE combined target: state group at state_speed + value_t at value_speed (D-58-18). */
+    /* ONE combined target: state group at state_speed + value_t at value_speed. */
     nt_ui_anim_target_t tgt = {
         .scale_x = cell->scale,
         .scale_y = cell->scale,
@@ -265,9 +265,9 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     const float eased_value = a->value_t;
     // #endregion
     // #region open ROW (registered widget; opacity always rides the row, transform conditionally)
-    /* The ROW is the registered widget: box OR label clicks the same id (D-58-05).
-     * Opacity ALWAYS rides the row -> inherits to box/overlay/text (whole-widget dim,
-     * D-58-11). The eased state transform rides the row only when scale_label; otherwise
+    /* The ROW is the registered widget: box OR label clicks the same id.
+     * Opacity ALWAYS rides the row -> inherits to box/overlay/text (whole-widget dim).
+     * The eased state transform rides the row only when scale_label; otherwise
      * it rides the box (indicator-only scale) so the label does not pop. */
     nt_ui_transform_t state_t = nt_ui_transform_defaults();
     state_t.scale_x = a->scale_x;
@@ -336,11 +336,11 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
                  const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(selected != NULL && "nt_ui_radio: selected must be non-NULL");
     /* Exclusivity is FREE: every radio in the group reads the same *selected, so
-     * no engine-side group state is needed (D-58-01/05). value row = am I it? */
+     * no engine-side group state is needed. value row = am I it? */
     const bool value_is_checked = (*selected == my_value);
     bool clicked = false;
     cb_core(ctx, data, label_layer, id, label, value_is_checked, false, style, decl, enabled, &clicked);
-    /* Re-selecting the already-selected option is a no-op (no flicker, D-58-05). */
+    /* Re-selecting the already-selected option is a no-op (no flicker). */
     if (clicked && *selected != my_value) {
         *selected = my_value;
         return true;
@@ -352,7 +352,7 @@ bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_
                   const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_toggle: value must be non-NULL");
     /* Same value logic as checkbox; is_toggle=true drives the always-visible
-     * thumb + render-only offset_x slide DELTA in cb_emit_box (D-58-16). */
+     * thumb + render-only offset_x slide DELTA in cb_emit_box. */
     bool clicked = false;
     cb_core(ctx, data, label_layer, id, label, *value, true, style, decl, enabled, &clicked);
     if (clicked) {

@@ -1,6 +1,6 @@
-/* UI Stateful Demo — the settings-menu worked example (DESIGN-DRAFT §7).
+/* UI Stateful Demo — the settings-menu worked example.
  *
- * Proves the three Phase 58 stateful widgets on one screen:
+ * Proves the three stateful widgets on one screen:
  *   - nt_ui_checkbox  "Enable VSync"      (checkmark POPS in/out)
  *   - nt_ui_toggle    "Dark Mode"         (thumb SLIDES left<->right)
  *   - nt_ui_radio x3  "Low / Med / High"  (shared &g_quality, free exclusivity)
@@ -87,7 +87,7 @@ static const nt_ui_label_style_t g_help_style = {
 };
 // #endregion
 
-// #region widget style templates (DESIGN-DRAFT §7)
+// #region widget style templates
 /* Box/check atlas refs are patched per-cell at runtime (region indices come from
  * the bound atlas). Every cell sets scale=1 / opacity=1 to satisfy the per-cell
  * asserts (assert_cell_valid: scale > 0, opacity in [0,1]); pressed dips scale,
@@ -307,7 +307,7 @@ static void section_label(const char *text) {
 }
 // #endregion
 
-// #region declare_menu (DESIGN-DRAFT §7 settings menu)
+// #region declare_menu (settings menu)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_menu(void) {
     if (!s_ids_ready) {

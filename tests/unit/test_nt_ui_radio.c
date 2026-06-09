@@ -1,4 +1,4 @@
-/* Radio widget tests (WIDGET-11 + SC#2 exclusivity over the shared cb_core).
+/* Radio widget tests: exclusivity over the shared cb_core.
  *
  * Leaf widget: nt_ui_radio(...) returns `changed` = the frame *selected flips to
  * my_value. Exclusivity is FREE — every radio in a group reads the SAME int*, so
