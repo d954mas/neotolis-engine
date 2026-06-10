@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: f566ab6
+# Commit: 4505f5d
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                88 B
 Elem                 174 B
-Code              642338 B
+Code              642123 B
 Data              233620 B
 Custom             37052 B
 ---------------- ----------
-TOTAL             914802 B
+TOTAL             914587 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             914802 B
  4528 B   basist::astc_6x6_hdr::assign_weights_4(basist::vec3F const*, float const*, unsigned char*, int, int, int, int, int, int, long long, bool, basist::astc_6x6_hdr::fast_bc6h_params const&)
 
 Total functions: 372
-Total code size: 641687 B
+Total code size: 641472 B
 
 ## Per-Module Contributions
 
@@ -73,7 +73,7 @@ TOTAL (linked)             67102 B
 Not linked to bunnymark:
 libnt_app.a                 1442 B
 libnt_app_stub.a            1428 B
-libnt_atlas.a               7118 B
+libnt_atlas.a               6894 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1930 B
 libnt_core.a                2178 B
@@ -85,8 +85,8 @@ libnt_gfx_stub.a           31230 B
 libnt_hash.a                4028 B
 libnt_input.a              16446 B
 libnt_input_stub.a         11148 B
-libnt_log.a                 1424 B
-libnt_log_stub.a             484 B
+libnt_log.a                10404 B
+libnt_log_stub.a             544 B
 libnt_material.a            4338 B
 libnt_material_comp.a       1992 B
 libnt_mem_scratch.a         1918 B
@@ -97,13 +97,13 @@ libnt_render.a              5910 B
 libnt_resource.a          186766 B
 libnt_shape_renderer.a   1140902 B
 libnt_sort.a                 366 B
-libnt_sprite_comp.a         8894 B
+libnt_sprite_comp.a         8892 B
 libnt_sprite_renderer.a   444554 B
 libnt_stats.a               5634 B
 libnt_text_renderer.a    1236522 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4696 B
-libnt_ui.a                463322 B
+libnt_ui.a                464734 B
 libnt_utf8.a                1000 B
 libnt_window.a              3940 B
 libnt_window_stub.a         1838 B

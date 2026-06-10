@@ -1,0 +1,14 @@
+[{
+  "commit": "4505f5d",
+  "date": "2026-06-10T04:55:41Z",
+  "files": {
+    "index.html": { "raw": 2556, "gzip": 1284 },
+    "index_simd.wasm": { "raw": 1156833, "gzip": 431056 },
+    "index.wasm": { "raw": 1037295, "gzip": 409652 },
+    "index_simd.js": { "raw": 26936, "gzip": 10828 },
+    "index.js": { "raw": 26936, "gzip": 10823 }
+  },
+  "engine": { "raw": 1186325, "gzip": 443168 },
+  "resources": { "raw": 0, "gzip": 0 },
+  "total": { "raw": 1186325, "gzip": 443168 }
+}]
