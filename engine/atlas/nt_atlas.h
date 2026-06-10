@@ -113,8 +113,9 @@ static inline void nt_atlas_resolve_ref(nt_atlas_region_ref_t *ref) {
          * valid (dead) index, so INVALID here means the name was never packed. Dev-only warn; release stays a
          * silent skip so a missing optional asset never traps a shipped game. */
         if (ref->region == NT_ATLAS_INVALID_REGION) {
-            /* Plain (domain-less) variant: this inline is included by game/example TUs that do not define NT_LOG_DOMAIN. */
-            nt_log_warn_once("nt_atlas_resolve_ref: name_hash 0x%016llx not present in ready atlas %u (typo?)", (unsigned long long)ref->name_hash, (unsigned)ref->atlas.id);
+            /* Per-message dedup via nt_log: each distinct name_hash warns once. Plain variant — this
+             * inline lands in game/example TUs without NT_LOG_DOMAIN. */
+            nt_log_warn_unique("nt_atlas_resolve_ref: name_hash 0x%016llx not present in ready atlas %u (typo?)", (unsigned long long)ref->name_hash, (unsigned)ref->atlas.id);
         }
 #endif
     }
