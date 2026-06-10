@@ -122,19 +122,14 @@ static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
     return NT_ATLAS_INVALID_REGION;
 }
 
-/* Free the old hash table and rebuild from live (non-tombstone) regions.
- * Called once after first parse and once after each merge. */
+/* Free the old hash table and rebuild from all named regions. Dead-but-named
+ * slots (vertex_count==0) stay in the table so a removed name still resolves to
+ * its stable index and revives in place on re-add. */
 static void hash_rebuild(nt_atlas_data_t *ad) {
     free(ad->hash_table);
 
-    uint32_t live = 0;
-    for (uint32_t i = 0; i < ad->region_count; i++) {
-        if (ad->regions[i].name_hash != NT_ATLAS_TOMBSTONE_HASH) {
-            live++;
-        }
-    }
-
-    uint32_t cap = next_pow2(live * 2U);
+    /* Every runtime slot carries a real name (removal keeps name_hash). */
+    uint32_t cap = next_pow2(ad->region_count * 2U);
     if (cap < 16U) {
         cap = 16U;
     }
@@ -145,9 +140,6 @@ static void hash_rebuild(nt_atlas_data_t *ad) {
 
     const uint32_t mask = cap - 1;
     for (uint32_t i = 0; i < ad->region_count; i++) {
-        if (ad->regions[i].name_hash == NT_ATLAS_TOMBSTONE_HASH) {
-            continue;
-        }
         uint32_t pos = (uint32_t)(ad->regions[i].name_hash & mask);
         for (uint32_t steps = 0; steps < cap; steps++) {
             nt_atlas_hash_entry_t *e = &ad->hash_table[pos];
@@ -381,7 +373,7 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
     const float ipu = ad->ipu;
     for (uint32_t i = 0; i < ad->region_count; i++) {
         const nt_texture_region_t *r = &ad->regions[i];
-        if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
+        if (r->vertex_count == 0) {
             continue;
         }
         const float trim_off_x = (float)r->trim_offset_x;
@@ -524,16 +516,18 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     }
     // #endregion
 
-    // #region pass 2: tombstones
+    // #region pass 2: tombstone-reclaim
+    /* Removed regions keep their name_hash and stay in the hash table (dead via
+     * vertex_count==0). A later merge that re-adds the name revives the SAME
+     * index in pass 1, so a resolved region index is stable for the atlas life. */
     for (uint32_t i = 0; i < pre_merge_count; i++) {
         nt_texture_region_t *r = &ad->regions[i];
-        if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
+        if (r->vertex_count == 0) {
             continue;
         }
         const bool still_present = (seen[i / 8U] >> (i % 8U)) & 1U;
         if (!still_present) {
             NT_LOG_WARN("atlas merge: region 0x%016llx removed (not in new blob)", (unsigned long long)r->name_hash);
-            r->name_hash = NT_ATLAS_TOMBSTONE_HASH;
             r->vertex_start = 0;
             r->index_start = 0;
             r->vertex_count = 0;

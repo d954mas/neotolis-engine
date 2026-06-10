@@ -33,15 +33,17 @@ typedef struct {
     /* Multiplies the atlas region's baked slice9 borders. */
     float slice9_scale;
 } nt_ui_button_style_t;
+_Static_assert(sizeof(nt_ui_btn_state_t) == 40, "nt_ui_btn_state_t stable ABI (16 ref + tint + 4 float + 8B align pad)");
+_Static_assert(sizeof(nt_ui_button_style_t) == 176, "nt_ui_button_style_t stable ABI");
 
 /* enabled=false short-circuits interaction and forces the disabled visual.
  * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl.
  * style->idle.bg.atlas.id == 0 = text-only button (no background IMAGE emitted);
  * other states inherit idle when their bg.atlas.id == 0. */
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
+void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
 
 /* Content-less button (slice9 bg only). Returns clicked. Same args as begin. */
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
+bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 
 #endif /* NT_UI_BUTTON_H */

@@ -7,3 +7,10 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
     (void)domain;
     (void)fmt;
 }
+
+bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *fmt, ...) {
+    (void)level;
+    (void)domain;
+    (void)fmt;
+    return false;
+}

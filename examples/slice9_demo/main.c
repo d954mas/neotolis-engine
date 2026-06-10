@@ -108,11 +108,14 @@ static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
 static uint32_t s_white_region_idx;
-static uint32_t s_panel_beige_idx;
-static uint32_t s_panel_blue_idx;
-static uint32_t s_panel_brown_idx;
-static uint32_t s_button_blue_idx;
-static uint32_t s_button_green_idx;
+
+/* Late-bound art refs filled upfront (init_atlas_refs); mutable so the engine memoizes
+ * the resolved region index in place on first emit under a ready atlas. */
+static nt_atlas_region_ref_t s_panel_beige_ref;
+static nt_atlas_region_ref_t s_panel_blue_ref;
+static nt_atlas_region_ref_t s_panel_brown_ref;
+static nt_atlas_region_ref_t s_button_blue_ref;
+static nt_atlas_region_ref_t s_button_green_ref;
 
 #define LAYER_BG 0
 #define LAYER_IMG 1
@@ -130,7 +133,17 @@ static float s_time;
 // #endregion
 
 // #region binding
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Fill the late-bound art refs upfront; the handle is valid before the data loads
+ * and the widget resolves + memoizes the region lazily. */
+static void init_atlas_refs(void) {
+    s_panel_beige_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BEIGE.value);
+    s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BLUE.value);
+    s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BROWN.value);
+    s_button_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_BLUE.value);
+    s_button_green_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_GREEN.value);
+}
+
+/* White-region + font stay is_ready-gated (white is the deferred path; font needs the loaded resource). */
 static void try_bind_resources(void) {
     if (s_atlas_bound && s_font_bound) {
         return;
@@ -139,18 +152,9 @@ static void try_bind_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS__WHITE.value);
         NT_ASSERT(s_white_region_idx != NT_ATLAS_INVALID_REGION);
-
-        s_panel_beige_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BEIGE.value);
-        s_panel_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BLUE.value);
-        s_panel_brown_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BROWN.value);
-        s_button_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_BLUE.value);
-        s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_GREEN.value);
-        NT_ASSERT(s_panel_beige_idx != NT_ATLAS_INVALID_REGION);
-        NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
-
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
         s_atlas_bound = true;
-        nt_log_info("slice9_demo: atlas bound (5 Kenney regions + white)");
+        nt_log_info("slice9_demo: atlas white region bound");
     }
 
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
@@ -172,26 +176,16 @@ static void declare_static_panels(void) {
     CLAY({.id = CLAY_ID("static-row"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_beige_idx}, &g_panel_style, NULL);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(70)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_blue_idx}, &g_panel_style, NULL);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_FIXED(80)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_brown_idx}, &g_panel_style, NULL);
-        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_style, NULL); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(70)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_blue_ref, &g_panel_style, NULL); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_FIXED(80)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_brown_ref, &g_panel_style, NULL); }
     }
 
     /* Kenney buttons */
     CLAY({.id = CLAY_ID("btn-row"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_button_blue_idx}, &g_panel_style, NULL);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(250), CLAY_SIZING_FIXED(40)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_button_green_idx}, &g_panel_style, NULL);
-        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_button_blue_ref, &g_panel_style, NULL); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(250), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_button_green_ref, &g_panel_style, NULL); }
     }
 }
 // #endregion
@@ -228,7 +222,7 @@ static void declare_animated_panel(void) {
                          .childGap = 8,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .userData = (void *)NT_UI_DATA_XFORM(0U, &t, opacity)}) {
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_brown_idx}, &g_panel_style, NULL);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_brown_ref, &g_panel_style, NULL);
             {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Animated Panel", &g_panel_label_style);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hello World", &g_child_label_style);
@@ -272,16 +266,16 @@ static void declare_nested_panels(void) {
         /* Outer beige panel — userData carries outer_t to all children via DFS. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(140)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .userData = (void *)NT_UI_DATA_XFORM(0U, &outer_t, 1.0F)}) {
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_beige_idx}, &g_panel_style, NULL);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_style, NULL);
             {
                 /* Middle blue panel — wrapping CLAY composes mid_opacity onto inherited outer_t. */
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                       .userData = (void *)NT_UI_DATA_XFORM(0U, &mid_identity, mid_opacity)}) {
-                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_blue_idx}, &g_panel_style, NULL);
+                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_blue_ref, &g_panel_style, NULL);
                     {
                         // clang-format off
                         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), (nt_atlas_region_ref_t){s_atlas_handle, s_panel_brown_idx}, &g_panel_style, NULL);
+                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_brown_ref, &g_panel_style, NULL);
                             { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style); }
                             nt_ui_panel_end(s_ctx);
                         }
@@ -545,6 +539,9 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_SLICE9_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_SLICE9_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_SLICE9_DEMO_FONT, NT_ASSET_FONT);
+
+    /* Handle is valid immediately; fill late-bound art refs upfront. */
+    init_atlas_refs();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,

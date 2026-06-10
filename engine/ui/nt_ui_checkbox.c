@@ -103,8 +103,8 @@ static void cb_emit_box(const cb_emit_args_t *e) {
                 .childAlignment = {align_x, CLAY_ALIGN_Y_CENTER},
             },
     };
-    /* No-art terminal: resolved box atlas.id == 0 => skip the IMAGE. */
-    if (e->box_ref.atlas.id != 0U) {
+    /* No-art terminal: atlas.id == 0 => skip the IMAGE. region still INVALID = atlas not ready: skip too. */
+    if (e->box_ref.atlas.id != 0U && e->box_ref.region != NT_ATLAS_INVALID_REGION) {
         nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
         NT_ASSERT(p != NULL && "nt_ui_checkbox: scratch alloc failed (box payload)");
         *p = (nt_ui_image_payload_t){.atlas = e->box_ref.atlas, .region_index = e->box_ref.region, .slice9_scale = 1.0F};
@@ -143,7 +143,9 @@ static void cb_emit_box(const cb_emit_args_t *e) {
         const Clay_ElementDeclaration ov_decl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(e->style->overlay_w), CLAY_SIZING_FIXED(e->style->overlay_h)}},
         };
-        nt_ui_image(e->ctx, ov_data, e->check_ref, &ov_style, &ov_decl);
+        /* check_ref is already resolved in cb_core; the by-pointer image API needs a mutable lvalue. */
+        nt_atlas_region_ref_t ov_ref = e->check_ref;
+        nt_ui_image(e->ctx, ov_data, &ov_ref, &ov_style, &ov_decl);
     }
 
     nt_ui_clay_priv_close_element();
@@ -181,7 +183,7 @@ static void cb_emit_text(const cb_emit_args_t *e) {
  *   out_clicked        receives the release-over-widget edge for the wrapper. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool value_is_checked, bool is_toggle, const nt_ui_widget_def_t *def,
-                    const nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_clicked) {
+                    nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_clicked) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_checkbox: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_checkbox: must be called between nt_ui_begin and nt_ui_end on the active ctx");
@@ -222,7 +224,8 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     *out_clicked = in.clicked;
     // #endregion
     // #region value-row + state pick
-    const nt_ui_cb_state_t *row = value_is_checked ? style->checked : style->unchecked;
+    /* Non-const row so the resolve memoizes into the style-owned cell refs. */
+    nt_ui_cb_state_t *row = value_is_checked ? style->checked : style->unchecked;
     int state = NT_UI_CB_IDLE;
     if (!enabled) {
         state = NT_UI_CB_DISABLED;
@@ -231,7 +234,12 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     } else if (in.hovered) {
         state = NT_UI_CB_HOVER;
     }
-    const nt_ui_cb_state_t *cell = &row[state];
+    nt_ui_cb_state_t *cell = &row[state];
+    /* Resolve the STYLE-OWNED cell + idle-row terminal refs in place BEFORE the inherit pick. */
+    nt_atlas_resolve_ref(&cell->box);
+    nt_atlas_resolve_ref(&cell->check);
+    nt_atlas_resolve_ref(&row[NT_UI_CB_IDLE].box);
+    nt_atlas_resolve_ref(&row[NT_UI_CB_IDLE].check);
     const nt_atlas_region_ref_t box_ref = nt_ui_ref_or(cell->box, row[NT_UI_CB_IDLE].box);
     const nt_atlas_region_ref_t check_ref = nt_ui_ref_or(cell->check, row[NT_UI_CB_IDLE].check);
     // #endregion
@@ -309,7 +317,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     nt_ui_clay_priv_close_element(); /* close ROW */
 }
 
-bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, nt_ui_checkbox_style_t *style,
                     const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_checkbox: value must be non-NULL");
     bool clicked = false;
@@ -321,7 +329,7 @@ bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     return false;
 }
 
-bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *selected, int my_value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *selected, int my_value, nt_ui_checkbox_style_t *style,
                  const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(selected != NULL && "nt_ui_radio: selected must be non-NULL");
     /* Exclusivity is FREE: every radio in the group reads the same *selected, so
@@ -337,7 +345,7 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
     return false;
 }
 
-bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, const nt_ui_checkbox_style_t *style,
+bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, nt_ui_checkbox_style_t *style,
                   const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_toggle: value must be non-NULL");
     /* Same value logic as checkbox; is_toggle=true drives the always-visible

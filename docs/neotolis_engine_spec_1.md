@@ -826,10 +826,11 @@ Two ways to bind a sprite to a region, picked by what the game knows:
   or read it back from a previously resolved sprite. Skips the hash lookup
   on bind and on stable frames (the atlas-revision gate inside sync resolves
   to a no-op when nothing changed). After atlas republish, sync re-resolves
-  via hash to confirm the cached index still points to the same region —
-  this is how tombstoning is detected. The atlas merge contract guarantees
-  that surviving regions keep the same index across republish, so the cached
-  index stays stable as long as the underlying region is not tombstoned.
+  via hash to pick up a removed region going dead (`vertex_count==0`). The
+  atlas merge contract guarantees every region ever present keeps the same
+  index for the atlas lifetime — removed regions are marked dead in place but
+  keep their index and revive there if re-added — so the cached index never
+  moves; a dead region simply zero-draws.
 
 Game code is free to read back the cached region index for animation logic
 (e.g. cycle to the next frame). It is stable across atlas republish for
@@ -1536,8 +1537,8 @@ Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. 
 Subsequent publications merge by `name_hash` to preserve stable region indices across pack stacking:
 - common regions update metadata in place and rewrite their copied vertex/index payload
 - new regions append to the end
-- removed regions become tombstones (`vertex_count = index_count = 0`, `name_hash = NT_ATLAS_TOMBSTONE_HASH`)
-- the hash table is rebuilt from live regions after each merge
+- removed regions are marked dead in place (`vertex_count = index_count = 0`) but KEEP their `name_hash` and stay in the hash table, so a later merge that re-adds the name revives the SAME index — a resolved region index is therefore stable for the atlas lifetime
+- the hash table is rebuilt from all named regions (live + dead) after each merge
 
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 

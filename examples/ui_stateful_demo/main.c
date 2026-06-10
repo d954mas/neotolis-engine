@@ -74,9 +74,9 @@ static const nt_ui_label_style_t g_help_style = {
 // #endregion
 
 // #region widget style templates
-/* Box/check atlas refs are patched per-cell at runtime (region indices come from the
- * bound atlas). Every cell sets scale=1 / opacity=1 to satisfy assert_cell_valid;
- * pressed dips scale, disabled dips opacity. */
+/* Box/check atlas refs are filled upfront from these templates (init_widget_styles);
+ * the engine resolves the region lazily. Every cell sets scale=1 / opacity=1 to satisfy
+ * assert_cell_valid; pressed dips scale, disabled dips opacity. */
 
 /* ---- checkbox: checkmark pops in (fast value pop) ---- */
 static const nt_ui_checkbox_style_t g_check_tmpl = {
@@ -186,8 +186,8 @@ static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
 
-/* Runtime widget styles: const templates copied + atlas refs patched once the
- * atlas binds (region indices are not known at compile time). */
+/* Runtime widget styles: const templates copied + late-bound atlas refs filled upfront
+ * (init_widget_styles); mutable so the engine's resolve memoizes the index in place. */
 static nt_ui_checkbox_style_t s_check;
 static nt_ui_checkbox_style_t s_switch;
 static nt_ui_checkbox_style_t s_radio;
@@ -217,17 +217,30 @@ static bool s_ids_ready;
 // #endregion
 
 // #region binding
-static void patch_row_atlas(nt_ui_cb_state_t row[4], nt_resource_t atlas, uint32_t box_region, uint32_t check_region) {
-    /* Only the IDLE cell carries the atlas refs; non-idle cells inherit the whole ref
-     * (resolve_ref). check_region == NT_ATLAS_INVALID_REGION = no overlay art (e.g. the
-     * radio unchecked row has no dot). */
-    row[NT_UI_CB_IDLE].box = (nt_atlas_region_ref_t){atlas, box_region};
-    if (check_region != NT_ATLAS_INVALID_REGION) {
-        row[NT_UI_CB_IDLE].check = (nt_atlas_region_ref_t){atlas, check_region};
-    }
+/* Fill the idle cell's late-bound refs; non-idle cells inherit the whole ref (nt_ui_ref_or).
+ * The handle is valid before the atlas data loads — the widget resolves + memoizes lazily. */
+static void init_widget_styles(void) {
+    /* Checkbox: box on both rows; only checked carries the check overlay. */
+    s_check = g_check_tmpl;
+    s_check.unchecked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BOX_OFF.value);
+    s_check.checked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BOX_OFF.value);
+    s_check.checked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_CHECKMARK.value);
+
+    /* Radio: ring on both rows; checked adds the dot. */
+    s_radio = g_radio_tmpl;
+    s_radio.unchecked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_RING.value);
+    s_radio.checked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_RING.value);
+    s_radio.checked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_DOT.value);
+
+    /* Toggle: track recolors by value (off grey / on green); thumb on both. */
+    s_switch = g_switch_tmpl;
+    s_switch.unchecked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
+    s_switch.unchecked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+    s_switch.checked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
+    s_switch.checked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* White-region + font stay is_ready-gated (white is the deferred path; font needs the loaded resource). */
 static void try_bind_resources(void) {
     if (s_atlas_bound && s_font_bound) {
         return;
@@ -235,36 +248,10 @@ static void try_bind_resources(void) {
 
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         const uint32_t white = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS__WHITE.value);
-        const uint32_t box_off = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BOX_OFF.value);
-        const uint32_t checkmark = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_CHECKMARK.value);
-        const uint32_t ring = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_RING.value);
-        const uint32_t dot = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_DOT.value);
-        const uint32_t track_off = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
-        const uint32_t track_on = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
-        const uint32_t thumb = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
-        NT_ASSERT(white != NT_ATLAS_INVALID_REGION && box_off != NT_ATLAS_INVALID_REGION && checkmark != NT_ATLAS_INVALID_REGION);
-        NT_ASSERT(ring != NT_ATLAS_INVALID_REGION && dot != NT_ATLAS_INVALID_REGION);
-        NT_ASSERT(track_off != NT_ATLAS_INVALID_REGION && track_on != NT_ATLAS_INVALID_REGION && thumb != NT_ATLAS_INVALID_REGION);
-
+        NT_ASSERT(white != NT_ATLAS_INVALID_REGION);
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, white);
-
-        /* Checkbox: box+check on both rows; unchecked has no check overlay. */
-        s_check = g_check_tmpl;
-        patch_row_atlas(s_check.unchecked, s_atlas_handle, box_off, NT_ATLAS_INVALID_REGION);
-        patch_row_atlas(s_check.checked, s_atlas_handle, box_off, checkmark);
-
-        /* Radio: ring on both rows; checked adds the dot. */
-        s_radio = g_radio_tmpl;
-        patch_row_atlas(s_radio.unchecked, s_atlas_handle, ring, NT_ATLAS_INVALID_REGION);
-        patch_row_atlas(s_radio.checked, s_atlas_handle, ring, dot);
-
-        /* Toggle: track recolors by value (off grey / on green); thumb on both. */
-        s_switch = g_switch_tmpl;
-        patch_row_atlas(s_switch.unchecked, s_atlas_handle, track_off, thumb);
-        patch_row_atlas(s_switch.checked, s_atlas_handle, track_on, thumb);
-
         s_atlas_bound = true;
-        nt_log_info("ui_stateful_demo: atlas bound (box/check + ring/dot + track + thumb)");
+        nt_log_info("ui_stateful_demo: atlas white region bound");
     }
 
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
@@ -566,6 +553,9 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_STATEFUL_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_STATEFUL_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_STATEFUL_DEMO_FONT, NT_ASSET_FONT);
+
+    /* Handle is valid immediately; fill late-bound widget refs upfront. */
+    init_widget_styles();
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,

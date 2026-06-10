@@ -82,7 +82,7 @@ if(NOT EMSCRIPTEN)
     # --- Log API tests (domain functions, macros, level filtering) ---
     add_executable(test_log_api unit/test_log_api.c)
     target_link_libraries(test_log_api PRIVATE nt_log unity)
-    target_compile_definitions(test_log_api PRIVATE NT_LOG_DOMAIN_DEFAULT="test_mod")
+    target_compile_definitions(test_log_api PRIVATE NT_LOG_DOMAIN_DEFAULT="test_mod" NT_LOG_REAL_IMPL=1)
     nt_set_warning_flags(test_log_api)
     nt_set_sanitizer_flags(test_log_api)
     set_target_properties(test_log_api PROPERTIES
