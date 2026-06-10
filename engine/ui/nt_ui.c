@@ -389,8 +389,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Clay v0.14 has no right/middle/wheel buttons; left only. */
     Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
-    /* Y inverted: Clay scroll opposite of typical wheel_dy. */
-    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = primary->wheel_dx, .y = -primary->wheel_dy}, dt);
+    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed (D-59-01). */
 
     Clay_BeginLayout();
 }

@@ -56,6 +56,8 @@ set(NT_UI_SOURCES
     nt_ui_anim.h
     nt_ui_state.c
     nt_ui_state.h
+    nt_ui_scroll.c
+    nt_ui_scroll.h
     nt_ui_button.c
     nt_ui_button.h
     nt_ui_checkbox.c
