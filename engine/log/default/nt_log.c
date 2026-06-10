@@ -1,4 +1,5 @@
 #include "log/nt_log.h"
+#include "hash/nt_hash.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -80,15 +81,6 @@ static uint64_t s_unique_hashes[NT_LOG_UNIQUE_MAX];
 static uint32_t s_unique_count;
 static bool s_unique_saturated;
 
-static uint64_t nt_log_msg_hash(const char *s, size_t len) {
-    uint64_t h = 1469598103934665603ULL; /* FNV-1a 64 offset basis */
-    for (size_t i = 0; i < len; i++) {
-        h ^= (uint8_t)s[i];
-        h *= 1099511628211ULL; /* FNV prime */
-    }
-    return h;
-}
-
 bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     if (s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
         return false; /* filtered: don't record, so it can still log if the level is lowered later */
@@ -102,7 +94,7 @@ bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *f
         return false;
     }
     const size_t len = (written < (int)sizeof(msg)) ? (size_t)written : sizeof(msg) - 1;
-    const uint64_t h = nt_log_msg_hash(msg, len);
+    const uint64_t h = nt_hash64(msg, (uint32_t)len).value;
     for (uint32_t i = 0; i < s_unique_count; i++) {
         if (s_unique_hashes[i] == h) {
             return false; /* this exact message already logged */

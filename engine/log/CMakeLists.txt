@@ -8,6 +8,9 @@ nt_add_module(nt_log LOG_DOMAIN "log"
     nt_log.h
 )
 
+# Real impl dedups nt_log_write_unique by xxHash64 of the message; the stub stays dep-free.
+target_link_libraries(nt_log PRIVATE nt_hash)
+
 nt_add_module(nt_log_stub LOG_DOMAIN "log_stub"
     stub/nt_log_stub.c
     nt_log.h
