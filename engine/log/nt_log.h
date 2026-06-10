@@ -24,6 +24,11 @@ void nt_log_set_level(nt_log_level_t level);
 /* --- Single log function --- */
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);
 
+/* Write the formatted message at most once per distinct content, program-wide (dedups by the
+ * produced string, unlike the per-call-site *_once macros). Returns true if it actually wrote.
+ * Bounded + saturating; single-threaded (same assumption as NT_LOG_ONCE_). */
+bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);
+
 /* --- Plain macros (no domain, for game/example code) --- */
 #define nt_log_info(...) nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__)
 #define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
@@ -46,6 +51,11 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define nt_log_warn_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__))
 #define nt_log_error_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__))
 
+/* --- Content-deduped variants (dedup by message text, program-wide) --- */
+#define nt_log_info_unique(...) nt_log_write_unique(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__)
+#define nt_log_warn_unique(...) nt_log_write_unique(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
+#define nt_log_error_unique(...) nt_log_write_unique(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
+
 /* --- Domain resolution --- */
 #ifndef NT_LOG_DOMAIN
 #ifdef NT_LOG_DOMAIN_DEFAULT
@@ -61,6 +71,9 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define NT_LOG_INFO_ONCE(...) NT_LOG_ONCE_(NT_LOG_INFO(__VA_ARGS__))
 #define NT_LOG_WARN_ONCE(...) NT_LOG_ONCE_(NT_LOG_WARN(__VA_ARGS__))
 #define NT_LOG_ERROR_ONCE(...) NT_LOG_ONCE_(NT_LOG_ERROR(__VA_ARGS__))
+#define NT_LOG_INFO_UNIQUE(...) nt_log_write_unique(NT_LOG_LEVEL_INFO, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_WARN_UNIQUE(...) nt_log_write_unique(NT_LOG_LEVEL_WARN, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_ERROR_UNIQUE(...) nt_log_write_unique(NT_LOG_LEVEL_ERROR, NT_LOG_DOMAIN, __VA_ARGS__)
 #else
 /* Compile error when domain macros used without domain defined */
 #define NT_LOG_INFO(...)                                                                                                                                                                               \

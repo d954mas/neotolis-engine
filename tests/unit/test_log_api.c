@@ -64,6 +64,35 @@ void test_log_set_level_none_filters_all(void) {
     TEST_PASS();
 }
 
+/* Content-dedup: same message logs once, repeat is suppressed.
+ * Real impl asserts the dedup; the stub build (returns false) smoke-runs the calls. */
+void test_log_unique_dedups_same_message(void) {
+    bool first = nt_log_warn_unique("unique-dedup-A id=%d", 7);
+    bool again = nt_log_warn_unique("unique-dedup-A id=%d", 7);
+#ifdef NT_LOG_REAL_IMPL
+    TEST_ASSERT_TRUE(first);  /* first occurrence logs */
+    TEST_ASSERT_FALSE(again); /* identical content deduped */
+#else
+    (void)first;
+    (void)again;
+    TEST_PASS();
+#endif
+}
+
+/* Content-dedup: distinct messages from the same call site each log. */
+void test_log_unique_distinct_messages_each_log(void) {
+    bool a = nt_log_warn_unique("unique-dedup-B id=%d", 1);
+    bool b = nt_log_warn_unique("unique-dedup-B id=%d", 2);
+#ifdef NT_LOG_REAL_IMPL
+    TEST_ASSERT_TRUE(a);
+    TEST_ASSERT_TRUE(b);
+#else
+    (void)a;
+    (void)b;
+    TEST_PASS();
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_log_domain_info);
@@ -76,5 +105,7 @@ int main(void) {
     RUN_TEST(test_log_set_level_filters_info);
     RUN_TEST(test_log_set_level_allows_error);
     RUN_TEST(test_log_set_level_none_filters_all);
+    RUN_TEST(test_log_unique_dedups_same_message);
+    RUN_TEST(test_log_unique_distinct_messages_each_log);
     return UNITY_END();
 }
