@@ -1346,10 +1346,11 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     /* Vacuous-pass guard: assert we actually iterated the panel. */
     TEST_ASSERT_GREATER_THAN_UINT32(20U, inside_cmd_count);
 
-    /* Ceiling 20 catches per-row pill-background regressions. */
+    /* Ceiling 22 catches per-row pill-background regressions (raised +2 for the
+     * "UI memory" line — D-59-11 — which adds one RECT-bg + TEXT row pair). */
     char msg[160];
-    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap 20). cmd_count=%u", alternations, inside_cmd_count);
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(20U, alternations, msg);
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap 22). cmd_count=%u", alternations, inside_cmd_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(22U, alternations, msg);
 }
 
 /* ---- Test 15x-perf-bulk: 20 widgets stay under scaled alternation cap (60). ---- */

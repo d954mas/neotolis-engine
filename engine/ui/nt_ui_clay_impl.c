@@ -773,6 +773,10 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
+/* Single per-frame line for the "UI memory" sidebar row (D-59-11). One emit per
+ * inspector layout, so a single buffer (not a ring) holds the live Clay_String. */
+static char cdv_mem_line_buf[64];
+
 /* Shares the hex ring's cursor space (reset per frame). */
 static Clay_String cdv_color_hex_to_string(Clay_Color c) {
     NT_ASSERT(cdv_hex_buf_cursor < NT_UI_INSPECTOR_INT_BUFS && "inspector hex-string scratch overflow; raise NT_UI_INSPECTOR_INT_BUFS");
@@ -1221,6 +1225,15 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                   .cornerRadius = CLAY_CORNER_RADIUS(4),
                   .border = {.color = {217, 91, 67, 255}, .width = {1, 1, 1, 1, 0}}}) {
                 CLAY_TEXT(CLAY_STRING("x"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .userData = debug_text_data}));
+            }
+        }
+        /* "UI memory" line (D-59-11): state-pool occupancy + anim collisions. Single per-frame
+         * buffer holds the live Clay_String through the walk (one emit per layout). */
+        {
+            (void)nt_ui_internal_format_mem_line(ctx, cdv_mem_line_buf, sizeof cdv_mem_line_buf);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                  .userData = debug_bg_data}) {
+                CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(cdv_mem_line_buf), .chars = cdv_mem_line_buf}), infoTextConfig);
             }
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}

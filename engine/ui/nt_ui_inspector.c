@@ -16,6 +16,7 @@
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_state.h"
 
 // #region metrics
 /* Defaults match Clay's debug-view literals. */
@@ -74,6 +75,15 @@ bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_emit_layout: ctx must be non-NULL");
     nt_ui_internal_emit_inspector_layout_extern(ctx);
+}
+
+/* "UI memory" sidebar line (D-59-11): state-pool occupancy + anim collisions.
+ * Formats into caller buf; the Clay row is emitted from the sidebar layout. */
+const char *nt_ui_internal_format_mem_line(const nt_ui_context_t *ctx, char *buf, size_t buf_size) {
+    NT_ASSERT(ctx != NULL && buf != NULL && buf_size > 0U);
+    (void)snprintf(buf, buf_size, "UI mem: %u/%u slots  %u B  anim_coll:%u", nt_ui_state_used_slots(ctx), (uint32_t)NT_UI_STATE_SLOTS, nt_ui_state_used_bytes(ctx),
+                   nt_ui_get_anim_collision_count(ctx));
+    return buf;
 }
 // #endregion
 
