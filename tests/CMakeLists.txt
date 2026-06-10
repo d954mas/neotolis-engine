@@ -462,6 +462,10 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_radio
         test_nt_ui_toggle
         test_nt_ui_tree_build
+        test_nt_ui_state
+        test_nt_ui_scroll
+        test_nt_ui_slider
+        test_nt_ui_progress
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
     # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub
