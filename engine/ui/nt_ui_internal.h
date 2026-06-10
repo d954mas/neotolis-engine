@@ -13,6 +13,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
+#include "ui/nt_ui_state.h"
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
@@ -201,6 +202,10 @@ struct nt_ui_context {
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];
     /* Monotonic; nonzero delta across frames means raise NT_UI_ANIM_SLOTS. */
     uint32_t anim_collision_count;
+
+    /* Generic per-id retained-state pool (#190). Arena auto-sizes via sizeof(struct
+     * nt_ui_context); create_context's memset zero-inits it (same as anim[]). */
+    nt_ui_state_cell_t state_pool[NT_UI_STATE_SLOTS];
 
 #if NT_UI_DEBUG_TOOLS
     /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.
