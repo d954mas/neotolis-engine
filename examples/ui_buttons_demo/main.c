@@ -256,10 +256,9 @@ static float s_xform_deg;
 // #endregion
 
 // #region binding
-/* Fill each variant's bg refs upfront from the const templates. The handle is valid before
- * the atlas data loads; the widget resolves + memoizes the region lazily. Only
- * the IDLE bg carries the ref — non-idle states inherit it via nt_ui_ref_or unless they set
- * their own (SWAP wants distinct hover/pressed art, so it does). */
+/* Fill each variant's bg refs upfront from the const templates (resolved + memoized lazily).
+ * Only the IDLE bg carries the ref — non-idle states inherit it via nt_ui_ref_or unless they
+ * set their own (SWAP wants distinct hover/pressed art, so it does). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void init_button_styles(void) {
     const nt_atlas_region_ref_t blue = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value);

@@ -122,14 +122,13 @@ static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
     return NT_ATLAS_INVALID_REGION;
 }
 
-/* Free the old hash table and rebuild from all named regions.
- * Called once after first parse and once after each merge.
- * Dead-but-named slots (vertex_count==0) stay in the table so a removed name
- * still resolves to its stable index and revives in place on re-add. */
+/* Free the old hash table and rebuild from all named regions. Dead-but-named
+ * slots (vertex_count==0) stay in the table so a removed name still resolves to
+ * its stable index and revives in place on re-add. */
 static void hash_rebuild(nt_atlas_data_t *ad) {
     free(ad->hash_table);
 
-    /* Every runtime slot carries a real name now (removal keeps name_hash). */
+    /* Every runtime slot carries a real name (removal keeps name_hash). */
     uint32_t cap = next_pow2(ad->region_count * 2U);
     if (cap < 16U) {
         cap = 16U;

@@ -102,10 +102,9 @@ uint8_t nt_atlas_page_count(nt_resource_t atlas);
  * NT_ATLAS_INVALID_REGION only for names never present. */
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash);
 
-/* Resolve-and-memoize: if unresolved and the atlas is ready, find by name and write the index back
- * into the ref. After return, region is a valid index (emit) or still INVALID (caller skips emit:
- * atlas not ready or bad name). One-shot — tombstone-reclaim keeps the index stable for life, so
- * there is no revision compare. */
+/* Resolve-and-memoize: under a ready atlas, find by name and write the index into the ref.
+ * After return region is a valid index (emit) or still INVALID (skip: not ready or bad name).
+ * One-shot — tombstone-reclaim keeps the index stable for life, so no revision compare. */
 static inline void nt_atlas_resolve_ref(nt_atlas_region_ref_t *ref) {
     if (ref->region == NT_ATLAS_INVALID_REGION && ref->atlas.id != 0U && nt_resource_is_ready(ref->atlas)) {
         ref->region = nt_atlas_find_region(ref->atlas, ref->name_hash);
