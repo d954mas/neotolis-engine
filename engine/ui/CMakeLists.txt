@@ -50,6 +50,8 @@ set(NT_UI_SOURCES
     nt_ui_fit.h
     nt_ui_image.c
     nt_ui_image.h
+    nt_ui_fill.c
+    nt_ui_fill.h
     nt_ui_panel.c
     nt_ui_panel.h
     nt_ui_anim.c
