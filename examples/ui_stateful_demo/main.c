@@ -1,6 +1,7 @@
-/* UI Stateful Demo — settings-menu worked example for checkbox/toggle/radio.
- * Value lives in the GAME (Model D): the engine stores no logical value, only the
- * transient eased pop/slide. Keys: Esc quit (native), D toggle inspector.
+/* UI Stateful Demo — worked example for checkbox/toggle/radio (Phase 58) plus
+ * slider/progress/scroll (Phase 59). Value lives in the GAME (Model D): the engine
+ * stores no logical value, only the transient eased visual + scroll physics state.
+ * Keys: Esc quit (native), D toggle inspector.
  * Build packs: build_ui_stateful_demo_packs build/examples/ui_stateful_demo */
 
 // #region includes
@@ -23,10 +24,14 @@
 #include "resource/nt_resource.h"
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_button.h"
 #include "ui/nt_ui_checkbox.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_scale.h"
+#include "ui/nt_ui_scroll.h"
+#include "ui/nt_ui_slider.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -159,6 +164,51 @@ static const nt_ui_checkbox_style_t g_radio_tmpl = {
             [NT_UI_CB_DISABLED] = {.box_tint = 0xFFFFFFFF, .check_tint = 0xFF6CC0F0, .scale = 1.0F, .opacity = 0.40F},
         },
 };
+
+/* ---- slider: grey slice9 track + green slice9 fill + circular thumb ----
+ * Reuses the toggle art (track_off pill, track_on pill, thumb circle). Hover/pressed
+ * tint the thumb; STRETCH fill grows the green pill from the left. */
+static const nt_ui_slider_style_t g_slider_tmpl = {
+    .track_w = 320,
+    .track_h = 18,
+    .thumb_w = 28,
+    .thumb_h = 28,
+    .fill_mode = NT_UI_FILL_STRETCH,
+    .fill_direction = NT_UI_FILL_LTR,
+    .state_speed = 16.0F,
+    .value_speed = 18.0F, /* eased on GAME-driven preset change; 1:1 during drag */
+    .states =
+        {
+            [NT_UI_SLIDER_IDLE] = {.track_tint = 0xFFFFFFFF, .fill_tint = 0xFFFFFFFF, .thumb_tint = 0xFFFFFFFF, .opacity = 1.0F},
+            [NT_UI_SLIDER_HOVER] = {.track_tint = 0xFFFFFFFF, .fill_tint = 0xFFFFFFFF, .thumb_tint = 0xFFE8F4FF, .opacity = 1.0F},
+            [NT_UI_SLIDER_PRESSED] = {.track_tint = 0xFFFFFFFF, .fill_tint = 0xFFFFFFFF, .thumb_tint = 0xFFCFE8FF, .opacity = 1.0F},
+            [NT_UI_SLIDER_DISABLED] = {.track_tint = 0xFFFFFFFF, .fill_tint = 0xFFFFFFFF, .thumb_tint = 0xFFFFFFFF, .opacity = 0.40F},
+        },
+};
+
+/* ---- progress (horizontal): grey track + green STRETCH fill ---- */
+static const nt_ui_progress_style_t g_progress_tmpl = {
+    .track_tint = 0xFFFFFFFF,
+    .fill_tint = 0xFFFFFFFF,
+    .track_w = 320,
+    .track_h = 22,
+    .fill_mode = NT_UI_FILL_STRETCH,
+    .fill_direction = NT_UI_FILL_LTR,
+    .value_speed = 6.0F, /* smooth ramp toward the target */
+    .opacity = 1.0F,
+};
+
+/* ---- mana bar (vertical): exercises a non-LTR fill direction (D-59-26) ---- */
+static const nt_ui_progress_style_t g_mana_tmpl = {
+    .track_tint = 0xFF3A3A52,
+    .fill_tint = 0xFFE07CC0, /* magenta mana */
+    .track_w = 26,
+    .track_h = 120,
+    .fill_mode = NT_UI_FILL_STRETCH,
+    .fill_direction = NT_UI_FILL_BOTTOM_UP,
+    .value_speed = 5.0F,
+    .opacity = 1.0F,
+};
 // #endregion
 
 // #region engine state
@@ -191,6 +241,12 @@ static bool s_font_bound;
 static nt_ui_checkbox_style_t s_check;
 static nt_ui_checkbox_style_t s_switch;
 static nt_ui_checkbox_style_t s_radio;
+static nt_ui_slider_style_t s_slider;
+static nt_ui_progress_style_t s_progress;
+static nt_ui_progress_style_t s_mana;
+static nt_ui_scroll_style_t s_scroll_hide; /* AUTO_HIDE bar */
+static nt_ui_scroll_style_t s_scroll_always;
+static nt_ui_button_style_t s_button;
 
 /* Game-owned values (Model D — state lives in the game, not the engine). */
 static bool s_vsync = true;
@@ -198,6 +254,28 @@ static bool s_dark;
 static int s_quality = 1;    /* 0 low / 1 med / 2 high */
 static bool s_cell_selected; /* indicator-only table-cell checkbox */
 static bool s_locked = true; /* a permanently-checked DISABLED checkbox */
+
+/* Slider / progress game-owned values (Model D). */
+static float s_volume = 0.65F; /* float slider 0..1 */
+static int s_count = 4;        /* int slider 0..10 */
+static float s_progress_val;   /* ramps 0->1 on a timer */
+static bool s_progress_up = true;
+static float s_mana_val = 0.7F; /* follows the float slider for a felt-out vertical bar */
+
+/* Physics-tuning controls (felt-out at the visual-QA gate, D-59-02). */
+static float s_friction = 0.92F;
+static float s_wheel_ease = 18.0F;
+
+/* Stable ids for the new widgets. */
+static uint32_t s_id_volume;
+static uint32_t s_id_count;
+static uint32_t s_id_friction;
+static uint32_t s_id_wheel_ease;
+static uint32_t s_id_scroll_hide;
+static uint32_t s_id_scroll_always;
+static uint32_t s_id_scroll_to_btn;
+static uint32_t s_id_inner_btn;
+static uint32_t s_inner_btn_hits;
 
 /* Stable widget ids (loc-safe — derived from key strings, not labels). */
 static uint32_t s_id_vsync;
@@ -238,6 +316,51 @@ static void init_widget_styles(void) {
     s_switch.unchecked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
     s_switch.checked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
     s_switch.checked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+
+    /* Slider: grey track + green STRETCH fill + thumb (only the idle cell carries art;
+     * hover/pressed/disabled inherit the whole ref). */
+    s_slider = g_slider_tmpl;
+    s_slider.states[NT_UI_SLIDER_IDLE].track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
+    s_slider.states[NT_UI_SLIDER_IDLE].fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
+    s_slider.states[NT_UI_SLIDER_IDLE].thumb = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+
+    /* Progress (horizontal): grey track + green fill. */
+    s_progress = g_progress_tmpl;
+    s_progress.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
+    s_progress.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
+
+    /* Mana (vertical, BOTTOM_UP): white track + white fill, tinted via style. */
+    s_mana = g_mana_tmpl;
+    s_mana.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS__WHITE.value);
+    s_mana.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS__WHITE.value);
+
+    /* Scroll: two styles differing only in scrollbar visibility (AUTO_HIDE vs ALWAYS).
+     * Thumb is the circle art; track is the grey pill (tinted dark). */
+    s_scroll_hide = nt_ui_scroll_style_defaults();
+    s_scroll_hide.bar_visibility = NT_UI_SCROLLBAR_AUTO_HIDE;
+    s_scroll_hide.bar_thickness = 12.0F;
+    s_scroll_hide.bar_thumb_min_px = 28.0F;
+    s_scroll_hide.bar_fade_speed = 8.0F;
+    s_scroll_hide.track_tint = 0x66303040;
+    s_scroll_hide.thumb_tint = 0xFFC8D0E0;
+    s_scroll_hide.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
+    s_scroll_hide.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+
+    s_scroll_always = s_scroll_hide;
+    s_scroll_always.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
+    s_scroll_always.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
+    s_scroll_always.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+
+    /* Inner / scroll-to button: grey slice9 pill bg, eased press dip. */
+    s_button = (nt_ui_button_style_t){
+        .transition_speed = 14.0F,
+        .slice9_scale = 1.0F,
+        .idle = {.bg_tint = 0xFF4A5266, .scale = 1.0F, .opacity = 1.0F},
+        .hover = {.bg_tint = 0xFF5A6480, .scale = 1.0F, .opacity = 1.0F},
+        .pressed = {.bg_tint = 0xFF3A4254, .scale = 0.96F, .opacity = 1.0F},
+        .disabled = {.bg_tint = 0xFF4A5266, .scale = 1.0F, .opacity = 0.40F},
+    };
+    s_button.idle.bg = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
 }
 
 /* White-region + font stay is_ready-gated (white is the deferred path; font needs the loaded resource). */
@@ -277,6 +400,164 @@ static const Clay_ElementDeclaration s_row_decl = {
 static void section_label(const char *text) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.top = 14, .bottom = 4}}}) { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, &g_section_style); }
 }
+
+/* The slider track decl: a FIXED-height row so the floating thumb has a stable parent. */
+static const Clay_ElementDeclaration s_slider_decl = {
+    .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(28)}},
+};
+static const Clay_ElementDeclaration s_progress_decl = {
+    .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(22)}},
+};
+// #endregion
+
+// #region declare_widgets (Phase 59 vitrine: slider / progress / scroll)
+/* Draws a small floating value-bubble at the slider thumb (D-59-22): proves the
+ * nt_ui_slider_thumb_pos exposure feeds a Clay floating element. */
+static void slider_drag_bubble(uint32_t id, const char *value_text) {
+    const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_ctx, id);
+    if (!t.found) {
+        return;
+    }
+    /* Floating element anchored to the root, offset to the thumb screen center. */
+    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = t.x - 24.0F, .y = t.y - 40.0F}, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(26)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = {40.0F, 120.0F, 90.0F, 235.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), value_text, &g_help_style);
+    }
+}
+
+/* One scroll list: 24 rows of labels + one capture-steal button inside, with the
+ * chosen scrollbar visibility. id selects the AUTO_HIDE vs ALWAYS style. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void scroll_list(uint32_t id, const nt_ui_scroll_style_t *style, const char *title) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
+
+        const Clay_ElementDeclaration scroll_decl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(180)}, .padding = CLAY_PADDING_ALL(8)},
+            .backgroundColor = {24.0F, 26.0F, 34.0F, 255.0F},
+            .cornerRadius = CLAY_CORNER_RADIUS(8),
+        };
+
+        nt_ui_scroll_begin(s_ctx, NULL, id, style, &scroll_decl);
+        {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+                /* A button INSIDE the scroller demonstrates capture-steal (tap clicks, drag scrolls). */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .padding = {.left = 10, .right = 10}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_inner_btn, &s_button,
+                                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                                       true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tap me (drag scrolls)", &g_help_style);
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_inner_btn_hits++;
+                        nt_log_info("ui_stateful_demo: inner button clicked (%u)", s_inner_btn_hits);
+                    }
+                }
+
+                char line[48];
+                for (int i = 0; i < 24; ++i) {
+                    (void)snprintf(line, sizeof line, "  Row %02d - scrollable item", i);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28)}, .padding = {.left = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), line, &g_status_style);
+                    }
+                }
+            }
+        }
+        nt_ui_scroll_end(s_ctx);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void declare_widgets_panel(void) {
+    char buf[64];
+
+    CLAY({.id = CLAY_ID("widgets-panel"),
+          .layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)},
+                     .padding = CLAY_PADDING_ALL(28),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 8,
+                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = {30.0F, 34.0F, 42.0F, 255.0F},
+          .cornerRadius = CLAY_CORNER_RADIUS(10)}) {
+
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.bottom = 8}}}) {
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Sliders / Progress / Scroll", &g_title_style);
+        }
+
+        // #region sliders (float + int) with drag-bubble
+        section_label("Sliders (drag the thumb)");
+
+        (void)snprintf(buf, sizeof buf, "Volume  %.2f", (double)s_volume);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+        if (nt_ui_slider_float(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_volume, NULL, &s_volume, 0.0F, 1.0F, 0.0F, &s_slider, &s_slider_decl, true)) {
+            s_mana_val = s_volume; /* vertical mana bar follows the float slider */
+        }
+        (void)snprintf(buf, sizeof buf, "%.2f", (double)s_volume);
+        slider_drag_bubble(s_id_volume, buf);
+
+        (void)snprintf(buf, sizeof buf, "Count   %d", s_count);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+        (void)nt_ui_slider_int(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_count, NULL, &s_count, 0, 10, 1, &s_slider, &s_slider_decl, true);
+        (void)snprintf(buf, sizeof buf, "%d", s_count);
+        slider_drag_bubble(s_id_count, buf);
+        // #endregion
+
+        // #region progress (horizontal ramp + vertical mana)
+        section_label("Progress (auto-ramp + vertical mana)");
+
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 28, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+                (void)snprintf(buf, sizeof buf, "Loading  %d%%", (int)(s_progress_val * 100.0F));
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+                nt_ui_progress(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("progress/load"), s_progress_val, &s_progress, &s_progress_decl);
+            }
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Mana", &g_help_style);
+                nt_ui_progress(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("progress/mana"), s_mana_val, &s_mana,
+                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(120)}}});
+            }
+        }
+        // #endregion
+
+        // #region scroll containers (AUTO_HIDE + ALWAYS) + scroll-to
+        section_label("Scroll (fling / rubber-band / wheel)");
+
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+            scroll_list(s_id_scroll_hide, &s_scroll_hide, "AUTO_HIDE bar");
+            scroll_list(s_id_scroll_always, &s_scroll_always, "ALWAYS bar");
+        }
+
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .padding = {.top = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scroll_to_btn, &s_button,
+                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(34)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}, true);
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Scroll both to top", &g_status_style);
+            if (nt_ui_button_end(s_ctx)) {
+                nt_ui_scroll_to(s_ctx, s_id_scroll_hide, 0.0F, 0.0F);
+                nt_ui_scroll_to(s_ctx, s_id_scroll_always, 0.0F, 0.0F);
+            }
+        }
+        // #endregion
+
+        // #region physics tuning (felt-out at the QA gate)
+        section_label("Physics tuning (feel it out)");
+
+        (void)snprintf(buf, sizeof buf, "Friction   %.3f", (double)s_friction);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+        if (nt_ui_slider_float(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_friction, NULL, &s_friction, 0.80F, 0.99F, 0.0F, &s_slider, &s_slider_decl, true)) {
+            s_scroll_hide.friction = s_friction;
+            s_scroll_always.friction = s_friction;
+        }
+
+        (void)snprintf(buf, sizeof buf, "Wheel ease %.1f", (double)s_wheel_ease);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+        if (nt_ui_slider_float(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_wheel_ease, NULL, &s_wheel_ease, 4.0F, 40.0F, 0.0F, &s_slider, &s_slider_decl, true)) {
+            s_scroll_hide.wheel_ease_speed = s_wheel_ease;
+            s_scroll_always.wheel_ease_speed = s_wheel_ease;
+        }
+        // #endregion
+    }
+}
 // #endregion
 
 // #region declare_menu (settings menu)
@@ -290,6 +571,14 @@ static void declare_menu(void) {
         s_id_q_high = nt_ui_id("settings/quality_high");
         s_id_cell = nt_ui_id("table/row0_select");
         s_id_locked = nt_ui_id("settings/locked");
+        s_id_volume = nt_ui_id("settings/volume");
+        s_id_count = nt_ui_id("settings/count");
+        s_id_friction = nt_ui_id("tune/friction");
+        s_id_wheel_ease = nt_ui_id("tune/wheel_ease");
+        s_id_scroll_hide = nt_ui_id("scroll/list_autohide");
+        s_id_scroll_always = nt_ui_id("scroll/list_always");
+        s_id_scroll_to_btn = nt_ui_id("scroll/to_top");
+        s_id_inner_btn = nt_ui_id("scroll/inner_btn");
         s_ids_ready = true;
     }
 
@@ -370,6 +659,22 @@ static void frame(void) {
     nt_resource_step();
     nt_material_step();
 
+    /* Auto-ramp the loading progress bar 0->1->0 so the value_t ease is visible. */
+    const float ramp = 0.25F * g_nt_app.dt;
+    if (s_progress_up) {
+        s_progress_val += ramp;
+        if (s_progress_val >= 1.0F) {
+            s_progress_val = 1.0F;
+            s_progress_up = false;
+        }
+    } else {
+        s_progress_val -= ramp;
+        if (s_progress_val <= 0.0F) {
+            s_progress_val = 0.0F;
+            s_progress_up = true;
+        }
+    }
+
     try_bind_resources();
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
@@ -438,7 +743,7 @@ static void frame(void) {
         const char *quality_name = (s_quality >= 0 && s_quality <= 2) ? quality_names[s_quality] : "?";
         char status_text[200];
         (void)snprintf(status_text, sizeof status_text, "vsync=%s  dark=%s  quality=%s  cell=%s", s_vsync ? "on" : "off", s_dark ? "on" : "off", quality_name, s_cell_selected ? "yes" : "no");
-        const char *help_text = "Click box or label to toggle  |  D = inspector  |  Esc quit";
+        const char *help_text = "Drag sliders  |  scroll/fling lists (tap inner button, drag to scroll)  |  D = inspector  |  Esc quit";
 
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
@@ -452,7 +757,11 @@ static void frame(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
             }
 
-            declare_menu();
+            /* Two panels side by side: the Phase 58 settings vitrine + the Phase 59 widgets. */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 20, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+                declare_menu();
+                declare_widgets_panel();
+            }
 
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), help_text, &g_help_style);
