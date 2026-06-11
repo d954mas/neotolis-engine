@@ -1,0 +1,357 @@
+#include "ui/nt_ui_slider.h"
+
+#include <math.h>
+#include <string.h>
+
+#include "core/nt_assert.h"
+#include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_anim.h"
+#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_debug_hit_zones.h"
+#include "ui/nt_ui_fill.h"
+#include "ui/nt_ui_image.h"
+#include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_label.h"
+#include "ui/nt_ui_state.h"
+
+const nt_ui_widget_def_t NT_UI_SLIDER_DEF = {
+    .name = "nt_slider",
+    .pill_color = 0xFFD0A070U,
+    ._reserved = 0U,
+};
+
+/* Drag grab-offset cell (state pool, keyed off the slider id ^ this salt). press ON the
+ * thumb stores press_pos.x - thumb_left so the relative grab is preserved across the drag;
+ * press on the track stores thumb_w/2 (thumb jumps under the pointer). Lives press->release.
+ * captures[] has no public payload slot, so the retained-state pool carries it (D-59-10). */
+#define NT_UI_SLIDER_DRAG_SALT 0x510D3201U
+typedef struct {
+    float grab_offset; /* press_pos.x - thumb_left at grab; thumb_w/2 = track-jump */
+    uint8_t active;    /* 1 while a drag is live */
+    uint8_t _pad[3];
+} nt_ui_slider_drag_t;
+
+/* Persistent thumb-view cell (separate salt; written EVERY frame, never cleared). Lets the
+ * const-ctx nt_ui_slider_thumb_pos recover the eased fraction + thumb geometry without an
+ * anim-pool accessor — the pool's no-eviction keeps last frame's value live. */
+#define NT_UI_SLIDER_VIEW_SALT 0x510D7E00U
+typedef struct {
+    float fraction; /* last eased value fraction [0,1] */
+    float track_w;
+    float thumb_w;
+    uint8_t _pad[4];
+} nt_ui_slider_view_t;
+
+static inline float slider_clampf(float v, float lo, float hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
+/* Linear position->value map, clamped to [min,max]. usable_w = track_w - thumb_w. */
+static float slider_pos_to_value(float pointer_x, float track_left, float usable_w, float thumb_w, float min, float max) {
+    const float thumb_left = pointer_x - track_left - (thumb_w * 0.5F);
+    const float frac = (usable_w > 0.0F) ? slider_clampf(thumb_left / usable_w, 0.0F, 1.0F) : 0.0F;
+    return min + ((max - min) * frac);
+}
+
+/* step != 0 quantizes value onto the min + k*step grid; 0 = continuous. */
+static float slider_quantize(float value, float min, float max, float step) {
+    if (step <= 0.0F) {
+        return slider_clampf(value, min, max);
+    }
+    const float k = roundf((value - min) / step);
+    return slider_clampf(min + (k * step), min, max);
+}
+
+/* Value -> [0,1] fraction over [min,max]; degenerate min==max collapses to 0. */
+static inline float slider_value_to_frac(float value, float min, float max) { return (max != min) ? slider_clampf((value - min) / (max - min), 0.0F, 1.0F) : 0.0F; }
+
+static inline int slider_clampi(int v, int lo, int hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
+/* Scratch element_data with optional opacity (no transform). */
+static nt_ui_element_data_t *slider_make_data(void *user_data, uint8_t layer, float opacity) {
+    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(d != NULL && "nt_ui_slider: scratch alloc failed (element_data)");
+    uint32_t flags = 0U;
+    if (opacity >= 0.0F) {
+        flags |= NT_UI_ELEM_FLAG_HAS_OPACITY;
+    }
+    *d = (nt_ui_element_data_t){
+        .user_data = user_data,
+        .layer = layer,
+        .flags = (uint8_t)flags,
+        .transform = nt_ui_transform_defaults(),
+        .opacity = (opacity >= 0.0F) ? opacity : 1.0F,
+    };
+    return d;
+}
+
+static void assert_cell_valid(const nt_ui_slider_cell_t *st) {
+    NT_ASSERT(isfinite(st->opacity) && st->opacity >= 0.0F && st->opacity <= 1.0F && "nt_ui_slider: style cell opacity must be finite in [0,1]");
+}
+
+/* Salted derivations so the drag + view cells can't alias the slider's own anim/registry id
+ * in the state pool (D-59 scrollbar-id-derivation discipline). */
+static inline uint32_t slider_drag_id(uint32_t id) { return id ^ NT_UI_SLIDER_DRAG_SALT; }
+static inline uint32_t slider_view_id(uint32_t id) { return id ^ NT_UI_SLIDER_VIEW_SALT; }
+
+/* Press-scoped drag resolve (D-59-20). Reads the prev-frame track bbox + grab cell, returns
+ * the new value fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps;
+ * held: thumb follows pointer minus the grab offset. Factored out to keep slider_core flat. */
+static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, float frac, float min, float max) {
+    const float usable_w = (style->track_w - style->thumb_w > 0.0F) ? (style->track_w - style->thumb_w) : 0.0F;
+    nt_ui_slider_drag_t *drag = (nt_ui_slider_drag_t *)nt_ui_state(ctx, slider_drag_id(id), (uint32_t)sizeof(nt_ui_slider_drag_t));
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id); /* prev-frame track bbox */
+    const float track_left = bb.found ? bb.x : in->press_pos[0];
+
+    if (in->pressed_now) {
+        const float thumb_left = track_left + (frac * usable_w);
+        const bool on_thumb = bb.found && in->press_pos[0] >= thumb_left && in->press_pos[0] <= (thumb_left + style->thumb_w);
+        drag->active = 1U;
+        if (on_thumb) {
+            drag->grab_offset = in->press_pos[0] - thumb_left; /* relative grab, value unchanged this frame */
+            return frac;
+        }
+        drag->grab_offset = style->thumb_w * 0.5F; /* track jump: thumb centers under the click */
+        const float v = slider_pos_to_value(in->press_pos[0], track_left, usable_w, style->thumb_w, min, max);
+        return slider_value_to_frac(v, min, max);
+    }
+    if (drag->active != 0U) { /* held: thumb follows pointer keeping the grab offset */
+        const float v = slider_pos_to_value(in->pos[0] - drag->grab_offset + (style->thumb_w * 0.5F), track_left, usable_w, style->thumb_w, min, max);
+        return slider_value_to_frac(v, min, max);
+    }
+    return frac;
+}
+
+/* Emits track + fill + thumb at fraction in [0,1]. Returns nothing; the registered id is
+ * the OUTER track container (one clickable target). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, const nt_ui_slider_cell_t *cell,
+                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, float fraction, float eased_opacity, const Clay_ElementDeclaration *decl) {
+    const uint8_t layer = (data != NULL) ? data->layer : 0U;
+    void *user = (data != NULL) ? data->user_data : NULL;
+
+    /* Resolve style-owned cell + idle refs in place BEFORE the inherit pick. */
+    nt_ui_slider_cell_t *mcell = (nt_ui_slider_cell_t *)cell;
+    nt_ui_slider_cell_t *micell = (nt_ui_slider_cell_t *)idle;
+    nt_atlas_resolve_ref(&mcell->track);
+    nt_atlas_resolve_ref(&mcell->fill);
+    nt_atlas_resolve_ref(&mcell->thumb);
+    nt_atlas_resolve_ref(&micell->track);
+    nt_atlas_resolve_ref(&micell->fill);
+    nt_atlas_resolve_ref(&micell->thumb);
+    nt_atlas_region_ref_t track_ref = nt_ui_ref_or(mcell->track, micell->track);
+    nt_atlas_region_ref_t fill_ref = nt_ui_ref_or(mcell->fill, micell->fill);
+    nt_atlas_region_ref_t thumb_ref = nt_ui_ref_or(mcell->thumb, micell->thumb);
+
+    /* OUTER track container is the registered widget id. */
+    Clay_ElementDeclaration track_decl = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
+    track_decl.id = (Clay_ElementId){.id = id};
+    track_decl.layout.sizing = (Clay_Sizing){CLAY_SIZING_FIXED(style->track_w), CLAY_SIZING_FIXED(style->track_h)};
+    track_decl.userData = (void *)slider_make_data(user, layer, eased_opacity);
+    /* Track background art on the container itself (no-art skip). */
+    if (track_ref.atlas.id != 0U && track_ref.region != NT_ATLAS_INVALID_REGION) {
+        nt_ui_image_payload_t *tp = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(tp != NULL && "nt_ui_slider: scratch alloc failed (track payload)");
+        *tp = (nt_ui_image_payload_t){.atlas = track_ref.atlas, .region_index = track_ref.region, .slice9_scale = 1.0F};
+        track_decl.image = (Clay_ImageElementConfig){.imageData = tp};
+        track_decl.backgroundColor = nt_ui_unpack_tint(cell->track_tint);
+    }
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(track_decl);
+    nt_ui_widget_register(ctx, id, &NT_UI_SLIDER_DEF, NULL);
+
+    /* Fill child (shared helper). Fraction drives the reveal; skip when no fill art. */
+    if (fill_ref.atlas.id != 0U && fill_ref.region != NT_ATLAS_INVALID_REGION) {
+        nt_ui_fill_emit(ctx, layer, &fill_ref, cell->fill_tint, fraction, style->track_w, style->track_h, style->fill_mode, style->fill_direction, 1.0F);
+    }
+
+    /* Thumb child: offset by fraction*(track_w - thumb_w), vertically centered. No-art skip. */
+    if (thumb_ref.atlas.id != 0U && thumb_ref.region != NT_ATLAS_INVALID_REGION) {
+        const float usable_w = style->track_w - style->thumb_w;
+        const float thumb_x = fraction * ((usable_w > 0.0F) ? usable_w : 0.0F);
+        nt_ui_transform_t tt = nt_ui_transform_defaults();
+        tt.offset_x = thumb_x;
+        nt_ui_element_data_t *thumb_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+        NT_ASSERT(thumb_data != NULL && "nt_ui_slider: scratch alloc failed (thumb data)");
+        *thumb_data = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
+        nt_ui_image_style_t thumb_style = nt_ui_image_style_defaults();
+        thumb_style.color_packed = cell->thumb_tint;
+        /* Floating so the thumb x-offset overlays the track without consuming layout. */
+        const Clay_ElementDeclaration thumb_decl = {
+            .layout = {.sizing = {CLAY_SIZING_FIXED(style->thumb_w), CLAY_SIZING_FIXED(style->thumb_h)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
+        };
+        nt_atlas_region_ref_t tref = thumb_ref;
+        nt_ui_image(ctx, thumb_data, &tref, &thumb_style, &thumb_decl);
+    }
+
+    /* Optional label child (after the parts, like checkbox cb_emit_text ordering). */
+    if (label != NULL) {
+        nt_ui_label_style_t lbl = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+        nt_ui_label(ctx, slider_make_data(NULL, label_layer, -1.0F), label, &lbl);
+    }
+
+    nt_ui_clay_priv_close_element();
+}
+
+/* Shared core parameterized by a normalized [0,1] fraction in/out so float + int both
+ * call it. Returns the new clamped fraction; *changed set when it differs from in_frac. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float in_frac, float min, float max, nt_ui_slider_style_t *style,
+                         const Clay_ElementDeclaration *decl, bool enabled, bool *changed) {
+    // #region entry asserts
+    NT_ASSERT(ctx != NULL && "nt_ui_slider: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_slider: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(style != NULL && "nt_ui_slider: style must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_slider: id 0 is the no-widget sentinel");
+    NT_ASSERT(isfinite(style->track_w) && style->track_w > 0.0F && isfinite(style->track_h) && style->track_h > 0.0F && "nt_ui_slider: style.track_w/track_h must be finite > 0");
+    NT_ASSERT(isfinite(style->thumb_w) && style->thumb_w >= 0.0F && isfinite(style->thumb_h) && style->thumb_h >= 0.0F && "nt_ui_slider: style.thumb_w/thumb_h must be finite >= 0");
+    NT_ASSERT(isfinite(style->state_speed) && style->state_speed >= 0.0F && "nt_ui_slider: style.state_speed must be finite >= 0");
+    NT_ASSERT(isfinite(style->value_speed) && style->value_speed >= 0.0F && "nt_ui_slider: style.value_speed must be finite >= 0");
+    NT_ASSERT(isfinite(min) && isfinite(max) && min != max && "nt_ui_slider: min must differ from max");
+    for (int i = 0; i < 4; ++i) {
+        assert_cell_valid(&style->states[i]);
+    }
+    if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_slider: decl->id must be 0 (id is the explicit param)");
+        NT_ASSERT(decl->image.imageData == NULL && "nt_ui_slider: decl->image.imageData must be NULL (style controls track art)");
+        NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_slider: decl->backgroundColor must be zero (style controls tint)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_slider: decl->userData must be NULL (data param controls)");
+    }
+    if (data != NULL) {
+        NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U && "nt_ui_slider: data->flags must not set HAS_TRANSFORM/HAS_OPACITY (widget owns these)");
+    }
+    // #endregion
+    // #region interaction
+    nt_ui_interaction_t in;
+    if (enabled) {
+        in = nt_ui_step_interaction_padded(ctx, id, NULL);
+    } else {
+        in = (nt_ui_interaction_t){0};
+        nt_ui_debug_record_disabled_zone(ctx, id, NULL);
+    }
+    // #endregion
+    // #region drag math (press-ON-thumb grab vs track jump)
+    float frac = slider_clampf(in_frac, 0.0F, 1.0F);
+    if (enabled && (in.pressed_now || in.pressed)) {
+        frac = slider_resolve_drag(ctx, id, &in, style, frac, min, max);
+    } else if (enabled) {
+        nt_ui_state_clear(ctx, slider_drag_id(id)); /* release: drop the drag cell */
+    }
+    // #endregion
+    // #region one anim call (state group + value_t)
+    int state = NT_UI_SLIDER_IDLE;
+    if (!enabled) {
+        state = NT_UI_SLIDER_DISABLED;
+    } else if (in.pressed) {
+        state = NT_UI_SLIDER_PRESSED;
+    } else if (in.hovered) {
+        state = NT_UI_SLIDER_HOVER;
+    }
+    const nt_ui_slider_cell_t *cell = &style->states[state];
+    nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = cell->opacity, .value_t = frac};
+    /* value_speed 0 during drag = 1:1 snap; eased only on a game-driven change. */
+    const float vspeed = in.pressed ? 0.0F : style->value_speed;
+    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, vspeed);
+    const float eased_frac = slider_clampf(a->value_t, 0.0F, 1.0F);
+    // #endregion
+
+    /* Persist the eased fraction + thumb geometry so const-ctx thumb_pos can recover it. */
+    nt_ui_slider_view_t *view = (nt_ui_slider_view_t *)nt_ui_state(ctx, slider_view_id(id), (uint32_t)sizeof(nt_ui_slider_view_t));
+    view->fraction = eased_frac;
+    view->track_w = style->track_w;
+    view->thumb_w = style->thumb_w;
+
+    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, eased_frac, a->opacity, decl);
+
+    /* Changed when the drag moved the fraction off the incoming game value. */
+    *changed = enabled && (fabsf(frac - in_frac) > 1e-6F);
+    return frac;
+}
+
+bool nt_ui_slider_float(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float *value, float min, float max, float step,
+                        nt_ui_slider_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
+    NT_ASSERT(value != NULL && "nt_ui_slider_float: value must be non-NULL");
+    NT_ASSERT(isfinite(step) && step >= 0.0F && "nt_ui_slider_float: step must be finite >= 0");
+    const float in_frac = slider_value_to_frac(slider_clampf(*value, min, max), min, max);
+    bool changed = false;
+    const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, min, max, style, decl, enabled, &changed);
+    if (!changed) {
+        return false;
+    }
+    const float q = slider_quantize(min + (out_frac * (max - min)), min, max, step);
+    if (fabsf(q - *value) > 1e-6F) {
+        *value = q;
+        return true;
+    }
+    return false;
+}
+
+bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *value, int min, int max, int step, nt_ui_slider_style_t *style,
+                      const Clay_ElementDeclaration *decl, bool enabled) {
+    NT_ASSERT(value != NULL && "nt_ui_slider_int: value must be non-NULL");
+    NT_ASSERT(step >= 0 && "nt_ui_slider_int: step must be >= 0");
+    NT_ASSERT(min != max && "nt_ui_slider_int: min must differ from max");
+    const float fmin = (float)min;
+    const float fmax = (float)max;
+    const float in_frac = slider_value_to_frac((float)slider_clampi(*value, min, max), fmin, fmax);
+    bool changed = false;
+    const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, fmin, fmax, style, decl, enabled, &changed);
+    if (!changed) {
+        return false;
+    }
+    const float raw = fmin + (out_frac * (fmax - fmin));
+    const float fstep = (step > 0) ? (float)step : 1.0F; /* int slider always quantizes to >= 1 */
+    const int qi = (int)lrintf(slider_quantize(raw, fmin, fmax, fstep));
+    if (qi != *value) {
+        *value = qi;
+        return true;
+    }
+    return false;
+}
+
+nt_ui_slider_thumb_t nt_ui_slider_thumb_pos(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_slider_thumb_pos: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_slider_thumb_pos: id must be non-zero");
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
+    /* The view cell is a mutable cache; the find is logically const (read-only). */
+    const nt_ui_slider_view_t *view = (const nt_ui_slider_view_t *)nt_ui_state_find((nt_ui_context_t *)ctx, slider_view_id(id));
+    if (!bb.found || view == NULL) {
+        return (nt_ui_slider_thumb_t){0.0F, 0.0F, false};
+    }
+    /* Thumb center = track_left + fraction*(track_w - thumb_w) + thumb_w/2 (matches the emit). */
+    const float usable_w = (view->track_w - view->thumb_w > 0.0F) ? (view->track_w - view->thumb_w) : 0.0F;
+    return (nt_ui_slider_thumb_t){.x = bb.x + (view->fraction * usable_w) + (view->thumb_w * 0.5F), .y = bb.y + (bb.height * 0.5F), .found = true};
+}
+
+nt_ui_slider_style_t nt_ui_slider_style_defaults(void) {
+    nt_ui_slider_style_t s;
+    memset(&s, 0, sizeof s); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
+    for (int i = 0; i < 4; ++i) {
+        s.states[i] = (nt_ui_slider_cell_t){.track_tint = 0xFFFFFFFFU, .fill_tint = 0xFFFFFFFFU, .thumb_tint = 0xFFFFFFFFU, .opacity = 1.0F};
+    }
+    s.states[NT_UI_SLIDER_DISABLED].opacity = 0.5F;
+    s.track_w = 200.0F;
+    s.track_h = 16.0F;
+    s.thumb_w = 20.0F;
+    s.thumb_h = 24.0F;
+    s.fill_mode = NT_UI_FILL_STRETCH;
+    s.fill_direction = NT_UI_FILL_LTR;
+    s.state_speed = 14.0F;
+    s.value_speed = 12.0F;
+    return s;
+}
