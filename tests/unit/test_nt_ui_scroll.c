@@ -267,6 +267,174 @@ static void test_scroll_capture_tap_no_steal(void) {
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.5F));
 }
 
+/* ================= Scrollbar visual cases (Plan 04, WIDGET-20 / D-59-14) ================= */
+
+/* A scroll frame with a chosen style + content height so the bar emit can be exercised.
+ * Container 200x200; content 200 x content_h. */
+static void scrollbar_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float content_h) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(content_h)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A style with track + thumb art bound from the fixture white region, y-only. */
+static nt_ui_scroll_style_t bar_style(nt_ui_scrollbar_visibility_t vis) {
+    const nt_atlas_region_ref_t art = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.scroll_y = true;
+    style.scroll_x = false;
+    style.bar_visibility = vis;
+    style.track_ref = art;
+    style.thumb_ref = art;
+    return style;
+}
+
+/* ---- Test 10: AUTO emits the bar only when content overflows the container. ---- */
+static void test_scrollbar_auto_only_on_overflow(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO);
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    /* Content SHORTER than container (150 < 200): no overflow -> bar hidden. */
+    scrollbar_frame(&p, &style, 150.0F);
+    scrollbar_frame(&p, &style, 150.0F); /* second frame: dims solved */
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_scroll_test_last_bar_emitted_axes() & 2U);
+
+    /* Content LONGER than container (1000 > 200): overflow -> bar shown. */
+    scrollbar_frame(&p, &style, 1000.0F);
+    scrollbar_frame(&p, &style, 1000.0F);
+    TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+}
+
+/* ---- Test 11: ALWAYS emits the bar even without overflow. ---- */
+static void test_scrollbar_always_shows(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_pointer_t p = {0};
+    p.active = true;
+    scrollbar_frame(&p, &style, 150.0F); /* no overflow */
+    scrollbar_frame(&p, &style, 150.0F);
+    TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+}
+
+/* ---- Test 12: thumb length is proportional to container/content (clamped to min). ---- */
+static void test_scrollbar_thumb_size_ratio(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    style.bar_thumb_min_px = 1.0F; /* tiny min so the ratio is not clamped */
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    /* container 200, content 800 -> thumb = track_len * 200/800 = 0.25 * track. */
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    float thumb_len = 0.0F;
+    float track_len = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, NULL, &track_len, NULL);
+    TEST_ASSERT_TRUE(track_len > 0.0F);
+    TEST_ASSERT_TRUE(float_near(thumb_len, 0.25F * track_len, 2.0F));
+}
+
+/* ---- Test 13: Clay sign — at rest (pos 0) the thumb sits at the TOP (offset 0); a
+ *      negative pos (scrolled down) puts the thumb toward the BOTTOM. (Pitfall 3) ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_thumb_pos_clay_sign(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    style.bar_thumb_min_px = 1.0F;
+    style.wheel_ease_speed = 0.0F; /* instant so scroll-to lands in one step */
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    /* At rest: pos 0 -> thumb offset 0 (top). */
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    float off_top = -1.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, NULL, &off_top, NULL, NULL);
+    TEST_ASSERT_TRUE(float_near(off_top, 0.0F, 0.5F));
+
+    /* Scroll to the bottom (max negative offset = -(content-container) = -600). */
+    nt_ui_scroll_to(s_fx.ctx, SCROLL_ID, 0.0F, -600.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    float off_bot = 0.0F;
+    float thumb_len = 0.0F;
+    float track_len = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &off_bot, &track_len, NULL);
+    /* Bottom end: thumb offset == track_len - thumb_len. */
+    TEST_ASSERT_TRUE(float_near(off_bot, track_len - thumb_len, 2.0F));
+    TEST_ASSERT_TRUE(off_bot > off_top); /* moved DOWN the track */
+}
+
+/* ---- Test 14: a track click (off the thumb) calls nt_ui_scroll_to toward the clicked
+ *      fraction — clicking near the bottom of the track scrolls the offset negative. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_track_click_scroll_to(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    style.bar_thumb_min_px = 10.0F;
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    /* Establish the bar bbox (two frames so the bar id has a prev-frame bbox). */
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+
+    /* The container spans y=[0,200]; the vertical bar runs the same y range on the right
+     * edge (x near 200-thickness..200). Click near the BOTTOM of the track, off the thumb
+     * (which is at the top). */
+    p.x = 195.0F; /* inside the right-edge bar (thickness 12) */
+    p.y = 190.0F; /* near the bottom */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scrollbar_frame(&p, &style, 800.0F);
+
+    /* Release. */
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scrollbar_frame(&p, &style, 800.0F);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+
+    /* Let the smooth scroll-to ease toward the clicked (bottom) fraction. */
+    for (int i = 0; i < 120; ++i) {
+        scrollbar_frame(&p, &style, 800.0F);
+    }
+    float oy = 0.0F;
+    nt_ui_scroll_test_last_child_offset(NULL, &oy);
+    /* Clicked near the bottom -> scrolled the offset substantially negative (down). */
+    TEST_ASSERT_TRUE(oy < -50.0F);
+}
+
+/* ---- Test 15: AUTO_HIDE fades toward 0 after idle (the eased fade opacity drops). ---- */
+static void test_scrollbar_auto_hide_fades(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
+    style.bar_fade_speed = 8.0F;
+    nt_pointer_t p = {0};
+    p.active = true; /* pointer NOT over the bar -> idle -> fade target 0 */
+    p.x = 10.0F;
+    p.y = 10.0F;
+
+    /* Many idle frames: the fade eases toward 0. */
+    float last_op = 1.0F;
+    for (int i = 0; i < 120; ++i) {
+        scrollbar_frame(&p, &style, 800.0F);
+        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &last_op);
+    }
+    TEST_ASSERT_TRUE(last_op < 0.2F); /* faded out while idle */
+}
+
+/* ---- Test 16: the per-axis bar id derives from the scroll id (own id for own anim). ---- */
+static void test_scrollbar_id_derivation_distinct(void) {
+    const uint32_t vy = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
+    const uint32_t vx = nt_ui_scroll_test_bar_id(SCROLL_ID, 0);
+    TEST_ASSERT_TRUE(vy != SCROLL_ID);
+    TEST_ASSERT_TRUE(vx != SCROLL_ID);
+    TEST_ASSERT_TRUE(vy != vx); /* the two axes never collide */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -278,5 +446,12 @@ int main(void) {
     RUN_TEST(test_scroll_childoffset_from_our_pos);
     RUN_TEST(test_scroll_capture_steal_drag);
     RUN_TEST(test_scroll_capture_tap_no_steal);
+    RUN_TEST(test_scrollbar_auto_only_on_overflow);
+    RUN_TEST(test_scrollbar_always_shows);
+    RUN_TEST(test_scrollbar_thumb_size_ratio);
+    RUN_TEST(test_scrollbar_thumb_pos_clay_sign);
+    RUN_TEST(test_scrollbar_track_click_scroll_to);
+    RUN_TEST(test_scrollbar_auto_hide_fades);
+    RUN_TEST(test_scrollbar_id_derivation_distinct);
     return UNITY_END();
 }

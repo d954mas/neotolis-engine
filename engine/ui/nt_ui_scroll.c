@@ -5,7 +5,10 @@
 
 #include "atlas/nt_atlas.h"
 #include "core/nt_assert.h"
+#include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_state.h"
 
@@ -14,6 +17,22 @@ const nt_ui_widget_def_t NT_UI_SCROLL_DEF = {
     .pill_color = 0xFF40C0B0U,
     ._reserved = 0U,
 };
+
+const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF = {
+    .name = "nt_scrollbar",
+    .pill_color = 0xFF40A0C0U,
+    ._reserved = 0U,
+};
+
+/* Per-axis scrollbar id derives from the scroll id (scroll_id ^ salt) so each bar has
+ * its OWN id for its OWN single nt_ui_anim value_t fade AND its own thumb-drag hit-test,
+ * never colliding with the container's value_t (Pitfall 6; RESEARCH Open Q3). */
+#define NT_UI_SCROLLBAR_VERT_SALT 0x5CB00000U
+#define NT_UI_SCROLLBAR_HORIZ_SALT 0x5CB10000U
+static inline uint32_t scrollbar_id(uint32_t scroll_id, int axis) { return scroll_id ^ ((axis == 1) ? NT_UI_SCROLLBAR_VERT_SALT : NT_UI_SCROLLBAR_HORIZ_SALT); }
+
+/* Below this eased fade the AUTO_HIDE bar is not worth a draw call — skip its emit. */
+#define NT_UI_SCROLLBAR_FADE_EPS 0.01F
 
 /* All physics is in Clay's NEGATIVE-down sign convention: childOffset is negative
  * going down/right, content moves up/left. Clamp bounds are [-(content-container), 0].
@@ -180,6 +199,11 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void) {
 #ifdef NT_TEST_ACCESS
 static float s_last_child_offset[2] = {0.0F, 0.0F};
 static uint32_t s_last_scroll_id = 0U;
+static uint8_t s_last_bar_emitted_axes = 0U;       /* bit0 = x, bit1 = y */
+static float s_last_bar_thumb_len[2] = {0.0F};     /* per-axis thumb length */
+static float s_last_bar_thumb_off[2] = {0.0F};     /* per-axis thumb offset along the track */
+static float s_last_bar_track_len[2] = {0.0F};     /* per-axis track length */
+static float s_last_bar_opacity[2] = {0.0F, 0.0F}; /* per-axis eased fade opacity */
 #endif
 // #endregion
 
@@ -246,6 +270,218 @@ static void scroll_steal_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_sc
     }
 }
 
+/* Scratch element_data carrying layer + whole-bar opacity (no transform). */
+static nt_ui_element_data_t *scrollbar_make_data(uint8_t layer, float opacity) {
+    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(d != NULL && "nt_ui_scrollbar: scratch alloc failed (element_data)");
+    *d = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = opacity};
+    return d;
+}
+
+/* True when this axis overflows (content longer than the container). */
+static inline bool scrollbar_overflows(float content, float container) { return content > container + 0.5F; }
+
+#ifdef NT_TEST_ACCESS
+/* Visibility predicate mirroring scrollbar_emit_axis: AUTO emits only on overflow;
+ * ALWAYS / AUTO_HIDE register whenever the container has solved dims. Test-only. */
+static bool scrollbar_was_emitted(const nt_ui_scroll_style_t *style, float content, float container) {
+    if (container <= 0.0F) {
+        return false;
+    }
+    if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO) {
+        return scrollbar_overflows(content, container);
+    }
+    return true;
+}
+#endif
+
+/* Thumb length on the track ∝ container/content, clamped to bar_thumb_min_px. */
+static float scrollbar_thumb_len(float track_len, float content, float container, float min_px) {
+    if (content <= 0.0F) {
+        return track_len;
+    }
+    float len = track_len * (container / content);
+    if (len < min_px) {
+        len = min_px;
+    }
+    if (len > track_len) {
+        len = track_len;
+    }
+    return len;
+}
+
+/* Thumb offset along the track from the current scroll pos (Clay NEGATIVE-down: pos is
+ * <= 0, so -pos / over maps [0..1] top→bottom). */
+static float scrollbar_thumb_pos(float pos, float content, float container, float track_len, float thumb_len) {
+    const float over = content - container;
+    if (over <= 0.0F) {
+        return 0.0F;
+    }
+    float frac = -pos / over; /* 0 at top/left, 1 at bottom/right */
+    frac = scroll_clampf(frac, 0.0F, 1.0F);
+    return frac * (track_len - thumb_len);
+}
+
+/* Thumb-drag + track-click for one axis. Reads the bar's prev-frame bbox, steals nothing
+ * from the container (different id). Drag delta along the axis maps back into s->pos
+ * (Clay sign); a track click (off the thumb) smooth-jumps via nt_ui_scroll_to. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t bar_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, float content, float container,
+                               float bar_origin, float track_len, float thumb_off, float thumb_len, bool *out_active) {
+    *out_active = false;
+    const float over = content - container;
+    if (over <= 0.0F || track_len - thumb_len <= 0.0F) {
+        (void)nt_ui_step_interaction(ctx, bar_id); /* keep the id registered (consistent hit-test) */
+        return;
+    }
+    const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, bar_id);
+    const float pointer_a = (axis == 1) ? in.pos[1] : in.pos[0];
+    const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
+
+    if (in.pressed_now) {
+        const float thumb_lo = bar_origin + thumb_off;
+        const bool on_thumb = press_a >= thumb_lo && press_a <= (thumb_lo + thumb_len);
+        if (!on_thumb) {
+            /* Track click (off the thumb): smooth-jump the clicked fraction. */
+            float frac = (press_a - bar_origin) / (track_len - thumb_len);
+            frac = scroll_clampf(frac, 0.0F, 1.0F);
+            const float target = -(frac * over);
+            if (axis == 1) {
+                nt_ui_scroll_to(ctx, scroll_id, s->pos[0], target);
+            } else {
+                nt_ui_scroll_to(ctx, scroll_id, target, s->pos[1]);
+            }
+        }
+    }
+    if (in.pressed) {
+        /* Held: map the pointer position along the track straight to the offset (1:1 grab
+         * is approximated by absolute mapping — thumb follows the pointer). */
+        float frac = (pointer_a - bar_origin - (thumb_len * 0.5F)) / (track_len - thumb_len);
+        frac = scroll_clampf(frac, 0.0F, 1.0F);
+        s->pos[axis] = -(frac * over);
+        s->target[axis] = s->pos[axis];
+        s->vel[axis] = 0.0F;
+        s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO; /* drag overrides any pending jump */
+        *out_active = true;
+    }
+    (void)style;
+}
+
+/* Emits one axis' 2-piece slice9 bar (track + thumb) as floating children of the open
+ * scroll container, handles thumb-drag/track-click, and drives the AUTO_HIDE fade with
+ * ONE nt_ui_anim call on the bar's derived id. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2]) {
+    const float clen = container[axis];
+    const float ccontent = content[axis];
+    if (clen <= 0.0F) {
+        return; /* dims not solved yet (frame 1) */
+    }
+    /* AUTO hides entirely when there is no overflow; ALWAYS / AUTO_HIDE always register. */
+    if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO && !scrollbar_overflows(ccontent, clen)) {
+        return;
+    }
+
+    const uint32_t bar_id = scrollbar_id(scroll_id, axis);
+    const float track_len = clen;
+    const float thumb_len = scrollbar_thumb_len(track_len, ccontent, clen, style->bar_thumb_min_px);
+    const float thumb_off = scrollbar_thumb_pos(s->pos[axis], ccontent, clen, track_len, thumb_len);
+
+    /* Bar origin in the container's local space (floating attaches at the container edge). */
+    const Clay_ElementData cd = Clay_GetElementData((Clay_ElementId){.id = scroll_id});
+    const float bar_edge = (axis == 1) ? cd.boundingBox.y : cd.boundingBox.x;
+    const float bar_origin = cd.found ? bar_edge : 0.0F;
+
+    bool dragging = false;
+    scrollbar_interact(ctx, scroll_id, bar_id, axis, style, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len, &dragging);
+
+    /* AUTO_HIDE: fade in on drag/hover, out after idle. ALWAYS / AUTO stay opaque. ONE anim. */
+    float opacity = 1.0F;
+    if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO_HIDE) {
+        const nt_ui_interaction_t hov = nt_ui_query_interaction(ctx, bar_id);
+        const float fade_target = (dragging || hov.hovered) ? 1.0F : 0.0F;
+        nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = fade_target};
+        const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, bar_id, &tgt, 0.0F, style->bar_fade_speed);
+        opacity = scroll_clampf(a->value_t, 0.0F, 1.0F);
+        if (opacity < NT_UI_SCROLLBAR_FADE_EPS) {
+#ifdef NT_TEST_ACCESS
+            s_last_bar_thumb_len[axis] = thumb_len;
+            s_last_bar_thumb_off[axis] = thumb_off;
+            s_last_bar_track_len[axis] = track_len;
+            s_last_bar_opacity[axis] = opacity;
+#endif
+            return; /* fully faded — nothing to draw (the id stays registered for next-frame hover) */
+        }
+    }
+#ifdef NT_TEST_ACCESS
+    s_last_bar_thumb_len[axis] = thumb_len;
+    s_last_bar_thumb_off[axis] = thumb_off;
+    s_last_bar_track_len[axis] = track_len;
+    s_last_bar_opacity[axis] = opacity;
+#endif
+
+    const uint8_t layer = 0U;
+    const float thickness = style->bar_thickness;
+    /* Track spans the full axis on the trailing edge; thumb is offset along the axis. */
+    Clay_ElementDeclaration track_decl;
+    Clay_ElementDeclaration thumb_decl;
+    if (axis == 1) { /* vertical bar on the right edge */
+        track_decl = (Clay_ElementDeclaration){
+            .layout = {.sizing = {CLAY_SIZING_FIXED(thickness), CLAY_SIZING_FIXED(track_len)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
+        };
+        thumb_decl = (Clay_ElementDeclaration){
+            .layout = {.sizing = {CLAY_SIZING_FIXED(thickness), CLAY_SIZING_FIXED(thumb_len)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = 0.0F, .y = thumb_off}, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
+        };
+    } else { /* horizontal bar on the bottom edge */
+        track_decl = (Clay_ElementDeclaration){
+            .layout = {.sizing = {CLAY_SIZING_FIXED(track_len), CLAY_SIZING_FIXED(thickness)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
+        };
+        thumb_decl = (Clay_ElementDeclaration){
+            .layout = {.sizing = {CLAY_SIZING_FIXED(thumb_len), CLAY_SIZING_FIXED(thickness)}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = thumb_off, .y = 0.0F}, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
+        };
+    }
+
+    /* Track piece is the registered bar id (hit-test target for drag + track-click). */
+    nt_atlas_region_ref_t track_ref = style->track_ref;
+    nt_atlas_resolve_ref(&track_ref);
+    track_decl.id = (Clay_ElementId){.id = bar_id};
+    track_decl.userData = (void *)scrollbar_make_data(layer, opacity);
+    if (track_ref.atlas.id != 0U && track_ref.region != NT_ATLAS_INVALID_REGION) {
+        nt_ui_image_payload_t *tp = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(tp != NULL && "nt_ui_scrollbar: scratch alloc failed (track payload)");
+        *tp = (nt_ui_image_payload_t){.atlas = track_ref.atlas, .region_index = track_ref.region, .slice9_scale = 1.0F};
+        track_decl.image = (Clay_ImageElementConfig){.imageData = tp};
+        track_decl.backgroundColor = nt_ui_unpack_tint(style->track_tint);
+    }
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(track_decl);
+    nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, NULL);
+    nt_ui_clay_priv_close_element();
+
+    /* Thumb piece is a separate floating image (no own id; the track owns the hit-test). */
+    nt_atlas_region_ref_t thumb_ref = style->thumb_ref;
+    nt_atlas_resolve_ref(&thumb_ref);
+    if (thumb_ref.atlas.id != 0U && thumb_ref.region != NT_ATLAS_INVALID_REGION) {
+        nt_ui_image_style_t thumb_style = nt_ui_image_style_defaults();
+        thumb_style.color_packed = style->thumb_tint;
+        nt_ui_image(ctx, scrollbar_make_data(layer, opacity), &thumb_ref, &thumb_style, &thumb_decl);
+    }
+}
+
+/* Emits enabled-axis scrollbars as floating children of the open scroll container. */
+static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2]) {
+    if (style->scroll_x) {
+        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container);
+    }
+    if (style->scroll_y) {
+        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_scroll_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_scroll_begin: ctx must be non-NULL");
@@ -301,10 +537,21 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     nt_ui_clay_priv_configure_open_element(final);
     nt_ui_widget_register(ctx, id, &NT_UI_SCROLL_DEF, NULL);
 
+    /* Scrollbars float over the container edges (escape the clip, no layout cost). They
+     * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. */
+    scrollbar_emit(ctx, id, style, s, content, container);
+
 #ifdef NT_TEST_ACCESS
     s_last_child_offset[0] = s->pos[0];
     s_last_child_offset[1] = s->pos[1];
     s_last_scroll_id = id;
+    s_last_bar_emitted_axes = 0U;
+    if (style->scroll_x && scrollbar_was_emitted(style, content[0], container[0])) {
+        s_last_bar_emitted_axes |= 1U;
+    }
+    if (style->scroll_y && scrollbar_was_emitted(style, content[1], container[1])) {
+        s_last_bar_emitted_axes |= 2U;
+    }
 #endif
 }
 
@@ -342,4 +589,21 @@ void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y) {
     }
 }
 uint32_t nt_ui_scroll_test_last_scroll_id(void) { return s_last_scroll_id; }
+uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void) { return s_last_bar_emitted_axes; }
+void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity) {
+    NT_ASSERT(axis == 0 || axis == 1);
+    if (thumb_len != NULL) {
+        *thumb_len = s_last_bar_thumb_len[axis];
+    }
+    if (thumb_off != NULL) {
+        *thumb_off = s_last_bar_thumb_off[axis];
+    }
+    if (track_len != NULL) {
+        *track_len = s_last_bar_track_len[axis];
+    }
+    if (opacity != NULL) {
+        *opacity = s_last_bar_opacity[axis];
+    }
+}
+uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis) { return scrollbar_id(scroll_id, axis); }
 #endif

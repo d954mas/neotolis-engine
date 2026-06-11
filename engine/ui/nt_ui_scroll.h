@@ -18,6 +18,7 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_SCROLL_DEF;
+extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Capture-steal threshold: a drag inside a scroll container exceeding this many
  * framebuffer px steals capture from the inner widget (cancel its click) and
@@ -86,6 +87,11 @@ float nt_ui_scroll_test_rubber_band(float d, float dim);
 /* Reads back the last clip.childOffset fed to Clay by scroll_begin (Clay sign). */
 void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y);
 uint32_t nt_ui_scroll_test_last_scroll_id(void);
+/* Scrollbar readbacks (Plan 04): which axes' bars emitted (bit0=x, bit1=y) + the last
+ * per-axis bar geometry (thumb len/off, track len, eased fade opacity) + the derived id. */
+uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void);
+void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity);
+uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
 #endif
 
 #endif /* NT_UI_SCROLL_H */
