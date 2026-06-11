@@ -570,6 +570,43 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y) {
     s->flags |= NT_UI_SCROLL_FLAG_SCROLL_TO;
 }
 
+/* Lightweight scroll for engine-internal clip panes (inspector) that have no widget id /
+ * style / scrollbar. Drives the same integrator off prev-frame Clay dims + raw wheel, returns
+ * the childOffset to feed clip.childOffset. Instant wheel (no momentum/rubber) — a debug pane
+ * shouldn't keep easing between frames. State rides the nt_ui_state pool under `tag`.
+ * MUST be called as a statement BEFORE the pane's clip element is opened: the prev-frame
+ * Clay_GetScrollContainerData entry is lost once enough sibling elements reuse the layout
+ * slots, so reading it inline in the .childOffset initializer returns zero dims. */
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_scroll_pane_offset: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_internal_scroll_pane_offset: id must be non-zero");
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state(ctx, id, (uint32_t)sizeof *s, tag);
+
+    /* Prev-frame dims; found==false (frame 1, clip not solved) -> 0 -> bounds 0 (1-frame lag). */
+    const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});
+    const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
+    const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
+
+    /* Wheel only when the pointer is over THIS pane (prev-frame bbox), Clay negative-down sign. */
+    float wheel[2] = {0.0F, 0.0F};
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        if ((p->wheel_dx != 0.0F || p->wheel_dy != 0.0F) && point_in_bbox(id, p->x, p->y)) {
+            if (scroll_x) {
+                wheel[0] += p->wheel_dx;
+            }
+            if (scroll_y) {
+                wheel[1] += -p->wheel_dy;
+            }
+        }
+    }
+
+    /* Instant wheel, no overscroll: wheel_ease 0 -> pos snaps to target, rubber/bounce 0. */
+    const float tun[NT_UI_SCROLL_T_COUNT] = {0.92F, 0.0F, 0.0F, 0.0F, 40.0F};
+    scroll_integrate(s, wheel, ctx->frame_dt, content, container, tun);
+    return (Clay_Vector2){.x = s->pos[0], .y = s->pos[1]};
+}
+
 #ifdef NT_TEST_ACCESS
 void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const float tunables[5]) {
     NT_ASSERT(s != NULL && wheel != NULL && content != NULL && container != NULL && tunables != NULL && "nt_ui_scroll_test_integrate: null arg");

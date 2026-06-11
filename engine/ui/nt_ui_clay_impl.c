@@ -16,6 +16,7 @@
 #include "math/nt_math.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_scroll.h"
 
 // #region clay module-level access (thin forwarders)
 void nt_ui_clay_priv_set_measure_text_cb(Clay_Dimensions (*cb)(Clay_StringSlice, Clay_TextElementConfig *, void *)) { Clay__MeasureText = cb; }
@@ -1184,19 +1185,10 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
     Clay_TextElementConfig *infoTitleConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
     Clay_ElementId scrollId = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0);
-    float scrollYOffset = 0;
-    bool pointerInDebugView = context->pointerInfo.position.y < context->layoutDimensions.height - 300;
-    for (int32_t i = 0; i < context->scrollContainerDatas.length; ++i) {
-        Clay__ScrollContainerDataInternal *scrollContainerData = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
-        if (scrollContainerData->elementId == scrollId.id) {
-            if (!context->externalScrollHandlingEnabled) {
-                scrollYOffset = scrollContainerData->scrollPosition.y;
-            } else {
-                pointerInDebugView = context->pointerInfo.position.y + scrollContainerData->scrollPosition.y < context->layoutDimensions.height - 300;
-            }
-            break;
-        }
-    }
+    /* OUR scroll offset (Clay's is bypassed, D-59-01); prev-frame state cell, same sign convention. */
+    const nt_ui_scroll_state_t *scrollState = (const nt_ui_scroll_state_t *)nt_ui_state_find(ctx, scrollId.id);
+    const float scrollYOffset = (scrollState != NULL) ? scrollState->pos[1] : 0.0F;
+    const bool pointerInDebugView = context->pointerInfo.position.y < context->layoutDimensions.height - 300;
     int32_t highlightedRow = pointerInDebugView ? (int32_t)((context->pointerInfo.position.y - scrollYOffset) / row_h) - 1 : -1;
     if (context->pointerInfo.position.x < context->layoutDimensions.width - panel_w) {
         highlightedRow = -1;
@@ -1237,10 +1229,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
             }
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
-        CLAY({.id = scrollId,
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-              .userData = debug_bg_data,
-              .clip = {.horizontal = true, .vertical = true, .childOffset = Clay_GetScrollOffset()}}) {
+        /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
+        const Clay_Vector2 treeOffset = nt_ui_internal_scroll_pane_offset(ctx, scrollId.id, NT_UI_STATE_TAG('i', 'n', 's', 'p'), true, true);
+        CLAY({.id = scrollId, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .userData = debug_bg_data, .clip = {.horizontal = true, .vertical = true, .childOffset = treeOffset}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
                   .backgroundColor = ((initialElementsLength + initialRootsLength) & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1,
                   .userData = debug_bg_data}) {
@@ -1277,10 +1268,14 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         if (ctx->inspector_selected_id != 0U) {
             Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
             if (selectedItem != NULL) {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+                Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
+                /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
+                const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, NT_UI_STATE_TAG('i', 'n', 's', '2'), false, true);
+                CLAY({.id = selInfoId,
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
                       .backgroundColor = CDV_COLOR_2,
                       .userData = debug_bg_data,
-                      .clip = {.vertical = true, .childOffset = Clay_GetScrollOffset()},
+                      .clip = {.vertical = true, .childOffset = selInfoOffset},
                       .border = {.color = CDV_COLOR_3, .width = {.betweenChildren = 1}}}) {
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h + 8.0F)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
                           .userData = debug_bg_data}) {

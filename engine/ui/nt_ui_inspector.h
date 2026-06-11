@@ -11,6 +11,12 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* Max RECT<->TEXT pipeline alternations the sidebar emits for the demo-shaped scene
+ * (pill-bg dropped, colored text only). Each fixed text-bearing chrome row (title, "UI
+ * memory" line) costs a RECT-bg + TEXT pair — bump this by 2 here, with the row, not in
+ * the test. The perf test asserts against it so a per-row pill regression trips. */
+#define NT_UI_INSPECTOR_ALTERNATION_CAP 22U
+
 /* Visible in both modes so callers keep a local instance even when stubs are no-op. */
 typedef struct nt_ui_inspector_metrics_t {
     float panel_width;     /* default 400 */

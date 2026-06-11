@@ -21,6 +21,8 @@
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_panel.h"
+#include "ui/nt_ui_scroll.h"
+#include "ui/nt_ui_state.h"
 #include "unity.h"
 
 #if NT_UI_DEBUG_TOOLS
@@ -1346,11 +1348,11 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     /* Vacuous-pass guard: assert we actually iterated the panel. */
     TEST_ASSERT_GREATER_THAN_UINT32(20U, inside_cmd_count);
 
-    /* Ceiling 22 catches per-row pill-background regressions (raised +2 for the
-     * "UI memory" line — D-59-11 — which adds one RECT-bg + TEXT row pair). */
+    /* Cap is single-sourced from the inspector module so adding a sidebar chrome row
+     * bumps it next to that row, not here. Catches per-row pill-background regressions. */
     char msg[160];
-    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap 22). cmd_count=%u", alternations, inside_cmd_count);
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(22U, alternations, msg);
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap %u). cmd_count=%u", alternations, NT_UI_INSPECTOR_ALTERNATION_CAP, inside_cmd_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(NT_UI_INSPECTOR_ALTERNATION_CAP, alternations, msg);
 }
 
 /* ---- Test 15x-perf-bulk: 20 widgets stay under scaled alternation cap (60). ---- */
@@ -1430,6 +1432,52 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations (bulk 20-row scene): %u (cap 60). cmd_count=%u", alternations, inside_cmd_count);
     /* 60 cap = 20 rows × ~2 + ~20 for header/info-pane. */
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(60U, alternations, msg);
+}
+
+/* Declares a 200x200 clip pane whose childOffset comes from the inspector's internal scroll
+ * helper (the path that replaced Clay_GetScrollOffset, D-59-01). Tall content overflows so
+ * wheel can scroll. The pointer sits at (ptr_x,100) so a caller can aim it on/off the pane. */
+static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, 100.0F);
+    p.wheel_dy = wheel_dy;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        /* Resolve offset BEFORE opening the clip element (the scroll_begin pattern: the
+         * prev-frame Clay_GetScrollContainerData read must precede this frame's reconfigure). */
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), NT_UI_STATE_TAG('t', 's', 't', 'p'), false, true);
+        CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
+            /* Tall content forces y overflow so the pane can scroll. */
+            CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Inspector panes scroll via OUR scroll path (Clay's is bypassed, D-59-01). A wheel
+ * over a clip pane fed by the internal helper moves the offset in the nt_ui_state pool. ---- */
+static void test_inspector_pane_scrolls_on_wheel(void) {
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const uint32_t pane_id = nt_ui_id("scroll_pane_test");
+
+    /* Frame 1: declare so the pane has prev-frame bbox + content dims; no wheel yet. */
+    emit_scroll_pane_frame(screen_w, screen_h, 100.0F, 0.0F);
+    const nt_ui_scroll_state_t *s0 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s0);
+    TEST_ASSERT_TRUE(s0->pos[1] == 0.0F);
+
+    /* Frame 2: wheel down over the pane -> Clay negative-down offset (content scrolls up). */
+    emit_scroll_pane_frame(screen_w, screen_h, 100.0F, 1.0F);
+    const nt_ui_scroll_state_t *s1 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s1);
+    TEST_ASSERT_TRUE_MESSAGE(s1->pos[1] < 0.0F, "wheel-down must move pane offset negative (Clay down sign)");
+
+    /* Frame 3: a wheel NOT over the pane (pointer off to the side) leaves the offset put. */
+    const float held = s1->pos[1];
+    emit_scroll_pane_frame(screen_w, screen_h, 700.0F, 1.0F);
+    const nt_ui_scroll_state_t *s2 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s2);
+    TEST_ASSERT_TRUE_MESSAGE(s2->pos[1] == held, "wheel off the pane must not move its offset");
 }
 
 /* ---- Test 15x-perf-layer-split: BG (250) carries only sprite cmds, TEXT (251)
@@ -1894,6 +1942,7 @@ int main(void) {
     RUN_TEST(test_inspector_inner_emits_carry_debug_layer);
     RUN_TEST(test_inspector_alternations_capped_after_strategy_a);
     RUN_TEST(test_inspector_alternations_bulk_scene_after_strategy_a);
+    RUN_TEST(test_inspector_pane_scrolls_on_wheel);
     RUN_TEST(test_inspector_layer_split_collapses_dispatch);
     RUN_TEST(test_inspector_overlay_scissor_clips_highlight_outside_panel);
     RUN_TEST(test_inspector_inactive_no_interception);

@@ -331,4 +331,9 @@ void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const f
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
 
+/* Scroll offset for an engine-internal clip pane (inspector) keyed by Clay element id; drives
+ * the custom scroll integrator off prev-frame dims + wheel. Feed the result to clip.childOffset.
+ * `tag` keeps each pane's state cell distinct (NT_UI_STATE_TAG). */
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y);
+
 #endif /* NT_UI_INTERNAL_H */
