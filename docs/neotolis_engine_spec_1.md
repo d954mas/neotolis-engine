@@ -223,6 +223,27 @@ If a decision can be deferred without loss of base architecture — it is deferr
   counter surfaces this degradation; game polls the delta to size
   `NT_UI_ANIM_SLOTS`.
 
+  **State pool.** `nt_ui_state(ctx, id, size)` is a generic per-widget-id
+  retained-state pool — the durable counterpart of the anim cache. It returns a
+  get-or-create cell (zeroed on create; zero is a valid initial state),
+  `nt_ui_state_find` returns NULL if absent, and `nt_ui_state_clear` /
+  `nt_ui_state_clear_all` drop one or all cells (e.g. a screen transition). It is
+  BSS in the context (`NT_UI_STATE_SLOTS` × `NT_UI_STATE_PAYLOAD_MAX`, defaults
+  64 × 64 B, `NT_UI_STATE_PROBE_MAX` probe window), no heap — direct-mapped +
+  linear-probe like the anim cache, but with **no LRU eviction**: a cell dies only
+  via clear or context destroy. This no-eviction property is the contract that
+  makes the game-owned-pointer escape hatch leak-safe — for an oversize payload the
+  game allocates, stores the pointer in the cell, and frees it before clear, knowing
+  the engine will never silently reclaim it. Overflow or a size mismatch on
+  re-acquire is `NT_ASSERT` (fail early, not a soft fallback). The returned pointer
+  is a frame-scoped cache, not held across frames — widgets re-acquire by id each
+  frame (the same const-cast read pattern as `nt_ui_get_bbox`). Occupancy
+  (slots/bytes) is surfaced on the inspector "UI memory" line. Distinct from the
+  anim cache: the anim cache evicts (transient easing), the state pool never evicts
+  (durable retained state such as a slider's drag offset or a scroll container's
+  momentum). Slider drag state and scroll physics state both ride it, keyed by
+  (optionally salted) widget id.
+
   **Stateful widgets.** `nt_ui_checkbox` / `nt_ui_radio` / `nt_ui_toggle`
   are leaf widgets over one shared core. Per code-first /
   explicit-over-implicit, the engine stores NO logical value — the game owns
@@ -240,7 +261,34 @@ If a decision can be deferred without loss of base architecture — it is deferr
   thumb with a symmetric `thumb_pad` end-margin. On the click-release frame the
   widget renders the PRE-flip value and returns `changed` after drawing, so the
   pop/slide animation begins the next frame — the same intrinsic 1-frame IM lag as
-  hit-test and arbitration.
+  hit-test and arbitration. `nt_ui_slider` / `nt_ui_progress` extend the same
+  game-owns-the-value model: the float/int value lives in the game, the engine eases
+  only the visual fraction (`value_t`); the slider exposes its thumb screen position
+  (`nt_ui_slider_thumb_pos`) so the game can draw drag-bubbles via a Clay floating
+  element. Slider and progress share one fill-emit helper (STRETCH slice9 stretch vs
+  CROP scissor-reveal × four directions).
+
+  **Custom scroll physics.** `nt_ui` scroll containers bypass Clay's built-in
+  `Clay_UpdateScrollContainers` (the unconditional call was REMOVED from
+  `nt_ui_begin`): the engine integrates the offset itself and feeds Clay a ready
+  `clip.childOffset` each frame — it never reads `Clay_GetScrollOffset`, only
+  `Clay_GetScrollContainerData` for the content/container clamp dims. Everything is in
+  Clay's NEGATIVE-down sign convention (childOffset negative going down/right, clamped
+  to `[-(content-container), 0]`); only the input edge (wheel) and the scrollbar-thumb
+  mapping flip sign. The four-behavior feel model lives in `nt_ui_scroll_style_t`
+  tunables: momentum/fling (exponential velocity decay by `friction`), overscroll
+  rubber-band + critically-damped bounce-back (`rubber_band_c` / `bounce_speed`),
+  smooth wheel (ease toward target by `wheel_ease_speed`, 0 = instant, no teleport),
+  and animated `nt_ui_scroll_to`. Per-container scroll state (pos/vel/target/flags)
+  rides the state pool keyed by the scroll id; no heap. Capture-steal-by-threshold
+  (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
+  scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
+  below it leaves the inner widget to click. The scrollbar (2-piece slice9 track +
+  thumb, both axes) emits as floating children of the container with
+  ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE fades via one `nt_ui_anim`
+  value_t). This replaces the v1.7-era assumption that Clay drives scroll; the
+  "Scissor limitation" note below still holds (AABB clip of a rotated scroll
+  container is unchanged).
 
   **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
   uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
