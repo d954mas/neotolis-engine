@@ -19,22 +19,32 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
     NT_ASSERT(isfinite(t->tint_t) && t->tint_t >= 0.0F && t->tint_t <= 1.0F && "nt_ui_anim: target.tint_t must be finite in [0,1]");
     NT_ASSERT(isfinite(t->value_t) && t->value_t >= 0.0F && t->value_t <= 1.0F && "nt_ui_anim: target.value_t must be finite in [0,1]");
     // #region slot-map + lerp
-    /* On full probe chain evict tail not base — evicting base re-evicts next
-     * frame and thrashes two ids competing for the same bucket. */
+    /* Probe-exhaust evicts the STALEST slot in the window (oldest last_touch), not blindly
+     * the tail — a tail-evict bleeds a slot that WAS touched this frame between widgets. */
+    const uint16_t tick = (uint16_t)ctx->current_generation;
     const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
     nt_ui_anim_interaction_t *a = NULL;
+    nt_ui_anim_interaction_t *stalest = NULL;
+    uint16_t stalest_age = 0U;
     for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
         nt_ui_anim_interaction_t *cand = &ctx->anim[(base + k) & (uint32_t)(NT_UI_ANIM_SLOTS - 1)];
         if (!cand->valid || cand->id == id) {
             a = cand;
             break;
         }
+        /* Wrap-safe age: ticks behind the current frame. The slot least recently touched wins. */
+        const uint16_t age = (uint16_t)(tick - cand->last_touch);
+        if (stalest == NULL || age > stalest_age) {
+            stalest = cand;
+            stalest_age = age;
+        }
     }
     if (a == NULL) {
         /* Counter surfaces the lost-easing degradation so games can dial NT_UI_ANIM_SLOTS. */
         ctx->anim_collision_count++;
-        a = &ctx->anim[(base + NT_UI_ANIM_PROBE_MAX - 1U) & (uint32_t)(NT_UI_ANIM_SLOTS - 1)];
+        a = stalest;
     }
+    a->last_touch = tick;
     const bool fresh = (!a->valid) || (a->id != id);
     if (fresh) {
         /* First-touch / replace-on-collision: snap cur=target, no flash. */
