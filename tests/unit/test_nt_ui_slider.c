@@ -248,6 +248,32 @@ static void test_disabled_no_drag(void) {
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F)); /* untouched */
 }
 
+/* ---- Test 9b: disabling mid-drag clears the drag cell, so re-enabling with the
+ *      pointer still held does NOT resume the stale grab and jump the value. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_disabled_mid_drag_no_resume_jump(void) {
+    float value = 0.5F; /* thumb at center */
+    warmup_float(&value, 0.0F, 1.0F);
+
+    /* Grab ON the thumb center: value unchanged, drag cell now active with a grab offset. */
+    const float thumb_center_x = SL_X_AT_FRAC(0.5F);
+    nt_pointer_t grab = make_pointer(thumb_center_x, SL_CY, true, true, false);
+    (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
+
+    /* Disable while the pointer is held FAR from the thumb: a stale grab cell would map
+     * this pointer to the value on re-enable. The value must stay put while disabled. */
+    nt_pointer_t held_far = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
+    TEST_ASSERT_FALSE(slider_float_frame(&held_far, &value, 0.0F, 1.0F, 0.0F, false));
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F)); /* untouched while disabled */
+
+    /* Re-enable with the pointer still held (no fresh press_now): the cleared cell means
+     * no live drag, so the value must NOT snap to the held pointer position. */
+    nt_pointer_t held_still = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
+    TEST_ASSERT_FALSE(slider_float_frame(&held_still, &value, 0.0F, 1.0F, 0.0F, true));
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* no stale-grab jump */
+}
+
 /* ---- Test 10: style defaults are a valid baseline that renders with supplied art. ---- */
 static void test_style_defaults_valid_baseline(void) {
     nt_ui_slider_style_t s = nt_ui_slider_style_defaults();
@@ -316,6 +342,7 @@ int main(void) {
     RUN_TEST(test_thumb_pos_exposed);
     RUN_TEST(test_thumb_pos_unknown_id);
     RUN_TEST(test_disabled_no_drag);
+    RUN_TEST(test_disabled_mid_drag_no_resume_jump);
     RUN_TEST(test_style_defaults_valid_baseline);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_track_w_zero);

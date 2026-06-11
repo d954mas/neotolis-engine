@@ -249,8 +249,9 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     float frac = slider_clampf(in_frac, 0.0F, 1.0F);
     if (enabled && (in.pressed_now || in.pressed)) {
         frac = slider_resolve_drag(ctx, id, &in, style, frac, min, max);
-    } else if (enabled) {
-        nt_ui_state_clear(ctx, slider_drag_id(id)); /* release: drop the drag cell */
+    } else {
+        /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
+        nt_ui_state_clear(ctx, slider_drag_id(id));
     }
     // #endregion
     // #region one anim call (state group + value_t)
@@ -305,7 +306,6 @@ bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
                       const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_slider_int: value must be non-NULL");
     NT_ASSERT(step >= 0 && "nt_ui_slider_int: step must be >= 0");
-    NT_ASSERT(min != max && "nt_ui_slider_int: min must differ from max");
     const float fmin = (float)min;
     const float fmax = (float)max;
     const float in_frac = slider_value_to_frac((float)slider_clampi(*value, min, max), fmin, fmax);
