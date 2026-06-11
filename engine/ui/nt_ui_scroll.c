@@ -388,7 +388,10 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     /* Bar origin in the container's local space (floating attaches at the container edge).
      * Read boundingBox only when found — frame 1 (layout unsolved) leaves it garbage. */
     const Clay_ElementData cd = Clay_GetElementData((Clay_ElementId){.id = scroll_id});
-    const float bar_origin = cd.found ? ((axis == 1) ? cd.boundingBox.y : cd.boundingBox.x) : 0.0F;
+    float bar_origin = 0.0F;
+    if (cd.found) {
+        bar_origin = (axis == 1) ? cd.boundingBox.y : cd.boundingBox.x;
+    }
 
     bool dragging = false;
     scrollbar_interact(ctx, scroll_id, bar_id, axis, style, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len, &dragging);
