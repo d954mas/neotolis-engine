@@ -6,7 +6,7 @@
 #include "ui/nt_ui_internal.h"
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size) {
+void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag) {
     NT_ASSERT(ctx != NULL && "nt_ui_state: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_state: id 0 reserved (empty-slot sentinel)");
     NT_ASSERT(size <= (uint32_t)NT_UI_STATE_PAYLOAD_MAX && "nt_ui_state: size > payload max; store a game-owned pointer instead (D-59-09)");
@@ -16,11 +16,13 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size) {
         nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
         if (c->id == id) {
             NT_ASSERT(c->size == size && "nt_ui_state: id reused with a different size (D-59-08 — two widgets colliding on one id?)");
+            NT_ASSERT(c->tag == tag && "nt_ui_state: id reused by a different widget tag (two widgets colliding on one id)");
             return c->payload;
         }
         if (c->id == 0U) {
             c->id = id;
             c->size = size;
+            c->tag = tag;
             memset(c->payload, 0, sizeof c->payload);
             return c->payload;
         }
@@ -60,6 +62,7 @@ void nt_ui_state_clear(nt_ui_context_t *ctx, uint32_t id) {
             /* Leave payload bytes — next create zeroes them. */
             c->id = 0U;
             c->size = 0U;
+            c->tag = 0U;
             return;
         }
         if (c->id == 0U) {
@@ -73,6 +76,7 @@ void nt_ui_state_clear_all(nt_ui_context_t *ctx) {
     for (uint32_t i = 0; i < (uint32_t)NT_UI_STATE_SLOTS; ++i) {
         ctx->state_pool[i].id = 0U;
         ctx->state_pool[i].size = 0U;
+        ctx->state_pool[i].tag = 0U;
     }
 }
 

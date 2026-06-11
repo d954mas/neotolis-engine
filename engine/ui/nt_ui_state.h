@@ -14,6 +14,15 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* Derive a sibling cell id from a widget's base id (drag/view/scrollbar sub-cells).
+ * `base ^ salt` can land on 0 when base == salt, which the pool's id != 0 assert
+ * traps — fold that one case to the salt so every derived id is nonzero. Salts are
+ * sparse high-bit constants, so the salt itself never collides with a real low id. */
+static inline uint32_t nt_ui_derived_id(uint32_t base, uint32_t salt) {
+    const uint32_t id = base ^ salt;
+    return (id != 0U) ? id : salt;
+}
+
 #ifndef NT_UI_STATE_SLOTS
 #define NT_UI_STATE_SLOTS 64 /* power-of-2; slot = id & (N-1) */
 #endif
@@ -28,12 +37,18 @@ _Static_assert((NT_UI_STATE_SLOTS & (NT_UI_STATE_SLOTS - 1)) == 0, "NT_UI_STATE_
 typedef struct {
     uint32_t id;   /* 0 = empty slot */
     uint32_t size; /* re-acquire asserts size match (D-59-08) */
+    uint32_t tag;  /* owner widget tag; re-acquire asserts match (cross-widget aliasing trap) */
     uint8_t payload[NT_UI_STATE_PAYLOAD_MAX];
 } nt_ui_state_cell_t;
 
-/* Get-or-create. Cell is ZEROED on create (zero must be a valid initial state).
- * Re-acquire with the same id asserts size matches. Overflow / oversize assert. */
-void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size);
+/* 4-char owner tag (e.g. NT_UI_STATE_TAG('s','c','r','l')); folds the widget identity
+ * into the cell so two different widgets colliding on one id+size trap, not alias silently. */
+#define NT_UI_STATE_TAG(a, b, c, d) (((uint32_t)(uint8_t)(a)) | ((uint32_t)(uint8_t)(b) << 8) | ((uint32_t)(uint8_t)(c) << 16) | ((uint32_t)(uint8_t)(d) << 24))
+
+/* Get-or-create. Cell is ZEROED on create (zero must be a valid initial state). `tag`
+ * identifies the owning widget — re-acquire asserts both size AND tag match, so two
+ * widgets that hash to the same id trap instead of aliasing. Overflow / oversize assert. */
+void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag);
 
 /* NULL if absent — no create, no assert on a miss. */
 void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id);

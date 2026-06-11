@@ -105,15 +105,15 @@ static void assert_cell_valid(const nt_ui_slider_cell_t *st) {
 
 /* Salted derivations so the drag + view cells can't alias the slider's own anim/registry id
  * in the state pool (D-59 scrollbar-id-derivation discipline). */
-static inline uint32_t slider_drag_id(uint32_t id) { return id ^ NT_UI_SLIDER_DRAG_SALT; }
-static inline uint32_t slider_view_id(uint32_t id) { return id ^ NT_UI_SLIDER_VIEW_SALT; }
+static inline uint32_t slider_drag_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_DRAG_SALT); }
+static inline uint32_t slider_view_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_VIEW_SALT); }
 
 /* Press-scoped drag resolve (D-59-20). Reads the prev-frame track bbox + grab cell, returns
  * the new value fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps;
  * held: thumb follows pointer minus the grab offset. Factored out to keep slider_core flat. */
 static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, float frac, float min, float max) {
     const float usable_w = (style->track_w - style->thumb_w > 0.0F) ? (style->track_w - style->thumb_w) : 0.0F;
-    nt_ui_slider_drag_t *drag = (nt_ui_slider_drag_t *)nt_ui_state(ctx, slider_drag_id(id), (uint32_t)sizeof(nt_ui_slider_drag_t));
+    nt_ui_slider_drag_t *drag = (nt_ui_slider_drag_t *)nt_ui_state(ctx, slider_drag_id(id), (uint32_t)sizeof(nt_ui_slider_drag_t), NT_UI_STATE_TAG('s', 'l', 'd', 'g'));
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id); /* prev-frame track bbox */
     const float track_left = bb.found ? bb.x : in->press_pos[0];
 
@@ -271,7 +271,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #endregion
 
     /* Persist the eased fraction + thumb geometry so const-ctx thumb_pos can recover it. */
-    nt_ui_slider_view_t *view = (nt_ui_slider_view_t *)nt_ui_state(ctx, slider_view_id(id), (uint32_t)sizeof(nt_ui_slider_view_t));
+    nt_ui_slider_view_t *view = (nt_ui_slider_view_t *)nt_ui_state(ctx, slider_view_id(id), (uint32_t)sizeof(nt_ui_slider_view_t), NT_UI_STATE_TAG('s', 'l', 'v', 'w'));
     view->fraction = eased_frac;
     view->track_w = style->track_w;
     view->thumb_w = style->thumb_w;
