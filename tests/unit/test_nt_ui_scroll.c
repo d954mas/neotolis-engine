@@ -234,6 +234,45 @@ static void test_scroll_capture_steal_drag(void) {
     TEST_ASSERT_TRUE(fabsf(oy) > 1.0F); /* the container moved */
 }
 
+/* ---- Test 8b: a capture-steal drag on a dt==0 frame zeroes velocity, so a prior
+ *      fling's momentum can't leak past the drag (no phantom momentum on release). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_capture_steal_dt_zero_no_phantom(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    const uint32_t inner_id = 0xBEEFU;
+
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style); /* establish container bbox + state cell */
+
+    /* Seed a leftover fling velocity into the live state cell (as if mid-momentum). */
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    s->vel[1] = -5000.0F; /* a strong residual fling */
+
+    /* A steal-worthy drag (40 px down) on a dt==0 frame. With dt<=0 there is no fresh
+     * velocity to compute — it MUST be zeroed, not left at the stale -5000. */
+    p.x = 100.0F;
+    p.y = 140.0F;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &p, 1); /* dt == 0 */
+    inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Velocity zeroed by the steal on the dt==0 frame (no leftover fling). */
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F));
+}
+
 /* ---- Test 9: tap<threshold leaves inner capture intact and does NOT scroll ---- */
 static void test_scroll_capture_tap_no_steal(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
@@ -445,6 +484,7 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_applied_once);
     RUN_TEST(test_scroll_childoffset_from_our_pos);
     RUN_TEST(test_scroll_capture_steal_drag);
+    RUN_TEST(test_scroll_capture_steal_dt_zero_no_phantom);
     RUN_TEST(test_scroll_capture_tap_no_steal);
     RUN_TEST(test_scrollbar_auto_only_on_overflow);
     RUN_TEST(test_scrollbar_always_shows);

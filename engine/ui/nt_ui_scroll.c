@@ -244,20 +244,18 @@ static void scroll_steal_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_sc
         if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
             continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
         }
-        /* Steal: cancel the inner widget, route the per-frame drag delta into our offset. */
+        /* Steal: cancel the inner widget, route the per-frame drag delta into our offset.
+         * dt<=0 has no fresh velocity — zero it so a prior fling's momentum can't leak
+         * past this drag frame (a stale vel would resume on release). */
         cap->active_id = 0U;
         any_drag = true;
         if (style->scroll_x) {
             s->pos[0] += ddx;
-            if (dt > 0.0F) {
-                s->vel[0] = ddx / dt;
-            }
+            s->vel[0] = (dt > 0.0F) ? (ddx / dt) : 0.0F;
         }
         if (style->scroll_y) {
             s->pos[1] += ddy;
-            if (dt > 0.0F) {
-                s->vel[1] = ddy / dt;
-            }
+            s->vel[1] = (dt > 0.0F) ? (ddy / dt) : 0.0F;
         }
         /* Re-anchor the press so next frame's delta is incremental, not cumulative. */
         cap->press_pos[0] = cap->pos[0];
@@ -387,10 +385,10 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     const float thumb_len = scrollbar_thumb_len(track_len, ccontent, clen, style->bar_thumb_min_px);
     const float thumb_off = scrollbar_thumb_pos(s->pos[axis], ccontent, clen, track_len, thumb_len);
 
-    /* Bar origin in the container's local space (floating attaches at the container edge). */
+    /* Bar origin in the container's local space (floating attaches at the container edge).
+     * Read boundingBox only when found — frame 1 (layout unsolved) leaves it garbage. */
     const Clay_ElementData cd = Clay_GetElementData((Clay_ElementId){.id = scroll_id});
-    const float bar_edge = (axis == 1) ? cd.boundingBox.y : cd.boundingBox.x;
-    const float bar_origin = cd.found ? bar_edge : 0.0F;
+    const float bar_origin = cd.found ? ((axis == 1) ? cd.boundingBox.y : cd.boundingBox.x) : 0.0F;
 
     bool dragging = false;
     scrollbar_interact(ctx, scroll_id, bar_id, axis, style, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len, &dragging);
@@ -403,22 +401,17 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = fade_target};
         const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, bar_id, &tgt, 0.0F, style->bar_fade_speed);
         opacity = scroll_clampf(a->value_t, 0.0F, 1.0F);
-        if (opacity < NT_UI_SCROLLBAR_FADE_EPS) {
-#ifdef NT_TEST_ACCESS
-            s_last_bar_thumb_len[axis] = thumb_len;
-            s_last_bar_thumb_off[axis] = thumb_off;
-            s_last_bar_track_len[axis] = track_len;
-            s_last_bar_opacity[axis] = opacity;
-#endif
-            return; /* fully faded — nothing to draw (the id stays registered for next-frame hover) */
-        }
     }
 #ifdef NT_TEST_ACCESS
+    /* Single write site — geometry + opacity are final by here (incl. the faded case). */
     s_last_bar_thumb_len[axis] = thumb_len;
     s_last_bar_thumb_off[axis] = thumb_off;
     s_last_bar_track_len[axis] = track_len;
     s_last_bar_opacity[axis] = opacity;
 #endif
+    if (opacity < NT_UI_SCROLLBAR_FADE_EPS) {
+        return; /* fully faded — nothing to draw (the id stays registered for next-frame hover) */
+    }
 
     const uint8_t layer = 0U;
     const float thickness = style->bar_thickness;
