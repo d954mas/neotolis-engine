@@ -66,6 +66,8 @@ set(NT_UI_SOURCES
     nt_ui_checkbox.h
     nt_ui_slider.c
     nt_ui_slider.h
+    nt_ui_progress.c
+    nt_ui_progress.h
     nt_ui_debug_hit_zones.c
     nt_ui_debug_hit_zones.h
     nt_ui_inspector.c
