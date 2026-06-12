@@ -155,6 +155,7 @@ int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
     return ctx->clay->layoutElements.length;
 }
 
+#if NT_UI_DEBUG_TOOLS
 /* Headroom (in Clay layout elements) the inspector keeps free while emitting its tree: one row costs
  * up to ~8 elements, and the panel chrome (header, scroll panes, selected-info body) trails the row
  * list. Stop adding rows once fewer than this remain so the inspector degrades (truncated tree) on an
@@ -164,6 +165,7 @@ static bool cdv_layout_budget_left(const nt_ui_context_t *ctx) {
     /* Clay raises maxElementsExceeded at length == capacity-1; keep a reserve below that. */
     return (ctx->clay->layoutElements.length + NT_UI_INSPECTOR_ELEM_RESERVE) < ctx->clay->layoutElements.capacity;
 }
+#endif /* NT_UI_DEBUG_TOOLS */
 
 nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_ui_context_t *ctx, int32_t index) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_get_layout_element_view: ctx must be non-NULL");
