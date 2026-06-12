@@ -1746,6 +1746,25 @@ static void test_scroll_wheel_tie_break_smaller_area(void) {
     TEST_ASSERT_TRUE(float_near(big->pos[1], 0.0F, 0.5F)); /* the bigger sibling never received it */
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* Declaring more scroll containers in one frame than the candidate cap traps (no silent wheel-dead). */
+static void candidate_overflow_frame(void) {
+    nt_pointer_t p = {0};
+    p.active = true;
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
+        for (uint32_t i = 0; i <= (uint32_t)NT_UI_WHEEL_CANDIDATES; ++i) {
+            nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);
+            nt_ui_scroll_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_assert_wheel_candidate_overflow(void) { NT_TEST_EXPECT_ASSERT(candidate_overflow_frame()); }
+#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -1796,5 +1815,8 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_nested_innermost_wins);
     RUN_TEST(test_scroll_wheel_nested_outer_band);
     RUN_TEST(test_scroll_wheel_tie_break_smaller_area);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_assert_wheel_candidate_overflow);
+#endif
     return UNITY_END();
 }

@@ -282,8 +282,10 @@ static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py)
  * id/depth are recorded; the bbox is re-fetched at resolve from the just-solved layout. Depth is the
  * live scroll-nesting counter so a candidate inside another scroll outranks its parent. */
 static void scroll_register_wheel_candidate(nt_ui_context_t *ctx, uint32_t scroll_id) {
+    /* Silent skip would leave the container wheel-dead — fail early like the state pool. */
+    NT_ASSERT(ctx->wheel_candidate_count < NT_UI_WHEEL_CANDIDATES && "nt_ui_scroll: too many scroll containers declared this frame — raise NT_UI_WHEEL_CANDIDATES");
     if (ctx->wheel_candidate_count >= NT_UI_WHEEL_CANDIDATES) {
-        return; /* cap reached: deeper nests than the (rare) limit fall back to no extra candidate */
+        return;
     }
     nt_ui_wheel_candidate_t *c = &ctx->wheel_candidates[ctx->wheel_candidate_count++];
     c->id = scroll_id;
