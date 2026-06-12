@@ -482,113 +482,88 @@ static Clay_ElementDeclaration scroll_tile_decl(float w, float h) {
     };
 }
 
-/* One VERTICAL scroll list: a capture-steal button + 24 rows of labels, with the chosen
- * scrollbar visibility (AUTO_HIDE vs ALWAYS). Compact tile for the 2x2 showcase. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_list(uint32_t id, uint32_t inner_btn_id, const nt_ui_scroll_style_t *style, const char *title) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
+/* One scroll-showcase tile: title + a rows x cols cell grid in a scroll container. The three vitrine
+ * variants (vertical labels / horizontal cells / both-axes grid) differ only in rows/cols, cell
+ * size/format and an optional capture-steal button — so they share this one builder. */
+typedef struct {
+    uint32_t id;
+    uint32_t inner_btn_id; /* 0 = no capture-steal button (only the vertical lists carry one) */
+    const nt_ui_scroll_style_t *style;
+    const char *title;
+    int rows, cols;
+    float cell_w; /* 0 = GROW width (the plain vertical label rows); else FIXED boxed cell */
+    float cell_h;
+    bool boxed;                                      /* tinted rounded cell vs plain left-aligned label row */
+    void (*fmt)(char *buf, int n, int row, int col); /* cell text (callback keeps snprintf formats literal) */
+    const nt_ui_label_style_t *cell_style;
+} scroll_tile_t;
 
-        const Clay_ElementDeclaration scroll_decl = scroll_tile_decl(220.0F, 78.0F);
-        nt_ui_scroll_begin(s_ctx, NULL, id, style, &scroll_decl);
-        {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
-                /* A button INSIDE the scroller demonstrates capture-steal (tap clicks, drag scrolls). */
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .padding = {.left = 10, .right = 10}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), inner_btn_id, &s_button,
-                                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-                                       true);
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tap me (drag scrolls)", &g_help_style);
-                    if (nt_ui_button_end(s_ctx)) {
-                        s_inner_btn_hits++;
-                        nt_log_info("ui_stateful_demo: inner button clicked (%u)", s_inner_btn_hits);
-                    }
-                }
+/* Per-variant cell-text formatters (callbacks keep snprintf format strings literal). */
+static void scroll_fmt_row(char *buf, int n, int row, int col) {
+    (void)col;
+    (void)snprintf(buf, (size_t)n, "  Row %02d - scrollable item", row);
+}
+static void scroll_fmt_col(char *buf, int n, int row, int col) {
+    (void)row;
+    (void)snprintf(buf, (size_t)n, "Col %02d", col);
+}
+static void scroll_fmt_rc(char *buf, int n, int row, int col) { (void)snprintf(buf, (size_t)n, "R%dC%d", row, col); }
 
-                /* Row labels are constant — format the 24 strings once, not per frame. */
-                enum { SCROLL_ROW_COUNT = 24 };
-                static char s_row_lines[SCROLL_ROW_COUNT][48];
-                static bool s_row_lines_init = false;
-                if (!s_row_lines_init) {
-                    for (int i = 0; i < SCROLL_ROW_COUNT; ++i) {
-                        (void)snprintf(s_row_lines[i], sizeof s_row_lines[i], "  Row %02d - scrollable item", i);
-                    }
-                    s_row_lines_init = true;
-                }
-                for (int i = 0; i < SCROLL_ROW_COUNT; ++i) {
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28)}, .padding = {.left = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), s_row_lines[i], &g_status_style);
-                    }
-                }
-            }
+/* The capture-steal button inside the vertical lists: a tap clicks, a drag scrolls. */
+static void scroll_inner_button(uint32_t inner_btn_id) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .padding = {.left = 10, .right = 10}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), inner_btn_id, &s_button,
+                           &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}, true);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tap me (drag scrolls)", &g_help_style);
+        if (nt_ui_button_end(s_ctx)) {
+            s_inner_btn_hits++;
+            nt_log_info("ui_stateful_demo: inner button clicked (%u)", s_inner_btn_hits);
         }
-        nt_ui_scroll_end(s_ctx);
     }
 }
 
-/* One HORIZONTAL scroll list: a single wide row of items overflowing on X only, so the
- * bottom-edge horizontal bar shows. Demonstrates scroll_x with scroll_y off. */
-static void scroll_list_horizontal(uint32_t id, const char *title) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
-
-        const Clay_ElementDeclaration scroll_decl = scroll_tile_decl(220.0F, 78.0F);
-        nt_ui_scroll_begin(s_ctx, NULL, id, &s_scroll_horiz, &scroll_decl);
-        {
-            /* One LEFT_TO_RIGHT row wider than the container -> X overflow, horizontal bar. */
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-                enum { HCOL_COUNT = 14 };
-                static char s_hcols[HCOL_COUNT][20];
-                static bool s_hcols_init = false;
-                if (!s_hcols_init) {
-                    for (int i = 0; i < HCOL_COUNT; ++i) {
-                        (void)snprintf(s_hcols[i], sizeof s_hcols[i], "Col %02d", i);
-                    }
-                    s_hcols_init = true;
-                }
-                for (int i = 0; i < HCOL_COUNT; ++i) {
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(78), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                          .backgroundColor = {40.0F, 46.0F, 60.0F, 255.0F},
-                          .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), s_hcols[i], &g_status_style);
-                    }
-                }
-            }
+/* One grid cell: either a plain left-aligned label row (GROW width) or a tinted rounded box. */
+static void scroll_cell(const scroll_tile_t *t, const char *text) {
+    if (t->boxed) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(t->cell_w), CLAY_SIZING_FIXED(t->cell_h)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {40.0F, 46.0F, 60.0F, 255.0F},
+              .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, t->cell_style);
         }
-        nt_ui_scroll_end(s_ctx);
+    } else {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(t->cell_h)}, .padding = {.left = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, t->cell_style);
+        }
     }
 }
 
-/* One BOTH-AXES scroll container: a grid of label cells wider AND taller than the container,
- * so both scrollbars show. Demonstrates scroll_x + scroll_y together. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_list_xy(uint32_t id, const char *title) {
+static void scroll_tile(const scroll_tile_t *t) {
+    /* Cell text is constant — format every (r,c) string once into a frame-stable scratch, not per frame. */
+    enum { TILE_MAX_CELLS = 64, TILE_CELL_CHARS = 48 };
+    static char s_cells[TILE_MAX_CELLS][TILE_CELL_CHARS];
+    NT_ASSERT((t->rows * t->cols) <= TILE_MAX_CELLS && "scroll_tile: too many cells for the scratch");
+    for (int r = 0; r < t->rows; ++r) {
+        for (int c = 0; c < t->cols; ++c) {
+            t->fmt(s_cells[(r * t->cols) + c], TILE_CELL_CHARS, r, c);
+        }
+    }
+
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), t->title, &g_help_style);
 
         const Clay_ElementDeclaration scroll_decl = scroll_tile_decl(220.0F, 78.0F);
-        nt_ui_scroll_begin(s_ctx, NULL, id, &s_scroll_xy, &scroll_decl);
+        nt_ui_scroll_begin(s_ctx, NULL, t->id, t->style, &scroll_decl);
         {
-            enum { XY_ROWS = 8, XY_COLS = 8 };
-            static char s_xy_cells[XY_ROWS][XY_COLS][12];
-            static bool s_xy_init = false;
-            if (!s_xy_init) {
-                for (int r = 0; r < XY_ROWS; ++r) {
-                    for (int c = 0; c < XY_COLS; ++c) {
-                        (void)snprintf(s_xy_cells[r][c], sizeof s_xy_cells[r][c], "R%dC%d", r, c);
-                    }
-                }
-                s_xy_init = true;
-            }
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
-                for (int r = 0; r < XY_ROWS; ++r) {
+                if (t->inner_btn_id != 0U) {
+                    scroll_inner_button(t->inner_btn_id);
+                }
+                for (int r = 0; r < t->rows; ++r) {
+                    /* Each row is a LEFT_TO_RIGHT strip of cols cells (a single cell when cols==1). */
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6}}) {
-                        for (int c = 0; c < XY_COLS; ++c) {
-                            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(30)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                  .backgroundColor = {40.0F, 46.0F, 60.0F, 255.0F},
-                                  .cornerRadius = CLAY_CORNER_RADIUS(5)}) {
-                                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), s_xy_cells[r][c], &g_help_style);
-                            }
+                        for (int c = 0; c < t->cols; ++c) {
+                            scroll_cell(t, s_cells[(r * t->cols) + c]);
                         }
                     }
                 }
@@ -660,12 +635,52 @@ static void declare_widgets_panel(void) {
         /* 2x2 tile grid: two vertical lists on top, horizontal + both-axes below. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-                scroll_list(s_id_scroll_hide, s_id_inner_btn_hide, &s_scroll_hide, "AUTO_HIDE bar (vertical)");
-                scroll_list(s_id_scroll_always, s_id_inner_btn_always, &s_scroll_always, "ALWAYS bar (vertical)");
+                scroll_tile(&(scroll_tile_t){.id = s_id_scroll_hide,
+                                             .inner_btn_id = s_id_inner_btn_hide,
+                                             .style = &s_scroll_hide,
+                                             .title = "AUTO_HIDE bar (vertical)",
+                                             .rows = 24,
+                                             .cols = 1,
+                                             .cell_w = 0.0F,
+                                             .cell_h = 28.0F,
+                                             .boxed = false,
+                                             .fmt = scroll_fmt_row,
+                                             .cell_style = &g_status_style});
+                scroll_tile(&(scroll_tile_t){.id = s_id_scroll_always,
+                                             .inner_btn_id = s_id_inner_btn_always,
+                                             .style = &s_scroll_always,
+                                             .title = "ALWAYS bar (vertical)",
+                                             .rows = 24,
+                                             .cols = 1,
+                                             .cell_w = 0.0F,
+                                             .cell_h = 28.0F,
+                                             .boxed = false,
+                                             .fmt = scroll_fmt_row,
+                                             .cell_style = &g_status_style});
             }
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-                scroll_list_horizontal(s_id_scroll_horiz, "Horizontal scroll");
-                scroll_list_xy(s_id_scroll_xy, "Both axes (X + Y)");
+                scroll_tile(&(scroll_tile_t){.id = s_id_scroll_horiz,
+                                             .inner_btn_id = 0U,
+                                             .style = &s_scroll_horiz,
+                                             .title = "Horizontal scroll",
+                                             .rows = 1,
+                                             .cols = 14,
+                                             .cell_w = 78.0F,
+                                             .cell_h = 44.0F,
+                                             .boxed = true,
+                                             .fmt = scroll_fmt_col,
+                                             .cell_style = &g_status_style});
+                scroll_tile(&(scroll_tile_t){.id = s_id_scroll_xy,
+                                             .inner_btn_id = 0U,
+                                             .style = &s_scroll_xy,
+                                             .title = "Both axes (X + Y)",
+                                             .rows = 8,
+                                             .cols = 8,
+                                             .cell_w = 56.0F,
+                                             .cell_h = 30.0F,
+                                             .boxed = true,
+                                             .fmt = scroll_fmt_rc,
+                                             .cell_style = &g_help_style});
             }
         }
 
@@ -820,6 +835,18 @@ static void probe_layout_and_quit(float viewport_h) {
 // #endregion
 
 // #region frame
+/* Bounce a 0..1 value up then down by rate_dt per call, flipping *up at each end. */
+static void ramp01(float *v, bool *up, float rate_dt) {
+    *v += *up ? rate_dt : -rate_dt;
+    if (*v >= 1.0F) {
+        *v = 1.0F;
+        *up = false;
+    } else if (*v <= 0.0F) {
+        *v = 0.0F;
+        *up = true;
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_stats_frame_begin();
@@ -842,38 +869,10 @@ static void frame(void) {
     nt_resource_step();
     nt_material_step();
 
-    /* Auto-ramp the loading progress bar 0->1->0 so the value_t ease is visible. */
-    const float ramp = 0.25F * g_nt_app.dt;
-    if (s_progress_up) {
-        s_progress_val += ramp;
-        if (s_progress_val >= 1.0F) {
-            s_progress_val = 1.0F;
-            s_progress_up = false;
-        }
-    } else {
-        s_progress_val -= ramp;
-        if (s_progress_val <= 0.0F) {
-            s_progress_val = 0.0F;
-            s_progress_up = true;
-        }
-    }
-
-    /* Mana auto-ramps independently at a different rate (phase-shifted from the load bar so
-     * the two bars never move in sync). The widget's value_speed eases the visual. */
-    const float mana_ramp = 0.18F * g_nt_app.dt;
-    if (s_mana_up) {
-        s_mana_val += mana_ramp;
-        if (s_mana_val >= 1.0F) {
-            s_mana_val = 1.0F;
-            s_mana_up = false;
-        }
-    } else {
-        s_mana_val -= mana_ramp;
-        if (s_mana_val <= 0.0F) {
-            s_mana_val = 0.0F;
-            s_mana_up = true;
-        }
-    }
+    /* Auto-ramp the load bar 0->1->0 (value_t ease visible) and the mana bar independently at a
+     * different rate (phase-shifted so the two bars never move in sync). */
+    ramp01(&s_progress_val, &s_progress_up, 0.25F * g_nt_app.dt);
+    ramp01(&s_mana_val, &s_mana_up, 0.18F * g_nt_app.dt);
 
     try_bind_resources();
 
