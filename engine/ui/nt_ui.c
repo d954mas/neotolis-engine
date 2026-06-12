@@ -394,7 +394,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Clay v0.14 has no right/middle/wheel buttons; left only. */
     Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
-    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed (D-59-01). */
+    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed. */
 
     Clay_BeginLayout();
 }
@@ -501,13 +501,12 @@ static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, ui
     return 0U;
 }
 
-/* Registry is cleared each nt_ui_begin, so a slot already holding this id == a duplicate
- * registration THIS frame. Trap here (the id is in hand) instead of letting Clay reject the
- * duplicate element id deep in the solver with a cryptic "already declared" message. */
+/* Registry clears each nt_ui_begin, so a slot already holding this id == a duplicate
+ * registration THIS frame — trap here instead of Clay's cryptic solver-depth error. */
 static void widget_assert_not_dup(const nt_ui_widget_slot_t *s, uint32_t id, const nt_ui_widget_def_t *def) {
     if (s->id == id) {
         nt_log_error("nt_ui_widget_register: widget id %u ('%s') already registered this frame (duplicate id)", id, def->name);
-        NT_ASSERT(s->id != id && "nt_ui_widget_register: widget id already registered this frame (duplicate id — see logged id; give the second widget its own id)");
+        NT_ASSERT(s->id != id && "nt_ui_widget_register: duplicate widget id this frame — see logged id; give the second widget its own id");
     }
 }
 
