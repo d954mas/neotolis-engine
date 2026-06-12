@@ -204,9 +204,9 @@ static nt_pointer_t make_pointer_at(float x, float y, bool is_down, bool is_pres
     return p;
 }
 
-/* ---- Pin: pressed visual un-presses when the held pointer drags OFF the widget, and
- *      re-presses when it returns. Click/capture semantics are untouched (no click off-widget).
- *      The bg IMAGE width tracks the active scale: idle/hover 1.0, pressed 0.95. ---- */
+/* ---- Pressed visual un-presses when the held pointer drags OFF the widget, and re-presses
+ *      when it returns. Click/capture semantics are untouched (no click off-widget). The bg
+ *      IMAGE width tracks the active scale: idle/hover 1.0, pressed 0.95. ---- */
 #define PB_X 120.0F
 #define PB_Y 90.0F
 #define PB_W 160.0F

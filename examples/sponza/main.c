@@ -192,7 +192,7 @@ static void camera_update(float dt) {
     /* Scroll wheel adjusts speed */
     float wheel = g_nt_input.pointers[0].wheel_dy;
     if (fabsf(wheel) > 0.001F) {
-        s_move_speed *= (1.0F + wheel * 1.6F); /* per wheel notch (wheel_dy now notch-normalized) */
+        s_move_speed *= (1.0F + wheel * 1.6F); /* per wheel notch (wheel_dy is notch-normalized) */
         if (s_move_speed < MOVE_SPEED_MIN) {
             s_move_speed = MOVE_SPEED_MIN;
         }

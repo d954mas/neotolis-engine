@@ -24,9 +24,8 @@ const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF = {
     ._reserved = 0U,
 };
 
-/* Per-axis scrollbar id derives from the scroll id (scroll_id ^ salt) so each bar has
- * its OWN id for its OWN single nt_ui_anim value_t fade AND its own thumb-drag hit-test,
- * never colliding with the container's value_t (Pitfall 6; RESEARCH Open Q3). */
+/* Per-axis scrollbar id derives from the scroll id so each bar owns its own fade
+ * value_t and thumb-drag hit-test, never colliding with the container's value_t. */
 #define NT_UI_SCROLLBAR_VERT_SALT 0x5CB00000U
 #define NT_UI_SCROLLBAR_HORIZ_SALT 0x5CB10000U
 static inline uint32_t scrollbar_id(uint32_t scroll_id, int axis) { return nt_ui_derived_id(scroll_id, (axis == 1) ? NT_UI_SCROLLBAR_VERT_SALT : NT_UI_SCROLLBAR_HORIZ_SALT); }
@@ -54,20 +53,17 @@ enum {
 /* Below this |target-pos| scroll-to/wheel-ease has arrived. */
 #define NT_UI_SCROLL_POS_EPS 0.25F
 /* Release-fling velocity tracked over a TIME WINDOW (iOS/Android VelocityTracker), not per-frame:
- * mouse events arrive slower than render frames, so a fast drag alternates moving / zero-delta
- * frames. Hard-zeroing on a zero-delta frame made the fling a lottery on the release frame's
- * parity. Instead a moving frame blends toward the instantaneous sample, a zero-delta frame DECAYS
- * toward 0 — both with dt-based factors so the window is wall-time, not frame, defined.
- * TAU_GAIN small -> snappy build; TAU_DECAY ~20ms keeps a single empty frame's velocity (fling
- * survives event quantization) yet drains a real ~100ms+ hold below the fling threshold. */
+ * pointer events arrive slower than render frames, so a fast drag alternates moving / zero-delta
+ * frames and per-frame velocity would depend on release-frame parity. A moving frame blends toward
+ * the instantaneous sample, a zero-delta frame decays toward 0, both dt-based so the window is
+ * wall-time. TAU_DECAY ~20ms survives one empty frame's quantization yet drains a real hold. */
 #define NT_UI_SCROLL_VEL_TAU_GAIN 0.03F
 #define NT_UI_SCROLL_VEL_TAU_DECAY 0.02F
 #define NT_UI_SCROLL_VEL_MAX 8000.0F
 /* A tap on a flinging container faster than this (px/s) stops the fling and is swallowed (iOS). */
 #define NT_UI_SCROLL_FLING_STOP_PX 50.0F
-/* Overscroll: per-60fps-frame velocity decay while the fling is rubber-compressing past the edge.
- * Aggressive enough that total overshoot depth is dt-invariant (vel bleeds out over the same wall
- * time at any step rate), then the bounce spring settles the remainder. */
+/* Overscroll: per-60fps-frame velocity decay while the fling compresses past the edge.
+ * Tuned so total overshoot depth is dt-invariant, then the bounce spring settles the rest. */
 #define NT_UI_SCROLL_OVERSCROLL_DECAY 0.55F
 
 static inline float scroll_clampf(float v, float lo, float hi) {
@@ -125,10 +121,9 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
         }
 
         if (dragging) {
-            /* Active drag: pos is a PURE FUNCTION of the raw (1:1) finger position — clamped
-             * in-bounds, rubber-banded past the edge, RECOMPUTED FROM RAW each frame (never
-             * iterated on its own output). A finger held still leaves raw unchanged -> pos
-             * frozen (no creep), in and out of bounds. target/vel synced for release. */
+            /* Active drag: pos is a pure function of raw (1:1 finger pos), recomputed from raw
+             * each frame so a held-still finger never creeps. Clamped in-bounds, rubber-banded
+             * past the edge; target tracks pos for the release fling. */
             if (s->raw[a] < lo || s->raw[a] > hi) {
                 const float edge = (s->raw[a] < lo) ? lo : hi;
                 const float over = s->raw[a] - edge; /* RAW over-edge distance from the anchor */
@@ -165,19 +160,17 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
         /* Released + out of bounds: critically-damped pull back to the clamped edge. */
         if (s->pos[a] < lo || s->pos[a] > hi) {
             const float edge = (s->pos[a] < lo) ? lo : hi;
-            /* Fling overshoot: don't kill vel instantly (one frame of vel*dt is FPS-dependent —
-             * half the depth at 120fps). Decay it aggressively per dt-normalized frame so the
-             * rubber compresses to the SAME visual depth regardless of step rate, then hand off
-             * to the bounce spring once vel has bled down. */
+            /* Fling overshoot: decay vel per dt-normalized frame (not instant kill, which is
+             * FPS-dependent) so the rubber compresses to the same depth at any step rate, then
+             * hand off to the bounce spring once vel has bled down. */
             if (fabsf(s->vel[a]) > NT_UI_SCROLL_VEL_EPS) {
                 s->vel[a] *= powf(NT_UI_SCROLL_OVERSCROLL_DECAY, dt * 60.0F);
             } else {
                 s->vel[a] = 0.0F; /* bounce absorbs the remainder */
             }
-            /* A rest point can never be out of bounds: re-clamp target so a stale (e.g. content just
-             * shrank) target can't drag pos back past the edge via the easing branch — pos animates to
-             * the NEW bound instead of fighting it. Gate on solved dims: a frame-1 (container==0)
-             * read would otherwise clamp a valid pending scroll-to target to 0 (1-frame-lag trap). */
+            /* Re-clamp target so a stale target (e.g. content shrank) can't drag pos back past the
+             * edge via the easing branch. Gated on solved dims: a frame-1 (container==0) read would
+             * clamp a valid pending scroll-to target to 0. */
             if (container[a] > 0.0F) {
                 s->target[a] = scroll_clampf(s->target[a], lo, hi);
             }
@@ -258,10 +251,9 @@ static uint32_t s_wheel_recipients = 0U;           /* # of scroll_begin gathers 
 #endif
 // #endregion
 
-/* The container's prev-frame layout bbox, fetched ONCE per scroll_begin / pane_offset call and
- * threaded down to every hit-test (drag-check, wheel-gather, bar origin) so Clay_GetElementData
- * runs a single time per container per frame. found==false on frame 1 (bbox not solved yet) — the
- * 1-frame lag we accept; callers treat !found as "no hit". */
+/* Container's prev-frame layout bbox, fetched once per call and threaded to every hit-test so
+ * Clay_GetElementData runs once per container per frame. found==false on frame 1 (1-frame lag);
+ * callers treat !found as "no hit". */
 typedef struct {
     Clay_BoundingBox box;
     bool found;
@@ -285,10 +277,9 @@ static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py)
  * scroll nesting (deep nests are rare and capped by NT_UI_WHEEL_CANDIDATES). */
 #define NT_UI_WHEEL_INSPECTOR_DEPTH 1000U
 
-/* Register this container as a wheel candidate for end-of-frame resolution (innermost-wins). The bbox
- * is re-fetched at resolve from the just-solved layout (so resolve + next-frame consume agree), hence
- * only id/depth are recorded. Depth is the live scroll-nesting counter so a candidate inside another
- * scroll outranks its parent. */
+/* Register this container as a wheel candidate for end-of-frame resolution (innermost-wins). Only
+ * id/depth are recorded; the bbox is re-fetched at resolve from the just-solved layout. Depth is the
+ * live scroll-nesting counter so a candidate inside another scroll outranks its parent. */
 static void scroll_register_wheel_candidate(nt_ui_context_t *ctx, uint32_t scroll_id) {
     if (ctx->wheel_candidate_count >= NT_UI_WHEEL_CANDIDATES) {
         return; /* cap reached: deeper nests than the (rare) limit fall back to no extra candidate */
@@ -298,14 +289,10 @@ static void scroll_register_wheel_candidate(nt_ui_context_t *ctx, uint32_t scrol
     c->depth = ctx->wheel_depth;
 }
 
-/* The ONE wheel-consume path: accumulate enabled-axis wheel deltas from pointers hovering the
- * container, in Clay's negative-down sign (vertical flips wheel_dy). Used by both scroll_begin and
- * the internal pane helper so the loop + sign convention live in a single place.
- *
- * Innermost-wins routing (#190): a pointer's wheel goes to AT MOST ONE container per frame. The
- * winner was resolved at the END of the PREVIOUS frame from the full candidate list (max nesting
- * depth, then smallest bbox, then latest declaration) into ctx->wheel_owner[i]; here we simply
- * consume when that owner is us. The bbox guard still gates a frame-1 lag / zeroed stale entry. */
+/* The one wheel-consume path: accumulate enabled-axis wheel deltas from hovering pointers in Clay's
+ * negative-down sign (vertical flips wheel_dy). Innermost-wins routing: a pointer's wheel goes to at
+ * most one container per frame; the winner was resolved at the end of the previous frame into
+ * ctx->wheel_owner[i], so here we only consume when that owner is us. */
 static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_scroll_bbox_t *bb, bool scroll_x, bool scroll_y, float out_wheel[2]) {
     out_wheel[0] = 0.0F;
     out_wheel[1] = 0.0F;
@@ -332,11 +319,10 @@ static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const 
     }
 }
 
-/* End-of-frame resolve: for each pointer, the winning candidate is the one whose bbox holds the
- * pointer, ranked (max depth, then min area, then latest declaration). The bbox is re-fetched from the
- * just-solved layout so it matches what next frame's consume reads (one shared snapshot, no drift). A
- * candidate whose freshly-solved bbox is not sane (frame-1 lag / dropped) simply never wins. Latest
- * declaration is the natural list order, so `<=` on area lets a later equal-best candidate override. */
+/* End-of-frame resolve: for each pointer, the winning candidate is the one whose bbox holds it,
+ * ranked (max depth, then min area, then latest declaration). The bbox is re-fetched from the
+ * just-solved layout so it matches what next frame's consume reads. `<=` on area lets a later
+ * equal-best candidate (latest declaration) override. */
 void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_resolve_wheel_owners: ctx must be non-NULL");
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
@@ -367,11 +353,9 @@ void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx) {
 }
 
 /* Time-windowed release-fling velocity for one axis. A moving frame blends toward the instantaneous
- * sample (delta/dt) with a dt-based gain so a dt hitch can't explode it, then clamps the magnitude.
- * A zero-delta frame DECAYS toward 0 with a dt-based factor (NOT a hard-zero): one empty frame keeps
- * most of the velocity so a fling survives the mouse arriving slower than the render loop, while a
- * sustained hold drains below the fling threshold. dt<=0 has no fresh sample and no wall time to
- * decay over, so it hard-zeroes (a prior fling can't leak past this drag frame). */
+ * sample with a dt-based gain (clamped); a zero-delta frame decays toward 0 with a dt-based factor so
+ * one empty frame keeps most velocity (fling survives event quantization) yet a held finger drains.
+ * dt<=0 hard-zeroes: no fresh sample and no wall time to decay over. */
 static float scroll_sample_vel(float prev_vel, float delta, float dt) {
     if (dt <= 0.0F) {
         return 0.0F;
@@ -402,10 +386,9 @@ static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_
     }
 }
 
-/* Shrink the cumulative-from-press delta by the tap threshold along the drag direction on the
- * LATCHING frame only. Without this the crossing frame dumps the whole accumulated dead-zone
- * (8+ px) into pos AND into vel/dt — a tiny finger move "flies away". Once latched the dead-zone
- * is spent, so subsequent frames pass the per-frame delta through untouched (true 1:1 tracking). */
+/* Strip the tap threshold from the cumulative-from-press delta on the LATCHING frame only, so the
+ * crossing frame doesn't dump the whole dead-zone into pos and vel. Once latched the dead-zone is
+ * spent and later frames pass the per-frame delta through untouched (1:1 tracking). */
 static void scroll_consume_threshold(bool latched, float *ddx, float *ddy) {
     if (latched) {
         return; /* dead-zone already consumed; route the full per-frame delta 1:1 */
@@ -437,24 +420,12 @@ static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_
     return def == &NT_UI_SCROLL_DEF || def == &NT_UI_SCROLLBAR_DEF;
 }
 
-/* Per-pointer gesture arbitration (D-59-04, Pitfall 2). Ownership is assigned at the POINTER-DOWN
- * EDGE to the container whose bbox holds the press point and is NEVER reassigned until release — the
- * iOS/Android contract. The single owner per pointer lives in ctx->captures[i].active_id; once this
- * container claims it, every OTHER container's STEAL/FREE-PRESS path sees a foreign-owned capture and
- * leaves it alone (the cross-container adoption bug — a held finger dragged over a neighbour can no
- * longer latch it). Three mutually-exclusive cases per pointer:
- *   - OWNED  : cap->active_id == our id — route the per-frame delta (cap->pos re-anchored each frame),
- *              hold DRAGGING/LATCHED. We own the capture so we also clear it on release here.
- *   - STEAL  : an INNER non-excluded widget owns it, press began in our bbox, threshold crossed — CLAIM
- *              the capture (active_id = our id, not 0: the edge-gated free-press below would otherwise
- *              re-adopt a still-held finger next frame). Claiming away cancels the inner widget (its
- *              resolve sees a foreign owner -> no click).
- *   - CANDIDATE: cap->active_id == 0 AND this is the press EDGE (btn.is_pressed) inside our bbox —
- *              record the free-press anchor. Threshold crossing CLAIMS the capture and routes. A
- *              merely-held (is_down, no edge) pointer never starts a gesture (kills the adoption bug).
- * Claimed captures must be re-marked seen every frame or begin's orphan-clear wipes them.
- * Nested/overlapping scrolls sharing a press point: the first to CLAIM wins, i.e. the OUTER container
- * (declared first, scroll_begin runs first) — the current contract (no nested scrolls shipped yet). */
+/* Per-pointer gesture arbitration (iOS/Android contract): ownership is assigned at the pointer-down
+ * EDGE to the container holding the press point and never reassigned until release. The single owner
+ * per pointer is ctx->captures[i].active_id; the three regions below (OWNED / STEAL / CANDIDATE) are
+ * mutually exclusive. A merely-held finger (is_down, no press edge) never starts a gesture, so a
+ * finger dragged in from a neighbour can't latch us. Claimed captures must be re-marked seen every
+ * frame or begin's orphan-clear wipes them; on overlap the first to CLAIM (outermost) wins. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const nt_scroll_bbox_t *bb, const float content[2],
                               const float container[2]) {
@@ -541,7 +512,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
         const bool armed = (s->flags & NT_UI_SCROLL_FLAG_FREE_PRESS) != 0U;
         if (!armed) {
             /* Edge-gate: only a fresh press (is_pressed) inside the bbox arms. A finger that entered
-             * while already held (no edge) NEVER starts a gesture — the cross-container adoption fix. */
+             * while already held (no edge) never starts a gesture. */
             if (!btn.is_pressed || !point_in_bbox(bb, p->x, p->y)) {
                 continue;
             }
@@ -764,10 +735,9 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     bool dragging = false;
     scrollbar_interact(ctx, scroll_id, bar_id, axis, style, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len, &dragging);
 
-    /* AUTO_HIDE: show on scroll ACTIVITY (idle within the linger window), on thumb-drag, or on
-     * bar-hover; fade out after the idle linger elapses. The integrator resets s->idle on any scroll
-     * motion (drag/wheel/fling/scroll-to), so the bar appears the moment content moves and lingers
-     * ~bar_hide_delay before fading. ALWAYS / AUTO stay opaque. ONE anim. */
+    /* AUTO_HIDE: visible on scroll activity (idle within the linger window), thumb-drag, or bar-hover;
+     * fades out once s->idle passes bar_hide_delay. The integrator resets s->idle on any scroll motion,
+     * so the bar appears the moment content moves. One anim call. */
     float opacity = 1.0F;
     if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO_HIDE) {
         const nt_ui_interaction_t hov = nt_ui_query_interaction(ctx, bar_id);
@@ -951,13 +921,11 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y) {
     s->flags |= NT_UI_SCROLL_FLAG_SCROLL_TO;
 }
 
-/* Lightweight scroll for engine-internal clip panes (inspector) that have no widget id /
- * style / scrollbar. Drives the same integrator off prev-frame Clay dims + raw wheel, returns
- * the childOffset to feed clip.childOffset. Instant wheel (no momentum/rubber) — a debug pane
- * shouldn't keep easing between frames. State rides the nt_ui_state pool under `tag`.
- * MUST be called as a statement BEFORE the pane's clip element is opened: the prev-frame
- * Clay_GetScrollContainerData entry is lost once enough sibling elements reuse the layout
- * slots, so reading it inline in the .childOffset initializer returns zero dims. */
+/* Lightweight scroll for engine-internal clip panes (inspector) with no widget id / style / bar.
+ * Drives the same integrator off prev-frame Clay dims + raw wheel, instant (no momentum/rubber).
+ * MUST be called as a statement BEFORE the pane's clip element opens: the prev-frame
+ * Clay_GetScrollContainerData entry is lost once sibling elements reuse the layout slots, so an
+ * inline read in the .childOffset initializer returns zero dims. */
 Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_scroll_pane_offset: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_internal_scroll_pane_offset: id must be non-zero");
@@ -968,10 +936,8 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    /* Wheel only when the pointer is over THIS pane (one bbox fetch), Clay negative-down sign;
-     * innermost-wins routing grants the pointer to exactly one container per frame. The inspector
-     * floats ON TOP of the game UI, so register at a depth above any plausible game scroll nesting
-     * — an open pane under the pointer beats whatever game container sits beneath it. */
+    /* Wheel only when the pointer is over this pane (innermost-wins routing). The inspector floats
+     * above the game UI, so register at a depth above any plausible game scroll nesting. */
     const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
     const uint16_t saved_depth = ctx->wheel_depth;
     ctx->wheel_depth = NT_UI_WHEEL_INSPECTOR_DEPTH;

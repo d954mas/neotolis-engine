@@ -109,10 +109,9 @@ typedef struct {
     uint32_t id;             /* Browser PointerEvent.pointerId */
     float x, y;              /* Framebuffer pixels, canvas-relative */
     float dx, dy;            /* Movement delta in framebuffer pixels */
-    float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent. Platform edge
-                                normalizes (GLFW yoffset 1:1; web deltaY px / notch). Trackpad/
-                                high-res wheels deliver fractional notches. Scale by px-per-notch
-                                (e.g. nt_ui scroll wheel_step_px) at the consumer, not here. */
+    float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
+                                normalizes; trackpads deliver fractional notches). Consumers scale
+                                by px-per-notch, not here. */
     float wheel_dy;          /* Vertical wheel delta in notches (see wheel_dx). */
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */

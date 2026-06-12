@@ -20,10 +20,9 @@ const nt_ui_widget_def_t NT_UI_SLIDER_DEF = {
     ._reserved = 0U,
 };
 
-/* Drag grab-offset cell (state pool, keyed off the slider id ^ this salt). press ON the
- * thumb stores press_pos.x - thumb_left so the relative grab is preserved across the drag;
- * press on the track stores thumb_w/2 (thumb jumps under the pointer). Lives press->release.
- * captures[] has no public payload slot, so the retained-state pool carries it (D-59-10). */
+/* Drag grab-offset cell (state pool, keyed off the slider id). press ON the thumb stores the
+ * relative grab so it is preserved across the drag; press on the track stores thumb_w/2 (thumb
+ * jumps under the pointer). Lives press->release; captures[] has no public payload slot for it. */
 #define NT_UI_SLIDER_DRAG_SALT 0x510D3201U
 typedef struct {
     float grab_offset; /* press_pos.x - thumb_left at grab; thumb_w/2 = track-jump */
@@ -103,14 +102,13 @@ static void assert_cell_valid(const nt_ui_slider_cell_t *st) {
     NT_ASSERT(isfinite(st->opacity) && st->opacity >= 0.0F && st->opacity <= 1.0F && "nt_ui_slider: style cell opacity must be finite in [0,1]");
 }
 
-/* Salted derivations so the drag + view cells can't alias the slider's own anim/registry id
- * in the state pool (D-59 scrollbar-id-derivation discipline). */
+/* Salted derivations so the drag + view cells can't alias the slider's own id in the state pool. */
 static inline uint32_t slider_drag_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_DRAG_SALT); }
 static inline uint32_t slider_view_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_VIEW_SALT); }
 
-/* Press-scoped drag resolve (D-59-20). Reads the prev-frame track bbox + grab cell, returns
- * the new value fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps;
- * held: thumb follows pointer minus the grab offset. Factored out to keep slider_core flat. */
+/* Press-scoped drag resolve. Reads the prev-frame track bbox + grab cell, returns the new value
+ * fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps; held: thumb
+ * follows pointer minus the grab offset. */
 static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, float frac, float min, float max) {
     const float usable_w = (style->track_w - style->thumb_w > 0.0F) ? (style->track_w - style->thumb_w) : 0.0F;
     nt_ui_slider_drag_t *drag = (nt_ui_slider_drag_t *)nt_ui_state(ctx, slider_drag_id(id), (uint32_t)sizeof(nt_ui_slider_drag_t), NT_UI_STATE_TAG('s', 'l', 'd', 'g'));

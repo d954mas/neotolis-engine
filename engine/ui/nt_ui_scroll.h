@@ -4,7 +4,7 @@
 /* Scroll container with custom engine-side physics (momentum/fling, overscroll
  * rubber-band + bounce, smooth wheel, animated scroll-to). The engine computes
  * the offset and feeds Clay a ready clip.childOffset each frame — Clay's built-in
- * scroll is bypassed (D-59-01). Scroll state rides the nt_ui_state pool keyed by
+ * scroll is bypassed. Scroll state rides the nt_ui_state pool keyed by
  * the scroll id; offset is in Clay's NEGATIVE-down sign convention (childOffset is
  * negative going down/right; clamp [-(content-container), 0]). */
 
@@ -21,13 +21,11 @@ extern const nt_ui_widget_def_t NT_UI_SCROLL_DEF;
 extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Capture-steal threshold: a drag inside a scroll container exceeding this many
- * framebuffer px steals capture from the inner widget (cancel its click) and
- * scrolls (D-59-04). Mobile standard ~8-10 px. The steal routes ZERO delta on the
- * latch frame (the inner widget already applied it; re-routing double-moves once);
- * the scroll tracks 1:1 from the next frame. Value semantics: the cancelled inner
- * widget KEEPS any value change it made before the steal — Model D puts the value in
- * the game, so the engine cannot revert it. Games needing transactional sliders should
- * commit on the released-over-widget frame (`released_now`), not on every drag tick. */
+ * framebuffer px steals capture from the inner widget and scrolls. Mobile standard
+ * ~8-10 px. The latch frame routes ZERO delta (the inner widget already applied it;
+ * re-routing would double-move once); scroll tracks 1:1 from the next frame. The
+ * cancelled inner widget keeps any value it wrote before the steal (Model D — value
+ * lives in the game), so commit-on-release is the safe pattern for sliders. */
 #ifndef NT_UI_SCROLL_STEAL_THRESHOLD_PX
 #define NT_UI_SCROLL_STEAL_THRESHOLD_PX 8.0F
 #endif
@@ -38,10 +36,9 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_DRAGGING ((uint8_t)(1U << 1))
 /* A free pointer (no widget capture) is mid-press inside the bbox; free_press_pos is its anchor. */
 #define NT_UI_SCROLL_FLAG_FREE_PRESS ((uint8_t)(1U << 2))
-/* A drag gesture has crossed the threshold and latched: the dead-zone is consumed, so subsequent
- * frames route the FULL per-frame delta 1:1 (only the latching frame subtracts the threshold).
- * Per-CONTAINER (not per-pointer): two simultaneous touches on one container share this latch — the
- * second touch inherits the first's latched state (known multi-touch limitation, single-touch by design). */
+/* Drag crossed the threshold and latched: dead-zone consumed, so later frames route the
+ * full per-frame delta 1:1 (only the latching frame subtracts the threshold). Per-CONTAINER,
+ * not per-pointer — single-touch by design. */
 #define NT_UI_SCROLL_FLAG_DRAG_LATCHED ((uint8_t)(1U << 3))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
@@ -57,19 +54,18 @@ typedef struct {
     uint8_t flags;
 } nt_ui_scroll_state_t;
 
-/* Scrollbar visibility / placement (visual consumed by Plan 04; defined here so the
- * style is one struct across the phase). */
+/* Scrollbar visibility / placement (defined here so the style stays one struct). */
 typedef enum { NT_UI_SCROLLBAR_ALWAYS = 0, NT_UI_SCROLLBAR_AUTO, NT_UI_SCROLLBAR_AUTO_HIDE } nt_ui_scrollbar_visibility_t;
 typedef enum { NT_UI_SCROLLBAR_OVERLAY = 0, NT_UI_SCROLLBAR_GUTTER } nt_ui_scrollbar_placement_t;
 
 typedef struct {
     bool scroll_x, scroll_y; /* which axes scroll */
-    float friction;          /* momentum decay (per-60fps base); D-59-02 tunable */
+    float friction;          /* momentum decay (per-60fps base) */
     float wheel_ease_speed;  /* smooth-wheel ease toward target; 0 = instant */
     float rubber_band_c;     /* overscroll coefficient (0 = no rubber-band; default 0.55) */
     float bounce_speed;      /* bounce-back spring ease */
     float wheel_step_px;     /* px per wheel unit */
-    /* scrollbar visual (consumed by Plan 04; declared here for one-struct ABI). */
+    /* scrollbar visual (declared here for one-struct ABI). */
     nt_ui_scrollbar_visibility_t bar_visibility;
     nt_ui_scrollbar_placement_t bar_placement;
     float bar_thickness;
@@ -93,7 +89,7 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
 void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_scroll_style_t *style, const Clay_ElementDeclaration *decl);
 void nt_ui_scroll_end(nt_ui_context_t *ctx);
 
-/* Set the target offset (Clay sign: negative = down/right) and ease there (D-59-02d).
+/* Set the target offset (Clay sign: negative = down/right) and ease there.
  * No-op if the container's state cell does not yet exist (call after first declaration). */
 void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y);
 
@@ -106,8 +102,8 @@ float nt_ui_scroll_test_rubber_band(float d, float dim);
 /* Reads back the last clip.childOffset fed to Clay by scroll_begin (Clay sign). */
 void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y);
 uint32_t nt_ui_scroll_test_last_scroll_id(void);
-/* Scrollbar readbacks (Plan 04): which axes' bars emitted (bit0=x, bit1=y) + the last
- * per-axis bar geometry (thumb len/off, track len, eased fade opacity) + the derived id. */
+/* Scrollbar readbacks: which axes' bars emitted (bit0=x, bit1=y) + the last per-axis
+ * bar geometry (thumb len/off, track len, eased fade opacity) + the derived id. */
 uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void);
 void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity);
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);

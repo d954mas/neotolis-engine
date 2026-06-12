@@ -829,8 +829,8 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
 }
 
 /* scale=2.0F → DST borders doubled (positions 32/68) BUT SRC borders unchanged
- * → UV cut stays at atlas src_l/source_w. Guards the user-caught bug where the
- * earlier impl scaled src too and corners sampled edge content. */
+ * → UV cut stays at atlas src_l/source_w (scaling src too would sample edge content
+ * into the corners). */
 void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));

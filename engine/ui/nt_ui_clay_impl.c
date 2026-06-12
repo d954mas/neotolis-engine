@@ -156,10 +156,9 @@ int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
 }
 
 #if NT_UI_DEBUG_TOOLS
-/* Headroom (in Clay layout elements) the inspector keeps free while emitting its tree: one row costs
- * up to ~8 elements, and the panel chrome (header, scroll panes, selected-info body) trails the row
- * list. Stop adding rows once fewer than this remain so the inspector degrades (truncated tree) on an
- * oversized scene instead of overflowing Clay's array — whose error handler is a hard trap. */
+/* Headroom (Clay layout elements) the inspector keeps free while emitting its tree, so it degrades
+ * (truncated tree) on an oversized scene instead of overflowing Clay's array (whose handler hard-traps).
+ * One row costs up to ~8 elements and the panel chrome trails the row list. */
 #define NT_UI_INSPECTOR_ELEM_RESERVE 64
 static bool cdv_layout_budget_left(const nt_ui_context_t *ctx) {
     /* Clay raises maxElementsExceeded at length == capacity-1; keep a reserve below that. */
@@ -786,8 +785,8 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* Single per-frame line for the "UI memory" sidebar row (D-59-11). One emit per
- * inspector layout, so a single buffer (not a ring) holds the live Clay_String. */
+/* Single per-frame line for the "UI memory" sidebar row. One emit per inspector
+ * layout, so a single buffer (not a ring) holds the live Clay_String. */
 static char cdv_mem_line_buf[64];
 
 /* Shares the hex ring's cursor space (reset per frame). */
@@ -1200,7 +1199,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
     Clay_TextElementConfig *infoTitleConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
     Clay_ElementId scrollId = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0);
-    /* OUR scroll offset (Clay's is bypassed, D-59-01); prev-frame state cell, same sign convention. */
+    /* Our scroll offset (Clay's is bypassed); prev-frame state cell, same sign convention. */
     const nt_ui_scroll_state_t *scrollState = (const nt_ui_scroll_state_t *)nt_ui_state_find(ctx, scrollId.id);
     const float scrollYOffset = (scrollState != NULL) ? scrollState->pos[1] : 0.0F;
     const bool pointerInDebugView = context->pointerInfo.position.y < context->layoutDimensions.height - 300;
@@ -1234,7 +1233,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                 CLAY_TEXT(CLAY_STRING("x"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .userData = debug_text_data}));
             }
         }
-        /* "UI memory" line (D-59-11): state-pool occupancy + anim collisions. Single per-frame
+        /* "UI memory" line: state-pool occupancy + anim collisions. Single per-frame
          * buffer holds the live Clay_String through the walk (one emit per layout). */
         {
             (void)nt_ui_internal_format_mem_line(ctx, cdv_mem_line_buf, sizeof cdv_mem_line_buf);
@@ -1264,10 +1263,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                 float contentWidth = panelContentsItem != NULL ? panelContentsItem->layoutElement->dimensions.width : 0.0F;
                 CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(contentWidth)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {}
                 /* Striped row backgrounds give the pane its scrollable height (FIXED row_h each). The
-                 * budget cap can truncate this loop on a large scene; if it does, content would collapse
-                 * to exactly fit the pane and the wheel would have nothing to scroll. Track the stripes
-                 * actually emitted, then top up the FULL row_count height with ONE spacer below so the
-                 * content always overflows when there are more rows than fit — scroll stays alive. */
+                 * budget cap can truncate this loop; track the stripes actually emitted so the spacer
+                 * below can restore the full height and keep the pane overflowing (scroll stays alive). */
                 int32_t emitted_rows = 0;
                 for (int32_t i = 0; i < layoutData.row_count && cdv_layout_budget_left(ctx); i++) {
                     Clay_Color rowColor = (i & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1;

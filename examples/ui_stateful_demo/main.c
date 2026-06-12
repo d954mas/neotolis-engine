@@ -1,6 +1,6 @@
-/* UI Stateful Demo — worked example for checkbox/toggle/radio (Phase 58) plus
- * slider/progress/scroll (Phase 59). Value lives in the GAME (Model D): the engine
- * stores no logical value, only the transient eased visual + scroll physics state.
+/* UI Stateful Demo — worked example for checkbox/toggle/radio plus slider/progress/scroll.
+ * Value lives in the GAME (Model D): the engine stores no logical value, only the transient
+ * eased visual + scroll physics state.
  * Keys: Esc quit (native), D toggle inspector.
  * Build packs: build_ui_stateful_demo_packs build/examples/ui_stateful_demo */
 
@@ -215,7 +215,7 @@ static const nt_ui_progress_style_t g_progress_crop_tmpl = {
 };
 
 /* ---- mana bar (vertical STRETCH slice9, BOTTOM_UP): the smooth gradient fill stretches
- * cleanly and is tinted BLUE; it fills bottom-up (D-59-26 non-LTR direction). ---- */
+ * cleanly and is tinted BLUE; it fills bottom-up (non-LTR direction). ---- */
 static const nt_ui_progress_style_t g_mana_tmpl = {
     .track_tint = 0xFFFFFFFF,
     .fill_tint = 0xFF4090F0, /* blue mana */
@@ -290,7 +290,7 @@ static bool s_progress_up = true;
 static float s_mana_val = 0.5F; /* vertical mana bar: auto-ramps 0->1->0, phase-shifted from the load bar */
 static bool s_mana_up = false;  /* starts heading DOWN so it runs out of sync with the load bar */
 
-/* Physics-tuning controls (felt-out at the visual-QA gate, D-59-02). */
+/* Physics-tuning controls exposed by the demo. */
 static float s_friction = 0.92F;
 static float s_wheel_ease = 18.0F;
 static float s_wheel_step = 40.0F; /* px per wheel notch; engine default 40 (user tunes by feel) */
@@ -458,8 +458,8 @@ static const Clay_ElementDeclaration s_progress_decl = {
 };
 // #endregion
 
-// #region declare_widgets (Phase 59 vitrine: slider / progress / scroll)
-/* Draws a small floating value-bubble at the slider thumb (D-59-22): proves the
+// #region declare_widgets (slider / progress / scroll)
+/* Draws a small floating value-bubble at the slider thumb: proves the
  * nt_ui_slider_thumb_pos exposure feeds a Clay floating element. */
 static void slider_drag_bubble(uint32_t id, const char *value_text) {
     const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_ctx, id);
@@ -484,7 +484,7 @@ static Clay_ElementDeclaration scroll_tile_decl(float w, float h) {
     };
 }
 
-/* One scroll-showcase tile: title + a rows x cols cell grid in a scroll container. The three vitrine
+/* One scroll-showcase tile: title + a rows x cols cell grid in a scroll container. The three
  * variants (vertical labels / horizontal cells / both-axes grid) differ only in rows/cols, cell
  * size/format and an optional capture-steal button — so they share this one builder. */
 typedef struct {
@@ -699,7 +699,7 @@ static void declare_widgets_panel(void) {
         }
         // #endregion
 
-        // #region physics tuning (felt-out at the QA gate)
+        // #region physics tuning
         section_label("Physics tuning (feel it out)");
 
         (void)snprintf(buf, sizeof buf, "Friction   %.3f", (double)s_friction);
@@ -960,7 +960,7 @@ static void frame(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
             }
 
-            /* Two panels side by side: the Phase 58 settings vitrine + the Phase 59 widgets. */
+            /* Two panels side by side: the settings widgets + the slider/progress/scroll widgets. */
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 20, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
                 declare_menu();
                 declare_widgets_panel();

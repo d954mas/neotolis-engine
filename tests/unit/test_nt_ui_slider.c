@@ -1,4 +1,4 @@
-/* Slider widget tests (59-03 GREEN).
+/* Slider widget tests.
  *
  * Covers: value<->position map (float + int, clamped), step quantize, thumb-grab
  * (press on the thumb = relative drag, value unchanged that frame) vs track-jump

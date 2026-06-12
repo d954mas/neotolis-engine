@@ -31,9 +31,9 @@
 #define TRACK_BORDER_X 24
 #define TRACK_BORDER_Y 16
 
-/* bar_track / bar_fill_smooth are 192x32 pills. 8px slice9 stays small enough that the
- * fill never end-cap-overlaps even in the 18px-tall slider track or a narrow low-value fill
- * (8+8 < both target dims) — this is the low-width distortion the user saw, fixed. */
+/* bar_track / bar_fill_smooth are 192x32 pills. 8px slice9 stays small enough that the fill
+ * never end-cap-overlaps even in the 18px-tall slider track or a narrow low-value fill (8+8 <
+ * both target dims). */
 #define BAR_BORDER 8
 
 static char s_path_buf[512];
@@ -133,9 +133,9 @@ int main(int argc, char *argv[]) {
     opts.name = "thumb";
     nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/thumb.png", &opts);
 
-    /* Progress-bar art (issue 4): a recessed track + two fills demoing STRETCH vs CROP.
-     * bar_track + bar_fill_smooth are slice9 pills (rounded ends fixed when stretched);
-     * bar_fill_shaped (diagonal candy stripes) gets NO slice9 — CROP reveals it undistorted. */
+    /* Progress-bar art: a recessed track + two fills demoing STRETCH vs CROP. bar_track +
+     * bar_fill_smooth are slice9 pills (rounded ends stay fixed when stretched); bar_fill_shaped
+     * (diagonal candy stripes) gets NO slice9 — CROP reveals it undistorted. */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "bar_track";
     opts.slice9_left = BAR_BORDER;
@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
 
     /* Scrollbar pieces: a recessed slot track + a light capsule thumb, both 32x32 with 8px slice9
      * (BAR_BORDER) so the rounded caps stay fixed whether the bar is stretched tall (vertical) or
-     * wide (horizontal). Replaces the toggle CIRCLE thumb that looked wrong stretched along the bar. */
+     * wide (horizontal). */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "scroll_track";
     opts.slice9_left = BAR_BORDER;

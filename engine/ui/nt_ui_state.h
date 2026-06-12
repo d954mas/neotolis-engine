@@ -1,14 +1,11 @@
 #ifndef NT_UI_STATE_H
 #define NT_UI_STATE_H
 
-/* Generic per-widget-id retained-state pool (#190). Direct-mapped, linear-probe,
- * NO eviction — a cell dies only via clear / clear_all / context destroy. That
- * no-eviction discipline keeps the D-59-09 game-owned-pointer escape hatch
- * leak-safe (a cell the game stored a pointer in is never silently reclaimed).
- *
- * Contract: the returned pointer is NOT valid across frames — re-acquire by id
- * each frame. Stores view/interaction state only (scroll offset/velocity, custom
- * widget userdata); logical values stay game-owned (Model D). */
+/* Generic per-widget-id retained-state pool. Direct-mapped, linear-probe, NO
+ * eviction: a cell dies only via clear / clear_all / context destroy, so a cell
+ * the game stored a pointer in is never silently reclaimed (leak-safe escape hatch).
+ * Returned pointer is NOT valid across frames — re-acquire by id each frame. Stores
+ * view/interaction state only; logical values stay game-owned. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -16,9 +13,8 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 /* Derive a sibling cell id from a widget's base id (drag/view/scrollbar sub-cells).
- * `base ^ salt` can land on 0 when base == salt, which the pool's id != 0 assert
- * traps — fold that one case to the salt so every derived id is nonzero. Salts are
- * sparse high-bit constants, so the salt itself never collides with a real low id. */
+ * Folds the base==salt case to salt so every derived id stays nonzero (id 0 is the
+ * empty-slot sentinel). Salts are sparse high-bit constants, never a real low id. */
 static inline uint32_t nt_ui_derived_id(uint32_t base, uint32_t salt) {
     const uint32_t id = base ^ salt;
     return (id != 0U) ? id : salt;
@@ -28,7 +24,7 @@ static inline uint32_t nt_ui_derived_id(uint32_t base, uint32_t salt) {
 #define NT_UI_STATE_SLOTS 64 /* power-of-2; slot = id & (N-1) */
 #endif
 #ifndef NT_UI_STATE_PAYLOAD_MAX
-#define NT_UI_STATE_PAYLOAD_MAX 64 /* bytes; > this => game stores its own pointer in the cell (D-59-09) */
+#define NT_UI_STATE_PAYLOAD_MAX 64 /* bytes; > this => game stores its own pointer in the cell */
 #endif
 #ifndef NT_UI_STATE_PROBE_MAX
 #define NT_UI_STATE_PROBE_MAX 4
@@ -37,7 +33,7 @@ _Static_assert((NT_UI_STATE_SLOTS & (NT_UI_STATE_SLOTS - 1)) == 0, "NT_UI_STATE_
 
 typedef struct {
     uint32_t id;   /* 0 = empty slot */
-    uint32_t size; /* re-acquire asserts size match (D-59-08) */
+    uint32_t size; /* re-acquire asserts size match */
     uint32_t tag;  /* owner widget tag; re-acquire asserts match (cross-widget aliasing trap) */
     uint8_t payload[NT_UI_STATE_PAYLOAD_MAX];
 } nt_ui_state_cell_t;

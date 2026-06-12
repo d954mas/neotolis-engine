@@ -1,9 +1,9 @@
-/* Scroll container + custom engine physics tests (59-02).
+/* Scroll container + custom engine physics tests.
  *
  * Physics (momentum decay, clamp, rubber-band, scroll-to, Clay sign) drive the
  * static integrator directly via the NT_TEST_ACCESS probe — no Clay frame needed.
- * Container + capture-steal cases (Task 2) declare a real scroll element and read
- * back the fed childOffset. UNITY_EXCLUDE_FLOAT: compare via int32 casts / eps. */
+ * Container + capture-steal cases declare a real scroll element and read back the
+ * fed childOffset. UNITY_EXCLUDE_FLOAT: compare via int32 casts / eps. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -236,7 +236,7 @@ static void test_scroll_capture_steal_drag(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Container claimed the gesture -> inner capture cancelled (no longer inner_id, no click). */
+    /* Container claimed the gesture -> inner capture cancelled (active id is the container, no click). */
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
     /* LATCH frame routes ZERO delta: pos AND raw stay at rest (fails before the fix, which dumped the
      * already-inner-applied 40 px delta into pos the same frame — the one-frame double-motion). */
@@ -347,7 +347,7 @@ static void test_scroll_capture_tap_no_steal(void) {
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.5F));
 }
 
-/* ================= Scrollbar visual cases (Plan 04, WIDGET-20 / D-59-14) ================= */
+/* ================= Scrollbar visual cases ================= */
 
 /* A scroll frame with a chosen style + content height so the bar emit can be exercised.
  * Container 200x200; content 200 x content_h. */
@@ -420,7 +420,7 @@ static void test_scrollbar_thumb_size_ratio(void) {
 }
 
 /* ---- Test 13: Clay sign — at rest (pos 0) the thumb sits at the TOP (offset 0); a
- *      negative pos (scrolled down) puts the thumb toward the BOTTOM. (Pitfall 3) ---- */
+ *      negative pos (scrolled down) puts the thumb toward the BOTTOM. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scrollbar_thumb_pos_clay_sign(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
@@ -1421,10 +1421,9 @@ static void test_scroll_content_shrink_clamps_pos(void) {
     TEST_ASSERT_TRUE(float_near(s.pos[1], -200.0F, 1.0F));
 }
 
-/* ---- Test 44 (flaky-fling fix): at high FPS the mouse posts events slower than the render loop, so
- *      a fast drag alternates a moving frame with a zero-delta frame. Releasing ON a zero-delta frame
- *      must STILL fling. The old hard-zero-on-still-frame sampler zeroed velocity on the release frame
- *      -> no fling (the lottery the user hit). Time-windowed tracking keeps it. ---- */
+/* ---- Test 44: at high FPS pointer events post slower than the render loop, so a fast drag
+ *      alternates a moving frame with a zero-delta frame. Releasing ON a zero-delta frame must
+ *      STILL fling — time-windowed velocity tracking keeps it. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_fling_survives_release_on_zero_delta_frame(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
@@ -1599,7 +1598,7 @@ static void test_scroll_wheel_no_broadcast_under_churn(void) {
     TEST_ASSERT_TRUE(moved >= 1);
 }
 
-/* ================= Innermost-wins routing (#190 — nested + tie-break) ================= */
+/* ================= Innermost-wins routing (nested + tie-break) ================= */
 
 static const uint32_t NEST_OUTER_ID = 0x5CF001U;
 static const uint32_t NEST_INNER_ID = 0x5CF002U;

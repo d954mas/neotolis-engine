@@ -664,7 +664,7 @@ static void test_disabled_widget_blocks_input_behind(void) {
     TEST_ASSERT_FALSE(inB3.hovered);
 }
 
-/* ---- Pin: press -> drag OFF -> drag BACK -> release inside = clicked (button) ----
+/* ---- press -> drag OFF -> drag BACK -> release inside = clicked (button) ----
  * Capture survives the off-widget excursion; the release lands over the widget so it clicks. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_press_drag_off_then_back_clicks(void) {
@@ -703,7 +703,7 @@ static void test_press_drag_off_then_back_clicks(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
 }
 
-/* ---- Pin: two fingers press two DIFFERENT widgets same frame -> independent captures, both click ---- */
+/* ---- two fingers press two DIFFERENT widgets same frame -> independent captures, both click ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_multitouch_two_widgets_independent_capture(void) {
     /* A and B are non-overlapping so each finger hits exactly one. */

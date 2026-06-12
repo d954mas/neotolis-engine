@@ -109,12 +109,10 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Wheel-routing candidate (#190): every scroll container/pane declared this frame appends one. The
- * bbox is NOT stored — nt_ui_end re-fetches it from the just-solved layout (Clay_GetElementData) so
- * the resolve and next frame's consume read the SAME layout snapshot (no double-lag drift). Axis
- * enablement is NOT stored either: ownership is decided purely by bbox containment (matching the old
- * claim), and the per-axis gating lives in the consume step. The winner per pointer (max depth, then
- * min bbox area, then latest declaration) lands in wheel_owner[], consumed NEXT frame — innermost. */
+/* Wheel-routing candidate: every scroll container/pane declared this frame appends one. The bbox is
+ * NOT stored — nt_ui_end re-fetches it from the just-solved layout so the resolve and next frame's
+ * consume read the same layout snapshot. Ownership is decided purely by bbox containment; per-axis
+ * gating lives in the consume step. The winner per pointer lands in wheel_owner[]. */
 typedef struct {
     uint32_t id;
     uint16_t depth; /* scroll-nesting depth; deeper (inner) wins */
@@ -143,9 +141,8 @@ struct nt_ui_context {
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
     /* Exclusive wheel routing (innermost-wins): the scroll id allowed to consume this pointer's wheel
-     * THIS frame (0 = free). Resolved at the END of the PREVIOUS frame from the full candidate list
-     * below (max depth, then min area, then latest declaration), so it persists one frame — the same
-     * 1-frame lag as every prev-frame bbox hit-test. Frame 1: all 0 -> nobody consumes (accepted). */
+     * this frame (0 = free). Resolved at the end of the previous frame from the candidate list below,
+     * so it carries the same 1-frame lag as every prev-frame bbox hit-test. Frame 1: all 0. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS];
     /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
      * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
@@ -229,8 +226,8 @@ struct nt_ui_context {
     /* Monotonic; nonzero delta across frames means raise NT_UI_ANIM_SLOTS. */
     uint32_t anim_collision_count;
 
-    /* Generic per-id retained-state pool (#190). Arena auto-sizes via sizeof(struct
-     * nt_ui_context); create_context's memset zero-inits it (same as anim[]). */
+    /* Generic per-id retained-state pool. Arena auto-sizes via sizeof(struct nt_ui_context);
+     * create_context's memset zero-inits it (same as anim[]). */
     nt_ui_state_cell_t state_pool[NT_UI_STATE_SLOTS];
 
 #if NT_UI_DEBUG_TOOLS

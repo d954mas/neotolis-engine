@@ -1447,8 +1447,8 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
 }
 
 /* Declares a 200x200 clip pane whose childOffset comes from the inspector's internal scroll
- * helper (the path that replaced Clay_GetScrollOffset, D-59-01). Tall content overflows so
- * wheel can scroll. The pointer sits at (ptr_x,100) so a caller can aim it on/off the pane. */
+ * helper. Tall content overflows so wheel can scroll. The pointer sits at (ptr_x,100) so a
+ * caller can aim it on/off the pane. */
 static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, float wheel_dy) {
     nt_pointer_t p = make_pointer(ptr_x, 100.0F);
     p.wheel_dy = wheel_dy;
@@ -1465,8 +1465,8 @@ static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, 
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Inspector panes scroll via OUR scroll path (Clay's is bypassed, D-59-01). A wheel
- * over a clip pane fed by the internal helper moves the offset in the nt_ui_state pool. ---- */
+/* ---- Inspector panes scroll via OUR scroll path (Clay's is bypassed). A wheel over a clip
+ * pane fed by the internal helper moves the offset in the nt_ui_state pool. ---- */
 static void test_inspector_pane_scrolls_on_wheel(void) {
     const float screen_w = 1280.0F;
     const float screen_h = 800.0F;
@@ -2003,20 +2003,17 @@ static void test_inspector_budget_capped_on_large_scene(void) {
     }
 }
 
-/* ---- INTEGRATION REPRO (#190): the inspector's OWN elements-tree pane scrolls on wheel ----
- * The bug the unit test test_inspector_pane_scrolls_on_wheel missed: it emits a clip pane in the
- * USER frame body, so its wheel candidate is registered + resolved exactly like a game container.
- * The REAL inspector pane is emitted INSIDE nt_ui_end (emit_inspector_layout) AFTER the user frame
- * closed. This drives that real path: inspector ON, a named scene tall enough to overflow the tree
- * pane, the pointer parked inside the tree pane, a wheel notch every frame. The pane state lives
- * under tag 'i','n','s','p' keyed by the ntInsp_OuterScrollPane Clay id. */
+/* ---- Integration: the inspector's OWN elements-tree pane scrolls on wheel ----
+ * The real inspector pane is emitted INSIDE nt_ui_end (after the user frame closes), so its wheel
+ * candidate registers + resolves on the end-of-frame path, not the user-frame path. This drives
+ * that path: inspector ON, a named scene tall enough to overflow the tree pane, the pointer parked
+ * in the pane, a wheel notch every frame. Pane state lives under the ntInsp_OuterScrollPane id. */
 static void inspector_scene_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
     nt_pointer_t p = make_pointer(ptr_x, ptr_y);
     p.wheel_dy = wheel_dy;
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
     /* Enough named leaves that the inspector's ~5-6x per-row element multiplier trips its own Clay
-     * budget cap (the real demo condition) — the truncation that used to collapse the pane to exactly
-     * fit, killing scroll. The fix tops up the content height so a truncated tree still overflows. */
+     * budget cap — the truncated tree must still top up its content height so the pane overflows. */
     CLAY({.id = CLAY_ID("repro_root")}) {
         for (int i = 0; i < 600; ++i) {
             CLAY({.id = CLAY_IDI("repro_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
@@ -2026,8 +2023,7 @@ static void inspector_scene_frame(float screen_w, float screen_h, float ptr_x, f
 }
 
 /* The inspector tree pane (emitted in nt_ui_end) must consume the wheel when the pointer is parked
- * over it. FAILS-BEFORE: the pane registered its candidate AFTER the user frame, but the prev-frame
- * resolve never granted it ownership through the real end-of-frame path, so pos[1] stayed 0. */
+ * over it — the candidate it registers on the end-of-frame path must win ownership for next frame. */
 static void test_inspector_tree_pane_scrolls_on_wheel_integration(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 1280.0F;

@@ -1,4 +1,4 @@
-/* Progress bar widget tests (59-04 GREEN).
+/* Progress bar widget tests.
  *
  * Read-only track + fill: fill ratio = value (clamped [0,1]); STRETCH (slice9,
  * shared slider fill-emit path → plain IMAGE) vs CROP (UV-reveal via a Clay clip →
@@ -26,8 +26,8 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
-/* Non-origin, ASYMMETRIC track (W != H) pins so a stray axis swap or sign flip on a
- * direction is visible (AGENTS.md asymmetric-data rule). */
+/* Non-origin, ASYMMETRIC track (W != H) so a stray axis swap or sign flip on a
+ * direction is visible. */
 #define PG_X 100.0F
 #define PG_Y 200.0F
 #define PG_W 200.0F

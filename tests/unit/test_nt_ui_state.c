@@ -1,4 +1,4 @@
-/* Generic per-id state pool tests (#190).
+/* Generic per-id state pool tests.
  *
  * Direct-mapped, linear-probe, NO-eviction pool over ctx->state_pool[]. Pointer
  * is stable within a frame and across re-acquires until clear/clear_all; first
@@ -135,7 +135,7 @@ static void test_state_zero_size_payload(void) {
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
-/* Re-acquire an id with a different size -> assert (D-59-08 size-collision guard). */
+/* Re-acquire an id with a different size -> assert (size-collision guard). */
 static void test_assert_size_mismatch(void) {
     const uint32_t id = 0xAAAAU;
     (void)nt_ui_state(s_fx.ctx, id, 16U, T_TAG);
@@ -152,11 +152,11 @@ static void test_assert_tag_mismatch(void) {
 /* id 0 is reserved (empty-slot sentinel) -> assert. */
 static void test_assert_id_zero(void) { NT_TEST_EXPECT_ASSERT((void)nt_ui_state(s_fx.ctx, 0U, 8U, T_TAG)); }
 
-/* size > payload max -> assert (game must store its own pointer, D-59-09). */
+/* size > payload max -> assert (game must store its own pointer). */
 static void test_assert_oversize(void) { NT_TEST_EXPECT_ASSERT((void)nt_ui_state(s_fx.ctx, 0xBBBBU, NT_UI_STATE_PAYLOAD_MAX + 1U, T_TAG)); }
 
 /* Fill the probe chain for one base bucket, then one more create -> overflow assert
- * (no LRU eviction, D-59-07). PROBE_MAX+1 ids that all hash to the same base. */
+ * (no LRU eviction). PROBE_MAX+1 ids that all hash to the same base. */
 static void test_assert_probe_overflow(void) {
     const uint32_t base = 3U;
     for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {

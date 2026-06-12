@@ -77,7 +77,7 @@ void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
     nt_ui_internal_emit_inspector_layout_extern(ctx);
 }
 
-/* "UI memory" sidebar line (D-59-11): state-pool occupancy + anim collisions.
+/* "UI memory" sidebar line: state-pool occupancy + anim collisions.
  * Formats into caller buf; the Clay row is emitted from the sidebar layout. */
 const char *nt_ui_internal_format_mem_line(const nt_ui_context_t *ctx, char *buf, size_t buf_size) {
     NT_ASSERT(ctx != NULL && buf != NULL && buf_size > 0U);
