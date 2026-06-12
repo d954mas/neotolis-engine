@@ -284,6 +284,76 @@ static void test_style_defaults_valid_baseline(void) {
     }
 }
 
+/* ---- Test 11: fill rect MUST stay inside the track rect at every ratio (LTR STRETCH).
+ *      Pins the emit geometry: fill left == track left, fill width == ratio*track_w, fill
+ *      right <= track right. A regression here = the visual "fill pokes past the track end". ---- */
+/* The track is the registered slider id (image cmd at the track bbox); the fill is the only
+ * other track-tall image whose left edge == track left and width < track width. */
+static bool find_track_and_fill(float *track_left, float *track_right, float *fill_left, float *fill_right, bool *has_fill) {
+    const Clay_RenderCommand *track_cmd = NULL;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && c->id == nt_ui_id("sl")) {
+            track_cmd = c;
+            break;
+        }
+    }
+    if (track_cmd == NULL) {
+        return false;
+    }
+    *track_left = track_cmd->boundingBox.x;
+    *track_right = track_cmd->boundingBox.x + track_cmd->boundingBox.width;
+    /* Fill = the image whose left edge matches the track and width is <= the track width but it
+     * is NOT the track itself (no id) and NOT the thumb (thumb is taller / left==track only at 0). */
+    *has_fill = false;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE || c == track_cmd) {
+            continue;
+        }
+        const Clay_BoundingBox b = c->boundingBox;
+        const bool track_tall = float_near(b.height, SL_H, 0.5F); /* fill is track-tall; thumb is SL_TH */
+        if (track_tall && float_near(b.x, *track_left, 0.5F)) {
+            *fill_left = b.x;
+            *fill_right = b.x + b.width;
+            *has_fill = true;
+            return true;
+        }
+    }
+    return true; /* no fill (ratio 0) is valid */
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_fill_inside_track_all_ratios(void) {
+    const float ratios[] = {0.0F, 0.05F, 0.18F, 0.5F, 0.95F, 1.0F};
+    for (size_t ri = 0; ri < sizeof ratios / sizeof ratios[0]; ++ri) {
+        float value = ratios[ri];
+        warmup_float(&value, 0.0F, 1.0F);
+        nt_pointer_t idle = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+        (void)slider_float_frame(&idle, &value, 0.0F, 1.0F, 0.0F, true);
+
+        float tl = 0.0F;
+        float tr = 0.0F;
+        float fl = 0.0F;
+        float fr = 0.0F;
+        bool has_fill = false;
+        TEST_ASSERT_TRUE(find_track_and_fill(&tl, &tr, &fl, &fr, &has_fill));
+        TEST_ASSERT_TRUE(float_near(tl, SL_X, 0.5F));
+        TEST_ASSERT_TRUE(float_near(tr, SL_X + SL_W, 0.5F));
+
+        if (ratios[ri] <= 0.0F) {
+            TEST_ASSERT_FALSE(has_fill); /* ratio 0 reveals nothing */
+            continue;
+        }
+        TEST_ASSERT_TRUE(has_fill);
+        /* Left edge anchored to the track; right edge == track_left + ratio*track_w; never past the track. */
+        TEST_ASSERT_TRUE(float_near(fl, tl, 0.5F));
+        TEST_ASSERT_TRUE(float_near(fr, tl + (ratios[ri] * SL_W), 0.5F));
+        TEST_ASSERT_TRUE(fl >= tl - 0.5F);
+        TEST_ASSERT_TRUE(fr <= tr + 0.5F);
+    }
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -344,6 +414,7 @@ int main(void) {
     RUN_TEST(test_disabled_no_drag);
     RUN_TEST(test_disabled_mid_drag_no_resume_jump);
     RUN_TEST(test_style_defaults_valid_baseline);
+    RUN_TEST(test_fill_inside_track_all_ratios);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);

@@ -165,9 +165,10 @@ static const nt_ui_checkbox_style_t g_radio_tmpl = {
         },
 };
 
-/* ---- slider: grey slice9 track + green slice9 fill + circular thumb ----
- * Reuses the toggle art (track_off pill, track_on pill, thumb circle). Hover/pressed
- * tint the thumb; STRETCH fill grows the green pill from the left. */
+/* ---- slider: recessed slice9 track + green slice9 fill + circular thumb ----
+ * Track + fill MUST be the matched bar pair (same 6px corner radius / 8px slice9) so the
+ * rounded fill caps nest inside the track groove; a radius mismatch makes the fill poke past
+ * the rounded ends at low/max ratios. Hover/pressed tint the thumb. */
 static const nt_ui_slider_style_t g_slider_tmpl = {
     .track_w = 320,
     .track_h = 18,
@@ -348,10 +349,10 @@ static void init_widget_styles(void) {
     s_switch.checked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
     s_switch.checked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
 
-    /* Slider: grey track + SMOOTH slice9 fill (replaces track_on; the rounded smooth pill
-     * stretches cleanly at low width, fixing the slice9 end-cap overlap the user saw) + thumb. */
+    /* Slider: bar_track groove + matched bar_fill_smooth fill (same 6px radius / 8px slice9 so
+     * the rounded fill caps nest inside the track instead of poking past the ends) + thumb. */
     s_slider = g_slider_tmpl;
-    s_slider.states[NT_UI_SLIDER_IDLE].track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
+    s_slider.states[NT_UI_SLIDER_IDLE].track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
     s_slider.states[NT_UI_SLIDER_IDLE].fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SMOOTH.value);
     s_slider.states[NT_UI_SLIDER_IDLE].thumb = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
 
