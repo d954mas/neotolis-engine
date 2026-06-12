@@ -146,6 +146,17 @@ static void test_registry_engine_and_game_defs_coexist(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- Test 4b: registering the same id twice in one frame traps (duplicate-id death-test) ----
+ * Catches the cryptic Clay "element already declared" class at the registration site instead. */
+static void test_registry_duplicate_id_traps(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_BUTTON_DEF, NULL);
+    /* Second register of the SAME id this frame must fire NT_ASSERT. */
+    NT_TEST_EXPECT_ASSERT(nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_IMAGE_DEF, NULL));
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 5: nt_ui_button declaration auto-tags BUTTON ---- */
 static void test_button_widget_auto_tagged(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -1903,6 +1914,7 @@ int main(void) {
     RUN_TEST(test_registry_collision_linear_probe);
     RUN_TEST(test_registry_id_zero_dropped);
     RUN_TEST(test_registry_engine_and_game_defs_coexist);
+    RUN_TEST(test_registry_duplicate_id_traps);
     RUN_TEST(test_button_widget_auto_tagged);
     RUN_TEST(test_panel_widget_tagged);
     RUN_TEST(test_image_widget_tagged);

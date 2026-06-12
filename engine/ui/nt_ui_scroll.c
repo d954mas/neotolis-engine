@@ -207,17 +207,46 @@ static float s_last_bar_opacity[2] = {0.0F, 0.0F}; /* per-axis eased fade opacit
 #endif
 // #endregion
 
-/* Is the framebuffer-px point (px,py) inside the scroll container's layout bbox?
- * Uses Clay's persistent hashmap (PREVIOUS frame's bbox) — scroll_begin runs during
- * declaration, so this frame's bbox is not solved yet (the 1-frame lag we accept).
- * 2D ctx: capture press_pos (UI-space px) and bbox (Clay Y-down px) align. */
-static bool point_in_bbox(uint32_t id, float px, float py) {
+/* The container's prev-frame layout bbox, fetched ONCE per scroll_begin / pane_offset call and
+ * threaded down to every hit-test (drag-check, wheel-gather, bar origin) so Clay_GetElementData
+ * runs a single time per container per frame. found==false on frame 1 (bbox not solved yet) — the
+ * 1-frame lag we accept; callers treat !found as "no hit". */
+typedef struct {
+    Clay_BoundingBox box;
+    bool found;
+} nt_scroll_bbox_t;
+
+static inline nt_scroll_bbox_t scroll_fetch_bbox(uint32_t id) {
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
-    if (!d.found) {
+    return (nt_scroll_bbox_t){.box = d.boundingBox, .found = d.found};
+}
+
+/* Is the framebuffer-px point (px,py) inside the (prev-frame) container bbox? !found -> false.
+ * 2D ctx: capture press_pos (UI-space px) and bbox (Clay Y-down px) align. */
+static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py) {
+    if (!bb->found) {
         return false;
     }
-    const Clay_BoundingBox bb = d.boundingBox;
-    return px >= bb.x && px <= (bb.x + bb.width) && py >= bb.y && py <= (bb.y + bb.height);
+    return px >= bb->box.x && px <= (bb->box.x + bb->box.width) && py >= bb->box.y && py <= (bb->box.y + bb->box.height);
+}
+
+/* The ONE wheel-gather path: accumulate enabled-axis wheel deltas from pointers hovering the
+ * container, in Clay's negative-down sign (vertical flips wheel_dy). Used by both scroll_begin
+ * and the internal pane helper so the loop + sign convention live in a single place. */
+static void scroll_gather_wheel(const nt_pointer_t *pointers, uint32_t count, const nt_scroll_bbox_t *bb, bool scroll_x, bool scroll_y, float out_wheel[2]) {
+    out_wheel[0] = 0.0F;
+    out_wheel[1] = 0.0F;
+    for (uint32_t i = 0; i < count; ++i) {
+        const nt_pointer_t *p = &pointers[i];
+        if ((p->wheel_dx != 0.0F || p->wheel_dy != 0.0F) && point_in_bbox(bb, p->x, p->y)) {
+            if (scroll_x) {
+                out_wheel[0] += p->wheel_dx;
+            }
+            if (scroll_y) {
+                out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
+            }
+        }
+    }
 }
 
 /* Route one incremental drag delta (drag_x, drag_y in fb px) into our offset/velocity.
@@ -274,7 +303,7 @@ static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_
  * Either way the per-frame delta routes into pos/vel and the anchor re-anchors so next frame's
  * delta is incremental, not cumulative. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s) {
+static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const nt_scroll_bbox_t *bb) {
     bool any_drag = false;
     bool any_free_press = false;
     const float dt = ctx->frame_dt;
@@ -284,7 +313,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
 
         if (inner_capture) {
             /* STEAL path: drag origin + cur pos come from the inner widget's capture. */
-            if (!point_in_bbox(id, cap->press_pos[0], cap->press_pos[1])) {
+            if (!point_in_bbox(bb, cap->press_pos[0], cap->press_pos[1])) {
                 continue;
             }
             float ddx = cap->pos[0] - cap->press_pos[0];
@@ -315,7 +344,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
         }
         const bool press_began = (s->flags & NT_UI_SCROLL_FLAG_FREE_PRESS) == 0U;
         if (press_began) {
-            if (!point_in_bbox(id, p->x, p->y)) {
+            if (!point_in_bbox(bb, p->x, p->y)) {
                 continue; /* press landed outside the container — not our gesture */
             }
             s->free_press_pos[0] = p->x;
@@ -452,7 +481,8 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
  * scroll container, handles thumb-drag/track-click, and drives the AUTO_HIDE fade with
  * ONE nt_ui_anim call on the bar's derived id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2]) {
+static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2],
+                                const nt_scroll_bbox_t *cbb) {
     const float clen = container[axis];
     const float ccontent = content[axis];
     if (clen <= 0.0F) {
@@ -468,12 +498,11 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     const float thumb_len = scrollbar_thumb_len(track_len, ccontent, clen, style->bar_thumb_min_px);
     const float thumb_off = scrollbar_thumb_pos(s->pos[axis], ccontent, clen, track_len, thumb_len);
 
-    /* Bar origin in the container's local space (floating attaches at the container edge).
-     * Read boundingBox only when found — frame 1 (layout unsolved) leaves it garbage. */
-    const Clay_ElementData cd = Clay_GetElementData((Clay_ElementId){.id = scroll_id});
+    /* Bar origin in the container's local space (floating attaches at the container edge). Reuse the
+     * container bbox cached by scroll_begin (one fetch/frame); frame 1 (!found) leaves it at 0. */
     float bar_origin = 0.0F;
-    if (cd.found) {
-        bar_origin = (axis == 1) ? cd.boundingBox.y : cd.boundingBox.x;
+    if (cbb->found) {
+        bar_origin = (axis == 1) ? cbb->box.y : cbb->box.x;
     }
 
     bool dragging = false;
@@ -552,12 +581,13 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
 }
 
 /* Emits enabled-axis scrollbars as floating children of the open scroll container. */
-static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2]) {
+static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2],
+                           const nt_scroll_bbox_t *cbb) {
     if (style->scroll_x) {
-        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container);
+        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container, cbb);
     }
     if (style->scroll_y) {
-        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container);
+        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container, cbb);
     }
 }
 
@@ -585,22 +615,15 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
+    /* One bbox fetch per container per frame — shared by drag-check, wheel-gather, and bar origin. */
+    const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
+
     /* Drag arbitration (steal + free-press) updates DRAGGING + routes drag delta before integrate. */
-    scroll_drag_check(ctx, id, style, s);
+    scroll_drag_check(ctx, id, style, s, &cbb);
 
     /* Wheel: only the container the pointer is over receives it (Clay sign = -wheel_dy). */
-    float wheel[2] = {0.0F, 0.0F};
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        if ((p->wheel_dx != 0.0F || p->wheel_dy != 0.0F) && point_in_bbox(id, p->x, p->y)) {
-            if (style->scroll_x) {
-                wheel[0] += p->wheel_dx;
-            }
-            if (style->scroll_y) {
-                wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
-            }
-        }
-    }
+    float wheel[2];
+    scroll_gather_wheel(ctx->frame_pointers, ctx->frame_pointer_count, &cbb, style->scroll_x, style->scroll_y, wheel);
 
     float tun[NT_UI_SCROLL_T_COUNT];
     style_to_tunables(style, tun);
@@ -618,7 +641,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 
     /* Scrollbars float over the container edges (escape the clip, no layout cost). They
      * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. */
-    scrollbar_emit(ctx, id, style, s, content, container);
+    scrollbar_emit(ctx, id, style, s, content, container, &cbb);
 
 #ifdef NT_TEST_ACCESS
     s_last_child_offset[0] = s->pos[0];
@@ -670,22 +693,19 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    /* Wheel only when the pointer is over THIS pane (prev-frame bbox), Clay negative-down sign. */
-    float wheel[2] = {0.0F, 0.0F};
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        if ((p->wheel_dx != 0.0F || p->wheel_dy != 0.0F) && point_in_bbox(id, p->x, p->y)) {
-            if (scroll_x) {
-                wheel[0] += p->wheel_dx;
-            }
-            if (scroll_y) {
-                wheel[1] += -p->wheel_dy;
-            }
-        }
-    }
+    /* Wheel only when the pointer is over THIS pane (one bbox fetch), Clay negative-down sign. */
+    const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
+    float wheel[2];
+    scroll_gather_wheel(ctx->frame_pointers, ctx->frame_pointer_count, &cbb, scroll_x, scroll_y, wheel);
 
-    /* Instant wheel, no overscroll: wheel_ease 0 -> pos snaps to target, rubber/bounce 0. */
-    const float tun[NT_UI_SCROLL_T_COUNT] = {0.92F, 0.0F, 0.0F, 0.0F, 40.0F};
+    /* Instant wheel, no overscroll: wheel_ease 0 -> pos snaps to target, rubber/bounce 0. Named
+     * index so the tunable order is compiler-checked (no positional divergence trap). */
+    float tun[NT_UI_SCROLL_T_COUNT] = {0};
+    tun[NT_UI_SCROLL_T_FRICTION] = 0.92F;
+    tun[NT_UI_SCROLL_T_WHEEL_EASE] = 0.0F;
+    tun[NT_UI_SCROLL_T_RUBBER_C] = 0.0F;
+    tun[NT_UI_SCROLL_T_BOUNCE] = 0.0F;
+    tun[NT_UI_SCROLL_T_WHEEL_STEP] = 40.0F;
     scroll_integrate(s, wheel, ctx->frame_dt, content, container, tun);
     return (Clay_Vector2){.x = s->pos[0], .y = s->pos[1]};
 }

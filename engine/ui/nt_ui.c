@@ -493,6 +493,16 @@ static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, ui
     return 0U;
 }
 
+/* Registry is cleared each nt_ui_begin, so a slot already holding this id == a duplicate
+ * registration THIS frame. Trap here (the id is in hand) instead of letting Clay reject the
+ * duplicate element id deep in the solver with a cryptic "already declared" message. */
+static void widget_assert_not_dup(const nt_ui_widget_slot_t *s, uint32_t id, const nt_ui_widget_def_t *def) {
+    if (s->id == id) {
+        nt_log_error("nt_ui_widget_register: widget id %u ('%s') already registered this frame (duplicate id)", id, def->name);
+        NT_ASSERT(s->id != id && "nt_ui_widget_register: widget id already registered this frame (duplicate id — see logged id; give the second widget its own id)");
+    }
+}
+
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
@@ -501,6 +511,7 @@ void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget
     }
     const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
     nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    widget_assert_not_dup(s, id, def);
     s->id = id;
     s->def = def;
     if (pad_lrtb != NULL) {

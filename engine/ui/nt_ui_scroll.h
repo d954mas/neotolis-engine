@@ -34,7 +34,9 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 /* A free pointer (no widget capture) is mid-press inside the bbox; free_press_pos is its anchor. */
 #define NT_UI_SCROLL_FLAG_FREE_PRESS ((uint8_t)(1U << 2))
 /* A drag gesture has crossed the threshold and latched: the dead-zone is consumed, so subsequent
- * frames route the FULL per-frame delta 1:1 (only the latching frame subtracts the threshold). */
+ * frames route the FULL per-frame delta 1:1 (only the latching frame subtracts the threshold).
+ * Per-CONTAINER (not per-pointer): two simultaneous touches on one container share this latch — the
+ * second touch inherits the first's latched state (known multi-touch limitation, single-touch by design). */
 #define NT_UI_SCROLL_FLAG_DRAG_LATCHED ((uint8_t)(1U << 3))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
