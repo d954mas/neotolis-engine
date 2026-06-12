@@ -53,10 +53,15 @@ enum {
 #define NT_UI_SCROLL_VEL_EPS 0.5F
 /* Below this |target-pos| scroll-to/wheel-ease has arrived. */
 #define NT_UI_SCROLL_POS_EPS 0.25F
-/* Release-fling velocity sample: EMA-smooth the per-frame sample so a single dt hitch can't
- * explode it, and hard-clamp the magnitude. A still (zero-delta) frame hard-zeroes instead of
- * leaking the EMA, preserving the no-fling-after-hold contract. */
-#define NT_UI_SCROLL_VEL_EMA 0.6F
+/* Release-fling velocity tracked over a TIME WINDOW (iOS/Android VelocityTracker), not per-frame:
+ * mouse events arrive slower than render frames, so a fast drag alternates moving / zero-delta
+ * frames. Hard-zeroing on a zero-delta frame made the fling a lottery on the release frame's
+ * parity. Instead a moving frame blends toward the instantaneous sample, a zero-delta frame DECAYS
+ * toward 0 — both with dt-based factors so the window is wall-time, not frame, defined.
+ * TAU_GAIN small -> snappy build; TAU_DECAY ~20ms keeps a single empty frame's velocity (fling
+ * survives event quantization) yet drains a real ~100ms+ hold below the fling threshold. */
+#define NT_UI_SCROLL_VEL_TAU_GAIN 0.03F
+#define NT_UI_SCROLL_VEL_TAU_DECAY 0.02F
 #define NT_UI_SCROLL_VEL_MAX 8000.0F
 /* A tap on a flinging container faster than this (px/s) stops the fling and is swallowed (iOS). */
 #define NT_UI_SCROLL_FLING_STOP_PX 50.0F
@@ -294,16 +299,20 @@ static void scroll_gather_wheel(const nt_pointer_t *pointers, uint32_t count, co
     }
 }
 
-/* EMA-smooth + clamp one axis' release-fling velocity sample. A moving frame blends the new
- * sample (delta/dt) into the prior vel so a single dt hitch can't explode it, then hard-clamps the
- * magnitude. A still frame (zero delta) HARD-ZEROES — not an EMA leak — so a finger held still
- * before release produces no fling (preserves the no-fling-after-hold contract). dt<=0 has no fresh
- * sample either, so it also zeroes (a prior fling can't leak past this drag frame). */
+/* Time-windowed release-fling velocity for one axis. A moving frame blends toward the instantaneous
+ * sample (delta/dt) with a dt-based gain so a dt hitch can't explode it, then clamps the magnitude.
+ * A zero-delta frame DECAYS toward 0 with a dt-based factor (NOT a hard-zero): one empty frame keeps
+ * most of the velocity so a fling survives the mouse arriving slower than the render loop, while a
+ * sustained hold drains below the fling threshold. dt<=0 has no fresh sample and no wall time to
+ * decay over, so it hard-zeroes (a prior fling can't leak past this drag frame). */
 static float scroll_sample_vel(float prev_vel, float delta, float dt) {
-    if (dt <= 0.0F || delta == 0.0F) {
+    if (dt <= 0.0F) {
         return 0.0F;
     }
-    float v = prev_vel + (((delta / dt) - prev_vel) * NT_UI_SCROLL_VEL_EMA);
+    if (delta == 0.0F) {
+        return prev_vel - (prev_vel * (1.0F - expf(-dt / NT_UI_SCROLL_VEL_TAU_DECAY)));
+    }
+    float v = prev_vel + (((delta / dt) - prev_vel) * (1.0F - expf(-dt / NT_UI_SCROLL_VEL_TAU_GAIN)));
     if (v > NT_UI_SCROLL_VEL_MAX) {
         v = NT_UI_SCROLL_VEL_MAX;
     } else if (v < -NT_UI_SCROLL_VEL_MAX) {
@@ -314,7 +323,7 @@ static float scroll_sample_vel(float prev_vel, float delta, float dt) {
 
 /* Route one incremental drag delta (drag_x, drag_y in fb px) into the RAW scroll pos (1:1,
  * accumulates even past the edge — the integrator rubber-bands raw->display each frame). vel is
- * SAMPLED (EMA + clamp) for the release fling; see scroll_sample_vel for the still-frame contract. */
+ * SAMPLED (time-windowed + clamp) for the release fling; see scroll_sample_vel for the decay contract. */
 static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_t *style, float drag_x, float drag_y, float dt) {
     if (style->scroll_x) {
         s->raw[0] += drag_x;

@@ -134,8 +134,8 @@ static void test_scroll_wheel_sign(void) {
 /* ---- Container frame helper: a 200x200 scroll over 200x1000 content (y overflows). ---- */
 static const uint32_t SCROLL_ID = 0x5C0011U;
 
-static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+static void scroll_frame_dt(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float dt) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         {
@@ -146,6 +146,8 @@ static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
     }
     nt_ui_end(s_fx.ctx);
 }
+
+static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) { scroll_frame_dt(p, style, 1.0F / 60.0F); }
 
 /* ---- Test 6: wheel applied ONCE — one notch moves childOffset by the wheel contribution ---- */
 static void test_scroll_wheel_applied_once(void) {
@@ -836,7 +838,10 @@ static void test_scroll_release_after_hold_no_fling(void) {
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
     const float pos_at_release = s->pos[1];
-    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F)); /* still finger -> zero sampled vel */
+    /* A genuine hold drains the time-windowed velocity below the integrator's dead-momentum eps
+     * (0.5 px/s), so the fling branch never fires on release -> no fling. (We pin the contract —
+     * vel is dead — not the exact decay value; time-windowed tracking never hard-zeroes a frame.) */
+    TEST_ASSERT_TRUE(fabsf(s->vel[1]) < 0.5F); /* held still -> momentum dead (below VEL_EPS) */
     /* Release; the post-release frames must not fling (settles at the release point). */
     p.buttons[NT_BUTTON_LEFT].is_down = false;
     p.buttons[NT_BUTTON_LEFT].is_released = true;
@@ -888,12 +893,16 @@ static void test_scroll_held_no_momentum_midhold(void) {
     nt_ui_scroll_state_t *s = held_drag_to(&p, &style, 40.0F);
     TEST_ASSERT_NOT_NULL(s);
     const float pos_after_drag = s->pos[1];
-    /* First held-still frame: vel samples to ~0; pos must NOT advance by the prior fling velocity. */
+    const float vel_after_drag = fabsf(s->vel[1]);
+    /* First held-still frame: pos must NOT advance by the prior fling velocity (the DRAGGING branch
+     * owns pos as a pure function of finger position; vel is read only at release). */
     scroll_frame(&p, &style);
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
     TEST_ASSERT_TRUE(float_near(s->pos[1], pos_after_drag, 0.001F)); /* no momentum step mid-hold */
-    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F));           /* vel sampled to zero on the still frame */
+    /* A single still frame DECAYS the time-windowed velocity (never hard-zeroes — that parity-zero
+     * was the flaky-fling bug); the genuine-hold drain to zero is covered by the release tests. */
+    TEST_ASSERT_TRUE(fabsf(s->vel[1]) < vel_after_drag); /* still frame bleeds momentum, not a spike */
 }
 
 /* ================= Gesture ownership (one owner per pointer, claimed at the down edge) ================= */
@@ -1375,6 +1384,54 @@ static void test_scroll_content_shrink_clamps_pos(void) {
     TEST_ASSERT_TRUE(float_near(s.pos[1], -200.0F, 1.0F));
 }
 
+/* ---- Test 44 (flaky-fling fix): at high FPS the mouse posts events slower than the render loop, so
+ *      a fast drag alternates a moving frame with a zero-delta frame. Releasing ON a zero-delta frame
+ *      must STILL fling. The old hard-zero-on-still-frame sampler zeroed velocity on the release frame
+ *      -> no fling (the lottery the user hit). Time-windowed tracking keeps it. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_fling_survives_release_on_zero_delta_frame(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    const float dt = 1.0F / 144.0F; /* high refresh: mouse events lag the render loop */
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame_dt(&p, &style, dt); /* establish bbox + state cell */
+
+    /* Press inside the container (empty content -> free press, no widget capture). */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame_dt(&p, &style, dt);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* Fast drag UP, but the pointer only ADVANCES on alternating frames: a 10 px move frame is
+     * followed by a zero-delta (mouse-quantized) frame. The whole gesture stays held DOWN. */
+    float y = 100.0F;
+    for (int i = 0; i < 12; ++i) {
+        y -= 10.0F;
+        p.y = y;
+        scroll_frame_dt(&p, &style, dt); /* move frame */
+        scroll_frame_dt(&p, &style, dt); /* zero-delta frame (pointer unchanged) */
+    }
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] < -1.0F); /* the drag scrolled */
+    /* The loop ended on a zero-delta frame: under the old hard-zero sampler vel is now 0 here. */
+
+    /* RELEASE while the last sampled frame was a zero-delta one. A real fling must follow. */
+    const float pos_at_release = s->pos[1];
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scroll_frame_dt(&p, &style, dt);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    for (int i = 0; i < 30; ++i) {
+        scroll_frame_dt(&p, &style, dt);
+    }
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] < pos_at_release - 1.0F); /* flung past the release point (no parity lottery) */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -1420,5 +1477,6 @@ int main(void) {
     RUN_TEST(test_scrollbar_thumb_grab_offset_no_jump);
     RUN_TEST(test_scroll_overscroll_depth_fps_independent);
     RUN_TEST(test_scroll_content_shrink_clamps_pos);
+    RUN_TEST(test_scroll_fling_survives_release_on_zero_delta_frame);
     return UNITY_END();
 }
