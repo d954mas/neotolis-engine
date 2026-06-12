@@ -341,14 +341,11 @@ static void test_fill_inside_track_all_ratios(void) {
         TEST_ASSERT_TRUE(float_near(tl, SL_X, 0.5F));
         TEST_ASSERT_TRUE(float_near(tr, SL_X + SL_W, 0.5F));
 
-        if (ratios[ri] <= 0.0F) {
-            TEST_ASSERT_FALSE(has_fill); /* ratio 0 reveals nothing */
-            continue;
-        }
         TEST_ASSERT_TRUE(has_fill);
-        /* Left edge anchored to the track; right edge == track_left + ratio*track_w; never past the track. */
+        /* Left edge anchored to the track; right edge == THUMB CENTER (fill meets the knob,
+         * never fraction*track_w — the thumb travels inset by thumb_w/2); never past the track. */
         TEST_ASSERT_TRUE(float_near(fl, tl, 0.5F));
-        TEST_ASSERT_TRUE(float_near(fr, tl + (ratios[ri] * SL_W), 0.5F));
+        TEST_ASSERT_TRUE(float_near(fr, SL_X_AT_FRAC(ratios[ri]), 0.5F));
         TEST_ASSERT_TRUE(fl >= tl - 0.5F);
         TEST_ASSERT_TRUE(fr <= tr + 0.5F);
     }
