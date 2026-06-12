@@ -274,7 +274,8 @@ static uint32_t s_id_wheel_ease;
 static uint32_t s_id_scroll_hide;
 static uint32_t s_id_scroll_always;
 static uint32_t s_id_scroll_to_btn;
-static uint32_t s_id_inner_btn;
+static uint32_t s_id_inner_btn_hide;
+static uint32_t s_id_inner_btn_always;
 static uint32_t s_inner_btn_hits;
 
 /* Stable widget ids (loc-safe — derived from key strings, not labels). */
@@ -430,7 +431,7 @@ static void slider_drag_bubble(uint32_t id, const char *value_text) {
 /* One scroll list: 24 rows of labels + one capture-steal button inside, with the
  * chosen scrollbar visibility. id selects the AUTO_HIDE vs ALWAYS style. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_list(uint32_t id, const nt_ui_scroll_style_t *style, const char *title) {
+static void scroll_list(uint32_t id, uint32_t inner_btn_id, const nt_ui_scroll_style_t *style, const char *title) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
 
@@ -445,7 +446,7 @@ static void scroll_list(uint32_t id, const nt_ui_scroll_style_t *style, const ch
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
                 /* A button INSIDE the scroller demonstrates capture-steal (tap clicks, drag scrolls). */
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .padding = {.left = 10, .right = 10}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_inner_btn, &s_button,
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), inner_btn_id, &s_button,
                                        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
                                        true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tap me (drag scrolls)", &g_help_style);
@@ -524,8 +525,8 @@ static void declare_widgets_panel(void) {
         section_label("Scroll (fling / rubber-band / wheel)");
 
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-            scroll_list(s_id_scroll_hide, &s_scroll_hide, "AUTO_HIDE bar");
-            scroll_list(s_id_scroll_always, &s_scroll_always, "ALWAYS bar");
+            scroll_list(s_id_scroll_hide, s_id_inner_btn_hide, &s_scroll_hide, "AUTO_HIDE bar");
+            scroll_list(s_id_scroll_always, s_id_inner_btn_always, &s_scroll_always, "ALWAYS bar");
         }
 
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .padding = {.top = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
@@ -578,7 +579,8 @@ static void declare_menu(void) {
         s_id_scroll_hide = nt_ui_id("scroll/list_autohide");
         s_id_scroll_always = nt_ui_id("scroll/list_always");
         s_id_scroll_to_btn = nt_ui_id("scroll/to_top");
-        s_id_inner_btn = nt_ui_id("scroll/inner_btn");
+        s_id_inner_btn_hide = nt_ui_id("scroll/inner_btn_hide");
+        s_id_inner_btn_always = nt_ui_id("scroll/inner_btn_always");
         s_ids_ready = true;
     }
 
