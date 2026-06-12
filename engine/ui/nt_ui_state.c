@@ -11,7 +11,10 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
     NT_ASSERT(id != 0U && "nt_ui_state: id 0 reserved (empty-slot sentinel)");
     NT_ASSERT(size <= (uint32_t)NT_UI_STATE_PAYLOAD_MAX && "nt_ui_state: size > payload max; store a game-owned pointer instead (D-59-09)");
 
+    /* Two passes over the window: clear() leaves holes mid-chain, so the id must be searched
+     * in the FULL window before claiming an earlier hole (else one id lands in two cells). */
     const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
+    nt_ui_state_cell_t *first_empty = NULL;
     for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
         nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
         if (c->id == id) {
@@ -19,13 +22,16 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
             NT_ASSERT(c->tag == tag && "nt_ui_state: id reused by a different widget tag (two widgets colliding on one id)");
             return c->payload;
         }
-        if (c->id == 0U) {
-            c->id = id;
-            c->size = size;
-            c->tag = tag;
-            memset(c->payload, 0, sizeof c->payload);
-            return c->payload;
+        if (c->id == 0U && first_empty == NULL) {
+            first_empty = c;
         }
+    }
+    if (first_empty != NULL) {
+        first_empty->id = id;
+        first_empty->size = size;
+        first_empty->tag = tag;
+        memset(first_empty->payload, 0, sizeof first_empty->payload);
+        return first_empty->payload;
     }
     /* No eviction: the game clears on screen close or raises NT_UI_STATE_SLOTS. */
     NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise NT_UI_STATE_SLOTS (D-59-07)");
@@ -37,14 +43,12 @@ void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id) {
     if (id == 0U) {
         return NULL;
     }
+    /* Full-window scan — clear() leaves holes mid-chain, an early empty does NOT mean absent. */
     const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
     for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
         nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
         if (c->id == id) {
             return c->payload;
-        }
-        if (c->id == 0U) {
-            return NULL; /* empty cell in the probe chain => id absent */
         }
     }
     return NULL;
@@ -60,9 +64,6 @@ bool nt_ui_state_has_tag(const nt_ui_context_t *ctx, uint32_t id, uint32_t tag) 
         const nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
         if (c->id == id) {
             return c->tag == tag;
-        }
-        if (c->id == 0U) {
-            return false;
         }
     }
     return false;
@@ -82,9 +83,6 @@ void nt_ui_state_clear(nt_ui_context_t *ctx, uint32_t id) {
             c->size = 0U;
             c->tag = 0U;
             return;
-        }
-        if (c->id == 0U) {
-            return; /* absent */
         }
     }
 }

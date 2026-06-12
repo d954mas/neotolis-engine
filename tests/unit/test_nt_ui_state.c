@@ -168,6 +168,30 @@ static void test_assert_probe_overflow(void) {
 
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
+/* ---- clear() leaves a hole mid probe-chain: the LATER colliding cell must stay reachable,
+ *      and a fresh acquire of an unrelated id may reuse the hole without duplicating ids. ---- */
+static void test_state_clear_hole_keeps_chain_reachable(void) {
+    const uint32_t id_a = 5U;
+    const uint32_t id_b = 5U + (uint32_t)NT_UI_STATE_SLOTS; /* same base slot, probes past A */
+    (void)nt_ui_state(s_fx.ctx, id_a, 8U, T_TAG);
+    uint32_t *b = (uint32_t *)nt_ui_state(s_fx.ctx, id_b, 8U, T_TAG);
+    b[0] = 0xC0FFEE01U;
+
+    nt_ui_state_clear(s_fx.ctx, id_a); /* hole at B's chain head */
+
+    uint32_t *b_found = (uint32_t *)nt_ui_state_find(s_fx.ctx, id_b);
+    TEST_ASSERT_NOT_NULL(b_found);
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE01U, b_found[0]);
+    /* Re-acquire must return the SAME live cell (not claim the hole and zero a duplicate). */
+    uint32_t *b_again = (uint32_t *)nt_ui_state(s_fx.ctx, id_b, 8U, T_TAG);
+    TEST_ASSERT_EQUAL_PTR(b_found, b_again);
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE01U, b_again[0]);
+    TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, id_b, T_TAG));
+    /* clear() must also reach an id behind a hole. */
+    nt_ui_state_clear(s_fx.ctx, id_b);
+    TEST_ASSERT_NULL(nt_ui_state_find(s_fx.ctx, id_b));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_state_create_returns_zeroed);
@@ -177,6 +201,7 @@ int main(void) {
     RUN_TEST(test_state_clear_all_empties);
     RUN_TEST(test_state_open_address_coexists);
     RUN_TEST(test_state_zero_size_payload);
+    RUN_TEST(test_state_clear_hole_keeps_chain_reachable);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_size_mismatch);
     RUN_TEST(test_assert_tag_mismatch);
