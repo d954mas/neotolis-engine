@@ -211,17 +211,21 @@ If a decision can be deferred without loss of base architecture — it is deferr
   Symmetrically, a widget that interacted last frame but is gone or disabled this
   frame stays a hot candidate for that ONE transition frame (it can gate widgets
   beneath it but itself reacts to nothing), then orphan cleanup drops it next frame.
-  A statically-disabled widget never registers, so never gates.
+  A statically-disabled widget never registers, so never gates — unless it opts in via
+  `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
+  same record `step_interaction` makes, minus any interaction). It blocks input to widgets
+  behind it but never captures, clicks, or reports hover — the stock disabled widgets
+  (button/checkbox/slider) call it so a disabled overlay or modal can't leak clicks through.
 
   **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
   visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
-  default 64); 4-probe chain; full-chain collision evicts the LAST
-  probed slot (snap-reseed, easing lost for one id). Tail eviction
-  spreads pressure across the probe window — evicting the base would
-  let the very next caller hashing to the same bucket re-evict the new
-  entry, thrashing the cache. The `anim_collision_count` monotonic
-  counter surfaces this degradation; game polls the delta to size
-  `NT_UI_ANIM_SLOTS`.
+  default 64); 4-probe chain; full-chain collision evicts the STALEST
+  slot in the probe window — the one with the oldest `last_touch`
+  generation tick (snap-reseed, easing lost for one id). Evicting by
+  staleness rather than blindly the tail avoids bleeding a slot that
+  was already touched this frame between widgets sharing the window.
+  The `anim_collision_count` monotonic counter surfaces this
+  degradation; game polls the delta to size `NT_UI_ANIM_SLOTS`.
 
   **State pool.** `nt_ui_state(ctx, id, size, tag)` is a generic per-widget-id
   retained-state pool — the durable counterpart of the anim cache. It returns a
@@ -282,11 +286,22 @@ If a decision can be deferred without loss of base architecture — it is deferr
   rubber-band + critically-damped bounce-back (`rubber_band_c` / `bounce_speed`),
   smooth wheel (ease toward target by `wheel_ease_speed`, 0 = instant, no teleport),
   and animated `nt_ui_scroll_to`. Per-container scroll state (pos/vel/target/flags)
-  rides the state pool keyed by the scroll id; no heap. Capture-steal-by-threshold
+  rides the state pool keyed by the scroll id; no heap. Wheel routing is exclusive
+  (innermost-wins): each frame every scroll container registers as a candidate, and
+  ownership is resolved at frame END — for each pointer the engine picks the candidate
+  whose just-solved bbox holds it (ranked by max scroll-nesting depth, then smallest
+  area, then latest declaration) and writes a single owner per pointer. That owner is
+  consumed the NEXT frame, so wheel routing carries a 1-frame lag: a newly shown
+  container sees its first wheel notch one frame late (the same intrinsic IM lag as
+  hit-test, which reads the previous frame's bbox). Capture-steal-by-threshold
   (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
   scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
-  below it leaves the inner widget to click. The scrollbar (2-piece slice9 track +
-  thumb, both axes) emits as floating children of the container with
+  below it leaves the inner widget to click. On the latch frame the steal routes zero
+  positional delta (the inner widget already applied it), tracking 1:1 from the next
+  frame; the cancelled inner widget keeps any value change it made before the steal
+  (Model D — the value lives in the game, so the engine cannot revert it). The
+  scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children of
+  the container with
   ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE fades via one `nt_ui_anim`
   value_t). This replaces the v1.7-era assumption that Clay drives scroll; the
   "Scissor limitation" note below still holds (AABB clip of a rotated scroll
