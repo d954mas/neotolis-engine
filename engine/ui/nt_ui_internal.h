@@ -95,6 +95,27 @@ static inline Clay_Color nt_ui_unpack_tint(uint32_t packed) { return (packed == 
  * else `fallback`. Keyed on atlas.id (region 0 is a valid index, so it can't double as "unset"). */
 static inline nt_atlas_region_ref_t nt_ui_ref_or(nt_atlas_region_ref_t ref, nt_atlas_region_ref_t fallback) { return (ref.atlas.id != 0U) ? ref : fallback; }
 
+/* Shared scalar clamps for the widget TUs (fill/progress/scroll/slider). */
+static inline float nt_ui_clampf(float v, float lo, float hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
+static inline int nt_ui_clampi(int v, int lo, int hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     nt_ui_baked_xform_t bx = {

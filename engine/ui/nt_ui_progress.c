@@ -17,16 +17,6 @@ const nt_ui_widget_def_t NT_UI_PROGRESS_DEF = {
     ._reserved = 0U,
 };
 
-static inline float progress_clamp01(float v) {
-    if (v < 0.0F) {
-        return 0.0F;
-    }
-    if (v > 1.0F) {
-        return 1.0F;
-    }
-    return v;
-}
-
 /* Scratch element_data carrying layer + whole-widget opacity (no transform). */
 static nt_ui_element_data_t *progress_make_data(void *user_data, uint8_t layer, float opacity) {
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
@@ -70,10 +60,10 @@ void nt_ui_progress(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     nt_atlas_resolve_ref(&style->fill);
 
     // #region one anim call (value_t ease toward the clamped target)
-    const float target = progress_clamp01(value_0_to_1);
+    const float target = nt_ui_clampf(value_0_to_1, 0.0F, 1.0F);
     nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = style->opacity, .value_t = target};
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->value_speed);
-    const float eased_ratio = progress_clamp01(a->value_t);
+    const float eased_ratio = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     const float widget_opacity = (a->opacity >= 0.0F) ? a->opacity : style->opacity;
     // #endregion
 

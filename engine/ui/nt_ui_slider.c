@@ -41,44 +41,24 @@ typedef struct {
     uint8_t _pad[4];
 } nt_ui_slider_view_t;
 
-static inline float slider_clampf(float v, float lo, float hi) {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
-
 /* Linear position->value map, clamped to [min,max]. usable_w = track_w - thumb_w. */
 static float slider_pos_to_value(float pointer_x, float track_left, float usable_w, float thumb_w, float min, float max) {
     const float thumb_left = pointer_x - track_left - (thumb_w * 0.5F);
-    const float frac = (usable_w > 0.0F) ? slider_clampf(thumb_left / usable_w, 0.0F, 1.0F) : 0.0F;
+    const float frac = (usable_w > 0.0F) ? nt_ui_clampf(thumb_left / usable_w, 0.0F, 1.0F) : 0.0F;
     return min + ((max - min) * frac);
 }
 
 /* step != 0 quantizes value onto the min + k*step grid; 0 = continuous. */
 static float slider_quantize(float value, float min, float max, float step) {
     if (step <= 0.0F) {
-        return slider_clampf(value, min, max);
+        return nt_ui_clampf(value, min, max);
     }
     const float k = roundf((value - min) / step);
-    return slider_clampf(min + (k * step), min, max);
+    return nt_ui_clampf(min + (k * step), min, max);
 }
 
 /* Value -> [0,1] fraction over [min,max]; degenerate min==max collapses to 0. */
-static inline float slider_value_to_frac(float value, float min, float max) { return (max != min) ? slider_clampf((value - min) / (max - min), 0.0F, 1.0F) : 0.0F; }
-
-static inline int slider_clampi(int v, int lo, int hi) {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
+static inline float slider_value_to_frac(float value, float min, float max) { return (max != min) ? nt_ui_clampf((value - min) / (max - min), 0.0F, 1.0F) : 0.0F; }
 
 /* Scratch element_data with optional opacity (no transform). */
 static nt_ui_element_data_t *slider_make_data(void *user_data, uint8_t layer, float opacity) {
@@ -269,7 +249,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     }
     // #endregion
     // #region drag math (press-ON-thumb grab vs track jump)
-    float frac = slider_clampf(in_frac, 0.0F, 1.0F);
+    float frac = nt_ui_clampf(in_frac, 0.0F, 1.0F);
     if (enabled && (in.pressed_now || in.pressed)) {
         frac = slider_resolve_drag(ctx, id, &in, style, frac, min, max);
     } else {
@@ -279,7 +259,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     /* Snap the fraction onto the value grid BEFORE it feeds anim/view/compose so the thumb + fill
      * land on the same tick as the emitted value (no continuous-thumb / snapped-value mismatch). */
     if (step_frac > 0.0F) {
-        frac = slider_clampf(roundf(frac / step_frac) * step_frac, 0.0F, 1.0F);
+        frac = nt_ui_clampf(roundf(frac / step_frac) * step_frac, 0.0F, 1.0F);
     }
     // #endregion
     // #region one anim call (state group + value_t)
@@ -301,7 +281,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, vspeed);
     /* During a drag vspeed=0 so eased_frac == the snapped frac (thumb/fill/bubble agree on the tick);
      * a game-driven change keeps the smooth ease toward the already-quantized target. */
-    const float eased_frac = slider_clampf(a->value_t, 0.0F, 1.0F);
+    const float eased_frac = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     // #endregion
 
     /* Persist the eased fraction + thumb geometry so const-ctx thumb_pos can recover it. */
@@ -322,7 +302,7 @@ bool nt_ui_slider_float(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(value != NULL && "nt_ui_slider_float: value must be non-NULL");
     NT_ASSERT(isfinite(step) && step >= 0.0F && "nt_ui_slider_float: step must be finite >= 0");
     const bool out_of_range = (*value < min) || (*value > max); /* clamp-and-writeback on first frame */
-    const float in_frac = slider_value_to_frac(slider_clampf(*value, min, max), min, max);
+    const float in_frac = slider_value_to_frac(nt_ui_clampf(*value, min, max), min, max);
     const float step_frac = (step > 0.0F) ? (step / (max - min)) : 0.0F;
     bool changed = false;
     const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, min, max, step_frac, style, decl, enabled, &changed);
@@ -345,7 +325,7 @@ bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     const float fmin = (float)min;
     const float fmax = (float)max;
     const bool out_of_range = (*value < min) || (*value > max); /* clamp-and-writeback on first frame */
-    const float in_frac = slider_value_to_frac((float)slider_clampi(*value, min, max), fmin, fmax);
+    const float in_frac = slider_value_to_frac((float)nt_ui_clampi(*value, min, max), fmin, fmax);
     const float fstep = (step > 0) ? (float)step : 1.0F; /* int slider always quantizes to >= 1 */
     const float step_frac = fstep / (fmax - fmin);
     bool changed = false;

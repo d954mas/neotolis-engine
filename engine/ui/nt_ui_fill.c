@@ -8,16 +8,6 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 
-static inline float fill_clamp01(float v) {
-    if (v < 0.0F) {
-        return 0.0F;
-    }
-    if (v > 1.0F) {
-        return 1.0F;
-    }
-    return v;
-}
-
 /* Scratch element_data carrying layer + opacity (no transform). */
 static nt_ui_element_data_t *fill_make_data(uint8_t layer, float opacity) {
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
@@ -60,7 +50,7 @@ void nt_ui_fill_emit(nt_ui_context_t *ctx, uint8_t layer, nt_atlas_region_ref_t 
     NT_ASSERT(isfinite(track_w) && track_w > 0.0F && isfinite(track_h) && track_h > 0.0F && "nt_ui_fill_emit: track_w/h must be finite > 0");
     NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_fill_emit: opacity must be finite in [0,1]");
 
-    const float r = fill_clamp01(ratio);
+    const float r = nt_ui_clampf(ratio, 0.0F, 1.0F);
 
     /* No-art terminal: resolve in place; skip the whole emit when there is no region. */
     nt_atlas_resolve_ref(fill_ref);

@@ -66,16 +66,6 @@ enum {
  * Tuned so total overshoot depth is dt-invariant, then the bounce spring settles the rest. */
 #define NT_UI_SCROLL_OVERSCROLL_DECAY 0.55F
 
-static inline float scroll_clampf(float v, float lo, float hi) {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
-
 /* iOS UIScrollView rubber-band: compresses large overscroll asymptotically.
  * d = raw over-edge distance, dim = container dimension on that axis, c ~ 0.55. */
 static float nt_ui_rubber_band(float d, float dim, float c) {
@@ -115,7 +105,7 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
          * momentum so the easing branch picks up the new target THIS frame (no swallowed notch). */
         if (wheel[a] != 0.0F) {
             s->target[a] += wheel[a] * wheel_step;
-            s->target[a] = scroll_clampf(s->target[a], lo, hi);
+            s->target[a] = nt_ui_clampf(s->target[a], lo, hi);
             s->vel[a] = 0.0F;
             activity = true;
         }
@@ -141,7 +131,7 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
         if (easing) {
             /* wheel_ease 0 = instant (matches nt_ui_anim speed-0 convention), no teleport otherwise. */
             float k = (wheel_ease <= 0.0F) ? 1.0F : wheel_ease * dt;
-            k = scroll_clampf(k, 0.0F, 1.0F);
+            k = nt_ui_clampf(k, 0.0F, 1.0F);
             s->pos[a] += (s->target[a] - s->pos[a]) * k;
             s->vel[a] = 0.0F; /* eased motion owns pos; momentum stands down */
         } else {
@@ -150,7 +140,7 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
             if (fabsf(s->vel[a]) > NT_UI_SCROLL_VEL_EPS) {
                 s->pos[a] += s->vel[a] * dt;
                 s->vel[a] *= powf(friction, dt * 60.0F);
-                s->target[a] = scroll_clampf(s->pos[a], lo, hi);
+                s->target[a] = nt_ui_clampf(s->pos[a], lo, hi);
                 activity = true; /* a fling in motion keeps the AUTO_HIDE bar awake */
             } else {
                 s->vel[a] = 0.0F;
@@ -172,18 +162,18 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
              * edge via the easing branch. Gated on solved dims: a frame-1 (container==0) read would
              * clamp a valid pending scroll-to target to 0. */
             if (container[a] > 0.0F) {
-                s->target[a] = scroll_clampf(s->target[a], lo, hi);
+                s->target[a] = nt_ui_clampf(s->target[a], lo, hi);
             }
             float kb = bounce * dt;
-            kb = scroll_clampf(kb, 0.0F, 1.0F);
+            kb = nt_ui_clampf(kb, 0.0F, 1.0F);
             s->pos[a] += (edge - s->pos[a]) * kb;
             if (fabsf(s->pos[a] - edge) < NT_UI_SCROLL_POS_EPS) {
                 s->pos[a] = edge;
             }
         } else {
             /* In-bounds: keep target inside so the next wheel/scroll-to starts clamped. */
-            s->target[a] = scroll_clampf(s->target[a], lo, hi);
-            s->pos[a] = scroll_clampf(s->pos[a], lo, hi);
+            s->target[a] = nt_ui_clampf(s->target[a], lo, hi);
+            s->pos[a] = nt_ui_clampf(s->pos[a], lo, hi);
         }
         /* raw tracks the settled pos so the NEXT drag anchors from the rest point (not a stale overdrag). */
         s->raw[a] = s->pos[a];
@@ -639,7 +629,7 @@ static float scrollbar_thumb_pos(float pos, float content, float container, floa
         return 0.0F;
     }
     float frac = -pos / over; /* 0 at top/left, 1 at bottom/right */
-    frac = scroll_clampf(frac, 0.0F, 1.0F);
+    frac = nt_ui_clampf(frac, 0.0F, 1.0F);
     return frac * (track_len - thumb_len);
 }
 
@@ -698,7 +688,7 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
              * thumb center so a continued drag from a track click maps from the thumb's middle. */
             s->thumb_grab = thumb_len * 0.5F;
             float frac = (press_a - bar_origin) / (track_len - thumb_len);
-            frac = scroll_clampf(frac, 0.0F, 1.0F);
+            frac = nt_ui_clampf(frac, 0.0F, 1.0F);
             const float target = -(frac * over);
             if (axis == 1) {
                 nt_ui_scroll_to(ctx, scroll_id, s->pos[0], target);
@@ -711,7 +701,7 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
         /* Held: map the pointer so the GRABBED point of the thumb stays under the cursor (true 1:1
          * thumb drag). Off-thumb track clicks seeded the grab to thumb-center above. */
         float frac = (pointer_a - bar_origin - s->thumb_grab) / (track_len - thumb_len);
-        frac = scroll_clampf(frac, 0.0F, 1.0F);
+        frac = nt_ui_clampf(frac, 0.0F, 1.0F);
         s->pos[axis] = -(frac * over);
         s->target[axis] = s->pos[axis];
         s->vel[axis] = 0.0F;
@@ -763,7 +753,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         const float fade_target = (active || dragging || hov.hovered) ? 1.0F : 0.0F;
         nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = fade_target};
         const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, bar_id, &tgt, 0.0F, style->bar_fade_speed);
-        opacity = scroll_clampf(a->value_t, 0.0F, 1.0F);
+        opacity = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     }
 #ifdef NT_TEST_ACCESS
     /* Single write site — geometry + opacity are final by here (incl. the faded case). */
