@@ -9,7 +9,7 @@
 void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag) {
     NT_ASSERT(ctx != NULL && "nt_ui_state: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_state: id 0 reserved (empty-slot sentinel)");
-    NT_ASSERT(size <= (uint32_t)NT_UI_STATE_PAYLOAD_MAX && "nt_ui_state: size > payload max; store a game-owned pointer instead (D-59-09)");
+    NT_ASSERT(size <= (uint32_t)NT_UI_STATE_PAYLOAD_MAX && "nt_ui_state: size > payload max; store a game-owned pointer instead");
 
     /* Two passes over the window: clear() leaves holes mid-chain, so the id must be searched
      * in the FULL window before claiming an earlier hole (else one id lands in two cells). */
@@ -18,7 +18,7 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
     for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
         nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
         if (c->id == id) {
-            NT_ASSERT(c->size == size && "nt_ui_state: id reused with a different size (D-59-08 — two widgets colliding on one id?)");
+            NT_ASSERT(c->size == size && "nt_ui_state: id reused with a different size (two widgets colliding on one id?)");
             NT_ASSERT(c->tag == tag && "nt_ui_state: id reused by a different widget tag (two widgets colliding on one id)");
             return c->payload;
         }
@@ -34,7 +34,7 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
         return first_empty->payload;
     }
     /* No eviction: the game clears on screen close or raises NT_UI_STATE_SLOTS. */
-    NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise NT_UI_STATE_SLOTS (D-59-07)");
+    NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise NT_UI_STATE_SLOTS");
     return NULL;
 }
 

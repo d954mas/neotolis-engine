@@ -82,7 +82,9 @@ void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
  * Formats into caller buf; the Clay row is emitted from the sidebar layout. */
 const char *nt_ui_internal_format_mem_line(const nt_ui_context_t *ctx, char *buf, size_t buf_size) {
     NT_ASSERT(ctx != NULL && buf != NULL && buf_size > 0U);
-    /* elems len/cap = live Clay element pressure; the inspector truncates its tree as len nears cap. */
+    /* elems len/cap = live Clay element pressure; the inspector truncates its tree as len nears cap.
+     * Sampled at header-emit time, so it undercounts the frame's final total (the inspector tree +
+     * panes are still emitted after this line). */
     (void)snprintf(buf, buf_size, "UI mem: %u/%u slots  %u B  anim_coll:%u  elems %d/%u", nt_ui_state_used_slots(ctx), (uint32_t)NT_UI_STATE_SLOTS, nt_ui_state_used_bytes(ctx),
                    nt_ui_get_anim_collision_count(ctx), nt_ui_internal_get_layout_element_count(ctx), ctx->max_elements);
     return buf;

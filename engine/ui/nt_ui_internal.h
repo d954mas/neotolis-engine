@@ -139,9 +139,11 @@ typedef struct {
     uint16_t depth; /* scroll-nesting depth; deeper (inner) wins */
 } nt_ui_wheel_candidate_t;
 
-/* Deep scroll nesting is rare; a small cap keeps the list in BSS (no heap in hot path). */
+/* Deep scroll nesting is rare; a small cap keeps the list in BSS (no heap in hot path).
+ * The DEBUG_TOOLS inspector registers 2 of these (tree + selection panes), so the effective
+ * game budget is this minus 2 when the inspector is active. */
 #ifndef NT_UI_WHEEL_CANDIDATES
-#define NT_UI_WHEEL_CANDIDATES 16
+#define NT_UI_WHEEL_CANDIDATES 24
 #endif
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */

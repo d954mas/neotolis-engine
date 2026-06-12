@@ -235,7 +235,7 @@ If a decision can be deferred without loss of base architecture — it is deferr
   `nt_ui_state_find` returns NULL if absent, and `nt_ui_state_clear` /
   `nt_ui_state_clear_all` drop one or all cells (e.g. a screen transition). It is
   BSS in the context (`NT_UI_STATE_SLOTS` × `NT_UI_STATE_PAYLOAD_MAX`, defaults
-  64 × 64 B, `NT_UI_STATE_PROBE_MAX` probe window), no heap — direct-mapped +
+  256 × 64 B ≈ 19 KB/ctx, `NT_UI_STATE_PROBE_MAX` probe window), no heap — direct-mapped +
   linear-probe like the anim cache, but with **no LRU eviction**: a cell dies only
   via clear or context destroy. This no-eviction property is the contract that
   makes the game-owned-pointer escape hatch leak-safe — for an oversize payload the

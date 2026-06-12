@@ -380,7 +380,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const nt_pointer_t *primary = &pointers[0];
 
 #if NT_UI_DEBUG_TOOLS
-    /* Pure coord check — frame-1 safe, no layout solve required. */
+    /* Pure coord check — frame-1 safe, no layout solve required. Single-touch contract: only
+     * pointer 0 gates the inspector sidebar (a debug tool is not driven multi-touch). */
     ctx->inspector_pointer_consumed = false;
     if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
         ctx->inspector_pointer_consumed = true;
