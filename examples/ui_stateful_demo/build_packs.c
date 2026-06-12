@@ -31,6 +31,11 @@
 #define TRACK_BORDER_X 24
 #define TRACK_BORDER_Y 16
 
+/* bar_track / bar_fill_smooth are 192x32 pills. 8px slice9 stays small enough that the
+ * fill never end-cap-overlaps even in the 18px-tall slider track or a narrow low-value fill
+ * (8+8 < both target dims) — this is the low-width distortion the user saw, fixed. */
+#define BAR_BORDER 8
+
 static char s_path_buf[512];
 
 static const char *pack_path(const char *dir, const char *name) {
@@ -128,7 +133,26 @@ int main(int argc, char *argv[]) {
     opts.name = "thumb";
     nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/thumb.png", &opts);
 
-    (void)printf("  Atlas: box/check + ring/dot + track_off/on (s9 %dx%d) + thumb\n", TRACK_BORDER_X, TRACK_BORDER_Y);
+    /* Progress-bar art (issue 4): a recessed track + two fills demoing STRETCH vs CROP.
+     * bar_track + bar_fill_smooth are slice9 pills (rounded ends fixed when stretched);
+     * bar_fill_shaped (diagonal candy stripes) gets NO slice9 — CROP reveals it undistorted. */
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "bar_track";
+    opts.slice9_left = BAR_BORDER;
+    opts.slice9_right = BAR_BORDER;
+    opts.slice9_top = BAR_BORDER;
+    opts.slice9_bottom = BAR_BORDER;
+    nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/bar_track.png", &opts);
+
+    opts.name = "bar_fill_smooth";
+    nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/bar_fill_smooth.png", &opts);
+
+    /* Shaped CROP fill: no slice9 (a partial reveal is geometrically incompatible with slice9). */
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "bar_fill_shaped";
+    nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/bar_fill_shaped.png", &opts);
+
+    (void)printf("  Atlas: box/check + ring/dot + track_off/on (s9 %dx%d) + thumb + bar track/fills\n", TRACK_BORDER_X, TRACK_BORDER_Y);
 
     /* White pixel for UI rects (panel backgrounds, inspector sidebar). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
