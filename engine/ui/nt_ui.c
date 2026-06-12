@@ -330,8 +330,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
         ctx->capture_seen[i] = 0U;
         ctx->pointer_hot[i] = (nt_ui_hot_t){0}; /* resolved lazily on first step/query this frame */
         ctx->pointer_occlusion[i] = INFINITY;   /* game re-feeds per frame; default = no cutoff */
-        ctx->wheel_owner[i] = 0U;               /* exclusive wheel routing re-arms each frame */
+        /* wheel_owner[] is NOT reset here — it carries the prev-frame end-of-frame resolution into
+         * this frame's consume (innermost-wins, 1-frame lag). It's rewritten in nt_ui_end. */
     }
+    /* New frame of wheel candidates; depth counter re-zeroes (begin++/end-- balance across the frame). */
+    ctx->wheel_candidate_count = 0U;
+    ctx->wheel_depth = 0U;
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
 
@@ -414,6 +418,9 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     const double build_t0 = nt_time_now();
     nt_ui_internal_build_tree(ctx);
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
+
+    /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
+    nt_ui_internal_resolve_wheel_owners(ctx);
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;

@@ -160,9 +160,11 @@ static void test_scroll_wheel_applied_once(void) {
     p.x = 100.0F; /* inside the 200x200 container */
     p.y = 100.0F;
     p.active = true;
-    /* Frame 1: establish layout + content dims (no wheel). */
+    /* Frame 1 solves the bbox; frame 2's end-of-frame resolve then grants this pointer's wheel owner
+     * (innermost-wins routing has a 1-frame ownership lag, same as every prev-frame bbox hit-test). */
     scroll_frame(&p, &style);
-    /* Frame 2: one wheel notch down. */
+    scroll_frame(&p, &style);
+    /* Frame 3: one wheel notch down — the owner resolved at frame 2's end now lets us consume it. */
     p.wheel_dy = 1.0F; /* input-edge negates to Clay -1 -> target -40 */
     scroll_frame(&p, &style);
 
@@ -1563,6 +1565,154 @@ static void test_scroll_wheel_no_broadcast_under_churn(void) {
     TEST_ASSERT_TRUE(moved >= 1);
 }
 
+/* ================= Innermost-wins routing (#190 — nested + tie-break) ================= */
+
+static const uint32_t NEST_OUTER_ID = 0x5CF001U;
+static const uint32_t NEST_INNER_ID = 0x5CF002U;
+
+/* Outer scroll (300x300 clip over 300x1000 content); an INNER scroll (200x200 over 200x800 content)
+ * sits at the TOP-LEFT of the outer's content via real nt_ui_scroll_begin nesting. At rest both
+ * childOffsets are 0, so the inner occupies outer-screen [0,200]x[0,200] and the band x>200 (or
+ * y>200) is outer-only. The pointer is parked by the caller. */
+static void nested_scroll_frame(nt_pointer_t *p) {
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("nest-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, NEST_OUTER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
+        {
+            CLAY({.id = CLAY_ID("nest-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                /* Inner scroll pinned to the content's top-left corner. */
+                nt_ui_scroll_begin(s_fx.ctx, NULL, NEST_INNER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+                {
+                    CLAY({.id = CLAY_ID("nest-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(800)}}}) {}
+                }
+                nt_ui_scroll_end(s_fx.ctx);
+            }
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 46 (innermost-wins): pointer over the INNER nested scroll routes the wheel to the INNER
+ *      container ONLY; the outer must not move. FAILS on outermost-wins (the old claim-as-you-go code
+ *      gave the wheel to the first-declared outer container). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_wheel_nested_innermost_wins(void) {
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 100.0F; /* inside the inner ([0,200]x[0,200]) AND the outer */
+    p.y = 100.0F;
+
+    /* Warm-up: frame 1 solves the bboxes, frame 2's end-of-frame resolve grants the owner (1-frame
+     * ownership lag — same as every prev-frame bbox hit-test). */
+    nested_scroll_frame(&p);
+    nested_scroll_frame(&p);
+
+    /* Wheel for several frames so the eased inner offset accumulates clearly. */
+    for (int i = 0; i < 20; ++i) {
+        p.wheel_dy = 1.0F;
+        nested_scroll_frame(&p);
+    }
+    p.wheel_dy = 0.0F;
+
+    nt_ui_scroll_state_t *outer = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, NEST_OUTER_ID);
+    nt_ui_scroll_state_t *inner = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, NEST_INNER_ID);
+    TEST_ASSERT_NOT_NULL(outer);
+    TEST_ASSERT_NOT_NULL(inner);
+    TEST_ASSERT_TRUE(inner->pos[1] < -1.0F);                 /* the INNER scrolled */
+    TEST_ASSERT_TRUE(float_near(outer->pos[1], 0.0F, 0.5F)); /* the OUTER stayed put (innermost won) */
+}
+
+/* ---- Test 47 (nested, outer band): pointer over the outer but OUTSIDE the inner routes to the
+ *      OUTER (the inner's bbox does not hold the pointer, so only the outer candidate wins). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_wheel_nested_outer_band(void) {
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 250.0F; /* x>200: inside the outer, OUTSIDE the inner (inner spans x[0,200]) */
+    p.y = 100.0F;
+
+    nested_scroll_frame(&p);
+    nested_scroll_frame(&p);
+    for (int i = 0; i < 20; ++i) {
+        p.wheel_dy = 1.0F;
+        nested_scroll_frame(&p);
+    }
+    p.wheel_dy = 0.0F;
+
+    nt_ui_scroll_state_t *outer = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, NEST_OUTER_ID);
+    nt_ui_scroll_state_t *inner = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, NEST_INNER_ID);
+    TEST_ASSERT_NOT_NULL(outer);
+    TEST_ASSERT_NOT_NULL(inner);
+    TEST_ASSERT_TRUE(outer->pos[1] < -1.0F);                 /* the OUTER scrolled */
+    TEST_ASSERT_TRUE(float_near(inner->pos[1], 0.0F, 0.5F)); /* the inner never received the wheel */
+}
+
+/* Two SAME-DEPTH overlapping scroll containers (both direct children of root, neither nested in the
+ * other): a BIG one declared FIRST, then a SMALL one FLOATING over the big's top-left corner so their
+ * bboxes genuinely overlap there (the deterministic stand-in for the stale-bbox overlap the routing
+ * must arbitrate). The pointer sits in the overlap. Declaration order (BIG first) is deliberately the
+ * OPPOSITE of the area order so only the smaller-area rule can pick the small one. */
+static const uint32_t TIE_BIG_ID = 0x5CF101U;
+static const uint32_t TIE_SMALL_ID = 0x5CF102U;
+
+static void tie_break_frame(nt_pointer_t *p) {
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("tie-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(400)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, TIE_BIG_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(400)}}});
+        {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(1200)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+        /* SMALL floats over the root's top-left so it overlaps BIG's [0,400]x[0,400] in [0,120]x[0,120]. */
+        nt_ui_scroll_begin(s_fx.ctx, NULL, TIE_SMALL_ID, &style,
+                           &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(120)}},
+                                                      .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}}});
+        {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(600)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 48 (tie-break): two SAME-DEPTH candidates whose bboxes overlap the parked pointer -> the
+ *      SMALLER-area one receives the wheel, and ONLY one does. Declaration order favours the big one,
+ *      so a pass proves area (not order) decides the tie. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_wheel_tie_break_smaller_area(void) {
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 60.0F; /* inside the overlap [0,120]x[0,120] of both BIG and the floating SMALL */
+    p.y = 60.0F;
+
+    /* Warm-up so the bboxes solve and the end-of-frame resolve grants the owner (1-frame lag). */
+    tie_break_frame(&p);
+    tie_break_frame(&p);
+
+    uint32_t max_recipients = 0U;
+    for (int f = 0; f < 20; ++f) {
+        p.wheel_dy = 1.0F;
+        nt_ui_scroll_test_wheel_recipients_reset();
+        tie_break_frame(&p);
+        const uint32_t got = nt_ui_scroll_test_wheel_recipients();
+        if (got > max_recipients) {
+            max_recipients = got;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(got <= 1U, "tie-break: wheel reached more than one same-depth container");
+    }
+    TEST_ASSERT_TRUE(max_recipients <= 1U);
+
+    nt_ui_scroll_state_t *big = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, TIE_BIG_ID);
+    nt_ui_scroll_state_t *small = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, TIE_SMALL_ID);
+    TEST_ASSERT_NOT_NULL(big);
+    TEST_ASSERT_NOT_NULL(small);
+    TEST_ASSERT_TRUE(small->pos[1] < -1.0F);               /* the smaller-area overlapping container won */
+    TEST_ASSERT_TRUE(float_near(big->pos[1], 0.0F, 0.5F)); /* the bigger sibling never received it */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -1610,5 +1760,8 @@ int main(void) {
     RUN_TEST(test_scroll_content_shrink_clamps_pos);
     RUN_TEST(test_scroll_fling_survives_release_on_zero_delta_frame);
     RUN_TEST(test_scroll_wheel_no_broadcast_under_churn);
+    RUN_TEST(test_scroll_wheel_nested_innermost_wins);
+    RUN_TEST(test_scroll_wheel_nested_outer_band);
+    RUN_TEST(test_scroll_wheel_tie_break_smaller_area);
     return UNITY_END();
 }

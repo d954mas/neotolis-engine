@@ -281,18 +281,31 @@ static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py)
     return px >= bb->box.x && px <= (bb->box.x + bb->box.width) && py >= bb->box.y && py <= (bb->box.y + bb->box.height);
 }
 
-/* The ONE wheel-gather path: accumulate enabled-axis wheel deltas from pointers hovering the
- * container, in Clay's negative-down sign (vertical flips wheel_dy). Used by both scroll_begin
- * and the internal pane helper so the loop + sign convention live in a single place.
+/* Inspector panes float above the game UI, so they enter the wheel resolve above any plausible game
+ * scroll nesting (deep nests are rare and capped by NT_UI_WHEEL_CANDIDATES). */
+#define NT_UI_WHEEL_INSPECTOR_DEPTH 1000U
+
+/* Register this container as a wheel candidate for end-of-frame resolution (innermost-wins). The bbox
+ * is re-fetched at resolve from the just-solved layout (so resolve + next-frame consume agree), hence
+ * only id/depth are recorded. Depth is the live scroll-nesting counter so a candidate inside another
+ * scroll outranks its parent. */
+static void scroll_register_wheel_candidate(nt_ui_context_t *ctx, uint32_t scroll_id) {
+    if (ctx->wheel_candidate_count >= NT_UI_WHEEL_CANDIDATES) {
+        return; /* cap reached: deeper nests than the (rare) limit fall back to no extra candidate */
+    }
+    nt_ui_wheel_candidate_t *c = &ctx->wheel_candidates[ctx->wheel_candidate_count++];
+    c->id = scroll_id;
+    c->depth = ctx->wheel_depth;
+}
+
+/* The ONE wheel-consume path: accumulate enabled-axis wheel deltas from pointers hovering the
+ * container, in Clay's negative-down sign (vertical flips wheel_dy). Used by both scroll_begin and
+ * the internal pane helper so the loop + sign convention live in a single place.
  *
- * Exclusive routing (D-59 wheel-broadcast fix): each pointer's wheel goes to AT MOST ONE container
- * per frame. ctx->wheel_owner[i] records the scroll id that already consumed pointer i this frame;
- * the FIRST container under the pointer (declaration order = outermost / earliest sibling) claims
- * it, and every later container whose (prev-frame) bbox also holds the pointer sees a foreign claim
- * and takes nothing. Without this, a STALE bbox (a container that just vacated its slot, still
- * returned found=true by Clay_GetElementData) overlapping a sibling that reflowed into that space
- * routed one notch to BOTH — the "wheel scrolls every list for a frame" bug. The bbox must also be
- * sane (found, w>0, h>0): a zeroed-but-found entry must never pass the hit test. */
+ * Innermost-wins routing (#190): a pointer's wheel goes to AT MOST ONE container per frame. The
+ * winner was resolved at the END of the PREVIOUS frame from the full candidate list (max nesting
+ * depth, then smallest bbox, then latest declaration) into ctx->wheel_owner[i]; here we simply
+ * consume when that owner is us. The bbox guard still gates a frame-1 lag / zeroed stale entry. */
 static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_scroll_bbox_t *bb, bool scroll_x, bool scroll_y, float out_wheel[2]) {
     out_wheel[0] = 0.0F;
     out_wheel[1] = 0.0F;
@@ -304,13 +317,12 @@ static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const 
         if (p->wheel_dx == 0.0F && p->wheel_dy == 0.0F) {
             continue; /* no notch on this pointer */
         }
+        if (ctx->wheel_owner[i] != scroll_id) {
+            continue; /* prev-frame resolve gave this pointer to a different (or no) container */
+        }
         if (!point_in_bbox(bb, p->x, p->y)) {
-            continue; /* pointer not over this container */
+            continue; /* owner moved off us since the resolve (e.g. pointer left) -> no consume */
         }
-        if (ctx->wheel_owner[i] != 0U && ctx->wheel_owner[i] != scroll_id) {
-            continue; /* another container already owns this pointer's wheel this frame */
-        }
-        ctx->wheel_owner[i] = scroll_id; /* claim: later containers under the same pointer get nothing */
         if (scroll_x) {
             out_wheel[0] += p->wheel_dx;
         }
@@ -318,6 +330,40 @@ static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const 
             out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
         }
     }
+}
+
+/* End-of-frame resolve: for each pointer, the winning candidate is the one whose bbox holds the
+ * pointer, ranked (max depth, then min area, then latest declaration). The bbox is re-fetched from the
+ * just-solved layout so it matches what next frame's consume reads (one shared snapshot, no drift). A
+ * candidate whose freshly-solved bbox is not sane (frame-1 lag / dropped) simply never wins. Latest
+ * declaration is the natural list order, so `<=` on area lets a later equal-best candidate override. */
+void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_resolve_wheel_owners: ctx must be non-NULL");
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        uint32_t best_id = 0U;
+        uint16_t best_depth = 0U;
+        float best_area = 0.0F;
+        for (uint32_t k = 0; k < ctx->wheel_candidate_count; ++k) {
+            const nt_ui_wheel_candidate_t *c = &ctx->wheel_candidates[k];
+            const nt_scroll_bbox_t bb = scroll_fetch_bbox(c->id);
+            if (!bb.found || bb.box.width <= 0.0F || bb.box.height <= 0.0F) {
+                continue; /* unsolved/zeroed this frame -> can't own */
+            }
+            if (!point_in_bbox(&bb, p->x, p->y)) {
+                continue;
+            }
+            const float area = bb.box.width * bb.box.height;
+            if (best_id == 0U || c->depth > best_depth || (c->depth == best_depth && area <= best_area)) {
+                best_id = c->id; /* <= on area lets a later equal-area candidate (latest declaration) win */
+                best_depth = c->depth;
+                best_area = area;
+            }
+        }
+        ctx->wheel_owner[i] = best_id;
+    }
+    /* Pointers beyond frame_pointer_count keep their stale owner; harmless (no consume without a notch),
+     * and the next begin overwrites frame_pointers before the next consume reads them. */
 }
 
 /* Time-windowed release-fling velocity for one axis. A moving frame blends toward the instantaneous
@@ -819,10 +865,16 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* One bbox fetch per container per frame — shared by drag-check, wheel-gather, and bar origin. */
     const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
 
+    /* Enter this container's scroll-nesting level; matched by the decrement in scroll_end. A nested
+     * scroll thus registers at a deeper depth than its parent so it wins the end-of-frame resolve. */
+    ++ctx->wheel_depth;
+
     /* Drag arbitration (steal + free-press) updates DRAGGING + routes drag delta before integrate. */
     scroll_drag_check(ctx, id, style, s, &cbb, content, container);
 
-    /* Wheel: exactly one container per pointer per frame (exclusive routing; see scroll_gather_wheel). */
+    /* Register as a wheel candidate this frame; consume the wheel the prev-frame resolve granted us
+     * (innermost-wins, 1-frame lag — see scroll_gather_wheel / nt_ui_internal_resolve_wheel_owners). */
+    scroll_register_wheel_candidate(ctx, id);
     float wheel[2];
     scroll_gather_wheel(ctx, id, &cbb, style->scroll_x, style->scroll_y, wheel);
 #ifdef NT_TEST_ACCESS
@@ -866,6 +918,8 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 void nt_ui_scroll_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_scroll_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_scroll_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(ctx->wheel_depth > 0U && "nt_ui_scroll_end: unbalanced scroll_begin/scroll_end (wheel-nesting underflow)");
+    --ctx->wheel_depth; /* leave this container's scroll-nesting level (matches scroll_begin's ++) */
     nt_ui_clay_priv_close_element();
 }
 
@@ -900,8 +954,14 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
     /* Wheel only when the pointer is over THIS pane (one bbox fetch), Clay negative-down sign;
-     * exclusive routing claims the pointer so a stale/overlapping sibling can't double-scroll. */
+     * innermost-wins routing grants the pointer to exactly one container per frame. The inspector
+     * floats ON TOP of the game UI, so register at a depth above any plausible game scroll nesting
+     * — an open pane under the pointer beats whatever game container sits beneath it. */
     const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
+    const uint16_t saved_depth = ctx->wheel_depth;
+    ctx->wheel_depth = NT_UI_WHEEL_INSPECTOR_DEPTH;
+    scroll_register_wheel_candidate(ctx, id);
+    ctx->wheel_depth = saved_depth;
     float wheel[2];
     scroll_gather_wheel(ctx, id, &cbb, scroll_x, scroll_y, wheel);
 

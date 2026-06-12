@@ -109,6 +109,22 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
+/* Wheel-routing candidate (#190): every scroll container/pane declared this frame appends one. The
+ * bbox is NOT stored — nt_ui_end re-fetches it from the just-solved layout (Clay_GetElementData) so
+ * the resolve and next frame's consume read the SAME layout snapshot (no double-lag drift). Axis
+ * enablement is NOT stored either: ownership is decided purely by bbox containment (matching the old
+ * claim), and the per-axis gating lives in the consume step. The winner per pointer (max depth, then
+ * min bbox area, then latest declaration) lands in wheel_owner[], consumed NEXT frame — innermost. */
+typedef struct {
+    uint32_t id;
+    uint16_t depth; /* scroll-nesting depth; deeper (inner) wins */
+} nt_ui_wheel_candidate_t;
+
+/* Deep scroll nesting is rare; a small cap keeps the list in BSS (no heap in hot path). */
+#ifndef NT_UI_WHEEL_CANDIDATES
+#define NT_UI_WHEEL_CANDIDATES 16
+#endif
+
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -126,11 +142,16 @@ struct nt_ui_context {
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Exclusive wheel routing: the scroll id that consumed this pointer's wheel THIS frame (0 = free).
-     * The first scroll container whose prev-frame bbox holds the pointer claims it; every later
-     * container under the same pointer sees a foreign claim and ignores the wheel. Stops a stale
-     * (prev-frame) bbox overlapping a reflowed sibling from broadcasting one notch to both. */
+    /* Exclusive wheel routing (innermost-wins): the scroll id allowed to consume this pointer's wheel
+     * THIS frame (0 = free). Resolved at the END of the PREVIOUS frame from the full candidate list
+     * below (max depth, then min area, then latest declaration), so it persists one frame — the same
+     * 1-frame lag as every prev-frame bbox hit-test. Frame 1: all 0 -> nobody consumes (accepted). */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS];
+    /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
+     * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
+    nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
+    uint32_t wheel_candidate_count;
+    uint16_t wheel_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
@@ -340,5 +361,9 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
  * the custom scroll integrator off prev-frame dims + wheel. Feed the result to clip.childOffset.
  * `tag` keeps each pane's state cell distinct (NT_UI_STATE_TAG). */
 Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y);
+
+/* End-of-frame wheel-owner resolve: picks, per pointer, the winning scroll candidate (max depth,
+ * then min bbox area, then latest declaration) into ctx->wheel_owner[] for NEXT frame's consume. */
+void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
 
 #endif /* NT_UI_INTERNAL_H */
