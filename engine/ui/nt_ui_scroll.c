@@ -428,7 +428,7 @@ static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_
  * frame or begin's orphan-clear wipes them; on overlap the first to CLAIM (outermost) wins. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const nt_scroll_bbox_t *bb, const float content[2],
-                              const float container[2]) {
+                              const float container[2], bool inspector_owned) {
     /* Per-axis scrollability: a gesture only arms/steals on an axis that is BOTH enabled and can
      * actually move (content overflows). A container whose content fits takes no gestures at all,
      * so taps + drags pass through to inner widgets untouched (no no-op scroll stealing clicks). */
@@ -443,10 +443,25 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
     bool any_drag = false;
     bool any_free_press = false;
     const float dt = ctx->frame_dt;
+    /* The inspector floats on top: when its sidebar has consumed a pointer, a game container under it
+     * must not arm/steal/own that pointer (topmost owns input — same gate step_interaction uses). The
+     * inspector's own panes pass inspector_owned and bypass this. OFF builds have no inspector. */
+#if NT_UI_DEBUG_TOOLS
+    const bool pane_blocked = !inspector_owned && ctx->inspector_pointer_consumed;
+#else
+    const bool pane_blocked = false;
+    (void)inspector_owned;
+#endif
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
         const nt_pointer_t *p = &ctx->frame_pointers[i];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        if (pane_blocked) {
+            if (cap->active_id == id) {
+                cap->active_id = 0U; /* drop a gesture the inspector stole the pointer out from under */
+            }
+            continue;
+        }
 
         // #region OWNED: we already own this pointer's gesture
         if (cap->active_id == id) {
@@ -855,7 +870,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     ++ctx->wheel_depth;
 
     /* Drag arbitration (steal + free-press) updates DRAGGING + routes drag delta before integrate. */
-    scroll_drag_check(ctx, id, style, s, &cbb, content, container);
+    scroll_drag_check(ctx, id, style, s, &cbb, content, container, false);
 
     /* Register as a wheel candidate this frame; consume the wheel the prev-frame resolve granted us
      * (innermost-wins, 1-frame lag — see scroll_gather_wheel / nt_ui_internal_resolve_wheel_owners). */
@@ -921,8 +936,9 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y) {
     s->flags |= NT_UI_SCROLL_FLAG_SCROLL_TO;
 }
 
-/* Lightweight scroll for engine-internal clip panes (inspector) with no widget id / style / bar.
- * Drives the same integrator off prev-frame Clay dims + raw wheel, instant (no momentum/rubber).
+/* Lightweight scroll for engine-internal clip panes (inspector) with no widget style / bar. Drives
+ * the same integrator + drag gesture as game containers off prev-frame Clay dims: instant wheel,
+ * 1:1 pointer/touch drag with friction fling on release, hard edge clamp (no rubber/bounce).
  * MUST be called as a statement BEFORE the pane's clip element opens: the prev-frame
  * Clay_GetScrollContainerData entry is lost once sibling elements reuse the layout slots, so an
  * inline read in the .childOffset initializer returns zero dims. */
@@ -936,9 +952,16 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
+    const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
+
+    /* Same pointer/touch gesture as game containers: one drag implementation, reused. Only the axes
+     * matter to scroll_drag_check + scroll_route_drag; the synthetic style carries nothing else.
+     * inspector_owned=true: the pane is the topmost overlay, so it bypasses the sidebar-consume gate. */
+    const nt_ui_scroll_style_t drag_style = {.scroll_x = scroll_x, .scroll_y = scroll_y};
+    scroll_drag_check(ctx, id, &drag_style, s, &cbb, content, container, true);
+
     /* Wheel only when the pointer is over this pane (innermost-wins routing). The inspector floats
      * above the game UI, so register at a depth above any plausible game scroll nesting. */
-    const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
     const uint16_t saved_depth = ctx->wheel_depth;
     ctx->wheel_depth = NT_UI_WHEEL_INSPECTOR_DEPTH;
     scroll_register_wheel_candidate(ctx, id);
@@ -946,8 +969,9 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     float wheel[2];
     scroll_gather_wheel(ctx, id, &cbb, scroll_x, scroll_y, wheel);
 
-    /* Instant wheel, no overscroll: wheel_ease 0 -> pos snaps to target, rubber/bounce 0. Named
-     * index so the tunable order is compiler-checked (no positional divergence trap). */
+    /* Instant wheel, friction-based fling on release, hard edge clamp: wheel_ease 0 -> pos snaps to
+     * target; friction 0.92 lets a drag-release coast; rubber/bounce 0 so overscroll clamps hard (no
+     * spring in a debug pane). Named index so the tunable order is compiler-checked. */
     float tun[NT_UI_SCROLL_T_COUNT] = {0};
     tun[NT_UI_SCROLL_T_FRICTION] = 0.92F;
     tun[NT_UI_SCROLL_T_WHEEL_EASE] = 0.0F;

@@ -2098,6 +2098,192 @@ static void test_inspector_pane_wins_over_game_container(void) {
     TEST_ASSERT_TRUE_MESSAGE(game->pos[1] == 0.0F, "the game container under the pane must NOT scroll (exclusive)");
 }
 
+/* Same 200x200 pane as emit_scroll_pane_frame but driven by a caller-built pointer so a test can
+ * stage a multi-frame press -> drag -> release gesture (left button + position per frame). */
+static void emit_scroll_pane_drag_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), NT_UI_STATE_TAG('t', 's', 't', 'p'), false, true);
+        CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
+            CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Build a left-pressed pointer at (x,y) with the press/hold edge flags set explicitly. */
+static nt_pointer_t make_drag_pointer(float x, float y, bool is_pressed, bool is_down) {
+    nt_pointer_t p = make_pointer(x, y);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
+    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
+    return p;
+}
+
+/* ---- Pointer/touch drag past the threshold tracks the pane 1:1 (the wheel-only bug repro). ---- */
+static void test_inspector_pane_drag_tracks_1to1(void) {
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const uint32_t pane_id = nt_ui_id("scroll_pane_test");
+    const float px = 100.0F; /* inside the 200-wide pane */
+
+    /* Frame 1: idle, establishes prev-frame bbox + content dims. */
+    nt_pointer_t f1 = make_pointer(px, 100.0F);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
+
+    /* Frame 2: fresh press inside the pane -> free-press arms (delta accrues from next frame). */
+    nt_pointer_t f2 = make_drag_pointer(px, 100.0F, true, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
+
+    /* Frame 3: held, dragged 30px up -> crosses the 8px threshold and latches. The latch frame
+     * strips the threshold radius, so pos moves up by (30 - 8) = 22px in Clay's negative-down sign. */
+    nt_pointer_t f3 = make_drag_pointer(px, 70.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f3);
+    const nt_ui_scroll_state_t *s3 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s3);
+    TEST_ASSERT_TRUE_MESSAGE(s3->pos[1] < 0.0F, "drag up past threshold must move the pane offset negative");
+    const float after_latch = s3->pos[1];
+    /* 30px raw drag minus the 8px threshold radius stripped on the latch frame -> 22px (Clay down sign). */
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(after_latch - (-22.0F)) < 0.5F, "latch frame must route (drag - threshold) 1:1");
+
+    /* Frame 4: held, dragged a further 40px up -> latched, full per-frame delta routes 1:1. */
+    nt_pointer_t f4 = make_drag_pointer(px, 30.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f4);
+    const nt_ui_scroll_state_t *s4 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s4);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(s4->pos[1] - (after_latch - 40.0F)) < 0.5F, "latched frame must track the full per-frame delta 1:1");
+}
+
+/* ---- Release after a fast drag flings, then friction decays the offset to rest. ---- */
+static void test_inspector_pane_drag_release_flings(void) {
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const uint32_t pane_id = nt_ui_id("scroll_pane_test");
+    const float px = 100.0F;
+
+    /* Frame 1: idle bbox. */
+    nt_pointer_t f1 = make_pointer(px, 150.0F);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
+
+    /* Frame 2: press arms. */
+    nt_pointer_t f2 = make_drag_pointer(px, 150.0F, true, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
+
+    /* Frames 3-4: fast drag up (60px/frame) so the release-fling velocity sampler charges. */
+    nt_pointer_t f3 = make_drag_pointer(px, 90.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f3);
+    nt_pointer_t f4 = make_drag_pointer(px, 30.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f4);
+    const nt_ui_scroll_state_t *sdrag = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(sdrag);
+    const float at_release = sdrag->pos[1];
+
+    /* Frame 5: release (button up) -> drag ends, fling owns the rest. One coast frame must move past
+     * the release point (momentum carried), proving the fling exists (not just a hard stop). */
+    nt_pointer_t f5 = make_pointer(px, 30.0F);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f5);
+    const nt_ui_scroll_state_t *s5 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s5);
+    TEST_ASSERT_TRUE_MESSAGE(s5->pos[1] < at_release, "release after a fast drag must keep coasting (fling)");
+    const float after_first_coast = s5->pos[1];
+
+    /* Frames 6+: no input -> friction decays the fling; it must eventually settle (vel -> 0). */
+    for (int i = 0; i < 240; ++i) {
+        nt_pointer_t fi = make_pointer(px, 30.0F);
+        emit_scroll_pane_drag_frame(screen_w, screen_h, &fi);
+    }
+    const nt_ui_scroll_state_t *sN = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(sN);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(sN->vel[1]) < 1.0F, "fling must decay to rest under friction");
+    TEST_ASSERT_TRUE_MESSAGE(sN->pos[1] <= after_first_coast, "fling settles at or past the first coast point");
+}
+
+/* ---- A tap (below the 8px threshold) on a tree row still selects it: the pane's free-press
+ * doesn't swallow the Clay PRESSED_THIS_FRAME pick that drives inspector_selected_id. ---- */
+static void test_inspector_pane_tap_still_selects_row(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    /* Pointer over a tree row near the top of the pane (rows start just below the header). */
+    const float ptr_x = 1100.0F; /* inside the right-attached inspector tree pane */
+    const float ptr_y = 130.0F;
+
+    /* Frame 1: build the tree (named leaves -> scrollable rows) so prev-frame bboxes exist. */
+    nt_pointer_t f1 = make_pointer(ptr_x, ptr_y);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("tap_root")}) {
+        for (int i = 0; i < 40; ++i) {
+            CLAY({.id = CLAY_IDI("tap_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    s_fx.ctx->inspector_selected_id = 0U;
+
+    /* Frame 2: a tap (press, no movement -> below threshold) over a tree row must set a selection. */
+    nt_pointer_t f2 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("tap_root")}) {
+        for (int i = 0; i < 40; ++i) {
+            CLAY({.id = CLAY_IDI("tap_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+
+    TEST_ASSERT_TRUE_MESSAGE(s_fx.ctx->inspector_selected_id != 0U, "a tap on a tree row must still select it (pane free-press must not swallow the pick)");
+}
+
+/* ---- A drag inside the pane must NOT scroll a game container directly beneath it: the pane
+ * claims the capture (exclusivity), so the game scroll under the same pointer stays put. ---- */
+static const uint32_t DRAG_GAME_SCROLL_ID = 0x2B6D02U;
+static void inspector_drag_over_game_scroll_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("dragx_root")}) {
+        /* Full-width game scroll whose bbox spans under the right-attached inspector pane. */
+        nt_ui_scroll_begin(s_fx.ctx, NULL, DRAG_GAME_SCROLL_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(screen_h)}}});
+        {
+            CLAY({.id = CLAY_ID("dragx_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(4000.0F)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+        /* Many named leaves so the inspector tree pane overflows enough to be drag-scrollable. */
+        for (int i = 0; i < 600; ++i) {
+            CLAY({.id = CLAY_IDI("dragx_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_pane_drag_does_not_scroll_game(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float ptr_x = 1000.0F; /* over the inspector tree pane AND the full-width game scroll */
+    const float ptr_y = 400.0F;  /* below header + mem line, safely inside the tree pane */
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    /* Frames 1-2: idle so both panes solve their bbox + content dims. */
+    nt_pointer_t f1 = make_pointer(ptr_x, ptr_y);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f1);
+    nt_pointer_t f2 = make_pointer(ptr_x, ptr_y);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f2);
+
+    /* Frame 3: press arms the pane's free-press. */
+    nt_pointer_t f3 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f3);
+
+    /* Frames 4-5: drag up well past the threshold so the pane latches + scrolls. */
+    nt_pointer_t f4 = make_drag_pointer(ptr_x, ptr_y - 40.0F, false, true);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f4);
+    nt_pointer_t f5 = make_drag_pointer(ptr_x, ptr_y - 90.0F, false, true);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f5);
+
+    const nt_ui_scroll_state_t *pane = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    const nt_ui_scroll_state_t *game = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, DRAG_GAME_SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(pane);
+    TEST_ASSERT_NOT_NULL(game);
+    TEST_ASSERT_TRUE_MESSAGE(pane->pos[1] < 0.0F, "the inspector pane must scroll under the drag");
+    TEST_ASSERT_TRUE_MESSAGE(game->pos[1] == 0.0F, "the game container under the pane must NOT scroll on drag (pane claims the capture)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -2158,6 +2344,10 @@ int main(void) {
     RUN_TEST(test_inspector_budget_capped_on_large_scene);
     RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
     RUN_TEST(test_inspector_pane_wins_over_game_container);
+    RUN_TEST(test_inspector_pane_drag_tracks_1to1);
+    RUN_TEST(test_inspector_pane_drag_release_flings);
+    RUN_TEST(test_inspector_pane_tap_still_selects_row);
+    RUN_TEST(test_inspector_pane_drag_does_not_scroll_game);
     return UNITY_END();
 }
 
