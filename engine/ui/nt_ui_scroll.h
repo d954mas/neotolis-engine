@@ -31,13 +31,16 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_SCROLL_TO ((uint8_t)(1U << 0))
 /* A pointer is dragging this container (set by capture-steal); gates rubber-band. */
 #define NT_UI_SCROLL_FLAG_DRAGGING ((uint8_t)(1U << 1))
+/* A free pointer (no widget capture) is mid-press inside the bbox; free_press_pos is its anchor. */
+#define NT_UI_SCROLL_FLAG_FREE_PRESS ((uint8_t)(1U << 2))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
- * negative-down sign convention. ~28B; under NT_UI_STATE_PAYLOAD_MAX. */
+ * negative-down sign convention. ~36B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
-    float pos[2];    /* current offset fed to clip.childOffset */
-    float vel[2];    /* momentum velocity (px/s) */
-    float target[2]; /* smooth-wheel + scroll-to target */
+    float pos[2];            /* current offset fed to clip.childOffset */
+    float vel[2];            /* momentum velocity (px/s) */
+    float target[2];         /* smooth-wheel + scroll-to target */
+    float free_press_pos[2]; /* free-press drag anchor (re-anchored each frame; FREE_PRESS gates it) */
     uint8_t flags;
 } nt_ui_scroll_state_t;
 

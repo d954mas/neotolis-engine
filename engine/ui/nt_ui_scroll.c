@@ -220,51 +220,108 @@ static bool point_in_bbox(uint32_t id, float px, float py) {
     return px >= bb.x && px <= (bb.x + bb.width) && py >= bb.y && py <= (bb.y + bb.height);
 }
 
-/* Capture-steal (D-59-04, Pitfall 2): a pointer captured by an INNER widget whose drag
- * exceeds the threshold along a scrolling axis hands the gesture to the scroll container.
- * Clearing captures[i].active_id makes the inner widget's next step see released_now /
- * clicked=false (a cancel), and routes the drag delta into our velocity/pos. */
+/* Route one incremental drag delta (drag_x, drag_y in fb px) into our offset/velocity.
+ * dt<=0 has no fresh velocity — zero it so a prior fling's momentum can't leak past this
+ * drag frame (a stale vel would resume on release). */
+static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_t *style, float drag_x, float drag_y, float dt) {
+    if (style->scroll_x) {
+        s->pos[0] += drag_x;
+        s->vel[0] = (dt > 0.0F) ? (drag_x / dt) : 0.0F;
+    }
+    if (style->scroll_y) {
+        s->pos[1] += drag_y;
+        s->vel[1] = (dt > 0.0F) ? (drag_y / dt) : 0.0F;
+    }
+}
+
+/* A capture this container must NOT steal: its OWN scrollbar (floats inside the bbox, a thumb
+ * drag must reach the bar), or any nested scroll/scrollbar widget (the inner scroller owns its
+ * own gesture). nt_ui_widget_lookup keys off the widget def registered at that id last frame. */
+static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t cap_id) {
+    if (cap_id == scrollbar_id(scroll_id, 0) || cap_id == scrollbar_id(scroll_id, 1)) {
+        return true;
+    }
+    const nt_ui_widget_def_t *def = nt_ui_widget_lookup(ctx, cap_id);
+    return def == &NT_UI_SCROLL_DEF || def == &NT_UI_SCROLLBAR_DEF;
+}
+
+/* Per-pointer drag arbitration (D-59-04, Pitfall 2). One drag-routing path, two entry conditions:
+ *   - STEAL: a pointer captured by an INNER widget whose press began in our bbox and dragged past
+ *     the threshold hands the gesture over — clearing captures[i].active_id delivers the inner
+ *     widget a released_now/clicked=false cancel on its next step.
+ *   - FREE-PRESS: a pointer with no capture at all (press on non-interactive content/empty space)
+ *     pressed inside our bbox and dragged past the threshold scrolls directly — a finger can start
+ *     a fling without landing on a widget. The press anchor rides the state cell (free_press_pos).
+ * Either way the per-frame delta routes into pos/vel and the anchor re-anchors so next frame's
+ * delta is incremental, not cumulative. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scroll_steal_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s) {
+static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s) {
     bool any_drag = false;
+    bool any_free_press = false;
     const float dt = ctx->frame_dt;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
-        const bool inner_capture = cap->active_id != 0U && cap->active_id != id;
-        if (!inner_capture) {
+        const bool inner_capture = cap->active_id != 0U && cap->active_id != id && !scroll_capture_excluded(ctx, id, cap->active_id);
+
+        if (inner_capture) {
+            /* STEAL path: drag origin + cur pos come from the inner widget's capture. */
+            if (!point_in_bbox(id, cap->press_pos[0], cap->press_pos[1])) {
+                continue;
+            }
+            const float ddx = cap->pos[0] - cap->press_pos[0];
+            const float ddy = cap->pos[1] - cap->press_pos[1];
+            const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
+            if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
+                continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
+            }
+            cap->active_id = 0U; /* cancel the inner widget */
+            scroll_route_drag(s, style, ddx, ddy, dt);
+            cap->press_pos[0] = cap->pos[0];
+            cap->press_pos[1] = cap->pos[1];
+            any_drag = true;
             continue;
         }
-        /* Only steal if the press began inside this container. */
-        if (!point_in_bbox(id, cap->press_pos[0], cap->press_pos[1])) {
-            continue;
+
+        /* FREE-PRESS path: no widget owns this pointer. Track its press origin ourselves. */
+        if (cap->active_id != 0U) {
+            continue; /* captured by THIS container's bar or an excluded nested scroller */
         }
-        const float ddx = cap->pos[0] - cap->press_pos[0];
-        const float ddy = cap->pos[1] - cap->press_pos[1];
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        if (!btn.is_down) {
+            continue; /* release ends the free press; momentum/fling owns the rest (DRAGGING clears) */
+        }
+        const bool press_began = (s->flags & NT_UI_SCROLL_FLAG_FREE_PRESS) == 0U;
+        if (press_began) {
+            if (!point_in_bbox(id, p->x, p->y)) {
+                continue; /* press landed outside the container — not our gesture */
+            }
+            s->free_press_pos[0] = p->x;
+            s->free_press_pos[1] = p->y;
+            any_free_press = true;
+            continue; /* anchor set this frame; delta accrues from next frame */
+        }
+        const float ddx = p->x - s->free_press_pos[0];
+        const float ddy = p->y - s->free_press_pos[1];
         const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
+        any_free_press = true;
         if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
-            continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
+            continue; /* still within the tap threshold — not yet a drag */
         }
-        /* Steal: cancel the inner widget, route the per-frame drag delta into our offset.
-         * dt<=0 has no fresh velocity — zero it so a prior fling's momentum can't leak
-         * past this drag frame (a stale vel would resume on release). */
-        cap->active_id = 0U;
+        scroll_route_drag(s, style, ddx, ddy, dt);
+        s->free_press_pos[0] = p->x;
+        s->free_press_pos[1] = p->y;
         any_drag = true;
-        if (style->scroll_x) {
-            s->pos[0] += ddx;
-            s->vel[0] = (dt > 0.0F) ? (ddx / dt) : 0.0F;
-        }
-        if (style->scroll_y) {
-            s->pos[1] += ddy;
-            s->vel[1] = (dt > 0.0F) ? (ddy / dt) : 0.0F;
-        }
-        /* Re-anchor the press so next frame's delta is incremental, not cumulative. */
-        cap->press_pos[0] = cap->pos[0];
-        cap->press_pos[1] = cap->pos[1];
     }
     if (any_drag) {
         s->flags |= NT_UI_SCROLL_FLAG_DRAGGING;
     } else {
         s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_DRAGGING;
+    }
+    if (any_free_press) {
+        s->flags |= NT_UI_SCROLL_FLAG_FREE_PRESS;
+    } else {
+        s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_FREE_PRESS;
     }
 }
 
@@ -502,8 +559,8 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    /* Capture-steal updates DRAGGING + routes drag delta before the integrate. */
-    scroll_steal_check(ctx, id, style, s);
+    /* Drag arbitration (steal + free-press) updates DRAGGING + routes drag delta before integrate. */
+    scroll_drag_check(ctx, id, style, s);
 
     /* Wheel: only the container the pointer is over receives it (Clay sign = -wheel_dy). */
     float wheel[2] = {0.0F, 0.0F};

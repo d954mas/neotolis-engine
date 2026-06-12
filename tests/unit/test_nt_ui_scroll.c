@@ -474,6 +474,209 @@ static void test_scrollbar_id_derivation_distinct(void) {
     TEST_ASSERT_TRUE(vy != vx); /* the two axes never collide */
 }
 
+/* ================= UX-fix round (free-press drag + scroll-to-from-button) ================= */
+
+static const uint32_t SCROLL_ID_A = 0x5C00A1U;
+static const uint32_t SCROLL_ID_B = 0x5C00B2U;
+
+/* Two scroll containers side by side, mirroring the demo's twin lists; an OPTIONAL "scroll
+ * both to top" call runs AFTER both are declared (exactly where the demo's button-end fires
+ * nt_ui_scroll_to). do_scroll_to gates the call so we can establish state first. */
+static void twin_scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style, bool do_scroll_to) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(200)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID_A, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+        {
+            CLAY({.id = CLAY_ID("contentA"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID_B, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+        {
+            CLAY({.id = CLAY_ID("contentB"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    /* Demo ordering: the scroll-to call fires DURING declaration, after both containers. */
+    if (do_scroll_to) {
+        nt_ui_scroll_to(s_fx.ctx, SCROLL_ID_A, 0.0F, 0.0F);
+        nt_ui_scroll_to(s_fx.ctx, SCROLL_ID_B, 0.0F, 0.0F);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 17: "scroll both to top" — the DEMO sequence. Scroll both down, then call
+ *      nt_ui_scroll_to(id,0,0) after declaration; both offsets must ease back to 0. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_to_top_from_button_sequence(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    /* Establish both containers + their state cells. */
+    twin_scroll_frame(&p, &style, false);
+
+    /* Scroll both down to the bottom (max negative offset). */
+    nt_ui_scroll_to(s_fx.ctx, SCROLL_ID_A, 0.0F, -600.0F);
+    nt_ui_scroll_to(s_fx.ctx, SCROLL_ID_B, 0.0F, -600.0F);
+    for (int i = 0; i < 120; ++i) {
+        twin_scroll_frame(&p, &style, false);
+    }
+    nt_ui_scroll_state_t *sa = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_A);
+    nt_ui_scroll_state_t *sb = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_B);
+    TEST_ASSERT_NOT_NULL(sa);
+    TEST_ASSERT_NOT_NULL(sb);
+    TEST_ASSERT_TRUE(sa->pos[1] < -100.0F); /* actually scrolled down */
+    TEST_ASSERT_TRUE(sb->pos[1] < -100.0F);
+
+    /* Now the "scroll both to top" button: scroll_to(0,0) fires after declaration. */
+    twin_scroll_frame(&p, &style, true);
+    /* Let the ease run. */
+    for (int i = 0; i < 120; ++i) {
+        twin_scroll_frame(&p, &style, false);
+    }
+    sa = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_A);
+    sb = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_B);
+    TEST_ASSERT_NOT_NULL(sa);
+    TEST_ASSERT_NOT_NULL(sb);
+    TEST_ASSERT_TRUE(float_near(sa->pos[1], 0.0F, 1.0F)); /* eased back to top */
+    TEST_ASSERT_TRUE(float_near(sb->pos[1], 0.0F, 1.0F));
+}
+
+/* ---- Test 18: free-press drag (no inner widget capture) scrolls the container, and the
+ *      release leaves momentum so a fling continues past the lifted finger. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_free_press_drag_and_fling(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style); /* establish bbox + state cell */
+
+    /* Finger DOWN inside the container, no widget captures it (empty content). */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.x = 100.0F;
+    p.y = 100.0F;
+    scroll_frame(&p, &style); /* press frame: anchor set */
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* Drag UP 60 px over several frames (content scrolls, pos goes negative). */
+    for (int i = 1; i <= 6; ++i) {
+        p.y = 100.0F - (float)(i * 10);
+        scroll_frame(&p, &style);
+    }
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] < -1.0F);         /* dragged the content */
+    TEST_ASSERT_TRUE(fabsf(s->vel[1]) > 100.0F); /* drag built velocity for a fling */
+
+    /* Finger UP: free press ends; momentum carries on. */
+    const float pos_at_release = s->pos[1];
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    for (int i = 0; i < 10; ++i) {
+        scroll_frame(&p, &style);
+    }
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] < pos_at_release - 1.0F); /* flung further than the release point */
+}
+
+/* ---- Test 19: a free-press TAP (below threshold) does NOT scroll the container. ---- */
+static void test_scroll_free_press_tap_no_scroll(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* A 3 px wobble — below the 8 px threshold. */
+    p.y = 103.0F;
+    p.x = 101.0F;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scroll_frame(&p, &style);
+
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* tap left it at rest */
+}
+
+/* ---- Test 20: the container does NOT steal its OWN scrollbar's thumb drag. A drag on the
+ *      bar id (>threshold) must reach the scrollbar (thumb maps the offset), not be cancelled
+ *      by the steal path. We assert the bar capture survives the drag_check. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_does_not_steal_own_scrollbar(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
+
+    nt_pointer_t p = {0};
+    p.x = 195.0F; /* over the right-edge vertical bar (thickness 12 in a 200-wide container) */
+    p.y = 100.0F;
+    p.active = true;
+    scrollbar_frame(&p, &style, 1000.0F); /* establish bar bbox */
+    scrollbar_frame(&p, &style, 1000.0F);
+
+    /* Press on the bar so it captures, then drag 40 px (>threshold) along y. The steal path
+     * MUST exclude the container's own bar id, leaving the bar capture intact. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    s_fx.ctx->captures[0].active_id = bar_id;
+    s_fx.ctx->captures[0].press_pos[0] = 195.0F;
+    s_fx.ctx->captures[0].press_pos[1] = 100.0F;
+    s_fx.ctx->captures[0].pos[0] = 195.0F;
+    s_fx.ctx->captures[0].pos[1] = 140.0F;
+    s_fx.ctx->capture_seen[0] = 1U;
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Bar capture NOT cancelled by the container's steal path (own-bar exclusion). */
+    TEST_ASSERT_EQUAL_UINT32(bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+}
+
+/* ---- Test 21: free-press drag must NOT hijack a click on a non-scrolling tap. A press inside
+ *      the container that releases before crossing the threshold scrolls nothing AND a free
+ *      press that started OUTSIDE the bbox never scrolls (anchor gate). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_free_press_outside_bbox_ignored(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 600.0F; /* far OUTSIDE the 200x200 container at the top-left */
+    p.y = 400.0F;
+    scroll_frame(&p, &style);
+
+    /* Press began outside the bbox, then the finger moves over the container and drags. The
+     * anchor must never latch (press did not begin inside) -> no scroll. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 6; ++i) {
+        p.x = 600.0F - (float)(i * 80); /* sweeps across the container */
+        p.y = 100.0F;
+        scroll_frame(&p, &style);
+    }
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* press-outside never scrolls */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -493,5 +696,10 @@ int main(void) {
     RUN_TEST(test_scrollbar_track_click_scroll_to);
     RUN_TEST(test_scrollbar_auto_hide_fades);
     RUN_TEST(test_scrollbar_id_derivation_distinct);
+    RUN_TEST(test_scroll_to_top_from_button_sequence);
+    RUN_TEST(test_scroll_free_press_drag_and_fling);
+    RUN_TEST(test_scroll_free_press_tap_no_scroll);
+    RUN_TEST(test_scroll_does_not_steal_own_scrollbar);
+    RUN_TEST(test_scroll_free_press_outside_bbox_ignored);
     return UNITY_END();
 }
