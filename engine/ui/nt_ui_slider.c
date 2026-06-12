@@ -297,9 +297,11 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     return frac;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_ui_slider_float(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float *value, float min, float max, float step,
                         nt_ui_slider_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_slider_float: value must be non-NULL");
+    NT_ASSERT(isfinite(min) && isfinite(max) && min < max && "nt_ui_slider_float: min must be < max (reversed range inverts clamps)");
     NT_ASSERT(isfinite(step) && step >= 0.0F && "nt_ui_slider_float: step must be finite >= 0");
     const bool out_of_range = (*value < min) || (*value > max); /* clamp-and-writeback on first frame */
     const float in_frac = slider_value_to_frac(nt_ui_clampf(*value, min, max), min, max);
@@ -318,9 +320,11 @@ bool nt_ui_slider_float(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     return false;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int *value, int min, int max, int step, nt_ui_slider_style_t *style,
                       const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_slider_int: value must be non-NULL");
+    NT_ASSERT(min < max && "nt_ui_slider_int: min must be < max (reversed range inverts clamps)");
     NT_ASSERT(step >= 0 && "nt_ui_slider_int: step must be >= 0");
     const float fmin = (float)min;
     const float fmax = (float)max;

@@ -456,6 +456,19 @@ static void test_assert_min_eq_max(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* min > max (reversed range) -> assert, both float and int wrappers (inverted clamps). */
+static void test_assert_min_gt_max(void) {
+    float fvalue = 0.5F;
+    int ivalue = 5;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("slf"), NULL, &fvalue, 1.0F, 0.0F, 0.0F, &s_style, &s_track_decl, true));
+        NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_int(s_fx.ctx, NULL, 0, nt_ui_id("sli"), NULL, &ivalue, 10, 0, 0, &s_style, &s_track_decl, true));
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
 /* data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY -- the widget owns those. */
 static void test_assert_data_flags_transform(void) {
     float value = 0.5F;
@@ -501,6 +514,7 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);
+    RUN_TEST(test_assert_min_gt_max);
     RUN_TEST(test_assert_data_flags_transform);
     RUN_TEST(test_assert_negative_step);
 #endif
