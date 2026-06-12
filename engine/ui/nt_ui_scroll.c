@@ -216,7 +216,6 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void) {
         .bounce_speed = 12.0F,
         .wheel_step_px = 40.0F,
         .bar_visibility = NT_UI_SCROLLBAR_ALWAYS,
-        .bar_placement = NT_UI_SCROLLBAR_OVERLAY,
         .bar_thickness = 12.0F,
         .bar_thumb_min_px = 24.0F,
         .bar_fade_speed = 6.0F,
@@ -399,15 +398,22 @@ static void scroll_consume_threshold(bool latched, float *ddx, float *ddy) {
 
 /* A capture this container must NOT steal: its OWN scrollbar (floats inside the bbox, a thumb
  * drag must reach the bar), or any nested scroll/scrollbar widget (the inner scroller owns its
- * own gesture). Nested CONTAINERS are detected via their always-on state-pool 'scrl' cell —
- * nt_ui_widget_lookup is DEBUG_TOOLS-only (NULL when OFF), so it must not be the only guard;
- * it stays as extra coverage for nested SCROLLBAR ids (registry-known, no state cell). */
+ * own gesture). Nested CONTAINERS carry an always-on state-pool 'scrl' cell; a nested SCROLLBAR
+ * id is reversible (id = container_id ^ salt), so XOR the salt back out and probe that 'scrl' cell
+ * — both checks work in ALL builds. nt_ui_widget_lookup is DEBUG_TOOLS-only (NULL when OFF), kept
+ * only as redundant extra coverage. */
 static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t cap_id) {
     if (cap_id == scrollbar_id(scroll_id, 0) || cap_id == scrollbar_id(scroll_id, 1)) {
         return true;
     }
-    if (nt_ui_state_has_tag(ctx, cap_id, NT_UI_STATE_TAG('s', 'c', 'r', 'l'))) {
+    const uint32_t scrl_tag = NT_UI_STATE_TAG('s', 'c', 'r', 'l');
+    if (nt_ui_state_has_tag(ctx, cap_id, scrl_tag)) {
         return true; /* nested scroll container — works in all builds */
+    }
+    /* Recover the owning container id from a bar id (salts XOR out) and check its 'scrl' cell:
+     * catches a nested SCROLLBAR's thumb drag without the DEBUG_TOOLS-only registry. */
+    if (nt_ui_state_has_tag(ctx, cap_id ^ NT_UI_SCROLLBAR_VERT_SALT, scrl_tag) || nt_ui_state_has_tag(ctx, cap_id ^ NT_UI_SCROLLBAR_HORIZ_SALT, scrl_tag)) {
+        return true;
     }
     const nt_ui_widget_def_t *def = nt_ui_widget_lookup(ctx, cap_id);
     return def == &NT_UI_SCROLL_DEF || def == &NT_UI_SCROLLBAR_DEF;
@@ -840,6 +846,12 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(style->friction) && style->friction > 0.0F && style->friction <= 1.0F && "nt_ui_scroll_begin: friction must be in (0,1]");
     NT_ASSERT(isfinite(style->wheel_ease_speed) && style->wheel_ease_speed >= 0.0F && "nt_ui_scroll_begin: wheel_ease_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->wheel_step_px) && "nt_ui_scroll_begin: wheel_step_px must be finite");
+    NT_ASSERT(isfinite(style->rubber_band_c) && style->rubber_band_c >= 0.0F && "nt_ui_scroll_begin: rubber_band_c must be finite >= 0");
+    NT_ASSERT(isfinite(style->bounce_speed) && style->bounce_speed >= 0.0F && "nt_ui_scroll_begin: bounce_speed must be finite >= 0");
+    NT_ASSERT(isfinite(style->bar_thickness) && style->bar_thickness >= 0.0F && "nt_ui_scroll_begin: bar_thickness must be finite >= 0");
+    NT_ASSERT(isfinite(style->bar_thumb_min_px) && style->bar_thumb_min_px >= 0.0F && "nt_ui_scroll_begin: bar_thumb_min_px must be finite >= 0");
+    NT_ASSERT(isfinite(style->bar_fade_speed) && style->bar_fade_speed >= 0.0F && "nt_ui_scroll_begin: bar_fade_speed must be finite >= 0");
+    NT_ASSERT(isfinite(style->bar_hide_delay) && style->bar_hide_delay >= 0.0F && "nt_ui_scroll_begin: bar_hide_delay must be finite >= 0");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_scroll_begin: decl->id must be 0 (scroll id passed separately)");
         NT_ASSERT(decl->clip.horizontal == false && decl->clip.vertical == false && "nt_ui_scroll_begin: decl->clip must be zero (style controls)");

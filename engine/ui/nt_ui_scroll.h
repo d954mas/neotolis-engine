@@ -56,9 +56,9 @@ typedef struct {
     uint8_t flags;
 } nt_ui_scroll_state_t;
 
-/* Scrollbar visibility / placement (defined here so the style stays one struct). */
+/* Scrollbar visibility (defined here so the style stays one struct). Bars always float
+ * as an overlay; a reserved-gutter layout would need real engine support and is not modelled. */
 typedef enum { NT_UI_SCROLLBAR_ALWAYS = 0, NT_UI_SCROLLBAR_AUTO, NT_UI_SCROLLBAR_AUTO_HIDE } nt_ui_scrollbar_visibility_t;
-typedef enum { NT_UI_SCROLLBAR_OVERLAY = 0, NT_UI_SCROLLBAR_GUTTER } nt_ui_scrollbar_placement_t;
 
 typedef struct {
     bool scroll_x, scroll_y; /* which axes scroll */
@@ -69,7 +69,6 @@ typedef struct {
     float wheel_step_px;     /* UI units (nt_ui_begin space) per wheel notch; name kept for ABI */
     /* scrollbar visual (declared here for one-struct ABI). */
     nt_ui_scrollbar_visibility_t bar_visibility;
-    nt_ui_scrollbar_placement_t bar_placement;
     float bar_thickness;
     float bar_thumb_min_px;
     float bar_fade_speed; /* AUTO_HIDE fade via nt_ui_anim value_t */
@@ -79,9 +78,11 @@ typedef struct {
     nt_atlas_region_ref_t track_ref, thumb_ref;
     uint32_t track_tint, thumb_tint;
 } nt_ui_scroll_style_t;
-_Static_assert(sizeof(nt_ui_scroll_style_t) == 88, "nt_ui_scroll_style_t stable ABI (2 bool + 5 float + 2 enum + 4 float[8B aligned] + 2x16B ref + 2 u32)");
+/* 88 not 84: the 16B atlas refs force 8B struct alignment, so dropping bar_placement just moved
+ * 4B of padding ahead of track_ref — the size is unchanged. */
+_Static_assert(sizeof(nt_ui_scroll_style_t) == 88, "nt_ui_scroll_style_t stable ABI (2 bool + 5 float + 1 enum + 4 float[8B aligned] + 2x16B ref + 2 u32)");
 
-/* A valid baseline: mobile-game-like tunables, y-only scroll, ALWAYS/OVERLAY bar. */
+/* A valid baseline: mobile-game-like tunables, y-only scroll, ALWAYS-visible overlay bar. */
 nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
 
 /* Opens a Clay clip element whose childOffset comes from OUR physics (not Clay).

@@ -690,6 +690,77 @@ static void test_scroll_does_not_steal_own_scrollbar(void) {
     TEST_ASSERT_EQUAL_UINT32(bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
 }
 
+/* IDs for the nested outer+inner scroll used by the nested-scrollbar exclusion test. */
+static const uint32_t EXCL_OUTER_ID = 0x5CE001U;
+static const uint32_t EXCL_INNER_ID = 0x5CE002U;
+
+/* Outer scroll (300x300 over 300x1000) holding an INNER scroll (200x200 over 200x800) with bars,
+ * pinned at the outer content's top-left. Both register their 'scrl' state cells. */
+static void excl_nested_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("excl-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
+        {
+            CLAY({.id = CLAY_ID("excl-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_INNER_ID, style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+                {
+                    CLAY({.id = CLAY_ID("excl-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(800)}}}) {}
+                }
+                nt_ui_scroll_end(s_fx.ctx);
+            }
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 20b: a parent scroll must NOT steal a nested scroll's SCROLLBAR thumb drag. The bar id
+ *      reverses (id ^ salt) to the inner container's id, whose always-on 'scrl' state cell is the
+ *      all-builds exclusion path (the DEBUG_TOOLS widget registry is NOT relied on). A press on the
+ *      inner bar dragged > threshold past the outer must leave the inner-bar capture intact. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_does_not_steal_nested_scrollbar(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    const uint32_t inner_bar_id = nt_ui_scroll_test_bar_id(EXCL_INNER_ID, 1);
+
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    excl_nested_frame(&p, &style); /* solve bboxes + create both 'scrl' cells */
+    excl_nested_frame(&p, &style);
+
+    /* The inner bar's 'scrl' reverse cell must exist all-builds (no registry). */
+    TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, EXCL_INNER_ID, NT_UI_STATE_TAG('s', 'c', 'r', 'l')));
+
+    /* Inject a capture held by the inner bar id, pressed inside the outer, dragged 40 px (>threshold).
+     * The OUTER's steal path must exclude it (reverse-tag path), leaving the capture on the inner bar. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    s_fx.ctx->captures[0].active_id = inner_bar_id;
+    s_fx.ctx->captures[0].press_pos[0] = 100.0F;
+    s_fx.ctx->captures[0].press_pos[1] = 100.0F;
+    s_fx.ctx->captures[0].pos[0] = 100.0F;
+    s_fx.ctx->captures[0].pos[1] = 140.0F;
+    s_fx.ctx->capture_seen[0] = 1U;
+    CLAY({.id = CLAY_ID("excl-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_OUTER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
+        {
+            CLAY({.id = CLAY_ID("excl-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                nt_ui_scroll_begin(s_fx.ctx, NULL, EXCL_INNER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+                {
+                    CLAY({.id = CLAY_ID("excl-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(800)}}}) {}
+                }
+                nt_ui_scroll_end(s_fx.ctx);
+            }
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Capture stayed on the inner bar: the outer did not steal a nested scrollbar's drag. */
+    TEST_ASSERT_EQUAL_UINT32(inner_bar_id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+}
+
 /* ---- Test 21: free-press drag must NOT hijack a click on a non-scrolling tap. A press inside
  *      the container that releases before crossing the threshold scrolls nothing AND a free
  *      press that started OUTSIDE the bbox never scrolls (anchor gate). ---- */
@@ -1788,6 +1859,7 @@ int main(void) {
     RUN_TEST(test_scroll_free_press_drag_and_fling);
     RUN_TEST(test_scroll_free_press_tap_no_scroll);
     RUN_TEST(test_scroll_does_not_steal_own_scrollbar);
+    RUN_TEST(test_scroll_does_not_steal_nested_scrollbar);
     RUN_TEST(test_scroll_free_press_outside_bbox_ignored);
     RUN_TEST(test_scroll_free_press_tracks_finger_1to1);
     RUN_TEST(test_scroll_free_press_slow_cross_no_velocity_spike);
