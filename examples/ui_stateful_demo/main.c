@@ -479,11 +479,19 @@ static void scroll_list(uint32_t id, uint32_t inner_btn_id, const nt_ui_scroll_s
                     }
                 }
 
-                char line[48];
-                for (int i = 0; i < 24; ++i) {
-                    (void)snprintf(line, sizeof line, "  Row %02d - scrollable item", i);
+                /* Row labels are constant — format the 24 strings once, not per frame. */
+                enum { SCROLL_ROW_COUNT = 24 };
+                static char s_row_lines[SCROLL_ROW_COUNT][48];
+                static bool s_row_lines_init = false;
+                if (!s_row_lines_init) {
+                    for (int i = 0; i < SCROLL_ROW_COUNT; ++i) {
+                        (void)snprintf(s_row_lines[i], sizeof s_row_lines[i], "  Row %02d - scrollable item", i);
+                    }
+                    s_row_lines_init = true;
+                }
+                for (int i = 0; i < SCROLL_ROW_COUNT; ++i) {
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28)}, .padding = {.left = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), line, &g_status_style);
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), s_row_lines[i], &g_status_style);
                     }
                 }
             }

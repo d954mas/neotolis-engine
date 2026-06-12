@@ -1,7 +1,7 @@
 #ifndef NT_UI_LABEL_H
 #define NT_UI_LABEL_H
 
-/* Stateless text widget. text must live until nt_ui_end completes (Clay stores .chars by pointer). */
+/* Stateless text widget. text is copied into per-frame scratch — callers may pass transient buffers. */
 
 #include <stdint.h>
 
