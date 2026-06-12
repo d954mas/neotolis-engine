@@ -213,11 +213,27 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
     nt_ui_clay_priv_close_element();
 }
 
+/* Effective hit pad: style pad, with the vertical components auto-grown so the thumb's vertical
+ * overhang past the track is always clickable even at zero style pad. Derived, no style requirement. */
+static void slider_effective_pad(const nt_ui_slider_style_t *style, int16_t out[4]) {
+    const float overhang = (style->thumb_h - style->track_h) * 0.5F;
+    int16_t grow = 0;
+    if (overhang > 0.0F) {
+        grow = (int16_t)ceilf(overhang);
+    }
+    out[0] = style->hit_padding_lrtb[0];
+    out[1] = style->hit_padding_lrtb[1];
+    out[2] = (int16_t)((style->hit_padding_lrtb[2] > grow) ? style->hit_padding_lrtb[2] : grow);
+    out[3] = (int16_t)((style->hit_padding_lrtb[3] > grow) ? style->hit_padding_lrtb[3] : grow);
+}
+
 /* Shared core parameterized by a normalized [0,1] fraction in/out so float + int both
- * call it. Returns the new clamped fraction; *changed set when it differs from in_frac. */
+ * call it. step_frac quantizes the fraction onto the 0,step_frac,2*step_frac,... grid (0 =
+ * continuous) BEFORE it feeds the anim/view/compose, so the thumb + fill snap WITH the value.
+ * Returns the new clamped fraction; *changed set when it differs from in_frac. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float in_frac, float min, float max, nt_ui_slider_style_t *style,
-                         const Clay_ElementDeclaration *decl, bool enabled, bool *changed) {
+static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float in_frac, float min, float max, float step_frac,
+                         nt_ui_slider_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *changed) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_slider: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_slider: must be called between nt_ui_begin and nt_ui_end on the active ctx");
@@ -240,14 +256,18 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     if (data != NULL) {
         NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U && "nt_ui_slider: data->flags must not set HAS_TRANSFORM/HAS_OPACITY (widget owns these)");
     }
+    NT_ASSERT(isfinite(step_frac) && step_frac >= 0.0F && "nt_ui_slider: step_frac must be finite >= 0");
     // #endregion
     // #region interaction
+    int16_t pad[4];
+    slider_effective_pad(style, pad);
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_step_interaction_padded(ctx, id, NULL);
+        in = nt_ui_step_interaction_padded(ctx, id, pad);
     } else {
         in = (nt_ui_interaction_t){0};
-        nt_ui_debug_record_disabled_zone(ctx, id, NULL);
+        nt_ui_block_pointer(ctx, id, pad); /* inert occluder: disabled slider still blocks input behind it */
+        nt_ui_debug_record_disabled_zone(ctx, id, pad);
     }
     // #endregion
     // #region drag math (press-ON-thumb grab vs track jump)
@@ -258,12 +278,20 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
         /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
         nt_ui_state_clear(ctx, slider_drag_id(id));
     }
+    /* Snap the fraction onto the value grid BEFORE it feeds anim/view/compose so the thumb + fill
+     * land on the same tick as the emitted value (no continuous-thumb / snapped-value mismatch). */
+    if (step_frac > 0.0F) {
+        frac = slider_clampf(roundf(frac / step_frac) * step_frac, 0.0F, 1.0F);
+    }
     // #endregion
     // #region one anim call (state group + value_t)
+    /* VISUAL pressed only while held AND over the widget: dragging off un-presses (re-presses on
+     * return). Capture/value semantics above use in.pressed untouched — this is the state-cell pick only. */
+    const bool pressed_visual = in.pressed && in.hovered;
     int state = NT_UI_SLIDER_IDLE;
     if (!enabled) {
         state = NT_UI_SLIDER_DISABLED;
-    } else if (in.pressed) {
+    } else if (pressed_visual) {
         state = NT_UI_SLIDER_PRESSED;
     } else if (in.hovered) {
         state = NT_UI_SLIDER_HOVER;
@@ -273,6 +301,8 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     /* value_speed 0 during drag = 1:1 snap; eased only on a game-driven change. */
     const float vspeed = in.pressed ? 0.0F : style->value_speed;
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, vspeed);
+    /* During a drag vspeed=0 so eased_frac == the snapped frac (thumb/fill/bubble agree on the tick);
+     * a game-driven change keeps the smooth ease toward the already-quantized target. */
     const float eased_frac = slider_clampf(a->value_t, 0.0F, 1.0F);
     // #endregion
 
@@ -284,7 +314,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
 
     slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, eased_frac, a->opacity, decl);
 
-    /* Changed when the drag moved the fraction off the incoming game value. */
+    /* Changed when the drag moved the (snapped) fraction off the incoming game value. */
     *changed = enabled && (fabsf(frac - in_frac) > 1e-6F);
     return frac;
 }
@@ -293,16 +323,19 @@ bool nt_ui_slider_float(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
                         nt_ui_slider_style_t *style, const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_slider_float: value must be non-NULL");
     NT_ASSERT(isfinite(step) && step >= 0.0F && "nt_ui_slider_float: step must be finite >= 0");
+    const bool out_of_range = (*value < min) || (*value > max); /* clamp-and-writeback on first frame */
     const float in_frac = slider_value_to_frac(slider_clampf(*value, min, max), min, max);
+    const float step_frac = (step > 0.0F) ? (step / (max - min)) : 0.0F;
     bool changed = false;
-    const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, min, max, style, decl, enabled, &changed);
-    if (!changed) {
-        return false;
-    }
-    const float q = slider_quantize(min + (out_frac * (max - min)), min, max, step);
-    if (fabsf(q - *value) > 1e-6F) {
-        *value = q;
-        return true;
+    const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, min, max, step_frac, style, decl, enabled, &changed);
+    /* Write back on a drag OR an out-of-range incoming *value (Unity property-clamp). An in-range
+     * off-grid value is left alone unless the user drags — the game owns its own precision. */
+    if (changed || out_of_range) {
+        const float q = slider_quantize(min + (out_frac * (max - min)), min, max, step);
+        if (fabsf(q - *value) > 1e-6F) {
+            *value = q;
+            return true;
+        }
     }
     return false;
 }
@@ -313,18 +346,20 @@ bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     NT_ASSERT(step >= 0 && "nt_ui_slider_int: step must be >= 0");
     const float fmin = (float)min;
     const float fmax = (float)max;
+    const bool out_of_range = (*value < min) || (*value > max); /* clamp-and-writeback on first frame */
     const float in_frac = slider_value_to_frac((float)slider_clampi(*value, min, max), fmin, fmax);
-    bool changed = false;
-    const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, fmin, fmax, style, decl, enabled, &changed);
-    if (!changed) {
-        return false;
-    }
-    const float raw = fmin + (out_frac * (fmax - fmin));
     const float fstep = (step > 0) ? (float)step : 1.0F; /* int slider always quantizes to >= 1 */
-    const int qi = (int)lrintf(slider_quantize(raw, fmin, fmax, fstep));
-    if (qi != *value) {
-        *value = qi;
-        return true;
+    const float step_frac = fstep / (fmax - fmin);
+    bool changed = false;
+    const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, fmin, fmax, step_frac, style, decl, enabled, &changed);
+    /* Write back on a drag OR an out-of-range incoming *value (clamp to range on first frame). */
+    if (changed || out_of_range) {
+        const float raw = fmin + (out_frac * (fmax - fmin));
+        const int qi = (int)lrintf(slider_quantize(raw, fmin, fmax, fstep));
+        if (qi != *value) {
+            *value = qi;
+            return true;
+        }
     }
     return false;
 }

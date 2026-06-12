@@ -351,6 +351,88 @@ static void test_fill_inside_track_all_ratios(void) {
     }
 }
 
+/* ---- Test 12: hit pad makes a press ABOVE the track (within the pad) start a drag.
+ *      Without the pad the press would miss the thin track entirely. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_hit_pad_above_track_drags(void) {
+    float value = 0.0F;
+    /* 12px top/bottom pad -> effective height 20 + 24 = 44px (touch-target reference). */
+    s_style.hit_padding_lrtb[2] = 12;
+    s_style.hit_padding_lrtb[3] = 12;
+    warmup_float(&value, 0.0F, 1.0F);
+
+    /* Press 10px ABOVE the track top, at the horizontal midpoint. Inside the 12px top pad,
+     * outside the bare track -> a drag must start and jump the value to ~0.5. */
+    const float above_y = SL_Y - 10.0F;
+    TEST_ASSERT_TRUE(above_y < SL_Y); /* genuinely outside the visual track */
+    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.5F), above_y, true, true, false);
+    (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
+}
+
+/* ---- Test 13: thumb overhang (thumb_h > track_h) is clickable even at ZERO style pad —
+ *      the effective vertical pad auto-grows to (thumb_h - track_h)/2. ---- */
+static void test_thumb_overhang_auto_pad_drags(void) {
+    float value = 0.0F;
+    /* No style pad; thumb_h 24 > track_h 20 -> 2px overhang each side auto-padded. */
+    s_style.hit_padding_lrtb[2] = 0;
+    s_style.hit_padding_lrtb[3] = 0;
+    warmup_float(&value, 0.0F, 1.0F);
+
+    /* Press 1px above the track top (inside the 2px auto-grown overhang pad). */
+    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.5F), SL_Y - 1.0F, true, true, false);
+    (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
+}
+
+/* ---- Test 14: stepped drag SNAPS the thumb visually — the emitted thumb center sits on the
+ *      nearest tick fraction, not the raw pointer fraction. int slider 0..10, drag between ticks. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_step_thumb_visual_snap(void) {
+    int value = 0;
+    nt_pointer_t f0 = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    (void)slider_int_frame(&f0, &value, 0, 10, 1, true); /* warm-up */
+
+    /* Press at fraction 0.63 (between tick 0.6 and 0.7 on a 0..10 grid). Value snaps to 6. */
+    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.63F), SL_CY, true, true, false);
+    (void)slider_int_frame(&p, &value, 0, 10, 1, true);
+    TEST_ASSERT_EQUAL_INT(6, value);
+
+    /* A second frame so the view cell + bbox latch the snapped fraction for thumb_pos. */
+    nt_pointer_t hold = make_pointer(SL_X_AT_FRAC(0.63F), SL_CY, true, false, false);
+    (void)slider_int_frame(&hold, &value, 0, 10, 1, true);
+
+    /* The emitted thumb center sits on the 0.6 tick fraction, NOT the 0.63 pointer fraction. */
+    const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("sl"));
+    TEST_ASSERT_TRUE(t.found);
+    TEST_ASSERT_TRUE(float_near(t.x, SL_X_AT_FRAC(0.6F), 0.6F));
+    /* And NOT at the raw pointer fraction (would be ~3px off at this width — guards the regression). */
+    TEST_ASSERT_FALSE(float_near(t.x, SL_X_AT_FRAC(0.63F), 0.6F));
+}
+
+/* ---- Test 15: an out-of-range incoming *value is clamped AND written back (returns true)
+ *      on the first frame, with no pointer interaction. Unity property-clamp semantics. ---- */
+static void test_out_of_range_writeback(void) {
+    /* Above max: clamps to 1.0, write-back true. */
+    float hi = 5.0F;
+    nt_pointer_t idle = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    const bool changed_hi = slider_float_frame(&idle, &hi, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(changed_hi);
+    TEST_ASSERT_TRUE(float_near(hi, 1.0F, 0.001F));
+
+    /* Below min: clamps to 0.0, write-back true. */
+    float lo = -3.0F;
+    const bool changed_lo = slider_float_frame(&idle, &lo, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(changed_lo);
+    TEST_ASSERT_TRUE(float_near(lo, 0.0F, 0.001F));
+
+    /* In-range, untouched -> no write-back. */
+    float ok = 0.5F;
+    const bool changed_ok = slider_float_frame(&idle, &ok, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_FALSE(changed_ok);
+    TEST_ASSERT_TRUE(float_near(ok, 0.5F, 0.001F));
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -412,6 +494,10 @@ int main(void) {
     RUN_TEST(test_disabled_mid_drag_no_resume_jump);
     RUN_TEST(test_style_defaults_valid_baseline);
     RUN_TEST(test_fill_inside_track_all_ratios);
+    RUN_TEST(test_hit_pad_above_track_drags);
+    RUN_TEST(test_thumb_overhang_auto_pad_drags);
+    RUN_TEST(test_step_thumb_visual_snap);
+    RUN_TEST(test_out_of_range_writeback);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);

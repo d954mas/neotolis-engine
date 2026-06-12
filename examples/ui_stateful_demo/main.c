@@ -177,7 +177,8 @@ static const nt_ui_slider_style_t g_slider_tmpl = {
     .fill_mode = NT_UI_FILL_STRETCH,
     .fill_direction = NT_UI_FILL_LTR,
     .state_speed = 16.0F,
-    .value_speed = 18.0F, /* eased on GAME-driven preset change; 1:1 during drag */
+    .value_speed = 18.0F,               /* eased on GAME-driven preset change; 1:1 during drag */
+    .hit_padding_lrtb = {0, 0, 13, 13}, /* 18px track + 13*2 pad = 44px touch target (mobile reference) */
     .states =
         {
             [NT_UI_SLIDER_IDLE] = {.track_tint = 0xFFFFFFFF, .fill_tint = 0xFFFFFFFF, .thumb_tint = 0xFFFFFFFF, .opacity = 1.0F},

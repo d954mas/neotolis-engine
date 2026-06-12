@@ -563,6 +563,31 @@ static float scrollbar_thumb_pos(float pos, float content, float container, floa
     return frac * (track_len - thumb_len);
 }
 
+/* Min effective cross-axis thickness for the bar's HIT area (touch target); the visual
+ * bar_thickness stays slim. The pad is split across the two cross-axis sides. */
+#define NT_UI_SCROLLBAR_HIT_MIN_PX 24.0F
+
+/* Cross-axis hit pad so a thin visual bar still has a >= NT_UI_SCROLLBAR_HIT_MIN_PX touch target.
+ * axis 1 (vertical bar): pad left/right; axis 0 (horizontal): pad top/bottom. */
+static void scrollbar_hit_pad(int axis, float thickness, int16_t out[4]) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    const float grow = (NT_UI_SCROLLBAR_HIT_MIN_PX - thickness) * 0.5F;
+    if (grow <= 0.0F) {
+        return;
+    }
+    const int16_t g = (int16_t)ceilf(grow);
+    if (axis == 1) {
+        out[0] = g; /* left */
+        out[1] = g; /* right */
+    } else {
+        out[2] = g; /* top */
+        out[3] = g; /* bottom */
+    }
+}
+
 /* Thumb-drag + track-click for one axis. Reads the bar's prev-frame bbox, steals nothing
  * from the container (different id). Drag delta along the axis maps back into s->pos
  * (Clay sign); a track click (off the thumb) smooth-jumps via nt_ui_scroll_to. */
@@ -570,12 +595,14 @@ static float scrollbar_thumb_pos(float pos, float content, float container, floa
 static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t bar_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, float content, float container,
                                float bar_origin, float track_len, float thumb_off, float thumb_len, bool *out_active) {
     *out_active = false;
+    int16_t pad[4];
+    scrollbar_hit_pad(axis, style->bar_thickness, pad);
     const float over = content - container;
     if (over <= 0.0F || track_len - thumb_len <= 0.0F) {
-        (void)nt_ui_step_interaction(ctx, bar_id); /* keep the id registered (consistent hit-test) */
+        (void)nt_ui_step_interaction_padded(ctx, bar_id, pad); /* keep the id registered (consistent hit-test) */
         return;
     }
-    const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, bar_id);
+    const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, bar_id, pad);
     const float pointer_a = (axis == 1) ? in.pos[1] : in.pos[0];
     const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
 
@@ -709,7 +736,9 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(track_decl);
-    nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, NULL);
+    int16_t reg_pad[4];
+    scrollbar_hit_pad(axis, thickness, reg_pad); /* same pad the interact step used (inspector overlay parity) */
+    nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, reg_pad);
     nt_ui_clay_priv_close_element();
 
     /* Thumb piece is a separate floating image (no own id; the track owns the hit-test). */
