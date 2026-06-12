@@ -132,8 +132,9 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
 static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     (void)window;
-    /* 16x scale per RESEARCH.md to approximate web pixel-based scroll */
-    nt_input_buffer_wheel((float)xoffset * 16.0F, (float)yoffset * 16.0F);
+    /* GLFW yoffset is already ±1.0 per wheel notch — pass through as the notch unit
+     * (nt_input contract: 1.0 == one detent; consumers scale by px-per-notch). */
+    nt_input_buffer_wheel((float)xoffset, (float)yoffset);
 }
 
 static void glfw_focus_callback(GLFWwindow *window, int focused) {

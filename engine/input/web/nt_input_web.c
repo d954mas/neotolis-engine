@@ -170,16 +170,25 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         }
     });
 
-    /* Wheel event (passive: false for preventDefault) */
+    /* Wheel event (passive: false for preventDefault). Normalize to the nt_input NOTCH unit
+     * (1.0 == one detent) so wheel strength is platform-independent. deltaMode: 0 = pixels
+     * (Chrome ~100-120 px/notch -> divide by ~120), 1 = lines (Firefox ~3 lines/notch ->
+     * divide by 3), 2 = pages (1 page ~ 1 notch of intent). Trackpads send small pixel
+     * deltas -> fractional notches, applied proportionally. */
+    var WHEEL_PX_PER_NOTCH = 120.0;
+    var WHEEL_LINES_PER_NOTCH = 3.0;
     canvas.addEventListener("wheel", function(e) {
         var dx = e.deltaX;
         var dy = e.deltaY;
         if (e.deltaMode === 1) {
-            dx *= 16.0;
-            dy *= 16.0;
+            dx /= WHEEL_LINES_PER_NOTCH;
+            dy /= WHEEL_LINES_PER_NOTCH;
         } else if (e.deltaMode === 2) {
-            dx *= window.innerWidth;
-            dy *= window.innerHeight;
+            dx = Math.sign(dx);
+            dy = Math.sign(dy);
+        } else {
+            dx /= WHEEL_PX_PER_NOTCH;
+            dy /= WHEEL_PX_PER_NOTCH;
         }
         Module['_ntWheelBuf'].push(dx, dy);
         e.preventDefault();
