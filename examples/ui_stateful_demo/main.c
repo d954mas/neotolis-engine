@@ -186,25 +186,40 @@ static const nt_ui_slider_style_t g_slider_tmpl = {
         },
 };
 
-/* ---- progress (horizontal): grey track + green STRETCH fill ---- */
-static const nt_ui_progress_style_t g_progress_tmpl = {
+/* ---- progress bar A (horizontal STRETCH slice9): recessed track + smooth gradient fill that
+ * slice9-stretches cleanly. Side-by-side with bar B this shows STRETCH (no distortion) art. ---- */
+static const nt_ui_progress_style_t g_progress_stretch_tmpl = {
     .track_tint = 0xFFFFFFFF,
     .fill_tint = 0xFFFFFFFF,
     .track_w = 320,
-    .track_h = 22,
+    .track_h = 24,
     .fill_mode = NT_UI_FILL_STRETCH,
     .fill_direction = NT_UI_FILL_LTR,
     .value_speed = 6.0F, /* smooth ramp toward the target */
     .opacity = 1.0F,
 };
 
-/* ---- mana bar (vertical): exercises a non-LTR fill direction (D-59-26) ---- */
+/* ---- progress bar B (horizontal CROP clip): recessed track + the shaped diagonal-stripe fill
+ * revealed (not stretched) by the clip scissor — the stripes stay crisp, proving CROP. ---- */
+static const nt_ui_progress_style_t g_progress_crop_tmpl = {
+    .track_tint = 0xFFFFFFFF,
+    .fill_tint = 0xFFFFFFFF,
+    .track_w = 320,
+    .track_h = 24,
+    .fill_mode = NT_UI_FILL_CROP,
+    .fill_direction = NT_UI_FILL_LTR,
+    .value_speed = 6.0F,
+    .opacity = 1.0F,
+};
+
+/* ---- mana bar (vertical CROP, BOTTOM_UP): the shaped fill reveals from the bottom (D-59-26
+ * non-LTR direction) — figured art reads better cropped than stretched in a narrow bar. ---- */
 static const nt_ui_progress_style_t g_mana_tmpl = {
-    .track_tint = 0xFF3A3A52,
-    .fill_tint = 0xFFE07CC0, /* magenta mana */
+    .track_tint = 0xFFFFFFFF,
+    .fill_tint = 0xFFFFFFFF,
     .track_w = 26,
-    .track_h = 120,
-    .fill_mode = NT_UI_FILL_STRETCH,
+    .track_h = 96,
+    .fill_mode = NT_UI_FILL_CROP,
     .fill_direction = NT_UI_FILL_BOTTOM_UP,
     .value_speed = 5.0F,
     .opacity = 1.0F,
@@ -242,7 +257,8 @@ static nt_ui_checkbox_style_t s_check;
 static nt_ui_checkbox_style_t s_switch;
 static nt_ui_checkbox_style_t s_radio;
 static nt_ui_slider_style_t s_slider;
-static nt_ui_progress_style_t s_progress;
+static nt_ui_progress_style_t s_progress_stretch;
+static nt_ui_progress_style_t s_progress_crop;
 static nt_ui_progress_style_t s_mana;
 static nt_ui_scroll_style_t s_scroll_hide; /* AUTO_HIDE bar */
 static nt_ui_scroll_style_t s_scroll_always;
@@ -265,12 +281,14 @@ static float s_mana_val = 0.7F; /* follows the float slider for a felt-out verti
 /* Physics-tuning controls (felt-out at the visual-QA gate, D-59-02). */
 static float s_friction = 0.92F;
 static float s_wheel_ease = 18.0F;
+static float s_wheel_step = 40.0F; /* px per wheel notch; engine default 40 (user tunes by feel) */
 
 /* Stable ids for the new widgets. */
 static uint32_t s_id_volume;
 static uint32_t s_id_count;
 static uint32_t s_id_friction;
 static uint32_t s_id_wheel_ease;
+static uint32_t s_id_wheel_step;
 static uint32_t s_id_scroll_hide;
 static uint32_t s_id_scroll_always;
 static uint32_t s_id_scroll_to_btn;
@@ -318,22 +336,27 @@ static void init_widget_styles(void) {
     s_switch.checked[NT_UI_CB_IDLE].box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
     s_switch.checked[NT_UI_CB_IDLE].check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
 
-    /* Slider: grey track + green STRETCH fill + thumb (only the idle cell carries art;
-     * hover/pressed/disabled inherit the whole ref). */
+    /* Slider: grey track + SMOOTH slice9 fill (replaces track_on; the rounded smooth pill
+     * stretches cleanly at low width, fixing the slice9 end-cap overlap the user saw) + thumb. */
     s_slider = g_slider_tmpl;
     s_slider.states[NT_UI_SLIDER_IDLE].track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
-    s_slider.states[NT_UI_SLIDER_IDLE].fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
+    s_slider.states[NT_UI_SLIDER_IDLE].fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SMOOTH.value);
     s_slider.states[NT_UI_SLIDER_IDLE].thumb = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
 
-    /* Progress (horizontal): grey track + green fill. */
-    s_progress = g_progress_tmpl;
-    s_progress.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
-    s_progress.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON.value);
+    /* Progress bar A (STRETCH slice9): recessed bar track + smooth slice9 fill. */
+    s_progress_stretch = g_progress_stretch_tmpl;
+    s_progress_stretch.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
+    s_progress_stretch.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SMOOTH.value);
 
-    /* Mana (vertical, BOTTOM_UP): white track + white fill, tinted via style. */
+    /* Progress bar B (CROP clip): same recessed track + shaped diagonal-stripe fill (no slice9). */
+    s_progress_crop = g_progress_crop_tmpl;
+    s_progress_crop.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
+    s_progress_crop.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SHAPED.value);
+
+    /* Mana (vertical CROP, BOTTOM_UP): recessed track + shaped fill revealed from the bottom. */
     s_mana = g_mana_tmpl;
-    s_mana.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS__WHITE.value);
-    s_mana.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS__WHITE.value);
+    s_mana.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
+    s_mana.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SHAPED.value);
 
     /* Scroll: two styles differing only in scrollbar visibility (AUTO_HIDE vs ALWAYS).
      * Thumb is the circle art; track is the grey pill (tinted dark). */
@@ -399,7 +422,7 @@ static const Clay_ElementDeclaration s_row_decl = {
 };
 
 static void section_label(const char *text) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.top = 14, .bottom = 4}}}) { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, &g_section_style); }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.top = 6, .bottom = 2}}}) { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, &g_section_style); }
 }
 
 /* The slider track decl: a FIXED-height row so the floating thumb has a stable parent. */
@@ -407,7 +430,7 @@ static const Clay_ElementDeclaration s_slider_decl = {
     .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(28)}},
 };
 static const Clay_ElementDeclaration s_progress_decl = {
-    .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(22)}},
+    .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(24)}},
 };
 // #endregion
 
@@ -436,7 +459,7 @@ static void scroll_list(uint32_t id, uint32_t inner_btn_id, const nt_ui_scroll_s
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
 
         const Clay_ElementDeclaration scroll_decl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(180)}, .padding = CLAY_PADDING_ALL(8)},
+            .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(120)}, .padding = CLAY_PADDING_ALL(8)},
             .backgroundColor = {24.0F, 26.0F, 34.0F, 255.0F},
             .cornerRadius = CLAY_CORNER_RADIUS(8),
         };
@@ -475,14 +498,14 @@ static void declare_widgets_panel(void) {
 
     CLAY({.id = CLAY_ID("widgets-panel"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)},
-                     .padding = CLAY_PADDING_ALL(28),
+                     .padding = CLAY_PADDING_ALL(20),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 8,
+                     .childGap = 4,
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = {30.0F, 34.0F, 42.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(10)}) {
 
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.bottom = 8}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.bottom = 2}}}) {
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Sliders / Progress / Scroll", &g_title_style);
         }
 
@@ -504,19 +527,25 @@ static void declare_widgets_panel(void) {
         slider_drag_bubble(s_id_count, buf);
         // #endregion
 
-        // #region progress (horizontal ramp + vertical mana)
-        section_label("Progress (auto-ramp + vertical mana)");
+        // #region progress (STRETCH vs CROP, side by side) + vertical mana
+        section_label("Progress: STRETCH (slice9) vs CROP (clip)");
 
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 28, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
-                (void)snprintf(buf, sizeof buf, "Loading  %d%%", (int)(s_progress_val * 100.0F));
+                /* Bar A: STRETCH slice9 — the smooth gradient pill stretches with no distortion. */
+                (void)snprintf(buf, sizeof buf, "STRETCH (slice9)  %d%%", (int)(s_progress_val * 100.0F));
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
-                nt_ui_progress(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("progress/load"), s_progress_val, &s_progress, &s_progress_decl);
+                nt_ui_progress(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("progress/stretch"), s_progress_val, &s_progress_stretch, &s_progress_decl);
+
+                /* Bar B: CROP clip — the diagonal-stripe art is revealed crisp, not stretched. */
+                (void)snprintf(buf, sizeof buf, "CROP (clip)  %d%%", (int)(s_progress_val * 100.0F));
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+                nt_ui_progress(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("progress/crop"), s_progress_val, &s_progress_crop, &s_progress_decl);
             }
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Mana", &g_help_style);
                 nt_ui_progress(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("progress/mana"), s_mana_val, &s_mana,
-                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(120)}}});
+                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(26), CLAY_SIZING_FIXED(96)}}});
             }
         }
         // #endregion
@@ -556,6 +585,13 @@ static void declare_widgets_panel(void) {
             s_scroll_hide.wheel_ease_speed = s_wheel_ease;
             s_scroll_always.wheel_ease_speed = s_wheel_ease;
         }
+
+        (void)snprintf(buf, sizeof buf, "Wheel step %.0f px/notch", (double)s_wheel_step);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
+        if (nt_ui_slider_float(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_wheel_step, NULL, &s_wheel_step, 10.0F, 80.0F, 0.0F, &s_slider, &s_slider_decl, true)) {
+            s_scroll_hide.wheel_step_px = s_wheel_step;
+            s_scroll_always.wheel_step_px = s_wheel_step;
+        }
         // #endregion
     }
 }
@@ -576,6 +612,7 @@ static void declare_menu(void) {
         s_id_count = nt_ui_id("settings/count");
         s_id_friction = nt_ui_id("tune/friction");
         s_id_wheel_ease = nt_ui_id("tune/wheel_ease");
+        s_id_wheel_step = nt_ui_id("tune/wheel_step");
         s_id_scroll_hide = nt_ui_id("scroll/list_autohide");
         s_id_scroll_always = nt_ui_id("scroll/list_always");
         s_id_scroll_to_btn = nt_ui_id("scroll/to_top");
@@ -747,12 +784,14 @@ static void frame(void) {
         (void)snprintf(status_text, sizeof status_text, "vsync=%s  dark=%s  quality=%s  cell=%s", s_vsync ? "on" : "off", s_dark ? "on" : "off", quality_name, s_cell_selected ? "yes" : "no");
         const char *help_text = "Drag sliders  |  scroll/fling lists (tap inner button, drag to scroll)  |  D = inspector  |  Esc quit";
 
+        /* Y_TOP (not Y_CENTER): the panels are taller than the viewport, so centering would clip
+         * the bottom rows (scroll-to button + tuning sliders) off-screen and unhittable. */
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
-                         .padding = CLAY_PADDING_ALL(24),
+                         .padding = CLAY_PADDING_ALL(10),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 16,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                         .childGap = 6,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
               .backgroundColor = {18.0F, 18.0F, 22.0F, 255.0F}}) {
 
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
