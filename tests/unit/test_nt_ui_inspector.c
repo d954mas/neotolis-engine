@@ -622,6 +622,121 @@ static void test_inspector_filter_keeps_text_leaves(void) {
     TEST_ASSERT_GREATER_THAN_INT32(a_growth, b_growth);
 }
 
+/* Union-misread guard: a TEXT leaf with siblings AFTER it at multiple depths.
+ * childrenOrTextContent is a union — on a text element its .children arm aliases
+ * the textElementData pointer, so an unguarded .children read derefs garbage. The
+ * DFS must mark text rows is_text, descend 0 children, and still enumerate the
+ * post-text siblings at every depth. Walk several frames (inspector active). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_text_with_siblings_no_union_misread(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    nt_ui_inspector_tree_row_t rows[64];
+    int32_t text_rows = 0;
+    int32_t sib_after_text = 0;
+
+    for (int32_t frame = 0; frame < 3; ++frame) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("tws_root")}) {
+            /* Depth 1: text leaf, then a sibling box AFTER it. */
+            nt_ui_label(s_fx.ctx, NULL, "depth1", &s_label_style);
+            CLAY({.id = CLAY_ID("tws_after1"), .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {
+                /* Depth 2: text leaf, then a sibling box AFTER it. */
+                nt_ui_label(s_fx.ctx, NULL, "depth2", &s_label_style);
+                CLAY({.id = CLAY_ID("tws_after2"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+            }
+        }
+        nt_ui_end(s_fx.ctx);
+
+        const int32_t n = nt_ui_internal_collect_tree_rows(s_fx.ctx, rows, 64);
+        TEST_ASSERT_GREATER_THAN_INT32(0, n);
+
+        text_rows = 0;
+        sib_after_text = 0;
+        bool seen_text = false;
+        bool found_after1 = false;
+        bool found_after2 = false;
+        for (int32_t i = 0; i < n; ++i) {
+            if (rows[i].is_text != 0U) {
+                /* Text row must carry the text arm, never a bogus child count. */
+                TEST_ASSERT_NOT_NULL(rows[i].text_chars);
+                text_rows++;
+                seen_text = true;
+            } else {
+                if (seen_text) {
+                    sib_after_text++;
+                }
+                if (rows[i].id == CLAY_ID("tws_after1").id) {
+                    found_after1 = true;
+                }
+                if (rows[i].id == CLAY_ID("tws_after2").id) {
+                    found_after2 = true;
+                }
+            }
+        }
+        /* Sibling boxes emitted AFTER a text leaf at depths 1 and 2 must survive the
+         * DFS — a union misread would crash before reaching them. */
+        TEST_ASSERT_TRUE(found_after1);
+        TEST_ASSERT_TRUE(found_after2);
+    }
+
+    /* At least our two labels are flagged text, and post-text siblings enumerate. */
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(2, text_rows);
+    TEST_ASSERT_GREATER_THAN_INT32(0, sib_after_text);
+}
+
+/* Capacity-overflow guard for the build_tree bake + collect_tree_rows DFS sites.
+ *
+ * When the USER tree itself exhausts Clay's layoutElements capacity, Clay__OpenElement flips
+ * maxElementsExceeded and returns WITHOUT adding the element; any ancestor still open then
+ * closes via Clay__CloseElement's early-return (the maxElementsExceeded branch) which never
+ * assigns children.elements — leaving a NON-TEXT element with children.length>0 and
+ * children.elements==NULL. Clay_EndLayout takes its own maxElementsExceeded branch and SKIPS
+ * CalculateFinalLayout (so Clay's own DFS never walks the malformed node), AND element-capacity
+ * overflow only sets a boolean — it fires NO error callback (unlike render-command or text-cache
+ * overflow). So nt_ui_clay_error_cb never traps, and build_tree's DFS walked the malformed tree:
+ * pre-fix it derefed children.elements[0] == NULL -> access violation at nt_ui_clay_impl.c:486.
+ * Same shape at the inspector's collect_tree_rows DFS. The engine contracts graceful degradation
+ * on overflow (the inspector's cdv_layout_budget_left reserve exists precisely to avoid Clay's
+ * trap), so both DFS sites now treat elements==NULL as childless and the frame must SURVIVE.
+ *
+ * 64 branches x 32 children = ~2112 elements (~2x the 1024 cap), so the crossing lands while a
+ * branch parent (non-text, children already counted) is still open -> elements==NULL parent. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_user_tree_capacity_overflow_no_crash(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    const int32_t cap = (int32_t)s_fx.ctx->max_elements; /* Clay layoutElements capacity == max_elements */
+
+    nt_ui_inspector_tree_row_t rows[64];
+
+    for (int rep = 0; rep < 3; ++rep) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("overflow_root")}) {
+            for (int b = 0; b < 64; ++b) {
+                CLAY({.id = CLAY_IDI("ovf_branch", (uint32_t)b), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {
+                    for (int c = 0; c < 32; ++c) {
+                        CLAY({.id = CLAY_IDI("ovf_leaf", (uint32_t)((b * 32) + c)), .layout = {.sizing = {CLAY_SIZING_FIXED(2), CLAY_SIZING_FIXED(2)}}}) {}
+                    }
+                }
+            }
+        }
+        /* build_tree runs inside end and walks the malformed tree -> pre-fix NULL deref. */
+        nt_ui_end(s_fx.ctx);
+
+        /* The scene must have actually overflowed (capacity reached), else the repro is moot. */
+        const int32_t total = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+        char msg[80];
+        (void)snprintf(msg, sizeof msg, "rep=%d total=%d cap=%d", rep, total, cap);
+        TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(cap - 1, total, msg);
+
+        /* The inspector's direct DFS walk shares the deref site -> must also survive. */
+        const int32_t n = nt_ui_internal_collect_tree_rows(s_fx.ctx, rows, 64);
+        TEST_ASSERT_GREATER_THAN_INT32(0, n);
+    }
+}
+
 /* Unnamed but widget-registered element produces an inspector tree row (hex id
  * fallback); the layout element count must grow. */
 static void test_inspector_emits_hex_for_unnamed_widget(void) {
@@ -2621,6 +2736,7 @@ int main(void) {
     RUN_TEST(test_button_auto_records_hit_padding);
     RUN_TEST(test_inspector_filter_skips_anonymous);
     RUN_TEST(test_inspector_filter_keeps_text_leaves);
+    RUN_TEST(test_inspector_text_with_siblings_no_union_misread);
     RUN_TEST(test_inspector_emits_hex_for_unnamed_widget);
     RUN_TEST(test_inspector_collapsed_storage);
     RUN_TEST(test_inspector_collapse_hides_children);
@@ -2665,6 +2781,7 @@ int main(void) {
     RUN_TEST(test_inspector_pane_drag_does_not_scroll_game);
     RUN_TEST(test_inspector_tree_text_moves_with_scroll);
     RUN_TEST(test_inspector_row_click_after_scroll_selects_scrolled_row);
+    RUN_TEST(test_inspector_user_tree_capacity_overflow_no_crash);
     return UNITY_END();
 }
 
