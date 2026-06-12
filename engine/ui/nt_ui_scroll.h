@@ -40,13 +40,15 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_DRAG_LATCHED ((uint8_t)(1U << 3))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
- * negative-down sign convention. ~44B; under NT_UI_STATE_PAYLOAD_MAX. */
+ * negative-down sign convention. ~52B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
     float pos[2];            /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
     float raw[2];            /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
     float vel[2];            /* momentum velocity (px/s), sampled from drag for the release fling */
     float target[2];         /* smooth-wheel + scroll-to target */
     float free_press_pos[2]; /* free-press drag anchor (re-anchored each frame; FREE_PRESS gates it) */
+    float idle;              /* seconds since last scroll activity (AUTO_HIDE linger; dt-accumulated, no wall clock) */
+    float thumb_grab;        /* offset of the press point within the thumb (track-axis px); set on thumb-press */
     uint8_t flags;
 } nt_ui_scroll_state_t;
 
@@ -68,10 +70,13 @@ typedef struct {
     float bar_thickness;
     float bar_thumb_min_px;
     float bar_fade_speed; /* AUTO_HIDE fade via nt_ui_anim value_t */
+    float bar_hide_delay; /* AUTO_HIDE: seconds of idle before the bar fades out (iOS/macOS overlay linger ~1.2s) */
+    /* Track-click semantics: clicking the track OFF the thumb smooth-jumps to the clicked spot
+     * (macOS "jump to the spot that's clicked" option), not page-by-page — chosen for game UI. */
     nt_atlas_region_ref_t track_ref, thumb_ref;
     uint32_t track_tint, thumb_tint;
 } nt_ui_scroll_style_t;
-_Static_assert(sizeof(nt_ui_scroll_style_t) == 88, "nt_ui_scroll_style_t stable ABI (2 bool + 5 float + 2 enum + 3 float + 2x16B ref + 2 u32)");
+_Static_assert(sizeof(nt_ui_scroll_style_t) == 88, "nt_ui_scroll_style_t stable ABI (2 bool + 5 float + 2 enum + 4 float[8B aligned] + 2x16B ref + 2 u32)");
 
 /* A valid baseline: mobile-game-like tunables, y-only scroll, ALWAYS/OVERLAY bar. */
 nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
