@@ -1367,6 +1367,56 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(NT_UI_INSPECTOR_ALTERNATION_CAP, alternations, msg);
 }
 
+/* The tree-pane clip element must emit its OWN static RECTANGLE bg, so overscroll/truncation shows
+ * the panel, not the game (the bug: bg came only from scrolling children + budget-capped stripes). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_tree_pane_clip_emits_static_bg(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    /* Two frames so the clip element's bbox is solved. */
+    for (int rep = 0; rep < 2; ++rep) {
+        nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("clipbg_root")}) {
+            CLAY({.id = CLAY_ID("clipbg_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        }
+        nt_ui_end(s_fx.ctx);
+    }
+
+    /* Resolve the clip element's bbox by id (Clay internals are not visible to the test TU). */
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+    const int32_t count = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_inspector_element_view_t pane = {0};
+    for (int32_t i = 0; i < count; ++i) {
+        const nt_ui_inspector_element_view_t v = nt_ui_internal_get_layout_element_view(s_fx.ctx, i);
+        if (v.id == pane_id) {
+            pane = v;
+            break;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(pane_id, pane.id, "tree-pane clip element must exist in the layout");
+    TEST_ASSERT_TRUE_MESSAGE(pane.w > 0.0F && pane.h > 0.0F, "clip bbox must be solved");
+
+    /* A RECTANGLE command anchored at the clip's top-left and matching its size only exists when the
+     * clip element itself carries .backgroundColor — the regression's root cause. */
+    Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    TEST_ASSERT_NOT_NULL(arr->internalArray);
+    bool found_clip_bg = false;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            continue;
+        }
+        if (fabsf(cc->boundingBox.x - pane.x) <= 1.0F && fabsf(cc->boundingBox.y - pane.y) <= 1.0F && fabsf(cc->boundingBox.width - pane.w) <= 1.0F && fabsf(cc->boundingBox.height - pane.h) <= 1.0F) {
+            found_clip_bg = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_clip_bg, "tree-pane clip element must emit a full-size RECTANGLE bg");
+}
+
 /* ---- Test 15x-perf-bulk: 20 widgets stay under scaled alternation cap (60). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
@@ -2330,6 +2380,7 @@ int main(void) {
     RUN_TEST(test_inspector_hover_transformed_widget);
     RUN_TEST(test_inspector_inner_emits_carry_debug_layer);
     RUN_TEST(test_inspector_alternations_capped_after_strategy_a);
+    RUN_TEST(test_inspector_tree_pane_clip_emits_static_bg);
     RUN_TEST(test_inspector_alternations_bulk_scene_after_strategy_a);
     RUN_TEST(test_inspector_pane_scrolls_on_wheel);
     RUN_TEST(test_inspector_layer_split_collapses_dispatch);

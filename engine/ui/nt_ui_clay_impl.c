@@ -1238,6 +1238,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         {
             (void)nt_ui_internal_format_mem_line(ctx, cdv_mem_line_buf, sizeof cdv_mem_line_buf);
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = CDV_COLOR_2,
                   .userData = debug_bg_data}) {
                 CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(cdv_mem_line_buf), .chars = cdv_mem_line_buf}), infoTextConfig);
             }
@@ -1245,7 +1246,13 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
         const Clay_Vector2 treeOffset = nt_ui_internal_scroll_pane_offset(ctx, scrollId.id, NT_UI_STATE_TAG('i', 'n', 's', 'p'), true, true);
-        CLAY({.id = scrollId, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .userData = debug_bg_data, .clip = {.horizontal = true, .vertical = true, .childOffset = treeOffset}}) {
+        /* Static bg on the clip element itself: stripes/zebra are decoration on top, so truncation
+         * or overscroll shows the panel, not the game (Clay paints clip bg before scrolled children). */
+        CLAY({.id = scrollId,
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+              .backgroundColor = CDV_COLOR_2,
+              .userData = debug_bg_data,
+              .clip = {.horizontal = true, .vertical = true, .childOffset = treeOffset}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
                   .backgroundColor = ((initialElementsLength + initialRootsLength) & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1,
                   .userData = debug_bg_data}) {
