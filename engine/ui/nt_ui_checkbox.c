@@ -219,6 +219,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
         in = nt_ui_step_interaction_padded(ctx, id, NULL);
     } else {
         in = (nt_ui_interaction_t){0};
+        nt_ui_block_pointer(ctx, id, NULL); /* inert occluder: disabled widget still blocks input behind it */
         nt_ui_debug_record_disabled_zone(ctx, id, NULL);
     }
     *out_clicked = in.clicked;

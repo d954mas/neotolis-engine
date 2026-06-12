@@ -61,6 +61,8 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
     } else {
         in = (nt_ui_interaction_t){0};
+        /* Inert occluder: still block the pointer so a disabled overlay can't leak clicks through. */
+        nt_ui_block_pointer(ctx, id, style->hit_padding_lrtb);
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
     }
 

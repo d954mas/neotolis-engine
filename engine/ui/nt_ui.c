@@ -2389,6 +2389,29 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
+/* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
+ * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak
+ * through to widgets underneath them (modal-overlay correctness) while staying visually inert. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
+void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_block_pointer: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_block_pointer: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(id != 0U && "nt_ui_block_pointer: id must be non-zero (0 = no widget)");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_block_pointer: pad_lrtb components must be >= 0");
+
+    /* Same registry record as step (so next-frame resolve_hot ranks it for topmost arbitration), minus
+     * the capture/button-edge state machine — an inert occluder, not an interactive widget. */
+    if (ctx->interactive_cur_count < ctx->max_elements) {
+        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
+        rec->id = id;
+        if (pad_lrtb != NULL) {
+            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
+        } else {
+            memset(rec->pad, 0, sizeof rec->pad);
+        }
+    }
+}
+
 #if NT_UI_DEBUG_TOOLS
 /* Record-only push for DISABLED widgets that skip hit-test; flag surfaces in mode=ALL. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
