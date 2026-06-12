@@ -253,6 +253,8 @@ struct nt_ui_context {
     uint32_t inspector_selected_id;
     /* Pointer inside sidebar footprint — gates step_interaction to zeroed return. */
     bool inspector_pointer_consumed;
+    /* Prev-frame tree truncation state — warn only on the OFF->ON edge, not every frame. */
+    bool inspector_was_truncated;
 
     /* Arena-allocated, cap = max_elements (user can't collapse more nodes than exist). */
     uint32_t *inspector_collapsed_ids;

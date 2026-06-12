@@ -13,6 +13,7 @@
 
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
+#include "log/nt_log.h"
 #include "math/nt_math.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
@@ -789,7 +790,10 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
 
 /* Single per-frame line for the "UI memory" sidebar row. One emit per inspector
  * layout, so a single buffer (not a ring) holds the live Clay_String. */
-static char cdv_mem_line_buf[64];
+static char cdv_mem_line_buf[96];
+
+/* Truncation marker text — single emit per layout, so one buffer holds the live Clay_String. */
+static char cdv_trunc_line_buf[80];
 
 /* Shares the hex ring's cursor space (reset per frame). */
 static Clay_String cdv_color_hex_to_string(Clay_Color c) {
@@ -1292,7 +1296,24 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                  * budget-truncated tree still overflows the pane and scrolls to its emitted text rows. */
                 const int32_t skipped_rows = layoutData.row_count - emitted_rows;
                 if (skipped_rows > 0) {
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)skipped_rows * row_h)}}, .userData = debug_bg_data}) {}
+                    /* Visible marker (~2 elements, fits the reserve): silent truncation hid these rows. The
+                     * spacer below drops one row_h so the marker takes a row's place and scroll height holds. */
+                    (void)snprintf(cdv_trunc_line_buf, sizeof cdv_trunc_line_buf, "... %d rows hidden (element budget - raise max_elements)", skipped_rows);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                          .userData = debug_bg_data}) {
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(cdv_trunc_line_buf), .chars = cdv_trunc_line_buf}), infoTextConfig);
+                    }
+                    const float spacer_h = (float)(skipped_rows - 1) * row_h;
+                    if (spacer_h > 0.0F) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(spacer_h)}}, .userData = debug_bg_data}) {}
+                    }
+                    /* Warn once per OFF->ON truncation edge (not per frame) so the user knows what to raise. */
+                    if (!ctx->inspector_was_truncated) {
+                        nt_log_warn("nt_ui_inspector: tree truncated, %d rows hidden (Clay element budget) — raise max_elements (now %u).", skipped_rows, ctx->max_elements);
+                    }
+                    ctx->inspector_was_truncated = true;
+                } else {
+                    ctx->inspector_was_truncated = false;
                 }
             }
         }

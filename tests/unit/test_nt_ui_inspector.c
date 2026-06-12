@@ -2053,6 +2053,53 @@ static void test_inspector_budget_capped_on_large_scene(void) {
     }
 }
 
+/* ---- Test 15z: truncation is VISIBLE — a "rows hidden" marker row is emitted ----
+ * When the tree truncates on the Clay element budget, the inspector must emit a visible TEXT row
+ * (not just a silent spacer). On a small scene that fits, no such marker exists. */
+static bool inspector_frozen_has_text(const nt_ui_context_t *ctx, const char *needle) {
+    const size_t need = strlen(needle);
+    const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
+            continue;
+        }
+        const Clay_StringSlice s = cc->renderData.text.stringContents;
+        if (s.chars == NULL || (size_t)s.length < need) {
+            continue;
+        }
+        for (size_t off = 0; off + need <= (size_t)s.length; ++off) {
+            if (memcmp(s.chars + off, needle, need) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void inspector_emit_leaf_scene(int leaf_count) {
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("trunc_root")}) {
+        for (int i = 0; i < leaf_count; ++i) {
+            CLAY({.id = CLAY_IDI("trunc_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_truncation_marker_visible(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    /* Big scene blows past the 1024 element cap -> tree truncates -> marker row present. */
+    inspector_emit_leaf_scene(600);
+    TEST_ASSERT_TRUE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "truncated tree must emit a visible 'rows hidden' marker row");
+
+    /* Small scene fits -> no truncation -> no marker. */
+    inspector_emit_leaf_scene(4);
+    TEST_ASSERT_FALSE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "untruncated tree must NOT emit a 'rows hidden' marker row");
+}
+
 /* ---- Integration: the inspector's OWN elements-tree pane scrolls on wheel ----
  * The real inspector pane is emitted INSIDE nt_ui_end (after the user frame closes), so its wheel
  * candidate registers + resolves on the end-of-frame path, not the user-frame path. This drives
@@ -2393,6 +2440,7 @@ int main(void) {
     RUN_TEST(test_inspector_metrics_set_changes_overlay_scissor);
     RUN_TEST(test_inspector_over_disabled_widget_and_scroll);
     RUN_TEST(test_inspector_budget_capped_on_large_scene);
+    RUN_TEST(test_inspector_truncation_marker_visible);
     RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
     RUN_TEST(test_inspector_pane_wins_over_game_container);
     RUN_TEST(test_inspector_pane_drag_tracks_1to1);
