@@ -2,7 +2,7 @@
 """Procedural CC0 progress-bar + scrollbar art for ui_stateful_demo (issue 4).
 
 Generates the 192x32 progress-bar sprites:
-  bar_track.png         - rounded recessed track (slice9-friendly: uniform 24px end-caps).
+  bar_track.png         - rounded recessed track (slice9-friendly: uniform 8px end-caps (== BAR_BORDER slice9)).
   bar_fill_smooth.png   - rounded vertical-gradient pill (stretches cleanly; STRETCH slice9 + slider fill).
   bar_fill_shaped.png   - diagonal candy stripes + gradient + glossy band (CROP reveal is obvious; NO slice9).
 

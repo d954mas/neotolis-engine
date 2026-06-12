@@ -423,10 +423,15 @@ static void scroll_consume_threshold(bool latched, float *ddx, float *ddy) {
 
 /* A capture this container must NOT steal: its OWN scrollbar (floats inside the bbox, a thumb
  * drag must reach the bar), or any nested scroll/scrollbar widget (the inner scroller owns its
- * own gesture). nt_ui_widget_lookup keys off the widget def registered at that id last frame. */
+ * own gesture). Nested CONTAINERS are detected via their always-on state-pool 'scrl' cell —
+ * nt_ui_widget_lookup is DEBUG_TOOLS-only (NULL when OFF), so it must not be the only guard;
+ * it stays as extra coverage for nested SCROLLBAR ids (registry-known, no state cell). */
 static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_id, uint32_t cap_id) {
     if (cap_id == scrollbar_id(scroll_id, 0) || cap_id == scrollbar_id(scroll_id, 1)) {
         return true;
+    }
+    if (nt_ui_state_has_tag(ctx, cap_id, NT_UI_STATE_TAG('s', 'c', 'r', 'l'))) {
+        return true; /* nested scroll container — works in all builds */
     }
     const nt_ui_widget_def_t *def = nt_ui_widget_lookup(ctx, cap_id);
     return def == &NT_UI_SCROLL_DEF || def == &NT_UI_SCROLLBAR_DEF;

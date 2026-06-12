@@ -10,6 +10,7 @@
  * each frame. Stores view/interaction state only (scroll offset/velocity, custom
  * widget userdata); logical values stay game-owned (Model D). */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct nt_ui_context nt_ui_context_t;
@@ -52,6 +53,10 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
 
 /* NULL if absent — no create, no assert on a miss. */
 void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id);
+
+/* True when a live cell exists under `id` with exactly `tag` — cheap widget-kind probe
+ * that works in ALL builds (the debug widget registry is DEBUG_TOOLS-only). */
+bool nt_ui_state_has_tag(const nt_ui_context_t *ctx, uint32_t id, uint32_t tag);
 
 /* Explicit free; the game frees any owned pointer BEFORE this. id==0 is a no-op. */
 void nt_ui_state_clear(nt_ui_context_t *ctx, uint32_t id);

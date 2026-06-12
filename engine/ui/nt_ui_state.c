@@ -50,6 +50,24 @@ void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id) {
     return NULL;
 }
 
+bool nt_ui_state_has_tag(const nt_ui_context_t *ctx, uint32_t id, uint32_t tag) {
+    NT_ASSERT(ctx != NULL && "nt_ui_state_has_tag: ctx must be non-NULL");
+    if (id == 0U) {
+        return false;
+    }
+    const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
+    for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
+        const nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
+        if (c->id == id) {
+            return c->tag == tag;
+        }
+        if (c->id == 0U) {
+            return false;
+        }
+    }
+    return false;
+}
+
 void nt_ui_state_clear(nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_state_clear: ctx must be non-NULL");
     if (id == 0U) {
