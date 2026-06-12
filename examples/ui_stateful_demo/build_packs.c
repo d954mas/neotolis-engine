@@ -152,7 +152,21 @@ int main(int argc, char *argv[]) {
     opts.name = "bar_fill_shaped";
     nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/bar_fill_shaped.png", &opts);
 
-    (void)printf("  Atlas: box/check + ring/dot + track_off/on (s9 %dx%d) + thumb + bar track/fills\n", TRACK_BORDER_X, TRACK_BORDER_Y);
+    /* Scrollbar pieces: a recessed slot track + a light capsule thumb, both 32x32 with 8px slice9
+     * (BAR_BORDER) so the rounded caps stay fixed whether the bar is stretched tall (vertical) or
+     * wide (horizontal). Replaces the toggle CIRCLE thumb that looked wrong stretched along the bar. */
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "scroll_track";
+    opts.slice9_left = BAR_BORDER;
+    opts.slice9_right = BAR_BORDER;
+    opts.slice9_top = BAR_BORDER;
+    opts.slice9_bottom = BAR_BORDER;
+    nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/scroll_track.png", &opts);
+
+    opts.name = "bar_thumb";
+    nt_builder_atlas_add(ctx, "examples/ui_stateful_demo/raw/bar_thumb.png", &opts);
+
+    (void)printf("  Atlas: box/check + ring/dot + track_off/on (s9 %dx%d) + thumb + bar track/fills + scroll track/thumb (s9 %d)\n", TRACK_BORDER_X, TRACK_BORDER_Y, BAR_BORDER);
 
     /* White pixel for UI rects (panel backgrounds, inspector sidebar). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};

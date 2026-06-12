@@ -24,11 +24,13 @@
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* ui_stateful_demo_atlas/_white */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SHAPED ((nt_hash64_t){0xD90FD46D2942D266ULL}) /* ui_stateful_demo_atlas/bar_fill_shaped */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SMOOTH ((nt_hash64_t){0x79EB3F6E66AACCD2ULL}) /* ui_stateful_demo_atlas/bar_fill_smooth */
+#define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_THUMB ((nt_hash64_t){0x0A23AE77D09F56B0ULL}) /* ui_stateful_demo_atlas/bar_thumb */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK ((nt_hash64_t){0x51EAE63B523DAC86ULL}) /* ui_stateful_demo_atlas/bar_track */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BOX_OFF ((nt_hash64_t){0x97CC840C10B18698ULL}) /* ui_stateful_demo_atlas/box_off */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_CHECKMARK ((nt_hash64_t){0x24D04B5060D94AAAULL}) /* ui_stateful_demo_atlas/checkmark */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_DOT ((nt_hash64_t){0x0E9B910790E5B74AULL}) /* ui_stateful_demo_atlas/radio_dot */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_RADIO_RING ((nt_hash64_t){0x6F272288C64FB9FCULL}) /* ui_stateful_demo_atlas/radio_ring */
+#define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_SCROLL_TRACK ((nt_hash64_t){0x2EA29D76260C5D05ULL}) /* ui_stateful_demo_atlas/scroll_track */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB ((nt_hash64_t){0x04116FA511D32E10ULL}) /* ui_stateful_demo_atlas/thumb */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF ((nt_hash64_t){0x50419D86161F9647ULL}) /* ui_stateful_demo_atlas/track_off */
 #define ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_ON ((nt_hash64_t){0x672BE88EE8BF9CFEULL}) /* ui_stateful_demo_atlas/track_on */
@@ -44,11 +46,13 @@ static inline void ui_stateful_demo_assets_register_labels(void) {
     (void)nt_hash64_str("ui_stateful_demo_atlas/_white");
     (void)nt_hash64_str("ui_stateful_demo_atlas/bar_fill_shaped");
     (void)nt_hash64_str("ui_stateful_demo_atlas/bar_fill_smooth");
+    (void)nt_hash64_str("ui_stateful_demo_atlas/bar_thumb");
     (void)nt_hash64_str("ui_stateful_demo_atlas/bar_track");
     (void)nt_hash64_str("ui_stateful_demo_atlas/box_off");
     (void)nt_hash64_str("ui_stateful_demo_atlas/checkmark");
     (void)nt_hash64_str("ui_stateful_demo_atlas/radio_dot");
     (void)nt_hash64_str("ui_stateful_demo_atlas/radio_ring");
+    (void)nt_hash64_str("ui_stateful_demo_atlas/scroll_track");
     (void)nt_hash64_str("ui_stateful_demo_atlas/tex0");
     (void)nt_hash64_str("ui_stateful_demo_atlas/thumb");
     (void)nt_hash64_str("ui_stateful_demo_atlas/track_off");

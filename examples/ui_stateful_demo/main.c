@@ -372,22 +372,22 @@ static void init_widget_styles(void) {
     s_mana.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
     s_mana.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SMOOTH.value);
 
-    /* Scroll: two styles differing only in scrollbar visibility (AUTO_HIDE vs ALWAYS).
-     * Thumb is the circle art; track is the grey pill (tinted dark). */
+    /* Scroll: two styles differing only in scrollbar visibility (AUTO_HIDE vs ALWAYS). Track is the
+     * recessed scroll slot; thumb is the light capsule pill (8px slice9, reads right at any length). */
     s_scroll_hide = nt_ui_scroll_style_defaults();
     s_scroll_hide.bar_visibility = NT_UI_SCROLLBAR_AUTO_HIDE;
     s_scroll_hide.bar_thickness = 12.0F;
     s_scroll_hide.bar_thumb_min_px = 28.0F;
     s_scroll_hide.bar_fade_speed = 8.0F;
-    s_scroll_hide.track_tint = 0x66303040;
-    s_scroll_hide.thumb_tint = 0xFFC8D0E0;
-    s_scroll_hide.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
-    s_scroll_hide.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+    s_scroll_hide.track_tint = 0xC0FFFFFF; /* slight alpha so the recessed slot floats over content */
+    s_scroll_hide.thumb_tint = 0xFFFFFFFF; /* art is already the light capsule; no recolor needed */
+    s_scroll_hide.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_SCROLL_TRACK.value);
+    s_scroll_hide.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_THUMB.value);
 
     s_scroll_always = s_scroll_hide;
     s_scroll_always.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
-    s_scroll_always.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
-    s_scroll_always.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+    s_scroll_always.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_SCROLL_TRACK.value);
+    s_scroll_always.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_THUMB.value);
 
     /* Horizontal-only: scroll_x on, scroll_y off; ALWAYS bar on the bottom edge. */
     s_scroll_horiz = s_scroll_always;

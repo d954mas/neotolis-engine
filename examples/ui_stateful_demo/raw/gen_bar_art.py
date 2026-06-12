@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Procedural CC0 progress-bar art for ui_stateful_demo (issue 4).
+"""Procedural CC0 progress-bar + scrollbar art for ui_stateful_demo (issue 4).
 
-Generates three 192x32 sprites:
+Generates the 192x32 progress-bar sprites:
   bar_track.png         - rounded recessed track (slice9-friendly: uniform 24px end-caps).
   bar_fill_smooth.png   - rounded vertical-gradient pill (stretches cleanly; STRETCH slice9 + slider fill).
   bar_fill_shaped.png   - diagonal candy stripes + gradient + glossy band (CROP reveal is obvious; NO slice9).
+
+And the 32x32 scrollbar pills (8px slice9 == BAR_BORDER, so the rounded caps stay fixed at any
+bar length/orientation — the bar is used both vertical and horizontal):
+  scroll_track.png      - subtle recessed slot (dark, soft inner shadow, faint rim).
+  bar_thumb.png         - light capsule thumb (vertical gloss gradient + bright top edge).
 
 Pure-Pillow, deterministic. Run from anywhere:
     python examples/ui_stateful_demo/raw/gen_bar_art.py
@@ -18,6 +23,9 @@ W, H = 192, 32
 # Corner radius == the 8px slice9 border (build_packs.c BAR_BORDER) so the rounded ends sit
 # entirely inside the fixed slice9 corner and never stretch — clean at any bar width/height.
 RADIUS = 8
+# Square scrollbar pieces: 8px slice9 corners are symmetric so the SAME art reads correctly whether
+# the bar is stretched tall (vertical) or wide (horizontal).
+SB = 32
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -102,8 +110,53 @@ def make_fill_shaped():
     img.save(os.path.join(HERE, "bar_fill_shaped.png"))
 
 
+def make_scroll_track():
+    """Recessed scrollbar slot: dark body, soft inner top shadow, faint lower rim. Square so the
+    8px slice9 corners read identically when stretched vertical or horizontal."""
+    img = Image.new("RGBA", (SB, SB), (0, 0, 0, 0))
+    px = img.load()
+    top = (20, 22, 30)     # inner shadow (recessed)
+    mid = (32, 35, 46)     # slot body
+    bot = (48, 52, 68)     # lower rim catch-light
+    for y in range(SB):
+        t = y / (SB - 1)
+        if t < 0.4:
+            col = lerp(top, mid, t / 0.4)
+        else:
+            col = lerp(mid, bot, (t - 0.4) / 0.6)
+        for x in range(SB):
+            px[x, y] = (col[0], col[1], col[2], 255)
+    img.putalpha(rounded_mask(SB, SB, RADIUS))
+    img.save(os.path.join(HERE, "scroll_track.png"))
+
+
+def make_bar_thumb():
+    """Light capsule scrollbar thumb: vertical gloss gradient + a bright top edge, slightly inset
+    rounded body so the recessed track shows around it. Square -> symmetric 8px slice9 both ways."""
+    img = Image.new("RGBA", (SB, SB), (0, 0, 0, 0))
+    px = img.load()
+    edge = (238, 243, 252)   # bright top edge
+    top = (208, 216, 232)    # gloss highlight
+    mid = (176, 186, 206)    # body
+    bot = (140, 150, 172)    # shaded base
+    for y in range(SB):
+        t = y / (SB - 1)
+        if t < 0.12:
+            col = lerp(edge, top, t / 0.12)
+        elif t < 0.5:
+            col = lerp(top, mid, (t - 0.12) / 0.38)
+        else:
+            col = lerp(mid, bot, (t - 0.5) / 0.5)
+        for x in range(SB):
+            px[x, y] = (col[0], col[1], col[2], 255)
+    img.putalpha(rounded_mask(SB, SB, RADIUS))
+    img.save(os.path.join(HERE, "bar_thumb.png"))
+
+
 if __name__ == "__main__":
     make_track()
     make_fill_smooth()
     make_fill_shaped()
-    print("wrote bar_track.png, bar_fill_smooth.png, bar_fill_shaped.png to", HERE)
+    make_scroll_track()
+    make_bar_thumb()
+    print("wrote bar_track.png, bar_fill_smooth.png, bar_fill_shaped.png,", "scroll_track.png, bar_thumb.png to", HERE)
