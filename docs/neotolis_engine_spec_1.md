@@ -271,8 +271,15 @@ If a decision can be deferred without loss of base architecture — it is deferr
   game-owns-the-value model: the float/int value lives in the game, the engine eases
   only the visual fraction (`value_t`); the slider exposes its thumb screen position
   (`nt_ui_slider_thumb_pos`) so the game can draw drag-bubbles via a Clay floating
-  element. Slider and progress share one fill-emit helper (STRETCH slice9 stretch vs
-  CROP scissor-reveal × four directions).
+  element. A press ON the thumb grabs at its press offset (relative drag, value unchanged
+  that frame); a press on the track jumps the value to the click point. `step` quantizes
+  the visual snap with the value, the fill edge meets the thumb CENTER (not `fraction ×
+  track_w`, which would under/overshoot the thumb's travel), and an out-of-range incoming
+  `*value` is clamped AND written back so game memory matches what is drawn. A live drag
+  returns `changed` every frame; act-once callers poll the release edge (commit-on-release).
+  Hit padding inflates the touch target and auto-grows vertically to cover the thumb's
+  overhang past the track even at zero style pad. Slider and progress share one fill-emit
+  helper (STRETCH slice9 stretch vs CROP scissor-reveal × four directions).
 
   **Custom scroll physics.** `nt_ui` scroll containers bypass Clay's built-in
   `Clay_UpdateScrollContainers` (the unconditional call was REMOVED from
@@ -285,8 +292,16 @@ If a decision can be deferred without loss of base architecture — it is deferr
   tunables: momentum/fling (exponential velocity decay by `friction`), overscroll
   rubber-band + critically-damped bounce-back (`rubber_band_c` / `bounce_speed`),
   smooth wheel (ease toward target by `wheel_ease_speed`, 0 = instant, no teleport),
-  and animated `nt_ui_scroll_to`. Per-container scroll state (pos/vel/target/flags)
-  rides the state pool keyed by the scroll id; no heap. Wheel routing is exclusive
+  and animated `nt_ui_scroll_to`. Release-fling velocity is tracked over a TIME WINDOW
+  (`TAU_GAIN`/`TAU_DECAY`), not a per-frame delta: a moving frame blends toward the
+  instantaneous sample, a zero-delta frame decays toward 0, so a fling survives pointer
+  events arriving slower than the render loop instead of depending on release-frame parity.
+  A press landing on a flinging container stops the fling and is swallowed (tap-to-stop).
+  Per-container scroll state (pos/vel/target/flags)
+  rides the state pool keyed by the scroll id; no heap. Wheel input is normalized to a
+  NOTCH unit at the platform edge — `1.0 == one physical detent` (GLFW pass-through; web
+  `deltaMode` divided to notches), so wheel strength is platform-independent and the
+  consumer scales by `wheel_step_px`. Wheel routing is exclusive
   (innermost-wins): each frame every scroll container registers as a candidate, and
   ownership is resolved at frame END — for each pointer the engine picks the candidate
   whose just-solved bbox holds it (ranked by max scroll-nesting depth, then smallest
@@ -302,8 +317,12 @@ If a decision can be deferred without loss of base architecture — it is deferr
   (Model D — the value lives in the game, so the engine cannot revert it). The
   scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children of
   the container with
-  ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE fades via one `nt_ui_anim`
-  value_t). This replaces the v1.7-era assumption that Clay drives scroll; the
+  ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE shows on scroll activity and fades
+  out `bar_hide_delay` seconds after the last motion, via one `nt_ui_anim` value_t).
+  A thumb press grabs at the press offset inside the thumb (no jump-to-center); a click
+  on the track off the thumb smooth-jumps to the clicked spot (`nt_ui_scroll_to`). A
+  thin bar still gets a ≥ 24 px touch target via a cross-axis hit pad. This replaces the
+  v1.7-era assumption that Clay drives scroll; the
   "Scissor limitation" note below still holds (AABB clip of a rotated scroll
   container is unchanged).
 
