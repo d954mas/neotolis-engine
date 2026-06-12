@@ -200,7 +200,9 @@ static void inject_inner_capture(uint32_t inner_id, float press_x, float press_y
     s_fx.ctx->capture_seen[0] = 1U;
 }
 
-/* ---- Test 8: capture-steal — drag>threshold cancels inner capture AND scrolls ---- */
+/* ---- Test 8: capture-steal — drag>threshold cancels inner capture AND scrolls. The container now
+ *      CLAIMS the capture (active_id = scroll id, not 0) so the gesture has a single owner that can't
+ *      be re-adopted by a neighbour; the inner widget sees a foreign owner -> no click (cancelled). ---- */
 static void test_scroll_capture_steal_drag(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     const uint32_t inner_id = 0xBEEFU;
@@ -226,8 +228,8 @@ static void test_scroll_capture_steal_drag(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Inner capture cancelled (active_id cleared) -> inner widget gets no click. */
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    /* Container claimed the gesture -> inner capture cancelled (no longer inner_id, no click). */
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
     /* Scrolled: drag delta routed into pos -> non-trivial childOffset. */
     float oy = 0.0F;
     nt_ui_scroll_test_last_child_offset(NULL, &oy);
@@ -894,6 +896,172 @@ static void test_scroll_held_no_momentum_midhold(void) {
     TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F));           /* vel sampled to zero on the still frame */
 }
 
+/* ================= Gesture ownership (one owner per pointer, claimed at the down edge) ================= */
+
+/* ---- Test 29: THE user bug — a finger that presses inside container A and is dragged across into
+ *      container B's bbox scrolls ONLY A. B never adopts the held finger (no down-edge inside B). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_cross_container_no_adoption(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 100.0F; /* inside A (x=[0,200]) */
+    p.y = 100.0F;
+    twin_scroll_frame(&p, &style, false); /* establish both bboxes + state cells */
+
+    /* Press EDGE inside A. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    twin_scroll_frame(&p, &style, false);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* Drag the still-held finger RIGHT across into B's bbox (x 100 -> 360), then keep it there.
+     * Vertical stays put; the demo lists scroll y, so to make A move we add a y component too. */
+    const float xs[6] = {120.0F, 180.0F, 240.0F, 300.0F, 340.0F, 360.0F};
+    for (int i = 0; i < 6; ++i) {
+        p.x = xs[i];
+        p.y = 100.0F - (float)((i + 1) * 8); /* drag up so A's y scrolls */
+        twin_scroll_frame(&p, &style, false);
+    }
+    /* A few frames fully inside B with the finger still held. */
+    for (int i = 0; i < 4; ++i) {
+        p.x = 360.0F;
+        p.y = 40.0F - (float)(i * 4);
+        twin_scroll_frame(&p, &style, false);
+    }
+
+    nt_ui_scroll_state_t *sa = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_A);
+    nt_ui_scroll_state_t *sb = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_B);
+    TEST_ASSERT_NOT_NULL(sa);
+    TEST_ASSERT_NOT_NULL(sb);
+    TEST_ASSERT_TRUE(sa->pos[1] < -1.0F);                 /* A (the press owner) scrolled */
+    TEST_ASSERT_TRUE(float_near(sb->pos[1], 0.0F, 0.5F)); /* B never adopted the held finger */
+    /* The single owner is A; the capture is NOT held by B. */
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID_A, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+}
+
+/* ---- Test 30: a finger ALREADY HELD (no press edge) entering a container never starts a gesture.
+ *      Without the down-edge gate this is the adoption bug; with it, the container ignores it. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_held_entry_no_edge_no_gesture(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style); /* establish bbox + state cell */
+
+    /* Finger arrives ALREADY DOWN (is_down true, is_pressed false — no edge this frame) and then
+     * drags well past the threshold inside the bbox. No gesture must ever arm. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 8; ++i) {
+        p.y = 100.0F - (float)(i * 10); /* 80 px of drag, no edge */
+        scroll_frame(&p, &style);
+    }
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F));                      /* never scrolled */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* nothing claimed */
+}
+
+/* ---- Test 31: steal continuity — after the container claims an inner-widget gesture it keeps
+ *      routing into that same container over subsequent frames (guards claim-not-zero). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_steal_continues_across_frames(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    const uint32_t inner_id = 0xBEEFU;
+
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style); /* establish bbox */
+
+    /* Frame 1: inner widget owns the pointer; a 40 px drag steals + claims. */
+    p.x = 100.0F;
+    p.y = 140.0F;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    inject_inner_capture(inner_id, 100.0F, 100.0F, 100.0F, 140.0F);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* claimed */
+    float oy_claim = 0.0F;
+    nt_ui_scroll_test_last_child_offset(NULL, &oy_claim);
+
+    /* Subsequent frames: the container OWNS the capture (no inner injection). The held finger keeps
+     * dragging down and the OWNED path must keep routing into THIS container. capture_seen is re-marked
+     * each frame so begin's orphan-clear doesn't drop the claim. */
+    for (int i = 1; i <= 5; ++i) {
+        p.buttons[NT_BUTTON_LEFT].is_down = true;
+        p.y = 140.0F + (float)(i * 10);
+        scroll_frame(&p, &style);
+        TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* still owned */
+    }
+    float oy_after = 0.0F;
+    nt_ui_scroll_test_last_child_offset(NULL, &oy_after);
+    /* The drag kept feeding the same container -> the offset advanced past the claim frame. */
+    TEST_ASSERT_TRUE(fabsf(oy_after) > fabsf(oy_claim) + 1.0F);
+}
+
+/* ---- Test 32: releasing a claimed gesture releases the capture (re-arms), flings, and the NEXT
+ *      press edge starts a FRESH gesture (the owner is reassigned only at a new down edge). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_release_reclaims_on_next_edge(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    /* Press edge inside, drag up fast to build a fling, finger still down (owned). */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 5; ++i) {
+        p.y = 100.0F - (float)(i * 14);
+        scroll_frame(&p, &style);
+    }
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* owned mid-drag */
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(fabsf(s->vel[1]) > 100.0F); /* built a fling */
+    const float pos_at_release = s->pos[1];
+
+    /* Release: the capture must clear (re-arm) and the fling carries on. */
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* released */
+    for (int i = 0; i < 8; ++i) {
+        scroll_frame(&p, &style);
+    }
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] < pos_at_release - 1.0F); /* flung past the release point */
+
+    /* A fresh press edge starts a brand-new gesture -> the container claims again. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.y = 100.0F;
+    scroll_frame(&p, &style); /* arm */
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 3; ++i) {
+        p.y = 100.0F - (float)(i * 12);
+        scroll_frame(&p, &style);
+    }
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* fresh claim */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -925,5 +1093,9 @@ int main(void) {
     RUN_TEST(test_scroll_release_after_hold_no_fling);
     RUN_TEST(test_scroll_raw_anchored_rubber_no_hysteresis);
     RUN_TEST(test_scroll_held_no_momentum_midhold);
+    RUN_TEST(test_scroll_cross_container_no_adoption);
+    RUN_TEST(test_scroll_held_entry_no_edge_no_gesture);
+    RUN_TEST(test_scroll_steal_continues_across_frames);
+    RUN_TEST(test_scroll_release_reclaims_on_next_edge);
     return UNITY_END();
 }

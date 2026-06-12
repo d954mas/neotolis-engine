@@ -304,15 +304,24 @@ static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_
     return def == &NT_UI_SCROLL_DEF || def == &NT_UI_SCROLLBAR_DEF;
 }
 
-/* Per-pointer drag arbitration (D-59-04, Pitfall 2). One drag-routing path, two entry conditions:
- *   - STEAL: a pointer captured by an INNER widget whose press began in our bbox and dragged past
- *     the threshold hands the gesture over — clearing captures[i].active_id delivers the inner
- *     widget a released_now/clicked=false cancel on its next step.
- *   - FREE-PRESS: a pointer with no capture at all (press on non-interactive content/empty space)
- *     pressed inside our bbox and dragged past the threshold scrolls directly — a finger can start
- *     a fling without landing on a widget. The press anchor rides the state cell (free_press_pos).
- * Either way the per-frame delta routes into pos/vel and the anchor re-anchors so next frame's
- * delta is incremental, not cumulative. */
+/* Per-pointer gesture arbitration (D-59-04, Pitfall 2). Ownership is assigned at the POINTER-DOWN
+ * EDGE to the container whose bbox holds the press point and is NEVER reassigned until release — the
+ * iOS/Android contract. The single owner per pointer lives in ctx->captures[i].active_id; once this
+ * container claims it, every OTHER container's STEAL/FREE-PRESS path sees a foreign-owned capture and
+ * leaves it alone (the cross-container adoption bug — a held finger dragged over a neighbour can no
+ * longer latch it). Three mutually-exclusive cases per pointer:
+ *   - OWNED  : cap->active_id == our id — route the per-frame delta (cap->pos re-anchored each frame),
+ *              hold DRAGGING/LATCHED. We own the capture so we also clear it on release here.
+ *   - STEAL  : an INNER non-excluded widget owns it, press began in our bbox, threshold crossed — CLAIM
+ *              the capture (active_id = our id, not 0: the edge-gated free-press below would otherwise
+ *              re-adopt a still-held finger next frame). Claiming away cancels the inner widget (its
+ *              resolve sees a foreign owner -> no click).
+ *   - CANDIDATE: cap->active_id == 0 AND this is the press EDGE (btn.is_pressed) inside our bbox —
+ *              record the free-press anchor. Threshold crossing CLAIMS the capture and routes. A
+ *              merely-held (is_down, no edge) pointer never starts a gesture (kills the adoption bug).
+ * Claimed captures must be re-marked seen every frame or begin's orphan-clear wipes them.
+ * Nested/overlapping scrolls sharing a press point: the first to CLAIM wins, i.e. the OUTER container
+ * (declared first, scroll_begin runs first) — the current contract (no nested scrolls shipped yet). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const nt_scroll_bbox_t *bb) {
     bool any_drag = false;
@@ -320,25 +329,45 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
     const float dt = ctx->frame_dt;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
-        const bool inner_capture = cap->active_id != 0U && cap->active_id != id && !scroll_capture_excluded(ctx, id, cap->active_id);
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
 
-        if (inner_capture) {
-            /* STEAL path: drag origin + cur pos come from the inner widget's capture. */
-            if (!point_in_bbox(bb, cap->press_pos[0], cap->press_pos[1])) {
+        // #region OWNED: we already own this pointer's gesture
+        if (cap->active_id == id) {
+            if (!btn.is_down) {
+                cap->active_id = 0U; /* release: we own the capture, so we end it (fling owns the rest) */
                 continue;
+            }
+            ctx->capture_seen[i] = 1U; /* keep our claim alive past begin's orphan-clear */
+            /* We own the capture but are not a stepped widget, so cap->pos isn't refreshed for us —
+             * track the live pointer ourselves so the per-frame delta is current. */
+            cap->pos[0] = p->x;
+            cap->pos[1] = p->y;
+            float ddx = cap->pos[0] - cap->press_pos[0];
+            float ddy = cap->pos[1] - cap->press_pos[1];
+            scroll_route_drag(s, style, ddx, ddy, dt);
+            cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
+            cap->press_pos[1] = cap->pos[1];
+            any_drag = true;
+            continue;
+        }
+        // #endregion
+
+        // #region STEAL: an inner widget owns it; take over past the threshold
+        const bool inner_capture = cap->active_id != 0U && !scroll_capture_excluded(ctx, id, cap->active_id);
+        if (inner_capture) {
+            if (!point_in_bbox(bb, cap->press_pos[0], cap->press_pos[1])) {
+                continue; /* press began outside us — another container's gesture */
             }
             float ddx = cap->pos[0] - cap->press_pos[0];
             float ddy = cap->pos[1] - cap->press_pos[1];
             const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
-            const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
-            /* Pre-latch: a sub-threshold move is still a tap (leave the inner capture to click).
-             * Post-latch: ANY per-frame delta (incl. zero) keeps the drag live so a held-still
-             * finger holds DRAGGING (no momentum mid-hold) instead of dropping into the integrator. */
-            if (!latched && axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
+            if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
                 continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
             }
-            cap->active_id = 0U; /* cancel the inner widget */
-            scroll_consume_threshold(latched, &ddx, &ddy);
+            cap->active_id = id;       /* CLAIM (not 0): hold the gesture so it can't be re-adopted */
+            ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
+            scroll_consume_threshold(false, &ddx, &ddy);
             scroll_route_drag(s, style, ddx, ddy, dt);
             cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
             cap->press_pos[1] = cap->pos[1];
@@ -346,42 +375,45 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             any_drag = true;
             continue;
         }
-
-        /* FREE-PRESS path: no widget owns this pointer. Track its press origin ourselves. */
         if (cap->active_id != 0U) {
             continue; /* captured by THIS container's bar or an excluded nested scroller */
         }
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+        // #endregion
+
+        // #region CANDIDATE: free pointer; only the press EDGE inside our bbox arms a gesture
         if (!btn.is_down) {
-            continue; /* release ends the free press; momentum/fling owns the rest (DRAGGING clears) */
+            continue; /* not held — nothing to track */
         }
-        const bool press_began = (s->flags & NT_UI_SCROLL_FLAG_FREE_PRESS) == 0U;
-        if (press_began) {
-            if (!point_in_bbox(bb, p->x, p->y)) {
-                continue; /* press landed outside the container — not our gesture */
+        const bool armed = (s->flags & NT_UI_SCROLL_FLAG_FREE_PRESS) != 0U;
+        if (!armed) {
+            /* Edge-gate: only a fresh press (is_pressed) inside the bbox arms. A finger that entered
+             * while already held (no edge) NEVER starts a gesture — the cross-container adoption fix. */
+            if (!btn.is_pressed || !point_in_bbox(bb, p->x, p->y)) {
+                continue;
             }
             s->free_press_pos[0] = p->x;
             s->free_press_pos[1] = p->y;
             any_free_press = true;
-            continue; /* anchor set this frame; delta accrues from next frame */
+            continue; /* armed this frame; delta accrues from next frame */
         }
         float ddx = p->x - s->free_press_pos[0];
         float ddy = p->y - s->free_press_pos[1];
         const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
         any_free_press = true;
-        const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
-        /* Pre-latch: below the threshold it's not yet a drag. Post-latch: route ANY per-frame delta
-         * (incl. zero on a held-still finger) so DRAGGING holds — the finger owns pos, no momentum. */
-        if (!latched && axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
+        if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
             continue; /* still within the tap threshold — not yet a drag */
         }
-        scroll_consume_threshold(latched, &ddx, &ddy);
+        cap->active_id = id;       /* CLAIM: from here the OWNED case routes this pointer */
+        ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
+        cap->press_pos[0] = p->x;
+        cap->press_pos[1] = p->y;
+        cap->pos[0] = p->x;
+        cap->pos[1] = p->y;
+        scroll_consume_threshold(false, &ddx, &ddy);
         scroll_route_drag(s, style, ddx, ddy, dt);
-        s->free_press_pos[0] = p->x; /* re-anchor: next frame's delta is per-frame, 1:1 */
-        s->free_press_pos[1] = p->y;
         s->flags |= NT_UI_SCROLL_FLAG_DRAG_LATCHED;
         any_drag = true;
+        // #endregion
     }
     if (any_drag) {
         s->flags |= NT_UI_SCROLL_FLAG_DRAGGING;
