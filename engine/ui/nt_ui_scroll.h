@@ -106,6 +106,10 @@ uint32_t nt_ui_scroll_test_last_scroll_id(void);
 uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void);
 void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity);
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
+/* Count of scroll_begin gathers that consumed a wheel since the last reset; lets a multi-container
+ * test detect a wheel reaching more than one container in a single frame (the broadcast bug). */
+uint32_t nt_ui_scroll_test_wheel_recipients(void);
+void nt_ui_scroll_test_wheel_recipients_reset(void);
 #endif
 
 #endif /* NT_UI_SCROLL_H */

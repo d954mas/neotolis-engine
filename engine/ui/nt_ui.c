@@ -330,6 +330,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
         ctx->capture_seen[i] = 0U;
         ctx->pointer_hot[i] = (nt_ui_hot_t){0}; /* resolved lazily on first step/query this frame */
         ctx->pointer_occlusion[i] = INFINITY;   /* game re-feeds per frame; default = no cutoff */
+        ctx->wheel_owner[i] = 0U;               /* exclusive wheel routing re-arms each frame */
     }
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;

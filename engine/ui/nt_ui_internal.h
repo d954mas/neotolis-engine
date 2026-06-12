@@ -126,6 +126,11 @@ struct nt_ui_context {
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
+    /* Exclusive wheel routing: the scroll id that consumed this pointer's wheel THIS frame (0 = free).
+     * The first scroll container whose prev-frame bbox holds the pointer claims it; every later
+     * container under the same pointer sees a foreign claim and ignores the wheel. Stops a stale
+     * (prev-frame) bbox overlapping a reflowed sibling from broadcasting one notch to both. */
+    uint32_t wheel_owner[NT_INPUT_MAX_POINTERS];
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */

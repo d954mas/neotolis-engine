@@ -254,6 +254,7 @@ static float s_last_bar_thumb_len[2] = {0.0F};     /* per-axis thumb length */
 static float s_last_bar_thumb_off[2] = {0.0F};     /* per-axis thumb offset along the track */
 static float s_last_bar_track_len[2] = {0.0F};     /* per-axis track length */
 static float s_last_bar_opacity[2] = {0.0F, 0.0F}; /* per-axis eased fade opacity */
+static uint32_t s_wheel_recipients = 0U;           /* # of scroll_begin gathers that consumed a wheel since reset (broadcast pin) */
 #endif
 // #endregion
 
@@ -282,19 +283,39 @@ static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py)
 
 /* The ONE wheel-gather path: accumulate enabled-axis wheel deltas from pointers hovering the
  * container, in Clay's negative-down sign (vertical flips wheel_dy). Used by both scroll_begin
- * and the internal pane helper so the loop + sign convention live in a single place. */
-static void scroll_gather_wheel(const nt_pointer_t *pointers, uint32_t count, const nt_scroll_bbox_t *bb, bool scroll_x, bool scroll_y, float out_wheel[2]) {
+ * and the internal pane helper so the loop + sign convention live in a single place.
+ *
+ * Exclusive routing (D-59 wheel-broadcast fix): each pointer's wheel goes to AT MOST ONE container
+ * per frame. ctx->wheel_owner[i] records the scroll id that already consumed pointer i this frame;
+ * the FIRST container under the pointer (declaration order = outermost / earliest sibling) claims
+ * it, and every later container whose (prev-frame) bbox also holds the pointer sees a foreign claim
+ * and takes nothing. Without this, a STALE bbox (a container that just vacated its slot, still
+ * returned found=true by Clay_GetElementData) overlapping a sibling that reflowed into that space
+ * routed one notch to BOTH — the "wheel scrolls every list for a frame" bug. The bbox must also be
+ * sane (found, w>0, h>0): a zeroed-but-found entry must never pass the hit test. */
+static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_scroll_bbox_t *bb, bool scroll_x, bool scroll_y, float out_wheel[2]) {
     out_wheel[0] = 0.0F;
     out_wheel[1] = 0.0F;
-    for (uint32_t i = 0; i < count; ++i) {
-        const nt_pointer_t *p = &pointers[i];
-        if ((p->wheel_dx != 0.0F || p->wheel_dy != 0.0F) && point_in_bbox(bb, p->x, p->y)) {
-            if (scroll_x) {
-                out_wheel[0] += p->wheel_dx;
-            }
-            if (scroll_y) {
-                out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
-            }
+    if (!bb->found || bb->box.width <= 0.0F || bb->box.height <= 0.0F) {
+        return; /* no solved geometry -> never a hit (frame-1 lag or a zeroed stale entry) */
+    }
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        if (p->wheel_dx == 0.0F && p->wheel_dy == 0.0F) {
+            continue; /* no notch on this pointer */
+        }
+        if (!point_in_bbox(bb, p->x, p->y)) {
+            continue; /* pointer not over this container */
+        }
+        if (ctx->wheel_owner[i] != 0U && ctx->wheel_owner[i] != scroll_id) {
+            continue; /* another container already owns this pointer's wheel this frame */
+        }
+        ctx->wheel_owner[i] = scroll_id; /* claim: later containers under the same pointer get nothing */
+        if (scroll_x) {
+            out_wheel[0] += p->wheel_dx;
+        }
+        if (scroll_y) {
+            out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
         }
     }
 }
@@ -801,9 +822,14 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Drag arbitration (steal + free-press) updates DRAGGING + routes drag delta before integrate. */
     scroll_drag_check(ctx, id, style, s, &cbb, content, container);
 
-    /* Wheel: only the container the pointer is over receives it (Clay sign = -wheel_dy). */
+    /* Wheel: exactly one container per pointer per frame (exclusive routing; see scroll_gather_wheel). */
     float wheel[2];
-    scroll_gather_wheel(ctx->frame_pointers, ctx->frame_pointer_count, &cbb, style->scroll_x, style->scroll_y, wheel);
+    scroll_gather_wheel(ctx, id, &cbb, style->scroll_x, style->scroll_y, wheel);
+#ifdef NT_TEST_ACCESS
+    if (wheel[0] != 0.0F || wheel[1] != 0.0F) {
+        s_wheel_recipients++;
+    }
+#endif
 
     float tun[NT_UI_SCROLL_T_COUNT];
     style_to_tunables(style, tun);
@@ -873,10 +899,11 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    /* Wheel only when the pointer is over THIS pane (one bbox fetch), Clay negative-down sign. */
+    /* Wheel only when the pointer is over THIS pane (one bbox fetch), Clay negative-down sign;
+     * exclusive routing claims the pointer so a stale/overlapping sibling can't double-scroll. */
     const nt_scroll_bbox_t cbb = scroll_fetch_bbox(id);
     float wheel[2];
-    scroll_gather_wheel(ctx->frame_pointers, ctx->frame_pointer_count, &cbb, scroll_x, scroll_y, wheel);
+    scroll_gather_wheel(ctx, id, &cbb, scroll_x, scroll_y, wheel);
 
     /* Instant wheel, no overscroll: wheel_ease 0 -> pos snaps to target, rubber/bounce 0. Named
      * index so the tunable order is compiler-checked (no positional divergence trap). */
@@ -922,4 +949,6 @@ void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thum
     }
 }
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis) { return scrollbar_id(scroll_id, axis); }
+uint32_t nt_ui_scroll_test_wheel_recipients(void) { return s_wheel_recipients; }
+void nt_ui_scroll_test_wheel_recipients_reset(void) { s_wheel_recipients = 0U; }
 #endif

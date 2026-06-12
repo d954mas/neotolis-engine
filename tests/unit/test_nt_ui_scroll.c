@@ -13,6 +13,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -1432,6 +1433,136 @@ static void test_scroll_fling_survives_release_on_zero_delta_frame(void) {
     TEST_ASSERT_TRUE(s->pos[1] < pos_at_release - 1.0F); /* flung past the release point (no parity lottery) */
 }
 
+/* ================= Wheel exclusive-routing (broadcast bug) ================= */
+
+/* Four scroll containers stacked VERTICALLY, mirroring the demo's scroll tiles (each a 220x78 clip
+ * over tall overflowing content). The wheel-broadcast bug is a STALE-bbox hit-test artifact: every
+ * scroll_begin hit-tests the pointer against its OWN PREV-frame bbox (Clay_GetElementData). On a
+ * frame where a layout transition SHIFTS the stack vertically (a spacer appearing/growing above),
+ * each container's prev-frame bbox is at the OLD position while the pointer is conceptually over the
+ * NEW one. A pointer parked at a fixed Y then falls inside the stale bbox of the container that USED
+ * to be there AND the one that is there now — so a single wheel notch routes to BOTH (a broadcast).
+ * The churn knobs: a growing spacer sweeps the stack across the parked pointer; tile A is AUTO_HIDE
+ * so its bar element churns; tile B's row count toggles (clip child-count churn). */
+static const uint32_t WHEEL_ID_A = 0x5CE0A1U;
+static const uint32_t WHEEL_ID_B = 0x5CE0B2U;
+static const uint32_t WHEEL_ID_C = 0x5CE0C3U;
+static const uint32_t WHEEL_ID_D = 0x5CE0D4U;
+
+/* Current childOffset.y for a scroll id, or 0 if its state cell isn't live yet. */
+static float wheel_pos_y(uint32_t id) {
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, id);
+    return (s != NULL) ? s->pos[1] : 0.0F;
+}
+
+/* Tile geometry: 220x78 clip, 0px gap so vertically-adjacent tiles share an edge (the stale-vs-new
+ * overlap band is exactly the shift distance at that shared edge). */
+#define WHEEL_TILE_W 220.0F
+#define WHEEL_TILE_H 78.0F
+
+static void wheel_tile(uint32_t id, const nt_ui_scroll_style_t *style, int rows) {
+    const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(WHEEL_TILE_W), CLAY_SIZING_FIXED(WHEEL_TILE_H)}}};
+    nt_ui_scroll_begin(s_fx.ctx, NULL, id, style, &decl);
+    {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+            for (int r = 0; r < rows; ++r) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(WHEEL_TILE_W), CLAY_SIZING_FIXED(30)}}}) {}
+            }
+        }
+    }
+    nt_ui_scroll_end(s_fx.ctx);
+}
+
+/* One churning vertical-stack frame. spacer_h shifts the whole stack DOWN by that many px (a panel
+ * resizing above the tiles); b_rows churns tile B's child count; if `drop_a` is set tile A is NOT
+ * declared this frame (a conditionally-hidden tile — its Clay hashmap bbox then goes STALE while the
+ * other tiles reflow up into the space A vacated). A stale bbox is still returned found=true by
+ * Clay_GetElementData, so on the frames A reappears its ancient bbox can overlap the live tiles. */
+static void wheel_grid_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style_a, const nt_ui_scroll_style_t *style_other, int b_rows, float spacer_h, bool drop_a) {
+    nt_mem_scratch_reset(); /* per-frame scratch reset, exactly as the engine main loop does */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("wheel-root"), .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 0}}) {
+        if (spacer_h > 0.0F) {
+            CLAY({.id = CLAY_ID("wheel-spacer"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(spacer_h)}}}) {}
+        }
+        if (!drop_a) {
+            wheel_tile(WHEEL_ID_A, style_a, 40); /* tall: overflows, AUTO_HIDE bar churns */
+        }
+        wheel_tile(WHEEL_ID_B, style_other, b_rows); /* churning row count (still overflows: >=3 rows) */
+        wheel_tile(WHEEL_ID_C, style_other, 40);
+        wheel_tile(WHEEL_ID_D, style_other, 40);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 45 (THE wheel-broadcast bug): a wheel notch EVERY frame, pointer parked at the center
+ *      of tile A, while the grid churns (A's AUTO_HIDE bar, B's row count, a root spacer). ONLY A's
+ *      offset may change on any frame; B/C/D must stay frozen at 0. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_wheel_no_broadcast_under_churn(void) {
+    nt_ui_scroll_style_t style_a = nt_ui_scroll_style_defaults();
+    style_a.bar_visibility = NT_UI_SCROLLBAR_AUTO_HIDE;
+    style_a.bar_hide_delay = 0.15F; /* short linger so the bar fades out and back in repeatedly */
+    style_a.bar_fade_speed = 10.0F;
+    const nt_atlas_region_ref_t art = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    style_a.track_ref = art;
+    style_a.thumb_ref = art;
+
+    nt_ui_scroll_style_t style_other = nt_ui_scroll_style_defaults();
+
+    nt_pointer_t p = {0};
+    p.active = true;
+    /* Park the pointer in the TOP tile slot (y in [0,78]). When A is dropped, B/C/D reflow UP so B
+     * now occupies [0,78] — but A's prev-frame bbox is ALSO [0,78] and Clay still returns it found.
+     * So both A (stale) and B (live) hit-test the parked pointer on the drop frame -> broadcast. */
+    p.x = WHEEL_TILE_W * 0.5F;
+    p.y = 40.0F; /* inside the top tile slot */
+
+    /* Two establishing frames so every container has a solved prev-frame bbox + dims. */
+    wheel_grid_frame(&p, &style_a, &style_other, 6, 0.0F, false);
+    wheel_grid_frame(&p, &style_a, &style_other, 6, 0.0F, false);
+
+    /* A wheel notch EVERY frame for ~300 frames while the stack churns. A is conditionally dropped
+     * every few frames (its stale bbox lingers); the spacer + B row count add layout-slot churn. No
+     * single frame may route the notch to more than ONE container (exclusive routing, never a
+     * broadcast). */
+    uint32_t max_recipients = 0U;
+    for (int f = 0; f < 300; ++f) {
+        p.wheel_dy = 1.0F;                              /* one notch this frame */
+        const int b_rows = ((f / 30) % 2 == 0) ? 6 : 3; /* B's row count toggles every ~30 frames */
+        const float spacer_h = (float)((f * 5) % 40);   /* sawtooth 0..35 px of extra slot churn */
+        const bool drop_a = (f % 3) == 0;               /* A vanishes every 3rd frame (stale-bbox lingers) */
+
+        nt_ui_scroll_test_wheel_recipients_reset();
+        wheel_grid_frame(&p, &style_a, &style_other, b_rows, spacer_h, drop_a);
+
+        const uint32_t got = nt_ui_scroll_test_wheel_recipients();
+        if (got > max_recipients) {
+            max_recipients = got;
+        }
+        /* The notch reached at most ONE container this frame (exclusive routing — never a broadcast). */
+        TEST_ASSERT_TRUE_MESSAGE(got <= 1U, "wheel notch broadcast to more than one scroll container in a single frame");
+    }
+    TEST_ASSERT_TRUE(max_recipients <= 1U); /* no frame ever broadcast */
+
+    /* Sanity: the notch was actually consumed by SOME container (the pointer sat over the stack the
+     * whole run); exclusivity above is the real pin, so we don't assert WHICH tile owns it. */
+    int moved = 0;
+    if (wheel_pos_y(WHEEL_ID_A) < -0.5F) {
+        ++moved;
+    }
+    if (wheel_pos_y(WHEEL_ID_B) < -0.5F) {
+        ++moved;
+    }
+    if (wheel_pos_y(WHEEL_ID_C) < -0.5F) {
+        ++moved;
+    }
+    if (wheel_pos_y(WHEEL_ID_D) < -0.5F) {
+        ++moved;
+    }
+    TEST_ASSERT_TRUE(moved >= 1);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -1478,5 +1609,6 @@ int main(void) {
     RUN_TEST(test_scroll_overscroll_depth_fps_independent);
     RUN_TEST(test_scroll_content_shrink_clamps_pos);
     RUN_TEST(test_scroll_fling_survives_release_on_zero_delta_frame);
+    RUN_TEST(test_scroll_wheel_no_broadcast_under_churn);
     return UNITY_END();
 }
