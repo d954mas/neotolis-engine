@@ -15,6 +15,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
+#include "ui/nt_ui_checkbox.h"
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_inspector.h"
@@ -1907,6 +1908,101 @@ static void test_inspector_metrics_set_changes_overlay_scissor(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "scissor height must equal viewport height");
 }
 
+/* ---- Test 15z: inspector emits cleanly over a DISABLED widget + scroll container ----
+ * A disabled widget routes through nt_ui_block_pointer (inert occluder) and skips hit-test;
+ * the inspector still walks it. Pins the invariant that a disabled widget keeps a def in the
+ * registry (the disabled path registers NT_UI_CHECKBOX_DEF too), so the inspector pill stays
+ * meaningful — no NULL-def entry — and the overlay/walk over it never traps. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_over_disabled_widget_and_scroll(void) {
+    nt_ui_checkbox_style_t cb = {0};
+    const nt_atlas_region_ref_t box = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    for (int i = 0; i < 4; ++i) {
+        cb.unchecked[i] = (nt_ui_cb_state_t){.box = box, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
+        cb.checked[i] = (nt_ui_cb_state_t){.box = box, .check = box, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
+    }
+    cb.text_base = s_label_style;
+    cb.box_w = 24.0F;
+    cb.box_h = 24.0F;
+    cb.overlay_w = 16.0F;
+    cb.overlay_h = 16.0F;
+    cb.gap = 8.0F;
+    cb.state_speed = 0.0F;
+    cb.value_speed = 0.0F;
+
+    nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    scroll.track_ref = box;
+    scroll.thumb_ref = box;
+
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    bool locked = true;
+
+    /* Pointer parked over the disabled checkbox so the viewport-hover scan picks the blocked
+     * id and the inspector reads its def for the pill/selected-info pane. */
+    nt_pointer_t mouse = make_pointer(60.0F, 60.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_checkbox(s_fx.ctx, NULL, 0U, nt_ui_id("locked"), "Locked (disabled)", &locked, &cb, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}},
+                       false);
+        nt_ui_scroll_begin(s_fx.ctx, NULL, nt_ui_id("list"), &scroll, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(80)}}});
+        for (int i = 0; i < 6; ++i) {
+            nt_ui_label(s_fx.ctx, NULL, "row", &s_label_style);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    /* The disabled (blocked) widget must carry a def in the registry — invariant the
+     * inspector relies on. NT_UI_CHECKBOX_DEF is registered even on the disabled path. */
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_CHECKBOX_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("locked")));
+    nt_ui_end(s_fx.ctx); /* inspector emit_layout walks here — must not trap */
+
+    /* Second frame: now the prev-frame interactive registry (incl. the block_pointer
+     * entry) is live, exercising resolve_hot + the inspector's viewport-hover pick. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_checkbox(s_fx.ctx, NULL, 0U, nt_ui_id("locked"), "Locked (disabled)", &locked, &cb, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}},
+                       false);
+        nt_ui_scroll_begin(s_fx.ctx, NULL, nt_ui_id("list"), &scroll, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(80)}}});
+        for (int i = 0; i < 6; ++i) {
+            nt_ui_label(s_fx.ctx, NULL, "row", &s_label_style);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+}
+
+/* ---- Test 15y: inspector stays within Clay's element budget on a large scene ----
+ * The inspector injects ~5-6 layout elements per user element (tree row + wrappers + the
+ * per-row background rects). On a scene with a few hundred named elements that multiplier
+ * pushes Clay's layoutElements array past max_elements — whose error handler is a hard trap,
+ * firing the instant the inspector is toggled ON. The emit must cap its own output: total
+ * element count stays strictly under capacity regardless of user-tree size (truncated tree,
+ * never a crash). Drives the count well past where the unguarded emit overflowed (~200 users). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_budget_capped_on_large_scene(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    const int32_t cap = (int32_t)s_fx.ctx->max_elements; /* Clay layoutElements capacity == max_elements */
+    /* 600 named leaves: unguarded, the inspector emit blows ~4x past the 1024 cap and traps. */
+    for (int rep = 0; rep < 3; ++rep) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("root")}) {
+            for (int i = 0; i < 600; ++i) {
+                CLAY({.id = CLAY_IDI("leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {}
+            }
+        }
+        nt_ui_end(s_fx.ctx); /* unguarded: Clay capacity error -> nt_ui_clay_error_cb traps here */
+        const int32_t total = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+        char msg[80];
+        (void)snprintf(msg, sizeof msg, "rep=%d total=%d cap=%d", rep, total, cap);
+        TEST_ASSERT_LESS_THAN_INT32_MESSAGE(cap, total, msg);
+        /* The user's own 600+ leaves were emitted; the inspector truncated, not the scene. */
+        TEST_ASSERT_GREATER_THAN_INT32_MESSAGE(600, total, msg);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -1963,6 +2059,8 @@ int main(void) {
     RUN_TEST(test_inspector_metrics_set_changes_input_consume_gate);
     RUN_TEST(test_inspector_metrics_setter_asserts_on_invalid);
     RUN_TEST(test_inspector_metrics_set_changes_overlay_scissor);
+    RUN_TEST(test_inspector_over_disabled_widget_and_scroll);
+    RUN_TEST(test_inspector_budget_capped_on_large_scene);
     return UNITY_END();
 }
 

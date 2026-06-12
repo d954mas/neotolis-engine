@@ -155,6 +155,16 @@ int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
     return ctx->clay->layoutElements.length;
 }
 
+/* Headroom (in Clay layout elements) the inspector keeps free while emitting its tree: one row costs
+ * up to ~8 elements, and the panel chrome (header, scroll panes, selected-info body) trails the row
+ * list. Stop adding rows once fewer than this remain so the inspector degrades (truncated tree) on an
+ * oversized scene instead of overflowing Clay's array — whose error handler is a hard trap. */
+#define NT_UI_INSPECTOR_ELEM_RESERVE 64
+static bool cdv_layout_budget_left(const nt_ui_context_t *ctx) {
+    /* Clay raises maxElementsExceeded at length == capacity-1; keep a reserve below that. */
+    return (ctx->clay->layoutElements.length + NT_UI_INSPECTOR_ELEM_RESERVE) < ctx->clay->layoutElements.capacity;
+}
+
 nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_ui_context_t *ctx, int32_t index) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_get_layout_element_view: ctx must be non-NULL");
     nt_ui_inspector_element_view_t v = {0};
@@ -859,7 +869,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         dfs_visited[dfs_length] = false;
         dfs_opened_wrappers[dfs_length] = false;
         dfs_length++;
-        if (rootIndex > 0) {
+        if (rootIndex > 0 && cdv_layout_budget_left(ctx)) {
             CLAY(
                 {.id = CLAY_IDI("ntInsp_EmptyRowOuter", rootIndex), .layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = {(uint16_t)(indent_w / 2U), 0, 0, 0}}, .userData = debug_bg_data}) {
                 CLAY({.id = CLAY_IDI("ntInsp_EmptyRow", rootIndex),
@@ -887,8 +897,11 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             const int32_t layer = cdv_element_layer(ctx, currentElement);
             const nt_ui_widget_def_t *wdef = nt_ui_widget_lookup(ctx, currentElement->id);
             Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
-            /* Anonymous wrappers descend silently. */
-            const bool has_identity = (idString.length > 0) || (wdef != NULL) || (currentElement->elementConfigs.length > 0);
+            /* Anonymous wrappers descend silently. Once the Clay element budget is nearly spent, treat
+             * EVERY remaining element as anonymous too: stop opening rows/wrappers so the inspector
+             * truncates gracefully instead of pushing Clay's array past capacity (a hard-trap error). */
+            const bool budget_left = cdv_layout_budget_left(ctx);
+            const bool has_identity = budget_left && ((idString.length > 0) || (wdef != NULL) || (currentElement->elementConfigs.length > 0));
             if (has_identity) {
                 if (highlighted_row_index == layoutData.row_count) {
                     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
@@ -979,7 +992,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             } /* if (has_identity) */
 
             /* Text-row hit-test is offset by 1 so clicking it selects the parent widget. */
-            if (Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
+            if (budget_left && Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
                 layoutData.row_count++;
                 if (highlighted_row_index == layoutData.row_count) {
                     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
@@ -1248,7 +1261,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                 Clay_LayoutElementHashMapItem *panelContentsItem = Clay__GetHashMapItem(panelContentsId.id);
                 float contentWidth = panelContentsItem != NULL ? panelContentsItem->layoutElement->dimensions.width : 0.0F;
                 CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(contentWidth)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {}
-                for (int32_t i = 0; i < layoutData.row_count; i++) {
+                for (int32_t i = 0; i < layoutData.row_count && cdv_layout_budget_left(ctx); i++) {
                     Clay_Color rowColor = (i & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1;
                     if (i == layoutData.selected_element_row_index) {
                         rowColor = CDV_COLOR_SELECTED_ROW;
