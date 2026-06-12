@@ -459,7 +459,8 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
     const bool can_x = style->scroll_x && (scroll_min_bound(content[0], container[0]) < 0.0F);
     const bool can_y = style->scroll_y && (scroll_min_bound(content[1], container[1]) < 0.0F);
     if (!can_x && !can_y) {
-        s->flags &= (uint8_t)~(NT_UI_SCROLL_FLAG_DRAGGING | NT_UI_SCROLL_FLAG_DRAG_LATCHED | NT_UI_SCROLL_FLAG_FREE_PRESS);
+        const uint8_t gesture_flags = NT_UI_SCROLL_FLAG_DRAGGING | NT_UI_SCROLL_FLAG_DRAG_LATCHED | NT_UI_SCROLL_FLAG_FREE_PRESS;
+        s->flags &= (uint8_t)~gesture_flags;
         return;
     }
 
