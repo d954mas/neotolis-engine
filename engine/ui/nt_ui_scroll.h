@@ -21,8 +21,10 @@ extern const nt_ui_widget_def_t NT_UI_SCROLL_DEF;
 extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Capture-steal threshold: a drag inside a scroll container exceeding this many
- * framebuffer px steals capture from the inner widget and scrolls. Mobile standard
- * ~8-10 px. The latch frame routes ZERO delta (the inner widget already applied it;
+ * UI units — the space passed to nt_ui_begin (games typically feed nt_ui_scale's
+ * logical space, making this resolution-independent) — steals capture from the inner
+ * widget and scrolls. Mobile standard ~8-10 px. The latch frame routes ZERO delta
+ * (the inner widget already applied it;
  * re-routing would double-move once); scroll tracks 1:1 from the next frame. The
  * cancelled inner widget keeps any value it wrote before the steal (Model D — value
  * lives in the game), so commit-on-release is the safe pattern for sliders. */
@@ -64,7 +66,7 @@ typedef struct {
     float wheel_ease_speed;  /* smooth-wheel ease toward target; 0 = instant */
     float rubber_band_c;     /* overscroll coefficient (0 = no rubber-band; default 0.55) */
     float bounce_speed;      /* bounce-back spring ease */
-    float wheel_step_px;     /* px per wheel unit */
+    float wheel_step_px;     /* UI units (nt_ui_begin space) per wheel notch; name kept for ABI */
     /* scrollbar visual (declared here for one-struct ABI). */
     nt_ui_scrollbar_visibility_t bar_visibility;
     nt_ui_scrollbar_placement_t bar_placement;

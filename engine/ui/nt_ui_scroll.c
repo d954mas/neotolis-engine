@@ -264,8 +264,9 @@ static inline nt_scroll_bbox_t scroll_fetch_bbox(uint32_t id) {
     return (nt_scroll_bbox_t){.box = d.boundingBox, .found = d.found};
 }
 
-/* Is the framebuffer-px point (px,py) inside the (prev-frame) container bbox? !found -> false.
- * 2D ctx: capture press_pos (UI-space px) and bbox (Clay Y-down px) align. */
+/* Is the UI-unit point (px,py) inside the (prev-frame) container bbox? !found -> false.
+ * Point + bbox share nt_ui_begin space (games typically feed nt_ui_scale's logical space),
+ * so the hit-test is resolution-independent. Both are Clay Y-down. */
 static inline bool point_in_bbox(const nt_scroll_bbox_t *bb, float px, float py) {
     if (!bb->found) {
         return false;
@@ -372,7 +373,7 @@ static float scroll_sample_vel(float prev_vel, float delta, float dt) {
     return v;
 }
 
-/* Route one incremental drag delta (drag_x, drag_y in fb px) into the RAW scroll pos (1:1,
+/* Route one incremental drag delta (drag_x, drag_y in UI units — nt_ui_begin space) into the RAW scroll pos (1:1,
  * accumulates even past the edge — the integrator rubber-bands raw->display each frame). vel is
  * SAMPLED (time-windowed + clamp) for the release fling; see scroll_sample_vel for the decay contract. */
 static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_t *style, float drag_x, float drag_y, float dt) {

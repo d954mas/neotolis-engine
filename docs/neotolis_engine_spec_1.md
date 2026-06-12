@@ -308,7 +308,11 @@ If a decision can be deferred without loss of base architecture — it is deferr
   area, then latest declaration) and writes a single owner per pointer. That owner is
   consumed the NEXT frame, so wheel routing carries a 1-frame lag: a newly shown
   container sees its first wheel notch one frame late (the same intrinsic IM lag as
-  hit-test, which reads the previous frame's bbox). Capture-steal-by-threshold
+  hit-test, which reads the previous frame's bbox). All scroll sizes and pixel
+  thresholds (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, `wheel_step_px`, bar/hit dimensions)
+  are in the coordinate space passed to `nt_ui_begin` — NOT framebuffer pixels; games
+  typically feed `nt_ui_scale`'s logical space, so these are resolution-independent.
+  Capture-steal-by-threshold
   (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
   scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
   below it leaves the inner widget to click. On the latch frame the steal routes zero
