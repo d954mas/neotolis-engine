@@ -2100,6 +2100,88 @@ static void test_inspector_truncation_marker_visible(void) {
     TEST_ASSERT_FALSE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "untruncated tree must NOT emit a 'rows hidden' marker row");
 }
 
+/* ---- Regression: a selected id that resolves to no element must NOT crash the info pane ----
+ * The selected-info pane resolved inspector_selected_id via Clay__GetHashMapItem, which returns the
+ * zeroed DEFAULT sentinel (NOT NULL) on a miss — its layoutElement is NULL. The `selectedItem != NULL`
+ * guard never catches that (DEFAULT is non-NULL), so the pane dereferenced a NULL layoutElement ->
+ * access violation. A selection can outlive its element on a rich scene: the collapse/row-pick path
+ * sets inspector_selected_id, and on a tree dense enough that Clay's layoutElementsHashMapInternal
+ * saturates (Clay__AddHashMapItem returns NULL for the overflow), that id no longer resolves. Here we
+ * pin the root invariant directly with an id that was never a Clay element -> guaranteed DEFAULT. */
+static void test_inspector_selected_unresolvable_id_no_crash(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    /* An id never declared in this Clay context's lifetime resolves to the DEFAULT sentinel. */
+    s_fx.ctx->inspector_selected_id = nt_ui_id("never_declared_widget");
+
+    /* The selected-info pane runs (selected_id != 0) and resolves the id. Pre-fix it derefs the
+     * DEFAULT sentinel's NULL layoutElement -> access violation inside nt_ui_end. */
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("present_root")}) {
+        CLAY({.id = CLAY_ID("present_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx); /* must not crash; the unresolvable selection is a no-op info pane */
+
+    /* Survived the walk -> the pane guarded the miss. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("never_declared_widget"), s_fx.ctx->inspector_selected_id);
+}
+
+/* Drive the inspector over a fixed truncating scene with a given pointer (wheel-scrollable). */
+static void inspector_marker_scene(float screen_w, float screen_h, const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("mk_root")}) {
+        for (int i = 0; i < 600; ++i) {
+            CLAY({.id = CLAY_IDI("mk_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Regression: pressing rows + scrolling a truncated pane never crashes the info pane ----
+ * On a budget-truncated scene a row-press can select an element that the info pane later fails to
+ * resolve in Clay's hashmap (saturated -> DEFAULT sentinel). Combined with wheel scrolling (which
+ * re-emits the marker/spacer + drives the integrator each frame), this is the exact shape of the
+ * reported collapse-on-truncation crash. Pins that the whole press -> select -> info-pane-resolve
+ * cycle survives across scrolling, with the DEFAULT-sentinel guards in place. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_truncated_pane_scroll_press_safe(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    /* Pointer parked in the right-attached sidebar tree pane (x>=400), inside the pick region. */
+    const float ptr_x = 600.0F;
+    const float ptr_y = 200.0F;
+
+    /* Warm-up so the pane solves its bbox + content height (wheel ownership has a 1-frame lag). */
+    nt_pointer_t warm = make_pointer(ptr_x, ptr_y);
+    inspector_marker_scene(screen_w, screen_h, &warm);
+    inspector_marker_scene(screen_w, screen_h, &warm);
+
+    /* Press a tree row deep in the pick region (a row that truncation may leave unresolvable). */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t press = {0};
+    press.x = ptr_x;
+    press.y = ptr_y;
+    press.active = true;
+    press.buttons[NT_BUTTON_LEFT].is_down = true;
+    press.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    inspector_marker_scene(screen_w, screen_h, &press); /* selects whatever row sits there */
+
+    /* Resolve the selection through the info pane on the next frame -> must not crash. */
+    inspector_marker_scene(screen_w, screen_h, &warm);
+
+    /* Wheel down hard while a selection is live; the offset clamps at the natural bottom. The marker +
+     * info pane re-emit every frame and resolve the (possibly unhashed) selection -> must not crash. */
+    for (int i = 0; i < 60; ++i) {
+        nt_pointer_t w = make_pointer(ptr_x, ptr_y);
+        w.wheel_dy = 1.0F;
+        inspector_marker_scene(screen_w, screen_h, &w);
+    }
+}
+
 /* ---- Integration: the inspector's OWN elements-tree pane scrolls on wheel ----
  * The real inspector pane is emitted INSIDE nt_ui_end (after the user frame closes), so its wheel
  * candidate registers + resolves on the end-of-frame path, not the user-frame path. This drives
@@ -2441,6 +2523,8 @@ int main(void) {
     RUN_TEST(test_inspector_over_disabled_widget_and_scroll);
     RUN_TEST(test_inspector_budget_capped_on_large_scene);
     RUN_TEST(test_inspector_truncation_marker_visible);
+    RUN_TEST(test_inspector_selected_unresolvable_id_no_crash);
+    RUN_TEST(test_inspector_truncated_pane_scroll_press_safe);
     RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
     RUN_TEST(test_inspector_pane_wins_over_game_container);
     RUN_TEST(test_inspector_pane_drag_tracks_1to1);

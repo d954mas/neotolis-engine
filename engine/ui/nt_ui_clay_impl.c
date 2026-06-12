@@ -1270,8 +1270,11 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         layoutData = cdv_render_layout_elements_list(ctx, (int32_t)initialRootsLength, highlightedRow);
                     }
                 }
+                /* On a dense/truncated scene even the inspector's own pane can miss a hashmap slot;
+                 * GetHashMapItem then returns the DEFAULT sentinel (non-NULL, NULL layoutElement). */
                 Clay_LayoutElementHashMapItem *panelContentsItem = Clay__GetHashMapItem(panelContentsId.id);
-                float contentWidth = panelContentsItem != NULL ? panelContentsItem->layoutElement->dimensions.width : 0.0F;
+                const bool panelContentsResolved = panelContentsItem != &Clay_LayoutElementHashMapItem_DEFAULT && panelContentsItem->layoutElement != NULL;
+                float contentWidth = panelContentsResolved ? panelContentsItem->layoutElement->dimensions.width : 0.0F;
                 CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(contentWidth)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {}
                 /* Striped row backgrounds give the pane its scrollable height (FIXED row_h each). The
                  * budget cap can truncate this loop; track the stripes actually emitted so the spacer
@@ -1319,8 +1322,11 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         // #region selected-info-pane
         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         if (ctx->inspector_selected_id != 0U) {
+            /* GetHashMapItem returns the zeroed DEFAULT sentinel (non-NULL, NULL layoutElement) on a
+             * miss — a selection past the element/hashmap budget resolves here, so guard the sentinel
+             * AND the NULL layoutElement, not just `!= NULL` (a debug tool must not crash the game). */
             Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
-            if (selectedItem != NULL) {
+            if (selectedItem != NULL && selectedItem != &Clay_LayoutElementHashMapItem_DEFAULT && selectedItem->layoutElement != NULL) {
                 Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
                 /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
                 const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, NT_UI_STATE_TAG('i', 'n', 's', '2'), false, true);
