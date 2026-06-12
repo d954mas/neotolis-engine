@@ -2003,6 +2003,105 @@ static void test_inspector_budget_capped_on_large_scene(void) {
     }
 }
 
+/* ---- INTEGRATION REPRO (#190): the inspector's OWN elements-tree pane scrolls on wheel ----
+ * The bug the unit test test_inspector_pane_scrolls_on_wheel missed: it emits a clip pane in the
+ * USER frame body, so its wheel candidate is registered + resolved exactly like a game container.
+ * The REAL inspector pane is emitted INSIDE nt_ui_end (emit_inspector_layout) AFTER the user frame
+ * closed. This drives that real path: inspector ON, a named scene tall enough to overflow the tree
+ * pane, the pointer parked inside the tree pane, a wheel notch every frame. The pane state lives
+ * under tag 'i','n','s','p' keyed by the ntInsp_OuterScrollPane Clay id. */
+static void inspector_scene_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    /* Enough named leaves that the inspector's ~5-6x per-row element multiplier trips its own Clay
+     * budget cap (the real demo condition) — the truncation that used to collapse the pane to exactly
+     * fit, killing scroll. The fix tops up the content height so a truncated tree still overflows. */
+    CLAY({.id = CLAY_ID("repro_root")}) {
+        for (int i = 0; i < 600; ++i) {
+            CLAY({.id = CLAY_IDI("repro_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx); /* inspector OuterScrollPane is emitted + resolved HERE */
+}
+
+/* The inspector tree pane (emitted in nt_ui_end) must consume the wheel when the pointer is parked
+ * over it. FAILS-BEFORE: the pane registered its candidate AFTER the user frame, but the prev-frame
+ * resolve never granted it ownership through the real end-of-frame path, so pos[1] stayed 0. */
+static void test_inspector_tree_pane_scrolls_on_wheel_integration(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    /* Sidebar is right-attached, panel_width=400 -> x in [880,1280]. The tree pane sits below the
+     * header(30) + mem line(30) + separator(1); y=400 is safely inside it. */
+    const float ptr_x = 1000.0F;
+    const float ptr_y = 400.0F;
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    /* Warm-up: frame 1 solves the pane bbox, frame 2's end-of-frame resolve grants the owner
+     * (1-frame ownership lag — same as every prev-frame bbox hit-test). */
+    inspector_scene_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_scene_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    const nt_ui_scroll_state_t *s0 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL_MESSAGE(s0, "inspector tree pane scroll state must exist after warm-up");
+    TEST_ASSERT_TRUE_MESSAGE(s0->pos[1] == 0.0F, "pane offset must start at rest");
+
+    /* Wheel down over the pane for several frames; the offset must move negative (Clay down sign). */
+    for (int i = 0; i < 6; ++i) {
+        inspector_scene_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+    const nt_ui_scroll_state_t *s1 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s1);
+    TEST_ASSERT_TRUE_MESSAGE(s1->pos[1] < 0.0F, "wheel over the real inspector tree pane must scroll it");
+}
+
+/* The inspector pane (depth NT_UI_WHEEL_INSPECTOR_DEPTH) must win EXCLUSIVELY over a game scroll
+ * container directly beneath it: the pane scrolls, the game container under the same pointer stays
+ * put. Pins the always-on-top debug-overlay contract against the innermost-wins resolve. */
+static const uint32_t REPRO_GAME_SCROLL_ID = 0x1A5C01U;
+static void inspector_over_game_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    CLAY({.id = CLAY_ID("repro2_root")}) {
+        /* Full-width game scroll so its bbox spans under the right-attached inspector pane too. */
+        nt_ui_scroll_begin(s_fx.ctx, NULL, REPRO_GAME_SCROLL_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(screen_h)}}});
+        {
+            CLAY({.id = CLAY_ID("repro2_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(4000.0F)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+        /* Named leaves so the inspector tree pane overflows + is scrollable. */
+        for (int i = 0; i < 80; ++i) {
+            CLAY({.id = CLAY_IDI("repro2_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_pane_wins_over_game_container(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float ptr_x = 1000.0F; /* over the right-attached inspector pane AND the full-width game scroll */
+    const float ptr_y = 400.0F;
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    inspector_over_game_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_over_game_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+
+    for (int i = 0; i < 6; ++i) {
+        inspector_over_game_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+
+    const nt_ui_scroll_state_t *pane = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    const nt_ui_scroll_state_t *game = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, REPRO_GAME_SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(pane);
+    TEST_ASSERT_NOT_NULL(game);
+    TEST_ASSERT_TRUE_MESSAGE(pane->pos[1] < 0.0F, "the inspector pane must win the wheel over the game container");
+    TEST_ASSERT_TRUE_MESSAGE(game->pos[1] == 0.0F, "the game container under the pane must NOT scroll (exclusive)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -2061,6 +2160,8 @@ int main(void) {
     RUN_TEST(test_inspector_metrics_set_changes_overlay_scissor);
     RUN_TEST(test_inspector_over_disabled_widget_and_scroll);
     RUN_TEST(test_inspector_budget_capped_on_large_scene);
+    RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
+    RUN_TEST(test_inspector_pane_wins_over_game_container);
     return UNITY_END();
 }
 

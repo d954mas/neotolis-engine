@@ -1263,6 +1263,12 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                 Clay_LayoutElementHashMapItem *panelContentsItem = Clay__GetHashMapItem(panelContentsId.id);
                 float contentWidth = panelContentsItem != NULL ? panelContentsItem->layoutElement->dimensions.width : 0.0F;
                 CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(contentWidth)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {}
+                /* Striped row backgrounds give the pane its scrollable height (FIXED row_h each). The
+                 * budget cap can truncate this loop on a large scene; if it does, content would collapse
+                 * to exactly fit the pane and the wheel would have nothing to scroll. Track the stripes
+                 * actually emitted, then top up the FULL row_count height with ONE spacer below so the
+                 * content always overflows when there are more rows than fit — scroll stays alive. */
+                int32_t emitted_rows = 0;
                 for (int32_t i = 0; i < layoutData.row_count && cdv_layout_budget_left(ctx); i++) {
                     Clay_Color rowColor = (i & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1;
                     if (i == layoutData.selected_element_row_index) {
@@ -1274,6 +1280,13 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         rowColor.b *= 1.25F;
                     }
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .backgroundColor = rowColor, .userData = debug_bg_data}) {}
+                    emitted_rows++;
+                }
+                /* One spacer (1 element) restores the height of the rows the stripe loop had to skip, so a
+                 * budget-truncated tree still overflows the pane and scrolls to its emitted text rows. */
+                const int32_t skipped_rows = layoutData.row_count - emitted_rows;
+                if (skipped_rows > 0) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)skipped_rows * row_h)}}, .userData = debug_bg_data}) {}
                 }
             }
         }
