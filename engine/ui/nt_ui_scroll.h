@@ -33,6 +33,9 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_DRAGGING ((uint8_t)(1U << 1))
 /* A free pointer (no widget capture) is mid-press inside the bbox; free_press_pos is its anchor. */
 #define NT_UI_SCROLL_FLAG_FREE_PRESS ((uint8_t)(1U << 2))
+/* A drag gesture has crossed the threshold and latched: the dead-zone is consumed, so subsequent
+ * frames route the FULL per-frame delta 1:1 (only the latching frame subtracts the threshold). */
+#define NT_UI_SCROLL_FLAG_DRAG_LATCHED ((uint8_t)(1U << 3))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
  * negative-down sign convention. ~36B; under NT_UI_STATE_PAYLOAD_MAX. */

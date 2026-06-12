@@ -677,6 +677,83 @@ static void test_scroll_free_press_outside_bbox_ignored(void) {
     TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* press-outside never scrolls */
 }
 
+/* ---- Test 22: free-press drag tracks the finger 1:1 — pos must equal the TOTAL finger
+ *      displacement after each frame (no threshold-crossing jump, no cumulative runaway). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_free_press_tracks_finger_1to1(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.rubber_band_c = 0.0F; /* isolate tracking from overscroll compression */
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style); /* establish bbox + state cell */
+
+    /* Finger DOWN inside the container (empty content -> free press, no widget capture). */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.x = 100.0F;
+    p.y = 150.0F;
+    const float start_y = p.y;
+    scroll_frame(&p, &style); /* press frame: anchor set */
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* Drag UP -3 px/frame for 10 frames (into the valid negative offset range, away from the
+     * top overscroll edge). The threshold (8 px) is crossed mid-sequence. Once scrolling has
+     * started, the content offset must equal the finger displacement MINUS the dead-zone
+     * threshold consumed before the drag latched — i.e. it tracks 1:1 with no extra jump.
+     * The frame-over-frame offset delta must never exceed the 3 px the finger actually moved. */
+    float prev_pos = 0.0F;
+    bool scrolling = false;
+    for (int i = 1; i <= 10; ++i) {
+        p.y = start_y - (float)(i * 3);
+        scroll_frame(&p, &style);
+        nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+        TEST_ASSERT_NOT_NULL(s);
+        if (scrolling) {
+            /* Per-frame offset step tracks the 3 px finger step (never an 8 px gap dump). */
+            const float step = fabsf(s->pos[1] - prev_pos);
+            TEST_ASSERT_TRUE(step <= 3.0F + 1.0F);
+        }
+        if (s->pos[1] < -0.5F) {
+            scrolling = true;
+        }
+        prev_pos = s->pos[1];
+    }
+}
+
+/* ---- Test 23: a SLOW free-press drag that crosses the threshold in tiny steps must not
+ *      spike velocity from the accumulated threshold gap (no runaway fling on release). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_free_press_slow_cross_no_velocity_spike(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.rubber_band_c = 0.0F;
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    const float start_y = 150.0F;
+    p.y = start_y;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* Creep -2 px/frame for 8 frames (crosses the 8 px threshold around frame 4-5). The
+     * crossing frame must route only the per-frame 2 px, not the whole accumulated gap, so
+     * velocity reflects 2 px / dt (~120 px/s) — never the 8+ px jump (~480+ px/s). */
+    for (int i = 1; i <= 8; ++i) {
+        p.y = start_y - (float)(i * 2);
+        scroll_frame(&p, &style);
+        nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+        TEST_ASSERT_NOT_NULL(s);
+        /* 2 px/frame at 60fps == 120 px/s; allow headroom but reject the 8px-gap spike. */
+        TEST_ASSERT_TRUE(fabsf(s->vel[1]) < 240.0F);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -701,5 +778,7 @@ int main(void) {
     RUN_TEST(test_scroll_free_press_tap_no_scroll);
     RUN_TEST(test_scroll_does_not_steal_own_scrollbar);
     RUN_TEST(test_scroll_free_press_outside_bbox_ignored);
+    RUN_TEST(test_scroll_free_press_tracks_finger_1to1);
+    RUN_TEST(test_scroll_free_press_slow_cross_no_velocity_spike);
     return UNITY_END();
 }

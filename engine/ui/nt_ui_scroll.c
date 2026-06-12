@@ -234,6 +234,25 @@ static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_
     }
 }
 
+/* Shrink the cumulative-from-press delta by the tap threshold along the drag direction on the
+ * LATCHING frame only. Without this the crossing frame dumps the whole accumulated dead-zone
+ * (8+ px) into pos AND into vel/dt — a tiny finger move "flies away". Once latched the dead-zone
+ * is spent, so subsequent frames pass the per-frame delta through untouched (true 1:1 tracking). */
+static void scroll_consume_threshold(bool latched, float *ddx, float *ddy) {
+    if (latched) {
+        return; /* dead-zone already consumed; route the full per-frame delta 1:1 */
+    }
+    const float len = sqrtf(((*ddx) * (*ddx)) + ((*ddy) * (*ddy)));
+    if (len <= NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
+        *ddx = 0.0F;
+        *ddy = 0.0F;
+        return;
+    }
+    const float keep = (len - NT_UI_SCROLL_STEAL_THRESHOLD_PX) / len; /* strip the threshold radius */
+    *ddx *= keep;
+    *ddy *= keep;
+}
+
 /* A capture this container must NOT steal: its OWN scrollbar (floats inside the bbox, a thumb
  * drag must reach the bar), or any nested scroll/scrollbar widget (the inner scroller owns its
  * own gesture). nt_ui_widget_lookup keys off the widget def registered at that id last frame. */
@@ -268,16 +287,19 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             if (!point_in_bbox(id, cap->press_pos[0], cap->press_pos[1])) {
                 continue;
             }
-            const float ddx = cap->pos[0] - cap->press_pos[0];
-            const float ddy = cap->pos[1] - cap->press_pos[1];
+            float ddx = cap->pos[0] - cap->press_pos[0];
+            float ddy = cap->pos[1] - cap->press_pos[1];
             const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
             if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
                 continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
             }
             cap->active_id = 0U; /* cancel the inner widget */
+            const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
+            scroll_consume_threshold(latched, &ddx, &ddy);
             scroll_route_drag(s, style, ddx, ddy, dt);
-            cap->press_pos[0] = cap->pos[0];
+            cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
             cap->press_pos[1] = cap->pos[1];
+            s->flags |= NT_UI_SCROLL_FLAG_DRAG_LATCHED;
             any_drag = true;
             continue;
         }
@@ -301,22 +323,26 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             any_free_press = true;
             continue; /* anchor set this frame; delta accrues from next frame */
         }
-        const float ddx = p->x - s->free_press_pos[0];
-        const float ddy = p->y - s->free_press_pos[1];
+        float ddx = p->x - s->free_press_pos[0];
+        float ddy = p->y - s->free_press_pos[1];
         const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
         any_free_press = true;
         if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
             continue; /* still within the tap threshold — not yet a drag */
         }
+        const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
+        scroll_consume_threshold(latched, &ddx, &ddy);
         scroll_route_drag(s, style, ddx, ddy, dt);
-        s->free_press_pos[0] = p->x;
+        s->free_press_pos[0] = p->x; /* re-anchor: next frame's delta is per-frame, 1:1 */
         s->free_press_pos[1] = p->y;
+        s->flags |= NT_UI_SCROLL_FLAG_DRAG_LATCHED;
         any_drag = true;
     }
     if (any_drag) {
         s->flags |= NT_UI_SCROLL_FLAG_DRAGGING;
     } else {
         s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_DRAGGING;
+        s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_DRAG_LATCHED; /* gesture ended: next drag re-arms the dead-zone */
     }
     if (any_free_press) {
         s->flags |= NT_UI_SCROLL_FLAG_FREE_PRESS;
