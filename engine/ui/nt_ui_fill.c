@@ -84,8 +84,14 @@ void nt_ui_fill_emit(nt_ui_context_t *ctx, uint8_t layer, nt_atlas_region_ref_t 
     }
 
     /* CROP: a full-size region revealed by `ratio` via a Clay .clip scissor (reuses the
-     * walker scissor path); slice9 IGNORED (a partial reveal can't honor stretched borders). */
-    NT_ASSERT((img_style.flags & NT_UI_IMAGE_SLICE9_OVERRIDE) == 0U && "nt_ui_fill_emit: CROP mode does not support slice9 borders (D-59-23)");
+     * walker scissor path); slice9 disabled (a partial reveal can't honor stretched borders).
+     * Force a zero-border slice9 override so the walker emits a plain quad instead of falling
+     * back to the atlas region's baked slice9 (which would re-stretch borders and break reveal). */
+    img_style.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
+    img_style.slice9_lrtb[0] = 0;
+    img_style.slice9_lrtb[1] = 0;
+    img_style.slice9_lrtb[2] = 0;
+    img_style.slice9_lrtb[3] = 0;
     const Clay_ElementDeclaration full_img = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(track_w), CLAY_SIZING_FIXED(track_h)}},
     };

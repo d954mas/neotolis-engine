@@ -19,6 +19,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_progress.h"
 #include "unity.h"
@@ -113,6 +114,23 @@ static probe_bbox_t first_image_bbox(void) {
     return out;
 }
 
+/* Payload of the fill IMAGE command (the SECOND image; the first is the track art). NULL if none. */
+static const nt_ui_image_payload_t *fill_image_payload(void) {
+    bool skipped_track = false;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            continue;
+        }
+        if (!skipped_track) {
+            skipped_track = true;
+            continue;
+        }
+        return (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    }
+    return NULL;
+}
+
 /* Bounding box of the first SCISSOR_START command (the CROP reveal window). */
 static probe_bbox_t first_scissor_bbox(void) {
     probe_bbox_t out = {0};
@@ -184,6 +202,31 @@ static void test_stretch_vs_crop_command_shape(void) {
     probe_bbox_t sc = first_scissor_bbox();
     TEST_ASSERT_TRUE(sc.found);
     TEST_ASSERT_TRUE(float_near(sc.w, 0.5F * PG_W, 1.0F));
+}
+
+/* ---- Test 3b: CROP forces a zero-border slice9 override on the revealed image so the walker
+ *      emits a plain quad and never falls back to the atlas region's baked slice9 (which would
+ *      re-stretch borders and break the reveal). STRETCH leaves slice9 honored (no forced flag). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_crop_disables_slice9_on_reveal(void) {
+    init_style(NT_UI_FILL_CROP, NT_UI_FILL_LTR, 0.0F);
+    progress_frame(0.5F);
+    const nt_ui_image_payload_t *crop = fill_image_payload();
+    TEST_ASSERT_NOT_NULL(crop);
+    /* Override flag set with all-zero borders -> walker's has_s9_override is true with zero src,
+     * so it draws a plain quad rather than reading the atlas region's default slice9. */
+    TEST_ASSERT_TRUE((crop->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) != 0U);
+    TEST_ASSERT_EQUAL_UINT16(0, crop->slice9_override[0]);
+    TEST_ASSERT_EQUAL_UINT16(0, crop->slice9_override[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, crop->slice9_override[2]);
+    TEST_ASSERT_EQUAL_UINT16(0, crop->slice9_override[3]);
+
+    /* STRETCH honors slice9: the fill image must NOT carry the forced override flag. */
+    init_style(NT_UI_FILL_STRETCH, NT_UI_FILL_LTR, 0.0F);
+    progress_frame(0.5F);
+    const nt_ui_image_payload_t *stretch = fill_image_payload();
+    TEST_ASSERT_NOT_NULL(stretch);
+    TEST_ASSERT_TRUE((stretch->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) == 0U);
 }
 
 /* ---- Test 4: all 4 directions place the fill on the correct edge (ASYMMETRIC track +
@@ -359,6 +402,7 @@ int main(void) {
     RUN_TEST(test_stretch_fill_ratio);
     RUN_TEST(test_value_clamps);
     RUN_TEST(test_stretch_vs_crop_command_shape);
+    RUN_TEST(test_crop_disables_slice9_on_reveal);
     RUN_TEST(test_directions_place_fill_edge);
     RUN_TEST(test_crop_directions_reveal_edge);
     RUN_TEST(test_value_ease_monotonic);
