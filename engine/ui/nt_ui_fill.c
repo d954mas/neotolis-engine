@@ -108,11 +108,19 @@ void nt_ui_fill_emit(nt_ui_context_t *ctx, uint8_t layer, nt_atlas_region_ref_t 
         child_off.y = -(track_h - fill_h); /* reveal the bottom end */
     }
     const Clay_ElementDeclaration clip = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(fill_w), CLAY_SIZING_FIXED(fill_h)}, .childAlignment = fill_alignment(direction)},
+        .layout = {.sizing = {CLAY_SIZING_FIXED(fill_w), CLAY_SIZING_FIXED(fill_h)}},
         .clip = {.horizontal = true, .vertical = true, .childOffset = child_off},
     };
+    /* Track-sized wrapper anchors the reveal window to the growing edge (RTL right,
+     * BOTTOM_UP bottom, ...); without it the clip sits top-left and reveals the wrong end. */
+    const Clay_ElementDeclaration box = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(track_w), CLAY_SIZING_FIXED(track_h)}, .childAlignment = fill_alignment(direction)},
+    };
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(box);
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(clip);
     nt_ui_image(ctx, fill_make_data(layer, opacity), fill_ref, &img_style, &full_img);
+    nt_ui_clay_priv_close_element();
     nt_ui_clay_priv_close_element();
 }

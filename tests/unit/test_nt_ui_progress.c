@@ -227,6 +227,49 @@ static void test_directions_place_fill_edge(void) {
     TEST_ASSERT_TRUE(float_near(td.h, r * PG_H, 1.0F));
 }
 
+/* ---- Test 4b: CROP mode — the revealed (clip/scissor) window hugs the correct edge of
+ *      the track for all 4 directions (ratio 0.3, ASYMMETRIC track). The wrapper anchors
+ *      the clip; without it the clip sat top-left and revealed the wrong end. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_crop_directions_reveal_edge(void) {
+    const float r = 0.3F;
+
+    /* LTR: clip hugs the LEFT edge, quarter-ish width, full height. */
+    init_style(NT_UI_FILL_CROP, NT_UI_FILL_LTR, 0.0F);
+    progress_frame(r);
+    probe_bbox_t ltr = first_scissor_bbox();
+    TEST_ASSERT_TRUE(ltr.found);
+    TEST_ASSERT_TRUE(float_near(ltr.x, PG_X, 1.0F));     /* left edge */
+    TEST_ASSERT_TRUE(float_near(ltr.w, r * PG_W, 1.0F)); /* revealed width */
+    TEST_ASSERT_TRUE(float_near(ltr.h, PG_H, 1.0F));     /* full height */
+
+    /* RTL: clip hugs the RIGHT edge. */
+    init_style(NT_UI_FILL_CROP, NT_UI_FILL_RTL, 0.0F);
+    progress_frame(r);
+    probe_bbox_t rtl = first_scissor_bbox();
+    TEST_ASSERT_TRUE(rtl.found);
+    TEST_ASSERT_TRUE(float_near(rtl.x + rtl.w, PG_X + PG_W, 1.0F)); /* right edge */
+    TEST_ASSERT_TRUE(float_near(rtl.w, r * PG_W, 1.0F));
+
+    /* BOTTOM_UP: clip hugs the BOTTOM edge, quarter-ish height, full width. */
+    init_style(NT_UI_FILL_CROP, NT_UI_FILL_BOTTOM_UP, 0.0F);
+    progress_frame(r);
+    probe_bbox_t bu = first_scissor_bbox();
+    TEST_ASSERT_TRUE(bu.found);
+    TEST_ASSERT_TRUE(float_near(bu.y + bu.h, PG_Y + PG_H, 1.0F)); /* bottom edge */
+    TEST_ASSERT_TRUE(float_near(bu.h, r * PG_H, 1.0F));           /* revealed height */
+    TEST_ASSERT_TRUE(float_near(bu.w, PG_W, 1.0F));               /* full width */
+
+    /* TOP_DOWN: clip hugs the TOP edge. */
+    init_style(NT_UI_FILL_CROP, NT_UI_FILL_TOP_DOWN, 0.0F);
+    progress_frame(r);
+    probe_bbox_t td = first_scissor_bbox();
+    TEST_ASSERT_TRUE(td.found);
+    TEST_ASSERT_TRUE(float_near(td.y, PG_Y, 1.0F)); /* top edge */
+    TEST_ASSERT_TRUE(float_near(td.h, r * PG_H, 1.0F));
+    TEST_ASSERT_TRUE(float_near(td.w, PG_W, 1.0F));
+}
+
 /* ---- Test 5: value_t eases the fill monotonically toward the target over frames
  *      (value_speed > 0 → the fill grows toward, never overshoots, value). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -317,6 +360,7 @@ int main(void) {
     RUN_TEST(test_value_clamps);
     RUN_TEST(test_stretch_vs_crop_command_shape);
     RUN_TEST(test_directions_place_fill_edge);
+    RUN_TEST(test_crop_directions_reveal_edge);
     RUN_TEST(test_value_ease_monotonic);
     RUN_TEST(test_instant_when_speed_zero);
     RUN_TEST(test_style_defaults_valid_baseline);
