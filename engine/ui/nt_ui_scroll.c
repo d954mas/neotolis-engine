@@ -104,16 +104,32 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
             s->target[a] = scroll_clampf(s->target[a], lo, hi);
         }
 
+        if (dragging) {
+            /* Active drag: pos is a PURE FUNCTION of the raw (1:1) finger position — clamped
+             * in-bounds, rubber-banded past the edge, RECOMPUTED FROM RAW each frame (never
+             * iterated on its own output). A finger held still leaves raw unchanged -> pos
+             * frozen (no creep), in and out of bounds. target/vel synced for release. */
+            if (s->raw[a] < lo || s->raw[a] > hi) {
+                const float edge = (s->raw[a] < lo) ? lo : hi;
+                const float over = s->raw[a] - edge; /* RAW over-edge distance from the anchor */
+                s->pos[a] = (rubber_c > 0.0F) ? (edge + nt_ui_rubber_band(over, container[a], rubber_c)) : edge;
+            } else {
+                s->pos[a] = s->raw[a];
+            }
+            s->target[a] = s->pos[a];
+            continue; /* drag owns this axis fully this frame; no momentum/ease/bounce */
+        }
+
         /* Smooth-wheel + scroll-to: ease pos toward target until it ARRIVES — not
          * only on the wheel frame, or the offset stalls before reaching target. */
-        const bool easing = scroll_to || (fabsf(s->target[a] - s->pos[a]) > NT_UI_SCROLL_POS_EPS && !dragging && fabsf(s->vel[a]) <= NT_UI_SCROLL_VEL_EPS);
+        const bool easing = scroll_to || (fabsf(s->target[a] - s->pos[a]) > NT_UI_SCROLL_POS_EPS && fabsf(s->vel[a]) <= NT_UI_SCROLL_VEL_EPS);
         if (easing) {
             /* wheel_ease 0 = instant (matches nt_ui_anim speed-0 convention), no teleport otherwise. */
             float k = (wheel_ease <= 0.0F) ? 1.0F : wheel_ease * dt;
             k = scroll_clampf(k, 0.0F, 1.0F);
             s->pos[a] += (s->target[a] - s->pos[a]) * k;
             s->vel[a] = 0.0F; /* eased motion owns pos; momentum stands down */
-        } else if (!dragging) {
+        } else {
             /* Momentum/fling: exponential decay, frame-rate independent. target
              * tracks pos so a later wheel/scroll-to starts from the rest point. */
             if (fabsf(s->vel[a]) > NT_UI_SCROLL_VEL_EPS) {
@@ -123,32 +139,25 @@ static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], floa
             } else {
                 s->vel[a] = 0.0F;
             }
-        } else {
-            /* Active drag owns pos directly; keep target synced for release. */
-            s->target[a] = s->pos[a];
         }
 
-        /* Overscroll: while dragging, past-edge distance rubber-bands (compressed).
-         * Released + out of bounds: critically-damped pull back to the clamped edge. */
+        /* Released + out of bounds: critically-damped pull back to the clamped edge. */
         if (s->pos[a] < lo || s->pos[a] > hi) {
             const float edge = (s->pos[a] < lo) ? lo : hi;
-            const float over = s->pos[a] - edge;
-            if (dragging && rubber_c > 0.0F) {
-                s->pos[a] = edge + nt_ui_rubber_band(over, container[a], rubber_c);
-            } else {
-                float kb = bounce * dt;
-                kb = scroll_clampf(kb, 0.0F, 1.0F);
-                s->pos[a] += (edge - s->pos[a]) * kb;
-                s->vel[a] = 0.0F; /* bounce absorbs momentum */
-                if (fabsf(s->pos[a] - edge) < NT_UI_SCROLL_POS_EPS) {
-                    s->pos[a] = edge;
-                }
+            float kb = bounce * dt;
+            kb = scroll_clampf(kb, 0.0F, 1.0F);
+            s->pos[a] += (edge - s->pos[a]) * kb;
+            s->vel[a] = 0.0F; /* bounce absorbs momentum */
+            if (fabsf(s->pos[a] - edge) < NT_UI_SCROLL_POS_EPS) {
+                s->pos[a] = edge;
             }
-        } else if (!dragging) {
+        } else {
             /* In-bounds: keep target inside so the next wheel/scroll-to starts clamped. */
             s->target[a] = scroll_clampf(s->target[a], lo, hi);
             s->pos[a] = scroll_clampf(s->pos[a], lo, hi);
         }
+        /* raw tracks the settled pos so the NEXT drag anchors from the rest point (not a stale overdrag). */
+        s->raw[a] = s->pos[a];
     }
 
     /* scroll-to clears when both axes have arrived. */
@@ -249,16 +258,18 @@ static void scroll_gather_wheel(const nt_pointer_t *pointers, uint32_t count, co
     }
 }
 
-/* Route one incremental drag delta (drag_x, drag_y in fb px) into our offset/velocity.
- * dt<=0 has no fresh velocity — zero it so a prior fling's momentum can't leak past this
- * drag frame (a stale vel would resume on release). */
+/* Route one incremental drag delta (drag_x, drag_y in fb px) into the RAW scroll pos (1:1,
+ * accumulates even past the edge — the integrator rubber-bands raw->display each frame). vel is
+ * SAMPLED for the release fling: a moving frame sets vel=delta/dt, a still frame (zero delta)
+ * sets vel=0 so a finger held still before release produces no fling (iOS/Android semantics).
+ * dt<=0 has no fresh velocity — zero it so a prior fling can't leak past this drag frame. */
 static void scroll_route_drag(nt_ui_scroll_state_t *s, const nt_ui_scroll_style_t *style, float drag_x, float drag_y, float dt) {
     if (style->scroll_x) {
-        s->pos[0] += drag_x;
+        s->raw[0] += drag_x;
         s->vel[0] = (dt > 0.0F) ? (drag_x / dt) : 0.0F;
     }
     if (style->scroll_y) {
-        s->pos[1] += drag_y;
+        s->raw[1] += drag_y;
         s->vel[1] = (dt > 0.0F) ? (drag_y / dt) : 0.0F;
     }
 }
@@ -319,11 +330,14 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             float ddx = cap->pos[0] - cap->press_pos[0];
             float ddy = cap->pos[1] - cap->press_pos[1];
             const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
-            if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
+            const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
+            /* Pre-latch: a sub-threshold move is still a tap (leave the inner capture to click).
+             * Post-latch: ANY per-frame delta (incl. zero) keeps the drag live so a held-still
+             * finger holds DRAGGING (no momentum mid-hold) instead of dropping into the integrator. */
+            if (!latched && axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
                 continue; /* tap (below threshold) leaves the inner capture -> inner clicks */
             }
             cap->active_id = 0U; /* cancel the inner widget */
-            const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
             scroll_consume_threshold(latched, &ddx, &ddy);
             scroll_route_drag(s, style, ddx, ddy, dt);
             cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
@@ -356,10 +370,12 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
         float ddy = p->y - s->free_press_pos[1];
         const float axis_move = (style->scroll_x ? fabsf(ddx) : 0.0F) + (style->scroll_y ? fabsf(ddy) : 0.0F);
         any_free_press = true;
-        if (axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
+        const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
+        /* Pre-latch: below the threshold it's not yet a drag. Post-latch: route ANY per-frame delta
+         * (incl. zero on a held-still finger) so DRAGGING holds — the finger owns pos, no momentum. */
+        if (!latched && axis_move < NT_UI_SCROLL_STEAL_THRESHOLD_PX) {
             continue; /* still within the tap threshold — not yet a drag */
         }
-        const bool latched = (s->flags & NT_UI_SCROLL_FLAG_DRAG_LATCHED) != 0U;
         scroll_consume_threshold(latched, &ddx, &ddy);
         scroll_route_drag(s, style, ddx, ddy, dt);
         s->free_press_pos[0] = p->x; /* re-anchor: next frame's delta is per-frame, 1:1 */

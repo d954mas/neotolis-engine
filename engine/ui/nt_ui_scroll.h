@@ -40,10 +40,11 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_DRAG_LATCHED ((uint8_t)(1U << 3))
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
- * negative-down sign convention. ~36B; under NT_UI_STATE_PAYLOAD_MAX. */
+ * negative-down sign convention. ~44B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
-    float pos[2];            /* current offset fed to clip.childOffset */
-    float vel[2];            /* momentum velocity (px/s) */
+    float pos[2];            /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
+    float raw[2];            /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
+    float vel[2];            /* momentum velocity (px/s), sampled from drag for the release fling */
     float target[2];         /* smooth-wheel + scroll-to target */
     float free_press_pos[2]; /* free-press drag anchor (re-anchored each frame; FREE_PRESS gates it) */
     uint8_t flags;

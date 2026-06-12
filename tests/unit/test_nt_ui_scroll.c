@@ -754,6 +754,146 @@ static void test_scroll_free_press_slow_cross_no_velocity_spike(void) {
     }
 }
 
+/* ---- Held-drag physics (defect 1): a finger held DOWN that owns the gesture moves content
+ *      as a PURE FUNCTION of finger displacement; momentum integrates only AFTER release.
+ *      Helper: press inside, drag to a target y over a few frames, return with the finger
+ *      still DOWN at that y (latched). ---- */
+static nt_ui_scroll_state_t *held_drag_to(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float drag_to_y) {
+    p->x = 100.0F;
+    p->y = 100.0F;
+    p->active = true;
+    scroll_frame(p, style); /* establish bbox + state cell */
+    p->buttons[NT_BUTTON_LEFT].is_down = true;
+    p->buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(p, style); /* press frame: anchor set */
+    p->buttons[NT_BUTTON_LEFT].is_pressed = false;
+    /* Drag toward the target in a few steps so the gesture latches (crosses the threshold). */
+    const float step = (drag_to_y - 100.0F) / 4.0F;
+    for (int i = 1; i <= 4; ++i) {
+        p->y = 100.0F + (step * (float)i);
+        scroll_frame(p, style);
+    }
+    return (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+}
+
+/* ---- Test 24: a finger held STILL mid-drag IN BOUNDS freezes pos for N frames (no creep,
+ *      no momentum) — the content only moves when the finger moves. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_held_still_in_bounds_frozen(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    /* Drag UP to y=60 (content moves up = negative pos), well inside the valid range. */
+    nt_ui_scroll_state_t *s = held_drag_to(&p, &style, 60.0F);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] < -1.0F); /* dragged in-bounds */
+    const float frozen = s->pos[1];
+    /* Finger now HELD STILL (button down, y unchanged) for 30 frames. */
+    for (int i = 0; i < 30; ++i) {
+        scroll_frame(&p, &style);
+        s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+        TEST_ASSERT_NOT_NULL(s);
+        TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 0.001F));         /* pos frozen — no creep, no drift */
+        TEST_ASSERT_TRUE((s->flags & NT_UI_SCROLL_FLAG_DRAGGING) != 0U); /* still dragging */
+    }
+}
+
+/* ---- Test 25: a finger held STILL PAST THE EDGE freezes the COMPRESSED offset for N frames
+ *      (the iterative-rubber creep bug: pos must not march toward the edge under a still finger). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_held_still_past_edge_frozen(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    /* Drag DOWN to y=240 (finger below the press): content overscrolls past the TOP edge
+     * (pos > 0 territory in Clay sign), entering the rubber-band region. */
+    nt_ui_scroll_state_t *s = held_drag_to(&p, &style, 260.0F);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] > 1.0F);             /* past the top edge (rubber-banded) */
+    TEST_ASSERT_TRUE(s->raw[1] > s->pos[1] + 1.0F); /* raw overdrag exceeds the compressed display */
+    const float frozen = s->pos[1];
+    /* Hold still past the edge for 30 frames: the compressed offset must NOT creep toward 0. */
+    for (int i = 0; i < 30; ++i) {
+        scroll_frame(&p, &style);
+        s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+        TEST_ASSERT_NOT_NULL(s);
+        TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 0.001F)); /* compressed offset frozen */
+    }
+}
+
+/* ---- Test 26: releasing AFTER holding the finger still produces NO fling (velocity sampled
+ *      near zero) — the content settles where the finger left it, no momentum kick. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_release_after_hold_no_fling(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    nt_ui_scroll_state_t *s = held_drag_to(&p, &style, 60.0F);
+    TEST_ASSERT_NOT_NULL(s);
+    /* Hold still 10 frames so the sampled velocity decays to zero. */
+    for (int i = 0; i < 10; ++i) {
+        scroll_frame(&p, &style);
+    }
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    const float pos_at_release = s->pos[1];
+    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F)); /* still finger -> zero sampled vel */
+    /* Release; the post-release frames must not fling (settles at the release point). */
+    p.buttons[NT_BUTTON_LEFT].is_down = false;
+    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    for (int i = 0; i < 20; ++i) {
+        scroll_frame(&p, &style);
+    }
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], pos_at_release, 1.0F)); /* no momentum after a held-still release */
+}
+
+/* ---- Test 27: raw-anchored rubber — dragging N px past the edge then back M px tracks
+ *      rubber(raw) BOTH ways with no hysteresis (the offset retraces, not a one-way creep). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_raw_anchored_rubber_no_hysteresis(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    /* Drag past the top edge to ~100 px of raw overdrag. */
+    nt_ui_scroll_state_t *s = held_drag_to(&p, &style, 300.0F);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(s->pos[1] > 1.0F);
+    const float raw_far = s->raw[1];
+    const float pos_far = s->pos[1];
+    /* Pull the finger BACK 50 px (toward the press): raw shrinks, pos must retrace toward rest. */
+    for (int i = 1; i <= 5; ++i) {
+        p.y = 300.0F - (float)(i * 10);
+        scroll_frame(&p, &style);
+    }
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    const float raw_near = s->raw[1];
+    const float pos_near = s->pos[1];
+    TEST_ASSERT_TRUE(raw_near < raw_far - 1.0F); /* raw came back ~50 px */
+    TEST_ASSERT_TRUE(pos_near < pos_far - 1.0F); /* compressed display retraced (no stuck hysteresis) */
+    /* pos is exactly the rubber-band of the current raw overdrag (pure function, recomputed from raw). */
+    const float expect = nt_ui_scroll_test_rubber_band(raw_near, 200.0F); /* container height 200 */
+    TEST_ASSERT_TRUE(float_near(pos_near, expect, 1.5F));
+}
+
+/* ---- Test 28: a held drag does NOT leak momentum mid-hold. Drag fast, then hold still: the
+ *      integrator must stay in the DRAGGING branch (no vel*dt advance under a still finger). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_held_no_momentum_midhold(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    /* A FAST drag builds velocity, then we freeze. Drag up to y=40 (fast) in 4 steps. */
+    nt_ui_scroll_state_t *s = held_drag_to(&p, &style, 40.0F);
+    TEST_ASSERT_NOT_NULL(s);
+    const float pos_after_drag = s->pos[1];
+    /* First held-still frame: vel samples to ~0; pos must NOT advance by the prior fling velocity. */
+    scroll_frame(&p, &style);
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], pos_after_drag, 0.001F)); /* no momentum step mid-hold */
+    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F));           /* vel sampled to zero on the still frame */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -780,5 +920,10 @@ int main(void) {
     RUN_TEST(test_scroll_free_press_outside_bbox_ignored);
     RUN_TEST(test_scroll_free_press_tracks_finger_1to1);
     RUN_TEST(test_scroll_free_press_slow_cross_no_velocity_spike);
+    RUN_TEST(test_scroll_held_still_in_bounds_frozen);
+    RUN_TEST(test_scroll_held_still_past_edge_frozen);
+    RUN_TEST(test_scroll_release_after_hold_no_fling);
+    RUN_TEST(test_scroll_raw_anchored_rubber_no_hysteresis);
+    RUN_TEST(test_scroll_held_no_momentum_midhold);
     return UNITY_END();
 }
