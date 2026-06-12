@@ -1491,9 +1491,10 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(50U, inside_cmd_count);
 
     char msg[200];
-    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations (bulk 20-row scene): %u (cap 60). cmd_count=%u", alternations, inside_cmd_count);
-    /* 60 cap = 20 rows × ~2 + ~20 for header/info-pane. */
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(60U, alternations, msg);
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations (bulk 20-row scene): %u (cap 72). cmd_count=%u", alternations, inside_cmd_count);
+    /* 72 cap: 20 rows × ~2 + ~20 chrome, + a few extra now that each row carries its own
+     * in-flow zebra bg (scrolls with the text) instead of one floating overlay column. */
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(72U, alternations, msg);
 }
 
 /* Declares a 200x200 clip pane whose childOffset comes from the inspector's internal scroll
@@ -2088,6 +2089,8 @@ static void inspector_emit_leaf_scene(int leaf_count) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* The marker is a PINNED footer below the scrolled clip (tree text scrolls, the marker stays), so it
+ * stays visible at offset 0 — it can't be lost off the scrolled bottom. */
 static void test_inspector_truncation_marker_visible(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
 
@@ -2463,6 +2466,135 @@ static void test_inspector_pane_drag_does_not_scroll_game(void) {
     TEST_ASSERT_TRUE_MESSAGE(game->pos[1] == 0.0F, "the game container under the pane must NOT scroll on drag (pane claims the capture)");
 }
 
+/* Y of the first TEXT command whose contents contain `needle` and that sits inside the right sidebar.
+ * Returns NAN when not found. */
+static float inspector_frozen_text_y(const nt_ui_context_t *ctx, const char *needle, float panel_left_x) {
+    const size_t need = strlen(needle);
+    const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT || cc->boundingBox.x < panel_left_x) {
+            continue;
+        }
+        const Clay_StringSlice s = cc->renderData.text.stringContents;
+        if (s.chars == NULL || (size_t)s.length < need) {
+            continue;
+        }
+        for (size_t off = 0; off + need <= (size_t)s.length; ++off) {
+            if (memcmp(s.chars + off, needle, need) == 0) {
+                return cc->boundingBox.y;
+            }
+        }
+    }
+    return NAN;
+}
+
+/* A named scene tall enough to overflow the inspector tree pane; the pointer is parked in the pane.
+ * Each leaf gets a UNIQUE id string so a single tracked row's TEXT bbox can be followed across scroll. */
+static void inspector_named_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    /* Static so the id-string pointers outlive the layout solve (Clay stores the pointer, not a copy). */
+    static char s_leaf_names[60][24];
+    CLAY({.id = CLAY_ID("scrolltext_root")}) {
+        for (int i = 0; i < 60; ++i) {
+            (void)snprintf(s_leaf_names[i], sizeof s_leaf_names[i], "uniqLeaf_%02d", i);
+            CLAY({.id = CLAY_SID(((Clay_String){.length = (int32_t)strlen(s_leaf_names[i]), .chars = s_leaf_names[i]})), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- FAILS-BEFORE: the tree TEXT must scroll WITH the pane (was pinned by the floating overlay). ----
+ * A tree-text TEXT command's bbox.y must move UP by the scroll offset once the pane is wheeled. */
+static void test_inspector_tree_text_moves_with_scroll(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float panel_left_x = screen_w - 400.0F;
+    const float ptr_x = 1000.0F;
+    const float ptr_y = 400.0F;
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+    /* A unique leaf low enough to survive a modest scroll yet not scroll off the clip top. */
+    const char *needle = "uniqLeaf_12";
+
+    /* Warm up: solve pane bbox + content height, grant wheel ownership (1-frame lag). */
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    const float y_before = inspector_frozen_text_y(s_fx.ctx, needle, panel_left_x);
+    TEST_ASSERT_FALSE_MESSAGE(isnan(y_before), "a tree-text TEXT row must be present before scrolling");
+
+    /* Wheel down a few notches so the pane scrolls. */
+    for (int i = 0; i < 4; ++i) {
+        inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE_MESSAGE(s->pos[1] < 0.0F, "pane must have scrolled (negative offset)");
+
+    const float y_after = inspector_frozen_text_y(s_fx.ctx, needle, panel_left_x);
+    TEST_ASSERT_FALSE_MESSAGE(isnan(y_after), "the tree-text row must still be present after scrolling");
+
+    /* The text must move UP by the scroll offset (within a row tolerance), not stay pinned. On the OLD
+     * floating-overlay architecture y_after == y_before (the bug). */
+    TEST_ASSERT_TRUE_MESSAGE(y_after < y_before - 4.0F, "tree text must scroll UP with the pane (was pinned)");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf((y_after - y_before) - s->pos[1]) < 2.0F, "tree text must move by exactly the scroll offset");
+}
+
+/* ---- Row-click AFTER scroll selects the element under the (scrolled) row, not a stale pinned one. ----
+ * Scroll the pane, then press over a tree row; the selected id must match the element whose row now
+ * sits under the pointer in the SCROLLED geometry. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_row_click_after_scroll_selects_scrolled_row(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float ptr_x = 1000.0F;
+    const float ptr_y = 200.0F; /* a row near the top of the pane */
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    /* Warm up + grant wheel ownership. */
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+
+    /* Click at offset 0 -> capture the element selected when the rows are unscrolled. */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t click0 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &click0, 1);
+    CLAY({.id = CLAY_ID("scrolltext_root")}) {
+        for (int i = 0; i < 60; ++i) {
+            CLAY({.id = CLAY_IDI("scrolltext_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    const uint32_t sel_unscrolled = s_fx.ctx->inspector_selected_id;
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0U, sel_unscrolled, "a click on a tree row at offset 0 must select something");
+
+    /* Scroll the pane down several rows. */
+    for (int i = 0; i < 6; ++i) {
+        inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE_MESSAGE(s->pos[1] <= -30.0F, "pane must have scrolled by at least one row (row_h=30)");
+
+    /* Click at the SAME pointer y after scrolling -> a DIFFERENT element (the row that scrolled under
+     * the cursor) must be selected. On the old pinned architecture the same row id would re-select. */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t click1 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &click1, 1);
+    CLAY({.id = CLAY_ID("scrolltext_root")}) {
+        for (int i = 0; i < 60; ++i) {
+            CLAY({.id = CLAY_IDI("scrolltext_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    const uint32_t sel_scrolled = s_fx.ctx->inspector_selected_id;
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0U, sel_scrolled, "a click on a tree row after scrolling must still select something");
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(sel_unscrolled, sel_scrolled, "after scrolling, the same pointer y must select the row that scrolled under it (not the stale pinned row)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -2531,6 +2663,8 @@ int main(void) {
     RUN_TEST(test_inspector_pane_drag_release_flings);
     RUN_TEST(test_inspector_pane_tap_still_selects_row);
     RUN_TEST(test_inspector_pane_drag_does_not_scroll_game);
+    RUN_TEST(test_inspector_tree_text_moves_with_scroll);
+    RUN_TEST(test_inspector_row_click_after_scroll_selects_scrolled_row);
     return UNITY_END();
 }
 
