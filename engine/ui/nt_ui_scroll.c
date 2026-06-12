@@ -507,8 +507,17 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
             }
             cap->active_id = id;       /* CLAIM (not 0): hold the gesture so it can't be re-adopted */
             ctx->capture_seen[i] = 1U; /* keep the claim past begin's orphan-clear */
-            scroll_consume_threshold(false, &ddx, &ddy);
-            scroll_route_drag(s, style, ddx, ddy, dt);
+            /* Route ZERO delta on the latch frame: the inner widget (declared earlier) already applied
+             * this same delta, so re-routing it here double-moves for one frame. Re-anchor and let the
+             * scroll track from NEXT frame's per-frame delta; zero vel so a prior fling can't leak past. */
+            (void)ddx;
+            (void)ddy;
+            if (can_x) {
+                s->vel[0] = 0.0F;
+            }
+            if (can_y) {
+                s->vel[1] = 0.0F;
+            }
             cap->press_pos[0] = cap->pos[0]; /* re-anchor: next frame's delta is per-frame, 1:1 */
             cap->press_pos[1] = cap->pos[1];
             s->flags |= NT_UI_SCROLL_FLAG_DRAG_LATCHED;

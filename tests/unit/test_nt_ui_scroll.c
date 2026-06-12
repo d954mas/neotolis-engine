@@ -205,9 +205,12 @@ static void inject_inner_capture(uint32_t inner_id, float press_x, float press_y
     s_fx.ctx->capture_seen[0] = 1U;
 }
 
-/* ---- Test 8: capture-steal — drag>threshold cancels inner capture AND scrolls. The container now
- *      CLAIMS the capture (active_id = scroll id, not 0) so the gesture has a single owner that can't
- *      be re-adopted by a neighbour; the inner widget sees a foreign owner -> no click (cancelled). ---- */
+/* ---- Test 8: capture-steal — drag>threshold cancels inner capture AND claims it, but routes ZERO
+ *      delta on the LATCH frame (the inner widget, declared earlier, already applied that same delta;
+ *      re-routing it here double-moves for one frame). The container CLAIMS the capture (active_id =
+ *      scroll id, not 0) so the gesture has a single owner; the inner widget sees a foreign owner ->
+ *      no click (cancelled). The scroll starts tracking 1:1 from the NEXT frame's per-frame delta. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_capture_steal_drag(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     const uint32_t inner_id = 0xBEEFU;
@@ -235,10 +238,41 @@ static void test_scroll_capture_steal_drag(void) {
 
     /* Container claimed the gesture -> inner capture cancelled (no longer inner_id, no click). */
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    /* Scrolled: drag delta routed into pos -> non-trivial childOffset. */
+    /* LATCH frame routes ZERO delta: pos AND raw stay at rest (fails before the fix, which dumped the
+     * already-inner-applied 40 px delta into pos the same frame — the one-frame double-motion). */
     float oy = 0.0F;
     nt_ui_scroll_test_last_child_offset(NULL, &oy);
-    TEST_ASSERT_TRUE(fabsf(oy) > 1.0F); /* the container moved */
+    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.5F)); /* no movement on the steal frame */
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* pos unchanged on the latch frame */
+    TEST_ASSERT_TRUE(float_near(s->raw[1], 0.0F, 0.5F)); /* raw unchanged on the latch frame */
+
+    /* NEXT frame: the container OWNS the capture; a further 20 px drag must route 1:1 into pos. The
+     * OWNED path tracks the live pointer and re-anchors press_pos each frame, so the offset advances
+     * by exactly the per-frame finger delta (no threshold dead-zone left to consume). */
+    p.y = 160.0F;                             /* +20 px further down */
+    p.buttons[NT_BUTTON_LEFT].is_down = true; /* finger still held — the OWNED path routes the drag */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    s_fx.ctx->captures[0].active_id = SCROLL_ID; /* container owns it now (claimed last frame) */
+    s_fx.ctx->captures[0].press_pos[0] = 100.0F; /* matches last frame's re-anchor (cap->pos was 140) */
+    s_fx.ctx->captures[0].press_pos[1] = 140.0F;
+    s_fx.ctx->captures[0].pos[0] = 100.0F;
+    s_fx.ctx->captures[0].pos[1] = 160.0F;
+    s_fx.ctx->capture_seen[0] = 1U;
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    /* 20 px finger move down -> raw tracks it 1:1 (Clay sign: positive raw past the top edge). */
+    TEST_ASSERT_TRUE(float_near(s->raw[1], 20.0F, 0.5F));
 }
 
 /* ---- Test 8b: a capture-steal drag on a dt==0 frame zeroes velocity, so a prior

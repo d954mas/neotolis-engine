@@ -22,7 +22,12 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Capture-steal threshold: a drag inside a scroll container exceeding this many
  * framebuffer px steals capture from the inner widget (cancel its click) and
- * scrolls (D-59-04). Mobile standard ~8-10 px. */
+ * scrolls (D-59-04). Mobile standard ~8-10 px. The steal routes ZERO delta on the
+ * latch frame (the inner widget already applied it; re-routing double-moves once);
+ * the scroll tracks 1:1 from the next frame. Value semantics: the cancelled inner
+ * widget KEEPS any value change it made before the steal — Model D puts the value in
+ * the game, so the engine cannot revert it. Games needing transactional sliders should
+ * commit on the released-over-widget frame (`released_now`), not on every drag tick. */
 #ifndef NT_UI_SCROLL_STEAL_THRESHOLD_PX
 #define NT_UI_SCROLL_STEAL_THRESHOLD_PX 8.0F
 #endif
