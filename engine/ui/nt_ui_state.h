@@ -21,7 +21,7 @@ static inline uint32_t nt_ui_derived_id(uint32_t base, uint32_t salt) {
 }
 
 #ifndef NT_UI_STATE_SLOTS
-#define NT_UI_STATE_SLOTS 64 /* power-of-2; slot = id & (N-1) */
+#define NT_UI_STATE_SLOTS 256 /* power-of-2; slot = id & (N-1). 256 x 76B = ~19.5 KB per context */
 #endif
 #ifndef NT_UI_STATE_PAYLOAD_MAX
 #define NT_UI_STATE_PAYLOAD_MAX 64 /* bytes; > this => game stores its own pointer in the cell */
