@@ -49,8 +49,12 @@ if(EMSCRIPTEN)
     endif()
 endif()
 
-# Derive preset name from build type + platform for output directory layout
-if(EMSCRIPTEN)
+# Derive preset name from build type + platform for output directory layout.
+# Overridable (-DNT_PRESET_NAME=...) so variant configs (e.g. DEBUG_TOOLS=OFF)
+# get their own build/engine|tests/<name> and never clobber the main artifacts.
+if(NT_PRESET_NAME)
+    # caller-provided; keep as-is
+elseif(EMSCRIPTEN)
     if(NT_WASM_ANALYSIS)
         set(_nt_wasm_tier "analysis")
     elseif(CMAKE_BUILD_TYPE STREQUAL "Release")

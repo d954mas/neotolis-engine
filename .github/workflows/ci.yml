@@ -411,7 +411,7 @@ jobs:
       # core tests (60/62) still pass. Verifies the production-default path
       # compiles + links + tests cleanly.
       - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)
-        run: cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -G Ninja
+        run: cmake -B build/_cmake/native-debug-off -DNT_PRESET_NAME=native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -G Ninja
 
       - name: Build native debug (NT_UI_DEBUG_TOOLS=OFF)
         run: cmake --build build/_cmake/native-debug-off
