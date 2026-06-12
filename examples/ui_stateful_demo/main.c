@@ -212,14 +212,14 @@ static const nt_ui_progress_style_t g_progress_crop_tmpl = {
     .opacity = 1.0F,
 };
 
-/* ---- mana bar (vertical CROP, BOTTOM_UP): the shaped fill reveals from the bottom (D-59-26
- * non-LTR direction) — figured art reads better cropped than stretched in a narrow bar. ---- */
+/* ---- mana bar (vertical STRETCH slice9, BOTTOM_UP): the smooth gradient fill stretches
+ * cleanly and is tinted BLUE; it fills bottom-up (D-59-26 non-LTR direction). ---- */
 static const nt_ui_progress_style_t g_mana_tmpl = {
     .track_tint = 0xFFFFFFFF,
-    .fill_tint = 0xFFFFFFFF,
+    .fill_tint = 0xFF4090F0, /* blue mana */
     .track_w = 26,
     .track_h = 96,
-    .fill_mode = NT_UI_FILL_CROP,
+    .fill_mode = NT_UI_FILL_STRETCH,
     .fill_direction = NT_UI_FILL_BOTTOM_UP,
     .value_speed = 5.0F,
     .opacity = 1.0F,
@@ -251,6 +251,13 @@ static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
 
+/* Headless layout probe (--probe-layout): after a settled frame, check every bottom-most
+ * interactive widget fits inside the viewport, log PASS/FAIL, then quit. Result rides
+ * s_probe_exit_code so a headless harness can read it via the process exit code. */
+static bool s_probe_layout;
+static int s_probe_settle_frames;
+static int s_probe_exit_code;
+
 /* Runtime widget styles: const templates copied + late-bound atlas refs filled upfront
  * (init_widget_styles); mutable so the engine's resolve memoizes the index in place. */
 static nt_ui_checkbox_style_t s_check;
@@ -262,6 +269,8 @@ static nt_ui_progress_style_t s_progress_crop;
 static nt_ui_progress_style_t s_mana;
 static nt_ui_scroll_style_t s_scroll_hide; /* AUTO_HIDE bar */
 static nt_ui_scroll_style_t s_scroll_always;
+static nt_ui_scroll_style_t s_scroll_horiz; /* horizontal-only (scroll_x) */
+static nt_ui_scroll_style_t s_scroll_xy;    /* both axes (scroll_x + scroll_y) */
 static nt_ui_button_style_t s_button;
 
 /* Game-owned values (Model D — state lives in the game, not the engine). */
@@ -274,9 +283,10 @@ static bool s_locked = true; /* a permanently-checked DISABLED checkbox */
 /* Slider / progress game-owned values (Model D). */
 static float s_volume = 0.65F; /* float slider 0..1 */
 static int s_count = 4;        /* int slider 0..10 */
-static float s_progress_val;   /* ramps 0->1 on a timer */
+static float s_progress_val;   /* horizontal load bar: ramps 0->1->0 on a timer */
 static bool s_progress_up = true;
-static float s_mana_val = 0.7F; /* follows the float slider for a felt-out vertical bar */
+static float s_mana_val = 0.5F; /* vertical mana bar: auto-ramps 0->1->0, phase-shifted from the load bar */
+static bool s_mana_up = false;  /* starts heading DOWN so it runs out of sync with the load bar */
 
 /* Physics-tuning controls (felt-out at the visual-QA gate, D-59-02). */
 static float s_friction = 0.92F;
@@ -291,6 +301,8 @@ static uint32_t s_id_wheel_ease;
 static uint32_t s_id_wheel_step;
 static uint32_t s_id_scroll_hide;
 static uint32_t s_id_scroll_always;
+static uint32_t s_id_scroll_horiz; /* horizontal-only scroll list */
+static uint32_t s_id_scroll_xy;    /* both-axes scroll grid */
 static uint32_t s_id_scroll_to_btn;
 static uint32_t s_id_inner_btn_hide;
 static uint32_t s_id_inner_btn_always;
@@ -353,10 +365,10 @@ static void init_widget_styles(void) {
     s_progress_crop.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
     s_progress_crop.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SHAPED.value);
 
-    /* Mana (vertical CROP, BOTTOM_UP): recessed track + shaped fill revealed from the bottom. */
+    /* Mana (vertical STRETCH slice9, BOTTOM_UP): recessed track + smooth slice9 fill, blue-tinted. */
     s_mana = g_mana_tmpl;
     s_mana.track = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_TRACK.value);
-    s_mana.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SHAPED.value);
+    s_mana.fill = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_BAR_FILL_SMOOTH.value);
 
     /* Scroll: two styles differing only in scrollbar visibility (AUTO_HIDE vs ALWAYS).
      * Thumb is the circle art; track is the grey pill (tinted dark). */
@@ -374,6 +386,16 @@ static void init_widget_styles(void) {
     s_scroll_always.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
     s_scroll_always.track_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_TRACK_OFF.value);
     s_scroll_always.thumb_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_STATEFUL_DEMO_ATLAS_THUMB.value);
+
+    /* Horizontal-only: scroll_x on, scroll_y off; ALWAYS bar on the bottom edge. */
+    s_scroll_horiz = s_scroll_always;
+    s_scroll_horiz.scroll_x = true;
+    s_scroll_horiz.scroll_y = false;
+
+    /* Both axes: content wider AND taller than the container; ALWAYS bars on both edges. */
+    s_scroll_xy = s_scroll_always;
+    s_scroll_xy.scroll_x = true;
+    s_scroll_xy.scroll_y = true;
 
     /* Inner / scroll-to button: grey slice9 pill bg, eased press dip. */
     s_button = (nt_ui_button_style_t){
@@ -422,7 +444,7 @@ static const Clay_ElementDeclaration s_row_decl = {
 };
 
 static void section_label(const char *text) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.top = 6, .bottom = 2}}}) { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, &g_section_style); }
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.top = 2, .bottom = 2}}}) { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, &g_section_style); }
 }
 
 /* The slider track decl: a FIXED-height row so the floating thumb has a stable parent. */
@@ -451,19 +473,23 @@ static void slider_drag_bubble(uint32_t id, const char *value_text) {
     }
 }
 
-/* One scroll list: 24 rows of labels + one capture-steal button inside, with the
- * chosen scrollbar visibility. id selects the AUTO_HIDE vs ALWAYS style. */
+/* Compact dark recessed container decl for the scroll-showcase tiles (one fixed size). */
+static Clay_ElementDeclaration scroll_tile_decl(float w, float h) {
+    return (Clay_ElementDeclaration){
+        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .padding = CLAY_PADDING_ALL(8)},
+        .backgroundColor = {24.0F, 26.0F, 34.0F, 255.0F},
+        .cornerRadius = CLAY_CORNER_RADIUS(8),
+    };
+}
+
+/* One VERTICAL scroll list: a capture-steal button + 24 rows of labels, with the chosen
+ * scrollbar visibility (AUTO_HIDE vs ALWAYS). Compact tile for the 2x2 showcase. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scroll_list(uint32_t id, uint32_t inner_btn_id, const nt_ui_scroll_style_t *style, const char *title) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
 
-        const Clay_ElementDeclaration scroll_decl = {
-            .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(120)}, .padding = CLAY_PADDING_ALL(8)},
-            .backgroundColor = {24.0F, 26.0F, 34.0F, 255.0F},
-            .cornerRadius = CLAY_CORNER_RADIUS(8),
-        };
-
+        const Clay_ElementDeclaration scroll_decl = scroll_tile_decl(220.0F, 78.0F);
         nt_ui_scroll_begin(s_ctx, NULL, id, style, &scroll_decl);
         {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
@@ -500,15 +526,87 @@ static void scroll_list(uint32_t id, uint32_t inner_btn_id, const nt_ui_scroll_s
     }
 }
 
+/* One HORIZONTAL scroll list: a single wide row of items overflowing on X only, so the
+ * bottom-edge horizontal bar shows. Demonstrates scroll_x with scroll_y off. */
+static void scroll_list_horizontal(uint32_t id, const char *title) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
+
+        const Clay_ElementDeclaration scroll_decl = scroll_tile_decl(220.0F, 78.0F);
+        nt_ui_scroll_begin(s_ctx, NULL, id, &s_scroll_horiz, &scroll_decl);
+        {
+            /* One LEFT_TO_RIGHT row wider than the container -> X overflow, horizontal bar. */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+                enum { HCOL_COUNT = 14 };
+                static char s_hcols[HCOL_COUNT][20];
+                static bool s_hcols_init = false;
+                if (!s_hcols_init) {
+                    for (int i = 0; i < HCOL_COUNT; ++i) {
+                        (void)snprintf(s_hcols[i], sizeof s_hcols[i], "Col %02d", i);
+                    }
+                    s_hcols_init = true;
+                }
+                for (int i = 0; i < HCOL_COUNT; ++i) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(78), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                          .backgroundColor = {40.0F, 46.0F, 60.0F, 255.0F},
+                          .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), s_hcols[i], &g_status_style);
+                    }
+                }
+            }
+        }
+        nt_ui_scroll_end(s_ctx);
+    }
+}
+
+/* One BOTH-AXES scroll container: a grid of label cells wider AND taller than the container,
+ * so both scrollbars show. Demonstrates scroll_x + scroll_y together. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void scroll_list_xy(uint32_t id, const char *title) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, &g_help_style);
+
+        const Clay_ElementDeclaration scroll_decl = scroll_tile_decl(220.0F, 78.0F);
+        nt_ui_scroll_begin(s_ctx, NULL, id, &s_scroll_xy, &scroll_decl);
+        {
+            enum { XY_ROWS = 8, XY_COLS = 8 };
+            static char s_xy_cells[XY_ROWS][XY_COLS][12];
+            static bool s_xy_init = false;
+            if (!s_xy_init) {
+                for (int r = 0; r < XY_ROWS; ++r) {
+                    for (int c = 0; c < XY_COLS; ++c) {
+                        (void)snprintf(s_xy_cells[r][c], sizeof s_xy_cells[r][c], "R%dC%d", r, c);
+                    }
+                }
+                s_xy_init = true;
+            }
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+                for (int r = 0; r < XY_ROWS; ++r) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6}}) {
+                        for (int c = 0; c < XY_COLS; ++c) {
+                            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(30)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                  .backgroundColor = {40.0F, 46.0F, 60.0F, 255.0F},
+                                  .cornerRadius = CLAY_CORNER_RADIUS(5)}) {
+                                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), s_xy_cells[r][c], &g_help_style);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        nt_ui_scroll_end(s_ctx);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_widgets_panel(void) {
     char buf[64];
 
     CLAY({.id = CLAY_ID("widgets-panel"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)},
-                     .padding = CLAY_PADDING_ALL(20),
+                     .padding = CLAY_PADDING_ALL(14),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 4,
+                     .childGap = 2,
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = {30.0F, 34.0F, 42.0F, 255.0F},
           .cornerRadius = CLAY_CORNER_RADIUS(10)}) {
@@ -522,9 +620,7 @@ static void declare_widgets_panel(void) {
 
         (void)snprintf(buf, sizeof buf, "Volume  %.2f", (double)s_volume);
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_status_style);
-        if (nt_ui_slider_float(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_volume, NULL, &s_volume, 0.0F, 1.0F, 0.0F, &s_slider, &s_slider_decl, true)) {
-            s_mana_val = s_volume; /* vertical mana bar follows the float slider */
-        }
+        (void)nt_ui_slider_float(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_volume, NULL, &s_volume, 0.0F, 1.0F, 0.0F, &s_slider, &s_slider_decl, true);
         (void)snprintf(buf, sizeof buf, "%.2f", (double)s_volume);
         slider_drag_bubble(s_id_volume, buf);
 
@@ -558,21 +654,30 @@ static void declare_widgets_panel(void) {
         }
         // #endregion
 
-        // #region scroll containers (AUTO_HIDE + ALWAYS) + scroll-to
-        section_label("Scroll (fling / rubber-band / wheel)");
+        // #region scroll containers (2x2: AUTO_HIDE vert / ALWAYS vert / horizontal / XY) + scroll-to
+        section_label("Scroll (vertical / horizontal / both axes)");
 
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-            scroll_list(s_id_scroll_hide, s_id_inner_btn_hide, &s_scroll_hide, "AUTO_HIDE bar");
-            scroll_list(s_id_scroll_always, s_id_inner_btn_always, &s_scroll_always, "ALWAYS bar");
+        /* 2x2 tile grid: two vertical lists on top, horizontal + both-axes below. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+                scroll_list(s_id_scroll_hide, s_id_inner_btn_hide, &s_scroll_hide, "AUTO_HIDE bar (vertical)");
+                scroll_list(s_id_scroll_always, s_id_inner_btn_always, &s_scroll_always, "ALWAYS bar (vertical)");
+            }
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+                scroll_list_horizontal(s_id_scroll_horiz, "Horizontal scroll");
+                scroll_list_xy(s_id_scroll_xy, "Both axes (X + Y)");
+            }
         }
 
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .padding = {.top = 6}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scroll_to_btn, &s_button,
                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(34)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}, true);
-            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Scroll both to top", &g_status_style);
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Scroll all to start", &g_status_style);
             if (nt_ui_button_end(s_ctx)) {
                 nt_ui_scroll_to(s_ctx, s_id_scroll_hide, 0.0F, 0.0F);
                 nt_ui_scroll_to(s_ctx, s_id_scroll_always, 0.0F, 0.0F);
+                nt_ui_scroll_to(s_ctx, s_id_scroll_horiz, 0.0F, 0.0F); /* reset X */
+                nt_ui_scroll_to(s_ctx, s_id_scroll_xy, 0.0F, 0.0F);    /* reset X + Y */
             }
         }
         // #endregion
@@ -623,6 +728,8 @@ static void declare_menu(void) {
         s_id_wheel_step = nt_ui_id("tune/wheel_step");
         s_id_scroll_hide = nt_ui_id("scroll/list_autohide");
         s_id_scroll_always = nt_ui_id("scroll/list_always");
+        s_id_scroll_horiz = nt_ui_id("scroll/list_horiz");
+        s_id_scroll_xy = nt_ui_id("scroll/list_xy");
         s_id_scroll_to_btn = nt_ui_id("scroll/to_top");
         s_id_inner_btn_hide = nt_ui_id("scroll/inner_btn_hide");
         s_id_inner_btn_always = nt_ui_id("scroll/inner_btn_always");
@@ -683,6 +790,35 @@ static void declare_menu(void) {
 }
 // #endregion
 
+// #region layout probe (headless viewport-fit assertion)
+/* One interactive widget's bottom edge vs the viewport; logs and returns whether it fits. */
+static bool probe_fits(uint32_t id, const char *name, float viewport_h) {
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        nt_log_error("probe: '%s' not found in layout (id=%u)", name, id);
+        return false;
+    }
+    const float bottom = d.boundingBox.y + d.boundingBox.height;
+    const bool fits = bottom <= viewport_h + 0.5F;
+    nt_log_info("probe: %-22s bottom=%.1f / viewport=%.0f -> %s", name, (double)bottom, (double)viewport_h, fits ? "FIT" : "CLIP");
+    return fits;
+}
+
+/* Assert the bottom-most interactive widgets sit within the viewport; logs PASS/FAIL + quits. */
+static void probe_layout_and_quit(float viewport_h) {
+    bool ok = true;
+    ok &= probe_fits(s_id_scroll_horiz, "scroll horizontal", viewport_h);
+    ok &= probe_fits(s_id_scroll_xy, "scroll both-axes", viewport_h);
+    ok &= probe_fits(s_id_scroll_to_btn, "scroll-to button", viewport_h);
+    ok &= probe_fits(s_id_friction, "friction slider", viewport_h);
+    ok &= probe_fits(s_id_wheel_ease, "wheel-ease slider", viewport_h);
+    ok &= probe_fits(s_id_wheel_step, "wheel-step slider", viewport_h);
+    nt_log_info("probe: LAYOUT %s", ok ? "PASS (all interactive widgets fit)" : "FAIL (a widget is clipped)");
+    s_probe_exit_code = ok ? 0 : 7; /* exit code is the headless signal: 0 fit, 7 clip */
+    nt_app_quit();
+}
+// #endregion
+
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
@@ -719,6 +855,23 @@ static void frame(void) {
         if (s_progress_val <= 0.0F) {
             s_progress_val = 0.0F;
             s_progress_up = true;
+        }
+    }
+
+    /* Mana auto-ramps independently at a different rate (phase-shifted from the load bar so
+     * the two bars never move in sync). The widget's value_speed eases the visual. */
+    const float mana_ramp = 0.18F * g_nt_app.dt;
+    if (s_mana_up) {
+        s_mana_val += mana_ramp;
+        if (s_mana_val >= 1.0F) {
+            s_mana_val = 1.0F;
+            s_mana_up = false;
+        }
+    } else {
+        s_mana_val -= mana_ramp;
+        if (s_mana_val <= 0.0F) {
+            s_mana_val = 0.0F;
+            s_mana_up = true;
         }
     }
 
@@ -817,6 +970,13 @@ static void frame(void) {
             }
         }
 
+        /* Headless probe: query the PREVIOUS frame's solved bboxes (Clay_GetElementData reads the
+         * persistent hashmap, valid only INSIDE begin/end). After a few settle frames assert every
+         * bottom-most interactive widget fits the logical viewport, then quit. */
+        if (s_probe_layout && ++s_probe_settle_frames >= 4) {
+            probe_layout_and_quit(scale.logical_h);
+        }
+
         nt_ui_end(s_ctx);
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
@@ -845,8 +1005,12 @@ static void frame(void) {
 
 // #region main + init
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
+    /* --probe-layout: headless viewport-fit gate (settle, assert all interactive widgets fit, quit). */
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--probe-layout") == 0) {
+            s_probe_layout = true;
+        }
+    }
 
     nt_engine_config_t config = {0};
     config.app_name = "ui_stateful_demo";
@@ -984,6 +1148,6 @@ int main(int argc, char *argv[]) {
     nt_window_shutdown();
     nt_engine_shutdown();
 #endif
-    return 0;
+    return s_probe_exit_code; /* 0 normally; --probe-layout sets 7 if a widget is clipped */
 }
 // #endregion
