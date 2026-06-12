@@ -1062,6 +1062,319 @@ static void test_scroll_release_reclaims_on_next_edge(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* fresh claim */
 }
 
+/* ================= UX-audit fixes (fades, tap-stop, wheel-vs-fling, vel clamp, no-overflow,
+ *                   thumb grab-offset, dt-invariant overscroll, content-shrink clamp) ================= */
+
+/* ---- Test 34 (fix 1): AUTO_HIDE bar fades IN on scroll activity. Idle frames fade it out, then
+ *      a single wheel notch resets the activity clock and the eased opacity rises again. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_auto_hide_fades_in_on_activity(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
+    style.bar_fade_speed = 8.0F;
+    style.bar_hide_delay = 0.3F; /* short linger so the idle fade-out lands within the test window */
+    nt_pointer_t p = {0};
+    p.active = true; /* pointer NOT over the bar */
+    p.x = 10.0F;
+    p.y = 10.0F;
+
+    /* Idle until the bar has faded out (idle past the linger, opacity drops). */
+    float op_idle = 1.0F;
+    for (int i = 0; i < 120; ++i) {
+        scrollbar_frame(&p, &style, 800.0F);
+        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_idle);
+    }
+    TEST_ASSERT_TRUE(op_idle < 0.2F); /* faded out while idle */
+
+    /* One wheel notch over the container resets the activity clock -> opacity must RISE over frames
+     * (this fails on the dead-bar code: with target stuck at 0 the opacity never leaves ~0). */
+    p.wheel_dy = 1.0F;
+    p.x = 100.0F; /* over the container so the wheel is gathered */
+    p.y = 100.0F;
+    scrollbar_frame(&p, &style, 800.0F);
+    p.wheel_dy = 0.0F;
+    float op_prev = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_prev);
+    bool rose = false;
+    for (int i = 0; i < 10; ++i) {
+        scrollbar_frame(&p, &style, 800.0F); /* fling-in-motion keeps idle reset -> fade target stays 1 */
+        float op = 0.0F;
+        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+        if (op > op_prev + 0.01F) {
+            rose = true;
+        }
+        op_prev = op;
+    }
+    TEST_ASSERT_TRUE(rose);           /* the bar faded back IN on activity */
+    TEST_ASSERT_TRUE(op_prev > 0.4F); /* climbed well off the floor */
+}
+
+/* ---- Test 35 (fix 1b): hovering the bar keeps it visible even with no scroll motion. ---- */
+static void test_scrollbar_auto_hide_hover_keeps_visible(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
+    style.bar_fade_speed = 8.0F;
+    style.bar_hide_delay = 0.2F;
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 195.0F; /* over the right-edge vertical bar */
+    p.y = 100.0F;
+
+    /* Idle clock runs past the linger, but the pointer hovers the bar -> stays opaque. */
+    float op = 0.0F;
+    for (int i = 0; i < 120; ++i) {
+        scrollbar_frame(&p, &style, 800.0F);
+        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+    }
+    TEST_ASSERT_TRUE(op > 0.8F); /* hover held it visible past the idle linger */
+}
+
+/* ---- Test 36 (fix 3): a wheel notch during a fling kills momentum and eases toward the wheel
+ *      target the SAME frame (the notch is not swallowed by the momentum overwrite). ---- */
+static void test_scroll_wheel_kills_fling(void) {
+    const float content[2] = {0.0F, 100000.0F};
+    const float container[2] = {0.0F, 400.0F};
+    nt_ui_scroll_state_t s = {0};
+    s.vel[1] = -3000.0F; /* a fling in motion */
+    const float no_wheel[2] = {0.0F, 0.0F};
+    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+    TEST_ASSERT_TRUE(fabsf(s.vel[1]) > 100.0F); /* still flinging */
+
+    const float target_before = s.target[1];
+    const float wheel_up[2] = {0.0F, 1.0F}; /* one notch toward 0 (Clay sign up) */
+    nt_ui_scroll_test_integrate(&s, wheel_up, 1.0F / 60.0F, content, container, s_tun);
+    /* Momentum killed so the easing branch picks up the new target (target moved by +step). */
+    TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(s.target[1] > target_before + 1.0F); /* the notch registered (not lost) */
+}
+
+/* ---- Test 37 (fix 4): a huge single-frame drag delta on a tiny dt is EMA-smoothed + clamped,
+ *      never exploding the release-fling velocity past the cap. ---- */
+static void test_scroll_velocity_clamp_on_dt_hitch(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    /* Press, then a massive jump on a near-zero dt (frame hitch). Without the clamp this is
+     * delta/dt -> astronomically large; with EMA+clamp it can never exceed the cap. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    /* One frame with a 500 px jump at a 0.001 s dt would sample 500000 px/s raw. */
+    p.y = 100.0F - 500.0F;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.001F, &p, 1);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+        {
+            CLAY({.id = CLAY_ID("content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(fabsf(s->vel[1]) <= 8000.0F + 0.5F); /* clamped to the velocity cap */
+}
+
+/* ---- Test 38 (fix 5): a container whose content FITS (no overflow) takes no gesture — a free-press
+ *      drag across it never claims a capture and never scrolls (inner widgets stay clickable). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_no_overflow_takes_no_gesture(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+
+    /* Content 150 < container 200 -> no overflow on the only enabled axis. */
+    scrollbar_frame(&p, &style, 150.0F);
+    scrollbar_frame(&p, &style, 150.0F); /* dims solved */
+
+    /* Press inside, then drag 50 px — well past the threshold. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scrollbar_frame(&p, &style, 150.0F);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 6; ++i) {
+        p.y = 100.0F - (float)(i * 10);
+        scrollbar_frame(&p, &style, 150.0F);
+    }
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F));                      /* never scrolled (no-op axis) */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* never stole a capture */
+    TEST_ASSERT_EQUAL_UINT8(0U, s->flags & NT_UI_SCROLL_FLAG_DRAGGING);       /* no gesture armed */
+}
+
+/* ---- Test 39 (fix 2): a tap on a FLINGING container stops the fling immediately and swallows the
+ *      tap (claims the capture so moving inner content can't be clicked). A tap on a RESTING
+ *      container does NOT claim (inner widgets stay clickable). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_tap_stops_fling_and_swallows(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style);
+
+    /* Seed a strong fling into the live cell. */
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    s->vel[1] = -2000.0F;
+    s->pos[1] = -100.0F;
+    s->raw[1] = -100.0F;
+    s->target[1] = -100.0F;
+
+    /* Press edge inside the container while it flings. */
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F)); /* fling stopped on tap */
+    const float frozen = s->pos[1];
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* tap swallowed (claimed) */
+
+    /* Held still: pos must stay frozen (no momentum continuation). */
+    scroll_frame(&p, &style);
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 1.0F)); /* frozen next frame */
+}
+
+/* ---- Test 40 (fix 2b): a press on a RESTING container does NOT claim the capture (no fling to
+ *      stop) so a tap still reaches inner widgets. ---- */
+static void test_scroll_tap_on_resting_does_not_swallow(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {0};
+    p.x = 100.0F;
+    p.y = 100.0F;
+    p.active = true;
+    scroll_frame(&p, &style); /* at rest, vel 0 */
+
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scroll_frame(&p, &style);
+    /* No fling -> the press only arms a free-press (does not claim a capture this frame). */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+}
+
+/* ---- Test 41 (fix 6): grabbing the thumb away from its center keeps the grabbed point under the
+ *      cursor — content does NOT jump on press, and a 10 px drag moves the thumb exactly 10 px. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_thumb_grab_offset_no_jump(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    style.bar_thumb_min_px = 40.0F; /* a sizable thumb so the grab offset is measurable */
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    /* Establish the bar bbox (thumb at the TOP, offset 0). */
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    float thumb_len = 0.0F;
+    float thumb_off0 = 0.0F;
+    float track_len = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &thumb_off0, &track_len, NULL);
+    TEST_ASSERT_TRUE(float_near(thumb_off0, 0.0F, 1.0F)); /* thumb at the top at rest */
+
+    /* over = content - container = 800 - 200 = 600; thumb travel maps pos: a thumb_off delta of D
+     * corresponds to a pos delta of -D * over / (track_len - thumb_len). Read s->pos DIRECTLY (the
+     * bar-geometry readback lags one frame), so the grab + drag effects are observed without lag. */
+    const float over = 600.0F;
+    const float travel = track_len - thumb_len;
+
+    /* Press the thumb near its BOTTOM edge (bar runs y=[0,200]; thumb_lo=0). */
+    const float grab_y = thumb_len - 5.0F; /* 5 px from the thumb bottom */
+    p.x = 195.0F;
+    p.y = grab_y;
+    p.buttons[NT_BUTTON_LEFT].is_down = true;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    scrollbar_frame(&p, &style, 800.0F);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+
+    nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    /* No jump-to-center: the grabbed point stays under the cursor, so pos barely moves on press.
+     * (Absolute thumb_len/2 mapping would jump pos to map the cursor to the thumb CENTER instead.) */
+    const float pos_press = s->pos[1];
+    const float thumb_off_press = (-pos_press / over) * travel;
+    TEST_ASSERT_TRUE(fabsf(thumb_off_press - thumb_off0) < 2.0F);
+
+    /* Drag the cursor +10 px down the track: the thumb must follow ~10 px (1:1). */
+    p.y = grab_y + 10.0F;
+    scrollbar_frame(&p, &style, 800.0F);
+    s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    const float thumb_off_drag = (-s->pos[1] / over) * travel;
+    TEST_ASSERT_TRUE(float_near(thumb_off_drag - thumb_off_press, 10.0F, 2.0F));
+}
+
+/* ---- Test 42 (fix 7): fling overscroll depth is FPS-independent — the same release velocity
+ *      integrated at 60 vs 120 fps reaches the same max overscroll depth (within tolerance). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static float fling_max_overshoot(float dt, int steps) {
+    /* Container 200, content 1000 -> bottom edge at -800. Fling hard past it; record max depth. */
+    const float content[2] = {0.0F, 1000.0F};
+    const float container[2] = {0.0F, 200.0F};
+    const float no_wheel[2] = {0.0F, 0.0F};
+    nt_ui_scroll_state_t s = {0};
+    s.pos[1] = -800.0F + 5.0F; /* start just inside the bottom edge */
+    s.raw[1] = s.pos[1];
+    s.target[1] = s.pos[1];
+    s.vel[1] = -4000.0F; /* fling down past the edge */
+    float deepest = 0.0F;
+    for (int i = 0; i < steps; ++i) {
+        nt_ui_scroll_test_integrate(&s, no_wheel, dt, content, container, s_tun);
+        const float depth = (-800.0F) - s.pos[1]; /* positive = past the bottom edge */
+        if (depth > deepest) {
+            deepest = depth;
+        }
+    }
+    return deepest;
+}
+
+static void test_scroll_overscroll_depth_fps_independent(void) {
+    /* Equal wall time: 0.5 s at 60fps (30 steps) vs 120fps (60 steps). */
+    const float d60 = fling_max_overshoot(1.0F / 60.0F, 30);
+    const float d120 = fling_max_overshoot(1.0F / 120.0F, 60);
+    TEST_ASSERT_TRUE(d60 > 1.0F); /* it actually overshot */
+    TEST_ASSERT_TRUE(d120 > 1.0F);
+    /* Depths within 10% of each other (FPS-invariant overscroll). */
+    const float rel = fabsf(d60 - d120) / d60;
+    TEST_ASSERT_TRUE(rel < 0.10F);
+}
+
+/* ---- Test 43 (also): content shrinks -> the offset animates back to the new (smaller) bound
+ *      instead of staying parked past it. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_content_shrink_clamps_pos(void) {
+    const float no_wheel[2] = {0.0F, 0.0F};
+    const float container[2] = {0.0F, 200.0F};
+    nt_ui_scroll_state_t s = {0};
+
+    /* Tall content (-800 is the bottom edge); scroll to the bottom. */
+    float content[2] = {0.0F, 1000.0F};
+    s.pos[1] = -800.0F;
+    s.raw[1] = -800.0F;
+    s.target[1] = -800.0F;
+    nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+    TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 1.0F)); /* parked at the old bottom */
+
+    /* Content SHRINKS to 400 -> new bottom edge is -(400-200) = -200. pos at -800 is now past it. */
+    content[1] = 400.0F;
+    for (int i = 0; i < 240; ++i) {
+        nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, s_tun);
+    }
+    /* The offset must animate back up to the new bound (-200), not stay parked at -800. */
+    TEST_ASSERT_TRUE(float_near(s.pos[1], -200.0F, 1.0F));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scroll_momentum_decays_monotonic);
@@ -1097,5 +1410,15 @@ int main(void) {
     RUN_TEST(test_scroll_held_entry_no_edge_no_gesture);
     RUN_TEST(test_scroll_steal_continues_across_frames);
     RUN_TEST(test_scroll_release_reclaims_on_next_edge);
+    RUN_TEST(test_scrollbar_auto_hide_fades_in_on_activity);
+    RUN_TEST(test_scrollbar_auto_hide_hover_keeps_visible);
+    RUN_TEST(test_scroll_wheel_kills_fling);
+    RUN_TEST(test_scroll_velocity_clamp_on_dt_hitch);
+    RUN_TEST(test_scroll_no_overflow_takes_no_gesture);
+    RUN_TEST(test_scroll_tap_stops_fling_and_swallows);
+    RUN_TEST(test_scroll_tap_on_resting_does_not_swallow);
+    RUN_TEST(test_scrollbar_thumb_grab_offset_no_jump);
+    RUN_TEST(test_scroll_overscroll_depth_fps_independent);
+    RUN_TEST(test_scroll_content_shrink_clamps_pos);
     return UNITY_END();
 }
