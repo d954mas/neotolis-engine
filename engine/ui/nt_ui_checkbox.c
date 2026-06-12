@@ -227,10 +227,12 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     // #region value-row + state pick
     /* Non-const row so the resolve memoizes into the style-owned cell refs. */
     nt_ui_cb_state_t *row = value_is_checked ? style->checked : style->unchecked;
+    /* VISUAL pressed only while held AND over (drag off un-presses, re-presses on return); the
+     * click/capture semantics (out_clicked = in.clicked) are untouched. */
     int state = NT_UI_CB_IDLE;
     if (!enabled) {
         state = NT_UI_CB_DISABLED;
-    } else if (in.pressed) {
+    } else if (in.pressed && in.hovered) {
         state = NT_UI_CB_PRESSED;
     } else if (in.hovered) {
         state = NT_UI_CB_HOVER;

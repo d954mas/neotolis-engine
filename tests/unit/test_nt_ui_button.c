@@ -189,6 +189,86 @@ static void test_button_disabled_path_balanced(void) {
     TEST_ASSERT_NOT_NULL(find_first_image_cmd(s_fx.ctx));
 }
 
+/* Unity float macros are excluded in this build (UNITY_EXCLUDE_FLOAT). */
+static bool float_eq_eps(float a, float b, float eps) { return fabsf(a - b) <= eps; }
+
+/* Primary pointer at (x,y) with the LEFT button edges set. */
+static nt_pointer_t make_pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
+    nt_pointer_t p = {0};
+    p.x = x;
+    p.y = y;
+    p.active = true;
+    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
+    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
+    return p;
+}
+
+/* ---- Pin: pressed visual un-presses when the held pointer drags OFF the widget, and
+ *      re-presses when it returns. Click/capture semantics are untouched (no click off-widget).
+ *      The bg IMAGE width tracks the active scale: idle/hover 1.0, pressed 0.95. ---- */
+#define PB_X 120.0F
+#define PB_Y 90.0F
+#define PB_W 160.0F
+#define PB_H 48.0F
+#define PB_CX (PB_X + (PB_W * 0.5F))
+#define PB_CY (PB_Y + (PB_H * 0.5F))
+
+/* One button frame at a fixed floating position; returns the clicked edge. The eased bg scale
+ * (style->idle.scale 1.0 vs pressed 0.95, transition_speed 0 = instant) is read out of the bg
+ * IMAGE command's engine element_data for the visual-state assertions. */
+static float s_pb_last_scale;
+static bool press_btn_frame(const nt_pointer_t *p) {
+    static const Clay_ElementDeclaration btn_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(PB_W), CLAY_SIZING_FIXED(PB_H)}}};
+    bool clicked = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("pbroot"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = PB_X, .y = PB_Y}}}) {
+        clicked = nt_ui_button(s_fx.ctx, NULL, nt_ui_id("pbtn"), &s_btn_style, &btn_decl, true);
+    }
+    nt_ui_end(s_fx.ctx);
+    s_pb_last_scale = 0.0F;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && c->id == nt_ui_id("pbtn")) {
+            const nt_ui_element_data_t *d = (const nt_ui_element_data_t *)c->userData;
+            s_pb_last_scale = (d != NULL) ? d->transform.scale_x : 0.0F;
+            break;
+        }
+    }
+    return clicked;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_button_pressed_visual_unpresses_off_widget(void) {
+    const float far_x = PB_X + PB_W + 200.0F;
+    const float far_y = PB_Y + PB_H + 200.0F;
+
+    /* Frame 1: warm (declare + step so bbox is baked AND it registers for arbitration). */
+    nt_pointer_t f1 = make_pointer_at(PB_CX, PB_CY, false, false, false);
+    (void)press_btn_frame(&f1);
+
+    /* Frame 2: press inside -> pressed visual (scale 0.95). */
+    nt_pointer_t f2 = make_pointer_at(PB_CX, PB_CY, true, true, false);
+    (void)press_btn_frame(&f2);
+    TEST_ASSERT_TRUE(float_eq_eps(s_pb_last_scale, 0.95F, 0.001F)); /* pressed cell active */
+
+    /* Frame 3: drag OFF, still held. Capture holds but the VISUAL un-presses (idle scale 1.0). */
+    nt_pointer_t f3 = make_pointer_at(far_x, far_y, true, false, false);
+    const bool clicked_off = press_btn_frame(&f3);
+    TEST_ASSERT_FALSE(clicked_off);
+    TEST_ASSERT_TRUE(float_eq_eps(s_pb_last_scale, 1.0F, 0.001F)); /* un-pressed -> idle scale */
+
+    /* Frame 4: drag BACK over the widget, still held -> re-presses (scale 0.95 again). */
+    nt_pointer_t f4 = make_pointer_at(PB_CX, PB_CY, true, false, false);
+    (void)press_btn_frame(&f4);
+    TEST_ASSERT_TRUE(float_eq_eps(s_pb_last_scale, 0.95F, 0.001F));
+
+    /* Frame 5: release OUTSIDE -> no click (capture cancels). */
+    nt_pointer_t f5 = make_pointer_at(far_x, far_y, false, false, true);
+    const bool clicked_out = press_btn_frame(&f5);
+    TEST_ASSERT_FALSE(clicked_out);
+}
+
 /* ---- Test 6: begin + centered label + end (was leaf sugar -- now inline) ---- */
 static void test_button_begin_label_end_inline(void) {
     nt_pointer_t mouse = {0};
@@ -442,5 +522,6 @@ int main(void) {
 #endif
     RUN_TEST(test_button_decl_fixed_size_hit_test);
     RUN_TEST(test_button_recovers_after_simulated_mid_button_state);
+    RUN_TEST(test_button_pressed_visual_unpresses_off_widget);
     return UNITY_END();
 }
