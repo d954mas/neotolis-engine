@@ -362,6 +362,15 @@ if(NOT EMSCRIPTEN)
             NT_DEVAPI_ENGINE_VERSION="1.9-dev"
         )
         nt_setup_test_target(test_devapi_core)
+
+        # PROTO-03/04/05/08/09: discovery group — endpoints / command.describe /
+        # features + the zero-engine-edits game-layer registration path.
+        add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
+        target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson unity)
+        target_compile_definitions(test_devapi_discovery PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+        )
+        nt_setup_test_target(test_devapi_discovery)
     endif()
 
     # --- File system module tests ---

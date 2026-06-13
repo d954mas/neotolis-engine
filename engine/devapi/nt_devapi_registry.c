@@ -55,6 +55,9 @@ nt_result_t nt_devapi_init(void) {
     nt_devapi_register_core();
 #endif
 
+    /* Discovery is always-on when devapi is built (no optional-L1 module). */
+    nt_devapi_register_discovery();
+
     return NT_OK;
 }
 

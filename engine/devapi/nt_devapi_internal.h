@@ -35,4 +35,9 @@ const char *nt_devapi_group_name(int index);
 void nt_devapi_register_core(void);
 #endif
 
+/* Discovery group registrar (endpoints / command.describe / features). Always-on
+   when devapi is built — no optional-L1 dependency, so NOT behind an #ifdef.
+   Defined in nt_devapi_discovery.c, invoked from nt_devapi_init. */
+void nt_devapi_register_discovery(void);
+
 #endif /* NT_DEVAPI_INTERNAL_H */

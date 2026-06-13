@@ -1,0 +1,133 @@
+#include "core/nt_assert.h"
+#include "devapi/nt_devapi_internal.h"
+
+/* The discovery group: endpoints / command.describe / features. Self-describing
+   contract — a bot reads the whole surface + each command's shape without source.
+   Always-on when devapi is built (no optional-L1 dependency), but still routed
+   through register_group so it appears in `features`. */
+
+/* D-06 stable machine tokens (mirror the dispatch-core codes). */
+#define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
+#define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
+
+/* Emit one command descriptor into `arr`. detail=false → cheap {method,layer,
+   summary}; detail=true → all 7 self-describing fields. */
+static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
+    cJSON *obj = cJSON_CreateObject();
+    NT_ASSERT(obj != NULL);
+    cJSON_AddStringToObject(obj, "method", slot->method);
+    cJSON_AddStringToObject(obj, "layer", slot->layer);
+    cJSON_AddStringToObject(obj, "summary", slot->summary);
+    if (detail) {
+        cJSON_AddStringToObject(obj, "params_shape", slot->params_shape);
+        cJSON_AddStringToObject(obj, "result_shape", slot->result_shape);
+        cJSON_AddStringToObject(obj, "frame_behavior", slot->frame_behavior);
+        cJSON_AddStringToObject(obj, "side_effects", slot->side_effects);
+    }
+    cJSON_AddItemToArray(arr, obj);
+}
+
+/* D-05 invariant: result is an OBJECT containing a `commands` array — never a
+   bare top-level array. detail flag toggles cheap vs full descriptor form. */
+static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)err;
+    (void)ud;
+    bool detail = false;
+    const cJSON *detail_item = cJSON_GetObjectItemCaseSensitive(params, "detail");
+    if (cJSON_IsBool(detail_item)) {
+        detail = cJSON_IsTrue(detail_item);
+    }
+
+    cJSON *commands = cJSON_AddArrayToObject(result, "commands");
+    NT_ASSERT(commands != NULL);
+    int n = nt_devapi_registry_count();
+    for (int i = 0; i < n; i++) {
+        emit_command(commands, nt_devapi_registry_slot(i), detail);
+    }
+    return true;
+}
+
+/* The full 7-field contract for one command named in params.method. Missing /
+   non-string method → bad_params; unknown name → unknown_method (D-06). */
+static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)ud;
+    const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
+    if (!cJSON_IsString(method_item) || method_item->valuestring == NULL) {
+        err->code = NT_DEVAPI_ERR_BAD_PARAMS;
+        err->message = "missing or non-string params.method";
+        return false;
+    }
+
+    const nt_devapi_slot *slot = nt_devapi_registry_find(method_item->valuestring);
+    if (slot == NULL) {
+        err->code = NT_DEVAPI_ERR_UNKNOWN_METHOD;
+        err->message = "no command registered for this method";
+        return false;
+    }
+
+    cJSON_AddStringToObject(result, "method", slot->method);
+    cJSON_AddStringToObject(result, "layer", slot->layer);
+    cJSON_AddStringToObject(result, "summary", slot->summary);
+    cJSON_AddStringToObject(result, "params_shape", slot->params_shape);
+    cJSON_AddStringToObject(result, "result_shape", slot->result_shape);
+    cJSON_AddStringToObject(result, "frame_behavior", slot->frame_behavior);
+    cJSON_AddStringToObject(result, "side_effects", slot->side_effects);
+    return true;
+}
+
+/* PROTO-05: active command groups = the compile-time policy state (D-09 — a group
+   is present only if its NT_DEVAPI_REGISTER_<group> was compiled). */
+static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)err;
+    (void)ud;
+    cJSON *groups = cJSON_AddArrayToObject(result, "groups");
+    NT_ASSERT(groups != NULL);
+    int n = nt_devapi_group_count();
+    for (int i = 0; i < n; i++) {
+        cJSON_AddItemToArray(groups, cJSON_CreateString(nt_devapi_group_name(i)));
+    }
+    return true;
+}
+
+/* Discovery commands carry layer="core": they are engine-level introspection,
+   not a game layer. Group name is "discovery" so `features` lists it distinctly. */
+static const nt_devapi_command_desc k_discovery_cmds[] = {
+    {
+        .method = "endpoints",
+        .layer = "core",
+        .summary = "list all registered commands (cheap; detail=true for full descriptors)",
+        .params_shape = "{detail?:bool}",
+        .result_shape = "{commands:[{method,layer,summary}]|[{...7 fields}]}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    },
+    {
+        .method = "command.describe",
+        .layer = "core",
+        .summary = "full self-describing contract for one command",
+        .params_shape = "{method:string}",
+        .result_shape = "{method,layer,summary,params_shape,result_shape,frame_behavior,side_effects}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    },
+    {
+        .method = "features",
+        .layer = "core",
+        .summary = "active command groups (compile-time policy state)",
+        .params_shape = "{}",
+        .result_shape = "{groups:string[]}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    },
+};
+
+static const nt_devapi_handler_fn k_discovery_handlers[] = {cmd_endpoints, cmd_command_describe, cmd_features};
+
+void nt_devapi_register_discovery(void) {
+    nt_devapi_register_group("discovery"); /* D-08: group-name registered once */
+    int n = (int)(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]));
+    for (int i = 0; i < n; i++) {
+        nt_devapi_register(&k_discovery_cmds[i], k_discovery_handlers[i], NULL);
+    }
+}
