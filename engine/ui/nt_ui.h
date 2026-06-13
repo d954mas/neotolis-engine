@@ -370,6 +370,12 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
+/* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
+ * arbitration over widgets behind it (the pointer can't leak through), but never captures,
+ * clicks, or reports hover. Disabled widgets call this so a modal/overlay blocks input to
+ * whatever sits underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
+void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
+
 /* True when any capture is active OR a pointer is over a widget this frame. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 

@@ -543,32 +543,27 @@ static void test_inspector_subtree_baked_identity(void) {
     TEST_ASSERT_EQUAL_INT32_MESSAGE(0, non_identity, "every inspector-emitted element should have identity baked");
 }
 
-/* Inspector's scroll panel emits real synthetic SCISSOR_START commands; build
- * pass marks them with nt_layout_index = -1 without disturbing real per-element
- * scissors. */
+/* The inspector tree pane is a real CLIP element (ntInsp_OuterScrollPane), so it emits a per-element
+ * SCISSOR_START (nt_layout_index >= 0) that the build pass leaves untouched. Tree rows scroll IN-FLOW
+ * now (no floating overlay), so the inspector itself no longer produces a synthetic scissor — the
+ * generic synthetic-scissor build path is covered by test_synthetic_scissor_start_marked. */
 static void test_inspector_active_synthetic_scissor_handled(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     nt_ui_end(s_fx.ctx);
 
-    /* At least one synthetic SCISSOR_START (from inspector's CLIP_TO_ATTACHED_PARENT
-     * floating panel). Plus at least one per-element SCISSOR_START. */
-    int32_t synthetic_count = 0;
     int32_t per_element_count = 0;
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
         if (c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
             continue;
         }
-        if (c->nt_layout_index < 0) {
-            synthetic_count++;
-        } else {
+        if (c->nt_layout_index >= 0) {
             per_element_count++;
         }
     }
-    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(1, synthetic_count, "inspector's clipTo=ATTACHED_PARENT floating should emit at least one synthetic SCISSOR_START");
-    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(1, per_element_count, "inspector's CLIP element (scroll pane) should emit a per-element SCISSOR_START");
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(1, per_element_count, "the inspector CLIP element (scroll pane) should emit a per-element SCISSOR_START");
 }
 
 // #endregion

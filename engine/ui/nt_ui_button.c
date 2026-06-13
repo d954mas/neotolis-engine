@@ -61,14 +61,18 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
     } else {
         in = (nt_ui_interaction_t){0};
+        /* Inert occluder: still block the pointer so a disabled overlay can't leak clicks through. */
+        nt_ui_block_pointer(ctx, id, style->hit_padding_lrtb);
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
     }
 
-    /* Priority: disabled → pressed → hover → idle. Non-const so the resolve memoizes into the style. */
+    /* Priority: disabled → pressed → hover → idle. Non-const so the resolve memoizes into the style.
+     * VISUAL pressed only while held AND over (dragging off un-presses, re-presses on return); the
+     * click/capture semantics in step_interaction are untouched. */
     nt_ui_btn_state_t *st = &style->idle;
     if (!enabled) {
         st = &style->disabled;
-    } else if (in.pressed) {
+    } else if (in.pressed && in.hovered) {
         st = &style->pressed;
     } else if (in.hovered) {
         st = &style->hover;

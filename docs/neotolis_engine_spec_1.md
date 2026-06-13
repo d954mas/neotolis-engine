@@ -211,17 +211,44 @@ If a decision can be deferred without loss of base architecture — it is deferr
   Symmetrically, a widget that interacted last frame but is gone or disabled this
   frame stays a hot candidate for that ONE transition frame (it can gate widgets
   beneath it but itself reacts to nothing), then orphan cleanup drops it next frame.
-  A statically-disabled widget never registers, so never gates.
+  A statically-disabled widget never registers, so never gates — unless it opts in via
+  `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
+  same record `step_interaction` makes, minus any interaction). It blocks input to widgets
+  behind it but never captures, clicks, or reports hover — the stock disabled widgets
+  (button/checkbox/slider) call it so a disabled overlay or modal can't leak clicks through.
 
   **Anim cache.** `nt_ui_anim_*` provides per-id eased state for widget
   visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
-  default 64); 4-probe chain; full-chain collision evicts the LAST
-  probed slot (snap-reseed, easing lost for one id). Tail eviction
-  spreads pressure across the probe window — evicting the base would
-  let the very next caller hashing to the same bucket re-evict the new
-  entry, thrashing the cache. The `anim_collision_count` monotonic
-  counter surfaces this degradation; game polls the delta to size
-  `NT_UI_ANIM_SLOTS`.
+  default 64); 4-probe chain; full-chain collision evicts the STALEST
+  slot in the probe window — the one with the oldest `last_touch`
+  generation tick (snap-reseed, easing lost for one id). Evicting by
+  staleness rather than blindly the tail avoids bleeding a slot that
+  was already touched this frame between widgets sharing the window.
+  The `anim_collision_count` monotonic counter surfaces this
+  degradation; game polls the delta to size `NT_UI_ANIM_SLOTS`.
+
+  **State pool.** `nt_ui_state(ctx, id, size, tag)` is a generic per-widget-id
+  retained-state pool — the durable counterpart of the anim cache. It returns a
+  get-or-create cell (zeroed on create; zero is a valid initial state). The 4-char
+  `tag` (built with `NT_UI_STATE_TAG`) identifies the owning widget so two widgets
+  that hash to the same id+size trap on re-acquire instead of aliasing silently,
+  `nt_ui_state_find` returns NULL if absent, and `nt_ui_state_clear` /
+  `nt_ui_state_clear_all` drop one or all cells (e.g. a screen transition). It is
+  BSS in the context (`NT_UI_STATE_SLOTS` × `NT_UI_STATE_PAYLOAD_MAX`, defaults
+  256 × 64 B ≈ 19 KB/ctx, `NT_UI_STATE_PROBE_MAX` probe window), no heap — direct-mapped +
+  linear-probe like the anim cache, but with **no LRU eviction**: a cell dies only
+  via clear or context destroy. This no-eviction property is the contract that
+  makes the game-owned-pointer escape hatch leak-safe — for an oversize payload the
+  game allocates, stores the pointer in the cell, and frees it before clear, knowing
+  the engine will never silently reclaim it. Overflow, a size mismatch, or a tag
+  mismatch on re-acquire is `NT_ASSERT` (fail early, not a soft fallback). The returned pointer
+  is a frame-scoped cache, not held across frames — widgets re-acquire by id each
+  frame (the same const-cast read pattern as `nt_ui_get_bbox`). Occupancy
+  (slots/bytes) is surfaced on the inspector "UI memory" line. Distinct from the
+  anim cache: the anim cache evicts (transient easing), the state pool never evicts
+  (durable retained state such as a slider's drag offset or a scroll container's
+  momentum). Slider drag state and scroll physics state both ride it, keyed by
+  (optionally salted) widget id.
 
   **Stateful widgets.** `nt_ui_checkbox` / `nt_ui_radio` / `nt_ui_toggle`
   are leaf widgets over one shared core. Per code-first /
@@ -240,7 +267,68 @@ If a decision can be deferred without loss of base architecture — it is deferr
   thumb with a symmetric `thumb_pad` end-margin. On the click-release frame the
   widget renders the PRE-flip value and returns `changed` after drawing, so the
   pop/slide animation begins the next frame — the same intrinsic 1-frame IM lag as
-  hit-test and arbitration.
+  hit-test and arbitration. `nt_ui_slider` / `nt_ui_progress` extend the same
+  game-owns-the-value model: the float/int value lives in the game, the engine eases
+  only the visual fraction (`value_t`); the slider exposes its thumb screen position
+  (`nt_ui_slider_thumb_pos`) so the game can draw drag-bubbles via a Clay floating
+  element. A press ON the thumb grabs at its press offset (relative drag, value unchanged
+  that frame); a press on the track jumps the value to the click point. `step` quantizes
+  the visual snap with the value, the fill edge meets the thumb CENTER (not `fraction ×
+  track_w`, which would under/overshoot the thumb's travel), and an out-of-range incoming
+  `*value` is clamped AND written back so game memory matches what is drawn. A live drag
+  returns `changed` every frame; act-once callers poll the release edge (commit-on-release).
+  Hit padding inflates the touch target and auto-grows vertically to cover the thumb's
+  overhang past the track even at zero style pad. Slider and progress share one fill-emit
+  helper (STRETCH slice9 stretch vs CROP scissor-reveal × four directions).
+
+  **Custom scroll physics.** `nt_ui` scroll containers bypass Clay's built-in
+  `Clay_UpdateScrollContainers` (the unconditional call was REMOVED from
+  `nt_ui_begin`): the engine integrates the offset itself and feeds Clay a ready
+  `clip.childOffset` each frame — it never reads `Clay_GetScrollOffset`, only
+  `Clay_GetScrollContainerData` for the content/container clamp dims. Everything is in
+  Clay's NEGATIVE-down sign convention (childOffset negative going down/right, clamped
+  to `[-(content-container), 0]`); only the input edge (wheel) and the scrollbar-thumb
+  mapping flip sign. The four-behavior feel model lives in `nt_ui_scroll_style_t`
+  tunables: momentum/fling (exponential velocity decay by `friction`), overscroll
+  rubber-band + critically-damped bounce-back (`rubber_band_c` / `bounce_speed`),
+  smooth wheel (ease toward target by `wheel_ease_speed`, 0 = instant, no teleport),
+  and animated `nt_ui_scroll_to`. Release-fling velocity is tracked over a TIME WINDOW
+  (`TAU_GAIN`/`TAU_DECAY`), not a per-frame delta: a moving frame blends toward the
+  instantaneous sample, a zero-delta frame decays toward 0, so a fling survives pointer
+  events arriving slower than the render loop instead of depending on release-frame parity.
+  A press landing on a flinging container stops the fling and is swallowed (tap-to-stop).
+  Per-container scroll state (pos/vel/target/flags)
+  rides the state pool keyed by the scroll id; no heap. Wheel input is normalized to a
+  NOTCH unit at the platform edge — `1.0 == one physical detent` (GLFW pass-through; web
+  `deltaMode` divided to notches), so wheel strength is platform-independent and the
+  consumer scales by `wheel_step_px`. Wheel routing is exclusive
+  (innermost-wins): each frame every scroll container registers as a candidate, and
+  ownership is resolved at frame END — for each pointer the engine picks the candidate
+  whose just-solved bbox holds it (ranked by max scroll-nesting depth, then smallest
+  area, then latest declaration) and writes a single owner per pointer. That owner is
+  consumed the NEXT frame, so wheel routing carries a 1-frame lag: a newly shown
+  container sees its first wheel notch one frame late (the same intrinsic IM lag as
+  hit-test, which reads the previous frame's bbox). All scroll sizes and pixel
+  thresholds (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, `wheel_step_px`, bar/hit dimensions)
+  are in the coordinate space passed to `nt_ui_begin` — NOT framebuffer pixels; games
+  typically feed `nt_ui_scale`'s logical space, so these are resolution-independent.
+  Capture-steal-by-threshold
+  (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
+  scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
+  below it leaves the inner widget to click. On the latch frame the steal routes zero
+  positional delta (the inner widget already applied it), tracking 1:1 from the next
+  frame; the cancelled inner widget keeps any value change it made before the steal
+  (Model D — the value lives in the game, so the engine cannot revert it). The
+  scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children of
+  the container with
+  ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE shows on scroll activity and fades
+  out `bar_hide_delay` seconds after the last motion, via one `nt_ui_anim` value_t).
+  A thumb press grabs at the press offset inside the thumb (no jump-to-center); a click
+  on the track off the thumb smooth-jumps to the clicked spot (`nt_ui_scroll_to`). A
+  thin bar still gets a ≥ 24 px touch target via a cross-axis hit pad. This replaces the
+  v1.7-era assumption that Clay drives scroll; the
+  "Scissor limitation" note below still holds (AABB clip of a rotated scroll
+  container is unchanged).
 
   **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
   uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0

@@ -15,12 +15,15 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
+#include "ui/nt_ui_checkbox.h"
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_panel.h"
+#include "ui/nt_ui_scroll.h"
+#include "ui/nt_ui_state.h"
 #include "unity.h"
 
 #if NT_UI_DEBUG_TOOLS
@@ -141,6 +144,17 @@ static void test_registry_engine_and_game_defs_coexist(void) {
     TEST_ASSERT_EQUAL_STRING("inv_slot", slot->name);
     TEST_ASSERT_EQUAL_UINT32(0xFF60D070U, btn->pill_color);
     TEST_ASSERT_EQUAL_UINT32(0xFFB060A0U, slot->pill_color);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 4b: registering the same id twice in one frame traps (duplicate-id death-test) ----
+ * Catches the cryptic Clay "element already declared" class at the registration site instead. */
+static void test_registry_duplicate_id_traps(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_BUTTON_DEF, NULL);
+    /* Second register of the SAME id this frame must fire NT_ASSERT. */
+    NT_TEST_EXPECT_ASSERT(nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_IMAGE_DEF, NULL));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -606,6 +620,121 @@ static void test_inspector_filter_keeps_text_leaves(void) {
 
     /* Text-bearing tree must produce more inspector rows. */
     TEST_ASSERT_GREATER_THAN_INT32(a_growth, b_growth);
+}
+
+/* Union-misread guard: a TEXT leaf with siblings AFTER it at multiple depths.
+ * childrenOrTextContent is a union — on a text element its .children arm aliases
+ * the textElementData pointer, so an unguarded .children read derefs garbage. The
+ * DFS must mark text rows is_text, descend 0 children, and still enumerate the
+ * post-text siblings at every depth. Walk several frames (inspector active). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_text_with_siblings_no_union_misread(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    nt_ui_inspector_tree_row_t rows[64];
+    int32_t text_rows = 0;
+    int32_t sib_after_text = 0;
+
+    for (int32_t frame = 0; frame < 3; ++frame) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("tws_root")}) {
+            /* Depth 1: text leaf, then a sibling box AFTER it. */
+            nt_ui_label(s_fx.ctx, NULL, "depth1", &s_label_style);
+            CLAY({.id = CLAY_ID("tws_after1"), .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {
+                /* Depth 2: text leaf, then a sibling box AFTER it. */
+                nt_ui_label(s_fx.ctx, NULL, "depth2", &s_label_style);
+                CLAY({.id = CLAY_ID("tws_after2"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+            }
+        }
+        nt_ui_end(s_fx.ctx);
+
+        const int32_t n = nt_ui_internal_collect_tree_rows(s_fx.ctx, rows, 64);
+        TEST_ASSERT_GREATER_THAN_INT32(0, n);
+
+        text_rows = 0;
+        sib_after_text = 0;
+        bool seen_text = false;
+        bool found_after1 = false;
+        bool found_after2 = false;
+        for (int32_t i = 0; i < n; ++i) {
+            if (rows[i].is_text != 0U) {
+                /* Text row must carry the text arm, never a bogus child count. */
+                TEST_ASSERT_NOT_NULL(rows[i].text_chars);
+                text_rows++;
+                seen_text = true;
+            } else {
+                if (seen_text) {
+                    sib_after_text++;
+                }
+                if (rows[i].id == CLAY_ID("tws_after1").id) {
+                    found_after1 = true;
+                }
+                if (rows[i].id == CLAY_ID("tws_after2").id) {
+                    found_after2 = true;
+                }
+            }
+        }
+        /* Sibling boxes emitted AFTER a text leaf at depths 1 and 2 must survive the
+         * DFS — a union misread would crash before reaching them. */
+        TEST_ASSERT_TRUE(found_after1);
+        TEST_ASSERT_TRUE(found_after2);
+    }
+
+    /* At least our two labels are flagged text, and post-text siblings enumerate. */
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(2, text_rows);
+    TEST_ASSERT_GREATER_THAN_INT32(0, sib_after_text);
+}
+
+/* Capacity-overflow guard for the build_tree bake + collect_tree_rows DFS sites.
+ *
+ * When the USER tree itself exhausts Clay's layoutElements capacity, Clay__OpenElement flips
+ * maxElementsExceeded and returns WITHOUT adding the element; any ancestor still open then
+ * closes via Clay__CloseElement's early-return (the maxElementsExceeded branch) which never
+ * assigns children.elements — leaving a NON-TEXT element with children.length>0 and
+ * children.elements==NULL. Clay_EndLayout takes its own maxElementsExceeded branch and SKIPS
+ * CalculateFinalLayout (so Clay's own DFS never walks the malformed node), AND element-capacity
+ * overflow only sets a boolean — it fires NO error callback (unlike render-command or text-cache
+ * overflow). So nt_ui_clay_error_cb never traps, and build_tree's DFS walked the malformed tree:
+ * pre-fix it derefed children.elements[0] == NULL -> access violation at nt_ui_clay_impl.c:486.
+ * Same shape at the inspector's collect_tree_rows DFS. The engine contracts graceful degradation
+ * on overflow (the inspector's cdv_layout_budget_left reserve exists precisely to avoid Clay's
+ * trap), so both DFS sites now treat elements==NULL as childless and the frame must SURVIVE.
+ *
+ * 64 branches x 32 children = ~2112 elements (~2x the 1024 cap), so the crossing lands while a
+ * branch parent (non-text, children already counted) is still open -> elements==NULL parent. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_user_tree_capacity_overflow_no_crash(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    const int32_t cap = (int32_t)s_fx.ctx->max_elements; /* Clay layoutElements capacity == max_elements */
+
+    nt_ui_inspector_tree_row_t rows[64];
+
+    for (int rep = 0; rep < 3; ++rep) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("overflow_root")}) {
+            for (int b = 0; b < 64; ++b) {
+                CLAY({.id = CLAY_IDI("ovf_branch", (uint32_t)b), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {
+                    for (int c = 0; c < 32; ++c) {
+                        CLAY({.id = CLAY_IDI("ovf_leaf", (uint32_t)((b * 32) + c)), .layout = {.sizing = {CLAY_SIZING_FIXED(2), CLAY_SIZING_FIXED(2)}}}) {}
+                    }
+                }
+            }
+        }
+        /* build_tree runs inside end and walks the malformed tree -> pre-fix NULL deref. */
+        nt_ui_end(s_fx.ctx);
+
+        /* The scene must have actually overflowed (capacity reached), else the repro is moot. */
+        const int32_t total = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+        char msg[80];
+        (void)snprintf(msg, sizeof msg, "rep=%d total=%d cap=%d", rep, total, cap);
+        TEST_ASSERT_GREATER_OR_EQUAL_INT32_MESSAGE(cap - 1, total, msg);
+
+        /* The inspector's direct DFS walk shares the deref site -> must also survive. */
+        const int32_t n = nt_ui_internal_collect_tree_rows(s_fx.ctx, rows, 64);
+        TEST_ASSERT_GREATER_THAN_INT32(0, n);
+    }
 }
 
 /* Unnamed but widget-registered element produces an inspector tree row (hex id
@@ -1346,10 +1475,61 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     /* Vacuous-pass guard: assert we actually iterated the panel. */
     TEST_ASSERT_GREATER_THAN_UINT32(20U, inside_cmd_count);
 
-    /* Ceiling 20 catches per-row pill-background regressions. */
+    /* Cap is single-sourced from the inspector module so adding a sidebar chrome row
+     * bumps it next to that row, not here. Catches per-row pill-background regressions. */
     char msg[160];
-    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap 20). cmd_count=%u", alternations, inside_cmd_count);
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(20U, alternations, msg);
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap %u). cmd_count=%u", alternations, NT_UI_INSPECTOR_ALTERNATION_CAP, inside_cmd_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(NT_UI_INSPECTOR_ALTERNATION_CAP, alternations, msg);
+}
+
+/* The tree-pane clip element must emit its OWN static RECTANGLE bg, so overscroll/truncation shows
+ * the panel, not the game (the bug: bg came only from scrolling children + budget-capped stripes). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_tree_pane_clip_emits_static_bg(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    /* Two frames so the clip element's bbox is solved. */
+    for (int rep = 0; rep < 2; ++rep) {
+        nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("clipbg_root")}) {
+            CLAY({.id = CLAY_ID("clipbg_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        }
+        nt_ui_end(s_fx.ctx);
+    }
+
+    /* Resolve the clip element's bbox by id (Clay internals are not visible to the test TU). */
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+    const int32_t count = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_inspector_element_view_t pane = {0};
+    for (int32_t i = 0; i < count; ++i) {
+        const nt_ui_inspector_element_view_t v = nt_ui_internal_get_layout_element_view(s_fx.ctx, i);
+        if (v.id == pane_id) {
+            pane = v;
+            break;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(pane_id, pane.id, "tree-pane clip element must exist in the layout");
+    TEST_ASSERT_TRUE_MESSAGE(pane.w > 0.0F && pane.h > 0.0F, "clip bbox must be solved");
+
+    /* A RECTANGLE command anchored at the clip's top-left and matching its size only exists when the
+     * clip element itself carries .backgroundColor — the regression's root cause. */
+    Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    TEST_ASSERT_NOT_NULL(arr->internalArray);
+    bool found_clip_bg = false;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            continue;
+        }
+        if (fabsf(cc->boundingBox.x - pane.x) <= 1.0F && fabsf(cc->boundingBox.y - pane.y) <= 1.0F && fabsf(cc->boundingBox.width - pane.w) <= 1.0F && fabsf(cc->boundingBox.height - pane.h) <= 1.0F) {
+            found_clip_bg = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_clip_bg, "tree-pane clip element must emit a full-size RECTANGLE bg");
 }
 
 /* ---- Test 15x-perf-bulk: 20 widgets stay under scaled alternation cap (60). ---- */
@@ -1426,9 +1606,56 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(50U, inside_cmd_count);
 
     char msg[200];
-    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations (bulk 20-row scene): %u (cap 60). cmd_count=%u", alternations, inside_cmd_count);
-    /* 60 cap = 20 rows × ~2 + ~20 for header/info-pane. */
-    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(60U, alternations, msg);
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations (bulk 20-row scene): %u (cap 72). cmd_count=%u", alternations, inside_cmd_count);
+    /* 72 cap: 20 rows × ~2 + ~20 chrome, + a few extra now that each row carries its own
+     * in-flow zebra bg (scrolls with the text) instead of one floating overlay column. */
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(72U, alternations, msg);
+}
+
+/* Declares a 200x200 clip pane whose childOffset comes from the inspector's internal scroll
+ * helper. Tall content overflows so wheel can scroll. The pointer sits at (ptr_x,100) so a
+ * caller can aim it on/off the pane. */
+static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, 100.0F);
+    p.wheel_dy = wheel_dy;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        /* Resolve offset BEFORE opening the clip element (the scroll_begin pattern: the
+         * prev-frame Clay_GetScrollContainerData read must precede this frame's reconfigure). */
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), NT_UI_STATE_TAG('t', 's', 't', 'p'), false, true);
+        CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
+            /* Tall content forces y overflow so the pane can scroll. */
+            CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Inspector panes scroll via OUR scroll path (Clay's is bypassed). A wheel over a clip
+ * pane fed by the internal helper moves the offset in the nt_ui_state pool. ---- */
+static void test_inspector_pane_scrolls_on_wheel(void) {
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const uint32_t pane_id = nt_ui_id("scroll_pane_test");
+
+    /* Frame 1: declare so the pane has prev-frame bbox + content dims; no wheel yet. */
+    emit_scroll_pane_frame(screen_w, screen_h, 100.0F, 0.0F);
+    const nt_ui_scroll_state_t *s0 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s0);
+    TEST_ASSERT_TRUE(s0->pos[1] == 0.0F);
+
+    /* Frame 2: wheel down over the pane -> Clay negative-down offset (content scrolls up). */
+    emit_scroll_pane_frame(screen_w, screen_h, 100.0F, 1.0F);
+    const nt_ui_scroll_state_t *s1 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s1);
+    TEST_ASSERT_TRUE_MESSAGE(s1->pos[1] < 0.0F, "wheel-down must move pane offset negative (Clay down sign)");
+
+    /* Frame 3: a wheel NOT over the pane (pointer off to the side) leaves the offset put. */
+    const float held = s1->pos[1];
+    emit_scroll_pane_frame(screen_w, screen_h, 700.0F, 1.0F);
+    const nt_ui_scroll_state_t *s2 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s2);
+    TEST_ASSERT_TRUE_MESSAGE(s2->pos[1] == held, "wheel off the pane must not move its offset");
 }
 
 /* ---- Test 15x-perf-layer-split: BG (250) carries only sprite cmds, TEXT (251)
@@ -1847,6 +2074,642 @@ static void test_inspector_metrics_set_changes_overlay_scissor(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "scissor height must equal viewport height");
 }
 
+/* ---- Test 15z: inspector emits cleanly over a DISABLED widget + scroll container ----
+ * A disabled widget routes through nt_ui_block_pointer (inert occluder) and skips hit-test;
+ * the inspector still walks it. Pins the invariant that a disabled widget keeps a def in the
+ * registry (the disabled path registers NT_UI_CHECKBOX_DEF too), so the inspector pill stays
+ * meaningful — no NULL-def entry — and the overlay/walk over it never traps. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_over_disabled_widget_and_scroll(void) {
+    nt_ui_checkbox_style_t cb = {0};
+    const nt_atlas_region_ref_t box = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    for (int i = 0; i < 4; ++i) {
+        cb.unchecked[i] = (nt_ui_cb_state_t){.box = box, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
+        cb.checked[i] = (nt_ui_cb_state_t){.box = box, .check = box, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
+    }
+    cb.text_base = s_label_style;
+    cb.box_w = 24.0F;
+    cb.box_h = 24.0F;
+    cb.overlay_w = 16.0F;
+    cb.overlay_h = 16.0F;
+    cb.gap = 8.0F;
+    cb.state_speed = 0.0F;
+    cb.value_speed = 0.0F;
+
+    nt_ui_scroll_style_t scroll = nt_ui_scroll_style_defaults();
+    scroll.track_ref = box;
+    scroll.thumb_ref = box;
+
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    bool locked = true;
+
+    /* Pointer parked over the disabled checkbox so the viewport-hover scan picks the blocked
+     * id and the inspector reads its def for the pill/selected-info pane. */
+    nt_pointer_t mouse = make_pointer(60.0F, 60.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_checkbox(s_fx.ctx, NULL, 0U, nt_ui_id("locked"), "Locked (disabled)", &locked, &cb, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}},
+                       false);
+        nt_ui_scroll_begin(s_fx.ctx, NULL, nt_ui_id("list"), &scroll, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(80)}}});
+        for (int i = 0; i < 6; ++i) {
+            nt_ui_label(s_fx.ctx, NULL, "row", &s_label_style);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    /* The disabled (blocked) widget must carry a def in the registry — invariant the
+     * inspector relies on. NT_UI_CHECKBOX_DEF is registered even on the disabled path. */
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_CHECKBOX_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("locked")));
+    nt_ui_end(s_fx.ctx); /* inspector emit_layout walks here — must not trap */
+
+    /* Second frame: now the prev-frame interactive registry (incl. the block_pointer
+     * entry) is live, exercising resolve_hot + the inspector's viewport-hover pick. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_checkbox(s_fx.ctx, NULL, 0U, nt_ui_id("locked"), "Locked (disabled)", &locked, &cb, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}},
+                       false);
+        nt_ui_scroll_begin(s_fx.ctx, NULL, nt_ui_id("list"), &scroll, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(80)}}});
+        for (int i = 0; i < 6; ++i) {
+            nt_ui_label(s_fx.ctx, NULL, "row", &s_label_style);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+}
+
+/* ---- Test 15y: inspector stays within Clay's element budget on a large scene ----
+ * The inspector injects ~5-6 layout elements per user element (tree row + wrappers + the
+ * per-row background rects). On a scene with a few hundred named elements that multiplier
+ * pushes Clay's layoutElements array past max_elements — whose error handler is a hard trap,
+ * firing the instant the inspector is toggled ON. The emit must cap its own output: total
+ * element count stays strictly under capacity regardless of user-tree size (truncated tree,
+ * never a crash). Drives the count well past where the unguarded emit overflowed (~200 users). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_budget_capped_on_large_scene(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    const int32_t cap = (int32_t)s_fx.ctx->max_elements; /* Clay layoutElements capacity == max_elements */
+    /* 600 named leaves: unguarded, the inspector emit blows ~4x past the 1024 cap and traps. */
+    for (int rep = 0; rep < 3; ++rep) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("root")}) {
+            for (int i = 0; i < 600; ++i) {
+                CLAY({.id = CLAY_IDI("leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {}
+            }
+        }
+        nt_ui_end(s_fx.ctx); /* unguarded: Clay capacity error -> nt_ui_clay_error_cb traps here */
+        const int32_t total = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+        char msg[80];
+        (void)snprintf(msg, sizeof msg, "rep=%d total=%d cap=%d", rep, total, cap);
+        TEST_ASSERT_LESS_THAN_INT32_MESSAGE(cap, total, msg);
+        /* The user's own 600+ leaves were emitted; the inspector truncated, not the scene. */
+        TEST_ASSERT_GREATER_THAN_INT32_MESSAGE(600, total, msg);
+    }
+}
+
+/* ---- Test 15z: truncation is VISIBLE — a "rows hidden" marker row is emitted ----
+ * When the tree truncates on the Clay element budget, the inspector must emit a visible TEXT row
+ * (not just a silent spacer). On a small scene that fits, no such marker exists. */
+static bool inspector_frozen_has_text(const nt_ui_context_t *ctx, const char *needle) {
+    const size_t need = strlen(needle);
+    const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
+            continue;
+        }
+        const Clay_StringSlice s = cc->renderData.text.stringContents;
+        if (s.chars == NULL || (size_t)s.length < need) {
+            continue;
+        }
+        for (size_t off = 0; off + need <= (size_t)s.length; ++off) {
+            if (memcmp(s.chars + off, needle, need) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void inspector_emit_leaf_scene(int leaf_count) {
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("trunc_root")}) {
+        for (int i = 0; i < leaf_count; ++i) {
+            CLAY({.id = CLAY_IDI("trunc_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* The marker is a PINNED footer below the scrolled clip (tree text scrolls, the marker stays), so it
+ * stays visible at offset 0 — it can't be lost off the scrolled bottom. */
+static void test_inspector_truncation_marker_visible(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    /* Big scene blows past the 1024 element cap -> tree truncates -> marker row present. */
+    inspector_emit_leaf_scene(600);
+    TEST_ASSERT_TRUE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "truncated tree must emit a visible 'rows hidden' marker row");
+
+    /* Small scene fits -> no truncation -> no marker. */
+    inspector_emit_leaf_scene(4);
+    TEST_ASSERT_FALSE_MESSAGE(inspector_frozen_has_text(s_fx.ctx, "rows hidden"), "untruncated tree must NOT emit a 'rows hidden' marker row");
+}
+
+/* ---- Regression: a selected id that resolves to no element must NOT crash the info pane ----
+ * The selected-info pane resolved inspector_selected_id via Clay__GetHashMapItem, which returns the
+ * zeroed DEFAULT sentinel (NOT NULL) on a miss — its layoutElement is NULL. The `selectedItem != NULL`
+ * guard never catches that (DEFAULT is non-NULL), so the pane dereferenced a NULL layoutElement ->
+ * access violation. A selection can outlive its element on a rich scene: the collapse/row-pick path
+ * sets inspector_selected_id, and on a tree dense enough that Clay's layoutElementsHashMapInternal
+ * saturates (Clay__AddHashMapItem returns NULL for the overflow), that id no longer resolves. Here we
+ * pin the root invariant directly with an id that was never a Clay element -> guaranteed DEFAULT. */
+static void test_inspector_selected_unresolvable_id_no_crash(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    /* An id never declared in this Clay context's lifetime resolves to the DEFAULT sentinel. */
+    s_fx.ctx->inspector_selected_id = nt_ui_id("never_declared_widget");
+
+    /* The selected-info pane runs (selected_id != 0) and resolves the id. Pre-fix it derefs the
+     * DEFAULT sentinel's NULL layoutElement -> access violation inside nt_ui_end. */
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("present_root")}) {
+        CLAY({.id = CLAY_ID("present_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx); /* must not crash; the unresolvable selection is a no-op info pane */
+
+    /* Survived the walk -> the pane guarded the miss. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("never_declared_widget"), s_fx.ctx->inspector_selected_id);
+}
+
+/* Drive the inspector over a fixed truncating scene with a given pointer (wheel-scrollable). */
+static void inspector_marker_scene(float screen_w, float screen_h, const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("mk_root")}) {
+        for (int i = 0; i < 600; ++i) {
+            CLAY({.id = CLAY_IDI("mk_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(4), CLAY_SIZING_FIXED(4)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Regression: pressing rows + scrolling a truncated pane never crashes the info pane ----
+ * On a budget-truncated scene a row-press can select an element that the info pane later fails to
+ * resolve in Clay's hashmap (saturated -> DEFAULT sentinel). Combined with wheel scrolling (which
+ * re-emits the marker/spacer + drives the integrator each frame), this is the exact shape of the
+ * reported collapse-on-truncation crash. Pins that the whole press -> select -> info-pane-resolve
+ * cycle survives across scrolling, with the DEFAULT-sentinel guards in place. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_truncated_pane_scroll_press_safe(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    /* Pointer parked in the right-attached sidebar tree pane (x>=400), inside the pick region. */
+    const float ptr_x = 600.0F;
+    const float ptr_y = 200.0F;
+
+    /* Warm-up so the pane solves its bbox + content height (wheel ownership has a 1-frame lag). */
+    nt_pointer_t warm = make_pointer(ptr_x, ptr_y);
+    inspector_marker_scene(screen_w, screen_h, &warm);
+    inspector_marker_scene(screen_w, screen_h, &warm);
+
+    /* Press a tree row deep in the pick region (a row that truncation may leave unresolvable). */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t press = {0};
+    press.x = ptr_x;
+    press.y = ptr_y;
+    press.active = true;
+    press.buttons[NT_BUTTON_LEFT].is_down = true;
+    press.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    inspector_marker_scene(screen_w, screen_h, &press); /* selects whatever row sits there */
+
+    /* Resolve the selection through the info pane on the next frame -> must not crash. */
+    inspector_marker_scene(screen_w, screen_h, &warm);
+
+    /* Wheel down hard while a selection is live; the offset clamps at the natural bottom. The marker +
+     * info pane re-emit every frame and resolve the (possibly unhashed) selection -> must not crash. */
+    for (int i = 0; i < 60; ++i) {
+        nt_pointer_t w = make_pointer(ptr_x, ptr_y);
+        w.wheel_dy = 1.0F;
+        inspector_marker_scene(screen_w, screen_h, &w);
+    }
+}
+
+/* ---- Integration: the inspector's OWN elements-tree pane scrolls on wheel ----
+ * The real inspector pane is emitted INSIDE nt_ui_end (after the user frame closes), so its wheel
+ * candidate registers + resolves on the end-of-frame path, not the user-frame path. This drives
+ * that path: inspector ON, a named scene tall enough to overflow the tree pane, the pointer parked
+ * in the pane, a wheel notch every frame. Pane state lives under the ntInsp_OuterScrollPane id. */
+static void inspector_scene_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    /* Enough named leaves that the inspector's ~5-6x per-row element multiplier trips its own Clay
+     * budget cap — the truncated tree must still top up its content height so the pane overflows. */
+    CLAY({.id = CLAY_ID("repro_root")}) {
+        for (int i = 0; i < 600; ++i) {
+            CLAY({.id = CLAY_IDI("repro_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx); /* inspector OuterScrollPane is emitted + resolved HERE */
+}
+
+/* The inspector tree pane (emitted in nt_ui_end) must consume the wheel when the pointer is parked
+ * over it — the candidate it registers on the end-of-frame path must win ownership for next frame. */
+static void test_inspector_tree_pane_scrolls_on_wheel_integration(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    /* Sidebar is right-attached, panel_width=400 -> x in [880,1280]. The tree pane sits below the
+     * header(30) + mem line(30) + separator(1); y=400 is safely inside it. */
+    const float ptr_x = 1000.0F;
+    const float ptr_y = 400.0F;
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    /* Warm-up: frame 1 solves the pane bbox, frame 2's end-of-frame resolve grants the owner
+     * (1-frame ownership lag — same as every prev-frame bbox hit-test). */
+    inspector_scene_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_scene_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    const nt_ui_scroll_state_t *s0 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL_MESSAGE(s0, "inspector tree pane scroll state must exist after warm-up");
+    TEST_ASSERT_TRUE_MESSAGE(s0->pos[1] == 0.0F, "pane offset must start at rest");
+
+    /* Wheel down over the pane for several frames; the offset must move negative (Clay down sign). */
+    for (int i = 0; i < 6; ++i) {
+        inspector_scene_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+    const nt_ui_scroll_state_t *s1 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s1);
+    TEST_ASSERT_TRUE_MESSAGE(s1->pos[1] < 0.0F, "wheel over the real inspector tree pane must scroll it");
+}
+
+/* The inspector pane (depth NT_UI_WHEEL_INSPECTOR_DEPTH) must win EXCLUSIVELY over a game scroll
+ * container directly beneath it: the pane scrolls, the game container under the same pointer stays
+ * put. Pins the always-on-top debug-overlay contract against the innermost-wins resolve. */
+static const uint32_t REPRO_GAME_SCROLL_ID = 0x1A5C01U;
+static void inspector_over_game_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    CLAY({.id = CLAY_ID("repro2_root")}) {
+        /* Full-width game scroll so its bbox spans under the right-attached inspector pane too. */
+        nt_ui_scroll_begin(s_fx.ctx, NULL, REPRO_GAME_SCROLL_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(screen_h)}}});
+        {
+            CLAY({.id = CLAY_ID("repro2_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(4000.0F)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+        /* Named leaves so the inspector tree pane overflows + is scrollable. */
+        for (int i = 0; i < 80; ++i) {
+            CLAY({.id = CLAY_IDI("repro2_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_pane_wins_over_game_container(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float ptr_x = 1000.0F; /* over the right-attached inspector pane AND the full-width game scroll */
+    const float ptr_y = 400.0F;
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    inspector_over_game_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_over_game_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+
+    for (int i = 0; i < 6; ++i) {
+        inspector_over_game_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+
+    const nt_ui_scroll_state_t *pane = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    const nt_ui_scroll_state_t *game = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, REPRO_GAME_SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(pane);
+    TEST_ASSERT_NOT_NULL(game);
+    TEST_ASSERT_TRUE_MESSAGE(pane->pos[1] < 0.0F, "the inspector pane must win the wheel over the game container");
+    TEST_ASSERT_TRUE_MESSAGE(game->pos[1] == 0.0F, "the game container under the pane must NOT scroll (exclusive)");
+}
+
+/* Same 200x200 pane as emit_scroll_pane_frame but driven by a caller-built pointer so a test can
+ * stage a multi-frame press -> drag -> release gesture (left button + position per frame). */
+static void emit_scroll_pane_drag_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        const Clay_Vector2 off = nt_ui_internal_scroll_pane_offset(s_fx.ctx, nt_ui_id("scroll_pane_test"), NT_UI_STATE_TAG('t', 's', 't', 'p'), false, true);
+        CLAY({.id = CLAY_ID("scroll_pane_test"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.vertical = true, .childOffset = off}}) {
+            CLAY({.id = CLAY_ID("scroll_pane_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(1000)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Build a left-pressed pointer at (x,y) with the press/hold edge flags set explicitly. */
+static nt_pointer_t make_drag_pointer(float x, float y, bool is_pressed, bool is_down) {
+    nt_pointer_t p = make_pointer(x, y);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
+    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
+    return p;
+}
+
+/* ---- Pointer/touch drag past the threshold tracks the pane 1:1 (the wheel-only bug repro). ---- */
+static void test_inspector_pane_drag_tracks_1to1(void) {
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const uint32_t pane_id = nt_ui_id("scroll_pane_test");
+    const float px = 100.0F; /* inside the 200-wide pane */
+
+    /* Frame 1: idle, establishes prev-frame bbox + content dims. */
+    nt_pointer_t f1 = make_pointer(px, 100.0F);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
+
+    /* Frame 2: fresh press inside the pane -> free-press arms (delta accrues from next frame). */
+    nt_pointer_t f2 = make_drag_pointer(px, 100.0F, true, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
+
+    /* Frame 3: held, dragged 30px up -> crosses the 8px threshold and latches. The latch frame
+     * strips the threshold radius, so pos moves up by (30 - 8) = 22px in Clay's negative-down sign. */
+    nt_pointer_t f3 = make_drag_pointer(px, 70.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f3);
+    const nt_ui_scroll_state_t *s3 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s3);
+    TEST_ASSERT_TRUE_MESSAGE(s3->pos[1] < 0.0F, "drag up past threshold must move the pane offset negative");
+    const float after_latch = s3->pos[1];
+    /* 30px raw drag minus the 8px threshold radius stripped on the latch frame -> 22px (Clay down sign). */
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(after_latch - (-22.0F)) < 0.5F, "latch frame must route (drag - threshold) 1:1");
+
+    /* Frame 4: held, dragged a further 40px up -> latched, full per-frame delta routes 1:1. */
+    nt_pointer_t f4 = make_drag_pointer(px, 30.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f4);
+    const nt_ui_scroll_state_t *s4 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s4);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(s4->pos[1] - (after_latch - 40.0F)) < 0.5F, "latched frame must track the full per-frame delta 1:1");
+}
+
+/* ---- Release after a fast drag flings, then friction decays the offset to rest. ---- */
+static void test_inspector_pane_drag_release_flings(void) {
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const uint32_t pane_id = nt_ui_id("scroll_pane_test");
+    const float px = 100.0F;
+
+    /* Frame 1: idle bbox. */
+    nt_pointer_t f1 = make_pointer(px, 150.0F);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
+
+    /* Frame 2: press arms. */
+    nt_pointer_t f2 = make_drag_pointer(px, 150.0F, true, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
+
+    /* Frames 3-4: fast drag up (60px/frame) so the release-fling velocity sampler charges. */
+    nt_pointer_t f3 = make_drag_pointer(px, 90.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f3);
+    nt_pointer_t f4 = make_drag_pointer(px, 30.0F, false, true);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f4);
+    const nt_ui_scroll_state_t *sdrag = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(sdrag);
+    const float at_release = sdrag->pos[1];
+
+    /* Frame 5: release (button up) -> drag ends, fling owns the rest. One coast frame must move past
+     * the release point (momentum carried), proving the fling exists (not just a hard stop). */
+    nt_pointer_t f5 = make_pointer(px, 30.0F);
+    emit_scroll_pane_drag_frame(screen_w, screen_h, &f5);
+    const nt_ui_scroll_state_t *s5 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s5);
+    TEST_ASSERT_TRUE_MESSAGE(s5->pos[1] < at_release, "release after a fast drag must keep coasting (fling)");
+    const float after_first_coast = s5->pos[1];
+
+    /* Frames 6+: no input -> friction decays the fling; it must eventually settle (vel -> 0). */
+    for (int i = 0; i < 240; ++i) {
+        nt_pointer_t fi = make_pointer(px, 30.0F);
+        emit_scroll_pane_drag_frame(screen_w, screen_h, &fi);
+    }
+    const nt_ui_scroll_state_t *sN = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(sN);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(sN->vel[1]) < 1.0F, "fling must decay to rest under friction");
+    TEST_ASSERT_TRUE_MESSAGE(sN->pos[1] <= after_first_coast, "fling settles at or past the first coast point");
+}
+
+/* ---- A tap (below the 8px threshold) on a tree row still selects it: the pane's free-press
+ * doesn't swallow the Clay PRESSED_THIS_FRAME pick that drives inspector_selected_id. ---- */
+static void test_inspector_pane_tap_still_selects_row(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    /* Pointer over a tree row near the top of the pane (rows start just below the header). */
+    const float ptr_x = 1100.0F; /* inside the right-attached inspector tree pane */
+    const float ptr_y = 130.0F;
+
+    /* Frame 1: build the tree (named leaves -> scrollable rows) so prev-frame bboxes exist. */
+    nt_pointer_t f1 = make_pointer(ptr_x, ptr_y);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("tap_root")}) {
+        for (int i = 0; i < 40; ++i) {
+            CLAY({.id = CLAY_IDI("tap_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    s_fx.ctx->inspector_selected_id = 0U;
+
+    /* Frame 2: a tap (press, no movement -> below threshold) over a tree row must set a selection. */
+    nt_pointer_t f2 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("tap_root")}) {
+        for (int i = 0; i < 40; ++i) {
+            CLAY({.id = CLAY_IDI("tap_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+
+    TEST_ASSERT_TRUE_MESSAGE(s_fx.ctx->inspector_selected_id != 0U, "a tap on a tree row must still select it (pane free-press must not swallow the pick)");
+}
+
+/* ---- A drag inside the pane must NOT scroll a game container directly beneath it: the pane
+ * claims the capture (exclusivity), so the game scroll under the same pointer stays put. ---- */
+static const uint32_t DRAG_GAME_SCROLL_ID = 0x2B6D02U;
+static void inspector_drag_over_game_scroll_frame(float screen_w, float screen_h, const nt_pointer_t *p) {
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, p, 1);
+    CLAY({.id = CLAY_ID("dragx_root")}) {
+        /* Full-width game scroll whose bbox spans under the right-attached inspector pane. */
+        nt_ui_scroll_begin(s_fx.ctx, NULL, DRAG_GAME_SCROLL_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(screen_h)}}});
+        {
+            CLAY({.id = CLAY_ID("dragx_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(screen_w), CLAY_SIZING_FIXED(4000.0F)}}}) {}
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+        /* Many named leaves so the inspector tree pane overflows enough to be drag-scrollable. */
+        for (int i = 0; i < 600; ++i) {
+            CLAY({.id = CLAY_IDI("dragx_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_pane_drag_does_not_scroll_game(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float ptr_x = 1000.0F; /* over the inspector tree pane AND the full-width game scroll */
+    const float ptr_y = 400.0F;  /* below header + mem line, safely inside the tree pane */
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    /* Frames 1-2: idle so both panes solve their bbox + content dims. */
+    nt_pointer_t f1 = make_pointer(ptr_x, ptr_y);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f1);
+    nt_pointer_t f2 = make_pointer(ptr_x, ptr_y);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f2);
+
+    /* Frame 3: press arms the pane's free-press. */
+    nt_pointer_t f3 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f3);
+
+    /* Frames 4-5: drag up well past the threshold so the pane latches + scrolls. */
+    nt_pointer_t f4 = make_drag_pointer(ptr_x, ptr_y - 40.0F, false, true);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f4);
+    nt_pointer_t f5 = make_drag_pointer(ptr_x, ptr_y - 90.0F, false, true);
+    inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f5);
+
+    const nt_ui_scroll_state_t *pane = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    const nt_ui_scroll_state_t *game = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, DRAG_GAME_SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(pane);
+    TEST_ASSERT_NOT_NULL(game);
+    TEST_ASSERT_TRUE_MESSAGE(pane->pos[1] < 0.0F, "the inspector pane must scroll under the drag");
+    TEST_ASSERT_TRUE_MESSAGE(game->pos[1] == 0.0F, "the game container under the pane must NOT scroll on drag (pane claims the capture)");
+}
+
+/* Y of the first TEXT command whose contents contain `needle` and that sits inside the right sidebar.
+ * Returns NAN when not found. */
+static float inspector_frozen_text_y(const nt_ui_context_t *ctx, const char *needle, float panel_left_x) {
+    const size_t need = strlen(needle);
+    const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT || cc->boundingBox.x < panel_left_x) {
+            continue;
+        }
+        const Clay_StringSlice s = cc->renderData.text.stringContents;
+        if (s.chars == NULL || (size_t)s.length < need) {
+            continue;
+        }
+        for (size_t off = 0; off + need <= (size_t)s.length; ++off) {
+            if (memcmp(s.chars + off, needle, need) == 0) {
+                return cc->boundingBox.y;
+            }
+        }
+    }
+    return NAN;
+}
+
+/* A named scene tall enough to overflow the inspector tree pane; the pointer is parked in the pane.
+ * Each leaf gets a UNIQUE id string so a single tracked row's TEXT bbox can be followed across scroll. */
+static void inspector_named_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
+    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    p.wheel_dy = wheel_dy;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &p, 1);
+    /* Static so the id-string pointers outlive the layout solve (Clay stores the pointer, not a copy). */
+    static char s_leaf_names[60][24];
+    CLAY({.id = CLAY_ID("scrolltext_root")}) {
+        for (int i = 0; i < 60; ++i) {
+            (void)snprintf(s_leaf_names[i], sizeof s_leaf_names[i], "uniqLeaf_%02d", i);
+            CLAY({.id = CLAY_SID(((Clay_String){.length = (int32_t)strlen(s_leaf_names[i]), .chars = s_leaf_names[i]})), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- FAILS-BEFORE: the tree TEXT must scroll WITH the pane (was pinned by the floating overlay). ----
+ * A tree-text TEXT command's bbox.y must move UP by the scroll offset once the pane is wheeled. */
+static void test_inspector_tree_text_moves_with_scroll(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float panel_left_x = screen_w - 400.0F;
+    const float ptr_x = 1000.0F;
+    const float ptr_y = 400.0F;
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+    /* A unique leaf low enough to survive a modest scroll yet not scroll off the clip top. */
+    const char *needle = "uniqLeaf_12";
+
+    /* Warm up: solve pane bbox + content height, grant wheel ownership (1-frame lag). */
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    const float y_before = inspector_frozen_text_y(s_fx.ctx, needle, panel_left_x);
+    TEST_ASSERT_FALSE_MESSAGE(isnan(y_before), "a tree-text TEXT row must be present before scrolling");
+
+    /* Wheel down a few notches so the pane scrolls. */
+    for (int i = 0; i < 4; ++i) {
+        inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE_MESSAGE(s->pos[1] < 0.0F, "pane must have scrolled (negative offset)");
+
+    const float y_after = inspector_frozen_text_y(s_fx.ctx, needle, panel_left_x);
+    TEST_ASSERT_FALSE_MESSAGE(isnan(y_after), "the tree-text row must still be present after scrolling");
+
+    /* The text must move UP by the scroll offset (within a row tolerance), not stay pinned. On the OLD
+     * floating-overlay architecture y_after == y_before (the bug). */
+    TEST_ASSERT_TRUE_MESSAGE(y_after < y_before - 4.0F, "tree text must scroll UP with the pane (was pinned)");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf((y_after - y_before) - s->pos[1]) < 2.0F, "tree text must move by exactly the scroll offset");
+}
+
+/* ---- Row-click AFTER scroll selects the element under the (scrolled) row, not a stale pinned one. ----
+ * Scroll the pane, then press over a tree row; the selected id must match the element whose row now
+ * sits under the pointer in the SCROLLED geometry. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_row_click_after_scroll_selects_scrolled_row(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float ptr_x = 1000.0F;
+    const float ptr_y = 200.0F; /* a row near the top of the pane */
+    const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+
+    /* Warm up + grant wheel ownership. */
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+    inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 0.0F);
+
+    /* Click at offset 0 -> capture the element selected when the rows are unscrolled. */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t click0 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &click0, 1);
+    CLAY({.id = CLAY_ID("scrolltext_root")}) {
+        for (int i = 0; i < 60; ++i) {
+            CLAY({.id = CLAY_IDI("scrolltext_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    const uint32_t sel_unscrolled = s_fx.ctx->inspector_selected_id;
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0U, sel_unscrolled, "a click on a tree row at offset 0 must select something");
+
+    /* Scroll the pane down several rows. */
+    for (int i = 0; i < 6; ++i) {
+        inspector_named_scroll_frame(screen_w, screen_h, ptr_x, ptr_y, 1.0F);
+    }
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE_MESSAGE(s->pos[1] <= -30.0F, "pane must have scrolled by at least one row (row_h=30)");
+
+    /* Click at the SAME pointer y after scrolling -> a DIFFERENT element (the row that scrolled under
+     * the cursor) must be selected. On the old pinned architecture the same row id would re-select. */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t click1 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 1.0F / 60.0F, &click1, 1);
+    CLAY({.id = CLAY_ID("scrolltext_root")}) {
+        for (int i = 0; i < 60; ++i) {
+            CLAY({.id = CLAY_IDI("scrolltext_leaf", (uint32_t)i), .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}) {}
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    const uint32_t sel_scrolled = s_fx.ctx->inspector_selected_id;
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0U, sel_scrolled, "a click on a tree row after scrolling must still select something");
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(sel_unscrolled, sel_scrolled, "after scrolling, the same pointer y must select the row that scrolled under it (not the stale pinned row)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -1854,6 +2717,7 @@ int main(void) {
     RUN_TEST(test_registry_collision_linear_probe);
     RUN_TEST(test_registry_id_zero_dropped);
     RUN_TEST(test_registry_engine_and_game_defs_coexist);
+    RUN_TEST(test_registry_duplicate_id_traps);
     RUN_TEST(test_button_widget_auto_tagged);
     RUN_TEST(test_panel_widget_tagged);
     RUN_TEST(test_image_widget_tagged);
@@ -1872,6 +2736,7 @@ int main(void) {
     RUN_TEST(test_button_auto_records_hit_padding);
     RUN_TEST(test_inspector_filter_skips_anonymous);
     RUN_TEST(test_inspector_filter_keeps_text_leaves);
+    RUN_TEST(test_inspector_text_with_siblings_no_union_misread);
     RUN_TEST(test_inspector_emits_hex_for_unnamed_widget);
     RUN_TEST(test_inspector_collapsed_storage);
     RUN_TEST(test_inspector_collapse_hides_children);
@@ -1892,7 +2757,9 @@ int main(void) {
     RUN_TEST(test_inspector_hover_transformed_widget);
     RUN_TEST(test_inspector_inner_emits_carry_debug_layer);
     RUN_TEST(test_inspector_alternations_capped_after_strategy_a);
+    RUN_TEST(test_inspector_tree_pane_clip_emits_static_bg);
     RUN_TEST(test_inspector_alternations_bulk_scene_after_strategy_a);
+    RUN_TEST(test_inspector_pane_scrolls_on_wheel);
     RUN_TEST(test_inspector_layer_split_collapses_dispatch);
     RUN_TEST(test_inspector_overlay_scissor_clips_highlight_outside_panel);
     RUN_TEST(test_inspector_inactive_no_interception);
@@ -1901,6 +2768,20 @@ int main(void) {
     RUN_TEST(test_inspector_metrics_set_changes_input_consume_gate);
     RUN_TEST(test_inspector_metrics_setter_asserts_on_invalid);
     RUN_TEST(test_inspector_metrics_set_changes_overlay_scissor);
+    RUN_TEST(test_inspector_over_disabled_widget_and_scroll);
+    RUN_TEST(test_inspector_budget_capped_on_large_scene);
+    RUN_TEST(test_inspector_truncation_marker_visible);
+    RUN_TEST(test_inspector_selected_unresolvable_id_no_crash);
+    RUN_TEST(test_inspector_truncated_pane_scroll_press_safe);
+    RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
+    RUN_TEST(test_inspector_pane_wins_over_game_container);
+    RUN_TEST(test_inspector_pane_drag_tracks_1to1);
+    RUN_TEST(test_inspector_pane_drag_release_flings);
+    RUN_TEST(test_inspector_pane_tap_still_selects_row);
+    RUN_TEST(test_inspector_pane_drag_does_not_scroll_game);
+    RUN_TEST(test_inspector_tree_text_moves_with_scroll);
+    RUN_TEST(test_inspector_row_click_after_scroll_selects_scrolled_row);
+    RUN_TEST(test_inspector_user_tree_capacity_overflow_no_crash);
     return UNITY_END();
 }
 

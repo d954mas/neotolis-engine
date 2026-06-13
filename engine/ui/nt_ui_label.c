@@ -7,6 +7,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
+#include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
@@ -28,7 +29,14 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
     NT_ASSERT(isfinite(style->font_size) && style->font_size > 0.0F && style->font_size <= (float)UINT16_MAX - 0.5F && "nt_ui_label: font_size must be finite in (0, UINT16_MAX - 0.5]");
 
     const uint16_t clay_font_size = (uint16_t)(style->font_size + 0.5F);
-    Clay_String s = {.length = (int32_t)strlen(text), .chars = text};
+
+    /* Clay stores .chars by pointer and the walker reads after declaration returns; copy
+     * into per-frame scratch so callers can pass snprintf'd stack buffers safely. */
+    const size_t text_len = strlen(text);
+    char *owned = (char *)nt_mem_scratch_alloc(text_len + 1U, _Alignof(char));
+    NT_ASSERT(owned != NULL && "nt_ui_label: scratch alloc failed (label text)");
+    memcpy(owned, text, text_len + 1U);
+    Clay_String s = {.length = (int32_t)text_len, .chars = owned};
     CLAY_TEXT(s, CLAY_TEXT_CONFIG({
                      .userData = (void *)data,
                      .textColor = style->color,

@@ -829,8 +829,8 @@ void test_emit_slice9_null_src_scale_one_matches_atlas(void) {
 }
 
 /* scale=2.0F → DST borders doubled (positions 32/68) BUT SRC borders unchanged
- * → UV cut stays at atlas src_l/source_w. Guards the user-caught bug where the
- * earlier impl scaled src too and corners sampled edge content. */
+ * → UV cut stays at atlas src_l/source_w (scaling src too would sample edge content
+ * into the corners). */
 void test_emit_slice9_null_src_scale_two_doubles_borders(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -889,6 +889,53 @@ void test_sprite_comp_slice9_scale_affects_emit_position(void) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
 }
 
+/* Graceful degradation: when dst < border sum the corners must not overflow the
+ * requested rect. Emit into a rect smaller than the borders on one then both axes
+ * and assert all 16 grid vertices stay inside [x, x+w] x [y, y+h]. Mirrors Unity/
+ * Defold behavior — geometry never exceeds the requested rect. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void assert_slice9_within_rect(float x, float y, float w, float h, const char *msg) {
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    const float eps = 0.5F;
+    for (uint32_t v = 0; v < 16U; ++v) {
+        float p[3];
+        nt_sprite_renderer_test_last_emit_position(v, p);
+        TEST_ASSERT_TRUE_MESSAGE(p[0] >= x - eps && p[0] <= x + w + eps, msg);
+        TEST_ASSERT_TRUE_MESSAGE(p[1] >= y - eps && p[1] <= y + h + eps, msg);
+    }
+}
+
+void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xD9ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res); /* 16/16/16/16 borders */
+    const float x = 100.0F;
+    const float y = 200.0F;
+
+    /* Horizontal squeeze: w=20 < (16+16)=32; inner columns must not cross. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 20.0F, 100.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    assert_slice9_within_rect(x, y, 20.0F, 100.0F, "narrow-w slice9 corners must stay within rect");
+    /* Inner-left <= inner-right (no crossing). */
+    float vl[3];
+    float vr[3];
+    nt_sprite_renderer_test_last_emit_position(1, vl);
+    nt_sprite_renderer_test_last_emit_position(2, vr);
+    TEST_ASSERT_TRUE_MESSAGE(vl[0] <= vr[0] + 0.5F, "narrow-w inner-left must not cross inner-right");
+
+    /* Vertical squeeze: h=10 < 32. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 100.0F, 10.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    assert_slice9_within_rect(x, y, 100.0F, 10.0F, "short-h slice9 corners must stay within rect");
+
+    /* Both axes squeezed: 12 x 8, both < 32. */
+    nt_sprite_renderer_emit_slice9(s_atlas_res, rs9, x, y, 12.0F, 8.0F, NULL, 1.0F, 0xFFFFFFFFU, 0, NT_MATH_MAT4_IDENTITY);
+    assert_slice9_within_rect(x, y, 12.0F, 8.0F, "tiny slice9 corners must stay within rect");
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -906,6 +953,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
     RUN_TEST(test_emit_slice9_null_src_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_null_src_scale_two_doubles_borders);
+    RUN_TEST(test_emit_slice9_degrades_when_dst_smaller_than_borders);
     RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     return UNITY_END();
 }

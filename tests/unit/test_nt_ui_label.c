@@ -216,6 +216,48 @@ static void test_label_element_data_passthrough(void) {
     TEST_ASSERT_EQUAL_PTR(&marker, d->user_data);
 }
 
+/* Label must scratch-copy its text: a stack buffer scribbled AFTER the call (and
+ * reused for a second label) must not corrupt the first label's emitted content. */
+static void test_label_scratch_copies_text(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    char buf[32];
+    (void)strcpy(buf, "ALPHA");
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_label(s_fx.ctx, NULL, buf, &s_style_body);
+        /* Scribble + reuse the same buffer like the demo's shared snprintf buffer. */
+        (void)strcpy(buf, "ZZZZZZZ");
+        nt_ui_label(s_fx.ctx, NULL, buf, &s_style_body);
+        (void)strcpy(buf, "OVERWRITTEN-GARBAGE");
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Walk all TEXT cmds; the first must still read "ALPHA", the second "ZZZZZZZ". */
+    const char *first = NULL;
+    int32_t first_len = 0;
+    const char *second = NULL;
+    int32_t second_len = 0;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
+            continue;
+        }
+        if (first == NULL) {
+            first = c->renderData.text.stringContents.chars;
+            first_len = c->renderData.text.stringContents.length;
+        } else if (second == NULL) {
+            second = c->renderData.text.stringContents.chars;
+            second_len = c->renderData.text.stringContents.length;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_NOT_NULL(second);
+    TEST_ASSERT_EQUAL_INT32(5, first_len);
+    TEST_ASSERT_EQUAL_MEMORY("ALPHA", first, 5);
+    TEST_ASSERT_EQUAL_INT32(7, second_len);
+    TEST_ASSERT_EQUAL_MEMORY("ZZZZZZZ", second, 7);
+}
+
 /* T7: nt_ui_label_sized overrides font_size from style. */
 static void test_label_sized_overrides_font_size(void) {
     nt_pointer_t mouse = {0};
@@ -243,6 +285,7 @@ int main(void) {
     RUN_TEST(test_label_per_call_override);
     RUN_TEST(test_label_empty_text_accepted);
     RUN_TEST(test_label_element_data_passthrough);
+    RUN_TEST(test_label_scratch_copies_text);
     RUN_TEST(test_label_sized_overrides_font_size);
     return UNITY_END();
 }

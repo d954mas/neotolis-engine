@@ -330,7 +330,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
         ctx->capture_seen[i] = 0U;
         ctx->pointer_hot[i] = (nt_ui_hot_t){0}; /* resolved lazily on first step/query this frame */
         ctx->pointer_occlusion[i] = INFINITY;   /* game re-feeds per frame; default = no cutoff */
+        /* wheel_owner[] is NOT reset here — it carries the prev-frame end-of-frame resolution into
+         * this frame's consume (innermost-wins, 1-frame lag). It's rewritten in nt_ui_end. */
     }
+    /* New frame of wheel candidates; depth counter re-zeroes (begin++/end-- balance across the frame). */
+    ctx->wheel_candidate_count = 0U;
+    ctx->wheel_depth = 0U;
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
 
@@ -375,7 +380,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const nt_pointer_t *primary = &pointers[0];
 
 #if NT_UI_DEBUG_TOOLS
-    /* Pure coord check — frame-1 safe, no layout solve required. */
+    /* Pure coord check — frame-1 safe, no layout solve required. Single-touch contract: only
+     * pointer 0 gates the inspector sidebar (a debug tool is not driven multi-touch). */
     ctx->inspector_pointer_consumed = false;
     if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
         ctx->inspector_pointer_consumed = true;
@@ -389,8 +395,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Clay v0.14 has no right/middle/wheel buttons; left only. */
     Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
-    /* Y inverted: Clay scroll opposite of typical wheel_dy. */
-    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = primary->wheel_dx, .y = -primary->wheel_dy}, dt);
+    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed. */
 
     Clay_BeginLayout();
 }
@@ -414,6 +419,9 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     const double build_t0 = nt_time_now();
     nt_ui_internal_build_tree(ctx);
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
+
+    /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
+    nt_ui_internal_resolve_wheel_owners(ctx);
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
@@ -494,6 +502,15 @@ static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, ui
     return 0U;
 }
 
+/* Registry clears each nt_ui_begin, so a slot already holding this id == a duplicate
+ * registration THIS frame — trap here instead of Clay's cryptic solver-depth error. */
+static void widget_assert_not_dup(const nt_ui_widget_slot_t *s, uint32_t id, const nt_ui_widget_def_t *def) {
+    if (s->id == id) {
+        nt_log_error("nt_ui_widget_register: widget id %u ('%s') already registered this frame (duplicate id)", id, def->name);
+        NT_ASSERT(s->id != id && "nt_ui_widget_register: duplicate widget id this frame — see logged id; give the second widget its own id");
+    }
+}
+
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
@@ -502,6 +519,7 @@ void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget
     }
     const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
     nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    widget_assert_not_dup(s, id, def);
     s->id = id;
     s->def = def;
     if (pad_lrtb != NULL) {
@@ -2378,6 +2396,29 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 }
 
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
+
+/* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
+ * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak
+ * through to widgets underneath them (modal-overlay correctness) while staying visually inert. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
+void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_block_pointer: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_block_pointer: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(id != 0U && "nt_ui_block_pointer: id must be non-zero (0 = no widget)");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_block_pointer: pad_lrtb components must be >= 0");
+
+    /* Same registry record as step (so next-frame resolve_hot ranks it for topmost arbitration), minus
+     * the capture/button-edge state machine — an inert occluder, not an interactive widget. */
+    if (ctx->interactive_cur_count < ctx->max_elements) {
+        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
+        rec->id = id;
+        if (pad_lrtb != NULL) {
+            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
+        } else {
+            memset(rec->pad, 0, sizeof rec->pad);
+        }
+    }
+}
 
 #if NT_UI_DEBUG_TOOLS
 /* Record-only push for DISABLED widgets that skip hit-test; flag surfaces in mode=ALL. */

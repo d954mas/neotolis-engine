@@ -50,14 +50,24 @@ set(NT_UI_SOURCES
     nt_ui_fit.h
     nt_ui_image.c
     nt_ui_image.h
+    nt_ui_fill.c
+    nt_ui_fill.h
     nt_ui_panel.c
     nt_ui_panel.h
     nt_ui_anim.c
     nt_ui_anim.h
+    nt_ui_state.c
+    nt_ui_state.h
+    nt_ui_scroll.c
+    nt_ui_scroll.h
     nt_ui_button.c
     nt_ui_button.h
     nt_ui_checkbox.c
     nt_ui_checkbox.h
+    nt_ui_slider.c
+    nt_ui_slider.h
+    nt_ui_progress.c
+    nt_ui_progress.h
     nt_ui_debug_hit_zones.c
     nt_ui_debug_hit_zones.h
     nt_ui_inspector.c

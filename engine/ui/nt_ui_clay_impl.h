@@ -7,6 +7,7 @@
  * defined inside #ifdef CLAY_IMPLEMENTATION in clay.h. */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "clay.h"
@@ -51,6 +52,9 @@ nt_ui_context_t *nt_ui_internal_get_inframe_ctx(void);
 
 // #region inspector emit-layout entry
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx);
+/* "UI memory" sidebar line — state-pool occupancy + anim collisions (lives in
+ * nt_ui_inspector.c so the snprintf + state getters stay out of the Clay TU). */
+const char *nt_ui_internal_format_mem_line(const nt_ui_context_t *ctx, char *buf, size_t buf_size);
 /* Walker calls this AFTER consuming frozen_cmds so the inspector string rings
  * can be reused by the next ctx. No-op when this ctx didn't claim them. */
 void nt_ui_internal_inspector_strings_release(const nt_ui_context_t *ctx);

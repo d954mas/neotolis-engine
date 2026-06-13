@@ -612,6 +612,154 @@ static void test_multitouch_secondary_finger_captures_when_primary_idle(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
 }
 
+/* ---- Disabled widget blocks input to widgets behind it (modal-overlay correctness) ----
+ * A disabled widget A calls nt_ui_block_pointer instead of step. It must win topmost-z hot
+ * arbitration over an OVERLAPPING enabled widget B underneath, so B never hovers/clicks and A
+ * itself never clicks. The pointer can't leak through the disabled overlay. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_disabled_widget_blocks_input_behind(void) {
+    /* A and B occupy the SAME bbox (full overlap). B declared FIRST (behind), A SECOND (front). */
+    const float ox = BTN_X;
+    const float oy = BTN_Y;
+    const float cx = ox + (BTN_W * 0.5F);
+    const float cy = oy + (BTN_H * 0.5F);
+
+    /* Frame 1: declare both. B steps (enabled). A blocks (disabled). Both register for next frame. */
+    nt_pointer_t f1 = make_pointer(cx, cy, false, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("behindB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("behindB"));
+    }
+    CLAY({.id = CLAY_ID("frontA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        nt_ui_block_pointer(s_fx.ctx, nt_ui_id("frontA"), NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: press inside the overlap. A (front) is the hot widget; B must see nothing. */
+    nt_pointer_t f2 = make_pointer(cx, cy, true, true, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("behindB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_interaction_t inB = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("behindB"));
+    CLAY({.id = CLAY_ID("frontA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_block_pointer(s_fx.ctx, nt_ui_id("frontA"), NULL);
+    /* A wins front-most arbitration; the disabled overlay swallows the pointer. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("frontA"), nt_ui_pointer_hot(s_fx.ctx, 0).id);
+    nt_ui_end(s_fx.ctx);
+    /* B got no hover, no press, no capture, no click — the leak is plugged. */
+    TEST_ASSERT_FALSE(inB.hovered);
+    TEST_ASSERT_FALSE(inB.pressed);
+    TEST_ASSERT_FALSE(inB.pressed_now);
+    TEST_ASSERT_FALSE(inB.clicked);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+
+    /* Frame 3: release inside. A never clicks (inert), B still blocked → no click leak. */
+    nt_pointer_t f3 = make_pointer(cx, cy, false, false, true);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    CLAY({.id = CLAY_ID("behindB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_interaction_t inB3 = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("behindB"));
+    CLAY({.id = CLAY_ID("frontA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ox, .y = oy}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_block_pointer(s_fx.ctx, nt_ui_id("frontA"), NULL);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(inB3.clicked);
+    TEST_ASSERT_FALSE(inB3.hovered);
+}
+
+/* ---- press -> drag OFF -> drag BACK -> release inside = clicked (button) ----
+ * Capture survives the off-widget excursion; the release lands over the widget so it clicks. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_press_drag_off_then_back_clicks(void) {
+    const float far_x = BTN_X + BTN_W + 200.0F; /* well outside the bbox */
+    const float far_y = BTN_Y + BTN_H + 200.0F;
+
+    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&f1);
+
+    /* Frame 2: press inside -> capture begins. */
+    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_ui_interaction_t in2 = query_btn_frame(&f2);
+    TEST_ASSERT_TRUE(in2.pressed_now);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+
+    /* Frame 3: drag OFF the widget, still held. Capture persists, hovered false, no click. */
+    nt_pointer_t f3 = make_pointer(far_x, far_y, true, false, false);
+    nt_ui_interaction_t in3 = query_btn_frame(&f3);
+    TEST_ASSERT_TRUE(in3.pressed);
+    TEST_ASSERT_FALSE(in3.hovered);
+    TEST_ASSERT_FALSE(in3.clicked);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+
+    /* Frame 4: drag BACK over the widget, still held. Hover returns, still no click yet. */
+    nt_pointer_t f4 = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_ui_interaction_t in4 = query_btn_frame(&f4);
+    TEST_ASSERT_TRUE(in4.pressed);
+    TEST_ASSERT_TRUE(in4.hovered);
+    TEST_ASSERT_FALSE(in4.clicked);
+
+    /* Frame 5: release INSIDE -> clicked (the round-trip excursion did not cancel). */
+    nt_pointer_t f5 = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    nt_ui_interaction_t in5 = query_btn_frame(&f5);
+    TEST_ASSERT_TRUE(in5.clicked);
+    TEST_ASSERT_TRUE(in5.released_now);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+}
+
+/* ---- two fingers press two DIFFERENT widgets same frame -> independent captures, both click ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_multitouch_two_widgets_independent_capture(void) {
+    /* A and B are non-overlapping so each finger hits exactly one. */
+    const float a_x = BTN_X;
+    const float a_y = BTN_Y;
+    const float a_cx = a_x + (BTN_W * 0.5F);
+    const float a_cy = a_y + (BTN_H * 0.5F);
+    const float b_x = BTN_X + BTN_W + 80.0F;
+    const float b_y = BTN_Y;
+    const float b_cx = b_x + (BTN_W * 0.5F);
+    const float b_cy = b_y + (BTN_H * 0.5F);
+
+    /* Frame 1: declare + step both so they register for next-frame arbitration. */
+    nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
+    const nt_pointer_t f1[2] = {idle, idle};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f1, 2);
+    CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    }
+    CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: finger 0 presses A, finger 1 presses B — SAME frame. Each captures its own widget. */
+    nt_pointer_t f0_press = make_pointer(a_cx, a_cy, true, true, false);
+    nt_pointer_t f1_press = make_pointer(b_cx, b_cy, true, true, false);
+    const nt_pointer_t f2[2] = {f0_press, f1_press};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f2, 2);
+    CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_interaction_t inA = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_interaction_t inB = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(inA.pressed_now);
+    TEST_ASSERT_TRUE(inB.pressed_now);
+    /* Independent captures: finger 0 -> A, finger 1 -> B. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btnA"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btnB"), nt_ui_test_capture_active_id(s_fx.ctx, 1));
+
+    /* Frame 3: both release over their own widget -> both click, both captures cleared. */
+    nt_pointer_t f0_rel = make_pointer(a_cx, a_cy, false, false, true);
+    nt_pointer_t f1_rel = make_pointer(b_cx, b_cy, false, false, true);
+    const nt_pointer_t f3[2] = {f0_rel, f1_rel};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, f3, 2);
+    CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_interaction_t inA_rel = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
+    nt_ui_interaction_t inB_rel = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(inA_rel.clicked);
+    TEST_ASSERT_TRUE(inB_rel.clicked);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 1));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_interaction_click_on_release_within_bounds);
@@ -629,5 +777,8 @@ int main(void) {
     RUN_TEST(test_query_outside_frame_returns_prev_frame_state);
     RUN_TEST(test_multitouch_first_finger_wins_capture);
     RUN_TEST(test_multitouch_secondary_finger_captures_when_primary_idle);
+    RUN_TEST(test_disabled_widget_blocks_input_behind);
+    RUN_TEST(test_press_drag_off_then_back_clicks);
+    RUN_TEST(test_multitouch_two_widgets_independent_capture);
     return UNITY_END();
 }

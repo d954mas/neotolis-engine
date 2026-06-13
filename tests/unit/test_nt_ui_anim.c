@@ -119,7 +119,7 @@ static void test_anim_open_address_coexists(void) {
     TEST_ASSERT_TRUE(float_near(r3->scale_x, 1.0F, 1e-6F));
 }
 
-/* All NT_UI_ANIM_PROBE_MAX consecutive slots full with other ids → evict tail. */
+/* All NT_UI_ANIM_PROBE_MAX consecutive slots full with other ids → evict a stale slot. */
 static void test_anim_evicts_when_probes_exhausted(void) {
     s_fx.ctx->frame_dt = 1.0F / 60.0F;
     nt_ui_anim_target_t t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
@@ -128,12 +128,52 @@ static void test_anim_evicts_when_probes_exhausted(void) {
         const uint32_t id = 1U + (k * NT_UI_ANIM_SLOTS);
         (void)nt_ui_anim(s_fx.ctx, id, &t, 0.0F, 0.0F);
     }
-    /* New id hashing to same base: all probes occupied → evict the tail slot. */
+    /* New id hashing to same base: all probes occupied → evict a slot, take it over. */
     const uint32_t bumped = 1U + (NT_UI_ANIM_PROBE_MAX * NT_UI_ANIM_SLOTS);
     nt_ui_anim_target_t t_new = {.scale_x = 0.25F, .scale_y = 0.25F, .scale_z = 1.0F, .opacity = 1.0F};
     const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, bumped, &t_new, 10.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(bumped, r->id);
     TEST_ASSERT_TRUE(float_near(r->scale_x, 0.25F, 1e-6F));
+}
+
+/* ---- Test 5b: probe-exhaust eviction picks the STALEST slot (oldest last_touch),
+ *      not the one touched this frame — a slot still in use must not be bled. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_anim_eviction_spares_fresh_slot(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    nt_ui_anim_target_t t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
+
+    /* Frame N: fill all PROBE_MAX slots at one base (all stamped tick = current_generation). */
+    const uint32_t base_id = 1U;
+    for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
+        const uint32_t id = base_id + (k * NT_UI_ANIM_SLOTS);
+        (void)nt_ui_anim(s_fx.ctx, id, &t, 0.0F, 0.0F);
+    }
+
+    /* Frame N+1: advance the per-frame tick (begin/end bump it; set it directly here). */
+    s_fx.ctx->current_generation++;
+
+    /* Re-touch ONLY the first slot's id this frame — it is now the freshest. Drive its
+     * scale to a recognizable value so a later bleed would be detectable. */
+    const uint32_t fresh_id = base_id;
+    nt_ui_anim_target_t fresh_t = {.scale_x = 0.5F, .scale_y = 0.5F, .scale_z = 1.0F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *fresh = nt_ui_anim(s_fx.ctx, fresh_id, &fresh_t, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(fresh_id, fresh->id);
+    TEST_ASSERT_TRUE(float_near(fresh->scale_x, 0.5F, 1e-6F));
+
+    /* A colliding new id arrives: all probes occupied -> must evict a STALE slot, never
+     * the fresh one. fresh_id keeps its id + value; the new id lands on a different slot. */
+    const uint32_t bumped = base_id + (NT_UI_ANIM_PROBE_MAX * NT_UI_ANIM_SLOTS);
+    nt_ui_anim_target_t t_new = {.scale_x = 0.9F, .scale_y = 0.9F, .scale_z = 1.0F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, bumped, &t_new, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(bumped, r->id);
+    TEST_ASSERT_TRUE_MESSAGE(r != fresh, "eviction must not reuse the slot touched this frame");
+
+    /* fresh_id's slot survived untouched (its id + eased value intact). */
+    const nt_ui_anim_interaction_t *after = nt_ui_anim(s_fx.ctx, fresh_id, &fresh_t, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_PTR(fresh, after);
+    TEST_ASSERT_EQUAL_UINT32(fresh_id, after->id);
+    TEST_ASSERT_TRUE(float_near(after->scale_x, 0.5F, 1e-6F));
 }
 
 /* ---- Test 6: 3D rotation_y eased convergence (single-axis dodges gimbal lock per nt_ui_anim.h doc). ---- */
@@ -238,6 +278,7 @@ int main(void) {
     RUN_TEST(test_anim_first_touch_no_flash);
     RUN_TEST(test_anim_open_address_coexists);
     RUN_TEST(test_anim_evicts_when_probes_exhausted);
+    RUN_TEST(test_anim_eviction_spares_fresh_slot);
     RUN_TEST(test_anim_rot_y_eases_to_target);
     RUN_TEST(test_anim_z_axis_fields_snap);
     RUN_TEST(test_anim_value_t_eases_when_value_speed_positive);

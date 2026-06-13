@@ -49,30 +49,13 @@ if(EMSCRIPTEN)
     endif()
 endif()
 
-# Derive preset name from build type + platform for output directory layout
-if(EMSCRIPTEN)
-    if(NT_WASM_ANALYSIS)
-        set(_nt_wasm_tier "analysis")
-    elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(_nt_wasm_tier "release")
-    else()
-        set(_nt_wasm_tier "debug")
-    endif()
-
-    set(_nt_wasm_mode_suffix "")
-    if(NT_WASM_ENABLE_SIMD)
-        set(_nt_wasm_mode_suffix "-simd")
-    elseif(NT_WASM_SIMD_WASM_PATH)
-        set(_nt_wasm_mode_suffix "-paired")
-    endif()
-
-    set(NT_PRESET_NAME "wasm-${_nt_wasm_tier}${_nt_wasm_mode_suffix}")
-else()
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(NT_PRESET_NAME "native-release")
-    else()
-        set(NT_PRESET_NAME "native-debug")
-    endif()
+# Output-layout name (build/engine|tests|examples/<name>) follows the BINARY DIR name,
+# so every configuration is isolated by construction — two Debug variants (e.g. the CI
+# NT_UI_DEBUG_TOOLS=OFF mirror) can never clobber each other's artifacts. All presets
+# configure into build/_cmake/<preset>, so preset users see identical paths as before.
+# Overridable (-DNT_PRESET_NAME=...) for non-standard binary dirs.
+if(NOT NT_PRESET_NAME)
+    get_filename_component(NT_PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
 endif()
 
 # Vendored dependencies (committed in deps/, always available)

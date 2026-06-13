@@ -31,6 +31,8 @@ typedef struct {
     float tint_t;  /* 0..1 (game maps to a color) */
     float value_t; /* 0..1 generic scalar eased at value_speed (overlay-pop, thumb-slide) */
     bool valid;
+    uint8_t _pad;
+    uint16_t last_touch; /* low 16 bits of the frame tick; probe-exhaust evicts the stalest slot */
 } nt_ui_anim_interaction_t;
 _Static_assert(sizeof(nt_ui_anim_interaction_t) == 56, "nt_ui_anim_interaction_t slot size (NT_UI_ANIM_SLOTS budget); update if fields change");
 

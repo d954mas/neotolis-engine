@@ -13,6 +13,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
+#include "ui/nt_ui_state.h"
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
@@ -94,6 +95,27 @@ static inline Clay_Color nt_ui_unpack_tint(uint32_t packed) { return (packed == 
  * else `fallback`. Keyed on atlas.id (region 0 is a valid index, so it can't double as "unset"). */
 static inline nt_atlas_region_ref_t nt_ui_ref_or(nt_atlas_region_ref_t ref, nt_atlas_region_ref_t fallback) { return (ref.atlas.id != 0U) ? ref : fallback; }
 
+/* Shared scalar clamps for the widget TUs (fill/progress/scroll/slider). */
+static inline float nt_ui_clampf(float v, float lo, float hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
+static inline int nt_ui_clampi(int v, int lo, int hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     nt_ui_baked_xform_t bx = {
@@ -107,6 +129,22 @@ typedef struct {
     uint32_t id;
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
+
+/* Wheel-routing candidate: every scroll container/pane declared this frame appends one. The bbox is
+ * NOT stored — nt_ui_end re-fetches it from the just-solved layout so the resolve and next frame's
+ * consume read the same layout snapshot. Ownership is decided purely by bbox containment; per-axis
+ * gating lives in the consume step. The winner per pointer lands in wheel_owner[]. */
+typedef struct {
+    uint32_t id;
+    uint16_t depth; /* scroll-nesting depth; deeper (inner) wins */
+} nt_ui_wheel_candidate_t;
+
+/* Deep scroll nesting is rare; a small cap keeps the list in BSS (no heap in hot path).
+ * The DEBUG_TOOLS inspector registers 2 of these (tree + selection panes), so the effective
+ * game budget is this minus 2 when the inspector is active. */
+#ifndef NT_UI_WHEEL_CANDIDATES
+#define NT_UI_WHEEL_CANDIDATES 24
+#endif
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
@@ -125,6 +163,15 @@ struct nt_ui_context {
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
+    /* Exclusive wheel routing (innermost-wins): the scroll id allowed to consume this pointer's wheel
+     * this frame (0 = free). Resolved at the end of the previous frame from the candidate list below,
+     * so it carries the same 1-frame lag as every prev-frame bbox hit-test. Frame 1: all 0. */
+    uint32_t wheel_owner[NT_INPUT_MAX_POINTERS];
+    /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
+     * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
+    nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
+    uint32_t wheel_candidate_count;
+    uint16_t wheel_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
@@ -202,6 +249,10 @@ struct nt_ui_context {
     /* Monotonic; nonzero delta across frames means raise NT_UI_ANIM_SLOTS. */
     uint32_t anim_collision_count;
 
+    /* Generic per-id retained-state pool. Arena auto-sizes via sizeof(struct nt_ui_context);
+     * create_context's memset zero-inits it (same as anim[]). */
+    nt_ui_state_cell_t state_pool[NT_UI_STATE_SLOTS];
+
 #if NT_UI_DEBUG_TOOLS
     /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.
      * Only the inspector-overlay path needs it, so gated under DEBUG_TOOLS. */
@@ -225,6 +276,8 @@ struct nt_ui_context {
     uint32_t inspector_selected_id;
     /* Pointer inside sidebar footprint — gates step_interaction to zeroed return. */
     bool inspector_pointer_consumed;
+    /* Prev-frame tree truncation state — warn only on the OFF->ON edge, not every frame. */
+    bool inspector_was_truncated;
 
     /* Arena-allocated, cap = max_elements (user can't collapse more nodes than exist). */
     uint32_t *inspector_collapsed_ids;
@@ -325,5 +378,14 @@ void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const f
 
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
+
+/* Scroll offset for an engine-internal clip pane (inspector) keyed by Clay element id; drives
+ * the custom scroll integrator off prev-frame dims + wheel. Feed the result to clip.childOffset.
+ * `tag` keeps each pane's state cell distinct (NT_UI_STATE_TAG). */
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y);
+
+/* End-of-frame wheel-owner resolve: picks, per pointer, the winning scroll candidate (max depth,
+ * then min bbox area, then latest declaration) into ctx->wheel_owner[] for NEXT frame's consume. */
+void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
 
 #endif /* NT_UI_INTERNAL_H */

@@ -31,7 +31,7 @@
 #define INERTIA_DECAY 0.95F
 #define ZOOM_MIN 2.5F
 #define ZOOM_MAX 9.0F
-#define ZOOM_SPEED 0.01F
+#define ZOOM_SPEED 0.16F /* per wheel notch (wheel_dy is notch-normalized: 1.0/detent) */
 #define FOV_DEG 70.0F
 #define VEL_THRESHOLD 0.0001F
 
