@@ -157,9 +157,11 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     // #endregion
     // #region panel floating decl (stays OPEN until nt_ui_modal_end)
     const nt_ui_element_data_t *panel_data = nt_ui_make_element_data_xform(style->layer, NULL, &panel_xf, t);
+    /* Center the panel: its center attaches to the root's center. The transition transform (panel_xf)
+     * composes on top of this placement (centering positions, the transform animates around it). */
     Clay_ElementDeclaration panel_decl = {
         .id = (Clay_ElementId){.id = id},
-        .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = panel_z},
+        .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .attachPoints = {.element = CLAY_ATTACH_POINT_CENTER_CENTER, .parent = CLAY_ATTACH_POINT_CENTER_CENTER}, .zIndex = panel_z},
         .userData = (void *)panel_data,
     };
     nt_ui_clay_priv_open_element();
