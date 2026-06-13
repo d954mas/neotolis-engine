@@ -20,6 +20,11 @@ typedef struct nt_devapi_slot {
     void *user_data;
 } nt_devapi_slot;
 
+/* Release the dispatch-core reusable response buffer (defined in nt_devapi.c).
+   Called from nt_devapi_shutdown so init -> shutdown -> init returns to a pristine
+   state — the statics are file-local to nt_devapi.c, hence this teardown hook. */
+void nt_devapi_resp_reset(void);
+
 /* Registry-table accessors (used by Plan 02 dispatch + Plan 03 discovery). */
 int nt_devapi_registry_count(void);
 const nt_devapi_slot *nt_devapi_registry_slot(int index);

@@ -24,7 +24,9 @@ static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
         cJSON_AddStringToObject(obj, "frame_behavior", slot->frame_behavior);
         cJSON_AddStringToObject(obj, "side_effects", slot->side_effects);
     }
-    cJSON_AddItemToArray(arr, obj);
+    cJSON_bool added = cJSON_AddItemToArray(arr, obj);
+    NT_ASSERT(added);
+    (void)added;
 }
 
 /* D-05 invariant: result is an OBJECT containing a `commands` array — never a
@@ -85,7 +87,11 @@ static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *er
     NT_ASSERT(groups != NULL);
     int n = nt_devapi_group_count();
     for (int i = 0; i < n; i++) {
-        cJSON_AddItemToArray(groups, cJSON_CreateString(nt_devapi_group_name(i)));
+        cJSON *name = cJSON_CreateString(nt_devapi_group_name(i));
+        NT_ASSERT(name != NULL); /* OOM: trap rather than silently drop a group name. */
+        cJSON_bool added = cJSON_AddItemToArray(groups, name);
+        NT_ASSERT(added);
+        (void)added;
     }
     return true;
 }

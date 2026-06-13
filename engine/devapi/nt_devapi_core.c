@@ -55,7 +55,11 @@ static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error 
     NT_ASSERT(modules != NULL);
     int n = nt_devapi_group_count();
     for (int i = 0; i < n; i++) {
-        cJSON_AddItemToArray(modules, cJSON_CreateString(nt_devapi_group_name(i)));
+        cJSON *name = cJSON_CreateString(nt_devapi_group_name(i));
+        NT_ASSERT(name != NULL); /* OOM: trap rather than silently drop a module name. */
+        cJSON_bool added = cJSON_AddItemToArray(modules, name);
+        NT_ASSERT(added);
+        (void)added;
     }
     return true;
 }

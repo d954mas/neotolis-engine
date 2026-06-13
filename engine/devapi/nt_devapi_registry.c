@@ -71,6 +71,7 @@ void nt_devapi_shutdown(void) {
         s_groups[i] = NULL;
     }
     s_group_count = 0;
+    nt_devapi_resp_reset(); /* symmetric teardown of the dispatch-core response buffer. */
     s_initialized = false;
 }
 

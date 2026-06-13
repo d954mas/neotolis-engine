@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -28,12 +29,24 @@ static void resp_reserve(size_t need) {
     }
     size_t cap = s_resp_cap ? s_resp_cap : 256U;
     while (cap < need) {
+        if (cap > SIZE_MAX / 2U) {
+            cap = need; /* geometric growth would wrap size_t — allocate exactly. */
+            break;
+        }
         cap *= 2U;
     }
     char *grown = (char *)realloc(s_resp_buf, cap);
     NT_ASSERT(grown != NULL);
     s_resp_buf = grown;
     s_resp_cap = cap;
+}
+
+/* Release the reusable response buffer. Called from nt_devapi_shutdown so an
+   init -> shutdown -> init cycle returns to a pristine state (no buffer leak). */
+void nt_devapi_resp_reset(void) {
+    free(s_resp_buf);
+    s_resp_buf = NULL;
+    s_resp_cap = 0U;
 }
 
 /* Serialize `tree` into the growing buffer and return it (D-04 lifetime). */
@@ -123,6 +136,20 @@ static cJSON *dispatch_one(const cJSON *req) {
     return entry;
 }
 
+/* D-07: ordered batch, continue-on-error — each request yields its own envelope
+   entry in order; one failure does not abort the loop. */
+static cJSON *dispatch_batch(const cJSON *root) {
+    cJSON *response = cJSON_CreateArray();
+    NT_ASSERT(response != NULL);
+    const cJSON *req = NULL;
+    cJSON_ArrayForEach(req, root) {
+        cJSON_bool added = cJSON_AddItemToArray(response, dispatch_one(req));
+        NT_ASSERT(added);
+        (void)added;
+    }
+    return response;
+}
+
 const char *nt_devapi_submit(const char *line) {
     cJSON *root = cJSON_Parse(line);
     if (root == NULL) {
@@ -133,17 +160,7 @@ const char *nt_devapi_submit(const char *line) {
         return out;
     }
 
-    cJSON *response;
-    if (cJSON_IsArray(root)) {
-        /* D-07: ordered batch, continue-on-error — one entry's failure does not
-           abort the loop; each request yields its own envelope entry in order. */
-        response = cJSON_CreateArray();
-        NT_ASSERT(response != NULL);
-        const cJSON *req = NULL;
-        cJSON_ArrayForEach(req, root) { cJSON_AddItemToArray(response, dispatch_one(req)); }
-    } else {
-        response = dispatch_one(root);
-    }
+    cJSON *response = cJSON_IsArray(root) ? dispatch_batch(root) : dispatch_one(root);
 
     const char *out = resp_serialize(response);
     cJSON_Delete(response);
