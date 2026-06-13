@@ -1435,21 +1435,23 @@ static void declare_stage(nt_ui_context_t *ctx) {
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    /* Prev-frame modal state (cached after nt_ui_end below): gameplay/global hotkeys yield to an open
-     * modal so Esc closes the top modal first and the palette/inspector keys don't fire underneath it. */
-    static bool s_modal_was_active;
     nt_stats_frame_begin();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
 
+    /* Gameplay/global hotkeys yield to an open modal so Esc closes the top modal first and the
+     * palette/inspector keys don't fire underneath it. nt_ui_modal_active reports last frame's
+     * presence (polled here before this frame's nt_ui_begin) -- the inherent IM 1-frame gate. */
+    const bool modal_was_active = nt_ui_modal_active(s_ctx);
+
 #ifndef NT_PLATFORM_WEB
-    if (!s_modal_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    if (!modal_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif
 
-    if (!s_modal_was_active) {
+    if (!modal_was_active) {
         if (nt_input_key_is_pressed(NT_KEY_T)) {
             g_current = (g_current == &g_dark) ? &g_light : &g_dark;
             nt_log_info("ui_showcase: palette -> %s", g_current->name);
@@ -1583,7 +1585,6 @@ static void frame(void) {
         }
 
         nt_ui_end(s_ctx);
-        s_modal_was_active = nt_ui_modal_active(s_ctx);
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
