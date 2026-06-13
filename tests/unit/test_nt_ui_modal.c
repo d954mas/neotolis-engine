@@ -277,14 +277,19 @@ static void test_modal_wants_pointer_while_open(void) {
 /* ---- CR-01 regression (option F): a button inside the modal body must be clickable. The fix DROPS
  *      the panel self-occluder that used to tie the body widgets on zIndex and steal their clicks.
  *      Needs 3 frames: F1 registers button, F2 press, F3 release-inside -> clicked. ---- */
-/* The panel floats attached-to-root with no offset, so its top-left is (0,0). The button is a NORMAL
- * (non-floating) child of the panel -> it shares the panel's floating tree root and inherits the
+/* The panel floats attached-to-root CENTER_CENTER, so it sits at the viewport center. The button is a
+ * NORMAL (non-floating) child of the panel -> it shares the panel's floating tree root and inherits the
  * panel's uniform zindex; with no self-occluder it's the sole interactive record and wins. With the
- * panel shrink-wrapping the button, the button sits at the panel origin (0,0). */
+ * panel shrink-wrapping the button, the panel == the button bbox, both centered in the 800x600 frame. */
+#define MODAL_VIEW_W 800.0F
+#define MODAL_VIEW_H 600.0F
 #define MODAL_BTN_W 200.0F
 #define MODAL_BTN_H 120.0F
-#define MODAL_BTN_CX (MODAL_BTN_W * 0.5F)
-#define MODAL_BTN_CY (MODAL_BTN_H * 0.5F)
+/* Centered panel top-left + the button (== panel) center. */
+#define MODAL_BTN_X0 ((MODAL_VIEW_W - MODAL_BTN_W) * 0.5F)
+#define MODAL_BTN_Y0 ((MODAL_VIEW_H - MODAL_BTN_H) * 0.5F)
+#define MODAL_BTN_CX (MODAL_BTN_X0 + (MODAL_BTN_W * 0.5F))
+#define MODAL_BTN_CY (MODAL_BTN_Y0 + (MODAL_BTN_H * 0.5F))
 
 static nt_pointer_t modal_pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
     nt_pointer_t p = {0};
@@ -353,12 +358,12 @@ static void test_modal_backdrop_close_pad(void) {
     st.backdrop_close_pad = 16;
     st.flags = (uint8_t)(NT_UI_MODAL_CLOSE_ON_BACKDROP | NT_UI_MODAL_TRANSITION_FADE);
 
-    /* Click 8px to the right of the panel's right edge (210, 60): outside the bbox but inside the 16px
+    /* Click 8px to the right of the (centered) panel's right edge: outside the bbox but inside the 16px
      * pad -> close suppressed. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_NONE, (int)modal_backdrop_click_reason(&st, MODAL_BTN_W + 8.0F, MODAL_BTN_CY));
+    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_NONE, (int)modal_backdrop_click_reason(&st, MODAL_BTN_X0 + MODAL_BTN_W + 8.0F, MODAL_BTN_CY));
 
-    /* Click well beyond panel+pad (400, 300): clearly on the backdrop -> CLOSE_BACKDROP. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_BACKDROP, (int)modal_backdrop_click_reason(&st, 400.0F, 300.0F));
+    /* Click in a far corner (40, 40): clearly off panel+pad -> CLOSE_BACKDROP. */
+    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_BACKDROP, (int)modal_backdrop_click_reason(&st, 40.0F, 40.0F));
 }
 
 /* ---- D-60 closed-modal regression: a FULLY-CLOSED modal (open=false, settled t=0) called every
