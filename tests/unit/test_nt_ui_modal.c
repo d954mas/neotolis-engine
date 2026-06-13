@@ -205,6 +205,37 @@ static void test_modal_tween_clamp_and_transition(void) {
     TEST_ASSERT_TRUE(saw_fully_closed);
 }
 
+/* ---- Entrance animation: a modal declared already-open on its very FIRST frame must ease from 0
+ *      (scale-pop/fade), not snap to 1. With a finite ease_speed the first visible frame's t is well
+ *      below 1, and after several frames it settles near 1. ---- */
+static void test_modal_open_entrance_eases_from_zero(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 8.0F; /* finite: entrance must animate, not snap */
+    nt_ui_modal_result_t r;
+
+    /* Frame 1 (first ever sight, open): t starts at ~0 and has only one dt of ease -> well under 1. */
+    modal_frame(MODAL_A, &st, true, &r);
+    TEST_ASSERT_TRUE(r.t < 0.5F);  /* RED if the fresh slot snapped straight to 1 */
+    TEST_ASSERT_TRUE(r.t >= 0.0F); /* eased up from 0, not negative */
+
+    /* After many frames it settles near 1. */
+    for (int i = 0; i < 120; ++i) {
+        modal_frame(MODAL_A, &st, true, &r);
+    }
+    TEST_ASSERT_TRUE(float_near(r.t, 1.0F, 0.02F));
+}
+
+/* ---- ease_speed=0 (instant) entrance still snaps to 1 on the first frame: the prime-then-snap path
+ *      must not regress the documented instant-open contract. ---- */
+static void test_modal_open_instant_snaps(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_modal_result_t r;
+    modal_frame(MODAL_A, &st, true, &r);
+    TEST_ASSERT_TRUE(float_near(r.t, 1.0F, 0.0001F));
+    TEST_ASSERT_TRUE(r.visible);
+}
+
 /* ---- High-level wrapper: returns true while animating (open OR closing), clears *p_open on
  *      close_requested, returns false once fully closed. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -504,6 +535,8 @@ int main(void) {
     RUN_TEST(test_modal_esc_top_only);
     RUN_TEST(test_modal_esc_requires_flag);
     RUN_TEST(test_modal_tween_clamp_and_transition);
+    RUN_TEST(test_modal_open_entrance_eases_from_zero);
+    RUN_TEST(test_modal_open_instant_snaps);
     RUN_TEST(test_modal_wrapper_contract);
     RUN_TEST(test_modal_wants_pointer_while_open);
     RUN_TEST(test_modal_body_button_clickable);

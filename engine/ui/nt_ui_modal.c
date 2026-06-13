@@ -23,8 +23,21 @@ const nt_ui_widget_def_t NT_UI_MODAL_DEF = {
 #define NT_UI_MODAL_BACKDROP_SALT 0x4D0BD000U
 static inline uint32_t modal_backdrop_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_MODAL_BACKDROP_SALT); }
 
-/* Below this eased t the modal's alpha rounds to 0 (8-bit) — treat as fully closed.
- * Locks Open Question 3: epsilon = 1/256 so the modal disappears when its alpha quantizes out. */
+/* True when this id has no live anim slot yet (read-only probe — does NOT touch/snap the slot;
+ * a bare nt_ui_anim call would create it). Mirrors nt_ui_anim's open-addressed probe window. */
+static bool modal_anim_slot_absent(const nt_ui_context_t *ctx, uint32_t id) {
+    const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
+    for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
+        const nt_ui_anim_interaction_t *cand = &ctx->anim[(base + k) & (uint32_t)(NT_UI_ANIM_SLOTS - 1)];
+        if (cand->valid && cand->id == id) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Below this eased t the modal's alpha rounds to 0 (8-bit) — treat as fully closed
+ * (epsilon = 1/256 so the modal disappears exactly when its alpha quantizes out). */
 #define NT_UI_MODAL_EPSILON (1.0F / 256.0F)
 
 /* Per-depth z-band: each modal sits panel_z = STRIDE*(depth+1), backdrop one below. */
@@ -60,12 +73,11 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     NT_ASSERT(isfinite(style->scale_start) && style->scale_start > 0.0F && "nt_ui_modal_begin: scale_start must be finite > 0 (use defaults, never {0})");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
     NT_ASSERT(isfinite(style->slide_offset) && "nt_ui_modal_begin: slide_offset must be finite");
-    /* MODAL-05 overflow: assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
+    /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_modal_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
     // #region stack push + z-band
     const uint8_t depth = ctx->active_modal_depth; /* 0-based depth of THIS modal */
-    ctx->active_modal_id[depth] = id;
     ++ctx->active_modal_depth;
     const int16_t panel_z = (int16_t)(NT_UI_MODAL_ZBAND_STRIDE * (depth + 1));
     const int16_t backdrop_z = (int16_t)(panel_z - 1);
@@ -88,6 +100,14 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
         .tint_t = 0.0F,
         .value_t = open ? 1.0F : 0.0F,
     };
+    /* Entrance must ease from 0: nt_ui_anim snaps a fresh slot to its target (no-flash convention),
+     * so a first-frame already-open modal would otherwise pop in with no animation. Seed the slot at
+     * t=0 first, then the real call eases up. ease_speed=0 still snaps (prime->0, then ->target). */
+    if (open && modal_anim_slot_absent(ctx, id)) {
+        nt_ui_anim_target_t seed = tgt;
+        seed.value_t = 0.0F;
+        (void)nt_ui_anim(ctx, id, &seed, 0.0F, 0.0F);
+    }
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t; /* eased 0..1 */
     // #endregion
@@ -121,12 +141,13 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
             ctx->modal_max_depth_cur = ctx->active_modal_depth;
             ctx->modal_top_id_cur = id;
         }
-        /* Backdrop: full-viewport floating rect at backdrop_z; its alpha is t*backdrop_alpha so it
-         * fades with the modal. The element opacity rides t too (composes onto children, of which it has none). */
+        /* Backdrop: full-viewport floating rect at backdrop_z. Fade rides t exactly once, in the
+         * color alpha (t*backdrop_alpha); element opacity stays 1 (it has no children to compose,
+         * and the walker folds opacity into the rect's own alpha — folding t there too dims t²). */
         Clay_Color backdrop_col = nt_ui_unpack_abgr(style->backdrop_color);
         backdrop_col.a = backdrop_col.a * t * style->backdrop_alpha;
         const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
-        const nt_ui_element_data_t *backdrop_data = nt_ui_make_element_data_xform(style->layer, NULL, &id_xf, t);
+        const nt_ui_element_data_t *backdrop_data = nt_ui_make_element_data_xform(style->layer, NULL, &id_xf, 1.0F);
         CLAY({
             .id = (Clay_ElementId){.id = backdrop_id},
             .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = backdrop_z},
@@ -134,20 +155,20 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
             .backgroundColor = backdrop_col,
             .userData = (void *)backdrop_data,
         }) {}
-        /* D-60-03 input-gate: the backdrop wins next-frame topmost-z over base content, so the world
-         * auto-gates (wants_pointer true) and base UI is blocked. Stays active while t>0 (D-60-11). */
-        nt_ui_block_pointer(ctx, backdrop_id, NULL);
 
-        /* Close-source scan (TOP modal only, D-60-08). Top = the deepest modal resolved LAST frame
-         * (1-frame IM lag): same-frame nesting can't be known at this begin's return. */
+        /* Close-source scan (TOP modal only). Top = the deepest modal resolved LAST frame (1-frame IM
+         * lag): same-frame nesting can't be known at this begin's return. */
         const bool is_top = (ctx->modal_top_id_prev == id);
         if (is_top && (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             reason = NT_UI_MODAL_CLOSE_ESC;
         }
+        /* Input-gate: the backdrop wins next-frame topmost-z over base content, so the world auto-gates
+         * (wants_pointer true) and base UI is blocked. CLOSE_ON_BACKDROP steps it (one registry record
+         * that both gates AND sources the close click); otherwise it stays an inert block_pointer. */
         if (is_top && (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U) {
-            /* step the backdrop (registry record + base-UI gate + click source), but the close DECISION is
-             * the padded panel bbox: a backdrop click closes ONLY when it lands clearly OUTSIDE the panel
-             * grown by backdrop_close_pad (so near-panel taps and empty-panel-bg clicks don't mis-close). */
+            /* The close DECISION is the padded panel bbox: a backdrop click closes ONLY when it lands
+             * clearly OUTSIDE the panel grown by backdrop_close_pad (so near-panel taps and empty
+             * panel-bg clicks don't mis-close). */
             const nt_ui_interaction_t bd = nt_ui_step_interaction(ctx, backdrop_id);
             if (bd.clicked) {
                 const int16_t pad = style->backdrop_close_pad;
@@ -156,6 +177,8 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
                     reason = NT_UI_MODAL_CLOSE_BACKDROP;
                 }
             }
+        } else {
+            nt_ui_block_pointer(ctx, backdrop_id, NULL);
         }
     }
     // #endregion
@@ -192,7 +215,7 @@ void nt_ui_modal_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_modal_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_modal_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(ctx->active_modal_depth > 0U && "nt_ui_modal_end: unbalanced begin/end (stack underflow)");
-    /* No panel self-occluder: it tied the body widgets on z and stole their clicks (CR-01). Empty-panel-bg
+    /* No panel self-occluder: it tied the body widgets on z and stole their clicks. Empty panel-bg
      * clicks are kept from mis-closing by the padded-panel-bbox guard in modal_begin's close-on-backdrop. */
     nt_ui_clay_priv_close_element(); /* close the panel floating element */
     --ctx->active_modal_depth;
@@ -202,7 +225,7 @@ bool nt_ui_modal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *s
     NT_ASSERT(p_open != NULL && "nt_ui_modal: p_open must be non-NULL");
     const nt_ui_modal_result_t r = nt_ui_modal_begin(ctx, id, style, *p_open);
     if (r.close_requested) {
-        *p_open = false; /* signal -> game's bool clears; t decays over the next frames (D-60-11) */
+        *p_open = false; /* signal -> game's bool clears; t decays over the next frames */
     }
     if (!r.visible) {
         nt_ui_modal_end(ctx); /* fully closed: balance the stack, caller skips the body */

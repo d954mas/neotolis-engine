@@ -176,11 +176,6 @@ struct nt_ui_context {
     /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
      * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
     nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
-    /* Active-modal stack: push on nt_ui_modal_begin, pop on nt_ui_modal_end. Drives z-band +
-     * top-only close targeting (D-60-04). 4B-aligned here (after wheel_candidates) so it adds no
-     * padding; the u8 depth counter packs into the u16/u8 cluster below. Rides the create_context
-     * memset zero-init (like anim[]). */
-    uint32_t active_modal_id[NT_UI_MODAL_MAX_DEPTH];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
      * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
      * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
