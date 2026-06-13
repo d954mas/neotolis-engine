@@ -8,11 +8,17 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # engine/CMakeLists.txt subdir-exclusion at NT_DEVAPI_ENABLED=0 (D-10): a release
 # build never compiles engine/devapi, so the dev surface is physically absent.
 # This script is the explicit belt-and-suspenders assertion (D-11): it greps the
-# release WASM for nt_devapi_* symbols and FAILS if any leak through. Per D-11
-# there is NO build-twice / byte-identity baseline — the existing size-tracking CI
-# already catches an accidental leak as a size jump.
+# WASM for nt_devapi_* symbols and FAILS if any leak through. Per D-11 there is NO
+# build-twice / byte-identity baseline — the size-tracking CI catches a leak as a jump.
+#
+# IMPORTANT: nt_devapi_* are INTERNAL symbols — their names live only in the WASM
+# "name" custom section, which a fully-stripped release build discards. Grepping a
+# stripped binary for nt_devapi_* therefore "passes" vacuously regardless of leakage.
+# So this gate (a) runs against a names-retaining preset by default and (b) enforces a
+# POSITIVE CONTROL: it first proves engine nt_* names are visible, and errors out if
+# not — converting a silent false-pass into a loud, actionable failure.
 
-PRESET="${PRESET:-wasm-release}"
+PRESET="${PRESET:-wasm-analysis-paired}"
 
 usage() {
     echo "Usage: devapi-zero-delta.sh [target-name]"
@@ -23,7 +29,9 @@ usage() {
     echo "  target-name   Example target to inspect (default: hello)"
     echo ""
     echo "Environment:"
-    echo "  PRESET        Build preset to inspect (default: wasm-release)"
+    echo "  PRESET        Build preset to inspect (default: wasm-analysis-paired)."
+    echo "                MUST retain symbol names — a stripped release preset makes the"
+    echo "                check vacuous and is rejected by the positive control."
     exit 1
 }
 
@@ -50,7 +58,9 @@ OUTPUT_DIR="$ROOT_DIR/build/examples/$TARGET/$PRESET"
 
 WASM_FILE=""
 if [ -d "$OUTPUT_DIR" ]; then
-    WASM_FILE=$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.wasm' | head -1)
+    # Deterministic pick (index.wasm sorts before index_simd.wasm) — both are the same
+    # engine build, so either proves absence; sort avoids a nondeterministic head -1.
+    WASM_FILE=$(find "$OUTPUT_DIR" -maxdepth 1 -name '*.wasm' | sort | head -1)
 fi
 
 if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
@@ -61,17 +71,28 @@ if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Assertion: zero nt_devapi_* symbols in the release WASM
+# Assertion: zero nt_devapi_* symbols, with a positive control
 # ---------------------------------------------------------------------------
 echo "Zero-delta check: $WASM_FILE ($PRESET)"
 
-if wasm-objdump -x "$WASM_FILE" | grep -q 'nt_devapi_'; then
-    echo "ZERO-DELTA FAIL: nt_devapi_* symbols present in release wasm"
-    echo "  A release build (NT_DEVAPI_ENABLED OFF) must not contain the dev surface."
-    echo "  Offending symbols:"
-    wasm-objdump -x "$WASM_FILE" | grep 'nt_devapi_' || true
+OBJDUMP=$(wasm-objdump -x "$WASM_FILE")
+
+# Positive control: this check only means something if internal symbol names survive
+# in this binary. If NO engine nt_* names are visible, the name section was stripped
+# and a grep for nt_devapi_* is vacuous — fail loudly instead of false-passing.
+if ! printf '%s\n' "$OBJDUMP" | grep -q 'nt_'; then
+    echo "ERROR: no engine nt_* symbols visible in $WASM_FILE — the name section is"
+    echo "  stripped, so a grep for nt_devapi_* would pass vacuously. Inspect a"
+    echo "  names-retaining preset instead (default: PRESET=wasm-analysis-paired)."
     exit 1
 fi
 
-echo "ZERO-DELTA OK: no nt_devapi_* symbols in $TARGET ($PRESET)"
+if printf '%s\n' "$OBJDUMP" | grep -q 'nt_devapi_'; then
+    echo "ZERO-DELTA FAIL: nt_devapi_* symbols present in $PRESET wasm"
+    echo "  A devapi-OFF build must not contain the dev surface. Offending symbols:"
+    printf '%s\n' "$OBJDUMP" | grep 'nt_devapi_' || true
+    exit 1
+fi
+
+echo "ZERO-DELTA OK: engine nt_* present, zero nt_devapi_* in $TARGET ($PRESET)"
 exit 0
