@@ -681,12 +681,14 @@ static void try_bind_resources(void) {
 // #endregion
 
 // #region widget tab render fns (fold the superseded demos' content as tabs)
-/* A labelled button slot: one button + an inline label, themed via the active palette. */
-static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled) {
+/* A labelled button slot: one button + an inline label, themed via the active palette.
+ * rounded=false for atlas-region-bg buttons: a non-zero cornerRadius on the bg IMAGE asserts in the
+ * engine (rounding must be pre-baked into the art); flat colored-rect buttons keep the rounding. */
+static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled, bool rounded) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                                   .cornerRadius = rounded ? CLAY_CORNER_RADIUS(8) : CLAY_CORNER_RADIUS(0)},
         enabled);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     (void)nt_ui_button_end(ctx);
@@ -707,11 +709,11 @@ static void render_labels(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 /* A captioned button cell: a variant title/sub above one button, themed via the palette. */
-static void labelled_button_cell(nt_ui_context_t *ctx, const char *title, const char *sub, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled) {
+static void labelled_button_cell(nt_ui_context_t *ctx, const char *title, const char *sub, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled, bool rounded) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), sub, g_current->caption);
-        button_cell(ctx, id, style, text, enabled);
+        button_cell(ctx, id, style, text, enabled, rounded);
     }
 }
 
@@ -725,12 +727,14 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
         .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}};
 
     CLAY(grid_row) {
-        labelled_button_cell(ctx, "Standard", "idle/hover/pressed/disabled", nt_ui_id("showcase/btn_standard"), g_current->btn_primary, "Primary", true);
-        labelled_button_cell(ctx, "Scale", "hover 1.20 / press 0.80", nt_ui_id("showcase/btn_scale"), g_current->btn_scale, "Boom", true);
-        labelled_button_cell(ctx, "Art swap", "blue idle / green hover / red press", nt_ui_id("showcase/btn_swap"), g_current->btn_swap, "Swap", true);
+        labelled_button_cell(ctx, "Standard", "idle/hover/pressed/disabled", nt_ui_id("showcase/btn_standard"), g_current->btn_primary, "Primary", true, true);
+        labelled_button_cell(ctx, "Scale", "hover 1.20 / press 0.80", nt_ui_id("showcase/btn_scale"), g_current->btn_scale, "Boom", true, true);
+        /* Art-swap bg is an atlas region (depth art) -> IMAGE element; rounding is baked into the art,
+         * so the cell MUST NOT set cornerRadius (a non-zero radius on the bg IMAGE asserts in the engine). */
+        labelled_button_cell(ctx, "Art swap", "blue idle / green hover / red press", nt_ui_id("showcase/btn_swap"), g_current->btn_swap, "Swap", true, false);
     }
     CLAY(grid_row) {
-        labelled_button_cell(ctx, "No-pad", "hit==visual (no touch padding)", nt_ui_id("showcase/btn_nopad"), g_current->btn_nopad, "Tight", true);
+        labelled_button_cell(ctx, "No-pad", "hit==visual (no touch padding)", nt_ui_id("showcase/btn_nopad"), g_current->btn_nopad, "Tight", true, true);
         /* Icon button: bunny child, untinted (its own art color), inside the no-pad style. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Icon", g_current->body);
@@ -745,7 +749,7 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->body);
             (void)nt_ui_button_end(ctx);
         }
-        labelled_button_cell(ctx, "Disabled", "enabled=false short-circuits + dims", nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Locked", false);
+        labelled_button_cell(ctx, "Disabled", "enabled=false short-circuits + dims", nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Locked", false, true);
     }
 }
 
@@ -1074,7 +1078,7 @@ static void modal_set_transition(nt_ui_modal_style_t *s, int transition) {
 static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
         true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
@@ -1115,7 +1119,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     modal_set_transition(&s_modal_style_runtime, st->modal.transition);
 
     if (nt_ui_modal(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)},
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIT(0)},
                          .padding = CLAY_PADDING_ALL(22),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 16,
