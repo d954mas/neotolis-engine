@@ -6,6 +6,11 @@
 
 #include "devapi/nt_devapi.h"
 
+/* D-06 stable machine error tokens, single-sourced for the dispatch core and the
+   discovery handlers (was duplicated in nt_devapi.c + nt_devapi_discovery.c). */
+#define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
+#define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
+
 /* One registered command. The 7 descriptor strings are strdup-owned copies
    (D-03) freed at shutdown; handler + user_data are stored verbatim. */
 typedef struct nt_devapi_slot {

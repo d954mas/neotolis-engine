@@ -11,10 +11,6 @@
    into one growing reusable buffer. The whole core is reachable from CTest via
    literal JSON strings — no transport. */
 
-/* Baseline error codes (D-06: stable machine tokens). */
-#define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
-#define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
-
 /* D-04: single growing reusable response buffer. The pointer returned by
    nt_devapi_submit is valid ONLY until the next submit — the next call memcpys a
    new payload here and a grow reallocs (the pointer may MOVE). Dev-only, single
@@ -60,7 +56,8 @@ static const char *resp_serialize(cJSON *tree) {
     return s_resp_buf;
 }
 
-/* Build {ok:false,error:{code,message}}. Takes ownership of nothing. */
+/* Build {ok:false,error:{code,message}} and return it (caller owns the returned
+   object). code/message are borrowed — cJSON copies them, this takes no ownership. */
 static cJSON *make_error_entry(const char *code, const char *message) {
     cJSON *entry = cJSON_CreateObject();
     NT_ASSERT(entry != NULL);

@@ -6,10 +6,6 @@
    Always-on when devapi is built (no optional-L1 dependency), but still routed
    through register_group so it appears in `features`. */
 
-/* D-06 stable machine tokens (mirror the dispatch-core codes). */
-#define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
-#define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
-
 /* Emit one command descriptor into `arr`. detail=false → cheap {method,layer,
    summary}; detail=true → all 7 self-describing fields. */
 static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
@@ -56,7 +52,7 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
     if (!cJSON_IsString(method_item) || method_item->valuestring == NULL) {
         err->code = NT_DEVAPI_ERR_BAD_PARAMS;
-        err->message = "missing or non-string params.method";
+        err->message = (method_item == NULL) ? "missing params.method" : "non-string params.method";
         return false;
     }
 
