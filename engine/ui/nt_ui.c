@@ -341,6 +341,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->modal_top_id_prev = ctx->modal_top_id_cur;
     ctx->modal_top_id_cur = 0U;
     ctx->modal_max_depth_cur = 0U;
+    /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
+     * nt_ui_modal_active BEFORE this frame's begin still sees last frame's result). */
+    ctx->modal_present_cur = false;
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
 
@@ -428,6 +431,10 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 
     /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
     nt_ui_internal_resolve_wheel_owners(ctx);
+
+    /* Publish this frame's modal presence for nt_ui_modal_active: a game polls it next frame BEFORE
+     * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
+    ctx->modal_present_prev = ctx->modal_present_cur;
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;

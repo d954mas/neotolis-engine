@@ -194,6 +194,11 @@ struct nt_ui_context {
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
+    /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
+     * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
+     * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
+    bool modal_present_cur;
+    bool modal_present_prev;
 
     /* Buttons do not nest (asserted). */
     struct {

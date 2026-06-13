@@ -422,6 +422,77 @@ static void test_modal_closed_does_not_block_base(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx)); /* RED pre-fix: backdrop gated the whole viewport */
 }
 
+/* ---- nt_ui_modal_active reports PREV-FRAME presence (not the live within-frame depth, which is
+ *      always 0 once nt_ui_end balanced the stack). A game polls it before its next nt_ui_begin to
+ *      gate hotkeys. Frame with a modal up -> active next; frame with no modal -> inactive next. ---- */
+static void test_modal_active_prev_frame(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F; /* instant */
+
+    /* Before any frame: nothing was up. */
+    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+
+    /* Frame 1: a modal is open. The live depth is 0 after end, but presence must be published. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_modal_test_stack_depth(s_fx.ctx)); /* live depth IS 0 ... */
+    TEST_ASSERT_TRUE(nt_ui_modal_active(s_fx.ctx));                      /* ... yet prev-frame presence is true */
+
+    /* Frame 2: no modal declared at all -> presence falls back to inactive. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    CLAY({.id = CLAY_ID("base2"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+
+    /* A fully-closed modal (settled, declares no backdrop) does NOT count as present. */
+    bool open = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    const bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &open);
+    if (declared) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+}
+
+/* ---- Sequential SAME-DEPTH modals in one frame: a FULLY-CLOSED first must not steal top from an
+ *      OPEN second at the same level. The latest PRESENT modal at the max depth wins top, so next
+ *      frame the second (open) modal's Esc fires and the first (closed) stays silent. ---- */
+static void test_modal_closed_same_depth_does_not_steal_top(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F; /* instant: open -> t=1, closed -> t=0 fully closed */
+    st.flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_TRANSITION_FADE);
+
+    /* Frame 1: establish top. A declared first but CLOSED (no backdrop), B declared second and OPEN.
+     * Both sit at depth 1 (sequential, not nested) since each balances before the next. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    bool a_open = false;
+    const bool a_decl = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &a_open); /* closed -> balances itself */
+    if (a_decl) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* open at the same depth */
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(a_decl); /* the closed modal declared no body */
+
+    /* Frame 2: Esc held. The OPEN second modal (B) must be top and consume Esc. */
+    nt_input_set_key(NT_KEY_ESCAPE, true);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    a_open = false;
+    const bool a_decl2 = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &a_open);
+    if (a_decl2) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_modal_result_t b = nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(b.close_requested); /* the open second modal is top -> Esc fires */
+    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_ESC, b.reason);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
@@ -438,5 +509,7 @@ int main(void) {
     RUN_TEST(test_modal_body_button_clickable);
     RUN_TEST(test_modal_backdrop_close_pad);
     RUN_TEST(test_modal_closed_does_not_block_base);
+    RUN_TEST(test_modal_active_prev_frame);
+    RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
     return UNITY_END();
 }

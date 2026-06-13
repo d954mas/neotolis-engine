@@ -67,11 +67,6 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const uint8_t depth = ctx->active_modal_depth; /* 0-based depth of THIS modal */
     ctx->active_modal_id[depth] = id;
     ++ctx->active_modal_depth;
-    /* Track the deepest modal this frame -> next frame's close-scan target (1-frame IM lag). */
-    if (ctx->active_modal_depth > ctx->modal_max_depth_cur) {
-        ctx->modal_max_depth_cur = ctx->active_modal_depth;
-        ctx->modal_top_id_cur = id;
-    }
     const int16_t panel_z = (int16_t)(NT_UI_MODAL_ZBAND_STRIDE * (depth + 1));
     const int16_t backdrop_z = (int16_t)(panel_z - 1);
     const uint32_t backdrop_id = modal_backdrop_id(id);
@@ -117,6 +112,15 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const bool backdrop_present = open || (t > NT_UI_MODAL_EPSILON);
     nt_ui_modal_close_reason_t reason = NT_UI_MODAL_CLOSE_NONE;
     if (backdrop_present) {
+        /* Modal presence this frame -> next frame's nt_ui_modal_active (game hotkey gate). */
+        ctx->modal_present_cur = true;
+        /* Top = the PRESENT modal at the max depth; a fully-closed modal never claims top, and a
+         * later same-depth present modal overrides an earlier one (>=, latest-declared wins the tie)
+         * so sequential same-level modals target the one actually up. Resolved next frame (IM lag). */
+        if (ctx->active_modal_depth >= ctx->modal_max_depth_cur) {
+            ctx->modal_max_depth_cur = ctx->active_modal_depth;
+            ctx->modal_top_id_cur = id;
+        }
         /* Backdrop: full-viewport floating rect at backdrop_z; its alpha is t*backdrop_alpha so it
          * fades with the modal. The element opacity rides t too (composes onto children, of which it has none). */
         Clay_Color backdrop_col = nt_ui_unpack_abgr(style->backdrop_color);
@@ -209,7 +213,9 @@ bool nt_ui_modal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *s
 
 bool nt_ui_modal_active(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_modal_active: ctx must be non-NULL");
-    return ctx->active_modal_depth > 0U;
+    /* Prev-frame presence: the live depth is always 0 once nt_ui_end balanced the stack, so the
+     * game gates its NEXT-frame hotkeys on whether a modal was up last frame (inherent IM lag). */
+    return ctx->modal_present_prev;
 }
 
 #ifdef NT_TEST_ACCESS
