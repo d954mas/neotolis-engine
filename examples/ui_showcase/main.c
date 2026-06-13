@@ -33,6 +33,7 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_scale.h"
@@ -96,6 +97,11 @@ static nt_ui_scroll_style_t s_scroll_dark, s_scroll_light;
 
 /* Slice9 panel image style (untinted, atlas-default slice9). */
 static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
+
+/* Per-palette base modal styles: the palette pointer flip restyles the modal on hot-swap
+ * (D-60-14). The Modals tab seeds a RUNTIME style from these each frame, then overlays the
+ * props-panel transition/ease/scale-start/backdrop-alpha (D-60-13) before passing to nt_ui_modal. */
+static nt_ui_modal_style_t s_modal_dark, s_modal_light;
 // #endregion
 
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
@@ -108,7 +114,8 @@ typedef struct {
     nt_ui_slider_style_t *slider;
     nt_ui_progress_style_t *progress;
     const nt_ui_scroll_style_t *scroll;
-    /* modal style pointer joins the palette in Plan 04. */
+    /* Modal base style: restyles on the palette pointer flip (D-60-14). */
+    const nt_ui_modal_style_t *modal;
     Clay_Color bg, panel, list_bg, list_sel;
     const char *name;
 } ui_palette_t;
@@ -126,6 +133,7 @@ static ui_palette_t g_dark = {
     .slider = &s_slider_dark,
     .progress = &s_progress_dark,
     .scroll = &s_scroll_dark,
+    .modal = &s_modal_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
     .list_bg = {24.0F, 26.0F, 34.0F, 255.0F},
@@ -144,6 +152,7 @@ static ui_palette_t g_light = {
     .slider = &s_slider_light,
     .progress = &s_progress_light,
     .scroll = &s_scroll_light,
+    .modal = &s_modal_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
     .list_bg = {224.0F, 227.0F, 235.0F, 255.0F},
@@ -168,6 +177,19 @@ typedef struct {
     bool ramp_up;
 } progress_params_t;
 
+/* Modal props (D-60-13): transition selector + tween/anim params the panel drives live. */
+typedef struct {
+    int transition;       /* 0 = scale-pop, 1 = fade, 2 = slide (segmented control) */
+    float ease_speed;     /* open/close tween value_speed */
+    float scale_start;    /* scale-pop start (~0.85..1.0) */
+    float backdrop_alpha; /* peak backdrop opacity 0..1 */
+} modal_params_t;
+
+/* Stress props (D-60-13): label count driving the render_stress loop. */
+typedef struct {
+    int label_count; /* segmented control: 50 / 100 / 200 / 400 */
+} stress_params_t;
+
 /* All per-tab logical state (slider floats, checkbox bools, radio int, scroll positions,
  * plus the props-panel param structs). Re-fed each frame -> retained across tab switches. */
 struct tab_state {
@@ -181,6 +203,12 @@ struct tab_state {
     /* Props params. */
     slice9_params_t s9;
     progress_params_t prog;
+    /* Modals tab. */
+    bool confirm_open;
+    bool nested_open;
+    modal_params_t modal;
+    /* Stress tab. */
+    stress_params_t stress;
 };
 
 static struct tab_state s_state = {
@@ -191,6 +219,10 @@ static struct tab_state s_state = {
     .slider_int = 4,
     .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 480, .target_h = 200},
     .prog = {.value = 0.4F, .auto_anim = false, .ramp_up = true},
+    .confirm_open = false,
+    .nested_open = false,
+    .modal = {.transition = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .backdrop_alpha = 0.55F},
+    .stress = {.label_count = 200},
 };
 // #endregion
 
@@ -217,6 +249,10 @@ static uint32_t s_id_inner_scroll;
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
 static uint32_t s_id_props_w, s_id_props_h;
 static uint32_t s_id_props_value;
+static uint32_t s_id_modal_confirm, s_id_modal_nested;
+static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s_id_modal_nested_btn, s_id_modal_nested_close_btn;
+static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop;
+static uint32_t s_id_theme_btn;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -283,12 +319,16 @@ static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
+static void props_modal(nt_ui_context_t *ctx, tab_state_t *st);
+static void props_stress(nt_ui_context_t *ctx, tab_state_t *st);
 // #endregion
 
 // #region registry (one entry per widget category present in this plan)
-/* Modals + Stress tabs land in Plan 04 (need the modal helper + stress harness). */
+/* 8 logical categories (DEMO-02). Buttons render as 3 sibling entries (D-60-13). */
 static const showcase_entry_t g_tabs[] = {
     {"Labels", "h1 / body / caption label variants, themed via the palette.", "examples/ui_showcase/main.c:render_labels", render_labels, NULL},
     {"Buttons: Primary", "Primary slice9 button (idle/hover/pressed/disabled).", "examples/ui_showcase/main.c:render_button_primary", render_button_primary, NULL},
@@ -298,6 +338,8 @@ static const showcase_entry_t g_tabs[] = {
     {"Toggles & Radios", "Checkbox + exclusive radio group + sliding toggle.", "examples/ui_showcase/main.c:render_toggles", render_toggles, NULL},
     {"Sliders & Progress", "Float + int sliders + a progress bar driven by a live value panel.", "examples/ui_showcase/main.c:render_sliders", render_sliders, props_progress},
     {"Scroll", "Tall scroll list with a nested inner scroll (capture-steal).", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
+    {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
+    {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
 #define TAB_COUNT ((int)(sizeof g_tabs / sizeof g_tabs[0]))
 // #endregion
@@ -429,6 +471,17 @@ static void init_styles(void) {
     scroll_base.thumb_ref = bar_thumb;
     s_scroll_dark = scroll_base;
     s_scroll_light = scroll_base;
+
+    /* ---- Modal: scale-pop + alpha; backdrop tuned per palette (dark dims to black, ---- */
+    /* light dims to a soft slate so the panel stays legible against a bright page). */
+    nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
+    modal_base.layer = LAYER_BG;
+    s_modal_dark = modal_base;
+    s_modal_dark.backdrop_color = 0xFF000000U; /* black */
+    s_modal_dark.backdrop_alpha = 0.60F;
+    s_modal_light = modal_base;
+    s_modal_light.backdrop_color = 0xFF202830U; /* slate */
+    s_modal_light.backdrop_alpha = 0.40F;
 }
 // #endregion
 
@@ -646,6 +699,197 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
 
     showcase_panel_end(ctx);
 }
+
+/* Runtime modal style the props panel mutates -- seeded from the palette modal style each frame,
+ * then overlaid with the panel's transition/ease/scale-start/backdrop-alpha so the open/close
+ * animation visibly tracks the panel (D-60-13). NOT a static-const. */
+static nt_ui_modal_style_t s_modal_style_runtime;
+
+/* Map the segmented transition index to the modal flag bits, preserving close-source flags. */
+static void modal_set_transition(nt_ui_modal_style_t *s, int transition) {
+    s->flags &= (uint8_t)~NT_UI_MODAL_TRANSITION_MASK;
+    if (transition == 1) {
+        s->flags |= NT_UI_MODAL_TRANSITION_FADE;
+    } else if (transition == 2) {
+        s->flags |= NT_UI_MODAL_TRANSITION_SLIDE;
+    } else {
+        s->flags |= NT_UI_MODAL_TRANSITION_SCALE_POP;
+    }
+}
+
+/* A labelled action button inside a modal body. */
+static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text) {
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        true);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
+    return nt_ui_button_end(ctx);
+}
+
+/* DEMO-05: confirm modal (high-level one-bool wrapper) + a nested depth-2 modal; Esc + backdrop
+ * close. The body is declared while the wrapper returns true (keep declaring through the close
+ * animation -- Pitfall 2). The runtime style is driven by props_modal so the anim tracks live. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
+    /* Seed the runtime style from the active palette, then overlay the props-panel values. */
+    s_modal_style_runtime = *g_current->modal;
+    s_modal_style_runtime.ease_speed = st->modal.ease_speed;
+    s_modal_style_runtime.scale_start = st->modal.scale_start;
+    s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
+    s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
+    modal_set_transition(&s_modal_style_runtime, st->modal.transition);
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Open a confirm dialog; the properties panel drives the transition + tween live.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes the TOP modal; clicking the backdrop closes; the backdrop blocks click-through.", g_current->caption);
+
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_modal_show_btn, g_current->btn_primary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        true);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->h1);
+    if (nt_ui_button_end(ctx)) {
+        st->confirm_open = true;
+    }
+
+    if (nt_ui_modal(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)},
+                         .padding = CLAY_PADDING_ALL(22),
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 16,
+                         .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
+              .backgroundColor = g_current->panel,
+              .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Confirm action", g_current->h1);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "This is a modal dialog. The backdrop blocks the base UI and world.", g_current->body);
+
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
+                if (modal_action_btn(ctx, s_id_modal_ok_btn, "OK")) {
+                    st->confirm_open = false;
+                }
+                if (modal_action_btn(ctx, s_id_modal_cancel_btn, "Cancel")) {
+                    st->confirm_open = false;
+                }
+                if (modal_action_btn(ctx, s_id_modal_nested_btn, "Show nested")) {
+                    st->nested_open = true;
+                }
+            }
+
+            /* Nested modal (depth 2): proves z-banding + top-only Esc targeting. */
+            if (nt_ui_modal(ctx, s_id_modal_nested, &s_modal_style_runtime, &st->nested_open)) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(340), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(20), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 14},
+                      .backgroundColor = g_current->panel,
+                      .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
+                    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested modal (depth 2)", g_current->h1);
+                    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes only this top modal.", g_current->body);
+                    if (modal_action_btn(ctx, s_id_modal_nested_close_btn, "Close")) {
+                        st->nested_open = false;
+                    }
+                }
+                nt_ui_modal_end(ctx);
+            }
+        }
+        nt_ui_modal_end(ctx);
+    }
+}
+
+/* DEMO-06: a cell of N labels @14pt + a frame gpu_ms readout (n/a guard on WebGL2 absent ext,
+ * Pitfall 3). NO nested ui_text GPU segment (the host frame loop owns the "frame" segment;
+ * nesting trips nt_gfx_gl.c:483). */
+static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = {200.0F, 210.0F, 220.0F, 255.0F}};
+
+    const float gpu_ms = nt_stats_get_gpu_ms();
+    if (gpu_ms < 0.0F) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "frame gpu: n/a (timer extension absent)", g_current->caption);
+    } else {
+        (void)snprintf(buf, sizeof buf, "frame gpu: %.2f ms", (double)gpu_ms);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    }
+    (void)snprintf(buf, sizeof buf, "draw calls: %u   labels: %d", nt_ui_get_last_walk_draw_calls(ctx), st->stress.label_count);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+
+    /* N small labels at 14pt -- the Slug GPU-cost proxy cell. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(760), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+        for (int i = 0; i < st->stress.label_count; ++i) {
+            (void)snprintf(buf, sizeof buf, "lbl%03d", i);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &stress_label);
+        }
+    }
+}
+
+/* D-60-13 Modal panel (the showcase piece): segmented transition + sliders for ease / scale-start
+ * / backdrop-alpha, all written into the Modals param struct that render_modals reads each frame. */
+static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    static const char *const names[3] = {"Scale-pop", "Fade", "Slide"};
+    showcase_panel_begin(ctx, "Modal properties");
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Transition", g_current->caption);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
+        for (int i = 0; i < 3; ++i) {
+            const bool sel = (st->modal.transition == i);
+            if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_trans") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
+                             &(Clay_ElementDeclaration){
+                                 .layout = {.sizing = {CLAY_SIZING_FIXED(92), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                             true)) {
+                st->modal.transition = i;
+            }
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], g_current->caption);
+        }
+    }
+
+    (void)snprintf(buf, sizeof buf, "Ease speed  %.1f", (double)st->modal.ease_speed);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ease, NULL, &st->modal.ease_speed, 4.0F, 30.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Scale start  %.2f", (double)st->modal.scale_start);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_scale, NULL, &st->modal.scale_start, 0.85F, 1.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Backdrop alpha  %.2f", (double)st->modal.backdrop_alpha);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_backdrop, NULL, &st->modal.backdrop_alpha, 0.0F, 1.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    showcase_panel_end(ctx);
+}
+
+/* D-60-13 Stress panel: segmented label count (50/100/200/400) driving render_stress + the live
+ * frame gpu_ms / draw-calls readout. */
+static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const int counts[4] = {50, 100, 200, 400};
+    showcase_panel_begin(ctx, "Stress properties");
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Label count", g_current->caption);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
+        for (int i = 0; i < 4; ++i) {
+            const bool sel = (st->stress.label_count == counts[i]);
+            (void)snprintf(buf, sizeof buf, "%d", counts[i]);
+            if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/stress_n") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
+                             &(Clay_ElementDeclaration){
+                                 .layout = {.sizing = {CLAY_SIZING_FIXED(66), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                             true)) {
+                st->stress.label_count = counts[i];
+            }
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+        }
+    }
+
+    const float gpu_ms = nt_stats_get_gpu_ms();
+    if (gpu_ms < 0.0F) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "frame gpu: n/a", g_current->caption);
+    } else {
+        (void)snprintf(buf, sizeof buf, "frame gpu: %.2f ms", (double)gpu_ms);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    }
+    (void)snprintf(buf, sizeof buf, "draw calls: %u", nt_ui_get_last_walk_draw_calls(ctx));
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+
+    showcase_panel_end(ctx);
+}
 // #endregion
 
 // #region tab list + stage layout
@@ -670,8 +914,45 @@ static void ensure_ids(void) {
     s_id_props_w = nt_ui_id("showcase/props_w");
     s_id_props_h = nt_ui_id("showcase/props_h");
     s_id_props_value = nt_ui_id("showcase/props_value");
+    s_id_modal_confirm = nt_ui_id("showcase/modal_confirm");
+    s_id_modal_nested = nt_ui_id("showcase/modal_nested");
+    s_id_modal_show_btn = nt_ui_id("showcase/modal_show_btn");
+    s_id_modal_ok_btn = nt_ui_id("showcase/modal_ok_btn");
+    s_id_modal_cancel_btn = nt_ui_id("showcase/modal_cancel_btn");
+    s_id_modal_nested_btn = nt_ui_id("showcase/modal_nested_btn");
+    s_id_modal_nested_close_btn = nt_ui_id("showcase/modal_nested_close_btn");
+    s_id_props_ease = nt_ui_id("showcase/props_ease");
+    s_id_props_scale = nt_ui_id("showcase/props_scale");
+    s_id_props_backdrop = nt_ui_id("showcase/props_backdrop");
+    s_id_theme_btn = nt_ui_id("showcase/theme_btn");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
     s_ids_ready = true;
+}
+
+/* Header (DEMO-04): a Dark/Light toggle button + a live ui_draw_calls + frame gpu_ms readout
+ * (the draw-call count IS the batching evidence -- no sort-by-material toggle, DEMO-09 REMOVED). */
+static void declare_header(nt_ui_context_t *ctx) {
+    char buf[96];
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_theme_btn, g_current->btn_primary,
+                           &(Clay_ElementDeclaration){
+                               .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                           true);
+        (void)snprintf(buf, sizeof buf, "Theme: %s", g_current->name);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+        if (nt_ui_button_end(ctx)) {
+            g_current = (g_current == &g_dark) ? &g_light : &g_dark;
+        }
+
+        const float gpu_ms = nt_stats_get_gpu_ms();
+        if (gpu_ms < 0.0F) {
+            (void)snprintf(buf, sizeof buf, "draw calls: %u   gpu: n/a", nt_ui_get_last_walk_draw_calls(ctx));
+        } else {
+            (void)snprintf(buf, sizeof buf, "draw calls: %u   gpu: %.2f ms", nt_ui_get_last_walk_draw_calls(ctx), (double)gpu_ms);
+        }
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "[T] palette  [D] inspector  [Esc] quit", g_current->caption);
+    }
 }
 
 /* Left tab list: one button per registry entry; clicking selects the active tab. */
@@ -849,9 +1130,7 @@ static void frame(void) {
                          .childGap = 8,
                          .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
               .backgroundColor = g_current->bg}) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "UI Showcase  |  [T] palette  [D] inspector  [Esc] quit", g_current->caption);
-            }
+            declare_header(s_ctx);
             /* Left tab list -> right content stage. */
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
                 declare_tab_list(s_ctx);
