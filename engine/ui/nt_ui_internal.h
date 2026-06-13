@@ -146,6 +146,12 @@ typedef struct {
 #define NT_UI_WHEEL_CANDIDATES 24
 #endif
 
+/* Nested-modal cap. Fixed array keeps the stack in BSS (no heap in hot path);
+ * depth drives the z-band 1000*(depth+1) and close-signal top-targeting. */
+#ifndef NT_UI_MODAL_MAX_DEPTH
+#define NT_UI_MODAL_MAX_DEPTH 8
+#endif
+
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -170,8 +176,14 @@ struct nt_ui_context {
     /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
      * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
     nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
+    /* Active-modal stack: push on nt_ui_modal_begin, pop on nt_ui_modal_end. Drives z-band +
+     * top-only close targeting (D-60-04). 4B-aligned here (after wheel_candidates) so it adds no
+     * padding; the u8 depth counter packs into the u16/u8 cluster below. Rides the create_context
+     * memset zero-init (like anim[]). */
+    uint32_t active_modal_id[NT_UI_MODAL_MAX_DEPTH];
     uint32_t wheel_candidate_count;
     uint16_t wheel_depth;
+    uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
