@@ -327,14 +327,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_http COMMAND test_http)
 
+    # SC1: cJSON standalone round-trip. Links cjson only — its whole point is to prove
+    # cjson is usable WITHOUT devapi, so it must NOT sit behind the NT_DEVAPI_ENABLED
+    # gate (cjson is built unconditionally, so this always builds + runs).
+    add_executable(test_devapi_cjson unit/test_devapi_cjson.c)
+    target_link_libraries(test_devapi_cjson PRIVATE cjson unity)
+    target_compile_definitions(test_devapi_cjson PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_devapi_cjson)
+
     # --- DevAPI module tests (NT_DEVAPI_ENABLED-gated) ---
     if(NT_DEVAPI_ENABLED)
-        # SC1: cJSON standalone round-trip (links cjson only, no devapi).
-        add_executable(test_devapi_cjson unit/test_devapi_cjson.c)
-        target_link_libraries(test_devapi_cjson PRIVATE cjson unity)
-        target_compile_definitions(test_devapi_cjson PRIVATE _CRT_SECURE_NO_WARNINGS)
-        nt_setup_test_target(test_devapi_cjson)
-
         # SC2: registry register / dup-reject / owned-copy survival.
         add_executable(test_devapi_registry unit/test_devapi_registry.c)
         target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson unity)

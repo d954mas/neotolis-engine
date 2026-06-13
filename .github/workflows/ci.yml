@@ -407,8 +407,11 @@ jobs:
       - name: Smoke test builder (debug)
         run: ./build/tools/builder/native-debug/builder
 
-      - name: Configure native debug tests (FULL asserts)
-        run: cmake --preset native-debug-test
+      # NT_DEVAPI_ENABLED=ON so the 5 devapi test targets build + run here (WR-01): they
+      # are gated behind if(NT_DEVAPI_ENABLED) in tests/CMakeLists.txt and would otherwise
+      # never execute in CI. FULL asserts exercise the devapi NT_ASSERT contract paths.
+      - name: Configure native debug tests (FULL asserts, devapi ON)
+        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON
 
       - name: Build native debug tests
         run: cmake --build --preset native-debug-test
