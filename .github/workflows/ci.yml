@@ -267,6 +267,13 @@ jobs:
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
 
+      # SC5 / PROTO-10: assert the release WASM (NT_DEVAPI_ENABLED OFF by default)
+      # contains zero nt_devapi_* symbols. Structural guarantee is the devapi
+      # subdir-exclusion (D-10); this grep is the explicit assertion (D-11). No
+      # build-twice baseline — the size-tracking jobs catch a leak as a size jump.
+      - name: DevAPI zero-delta check (release WASM has no devapi)
+        run: PRESET=wasm-release bash scripts/devapi-zero-delta.sh hello
+
       - name: Measure sizes (all examples)
         run: |
           source scripts/wasm_examples.sh
