@@ -173,10 +173,11 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
         *thumb_data = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
         nt_ui_image_style_t thumb_style = nt_ui_image_style_defaults();
         thumb_style.color_packed = cell->thumb_tint;
-        /* Floating so the thumb x-offset overlays the track without consuming layout. */
+        /* Floating so the thumb x-offset overlays the track without consuming layout. clipTo the
+         * attached parent so a slider inside a scroll container can't leak its thumb past the clip. */
         const Clay_ElementDeclaration thumb_decl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(style->thumb_w), CLAY_SIZING_FIXED(style->thumb_h)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
         };
         nt_atlas_region_ref_t tref = thumb_ref;
         nt_ui_image(ctx, thumb_data, &tref, &thumb_style, &thumb_decl);
