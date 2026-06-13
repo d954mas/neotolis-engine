@@ -2066,6 +2066,15 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
+bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_hit_test_padded: ctx must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL, NULL);
+    Clay_SetCurrentContext(saved);
+    return hit;
+}
+
 #if NT_UI_DEBUG_TOOLS
 /* The 2D-affine screen scan can't be reused in 3D ctx — z->m maps Clay→world there, not Clay→screen —
  * so the cursor is ray-cast against each recorded zone's plane. Contract, scope, and ordering: see the

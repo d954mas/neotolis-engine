@@ -48,16 +48,16 @@ _Static_assert(sizeof(nt_ui_modal_result_t) == 12, "nt_ui_modal_result_t stable 
 #define NT_UI_MODAL_TRANSITION_MASK ((uint8_t)(3U << 2))
 
 typedef struct {
-    float ease_speed;        /* value_speed for the open/close tween; > 0 (0 = instant snap) */
-    float scale_start;       /* scale-pop start (default 0.92); eases to 1.0. Asserted > 0 */
-    float backdrop_alpha;    /* peak backdrop opacity at t==1 (0..1) */
-    float slide_offset;      /* SLIDE transition: start offset px (additive, eased to 0) */
-    uint32_t backdrop_color; /* 0xAABBGGRR; alpha multiplied by t*backdrop_alpha */
-    nt_ui_layer_t layer;     /* draw layer for backdrop + panel element data */
-    uint8_t flags;           /* LISTEN_ESC | CLOSE_ON_BACKDROP | transition selector */
-    uint8_t _pad[2];
+    float ease_speed;           /* value_speed for the open/close tween; > 0 (0 = instant snap) */
+    float scale_start;          /* scale-pop start (default 0.92); eases to 1.0. Asserted > 0 */
+    float backdrop_alpha;       /* peak backdrop opacity at t==1 (0..1) */
+    float slide_offset;         /* SLIDE transition: start offset px (additive, eased to 0) */
+    uint32_t backdrop_color;    /* 0xAABBGGRR; alpha multiplied by t*backdrop_alpha */
+    nt_ui_layer_t layer;        /* draw layer for backdrop + panel element data */
+    uint8_t flags;              /* LISTEN_ESC | CLOSE_ON_BACKDROP | transition selector */
+    int16_t backdrop_close_pad; /* clicks within this px margin around the panel do NOT close — avoids accidental close on near-panel taps; mobile-aware */
 } nt_ui_modal_style_t;
-_Static_assert(sizeof(nt_ui_modal_style_t) == 24, "nt_ui_modal_style_t stable ABI (4 float + 1 u32 + 1 u8 + 1 u8 + 2 pad)");
+_Static_assert(sizeof(nt_ui_modal_style_t) == 24, "nt_ui_modal_style_t stable ABI (4 float + 1 u32 + 1 u8 + 1 u8 + 1 int16)");
 
 /* A valid baseline: scale-pop + alpha, sane ease speed and scale-start > 0. Dodges the
  * {0} trap (scale_start must be > 0 — nt_ui_anim asserts scale_* > 0). */

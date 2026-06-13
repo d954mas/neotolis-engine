@@ -12,9 +12,7 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "core/nt_assert.h"
 #include "input/nt_input_internal.h" /* nt_input_set_key / nt_input_clear_all_keys */
-#include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -276,6 +274,93 @@ static void test_modal_wants_pointer_while_open(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
+/* ---- CR-01 regression (option F): a button inside the modal body must be clickable. The fix DROPS
+ *      the panel self-occluder that used to tie the body widgets on zIndex and steal their clicks.
+ *      Needs 3 frames: F1 registers button, F2 press, F3 release-inside -> clicked. ---- */
+/* The panel floats attached-to-root with no offset, so its top-left is (0,0). The button is a NORMAL
+ * (non-floating) child of the panel -> it shares the panel's floating tree root and inherits the
+ * panel's uniform zindex; with no self-occluder it's the sole interactive record and wins. With the
+ * panel shrink-wrapping the button, the button sits at the panel origin (0,0). */
+#define MODAL_BTN_W 200.0F
+#define MODAL_BTN_H 120.0F
+#define MODAL_BTN_CX (MODAL_BTN_W * 0.5F)
+#define MODAL_BTN_CY (MODAL_BTN_H * 0.5F)
+
+static nt_pointer_t modal_pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
+    nt_pointer_t p = {0};
+    p.x = x;
+    p.y = y;
+    p.active = true;
+    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
+    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
+    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
+    return p;
+}
+
+static nt_pointer_t modal_btn_pointer(bool is_down, bool is_pressed, bool is_released) { return modal_pointer_at(MODAL_BTN_CX, MODAL_BTN_CY, is_down, is_pressed, is_released); }
+
+/* One modal frame with a stepped button child. The button id is stepped INSIDE the body — mirrors the
+ * showcase's action-button pattern. */
+static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, true);
+    nt_ui_interaction_t in;
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
+        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("modal_btn"));
+    }
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    return in;
+}
+
+static void test_modal_body_button_clickable(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F; /* t snaps to 1: panel lives from frame 1 */
+
+    /* Frame 1: register the button (empty prev-frame registry -> nothing hot yet). */
+    nt_pointer_t f1 = modal_btn_pointer(false, false, false);
+    modal_button_frame(&st, &f1);
+
+    /* Frame 2: press inside the button. Resolve runs off frame-1 registry: with no self-occluder the
+     * button is the sole interactive record, so the press lands on it. */
+    nt_pointer_t f2 = modal_btn_pointer(true, true, false);
+    nt_ui_interaction_t in2 = modal_button_frame(&st, &f2);
+    TEST_ASSERT_TRUE(in2.pressed_now); /* RED on the pre-fix occluder code: it stole hot -> false */
+
+    /* Frame 3: release inside -> clicked exactly once. */
+    nt_pointer_t f3 = modal_btn_pointer(false, false, true);
+    nt_ui_interaction_t in3 = modal_button_frame(&st, &f3);
+    TEST_ASSERT_TRUE(in3.clicked); /* CR-01: action button must be clickable inside a modal */
+}
+
+/* ---- backdrop_close_pad: a CLOSE_ON_BACKDROP click JUST OUTSIDE the panel but within the pad must NOT
+ *      close; a click well beyond panel+pad DOES raise CLOSE_BACKDROP. The panel (= MODAL_A) is the
+ *      shrink-wrapped 200x120 box at (0,0); is_top needs the 1-frame IM lag so each probe runs 2 frames
+ *      (F1 establishes top, F2 holds the click). ---- */
+static nt_ui_modal_close_reason_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
+    nt_pointer_t f1 = modal_pointer_at(cx, cy, false, false, false);
+    modal_button_frame(st, &f1); /* establish top (modal_top_id_prev) */
+    /* F2: full press+release in one frame at (cx,cy) -> backdrop click fires this frame. */
+    nt_pointer_t f2 = modal_pointer_at(cx, cy, false, false, true);
+    f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    modal_button_frame(st, &f2);
+    return nt_ui_modal_test_last_close_reason();
+}
+
+static void test_modal_backdrop_close_pad(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    st.backdrop_close_pad = 16;
+    st.flags = (uint8_t)(NT_UI_MODAL_CLOSE_ON_BACKDROP | NT_UI_MODAL_TRANSITION_FADE);
+
+    /* Click 8px to the right of the panel's right edge (210, 60): outside the bbox but inside the 16px
+     * pad -> close suppressed. */
+    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_NONE, (int)modal_backdrop_click_reason(&st, MODAL_BTN_W + 8.0F, MODAL_BTN_CY));
+
+    /* Click well beyond panel+pad (400, 300): clearly on the backdrop -> CLOSE_BACKDROP. */
+    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_BACKDROP, (int)modal_backdrop_click_reason(&st, 400.0F, 300.0F));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
@@ -289,5 +374,7 @@ int main(void) {
     RUN_TEST(test_modal_tween_clamp_and_transition);
     RUN_TEST(test_modal_wrapper_contract);
     RUN_TEST(test_modal_wants_pointer_while_open);
+    RUN_TEST(test_modal_body_button_clickable);
+    RUN_TEST(test_modal_backdrop_close_pad);
     return UNITY_END();
 }

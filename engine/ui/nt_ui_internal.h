@@ -407,4 +407,8 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
  * then min bbox area, then latest declaration) into ctx->wheel_owner[] for NEXT frame's consume. */
 void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
 
+/* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
+ * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */
+bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
+
 #endif /* NT_UI_INTERNAL_H */

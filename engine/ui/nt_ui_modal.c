@@ -2,10 +2,11 @@
 
 #include <math.h>
 
+#include <stdint.h>
+
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
-#include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
@@ -26,6 +27,10 @@ static inline uint32_t modal_backdrop_id(uint32_t id) { return nt_ui_derived_id(
  * Locks Open Question 3: epsilon = 1/256 so the modal disappears when its alpha quantizes out. */
 #define NT_UI_MODAL_EPSILON (1.0F / 256.0F)
 
+/* Per-depth z-band: each modal sits panel_z = STRIDE*(depth+1), backdrop one below. */
+#define NT_UI_MODAL_ZBAND_STRIDE 1000
+_Static_assert(NT_UI_MODAL_ZBAND_STRIDE *(NT_UI_MODAL_MAX_DEPTH) <= INT16_MAX, "modal z-band exceeds int16 zIndex");
+
 #ifdef NT_TEST_ACCESS
 static uint16_t s_last_panel_zband;
 static uint16_t s_last_backdrop_zband;
@@ -41,7 +46,7 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
         .backdrop_color = 0xFF000000U, /* black; alpha is scaled by t*backdrop_alpha */
         .layer = 0U,
         .flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP | NT_UI_MODAL_TRANSITION_SCALE_POP),
-        ._pad = {0U, 0U},
+        .backdrop_close_pad = 16,
     };
 }
 
@@ -67,7 +72,7 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
         ctx->modal_max_depth_cur = ctx->active_modal_depth;
         ctx->modal_top_id_cur = id;
     }
-    const int16_t panel_z = (int16_t)(1000 * (depth + 1));
+    const int16_t panel_z = (int16_t)(NT_UI_MODAL_ZBAND_STRIDE * (depth + 1));
     const int16_t backdrop_z = (int16_t)(panel_z - 1);
     const uint32_t backdrop_id = modal_backdrop_id(id);
     // #endregion
@@ -131,11 +136,16 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
         reason = NT_UI_MODAL_CLOSE_ESC;
     }
     if (is_top && (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U) {
-        /* A click landing on the backdrop (outside the panel — the panel occludes its own area at a
-         * higher z, see modal_end) raises BACKDROP. step doubles as a registry record + click source. */
+        /* step the backdrop (registry record + base-UI gate + click source), but the close DECISION is
+         * the padded panel bbox: a backdrop click closes ONLY when it lands clearly OUTSIDE the panel
+         * grown by backdrop_close_pad (so near-panel taps and empty-panel-bg clicks don't mis-close). */
         const nt_ui_interaction_t bd = nt_ui_step_interaction(ctx, backdrop_id);
         if (bd.clicked) {
-            reason = NT_UI_MODAL_CLOSE_BACKDROP;
+            const int16_t pad = style->backdrop_close_pad;
+            const int16_t pad_lrtb[4] = {pad, pad, pad, pad};
+            if (!nt_ui_internal_hit_test_padded(ctx, id, bd.pos[0], bd.pos[1], pad_lrtb)) {
+                reason = NT_UI_MODAL_CLOSE_BACKDROP;
+            }
         }
     }
     // #endregion
@@ -170,9 +180,8 @@ void nt_ui_modal_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_modal_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_modal_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(ctx->active_modal_depth > 0U && "nt_ui_modal_end: unbalanced begin/end (stack underflow)");
-    /* The panel occludes its own area so a click on the panel background does NOT leak to the
-     * backdrop (which would mis-fire CLOSE_ON_BACKDROP). Done at end so it sits inside the open panel. */
-    nt_ui_block_pointer(ctx, ctx->active_modal_id[ctx->active_modal_depth - 1U], NULL);
+    /* No panel self-occluder: it tied the body widgets on z and stole their clicks (CR-01). Empty-panel-bg
+     * clicks are kept from mis-closing by the padded-panel-bbox guard in modal_begin's close-on-backdrop. */
     nt_ui_clay_priv_close_element(); /* close the panel floating element */
     --ctx->active_modal_depth;
 }
