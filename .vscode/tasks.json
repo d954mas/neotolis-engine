@@ -535,6 +535,43 @@
             "problemMatcher": []
         },
         {
+            "label": "Build & run ui_showcase packs (release)",
+            "dependsOn": [
+                "Configure native-release",
+                "Build & run ui_showcase packs (release command)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_showcase packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_ui_showcase_packs && build\\examples\\ui_showcase\\native-release\\build_ui_showcase_packs.exe build/examples/ui_showcase",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build ui_showcase (release)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target ui_showcase",
+            "dependsOn": ["Build & run ui_showcase packs (release)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Run ui_showcase (native-release)",
+            "type": "shell",
+            "command": "build\\examples\\ui_showcase\\native-release\\ui_showcase.exe",
+            "dependsOn": ["Build ui_showcase (release)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "presentation": { "panel": "dedicated", "reveal": "always" },
+            "problemMatcher": []
+        },
+        {
             "label": "Build & run slice9_demo packs (debug)",
             "type": "shell",
             "command": "cmake --build build/_cmake/native-debug --target slice9_demo_build_packs && build\\examples\\slice9_demo\\native-debug\\slice9_demo_build_packs.exe build/examples/slice9_demo",
@@ -703,6 +740,32 @@
         {
             "label": "Build & Serve ui_showcase (debug)",
             "dependsOn": ["Build wasm-debug-paired", "Ensure server ui_showcase (debug :8098)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server ui_showcase (release :8099)",
+            "type": "shell",
+            "command": "python -m http.server 8099 -d \"${workspaceFolder}/build/examples/ui_showcase/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve ui_showcase (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server ui_showcase (release :8099)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
