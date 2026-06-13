@@ -145,6 +145,11 @@ int main(int argc, char *argv[]) {
     opts.name = "bar_fill_smooth";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_fill_smooth.png", &opts);
 
+    /* Shaped diagonal-stripe fill for the CROP-clip progress variant (revealed, not stretched;
+     * slice9 is ignored in CROP, so it keeps the bar pill borders only for the STRETCH siblings). */
+    opts.name = "bar_fill_shaped";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_fill_shaped.png", &opts);
+
     /* Scrollbar: recessed slot track + light capsule thumb (8px slice9). */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "scroll_track";
@@ -186,7 +191,15 @@ int main(int argc, char *argv[]) {
     btn_opts.name = "button_green";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/button_green_depth.png", &btn_opts);
 
-    (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 2 buttons (s9:%d)\n", PANEL_BORDER, BUTTON_BORDER);
+    btn_opts.name = "button_red";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/button_red_depth.png", &btn_opts);
+
+    /* Real icon art (Kenney CC0 bunny, 32x32) for the icon button variant. */
+    nt_atlas_sprite_opts_t icon_opts = nt_atlas_sprite_opts_defaults();
+    icon_opts.name = "icon_bunny";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/icon_bunny.png", &icon_opts);
+
+    (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon\n", PANEL_BORDER, BUTTON_BORDER);
 
     /* White pixel for UI rects (panel backgrounds, tab list). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};

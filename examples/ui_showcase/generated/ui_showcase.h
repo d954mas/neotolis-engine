@@ -22,13 +22,16 @@
 
 /* --- ATLAS_REGION --- */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* ui_showcase_atlas/_white */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_FILL_SHAPED ((nt_hash64_t){0xD90FD46D2942D266ULL}) /* ui_showcase_atlas/bar_fill_shaped */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_FILL_SMOOTH ((nt_hash64_t){0x79EB3F6E66AACCD2ULL}) /* ui_showcase_atlas/bar_fill_smooth */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_THUMB ((nt_hash64_t){0x0A23AE77D09F56B0ULL}) /* ui_showcase_atlas/bar_thumb */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_TRACK ((nt_hash64_t){0x51EAE63B523DAC86ULL}) /* ui_showcase_atlas/bar_track */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BOX_OFF ((nt_hash64_t){0x97CC840C10B18698ULL}) /* ui_showcase_atlas/box_off */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_BLUE ((nt_hash64_t){0x04DD51E0B9359D84ULL}) /* ui_showcase_atlas/button_blue */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_GREEN ((nt_hash64_t){0x7ABDDB88258FF8EEULL}) /* ui_showcase_atlas/button_green */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_RED ((nt_hash64_t){0x72F1164809108B78ULL}) /* ui_showcase_atlas/button_red */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK ((nt_hash64_t){0x24D04B5060D94AAAULL}) /* ui_showcase_atlas/checkmark */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY ((nt_hash64_t){0x8BCA833565A72C8EULL}) /* ui_showcase_atlas/icon_bunny */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BEIGE ((nt_hash64_t){0x0AE1CE33078EC907ULL}) /* ui_showcase_atlas/panel_beige */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE ((nt_hash64_t){0xD19BE6D11F48A883ULL}) /* ui_showcase_atlas/panel_blue */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN ((nt_hash64_t){0xAF4C0086E593897FULL}) /* ui_showcase_atlas/panel_brown */
@@ -48,13 +51,16 @@ static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("ui_showcase/font");
     (void)nt_hash64_str("ui_showcase_atlas");
     (void)nt_hash64_str("ui_showcase_atlas/_white");
+    (void)nt_hash64_str("ui_showcase_atlas/bar_fill_shaped");
     (void)nt_hash64_str("ui_showcase_atlas/bar_fill_smooth");
     (void)nt_hash64_str("ui_showcase_atlas/bar_thumb");
     (void)nt_hash64_str("ui_showcase_atlas/bar_track");
     (void)nt_hash64_str("ui_showcase_atlas/box_off");
     (void)nt_hash64_str("ui_showcase_atlas/button_blue");
     (void)nt_hash64_str("ui_showcase_atlas/button_green");
+    (void)nt_hash64_str("ui_showcase_atlas/button_red");
     (void)nt_hash64_str("ui_showcase_atlas/checkmark");
+    (void)nt_hash64_str("ui_showcase_atlas/icon_bunny");
     (void)nt_hash64_str("ui_showcase_atlas/panel_beige");
     (void)nt_hash64_str("ui_showcase_atlas/panel_blue");
     (void)nt_hash64_str("ui_showcase_atlas/panel_brown");

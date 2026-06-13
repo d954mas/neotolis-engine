@@ -88,6 +88,11 @@ static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, 
  * Mutable so the engine memoizes the resolved region index in place. Dark + light variants. */
 static nt_ui_button_style_t s_btn_primary_dark, s_btn_primary_light;
 static nt_ui_button_style_t s_btn_secondary_dark, s_btn_secondary_light;
+/* Buttons-tab variety (theme-agnostic art, same in both palettes): exaggerated-scale, per-state
+ * VISUAL ART SWAP (blue idle / green hover / red pressed), and no-pad touch-target variants. */
+static nt_ui_button_style_t s_btn_scale_dark, s_btn_scale_light;
+static nt_ui_button_style_t s_btn_swap_dark, s_btn_swap_light;
+static nt_ui_button_style_t s_btn_nopad_dark, s_btn_nopad_light;
 /* Tab-row click target: no atlas art (idle bg_tint == no-tint => transparent so the row's
  * selected/unselected CLAY bg shows), hover/pressed paint a translucent-white lighten overlay
  * (theme-agnostic, reads on both palettes). */
@@ -97,6 +102,10 @@ static nt_ui_checkbox_style_t s_radio_dark, s_radio_light;
 static nt_ui_checkbox_style_t s_switch_dark, s_switch_light;
 static nt_ui_slider_style_t s_slider_dark, s_slider_light;
 static nt_ui_progress_style_t s_progress_dark, s_progress_light;
+/* Progress variants: horizontal CROP (shaped diagonal-stripe fill, revealed not stretched) +
+ * vertical BOTTOM_UP "mana" bar. Same art on both palettes. */
+static nt_ui_progress_style_t s_progress_crop_dark, s_progress_crop_light;
+static nt_ui_progress_style_t s_progress_vert_dark, s_progress_vert_light;
 /* Four scroll variants (Scroll tab): vertical AUTO_HIDE / vertical ALWAYS / horizontal-only /
  * both-axes. Same art, differ only in bar_visibility + scroll_x/scroll_y. Dark+light share art. */
 static nt_ui_scroll_style_t s_scroll_hide_dark, s_scroll_hide_light;
@@ -120,9 +129,12 @@ typedef struct {
     /* Widget styles are non-const: the engine memoizes the resolved atlas region index in
      * place on first emit, so these point at mutable runtime storage. */
     nt_ui_button_style_t *btn_primary, *btn_secondary, *listrow;
+    /* Buttons-tab variety: exaggerated-scale / per-state art-swap / no-pad touch-target. */
+    nt_ui_button_style_t *btn_scale, *btn_swap, *btn_nopad;
     nt_ui_checkbox_style_t *check, *radio, *toggle; /* one shared checkbox style each */
     nt_ui_slider_style_t *slider;
     nt_ui_progress_style_t *progress;
+    nt_ui_progress_style_t *progress_crop, *progress_vert; /* CROP + vertical variants */
     /* Four scroll variants (the engine memoizes the resolved atlas index in place -> non-const). */
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
     /* Modal base style: restyles on the palette pointer flip (D-60-14). */
@@ -142,11 +154,16 @@ static ui_palette_t g_dark = {
     .btn_primary = &s_btn_primary_dark,
     .btn_secondary = &s_btn_secondary_dark,
     .listrow = &s_listrow_dark,
+    .btn_scale = &s_btn_scale_dark,
+    .btn_swap = &s_btn_swap_dark,
+    .btn_nopad = &s_btn_nopad_dark,
     .check = &s_check_dark,
     .radio = &s_radio_dark,
     .toggle = &s_switch_dark,
     .slider = &s_slider_dark,
     .progress = &s_progress_dark,
+    .progress_crop = &s_progress_crop_dark,
+    .progress_vert = &s_progress_vert_dark,
     .scroll_hide = &s_scroll_hide_dark,
     .scroll_always = &s_scroll_always_dark,
     .scroll_horiz = &s_scroll_horiz_dark,
@@ -170,11 +187,16 @@ static ui_palette_t g_light = {
     .btn_primary = &s_btn_primary_light,
     .btn_secondary = &s_btn_secondary_light,
     .listrow = &s_listrow_light,
+    .btn_scale = &s_btn_scale_light,
+    .btn_swap = &s_btn_swap_light,
+    .btn_nopad = &s_btn_nopad_light,
     .check = &s_check_light,
     .radio = &s_radio_light,
     .toggle = &s_switch_light,
     .slider = &s_slider_light,
     .progress = &s_progress_light,
+    .progress_crop = &s_progress_crop_light,
+    .progress_vert = &s_progress_vert_light,
     .scroll_hide = &s_scroll_hide_light,
     .scroll_always = &s_scroll_always_light,
     .scroll_horiz = &s_scroll_horiz_light,
@@ -206,6 +228,16 @@ typedef struct {
     bool ramp_up;
 } progress_params_t;
 
+/* Transform-aware button props (D-60-13): the panel drives a live transform around a button to
+ * prove inverse-affine hit-test still clicks correctly when rotated/scaled/offset. */
+typedef struct {
+    float rotation_deg; /* -180..180 */
+    float scale;        /* 0.5..2.0 */
+    float offset_x;     /* -120..120 px */
+    float offset_y;
+    uint32_t clicks; /* proof counter: still clickable while transformed */
+} btn_xform_params_t;
+
 /* Modal props (D-60-13): transition selector + tween/anim params the panel drives live. */
 typedef struct {
     int transition;       /* 0 = scale-pop, 1 = fade, 2 = slide (segmented control) */
@@ -232,6 +264,7 @@ struct tab_state {
     /* Props params. */
     slice9_params_t s9;
     progress_params_t prog;
+    btn_xform_params_t btn_xform;
     /* Modals tab. */
     bool confirm_open;
     bool nested_open;
@@ -248,6 +281,7 @@ static struct tab_state s_state = {
     .slider_int = 4,
     .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 480, .target_h = 200},
     .prog = {.value = 0.4F, .auto_anim = false, .ramp_up = true},
+    .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
     .confirm_open = false,
     .nested_open = false,
     .modal = {.transition = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .backdrop_alpha = 0.55F},
@@ -273,12 +307,14 @@ static uint32_t s_id_radio_a, s_id_radio_b, s_id_radio_c;
 static uint32_t s_id_toggle;
 static uint32_t s_id_slider_f, s_id_slider_i;
 static uint32_t s_id_progress;
-static uint32_t s_id_scroll_hide, s_id_scroll_always; /* vertical AUTO_HIDE / ALWAYS lists */
-static uint32_t s_id_scroll_horiz, s_id_scroll_xy;    /* horizontal-only / both-axes */
-static uint32_t s_id_stress_scroll;                   /* fixed-size scroll so the label cell can't overflow */
+static uint32_t s_id_progress_crop, s_id_progress_vert; /* CROP + vertical progress variants */
+static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / ALWAYS lists */
+static uint32_t s_id_scroll_horiz, s_id_scroll_xy;      /* horizontal-only / both-axes */
+static uint32_t s_id_stress_scroll;                     /* fixed-size scroll so the label cell can't overflow */
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
 static uint32_t s_id_props_w, s_id_props_h;
 static uint32_t s_id_props_value;
+static uint32_t s_id_props_rot, s_id_props_bscale, s_id_props_offx, s_id_props_offy; /* button transform panel */
 static uint32_t s_id_modal_confirm, s_id_modal_nested;
 static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s_id_modal_nested_btn, s_id_modal_nested_close_btn;
 static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop;
@@ -317,6 +353,8 @@ static nt_atlas_region_ref_t s_panel_beige_ref;
 static nt_atlas_region_ref_t s_panel_blue_ref;
 static nt_atlas_region_ref_t s_panel_brown_ref;
 static nt_atlas_region_ref_t s_button_green_ref;
+/* Icon-button art (Kenney bunny); untinted so it shows its natural color. */
+static nt_atlas_region_ref_t s_icon_bunny_ref;
 
 static int s_active_tab;
 // #endregion
@@ -342,9 +380,8 @@ static void showcase_panel_end(nt_ui_context_t *ctx) { nt_ui_group_end(ctx); }
 
 // #region widget tab render fns (filled in Task 2; stubs in Task 1)
 static void render_labels(nt_ui_context_t *ctx, tab_state_t *st);
-static void render_button_primary(nt_ui_context_t *ctx, tab_state_t *st);
-static void render_button_secondary(nt_ui_context_t *ctx, tab_state_t *st);
-static void render_button_disabled(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st);
@@ -354,6 +391,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
+static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_modal(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_stress(nt_ui_context_t *ctx, tab_state_t *st);
 // #endregion
@@ -362,9 +400,9 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st);
 /* 8 logical categories (DEMO-02). Buttons render as 3 sibling entries (D-60-13). */
 static const showcase_entry_t g_tabs[] = {
     {"Labels", "h1 / body / caption label variants, themed via the palette.", "examples/ui_showcase/main.c:render_labels", render_labels, NULL},
-    {"Buttons: Primary", "Primary slice9 button (idle/hover/pressed/disabled).", "examples/ui_showcase/main.c:render_button_primary", render_button_primary, NULL},
-    {"Buttons: Secondary", "Secondary (alternate art) button variant.", "examples/ui_showcase/main.c:render_button_secondary", render_button_secondary, NULL},
-    {"Buttons: Disabled", "Disabled button (interaction short-circuit + dim).", "examples/ui_showcase/main.c:render_button_disabled", render_button_disabled, NULL},
+    {"Buttons", "Standard / scale / per-state ART SWAP / no-pad touch-target / icon / disabled.", "examples/ui_showcase/main.c:render_buttons", render_buttons, NULL},
+    {"Buttons: Transform", "Rotated/scaled/offset button that STILL hit-tests (inverse-affine); driven by the panel.", "examples/ui_showcase/main.c:render_button_transform", render_button_transform,
+     props_button_transform},
     {"Images & Slice9", "Slice9 panels at 3 sizes (corners stay crisp) + a live insets/size panel.", "examples/ui_showcase/main.c:render_slice9", render_slice9, props_slice9},
     {"Toggles & Radios", "Checkbox + exclusive radio group + sliding toggle.", "examples/ui_showcase/main.c:render_toggles", render_toggles, NULL},
     {"Sliders & Progress", "Float + int sliders + a progress bar driven by a live value panel.", "examples/ui_showcase/main.c:render_sliders", render_sliders, props_progress},
@@ -391,10 +429,15 @@ static void init_styles(void) {
     const nt_atlas_region_ref_t bar_thumb = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_THUMB.value);
     const nt_atlas_region_ref_t btn_blue = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_BLUE.value);
 
+    const nt_atlas_region_ref_t btn_green = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_GREEN.value);
+    const nt_atlas_region_ref_t btn_red = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_RED.value);
+    const nt_atlas_region_ref_t bar_fill_shaped = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BAR_FILL_SHAPED.value);
+
     s_panel_beige_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BEIGE.value);
     s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE.value);
     s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN.value);
-    s_button_green_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_GREEN.value);
+    s_button_green_ref = btn_green;
+    s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
 
     /* ---- Buttons: primary (blue slice9) + secondary (green slice9). ---- */
     nt_ui_button_style_t btn_base = {
@@ -411,8 +454,33 @@ static void init_styles(void) {
     s_btn_primary_light = s_btn_primary_dark;
 
     s_btn_secondary_dark = btn_base;
-    s_btn_secondary_dark.idle.bg = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_GREEN.value);
+    s_btn_secondary_dark.idle.bg = btn_green;
     s_btn_secondary_light = s_btn_secondary_dark;
+
+    /* Exaggerated-scale variant: hover blows up to 1.20, press shrinks to 0.80 (no offset). */
+    s_btn_scale_dark = btn_base;
+    s_btn_scale_dark.idle.bg = btn_blue;
+    s_btn_scale_dark.hover.scale = 1.20F;
+    s_btn_scale_dark.pressed.scale = 0.80F;
+    s_btn_scale_dark.pressed.offset_y = 0.0F;
+    s_btn_scale_light = s_btn_scale_dark;
+
+    /* Per-state VISUAL ART SWAP: blue idle/disabled, green hover, red pressed. Non-idle states set
+     * their own bg ref (otherwise they inherit idle.bg). */
+    s_btn_swap_dark = btn_base;
+    s_btn_swap_dark.idle.bg = btn_blue;
+    s_btn_swap_dark.hover.bg = btn_green;
+    s_btn_swap_dark.pressed.bg = btn_red;
+    s_btn_swap_light = s_btn_swap_dark;
+
+    /* No-pad / touch-target variant: zero hit padding so visual==hit (vs the padded primary). */
+    s_btn_nopad_dark = btn_base;
+    s_btn_nopad_dark.idle.bg = btn_blue;
+    s_btn_nopad_dark.hit_padding_lrtb[0] = 0;
+    s_btn_nopad_dark.hit_padding_lrtb[1] = 0;
+    s_btn_nopad_dark.hit_padding_lrtb[2] = 0;
+    s_btn_nopad_dark.hit_padding_lrtb[3] = 0;
+    s_btn_nopad_light = s_btn_nopad_dark;
 
     /* ---- Tab-row click target: no art, idle transparent, hover/pressed translucent-white lighten. ---- */
     /* idle.bg.atlas.id stays 0 => text-only button (no IMAGE); bg_tint 0xFFFFFFFF unpacks to no-tint
@@ -505,6 +573,25 @@ static void init_styles(void) {
     progress_base.fill = bar_fill;
     s_progress_dark = progress_base;
     s_progress_light = progress_base;
+
+    /* CROP variant: same recessed track, shaped diagonal-stripe fill revealed by a clip scissor
+     * (stripes stay crisp; slice9 is ignored in CROP). */
+    nt_ui_progress_style_t progress_crop = progress_base;
+    progress_crop.fill = bar_fill_shaped;
+    progress_crop.fill_mode = NT_UI_FILL_CROP;
+    progress_crop.fill_direction = NT_UI_FILL_LTR;
+    s_progress_crop_dark = progress_crop;
+    s_progress_crop_light = progress_crop;
+
+    /* Vertical "mana" bar: STRETCH slice9 fill, BOTTOM_UP, blue-tinted, narrow + tall. */
+    nt_ui_progress_style_t progress_vert = progress_base;
+    progress_vert.track_w = 28.0F;
+    progress_vert.track_h = 150.0F;
+    progress_vert.fill_tint = 0xFFF09040U; /* blue mana (0xAABBGGRR) */
+    progress_vert.fill_mode = NT_UI_FILL_STRETCH;
+    progress_vert.fill_direction = NT_UI_FILL_BOTTOM_UP;
+    s_progress_vert_dark = progress_vert;
+    s_progress_vert_light = progress_vert;
 
     /* ---- Scroll: recessed slot track + capsule thumb. Four variants differ only in bar ---- */
     /* visibility (AUTO_HIDE vs ALWAYS) + which axes scroll; same art on dark+light. */
@@ -600,20 +687,82 @@ static void render_labels(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-static void render_button_primary(nt_ui_context_t *ctx, tab_state_t *st) {
-    (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Primary action button (idle / hover / pressed).", g_current->caption);
-    button_cell(ctx, nt_ui_id("showcase/btn_primary"), g_current->btn_primary, "Primary", true);
+/* A captioned button cell: a variant title/sub above one button, themed via the palette. */
+static void labelled_button_cell(nt_ui_context_t *ctx, const char *title, const char *sub, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), sub, g_current->caption);
+        button_cell(ctx, id, style, text, enabled);
+    }
 }
-static void render_button_secondary(nt_ui_context_t *ctx, tab_state_t *st) {
+
+/* Buttons tab: the full variety the old ui_buttons_demo showed -- standard states, exaggerated
+ * scale, per-state VISUAL ART SWAP (blue/green/red), no-pad touch-target, an icon button, and a
+ * disabled button. Two rows of three cells. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Secondary (alternate art) button.", g_current->caption);
-    button_cell(ctx, nt_ui_id("showcase/btn_secondary"), g_current->btn_secondary, "Secondary", true);
+    static const Clay_ElementDeclaration grid_row = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}};
+
+    CLAY(grid_row) {
+        labelled_button_cell(ctx, "Standard", "idle/hover/pressed/disabled", nt_ui_id("showcase/btn_standard"), g_current->btn_primary, "Primary", true);
+        labelled_button_cell(ctx, "Scale", "hover 1.20 / press 0.80", nt_ui_id("showcase/btn_scale"), g_current->btn_scale, "Boom", true);
+        labelled_button_cell(ctx, "Art swap", "blue idle / green hover / red press", nt_ui_id("showcase/btn_swap"), g_current->btn_swap, "Swap", true);
+    }
+    CLAY(grid_row) {
+        labelled_button_cell(ctx, "No-pad", "hit==visual (no touch padding)", nt_ui_id("showcase/btn_nopad"), g_current->btn_nopad, "Tight", true);
+        /* Icon button: bunny child, untinted (its own art color), inside the no-pad style. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Icon", g_current->body);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "icon child (untinted)", g_current->caption);
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_icon"), g_current->btn_nopad,
+                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)},
+                                                                     .padding = CLAY_PADDING_ALL(8),
+                                                                     .childGap = 14,
+                                                                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                               true);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->h1);
+            (void)nt_ui_button_end(ctx);
+        }
+        labelled_button_cell(ctx, "Disabled", "enabled=false short-circuits + dims", nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Locked", false);
+    }
 }
-static void render_button_disabled(nt_ui_context_t *ctx, tab_state_t *st) {
-    (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Disabled button: enabled=false short-circuits interaction + dims.", g_current->caption);
-    button_cell(ctx, nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Disabled", false);
+
+/* Buttons: Transform tab. A button wrapped in a live transform (rotation/scale/offset from the
+ * props panel) -- proves inverse-affine hit-test: it still clicks while rotated/scaled/translated.
+ * The click counter is the proof. */
+static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[80];
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The button below is transformed by the properties panel. It STILL hit-tests correctly.", g_current->caption);
+    (void)snprintf(buf, sizeof buf, "clicks: %u   (rot %.0f deg  scale %.2f  offset %.0f,%.0f)", st->btn_xform.clicks, (double)st->btn_xform.rotation_deg, (double)st->btn_xform.scale,
+                   (double)st->btn_xform.offset_x, (double)st->btn_xform.offset_y);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+
+    /* Stable slot so the transformed button has room to rotate/offset without overlap. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(360)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        const nt_ui_transform_t xform = {
+            .offset_x = st->btn_xform.offset_x,
+            .offset_y = st->btn_xform.offset_y,
+            .rotation_z = st->btn_xform.rotation_deg * 0.017453292F, /* deg -> rad */
+            .scale_x = st->btn_xform.scale,
+            .scale_y = st->btn_xform.scale,
+            .scale_z = 1.0F,
+        };
+        /* The wrapping CLAY's transform composes into the button's tree_baked, so both the renderer
+         * and the inverse-affine hit-test see it. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &xform, 1.0F)}) {
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform"), g_current->btn_primary,
+                               &(Clay_ElementDeclaration){
+                                   .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                               true);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click me", g_current->h1);
+            if (nt_ui_button_end(ctx)) {
+                st->btn_xform.clicks++;
+            }
+        }
+    }
 }
 
 /* One reference panel at a fixed size (DEMO-07: corners stay non-stretched). */
@@ -683,9 +832,25 @@ static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_slider_i, NULL, &st->slider_int, 0, 10, 1, g_current->slider, &sdecl, true);
 
-    (void)snprintf(buf, sizeof buf, "Progress  %d%%", (int)(st->prog.value * 100.0F));
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress, st->prog.value, g_current->progress, &pdecl);
+    /* Progress: STRETCH (slice9) + CROP (clip, shaped fill) side by side, plus a vertical mana bar.
+     * All three read the same panel-driven value, so they animate together. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Progress: STRETCH (slice9) / CROP (clip) / vertical (BOTTOM_UP)", g_current->caption);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 28, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+            (void)snprintf(buf, sizeof buf, "STRETCH (slice9)  %d%%", (int)(st->prog.value * 100.0F));
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress, st->prog.value, g_current->progress, &pdecl);
+
+            (void)snprintf(buf, sizeof buf, "CROP (clip)  %d%%", (int)(st->prog.value * 100.0F));
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress_crop, st->prog.value, g_current->progress_crop, &pdecl);
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Mana", g_current->caption);
+            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress_vert, st->prog.value, g_current->progress_vert,
+                           &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(150)}}});
+        }
+    }
 }
 
 /* One vertical-list item row (fills container width). */
@@ -825,6 +990,45 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_value, NULL, &st->prog.value, 0.0F, 1.0F, 0.0F, g_current->slider, &sdecl, !st->prog.auto_anim);
 
     (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/props_auto"), "Auto-animate", &st->prog.auto_anim, g_current->toggle, &row, true);
+
+    showcase_panel_end(ctx);
+}
+
+/* D-60-13 Button-transform panel: rotation / scale / offset sliders drive the live transform around
+ * the transform-aware button (read in render_button_transform each frame). Props panel over global
+ * Q/E/arrow keys -- those collide with the showcase's T/D/Esc. */
+static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    showcase_panel_begin(ctx, "Transform properties");
+
+    (void)snprintf(buf, sizeof buf, "Rotation  %.0f deg", (double)st->btn_xform.rotation_deg);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_rot, NULL, &st->btn_xform.rotation_deg, -180.0F, 180.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Scale  %.2f", (double)st->btn_xform.scale);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_bscale, NULL, &st->btn_xform.scale, 0.5F, 2.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Offset X  %.0f", (double)st->btn_xform.offset_x);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_offx, NULL, &st->btn_xform.offset_x, -120.0F, 120.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Offset Y  %.0f", (double)st->btn_xform.offset_y);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_offy, NULL, &st->btn_xform.offset_y, -120.0F, 120.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform_reset"), g_current->btn_secondary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(44)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        true);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reset", g_current->body);
+    if (nt_ui_button_end(ctx)) {
+        st->btn_xform.rotation_deg = 20.0F;
+        st->btn_xform.scale = 1.0F;
+        st->btn_xform.offset_x = 0.0F;
+        st->btn_xform.offset_y = 0.0F;
+    }
 
     showcase_panel_end(ctx);
 }
@@ -1060,6 +1264,8 @@ static void ensure_ids(void) {
     s_id_slider_f = nt_ui_id("showcase/slider_f");
     s_id_slider_i = nt_ui_id("showcase/slider_i");
     s_id_progress = nt_ui_id("showcase/progress");
+    s_id_progress_crop = nt_ui_id("showcase/progress_crop");
+    s_id_progress_vert = nt_ui_id("showcase/progress_vert");
     s_id_scroll_hide = nt_ui_id("showcase/scroll_hide");
     s_id_scroll_always = nt_ui_id("showcase/scroll_always");
     s_id_scroll_horiz = nt_ui_id("showcase/scroll_horiz");
@@ -1072,6 +1278,10 @@ static void ensure_ids(void) {
     s_id_props_w = nt_ui_id("showcase/props_w");
     s_id_props_h = nt_ui_id("showcase/props_h");
     s_id_props_value = nt_ui_id("showcase/props_value");
+    s_id_props_rot = nt_ui_id("showcase/props_rot");
+    s_id_props_bscale = nt_ui_id("showcase/props_bscale");
+    s_id_props_offx = nt_ui_id("showcase/props_offx");
+    s_id_props_offy = nt_ui_id("showcase/props_offy");
     s_id_modal_confirm = nt_ui_id("showcase/modal_confirm");
     s_id_modal_nested = nt_ui_id("showcase/modal_nested");
     s_id_modal_show_btn = nt_ui_id("showcase/modal_show_btn");
