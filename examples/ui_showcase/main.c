@@ -69,10 +69,18 @@ struct nt_ui_context;
 static const nt_ui_label_style_t g_h1_dark = {.font_id = 0, .font_size = 40, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
 static const nt_ui_label_style_t g_body_dark = {.font_id = 0, .font_size = 22, .color = {225.0F, 228.0F, 235.0F, 255.0F}};
 static const nt_ui_label_style_t g_caption_dark = {.font_id = 0, .font_size = 16, .color = {165.0F, 170.0F, 182.0F, 255.0F}};
+/* Title in the header (smaller than the per-tab h1) + selected tab-row label (near-white pop). */
+static const nt_ui_label_style_t g_title_dark = {.font_id = 0, .font_size = 26, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+static const nt_ui_label_style_t g_row_sel_dark = {.font_id = 0, .font_size = 16, .color = {245.0F, 247.0F, 252.0F, 255.0F}};
+/* Source-link line: dimmer + distinct from body/caption so it reads as a reference, not copy. */
+static const nt_ui_label_style_t g_link_dark = {.font_id = 0, .font_size = 14, .color = {110.0F, 150.0F, 200.0F, 255.0F}};
 
 static const nt_ui_label_style_t g_h1_light = {.font_id = 0, .font_size = 40, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
 static const nt_ui_label_style_t g_body_light = {.font_id = 0, .font_size = 22, .color = {28.0F, 30.0F, 38.0F, 255.0F}};
 static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 16, .color = {90.0F, 92.0F, 104.0F, 255.0F}};
+static const nt_ui_label_style_t g_title_light = {.font_id = 0, .font_size = 26, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
+static const nt_ui_label_style_t g_row_sel_light = {.font_id = 0, .font_size = 16, .color = {12.0F, 28.0F, 56.0F, 255.0F}};
+static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, .color = {56.0F, 100.0F, 170.0F, 255.0F}};
 // #endregion
 
 // #region palette widget styles (filled with late-bound atlas refs at init)
@@ -80,6 +88,10 @@ static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 1
  * Mutable so the engine memoizes the resolved region index in place. Dark + light variants. */
 static nt_ui_button_style_t s_btn_primary_dark, s_btn_primary_light;
 static nt_ui_button_style_t s_btn_secondary_dark, s_btn_secondary_light;
+/* Tab-row click target: no atlas art (idle bg_tint == no-tint => transparent so the row's
+ * selected/unselected CLAY bg shows), hover/pressed paint a translucent-white lighten overlay
+ * (theme-agnostic, reads on both palettes). */
+static nt_ui_button_style_t s_listrow_dark, s_listrow_light;
 static nt_ui_checkbox_style_t s_check_dark, s_check_light;
 static nt_ui_checkbox_style_t s_radio_dark, s_radio_light;
 static nt_ui_checkbox_style_t s_switch_dark, s_switch_light;
@@ -99,16 +111,17 @@ static nt_ui_modal_style_t s_modal_dark, s_modal_light;
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
 typedef struct {
     const nt_ui_label_style_t *h1, *body, *caption;
+    const nt_ui_label_style_t *title, *row_sel, *link; /* header title, selected tab-row label, source-link */
     /* Widget styles are non-const: the engine memoizes the resolved atlas region index in
      * place on first emit, so these point at mutable runtime storage. */
-    nt_ui_button_style_t *btn_primary, *btn_secondary;
+    nt_ui_button_style_t *btn_primary, *btn_secondary, *listrow;
     nt_ui_checkbox_style_t *check, *radio, *toggle; /* one shared checkbox style each */
     nt_ui_slider_style_t *slider;
     nt_ui_progress_style_t *progress;
     const nt_ui_scroll_style_t *scroll;
     /* Modal base style: restyles on the palette pointer flip (D-60-14). */
     const nt_ui_modal_style_t *modal;
-    Clay_Color bg, panel, list_bg, list_sel;
+    Clay_Color bg, panel, list_bg, list_sel, accent, border;
     const char *name;
 } ui_palette_t;
 
@@ -117,8 +130,12 @@ static ui_palette_t g_dark = {
     .h1 = &g_h1_dark,
     .body = &g_body_dark,
     .caption = &g_caption_dark,
+    .title = &g_title_dark,
+    .row_sel = &g_row_sel_dark,
+    .link = &g_link_dark,
     .btn_primary = &s_btn_primary_dark,
     .btn_secondary = &s_btn_secondary_dark,
+    .listrow = &s_listrow_dark,
     .check = &s_check_dark,
     .radio = &s_radio_dark,
     .toggle = &s_switch_dark,
@@ -129,15 +146,21 @@ static ui_palette_t g_dark = {
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
     .list_bg = {24.0F, 26.0F, 34.0F, 255.0F},
-    .list_sel = {52.0F, 92.0F, 140.0F, 255.0F},
+    .list_sel = {46.0F, 98.0F, 158.0F, 255.0F},
+    .accent = {86.0F, 156.0F, 230.0F, 255.0F},
+    .border = {58.0F, 64.0F, 78.0F, 255.0F},
     .name = "DARK",
 };
 static ui_palette_t g_light = {
     .h1 = &g_h1_light,
     .body = &g_body_light,
     .caption = &g_caption_light,
+    .title = &g_title_light,
+    .row_sel = &g_row_sel_light,
+    .link = &g_link_light,
     .btn_primary = &s_btn_primary_light,
     .btn_secondary = &s_btn_secondary_light,
+    .listrow = &s_listrow_light,
     .check = &s_check_light,
     .radio = &s_radio_light,
     .toggle = &s_switch_light,
@@ -148,7 +171,9 @@ static ui_palette_t g_light = {
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
     .list_bg = {224.0F, 227.0F, 235.0F, 255.0F},
-    .list_sel = {150.0F, 188.0F, 240.0F, 255.0F},
+    .list_sel = {138.0F, 182.0F, 240.0F, 255.0F},
+    .accent = {52.0F, 120.0F, 214.0F, 255.0F},
+    .border = {206.0F, 210.0F, 220.0F, 255.0F},
     .name = "LIGHT",
 };
 
@@ -375,6 +400,21 @@ static void init_styles(void) {
     s_btn_secondary_dark.idle.bg = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BUTTON_GREEN.value);
     s_btn_secondary_light = s_btn_secondary_dark;
 
+    /* ---- Tab-row click target: no art, idle transparent, hover/pressed translucent-white lighten. ---- */
+    /* idle.bg.atlas.id stays 0 => text-only button (no IMAGE); bg_tint 0xFFFFFFFF unpacks to no-tint
+     * (transparent), so the row's selected/unselected CLAY bg shows through. No scale-pop on rows. */
+    nt_ui_button_style_t listrow_base = {
+        .idle = {.bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
+        .hover = {.bg_tint = 0x22FFFFFFU, .scale = 1.0F, .opacity = 1.0F},   /* ~13% white lighten */
+        .pressed = {.bg_tint = 0x3AFFFFFFU, .scale = 1.0F, .opacity = 1.0F}, /* ~23% white lighten */
+        .disabled = {.bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
+        .transition_speed = 16.0F,
+        .hit_padding_lrtb = {0, 0, 0, 0},
+        .slice9_scale = 1.0F,
+    };
+    s_listrow_dark = listrow_base;
+    s_listrow_light = listrow_base;
+
     /* ---- Checkbox: box + checkmark pop. Light variant darkens text. ---- */
     nt_ui_checkbox_style_t check_base = nt_ui_checkbox_style_defaults();
     check_base.box_w = 32;
@@ -514,10 +554,11 @@ static void render_labels(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Heading 1 (h1)", g_current->h1);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Body text -- the default reading style for paragraphs and descriptions.", g_current->body);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Caption -- small secondary text for hints and metadata.", g_current->caption);
-    /* Wrapped + tinted variant (3rd distinct config). */
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
+    /* Wrapped + tinted variant (3rd distinct config). Wide enough to avoid ragged narrow wraps. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(620), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(16), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = g_current->panel,
-          .cornerRadius = CLAY_CORNER_RADIUS(8)}) {
+          .cornerRadius = CLAY_CORNER_RADIUS(8),
+          .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boxed body label inside a themed panel; re-styles with the T-key palette flip.", g_current->body);
     }
 }
@@ -929,7 +970,12 @@ static void ensure_ids(void) {
  * (the draw-call count IS the batching evidence -- no sort-by-material toggle, DEMO-09 REMOVED). */
 static void declare_header(nt_ui_context_t *ctx) {
     char buf[96];
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+    /* Title | theme button | live readout | (GROW spacer) | dim keyboard hints, with a 1px
+     * bottom separator under the whole bar. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.bottom = 10}, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+          .border = {.color = g_current->border, .width = {.bottom = 1}}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Neotolis UI Showcase", g_current->title);
+
         nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_theme_btn, g_current->btn_primary,
                            &(Clay_ElementDeclaration){
                                .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
@@ -946,31 +992,45 @@ static void declare_header(nt_ui_context_t *ctx) {
         } else {
             (void)snprintf(buf, sizeof buf, "draw calls: %u   gpu: %.2f ms", nt_ui_get_last_walk_draw_calls(ctx), (double)gpu_ms);
         }
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+
+        /* Spacer pushes the keyboard hints to the far right, dimmer than the live readout. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "[T] palette  [D] inspector  [Esc] quit", g_current->caption);
     }
 }
 
-/* Left tab list: one button per registry entry; clicking selects the active tab. */
+/* One tab-list row: full-row click target (transparent list-row button so the row's CLAY bg shows
+ * the selected/unselected state), a 3px left accent bar on the active row, hover/pressed lighten. */
+static void tab_row(nt_ui_context_t *ctx, int i, bool selected) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(38)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = selected ? g_current->list_sel : g_current->list_bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
+        /* 3px left accent bar on the active row (transparent spacer otherwise => stable layout). */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(3), CLAY_SIZING_GROW(0)}}, .backgroundColor = selected ? g_current->accent : (Clay_Color){0}}) {}
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tab_btn_base + (uint32_t)i, g_current->listrow,
+                           &(Clay_ElementDeclaration){
+                               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 12, .right = 10}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+                               .cornerRadius = {0, 6, 0, 6}},
+                           true);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), g_tabs[i].name, selected ? g_current->row_sel : g_current->caption);
+        if (nt_ui_button_end(ctx)) {
+            s_active_tab = i;
+        }
+    }
+}
+
+/* Left tab list: one full-row click target per registry entry; clicking selects the active tab. */
 static void declare_tab_list(nt_ui_context_t *ctx) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(10),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 6,
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
-          .backgroundColor = g_current->list_bg}) {
+          .backgroundColor = g_current->list_bg,
+          .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         for (int i = 0; i < TAB_COUNT; ++i) {
-            const bool selected = (i == s_active_tab);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(38)}, .padding = {.left = 10, .right = 10}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = selected ? g_current->list_sel : g_current->list_bg,
-                  .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
-                /* Use the primary button as a transparent-ish clickable row via begin/end. */
-                if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tab_btn_base + (uint32_t)i, &s_btn_primary_dark,
-                                 &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}}, true)) {
-                    s_active_tab = i;
-                }
-                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), g_tabs[i].name, g_current->caption);
-            }
+            tab_row(ctx, i, i == s_active_tab);
         }
     }
 }
@@ -987,7 +1047,8 @@ static void declare_stage(nt_ui_context_t *ctx) {
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->name, g_current->h1);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->info, g_current->caption);
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->caption);
+        /* Source reference: a dim "link" style distinct from body/caption copy. */
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->link);
 
         /* Content stage + (optional) props panel side by side. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
@@ -995,7 +1056,8 @@ static void declare_stage(nt_ui_context_t *ctx) {
             nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll,
                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8)}});
             {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
+                /* Cap the readable content column (~720px) so text/cards don't stretch edge-to-edge. */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0, 720), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
             }
             nt_ui_scroll_end(ctx);
 
@@ -1142,7 +1204,12 @@ static void frame(void) {
             /* Left tab list -> right content stage. */
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
                 declare_tab_list(s_ctx);
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .backgroundColor = g_current->panel, .cornerRadius = CLAY_CORNER_RADIUS(10)}) { declare_stage(s_ctx); }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+                      .backgroundColor = g_current->panel,
+                      .cornerRadius = CLAY_CORNER_RADIUS(10),
+                      .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
+                    declare_stage(s_ctx);
+                }
             }
         }
 
@@ -1155,9 +1222,12 @@ static void frame(void) {
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         {
+            /* Bottom-left overlay: nt_stats_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
+             * y-up text space, so anchor high enough (~5 line-heights) that the last line stays on
+             * screen and clear of the header's theme button at the top. */
             mat4 stats_model;
             glm_mat4_identity(stats_model);
-            glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
+            glm_translate(stats_model, (vec3){10.0F, 92.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
             nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();
