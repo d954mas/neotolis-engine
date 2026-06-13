@@ -101,10 +101,12 @@ static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
 typedef struct {
     const nt_ui_label_style_t *h1, *body, *caption;
-    const nt_ui_button_style_t *btn_primary, *btn_secondary;
-    const nt_ui_checkbox_style_t *check, *radio, *toggle; /* one shared checkbox style each */
-    const nt_ui_slider_style_t *slider;
-    const nt_ui_progress_style_t *progress;
+    /* Widget styles are non-const: the engine memoizes the resolved atlas region index in
+     * place on first emit, so these point at mutable runtime storage. */
+    nt_ui_button_style_t *btn_primary, *btn_secondary;
+    nt_ui_checkbox_style_t *check, *radio, *toggle; /* one shared checkbox style each */
+    nt_ui_slider_style_t *slider;
+    nt_ui_progress_style_t *progress;
     const nt_ui_scroll_style_t *scroll;
     /* modal style pointer joins the palette in Plan 04. */
     Clay_Color bg, panel, list_bg, list_sel;
@@ -451,48 +453,197 @@ static void try_bind_resources(void) {
 }
 // #endregion
 
-// #region widget tab render fns (Task 1 stubs -- Task 2 fills these)
+// #region widget tab render fns (fold the superseded demos' content as tabs)
+/* A labelled button slot: one button + an inline label, themed via the active palette. */
+static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled) {
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        enabled);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->h1);
+    (void)nt_ui_button_end(ctx);
+}
+
 static void render_labels(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Labels (stub)", g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Heading 1 (h1)", g_current->h1);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Body text -- the default reading style for paragraphs and descriptions.", g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Caption -- small secondary text for hints and metadata.", g_current->caption);
+    /* Wrapped + tinted variant (3rd distinct config). */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = g_current->panel,
+          .cornerRadius = CLAY_CORNER_RADIUS(8)}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boxed body label inside a themed panel; re-styles with the T-key palette flip.", g_current->body);
+    }
 }
+
 static void render_button_primary(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Button primary (stub)", g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Primary action button (idle / hover / pressed).", g_current->caption);
+    button_cell(ctx, nt_ui_id("showcase/btn_primary"), g_current->btn_primary, "Primary", true);
 }
 static void render_button_secondary(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Button secondary (stub)", g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Secondary (alternate art) button.", g_current->caption);
+    button_cell(ctx, nt_ui_id("showcase/btn_secondary"), g_current->btn_secondary, "Secondary", true);
 }
 static void render_button_disabled(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Button disabled (stub)", g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Disabled button: enabled=false short-circuits interaction + dims.", g_current->caption);
+    button_cell(ctx, nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Disabled", false);
 }
+
+/* One reference panel at a fixed size (DEMO-07: corners stay non-stretched). */
+static void slice9_ref(nt_ui_context_t *ctx, nt_atlas_region_ref_t *ref, float w, float h, const char *cap) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), cap, g_current->caption);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), ref, &g_panel_img_style, NULL); }
+    }
+}
+
 static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
-    (void)st;
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_img_style, NULL); }
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Slice9 (stub)", g_current->body);
+    /* Three reference sizes prove corners stay crisp while the center stretches (DEMO-07). */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+        slice9_ref(ctx, &s_panel_blue_ref, 300.0F, 100.0F, "300x100");
+        slice9_ref(ctx, &s_panel_blue_ref, 600.0F, 100.0F, "600x100");
+    }
+    slice9_ref(ctx, &s_panel_blue_ref, 600.0F, 400.0F, "600x400");
+
+    /* A slice9-backed nt_ui_panel container with a child label (folds the slice9_demo panel use). */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(360), CLAY_SIZING_FIXED(90)}, .padding = CLAY_PADDING_ALL(14), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_panel_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_img_style, NULL);
+        {
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panel with child (corners crisp)", g_current->body);
+        }
+        nt_ui_panel_end(ctx);
+    }
+
+    /* Panel-driven: the props_slice9 sliders feed insets + target size into this emit live. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panel-driven (insets + size from the properties panel):", g_current->caption);
+    nt_ui_image_style_t live = {
+        .color_packed = 0xFFFFFFFF,
+        .slice9_scale = 1.0F,
+        .slice9_lrtb = {(uint16_t)st->s9.inset_l, (uint16_t)st->s9.inset_r, (uint16_t)st->s9.inset_t, (uint16_t)st->s9.inset_b},
+        .flags = NT_UI_IMAGE_SLICE9_OVERRIDE,
+    };
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED((float)st->s9.target_w), CLAY_SIZING_FIXED((float)st->s9.target_h)}}}) {
+        nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_brown_ref, &live, NULL);
+    }
 }
+
 static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st) {
-    (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Toggles (stub)", g_current->body);
+    static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Checkbox", g_current->caption);
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_cb, "Enable feature", &st->cb_value, g_current->check, &row, true);
+    /* A second, disabled checkbox for the disabled-state config. */
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/cb_locked"), "Locked (disabled)", &st->cb_value, g_current->check, &row, false);
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Radio group (exclusive)", g_current->caption);
+    (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_radio_a, "Low", &st->radio_sel, 0, g_current->radio, &row, true);
+    (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_radio_b, "Medium", &st->radio_sel, 1, g_current->radio, &row, true);
+    (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_radio_c, "High", &st->radio_sel, 2, g_current->radio, &row, true);
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Toggle", g_current->caption);
+    (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_toggle, "Dark mode", &st->toggle_value, g_current->toggle, &row, true);
 }
+
 static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st) {
-    (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Sliders (stub)", g_current->body);
+    char buf[64];
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(28)}}};
+    static const Clay_ElementDeclaration pdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(24)}}};
+
+    (void)snprintf(buf, sizeof buf, "Volume  %.2f", (double)st->slider_float);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_slider_f, NULL, &st->slider_float, 0.0F, 1.0F, 0.0F, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Count   %d", st->slider_int);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_slider_i, NULL, &st->slider_int, 0, 10, 1, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Progress  %d%%", (int)(st->prog.value * 100.0F));
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress, st->prog.value, g_current->progress, &pdecl);
 }
+
+/* One scrollable item row. */
+static void scroll_row(nt_ui_context_t *ctx, const char *text) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(30)}, .padding = {.left = 8}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
+    }
+}
+
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Scroll (stub)", g_current->body);
+    char buf[48];
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tall list (the stage scroll handles the outer scroll):", g_current->caption);
+    for (int i = 0; i < 12; ++i) {
+        (void)snprintf(buf, sizeof buf, "Outer row %02d", i);
+        scroll_row(ctx, buf);
+    }
+    /* Nested inner scroll: a drag inside it scrolls the inner container (capture-steal). */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested inner scroll:", g_current->caption);
+    nt_ui_scroll_begin(ctx, NULL, s_id_inner_scroll, g_current->scroll,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(120)}, .padding = CLAY_PADDING_ALL(6)},
+                                                  .backgroundColor = g_current->bg,
+                                                  .cornerRadius = CLAY_CORNER_RADIUS(8)});
+    {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+            for (int i = 0; i < 20; ++i) {
+                (void)snprintf(buf, sizeof buf, "  Inner item %02d", i);
+                scroll_row(ctx, buf);
+            }
+        }
+    }
+    nt_ui_scroll_end(ctx);
 }
+
+/* D-60-13 Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
-    showcase_panel_begin(ctx, "Slice9 (stub)");
-    (void)st;
+    char buf[64];
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    showcase_panel_begin(ctx, "Slice9 properties");
+
+    (void)snprintf(buf, sizeof buf, "Inset L  %d", st->s9.inset_l);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_il, NULL, &st->s9.inset_l, 0, 48, 1, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Inset R  %d", st->s9.inset_r);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ir, NULL, &st->s9.inset_r, 0, 48, 1, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Inset T  %d", st->s9.inset_t);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_it, NULL, &st->s9.inset_t, 0, 48, 1, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Inset B  %d", st->s9.inset_b);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ib, NULL, &st->s9.inset_b, 0, 48, 1, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Width  %d", st->s9.target_w);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 700, 1, g_current->slider, &sdecl, true);
+
+    (void)snprintf(buf, sizeof buf, "Height  %d", st->s9.target_h);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_h, NULL, &st->s9.target_h, 60, 460, 1, g_current->slider, &sdecl, true);
+
     showcase_panel_end(ctx);
 }
+
+/* D-60-13 Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
-    showcase_panel_begin(ctx, "Progress (stub)");
-    (void)st;
+    char buf[64];
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    showcase_panel_begin(ctx, "Progress properties");
+
+    (void)snprintf(buf, sizeof buf, "Value  %.2f", (double)st->prog.value);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    /* Manual value slider is disabled while auto-animate drives the value. */
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_value, NULL, &st->prog.value, 0.0F, 1.0F, 0.0F, g_current->slider, &sdecl, !st->prog.auto_anim);
+
+    (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/props_auto"), "Auto-animate", &st->prog.auto_anim, g_current->toggle, &row, true);
+
     showcase_panel_end(ctx);
 }
 // #endregion
