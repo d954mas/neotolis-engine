@@ -48,6 +48,13 @@ nt_result_t nt_devapi_init(void) {
     s_count = 0;
     s_group_count = 0;
     s_initialized = true;
+
+    /* D-09: wire the compiled-in engine groups. Each group is opt-in via its
+       NT_DEVAPI_REGISTER_<group> define; phases 65-69 add their own block here. */
+#ifdef NT_DEVAPI_REGISTER_core
+    nt_devapi_register_core();
+#endif
+
     return NT_OK;
 }
 

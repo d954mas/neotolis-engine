@@ -29,4 +29,10 @@ const nt_devapi_slot *nt_devapi_registry_find(const char *method);
 int nt_devapi_group_count(void);
 const char *nt_devapi_group_name(int index);
 
+/* Engine `core` group registrar (D-09 per-group #ifdef). Defined in
+   nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */
+#ifdef NT_DEVAPI_REGISTER_core
+void nt_devapi_register_core(void);
+#endif
+
 #endif /* NT_DEVAPI_INTERNAL_H */

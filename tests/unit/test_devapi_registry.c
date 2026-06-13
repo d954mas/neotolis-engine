@@ -27,7 +27,16 @@ static bool dummy_handler(const cJSON *params, cJSON *result_obj, nt_devapi_erro
     return true;
 }
 
-void setUp(void) { TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); }
+/* nt_devapi_init auto-registers the compiled-in `core` group (D-09), so the
+   registry is non-empty after setUp. Tests assert DELTAS from these baselines. */
+static int s_base_cmds;
+static int s_base_groups;
+
+void setUp(void) {
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    s_base_cmds = nt_devapi_registry_count();
+    s_base_groups = nt_devapi_group_count();
+}
 
 void tearDown(void) { nt_devapi_shutdown(); }
 
@@ -37,8 +46,9 @@ static void test_init_double_init(void) {
 }
 
 static void test_register_seven_fields_round_trip(void) {
+    /* Unique method (avoid colliding with the auto-registered core group). */
     nt_devapi_command_desc desc = {
-        .method = "ping",
+        .method = "test.liveness",
         .layer = "engine",
         .summary = "liveness check",
         .params_shape = "{}",
@@ -47,11 +57,11 @@ static void test_register_seven_fields_round_trip(void) {
         .side_effects = "none",
     };
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, dummy_handler, NULL));
-    TEST_ASSERT_EQUAL_INT(1, nt_devapi_registry_count());
+    TEST_ASSERT_EQUAL_INT(s_base_cmds + 1, nt_devapi_registry_count());
 
-    const nt_devapi_slot *slot = nt_devapi_registry_find("ping");
+    const nt_devapi_slot *slot = nt_devapi_registry_find("test.liveness");
     TEST_ASSERT_NOT_NULL(slot);
-    TEST_ASSERT_EQUAL_STRING("ping", slot->method);
+    TEST_ASSERT_EQUAL_STRING("test.liveness", slot->method);
     TEST_ASSERT_EQUAL_STRING("engine", slot->layer);
     TEST_ASSERT_EQUAL_STRING("liveness check", slot->summary);
     TEST_ASSERT_EQUAL_STRING("{}", slot->params_shape);
@@ -114,8 +124,8 @@ static void test_dup_method_rejected_first_preserved(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&first, dummy_handler, NULL));
     TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_devapi_register(&second, dummy_handler, NULL));
 
-    /* Still exactly one slot, and it is the original. */
-    TEST_ASSERT_EQUAL_INT(1, nt_devapi_registry_count());
+    /* Exactly one NEW slot added (the dup was rejected), and it is the original. */
+    TEST_ASSERT_EQUAL_INT(s_base_cmds + 1, nt_devapi_registry_count());
     const nt_devapi_slot *slot = nt_devapi_registry_find("foo");
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_EQUAL_STRING("engine", slot->layer);
@@ -123,9 +133,10 @@ static void test_dup_method_rejected_first_preserved(void) {
 }
 
 static void test_register_group_tracked(void) {
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("core"));
-    TEST_ASSERT_EQUAL_INT(1, nt_devapi_group_count());
-    TEST_ASSERT_EQUAL_STRING("core", nt_devapi_group_name(0));
+    /* Unique name (core is already auto-registered by init). */
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("test_grp"));
+    TEST_ASSERT_EQUAL_INT(s_base_groups + 1, nt_devapi_group_count());
+    TEST_ASSERT_EQUAL_STRING("test_grp", nt_devapi_group_name(s_base_groups));
 }
 
 int main(void) {

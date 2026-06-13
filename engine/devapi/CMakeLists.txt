@@ -4,6 +4,7 @@
 # Plan 03 will add nt_devapi_discovery.c (endpoints/command.describe/features).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
+    nt_devapi_core.c
     nt_devapi_registry.c
     nt_devapi.h
     nt_devapi_internal.h

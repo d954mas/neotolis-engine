@@ -351,6 +351,17 @@ if(NOT EMSCRIPTEN)
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
         nt_setup_test_target(test_devapi_envelope)
+
+        # PROTO-11: core command group — ping / engine.info / view via submit().
+        # NT_DEVAPI_ENGINE_VERSION mirrors the value injected on nt_devapi (PRIVATE),
+        # so the test can assert engine.info.version against the same compile-def.
+        add_executable(test_devapi_core unit/test_devapi_core.c)
+        target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson unity)
+        target_compile_definitions(test_devapi_core PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+            NT_DEVAPI_ENGINE_VERSION="1.9-dev"
+        )
+        nt_setup_test_target(test_devapi_core)
     endif()
 
     # --- File system module tests ---
