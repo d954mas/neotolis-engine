@@ -109,42 +109,48 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
         panel_xf.scale_y = scale;
     }
     // #endregion
-    // #region backdrop floating decl + input-gate occluder
-    /* Backdrop: full-viewport floating rect at backdrop_z; its alpha is t*backdrop_alpha so it
-     * fades with the modal. The element opacity rides t too (composes onto children, of which it has none). */
-    Clay_Color backdrop_col = nt_ui_unpack_abgr(style->backdrop_color);
-    backdrop_col.a = backdrop_col.a * t * style->backdrop_alpha;
-    const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
-    const nt_ui_element_data_t *backdrop_data = nt_ui_make_element_data_xform(style->layer, NULL, &id_xf, t);
-    CLAY({
-        .id = (Clay_ElementId){.id = backdrop_id},
-        .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = backdrop_z},
-        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-        .backgroundColor = backdrop_col,
-        .userData = (void *)backdrop_data,
-    }) {}
-    /* D-60-03 input-gate: the backdrop wins next-frame topmost-z over base content, so the world
-     * auto-gates (wants_pointer true) and base UI is blocked. Stays active while t>0 (D-60-11). */
-    nt_ui_block_pointer(ctx, backdrop_id, NULL);
-    // #endregion
-    // #region close-source scan (TOP modal only, D-60-08)
+    // #region backdrop floating decl + input-gate occluder + close-scan (present-only)
+    /* A FULLY-CLOSED modal (!open && settled) must declare NO backdrop: the block_pointer occluder
+     * would otherwise gate the whole viewport at backdrop_z every frame the helper is called, making
+     * the base UI underneath unclickable. Skip the backdrop + its input-gate + the close-scan unless
+     * the modal is present (opening, open, or still animating closed). */
+    const bool backdrop_present = open || (t > NT_UI_MODAL_EPSILON);
     nt_ui_modal_close_reason_t reason = NT_UI_MODAL_CLOSE_NONE;
-    /* Top = the deepest modal resolved LAST frame (1-frame IM lag): same-frame nesting can't be known
-     * at this begin's return, so the genuinely-topmost modal is the one that was deepest last frame. */
-    const bool is_top = (ctx->modal_top_id_prev == id);
-    if (is_top && (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        reason = NT_UI_MODAL_CLOSE_ESC;
-    }
-    if (is_top && (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U) {
-        /* step the backdrop (registry record + base-UI gate + click source), but the close DECISION is
-         * the padded panel bbox: a backdrop click closes ONLY when it lands clearly OUTSIDE the panel
-         * grown by backdrop_close_pad (so near-panel taps and empty-panel-bg clicks don't mis-close). */
-        const nt_ui_interaction_t bd = nt_ui_step_interaction(ctx, backdrop_id);
-        if (bd.clicked) {
-            const int16_t pad = style->backdrop_close_pad;
-            const int16_t pad_lrtb[4] = {pad, pad, pad, pad};
-            if (!nt_ui_internal_hit_test_padded(ctx, id, bd.pos[0], bd.pos[1], pad_lrtb)) {
-                reason = NT_UI_MODAL_CLOSE_BACKDROP;
+    if (backdrop_present) {
+        /* Backdrop: full-viewport floating rect at backdrop_z; its alpha is t*backdrop_alpha so it
+         * fades with the modal. The element opacity rides t too (composes onto children, of which it has none). */
+        Clay_Color backdrop_col = nt_ui_unpack_abgr(style->backdrop_color);
+        backdrop_col.a = backdrop_col.a * t * style->backdrop_alpha;
+        const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
+        const nt_ui_element_data_t *backdrop_data = nt_ui_make_element_data_xform(style->layer, NULL, &id_xf, t);
+        CLAY({
+            .id = (Clay_ElementId){.id = backdrop_id},
+            .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = backdrop_z},
+            .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+            .backgroundColor = backdrop_col,
+            .userData = (void *)backdrop_data,
+        }) {}
+        /* D-60-03 input-gate: the backdrop wins next-frame topmost-z over base content, so the world
+         * auto-gates (wants_pointer true) and base UI is blocked. Stays active while t>0 (D-60-11). */
+        nt_ui_block_pointer(ctx, backdrop_id, NULL);
+
+        /* Close-source scan (TOP modal only, D-60-08). Top = the deepest modal resolved LAST frame
+         * (1-frame IM lag): same-frame nesting can't be known at this begin's return. */
+        const bool is_top = (ctx->modal_top_id_prev == id);
+        if (is_top && (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+            reason = NT_UI_MODAL_CLOSE_ESC;
+        }
+        if (is_top && (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U) {
+            /* step the backdrop (registry record + base-UI gate + click source), but the close DECISION is
+             * the padded panel bbox: a backdrop click closes ONLY when it lands clearly OUTSIDE the panel
+             * grown by backdrop_close_pad (so near-panel taps and empty-panel-bg clicks don't mis-close). */
+            const nt_ui_interaction_t bd = nt_ui_step_interaction(ctx, backdrop_id);
+            if (bd.clicked) {
+                const int16_t pad = style->backdrop_close_pad;
+                const int16_t pad_lrtb[4] = {pad, pad, pad, pad};
+                if (!nt_ui_internal_hit_test_padded(ctx, id, bd.pos[0], bd.pos[1], pad_lrtb)) {
+                    reason = NT_UI_MODAL_CLOSE_BACKDROP;
+                }
             }
         }
     }

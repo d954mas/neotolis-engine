@@ -361,6 +361,62 @@ static void test_modal_backdrop_close_pad(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_BACKDROP, (int)modal_backdrop_click_reason(&st, 400.0F, 300.0F));
 }
 
+/* ---- D-60 closed-modal regression: a FULLY-CLOSED modal (open=false, settled t=0) called every
+ *      frame must NOT block a base widget. Before the fix the backdrop block_pointer was registered
+ *      unconditionally at backdrop_z, occluding the whole viewport -> the base button never went hot.
+ *      The wrapper (open=false, ease_speed=0) reports fully_closed on frame 1 and declares no backdrop;
+ *      the base button (at the same screen point) is then the sole interactive record and clicks. ---- */
+#define CLOSED_BTN_W 200.0F
+#define CLOSED_BTN_H 120.0F
+#define CLOSED_BTN_CX (CLOSED_BTN_W * 0.5F)
+#define CLOSED_BTN_CY (CLOSED_BTN_H * 0.5F)
+
+/* One frame: a base button at (0,0)+size, plus a fully-closed modal at the same point. The wrapper
+ * returns false (fully closed) so no body is declared and the stack stays balanced. */
+static nt_ui_interaction_t closed_modal_base_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
+    bool open = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_interaction_t in;
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_id("closed_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(CLOSED_BTN_W), CLAY_SIZING_FIXED(CLOSED_BTN_H)}}}) {
+        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("closed_base_btn"));
+    }
+    /* Settled-closed modal called every frame (the showcase Modals-tab pattern). */
+    const bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, st, &open);
+    TEST_ASSERT_FALSE(declared); /* fully closed -> wrapper balances its own stack, no body */
+    nt_ui_end(s_fx.ctx);
+    return in;
+}
+
+static void test_modal_closed_does_not_block_base(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F; /* instant: open=false -> t snaps to 0, fully closed from frame 1 */
+
+    /* Frame 1: register the base button (empty prev-frame registry). */
+    nt_pointer_t f1 = modal_pointer_at(CLOSED_BTN_CX, CLOSED_BTN_CY, false, false, false);
+    closed_modal_base_frame(&st, &f1);
+
+    /* Frame 2: press inside the base button. With the closed modal declaring NO backdrop occluder,
+     * the base button is the sole interactive record and the press lands on it.
+     * RED on the pre-fix code: the unconditional backdrop block_pointer stole hot -> pressed_now false. */
+    nt_pointer_t f2 = modal_pointer_at(CLOSED_BTN_CX, CLOSED_BTN_CY, true, true, false);
+    nt_ui_interaction_t in2 = closed_modal_base_frame(&st, &f2);
+    TEST_ASSERT_TRUE(in2.pressed_now);
+
+    /* Frame 3: release inside -> clicked. The closed modal never gated the click-through. */
+    nt_pointer_t f3 = modal_pointer_at(CLOSED_BTN_CX, CLOSED_BTN_CY, false, false, true);
+    nt_ui_interaction_t in3 = closed_modal_base_frame(&st, &f3);
+    TEST_ASSERT_TRUE(in3.clicked);
+
+    /* The closed modal must not auto-gate the world pointer over EMPTY space (no base widget there).
+     * A point far from the base button: with no backdrop occluder, nothing claims it. Two frames for
+     * the IM-lag registry to settle on the empty-point query. */
+    nt_pointer_t empty1 = modal_pointer_at(700.0F, 500.0F, false, false, false);
+    closed_modal_base_frame(&st, &empty1);
+    nt_pointer_t empty2 = modal_pointer_at(700.0F, 500.0F, false, false, false);
+    closed_modal_base_frame(&st, &empty2);
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx)); /* RED pre-fix: backdrop gated the whole viewport */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
@@ -376,5 +432,6 @@ int main(void) {
     RUN_TEST(test_modal_wants_pointer_while_open);
     RUN_TEST(test_modal_body_button_clickable);
     RUN_TEST(test_modal_backdrop_close_pad);
+    RUN_TEST(test_modal_closed_does_not_block_base);
     return UNITY_END();
 }
