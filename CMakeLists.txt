@@ -104,6 +104,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/ui_buttons_demo)
     add_subdirectory(examples/ui_stateful_demo)
     add_subdirectory(examples/ui_3d_demo)
+    add_subdirectory(examples/ui_showcase)
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)
