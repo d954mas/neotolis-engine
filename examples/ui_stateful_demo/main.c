@@ -466,7 +466,8 @@ static void slider_drag_bubble(uint32_t id, const char *value_text) {
     if (!t.found) {
         return;
     }
-    /* Floating element anchored to the root, offset to the thumb screen center. */
+    /* Root-anchored, offset to the thumb screen center. clipTo stays NONE (default): the bubble must
+     * float over everything, including past any scroll container clip — opposite of the thumb/bar. */
     CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = t.x - 24.0F, .y = t.y - 40.0F}, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(26)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = {40.0F, 120.0F, 90.0F, 235.0F},

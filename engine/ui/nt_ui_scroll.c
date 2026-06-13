@@ -777,23 +777,34 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     /* Track spans the full axis on the trailing edge; thumb is offset along the axis. */
     Clay_ElementDeclaration track_decl;
     Clay_ElementDeclaration thumb_decl;
+    /* clipTo the attached parent so a nested inner scroll's bar can't leak past an outer clip (and the
+     * bar stays inside the container viewport). z-order/draw-on-top is unaffected — Clay clipTo only
+     * adds a SCISSOR around the floating root, it does not touch zIndex sorting. */
     if (axis == 1) { /* vertical bar on the right edge */
         track_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(thickness), CLAY_SIZING_FIXED(track_len)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
         };
         thumb_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(thickness), CLAY_SIZING_FIXED(thumb_len)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = 0.0F, .y = thumb_off}, .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                         .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
+                         .offset = {.x = 0.0F, .y = thumb_off},
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP}},
         };
     } else { /* horizontal bar on the bottom edge */
         track_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(track_len), CLAY_SIZING_FIXED(thickness)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                         .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
         };
         thumb_decl = (Clay_ElementDeclaration){
             .layout = {.sizing = {CLAY_SIZING_FIXED(thumb_len), CLAY_SIZING_FIXED(thickness)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = thumb_off, .y = 0.0F}, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
+                         .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
+                         .offset = {.x = thumb_off, .y = 0.0F},
+                         .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM}},
         };
     }
 

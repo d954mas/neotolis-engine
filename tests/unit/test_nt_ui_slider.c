@@ -19,6 +19,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
 #include "unity.h"
 
@@ -433,6 +434,136 @@ static void test_out_of_range_writeback(void) {
     TEST_ASSERT_TRUE(float_near(ok, 0.5F, 0.001F));
 }
 
+/* ---- Test 16: a slider inside a scroll container scrolled under the clip edge must have its
+ *      floating THUMB clipped to the scroll viewport. Clay emits clipTo=ATTACHED_PARENT as a
+ *      SCISSOR_START (both clip axes false marker) carrying the attached clip rect; with
+ *      CLIP_TO_NONE that scissor is absent and the thumb leaks past the container clip. ----
+ *
+ * Scroll container 200x200 at SCROLL_Y; tall content holds the slider near the bottom so a
+ * scroll-down pushes the thumb past the container's bottom clip edge. We assert the thumb IMAGE
+ * command sits inside a both-axes-false SCISSOR whose bbox == the scroll viewport, and that the
+ * viewport actually clips the thumb (thumb bottom extends past the viewport bottom). */
+#define SCROLL_SL_ID 0x5C5117U
+#define SCROLL_X 60.0F
+#define SCROLL_Y 40.0F
+#define SCROLL_DIM 200.0F
+#define SCROLL_CONTENT_H 2000.0F
+#define SCROLL_SL_PAD_TOP 1700.0F /* slider sits low in the content so scrolling drives it off-screen */
+
+static nt_ui_scroll_style_t scroll_y_style(void) {
+    nt_ui_scroll_style_t st = nt_ui_scroll_style_defaults();
+    st.scroll_x = false;
+    st.scroll_y = true;
+    st.bar_visibility = NT_UI_SCROLLBAR_AUTO; /* no bar art -> no extra floating images to confuse the scan */
+    st.wheel_ease_speed = 0.0F;
+    return st;
+}
+
+/* One frame: scroll container holding the slider low in tall content. */
+static void slider_in_scroll_frame(const nt_pointer_t *p, float *value, const nt_ui_scroll_style_t *scroll_style) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SCROLL_X, .y = SCROLL_Y}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_SL_ID, scroll_style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_DIM)}}});
+        {
+            CLAY({.id = CLAY_ID("scroll-content"),
+                  .layout = {.sizing = {CLAY_SIZING_FIXED(SCROLL_DIM), CLAY_SIZING_FIXED(SCROLL_CONTENT_H)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .padding = {.top = (uint16_t)SCROLL_SL_PAD_TOP}}}) {
+                (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, SCROLL_SL_ID + 1U, NULL, value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true);
+            }
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* The thumb IMAGE command: SL_TH tall (taller than the SL_H track + fill), the only such image. */
+static const Clay_RenderCommand *find_thumb_image(int32_t *out_index) {
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.height, SL_TH, 0.5F)) {
+            if (out_index != NULL) {
+                *out_index = i;
+            }
+            return c;
+        }
+    }
+    return NULL;
+}
+
+/* Walk the frozen commands up to thumb_index, tracking the innermost active both-axes-false
+ * (floating-clipTo) SCISSOR bbox. Returns true + the clip rect if the thumb is enclosed by one. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool active_floating_clip_at(int32_t thumb_index, Clay_BoundingBox *out_clip) {
+    Clay_BoundingBox stack[16];
+    bool is_floating_marker[16];
+    int depth = 0;
+    bool found = false;
+    for (int32_t i = 0; i < thumb_index; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            const bool both_false = !c->renderData.clip.horizontal && !c->renderData.clip.vertical;
+            if (depth < 16) {
+                stack[depth] = c->boundingBox;
+                is_floating_marker[depth] = both_false;
+                ++depth;
+            }
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+            if (depth > 0) {
+                --depth;
+            }
+        }
+    }
+    /* Innermost floating-clip marker still open at the thumb. */
+    for (int d = depth - 1; d >= 0; --d) {
+        if (is_floating_marker[d]) {
+            if (out_clip != NULL) {
+                *out_clip = stack[d];
+            }
+            found = true;
+            break;
+        }
+    }
+    return found;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_thumb_clipped_in_scroll(void) {
+    nt_ui_scroll_style_t scroll_style = scroll_y_style();
+    float value = 0.5F;
+    nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
+
+    /* Two frames so Clay solves the scroll dims, then scroll so the slider track (local y ~=
+     * SCROLL_SL_PAD_TOP) straddles the container's BOTTOM clip edge: place the track top a little
+     * above the viewport bottom so the SL_TH-tall thumb pokes past the clip but stays partly visible. */
+    slider_in_scroll_frame(&idle, &value, &scroll_style);
+    slider_in_scroll_frame(&idle, &value, &scroll_style);
+    const float target = -(SCROLL_SL_PAD_TOP - (SCROLL_DIM - (SL_TH * 0.5F))); /* track top ~ viewport bottom - thumb/2 */
+    nt_ui_scroll_to(s_fx.ctx, SCROLL_SL_ID, 0.0F, target);
+    slider_in_scroll_frame(&idle, &value, &scroll_style);
+    slider_in_scroll_frame(&idle, &value, &scroll_style);
+
+    int32_t thumb_index = -1;
+    const Clay_RenderCommand *thumb = find_thumb_image(&thumb_index);
+    TEST_ASSERT_NOT_NULL(thumb);
+
+    /* The thumb must be enclosed by a floating-clipTo SCISSOR (the clipTo=ATTACHED_PARENT marker). */
+    Clay_BoundingBox clip = {0};
+    const bool clipped = active_floating_clip_at(thumb_index, &clip);
+    TEST_ASSERT_TRUE(clipped); /* FAILS if clipTo reverts to CLAY_CLIP_TO_NONE (no scissor emitted) */
+
+    /* The clip rect is the scroll viewport (200x200 at the scroll container origin). */
+    TEST_ASSERT_TRUE(float_near(clip.height, SCROLL_DIM, 1.0F));
+    const float clip_top = clip.y;
+    const float clip_bottom = clip.y + clip.height;
+
+    /* The thumb actually pokes past the viewport bottom -> the clip is doing real work (the leak
+     * the fix prevents). The visible thumb is the IMAGE bbox intersected with this clip rect. */
+    const float thumb_top = thumb->boundingBox.y;
+    const float thumb_bottom = thumb->boundingBox.y + thumb->boundingBox.height;
+    TEST_ASSERT_TRUE(thumb_bottom > clip_bottom + 0.5F); /* leaks past the bottom clip edge without clipping */
+    TEST_ASSERT_TRUE(thumb_top < clip_bottom);           /* but still partially inside (a real partial clip) */
+    TEST_ASSERT_TRUE(thumb_bottom > clip_top);           /* sanity: overlaps the viewport */
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -511,6 +642,7 @@ int main(void) {
     RUN_TEST(test_thumb_overhang_auto_pad_drags);
     RUN_TEST(test_step_thumb_visual_snap);
     RUN_TEST(test_out_of_range_writeback);
+    RUN_TEST(test_thumb_clipped_in_scroll);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);

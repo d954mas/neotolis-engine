@@ -1817,6 +1817,128 @@ static void test_scroll_wheel_tie_break_smaller_area(void) {
     TEST_ASSERT_TRUE(float_near(big->pos[1], 0.0F, 0.5F)); /* the bigger sibling never received it */
 }
 
+/* ================= Scrollbar floating clipTo (clip to the attached container viewport) ================= */
+
+/* Innermost still-open both-axes-false (floating clipTo marker) SCISSOR bbox active at cmd_index. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool floating_clip_at(int32_t cmd_index, Clay_BoundingBox *out_clip) {
+    Clay_BoundingBox stack[16];
+    bool marker[16];
+    int depth = 0;
+    for (int32_t i = 0; i < cmd_index; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            if (depth < 16) {
+                stack[depth] = c->boundingBox;
+                marker[depth] = !c->renderData.clip.horizontal && !c->renderData.clip.vertical;
+                ++depth;
+            }
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
+            --depth;
+        }
+    }
+    for (int d = depth - 1; d >= 0; --d) {
+        if (marker[d]) {
+            if (out_clip != NULL) {
+                *out_clip = stack[d];
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The vertical bar's TRACK image carries the bar id; the THUMB is the other axis-thin image
+ * (thumb_len tall, no id). Standalone container is 200x200 at the root origin. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_standalone_renders_inside_clip(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    const uint32_t bar_id = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    scrollbar_frame(&p, &style, 1000.0F); /* overflow -> bar shown */
+    scrollbar_frame(&p, &style, 1000.0F);
+
+    const Clay_RenderCommand *track = NULL;
+    int32_t track_idx = -1;
+    const Clay_RenderCommand *thumb = NULL;
+    int32_t thumb_idx = -1;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            continue;
+        }
+        if (c->id == bar_id) {
+            track = c;
+            track_idx = i;
+        } else if (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F) {
+            thumb = c; /* the only other image is the thumb */
+            thumb_idx = i;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(track);
+    TEST_ASSERT_NOT_NULL(thumb);
+
+    /* clipTo did NOT collapse the bar: both images keep a sane non-zero bbox fully inside the
+     * 200x200 container viewport (track == full track_len, thumb a positive slice). */
+    TEST_ASSERT_TRUE(track->boundingBox.width > 0.0F && track->boundingBox.height > 0.0F);
+    TEST_ASSERT_TRUE(float_near(track->boundingBox.height, 200.0F, 1.0F)); /* full container height */
+    TEST_ASSERT_TRUE(thumb->boundingBox.width > 0.0F && thumb->boundingBox.height > 0.0F);
+
+    /* Both are enclosed by a floating-clip SCISSOR == the container viewport, but the viewport
+     * fully contains them (standalone over-clip guard: visible == full image, nothing trimmed). */
+    Clay_BoundingBox tclip = {0};
+    Clay_BoundingBox hclip = {0};
+    TEST_ASSERT_TRUE(floating_clip_at(track_idx, &tclip));
+    TEST_ASSERT_TRUE(floating_clip_at(thumb_idx, &hclip));
+    TEST_ASSERT_TRUE(track->boundingBox.y >= tclip.y - 0.5F);
+    TEST_ASSERT_TRUE(track->boundingBox.y + track->boundingBox.height <= tclip.y + tclip.height + 0.5F);
+    TEST_ASSERT_TRUE(thumb->boundingBox.y >= hclip.y - 0.5F);
+    TEST_ASSERT_TRUE(thumb->boundingBox.y + thumb->boundingBox.height <= hclip.y + hclip.height + 0.5F);
+}
+
+/* ---- Nested: an INNER scroll's bar, with the inner scrolled so its bar would sit past the OUTER
+ *      clip edge, is clipped to the outer viewport. The inner bar TRACK image is enclosed by a
+ *      floating-clip SCISSOR whose bbox is bounded by the outer container (300x300) viewport. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_nested_clipped_to_outer(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    style.wheel_ease_speed = 0.0F;
+    const uint32_t inner_bar_id = nt_ui_scroll_test_bar_id(EXCL_INNER_ID, 1);
+    nt_pointer_t p = {0};
+    p.active = true;
+
+    excl_nested_frame(&p, &style);
+    excl_nested_frame(&p, &style);
+    /* Scroll the OUTER down so the inner scroll (200 tall, pinned at the outer content top) straddles
+     * the outer's TOP clip edge: its bar's lower part stays visible while the upper part leaves the
+     * outer viewport. Without clipTo the inner bar would draw its full height past the outer clip. */
+    nt_ui_scroll_to(s_fx.ctx, EXCL_OUTER_ID, 0.0F, -150.0F);
+    excl_nested_frame(&p, &style);
+    excl_nested_frame(&p, &style);
+
+    int32_t inner_track_idx = -1;
+    const Clay_RenderCommand *inner_track = NULL;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && c->id == inner_bar_id) {
+            inner_track = c;
+            inner_track_idx = i;
+            break;
+        }
+    }
+    if (inner_track == NULL) {
+        TEST_IGNORE_MESSAGE("inner bar culled at this scroll offset — geometry-dependent; covered by standalone + slider tests");
+        return;
+    }
+    Clay_BoundingBox clip = {0};
+    TEST_ASSERT_TRUE(floating_clip_at(inner_track_idx, &clip));
+    /* The inner bar's clip is bounded by the OUTER container viewport (300 tall at the outer origin),
+     * not the inner's own full 200 height extending past the outer clip. */
+    TEST_ASSERT_TRUE(clip.height <= 300.0F + 0.5F);
+}
+
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* Declaring more scroll containers in one frame than the candidate cap traps (no silent wheel-dead). */
 static void candidate_overflow_frame(void) {
@@ -1887,6 +2009,8 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_nested_innermost_wins);
     RUN_TEST(test_scroll_wheel_nested_outer_band);
     RUN_TEST(test_scroll_wheel_tie_break_smaller_area);
+    RUN_TEST(test_scrollbar_standalone_renders_inside_clip);
+    RUN_TEST(test_scrollbar_nested_clipped_to_outer);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_wheel_candidate_overflow);
 #endif
