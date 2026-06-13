@@ -311,6 +311,7 @@ static uint32_t s_id_progress_crop, s_id_progress_vert; /* CROP + vertical progr
 static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / ALWAYS lists */
 static uint32_t s_id_scroll_horiz, s_id_scroll_xy;      /* horizontal-only / both-axes */
 static uint32_t s_id_stress_scroll;                     /* fixed-size scroll so the label cell can't overflow */
+static uint32_t s_id_stage_scroll;                      /* vertical scroll around the stage content so tall tabs fit */
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
 static uint32_t s_id_props_w, s_id_props_h;
 static uint32_t s_id_props_value;
@@ -439,43 +440,60 @@ static void init_styles(void) {
     s_button_green_ref = btn_green;
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
 
-    /* ---- Buttons: primary (blue slice9) + secondary (green slice9). ---- */
-    nt_ui_button_style_t btn_base = {
-        .idle = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 1.0F},
-        .hover = {.bg_tint = 0xFFFFFFFF, .scale = 1.05F, .opacity = 1.0F},
-        .pressed = {.bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_y = 2.0F, .opacity = 1.0F},
-        .disabled = {.bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 0.4F},
+    /* ---- Buttons: FLAT generic buttons (no atlas art -> idle.bg.atlas.id stays 0). Solid theme-color
+     * bg via per-state bg_tint (0xAABBGGRR); rounded corners come from the cell's cornerRadius. The
+     * per-state ART SWAP demo (s_btn_swap_*) is the ONLY button that keeps the blue/green/red depth
+     * art -- that's the intended art showcase. ---- */
+    /* Flat primary (blue): idle/hover/pressed/disabled solid tints; hover lightens, pressed darkens. */
+    nt_ui_button_style_t flat_primary = {
+        .idle = {.bg_tint = 0xFFCC7A3CU, .scale = 1.0F, .opacity = 1.0F},                       /* solid blue */
+        .hover = {.bg_tint = 0xFFE08F4FU, .scale = 1.05F, .opacity = 1.0F},                     /* lighter */
+        .pressed = {.bg_tint = 0xFFA86230U, .scale = 0.95F, .offset_y = 2.0F, .opacity = 1.0F}, /* darker */
+        .disabled = {.bg_tint = 0xFFCC7A3CU, .scale = 1.0F, .opacity = 0.4F},
         .transition_speed = 12.0F,
         .hit_padding_lrtb = {16, 16, 16, 16},
         .slice9_scale = 1.0F,
     };
-    s_btn_primary_dark = btn_base;
-    s_btn_primary_dark.idle.bg = btn_blue;
-    s_btn_primary_light = s_btn_primary_dark;
+    /* Flat secondary (green): same shape, green tints. */
+    nt_ui_button_style_t flat_secondary = flat_primary;
+    flat_secondary.idle.bg_tint = 0xFF5FA84FU;
+    flat_secondary.hover.bg_tint = 0xFF72C25FU;
+    flat_secondary.pressed.bg_tint = 0xFF4A8A3CU;
+    flat_secondary.disabled.bg_tint = 0xFF5FA84FU;
 
-    s_btn_secondary_dark = btn_base;
-    s_btn_secondary_dark.idle.bg = btn_green;
-    s_btn_secondary_light = s_btn_secondary_dark;
+    /* Generic flat styles are theme-agnostic (consistent on both palettes -> dark==light). */
+    s_btn_primary_dark = flat_primary;
+    s_btn_primary_light = flat_primary;
 
-    /* Exaggerated-scale variant: hover blows up to 1.20, press shrinks to 0.80 (no offset). */
-    s_btn_scale_dark = btn_base;
-    s_btn_scale_dark.idle.bg = btn_blue;
+    s_btn_secondary_dark = flat_secondary;
+    s_btn_secondary_light = flat_secondary;
+
+    /* Exaggerated-scale variant: flat blue, hover blows up to 1.20, press shrinks to 0.80 (no offset). */
+    s_btn_scale_dark = flat_primary;
     s_btn_scale_dark.hover.scale = 1.20F;
     s_btn_scale_dark.pressed.scale = 0.80F;
     s_btn_scale_dark.pressed.offset_y = 0.0F;
     s_btn_scale_light = s_btn_scale_dark;
 
-    /* Per-state VISUAL ART SWAP: blue idle/disabled, green hover, red pressed. Non-idle states set
-     * their own bg ref (otherwise they inherit idle.bg). */
-    s_btn_swap_dark = btn_base;
+    /* Per-state VISUAL ART SWAP (the ONLY art button): blue idle/disabled, green hover, red pressed.
+     * Uses the depth-art slice9; bg_tint stays no-tint (0xFFFFFFFF) so the art shows its own color. */
+    nt_ui_button_style_t swap_base = {
+        .idle = {.bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
+        .hover = {.bg_tint = 0xFFFFFFFFU, .scale = 1.05F, .opacity = 1.0F},
+        .pressed = {.bg_tint = 0xFFFFFFFFU, .scale = 0.95F, .offset_y = 2.0F, .opacity = 1.0F},
+        .disabled = {.bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 0.4F},
+        .transition_speed = 12.0F,
+        .hit_padding_lrtb = {16, 16, 16, 16},
+        .slice9_scale = 1.0F,
+    };
+    s_btn_swap_dark = swap_base;
     s_btn_swap_dark.idle.bg = btn_blue;
     s_btn_swap_dark.hover.bg = btn_green;
     s_btn_swap_dark.pressed.bg = btn_red;
     s_btn_swap_light = s_btn_swap_dark;
 
-    /* No-pad / touch-target variant: zero hit padding so visual==hit (vs the padded primary). */
-    s_btn_nopad_dark = btn_base;
-    s_btn_nopad_dark.idle.bg = btn_blue;
+    /* No-pad / touch-target variant: flat blue, zero hit padding so visual==hit (vs the padded primary). */
+    s_btn_nopad_dark = flat_primary;
     s_btn_nopad_dark.hit_padding_lrtb[0] = 0;
     s_btn_nopad_dark.hit_padding_lrtb[1] = 0;
     s_btn_nopad_dark.hit_padding_lrtb[2] = 0;
@@ -667,9 +685,10 @@ static void try_bind_resources(void) {
 static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
         enabled);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->h1);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     (void)nt_ui_button_end(ctx);
 }
 
@@ -716,14 +735,14 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Icon", g_current->body);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "icon child (untinted)", g_current->caption);
-            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_icon"), g_current->btn_nopad,
-                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)},
-                                                                     .padding = CLAY_PADDING_ALL(8),
-                                                                     .childGap = 14,
-                                                                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-                               true);
+            nt_ui_button_begin(
+                ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_icon"), g_current->btn_nopad,
+                &(Clay_ElementDeclaration){
+                    .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childGap = 14, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                true);
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->h1);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->body);
             (void)nt_ui_button_end(ctx);
         }
         labelled_button_cell(ctx, "Disabled", "enabled=false short-circuits + dims", nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Locked", false);
@@ -755,9 +774,10 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &xform, 1.0F)}) {
             nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform"), g_current->btn_primary,
                                &(Clay_ElementDeclaration){
-                                   .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                                   .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
                                true);
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click me", g_current->h1);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click me", g_current->body);
             if (nt_ui_button_end(ctx)) {
                 st->btn_xform.clicks++;
             }
@@ -1054,7 +1074,8 @@ static void modal_set_transition(nt_ui_modal_style_t *s, int transition) {
 static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
         true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     return nt_ui_button_end(ctx);
@@ -1069,9 +1090,10 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
 
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_modal_show_btn, g_current->btn_primary,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
         true);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->h1);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->confirm_open = true;
     }
@@ -1192,7 +1214,8 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
             const bool sel = (st->modal.transition == i);
             if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_trans") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
                              &(Clay_ElementDeclaration){
-                                 .layout = {.sizing = {CLAY_SIZING_FIXED(92), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                                 .layout = {.sizing = {CLAY_SIZING_FIXED(92), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                 .cornerRadius = CLAY_CORNER_RADIUS(8)},
                              true)) {
                 st->modal.transition = i;
             }
@@ -1229,7 +1252,8 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
             (void)snprintf(buf, sizeof buf, "%d", counts[i]);
             if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/stress_n") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
                              &(Clay_ElementDeclaration){
-                                 .layout = {.sizing = {CLAY_SIZING_FIXED(66), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                                 .layout = {.sizing = {CLAY_SIZING_FIXED(66), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                 .cornerRadius = CLAY_CORNER_RADIUS(8)},
                              true)) {
                 st->stress.label_count = counts[i];
             }
@@ -1271,6 +1295,7 @@ static void ensure_ids(void) {
     s_id_scroll_horiz = nt_ui_id("showcase/scroll_horiz");
     s_id_scroll_xy = nt_ui_id("showcase/scroll_xy");
     s_id_stress_scroll = nt_ui_id("showcase/stress_scroll");
+    s_id_stage_scroll = nt_ui_id("showcase/stage_scroll");
     s_id_props_il = nt_ui_id("showcase/props_il");
     s_id_props_ir = nt_ui_id("showcase/props_ir");
     s_id_props_it = nt_ui_id("showcase/props_it");
@@ -1309,7 +1334,8 @@ static void declare_header(nt_ui_context_t *ctx) {
 
         nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_theme_btn, g_current->btn_primary,
                            &(Clay_ElementDeclaration){
-                               .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
+                               .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                               .cornerRadius = CLAY_CORNER_RADIUS(8)},
                            true);
         (void)snprintf(buf, sizeof buf, "Theme: %s", g_current->name);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
@@ -1366,9 +1392,11 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
     }
 }
 
-/* Right stage: title/info, the tab content laid out directly (NO stage scroll -- the modal would be
- * clipped + the Scroll tab's containers would be scroll-inside-scroll), and (if set) the focused
- * props panel. Tabs that can overflow own their scrolling (the Scroll tab + render_stress). */
+/* Right stage: title/info, the tab content in a VERTICAL scroll (tall tabs like Slice9 fit/scroll),
+ * and (if set) the focused props panel BESIDE the scroll (short -> not scrolled). The modal is NOT
+ * here: it's declared at ROOT in frame() so its floating panel is never clipped by the stage scissor.
+ * The Scroll tab + render_stress size their own containers to fit the stage, so the stage scroll
+ * won't engage there (avoids scroll-in-scroll). */
 static void declare_stage(nt_ui_context_t *ctx) {
     NT_ASSERT(s_active_tab >= 0 && s_active_tab < TAB_COUNT && "active tab out of range");
     const showcase_entry_t *e = &g_tabs[s_active_tab];
@@ -1383,10 +1411,14 @@ static void declare_stage(nt_ui_context_t *ctx) {
         /* Source reference: a dim "link" style distinct from body/caption copy. */
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->link);
 
-        /* Content + (optional) props panel side by side. */
+        /* Content (scrolled) + (optional) props panel side by side. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-            /* Cap the readable content column (~720px) so text/cards don't stretch edge-to-edge. */
+            /* Vertical scroll bounds the content to the stage height; the inner column FITs (grows
+             * taller than the viewport on tall tabs -> scrolls). Width capped ~736 (720 + bar) so
+             * text/cards don't stretch edge-to-edge. */
+            nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0, 736), CLAY_SIZING_GROW(0)}}});
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0, 720), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
+            nt_ui_scroll_end(ctx);
 
             if (e->props_fn != NULL) {
                 e->props_fn(ctx, &s_state);
