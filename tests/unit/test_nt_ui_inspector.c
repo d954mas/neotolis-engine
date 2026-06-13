@@ -1,5 +1,5 @@
 /* nt_ui_inspector + widget_registry tests. Visual verification of pixels lives
- * in ui_buttons_demo (D toggle). */
+ * in ui_showcase (D toggle). */
 
 #include <math.h>
 #include <stdalign.h>
