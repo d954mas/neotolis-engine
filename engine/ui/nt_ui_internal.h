@@ -181,9 +181,16 @@ struct nt_ui_context {
      * padding; the u8 depth counter packs into the u16/u8 cluster below. Rides the create_context
      * memset zero-init (like anim[]). */
     uint32_t active_modal_id[NT_UI_MODAL_MAX_DEPTH];
+    /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
+     * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
+     * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
+     * the inner begin's return, so we use last frame's resolved top). */
+    uint32_t modal_top_id_prev;
+    uint32_t modal_top_id_cur;
     uint32_t wheel_candidate_count;
     uint16_t wheel_depth;
     uint8_t active_modal_depth;
+    uint8_t modal_max_depth_cur; /* deepest active_modal_depth reached this frame (drives modal_top_id_cur) */
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */

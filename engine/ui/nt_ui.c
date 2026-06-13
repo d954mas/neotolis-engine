@@ -336,6 +336,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* New frame of wheel candidates; depth counter re-zeroes (begin++/end-- balance across the frame). */
     ctx->wheel_candidate_count = 0U;
     ctx->wheel_depth = 0U;
+    ctx->active_modal_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
+    /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
+    ctx->modal_top_id_prev = ctx->modal_top_id_cur;
+    ctx->modal_top_id_cur = 0U;
+    ctx->modal_max_depth_cur = 0U;
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
 
@@ -405,6 +410,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
+    NT_ASSERT(ctx->active_modal_depth == 0U && "nt_ui_end: unbalanced nt_ui_modal_begin/end (missing modal_end)");
 #if NT_UI_DEBUG_TOOLS
     if (ctx->inspector_active) {
         nt_ui_internal_emit_inspector_layout_extern(ctx);
