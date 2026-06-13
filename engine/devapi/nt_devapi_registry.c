@@ -75,9 +75,11 @@ void nt_devapi_shutdown(void) {
 }
 
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data) {
-    NT_ASSERT(desc != NULL);
-    NT_ASSERT(desc->method != NULL);
-    NT_ASSERT(handler != NULL);
+    /* desc + handler + all 7 self-describing fields are required preconditions (NULL is a
+       caller bug). A NULL field would strdup to NULL and silently vanish from
+       endpoints/command.describe; short-circuit keeps the desc!=NULL deref-guard first. */
+    NT_ASSERT(desc != NULL && handler != NULL && desc->method != NULL && desc->layer != NULL && desc->summary != NULL && desc->params_shape != NULL && desc->result_shape != NULL &&
+              desc->frame_behavior != NULL && desc->side_effects != NULL);
 
     /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite (D-06). */
     if (nt_devapi_registry_find(desc->method) != NULL) {
@@ -103,6 +105,12 @@ nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_han
 
 nt_result_t nt_devapi_register_group(const char *group_name) {
     NT_ASSERT(group_name != NULL);
+    /* dup group is a registration error (mirror dup_method): reject, don't double-list. */
+    for (int i = 0; i < s_group_count; i++) {
+        if (s_groups[i] != NULL && strcmp(s_groups[i], group_name) == 0) {
+            return NT_ERR_INIT_FAILED;
+        }
+    }
     NT_ASSERT(s_group_count < NT_DEVAPI_MAX_GROUPS);
     s_groups[s_group_count] = devapi_strdup(group_name);
     s_group_count++;

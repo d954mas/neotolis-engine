@@ -125,9 +125,16 @@ static const nt_devapi_command_desc k_discovery_cmds[] = {
 static const nt_devapi_handler_fn k_discovery_handlers[] = {cmd_endpoints, cmd_command_describe, cmd_features};
 
 void nt_devapi_register_discovery(void) {
-    nt_devapi_register_group("discovery"); /* D-08: group-name registered once */
+    /* Engine-internal registration: a dup group/method here is a build-time collision
+       (programming bug), so assert NT_OK. Capture first — NT_ASSERT compiles out under
+       NT_ASSERT_MODE=0, so the call must NOT live inside the macro. */
+    nt_result_t gr = nt_devapi_register_group("discovery"); /* D-08: group-name registered once */
+    NT_ASSERT(gr == NT_OK);
+    (void)gr;
     int n = (int)(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]));
     for (int i = 0; i < n; i++) {
-        nt_devapi_register(&k_discovery_cmds[i], k_discovery_handlers[i], NULL);
+        nt_result_t rr = nt_devapi_register(&k_discovery_cmds[i], k_discovery_handlers[i], NULL);
+        NT_ASSERT(rr == NT_OK);
+        (void)rr;
     }
 }

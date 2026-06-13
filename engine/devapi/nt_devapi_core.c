@@ -93,10 +93,17 @@ static const nt_devapi_command_desc k_core_cmds[] = {
 static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info, cmd_view};
 
 void nt_devapi_register_core(void) {
-    nt_devapi_register_group("core"); /* D-08: group-name string registered once */
+    /* Engine-internal registration: a dup group/method here is a build-time collision
+       (programming bug), so assert NT_OK. Capture first — NT_ASSERT compiles out under
+       NT_ASSERT_MODE=0, so the call must NOT live inside the macro. */
+    nt_result_t gr = nt_devapi_register_group("core"); /* D-08: group-name registered once */
+    NT_ASSERT(gr == NT_OK);
+    (void)gr;
     int n = (int)(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]));
     for (int i = 0; i < n; i++) {
-        nt_devapi_register(&k_core_cmds[i], k_core_handlers[i], NULL);
+        nt_result_t rr = nt_devapi_register(&k_core_cmds[i], k_core_handlers[i], NULL);
+        NT_ASSERT(rr == NT_OK);
+        (void)rr;
     }
 }
 
