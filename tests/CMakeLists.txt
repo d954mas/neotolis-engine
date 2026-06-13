@@ -342,6 +342,15 @@ if(NOT EMSCRIPTEN)
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
         nt_setup_test_target(test_devapi_registry)
+
+        # PROTO-06/07: submit() envelope, request_id echo, unknown-method,
+        # batch order + continue-on-error, D-04 pointer lifetime (ASan via sanitizer flags).
+        add_executable(test_devapi_envelope unit/test_devapi_envelope.c)
+        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson unity)
+        target_compile_definitions(test_devapi_envelope PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+        )
+        nt_setup_test_target(test_devapi_envelope)
     endif()
 
     # --- File system module tests ---

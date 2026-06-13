@@ -1,9 +1,9 @@
 # nt_devapi -- self-describing command layer (dev-only, gated by NT_DEVAPI_ENABLED)
 #
-# Source list is intentionally minimal for Plan 01 (only files that exist).
-# Plans 02/03 extend it: add nt_devapi.c (submit/dispatch), nt_devapi_core.c
-# (ping/engine.info/view), nt_devapi_discovery.c (endpoints/command.describe/features).
+# Plan 02 adds the dispatch core (nt_devapi.c) + core group (nt_devapi_core.c).
+# Plan 03 will add nt_devapi_discovery.c (endpoints/command.describe/features).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
+    nt_devapi.c
     nt_devapi_registry.c
     nt_devapi.h
     nt_devapi_internal.h
