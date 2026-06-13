@@ -168,6 +168,71 @@ static void test_d04_copy_before_next_submit(void) {
     cJSON_Delete(root2);
 }
 
+/* ---- non-object / non-array top-level inputs (the discriminator's else-branch) ---- */
+
+static void test_bare_number_is_bad_params(void) {
+    const char *resp = nt_devapi_submit("42"); /* valid JSON, but not an object or array */
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root); /* no crash on a non-object scalar */
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
+    cJSON_Delete(root);
+}
+
+static void test_json_null_is_bad_params(void) {
+    const char *resp = nt_devapi_submit("null"); /* parses to a cJSON null node, not a NULL ptr */
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON_Delete(root);
+}
+
+static void test_empty_batch_returns_empty_array(void) {
+    const char *resp = nt_devapi_submit("[]");
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsArray(root)); /* empty array in -> empty array out */
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(root));
+    cJSON_Delete(root);
+}
+
+static void test_batch_of_non_objects_each_bad_params(void) {
+    const char *resp = nt_devapi_submit("[1,2]");
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsArray(root));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(root));
+    cJSON *e0 = cJSON_GetArrayItem(root, 0);
+    cJSON *e1 = cJSON_GetArrayItem(root, 1);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(e0, "ok")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(e1, "ok")));
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(e0, "error"), "code")->valuestring);
+    cJSON_Delete(root);
+}
+
+/* ---- request_id fidelity on the error + per-batch-entry paths (Pitfall 5) ---- */
+
+static void test_request_id_string_echoed_on_error(void) {
+    const char *resp = nt_devapi_submit("{\"method\":\"nope\",\"request_id\":\"xyz\"}");
+    cJSON *root = cJSON_Parse(resp);
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
+    TEST_ASSERT_TRUE(cJSON_IsString(id)); /* string id survives the error path unchanged */
+    TEST_ASSERT_EQUAL_STRING("xyz", id->valuestring);
+    cJSON_Delete(root);
+}
+
+static void test_batch_echoes_each_request_id(void) {
+    const char *resp = nt_devapi_submit("[{\"method\":\"ok\",\"request_id\":1},{\"method\":\"ok\",\"request_id\":\"two\"}]");
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(root));
+    cJSON *id0 = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(root, 0), "request_id");
+    cJSON *id1 = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(root, 1), "request_id");
+    TEST_ASSERT_TRUE(cJSON_IsNumber(id0)); /* each entry echoes its OWN id with its OWN type */
+    TEST_ASSERT_EQUAL_INT(1, id0->valueint);
+    TEST_ASSERT_TRUE(cJSON_IsString(id1));
+    TEST_ASSERT_EQUAL_STRING("two", id1->valuestring);
+    cJSON_Delete(root);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_single_ok_envelope);
@@ -180,5 +245,11 @@ int main(void) {
     RUN_TEST(test_request_id_echoed_on_error);
     RUN_TEST(test_batch_order_and_continue_on_error);
     RUN_TEST(test_d04_copy_before_next_submit);
+    RUN_TEST(test_bare_number_is_bad_params);
+    RUN_TEST(test_json_null_is_bad_params);
+    RUN_TEST(test_empty_batch_returns_empty_array);
+    RUN_TEST(test_batch_of_non_objects_each_bad_params);
+    RUN_TEST(test_request_id_string_echoed_on_error);
+    RUN_TEST(test_batch_echoes_each_request_id);
     return UNITY_END();
 }

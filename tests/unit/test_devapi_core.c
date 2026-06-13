@@ -21,7 +21,7 @@ void setUp(void) {
     g_nt_window.fb_height = 1080;
     g_nt_window.width = 960;
     g_nt_window.height = 540;
-    g_nt_window.dpr = 2.0F;
+    g_nt_window.dpr = 2.5F; /* fractional on purpose: catches int-truncation of dpr (WR). */
 
     /* init auto-registers the core group (D-09 NT_DEVAPI_REGISTER_core). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
@@ -48,7 +48,9 @@ static void test_view_reflects_window(void) {
     TEST_ASSERT_EQUAL_INT(1080, cJSON_GetObjectItemCaseSensitive(result, "fb_height")->valueint);
     TEST_ASSERT_EQUAL_INT(960, cJSON_GetObjectItemCaseSensitive(result, "width")->valueint);
     TEST_ASSERT_EQUAL_INT(540, cJSON_GetObjectItemCaseSensitive(result, "height")->valueint);
-    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(result, "dpr")->valueint);
+    /* dpr must be the full fractional value, not int-truncated to 2 (valueint would pass 2.5). */
+    double dpr = cJSON_GetObjectItemCaseSensitive(result, "dpr")->valuedouble;
+    TEST_ASSERT_TRUE(dpr > 2.49 && dpr < 2.51);
     cJSON_Delete(root);
 }
 
