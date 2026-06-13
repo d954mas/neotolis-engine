@@ -97,7 +97,12 @@ static nt_ui_checkbox_style_t s_radio_dark, s_radio_light;
 static nt_ui_checkbox_style_t s_switch_dark, s_switch_light;
 static nt_ui_slider_style_t s_slider_dark, s_slider_light;
 static nt_ui_progress_style_t s_progress_dark, s_progress_light;
-static nt_ui_scroll_style_t s_scroll_dark, s_scroll_light;
+/* Four scroll variants (Scroll tab): vertical AUTO_HIDE / vertical ALWAYS / horizontal-only /
+ * both-axes. Same art, differ only in bar_visibility + scroll_x/scroll_y. Dark+light share art. */
+static nt_ui_scroll_style_t s_scroll_hide_dark, s_scroll_hide_light;
+static nt_ui_scroll_style_t s_scroll_always_dark, s_scroll_always_light;
+static nt_ui_scroll_style_t s_scroll_horiz_dark, s_scroll_horiz_light;
+static nt_ui_scroll_style_t s_scroll_xy_dark, s_scroll_xy_light;
 
 /* Slice9 panel image style (untinted, atlas-default slice9). */
 static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
@@ -118,7 +123,8 @@ typedef struct {
     nt_ui_checkbox_style_t *check, *radio, *toggle; /* one shared checkbox style each */
     nt_ui_slider_style_t *slider;
     nt_ui_progress_style_t *progress;
-    const nt_ui_scroll_style_t *scroll;
+    /* Four scroll variants (the engine memoizes the resolved atlas index in place -> non-const). */
+    nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
     /* Modal base style: restyles on the palette pointer flip (D-60-14). */
     const nt_ui_modal_style_t *modal;
     Clay_Color bg, panel, list_bg, list_sel, accent, border;
@@ -141,7 +147,10 @@ static ui_palette_t g_dark = {
     .toggle = &s_switch_dark,
     .slider = &s_slider_dark,
     .progress = &s_progress_dark,
-    .scroll = &s_scroll_dark,
+    .scroll_hide = &s_scroll_hide_dark,
+    .scroll_always = &s_scroll_always_dark,
+    .scroll_horiz = &s_scroll_horiz_dark,
+    .scroll_xy = &s_scroll_xy_dark,
     .modal = &s_modal_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
@@ -166,7 +175,10 @@ static ui_palette_t g_light = {
     .toggle = &s_switch_light,
     .slider = &s_slider_light,
     .progress = &s_progress_light,
-    .scroll = &s_scroll_light,
+    .scroll_hide = &s_scroll_hide_light,
+    .scroll_always = &s_scroll_always_light,
+    .scroll_horiz = &s_scroll_horiz_light,
+    .scroll_xy = &s_scroll_xy_light,
     .modal = &s_modal_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
@@ -261,8 +273,9 @@ static uint32_t s_id_radio_a, s_id_radio_b, s_id_radio_c;
 static uint32_t s_id_toggle;
 static uint32_t s_id_slider_f, s_id_slider_i;
 static uint32_t s_id_progress;
-static uint32_t s_id_stage_scroll;
-static uint32_t s_id_inner_scroll;
+static uint32_t s_id_scroll_hide, s_id_scroll_always; /* vertical AUTO_HIDE / ALWAYS lists */
+static uint32_t s_id_scroll_horiz, s_id_scroll_xy;    /* horizontal-only / both-axes */
+static uint32_t s_id_stress_scroll;                   /* fixed-size scroll so the label cell can't overflow */
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
 static uint32_t s_id_props_w, s_id_props_h;
 static uint32_t s_id_props_value;
@@ -337,6 +350,7 @@ static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
@@ -354,7 +368,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Images & Slice9", "Slice9 panels at 3 sizes (corners stay crisp) + a live insets/size panel.", "examples/ui_showcase/main.c:render_slice9", render_slice9, props_slice9},
     {"Toggles & Radios", "Checkbox + exclusive radio group + sliding toggle.", "examples/ui_showcase/main.c:render_toggles", render_toggles, NULL},
     {"Sliders & Progress", "Float + int sliders + a progress bar driven by a live value panel.", "examples/ui_showcase/main.c:render_sliders", render_sliders, props_progress},
-    {"Scroll", "Tall scroll list with a nested inner scroll (capture-steal).", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
+    {"Scroll", "Four scroll variants: vertical AUTO_HIDE / ALWAYS bar / horizontal-only / both axes.", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
@@ -492,17 +506,40 @@ static void init_styles(void) {
     s_progress_dark = progress_base;
     s_progress_light = progress_base;
 
-    /* ---- Scroll: recessed slot track + capsule thumb, ALWAYS bar. ---- */
+    /* ---- Scroll: recessed slot track + capsule thumb. Four variants differ only in bar ---- */
+    /* visibility (AUTO_HIDE vs ALWAYS) + which axes scroll; same art on dark+light. */
     nt_ui_scroll_style_t scroll_base = nt_ui_scroll_style_defaults();
-    scroll_base.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
     scroll_base.bar_thickness = 12.0F;
     scroll_base.bar_thumb_min_px = 28.0F;
+    scroll_base.bar_fade_speed = 8.0F;
     scroll_base.track_tint = 0xC0FFFFFF;
     scroll_base.thumb_tint = 0xFFFFFFFF;
     scroll_base.track_ref = scroll_track;
     scroll_base.thumb_ref = bar_thumb;
-    s_scroll_dark = scroll_base;
-    s_scroll_light = scroll_base;
+
+    nt_ui_scroll_style_t scroll_hide = scroll_base;
+    scroll_hide.bar_visibility = NT_UI_SCROLLBAR_AUTO_HIDE;
+    s_scroll_hide_dark = scroll_hide;
+    s_scroll_hide_light = scroll_hide;
+
+    nt_ui_scroll_style_t scroll_always = scroll_base;
+    scroll_always.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
+    s_scroll_always_dark = scroll_always;
+    s_scroll_always_light = scroll_always;
+
+    /* Horizontal-only: scroll_x on, scroll_y off; ALWAYS bar on the bottom edge. */
+    nt_ui_scroll_style_t scroll_horiz = scroll_always;
+    scroll_horiz.scroll_x = true;
+    scroll_horiz.scroll_y = false;
+    s_scroll_horiz_dark = scroll_horiz;
+    s_scroll_horiz_light = scroll_horiz;
+
+    /* Both axes: content wider AND taller than the container; ALWAYS bars on both edges. */
+    nt_ui_scroll_style_t scroll_xy = scroll_always;
+    scroll_xy.scroll_x = true;
+    scroll_xy.scroll_y = true;
+    s_scroll_xy_dark = scroll_xy;
+    s_scroll_xy_light = scroll_xy;
 
     /* ---- Modal: scale-pop + alpha; backdrop tuned per palette (dark dims to black, ---- */
     /* light dims to a soft slate so the panel stays legible against a bright page). */
@@ -651,36 +688,95 @@ static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress, st->prog.value, g_current->progress, &pdecl);
 }
 
-/* One scrollable item row. */
+/* One vertical-list item row (fills container width). */
 static void scroll_row(nt_ui_context_t *ctx, const char *text) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(30)}, .padding = {.left = 8}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28)}, .padding = {.left = 8}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     }
 }
 
+/* One fixed-size boxed cell (horizontal + XY grids need intrinsic content larger than the box). */
+static void scroll_cell(nt_ui_context_t *ctx, const char *text, float w, float h) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = g_current->list_bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->caption);
+    }
+}
+
+/* A captioned scroll tile: title above its own scroll container (NOT nested in another scroll). */
+static void scroll_tile_begin(nt_ui_context_t *ctx, const char *title, uint32_t id, nt_ui_scroll_style_t *style, float w, float h) {
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->caption);
+    nt_ui_scroll_begin(ctx, NULL, id, style,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}, .padding = CLAY_PADDING_ALL(6)},
+                                                  .backgroundColor = g_current->bg,
+                                                  .cornerRadius = CLAY_CORNER_RADIUS(8)});
+}
+
+/* DEMO-12: four independent scroll containers in a labelled 2x2 grid -- vertical AUTO_HIDE,
+ * vertical ALWAYS, horizontal-only, both-axes. None nested inside another scroll (the stage
+ * scroll is gone), so each gets its own drag-capture + its own clipped bars. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
     char buf[48];
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tall list (the stage scroll handles the outer scroll):", g_current->caption);
-    for (int i = 0; i < 12; ++i) {
-        (void)snprintf(buf, sizeof buf, "Outer row %02d", i);
-        scroll_row(ctx, buf);
-    }
-    /* Nested inner scroll: a drag inside it scrolls the inner container (capture-steal). */
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested inner scroll:", g_current->caption);
-    nt_ui_scroll_begin(ctx, NULL, s_id_inner_scroll, g_current->scroll,
-                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(120)}, .padding = CLAY_PADDING_ALL(6)},
-                                                  .backgroundColor = g_current->bg,
-                                                  .cornerRadius = CLAY_CORNER_RADIUS(8)});
-    {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
-            for (int i = 0; i < 20; ++i) {
-                (void)snprintf(buf, sizeof buf, "  Inner item %02d", i);
-                scroll_row(ctx, buf);
+    static const Clay_ElementDeclaration tile = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}};
+    static const Clay_ElementDeclaration grow_col = {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}};
+    static const Clay_ElementDeclaration grid_row = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 20, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}};
+
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 16}}) {
+        /* Top row: two vertical lists (AUTO_HIDE bar lingers then fades / ALWAYS bar stays). */
+        CLAY(grid_row) {
+            CLAY(tile) {
+                scroll_tile_begin(ctx, "Vertical AUTO_HIDE", s_id_scroll_hide, g_current->scroll_hide, 280.0F, 150.0F);
+                CLAY(grow_col) {
+                    for (int i = 0; i < 24; ++i) {
+                        (void)snprintf(buf, sizeof buf, "AUTO_HIDE row %02d", i);
+                        scroll_row(ctx, buf);
+                    }
+                }
+                nt_ui_scroll_end(ctx);
+            }
+            CLAY(tile) {
+                scroll_tile_begin(ctx, "Vertical ALWAYS", s_id_scroll_always, g_current->scroll_always, 280.0F, 150.0F);
+                CLAY(grow_col) {
+                    for (int i = 0; i < 24; ++i) {
+                        (void)snprintf(buf, sizeof buf, "ALWAYS row %02d", i);
+                        scroll_row(ctx, buf);
+                    }
+                }
+                nt_ui_scroll_end(ctx);
+            }
+        }
+        /* Bottom row: horizontal-only (wide single row) + both-axes (grid bigger than the box). */
+        CLAY(grid_row) {
+            CLAY(tile) {
+                scroll_tile_begin(ctx, "Horizontal-only", s_id_scroll_horiz, g_current->scroll_horiz, 280.0F, 88.0F);
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6}}) {
+                    for (int c = 0; c < 14; ++c) {
+                        (void)snprintf(buf, sizeof buf, "col %02d", c);
+                        scroll_cell(ctx, buf, 78.0F, 44.0F);
+                    }
+                }
+                nt_ui_scroll_end(ctx);
+            }
+            CLAY(tile) {
+                scroll_tile_begin(ctx, "Both axes (X + Y)", s_id_scroll_xy, g_current->scroll_xy, 280.0F, 150.0F);
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+                    for (int r = 0; r < 8; ++r) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6}}) {
+                            for (int c = 0; c < 8; ++c) {
+                                (void)snprintf(buf, sizeof buf, "%d,%d", r, c);
+                                scroll_cell(ctx, buf, 56.0F, 30.0F);
+                            }
+                        }
+                    }
+                }
+                nt_ui_scroll_end(ctx);
             }
         }
     }
-    nt_ui_scroll_end(ctx);
 }
 
 /* D-60-13 Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
@@ -760,19 +856,10 @@ static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text
     return nt_ui_button_end(ctx);
 }
 
-/* DEMO-05: confirm modal (high-level one-bool wrapper) + a nested depth-2 modal; Esc + backdrop
- * close. The body is declared while the wrapper returns true (keep declaring through the close
- * animation -- Pitfall 2). The runtime style is driven by props_modal so the anim tracks live. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* DEMO-05 (tab body): description + the "Show confirm" trigger ONLY. The modal itself is declared
+ * at ROOT in render_modal_overlay (called from frame()) so its floating panel is never clipped by
+ * the stage's scissor stack. This fn must NOT call nt_ui_modal (would re-clip it). */
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
-    /* Seed the runtime style from the active palette, then overlay the props-panel values. */
-    s_modal_style_runtime = *g_current->modal;
-    s_modal_style_runtime.ease_speed = st->modal.ease_speed;
-    s_modal_style_runtime.scale_start = st->modal.scale_start;
-    s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
-    s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
-    modal_set_transition(&s_modal_style_runtime, st->modal.transition);
-
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Open a confirm dialog; the properties panel drives the transition + tween live.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes the TOP modal; clicking the backdrop closes; the backdrop blocks click-through.", g_current->caption);
 
@@ -784,6 +871,22 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
     if (nt_ui_button_end(ctx)) {
         st->confirm_open = true;
     }
+}
+
+/* DEMO-05 (root overlay): the confirm modal (high-level one-bool wrapper) + a nested depth-2 modal;
+ * Esc + backdrop close. Declared at ROOT (no scissor ancestor) so the floating panel renders + the
+ * OK/Cancel/nested buttons win z over the backdrop. Self-gates on confirm_open; the runtime style is
+ * driven by props_modal so the anim tracks live. The body is declared while the wrapper returns true
+ * (keep declaring through the close animation -- Pitfall 2). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
+    /* Seed the runtime style from the active palette, then overlay the props-panel values. */
+    s_modal_style_runtime = *g_current->modal;
+    s_modal_style_runtime.ease_speed = st->modal.ease_speed;
+    s_modal_style_runtime.scale_start = st->modal.scale_start;
+    s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
+    s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
+    modal_set_transition(&s_modal_style_runtime, st->modal.transition);
 
     if (nt_ui_modal(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIT(0)},
@@ -847,13 +950,28 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "draw calls: %u   labels: %d", nt_ui_get_last_walk_draw_calls(ctx), st->stress.label_count);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
 
-    /* N small labels at 14pt -- the Slug GPU-cost proxy cell. */
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(760), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-        for (int i = 0; i < st->stress.label_count; ++i) {
-            (void)snprintf(buf, sizeof buf, "lbl%03d", i);
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &stress_label);
+    /* N small labels at 14pt -- the Slug GPU-cost proxy cell. The stage no longer scrolls, so the
+     * 400-label case is wrapped in a fixed-size scroll container -- it can't overflow the window. */
+    nt_ui_scroll_begin(ctx, NULL, s_id_stress_scroll, g_current->scroll_always,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(760), CLAY_SIZING_FIXED(420)}, .padding = CLAY_PADDING_ALL(6)},
+                                                  .backgroundColor = g_current->bg,
+                                                  .cornerRadius = CLAY_CORNER_RADIUS(8)});
+    {
+        /* Fixed-width column of LEFT_TO_RIGHT rows (12 labels/row): fills the box width and grows
+         * DOWN, so vertical scroll reaches every label regardless of count. */
+        enum { STRESS_COLS = 12 };
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(740), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+            for (int i = 0; i < st->stress.label_count; i += STRESS_COLS) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+                    for (int c = 0; c < STRESS_COLS && (i + c) < st->stress.label_count; ++c) {
+                        (void)snprintf(buf, sizeof buf, "lbl%03d", i + c);
+                        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &stress_label);
+                    }
+                }
+            }
         }
     }
+    nt_ui_scroll_end(ctx);
 }
 
 /* D-60-13 Modal panel (the showcase piece): segmented transition + sliders for ease / scale-start
@@ -942,8 +1060,11 @@ static void ensure_ids(void) {
     s_id_slider_f = nt_ui_id("showcase/slider_f");
     s_id_slider_i = nt_ui_id("showcase/slider_i");
     s_id_progress = nt_ui_id("showcase/progress");
-    s_id_stage_scroll = nt_ui_id("showcase/stage_scroll");
-    s_id_inner_scroll = nt_ui_id("showcase/inner_scroll");
+    s_id_scroll_hide = nt_ui_id("showcase/scroll_hide");
+    s_id_scroll_always = nt_ui_id("showcase/scroll_always");
+    s_id_scroll_horiz = nt_ui_id("showcase/scroll_horiz");
+    s_id_scroll_xy = nt_ui_id("showcase/scroll_xy");
+    s_id_stress_scroll = nt_ui_id("showcase/stress_scroll");
     s_id_props_il = nt_ui_id("showcase/props_il");
     s_id_props_ir = nt_ui_id("showcase/props_ir");
     s_id_props_it = nt_ui_id("showcase/props_it");
@@ -1035,7 +1156,9 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
     }
 }
 
-/* Right stage: title/info, the scroll-wrapped content, and (if set) the focused props panel. */
+/* Right stage: title/info, the tab content laid out directly (NO stage scroll -- the modal would be
+ * clipped + the Scroll tab's containers would be scroll-inside-scroll), and (if set) the focused
+ * props panel. Tabs that can overflow own their scrolling (the Scroll tab + render_stress). */
 static void declare_stage(nt_ui_context_t *ctx) {
     NT_ASSERT(s_active_tab >= 0 && s_active_tab < TAB_COUNT && "active tab out of range");
     const showcase_entry_t *e = &g_tabs[s_active_tab];
@@ -1050,16 +1173,10 @@ static void declare_stage(nt_ui_context_t *ctx) {
         /* Source reference: a dim "link" style distinct from body/caption copy. */
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->link);
 
-        /* Content stage + (optional) props panel side by side. */
+        /* Content + (optional) props panel side by side. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-            /* Scroll-wrapped content (DEMO-12): exercises the scissor stack. */
-            nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll,
-                               &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8)}});
-            {
-                /* Cap the readable content column (~720px) so text/cards don't stretch edge-to-edge. */
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0, 720), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
-            }
-            nt_ui_scroll_end(ctx);
+            /* Cap the readable content column (~720px) so text/cards don't stretch edge-to-edge. */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0, 720), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
 
             if (e->props_fn != NULL) {
                 e->props_fn(ctx, &s_state);
@@ -1211,6 +1328,12 @@ static void frame(void) {
                     declare_stage(s_ctx);
                 }
             }
+        }
+
+        /* Modal declared at ROOT (after the scene, before nt_ui_end): no scissor ancestor, so the
+         * floating panel renders unclipped. Self-gates on confirm_open; only the Modals tab drives it. */
+        if (g_tabs[s_active_tab].render == render_modals) {
+            render_modal_overlay(s_ctx, &s_state);
         }
 
         nt_ui_end(s_ctx);
