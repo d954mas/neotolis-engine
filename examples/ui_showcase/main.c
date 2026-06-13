@@ -1,12 +1,4 @@
-/* UI Showcase -- Druid-style tabbed vitrine that supersedes the per-phase UI demos.
- * A static-const registry of widget tabs (name + info + code_url + render fn + nullable
- * props fn) drives a left tab-list -> right content-stage layout. The stage is wrapped in a
- * scroll container; a focused live properties panel renders only for tabs that set props_fn
- * (Slice9 insets/size, Progress value). Theme hot-swap is a single g_current pointer flip over
- * a game-owned ui_palette_t of per-widget style pointers (Model D, no engine API). Per-tab state
- * lives in a game-owned struct keyed by tab so it survives tab switches (IM re-feeds each frame).
- * Keys: Esc quit (native) | T palette dark/light | D inspector
- * Build packs: build_ui_showcase_packs build/examples/ui_showcase */
+/* UI Showcase -- tabbed vitrine demoing the engine's UI widgets; see README. */
 
 // #region includes
 #include "app/nt_app.h"
@@ -791,6 +783,10 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         }
         nt_ui_modal_end(ctx);
     }
+    /* Outer closed -> the nested child can't be declared; clear its bool so the stack stays balanced. */
+    if (!st->confirm_open) {
+        st->nested_open = false;
+    }
 }
 
 /* DEMO-06: a cell of N labels @14pt + a frame gpu_ms readout (n/a guard on WebGL2 absent ext,
@@ -1014,31 +1010,42 @@ static void declare_stage(nt_ui_context_t *ctx) {
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
+    /* Prev-frame modal state (cached after nt_ui_end below): gameplay/global hotkeys yield to an open
+     * modal so Esc closes the top modal first and the palette/inspector keys don't fire underneath it. */
+    static bool s_modal_was_active;
     nt_stats_frame_begin();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
 
 #ifndef NT_PLATFORM_WEB
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    if (!s_modal_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif
 
-    if (nt_input_key_is_pressed(NT_KEY_T)) {
-        g_current = (g_current == &g_dark) ? &g_light : &g_dark;
-        nt_log_info("ui_showcase: palette -> %s", g_current->name);
-    }
-    if (nt_input_key_is_pressed(NT_KEY_D)) {
-        const bool now_on = !nt_ui_inspector_is_active(s_ctx);
-        nt_ui_inspector_set_active(s_ctx, now_on);
-        nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
+    if (!s_modal_was_active) {
+        if (nt_input_key_is_pressed(NT_KEY_T)) {
+            g_current = (g_current == &g_dark) ? &g_light : &g_dark;
+            nt_log_info("ui_showcase: palette -> %s", g_current->name);
+        }
+        if (nt_input_key_is_pressed(NT_KEY_D)) {
+            const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+            nt_ui_inspector_set_active(s_ctx, now_on);
+            nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
+        }
     }
 
     nt_resource_step();
     nt_material_step();
 
-    /* Auto-animate progress when its panel toggle is on. */
+    /* Auto-animate progress when its panel toggle is on. On the off->on edge, derive the ramp direction
+     * from the current value so it continues toward the nearer end instead of snapping. */
+    static bool s_prog_auto_prev;
+    if (s_state.prog.auto_anim && !s_prog_auto_prev) {
+        s_state.prog.ramp_up = (s_state.prog.value < 1.0F);
+    }
+    s_prog_auto_prev = s_state.prog.auto_anim;
     if (s_state.prog.auto_anim) {
         s_state.prog.value += (s_state.prog.ramp_up ? 1.0F : -1.0F) * 0.3F * g_nt_app.dt;
         if (s_state.prog.value >= 1.0F) {
@@ -1099,6 +1106,7 @@ static void frame(void) {
         });
         nt_sprite_renderer_restore_gpu();
         nt_text_renderer_restore_gpu();
+        /* Force a style re-init next frame so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
         s_font_bound = false;
     }
@@ -1139,6 +1147,7 @@ static void frame(void) {
         }
 
         nt_ui_end(s_ctx);
+        s_modal_was_active = nt_ui_modal_active(s_ctx);
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);

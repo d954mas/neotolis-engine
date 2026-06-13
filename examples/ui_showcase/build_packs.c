@@ -133,7 +133,7 @@ int main(int argc, char *argv[]) {
     opts.name = "thumb";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/thumb.png", &opts);
 
-    /* Slider/progress bar art: recessed track + smooth slice9 fill + shaped CROP fill. */
+    /* Slider/progress bar art: recessed track + smooth slice9 fill. */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "bar_track";
     opts.slice9_left = BAR_BORDER;
@@ -144,11 +144,6 @@ int main(int argc, char *argv[]) {
 
     opts.name = "bar_fill_smooth";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_fill_smooth.png", &opts);
-
-    /* Shaped CROP fill: no slice9 (a partial reveal is geometrically incompatible with slice9). */
-    opts = nt_atlas_sprite_opts_defaults();
-    opts.name = "bar_fill_shaped";
-    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/bar_fill_shaped.png", &opts);
 
     /* Scrollbar: recessed slot track + light capsule thumb (8px slice9). */
     opts = nt_atlas_sprite_opts_defaults();
