@@ -9,39 +9,14 @@
 #error "NT_DEVAPI_ENABLED not defined — link against nt_devapi via target_link_libraries(<target> PUBLIC|PRIVATE nt_devapi)"
 #endif
 
-#include <stdbool.h>
-
 #include "cJSON.h"
 #include "core/nt_types.h"
+#include "devapi/nt_devapi_types.h" /* nt_devapi_error / _command_desc / _handler_fn (shared with the stub) */
 
 /* Registry table cap. Dev-only, linear-scanned — 64 covers engine + game groups. */
 #ifndef NT_DEVAPI_MAX_COMMANDS
 #define NT_DEVAPI_MAX_COMMANDS 64
 #endif
-
-/* Error returned by a handler: a stable machine code token + a human message.
-   Both point at static string literals owned by the handler/engine. */
-typedef struct nt_devapi_error {
-    const char *code;
-    const char *message;
-} nt_devapi_error;
-
-/* Self-describing command metadata. All 7 fields are documentation strings the
-   registry copies (strdup) at registration — the caller may free its buffers after.
-   D-08: NO `group` field; group membership is tracked separately via register_group. */
-typedef struct nt_devapi_command_desc {
-    const char *method;
-    const char *layer;
-    const char *summary;
-    const char *params_shape;
-    const char *result_shape;
-    const char *frame_behavior;
-    const char *side_effects;
-} nt_devapi_command_desc;
-
-/* Command handler. Fills result_obj (a pre-created cJSON object) on success and
-   returns true; on failure fills err and returns false. params may be NULL. */
-typedef bool (*nt_devapi_handler_fn)(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data);
 
 /* Lifecycle. init returns NT_OK once; a second init without shutdown returns NT_ERR_INIT_FAILED. */
 nt_result_t nt_devapi_init(void);
