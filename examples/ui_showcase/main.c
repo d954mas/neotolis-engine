@@ -84,30 +84,20 @@ static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, 
 // #endregion
 
 // #region palette widget styles (filled with late-bound atlas refs at init)
-/* Runtime styles: const baselines copied + late-bound refs filled upfront (init_styles).
- * Mutable so the engine memoizes the resolved region index in place. Dark + light variants. */
+/* Mutable so the engine can memoize the resolved atlas region index in place. */
 static nt_ui_button_style_t s_btn_primary_dark, s_btn_primary_light;
 static nt_ui_button_style_t s_btn_secondary_dark, s_btn_secondary_light;
-/* Buttons-tab variety (theme-agnostic art, same in both palettes): exaggerated-scale, per-state
- * VISUAL ART SWAP (blue idle / green hover / red pressed), and no-pad touch-target variants. */
 static nt_ui_button_style_t s_btn_scale_dark, s_btn_scale_light;
 static nt_ui_button_style_t s_btn_swap_dark, s_btn_swap_light;
 static nt_ui_button_style_t s_btn_nopad_dark, s_btn_nopad_light;
-/* Tab-row click target: no atlas art (idle bg_tint == no-tint => transparent so the row's
- * selected/unselected CLAY bg shows), hover/pressed paint a translucent-white lighten overlay
- * (theme-agnostic, reads on both palettes). */
 static nt_ui_button_style_t s_listrow_dark, s_listrow_light;
 static nt_ui_checkbox_style_t s_check_dark, s_check_light;
 static nt_ui_checkbox_style_t s_radio_dark, s_radio_light;
 static nt_ui_checkbox_style_t s_switch_dark, s_switch_light;
 static nt_ui_slider_style_t s_slider_dark, s_slider_light;
 static nt_ui_progress_style_t s_progress_dark, s_progress_light;
-/* Progress variants: horizontal CROP (shaped diagonal-stripe fill, revealed not stretched) +
- * vertical BOTTOM_UP "mana" bar. Same art on both palettes. */
 static nt_ui_progress_style_t s_progress_crop_dark, s_progress_crop_light;
 static nt_ui_progress_style_t s_progress_vert_dark, s_progress_vert_light;
-/* Four scroll variants (Scroll tab): vertical AUTO_HIDE / vertical ALWAYS / horizontal-only /
- * both-axes. Same art, differ only in bar_visibility + scroll_x/scroll_y. Dark+light share art. */
 static nt_ui_scroll_style_t s_scroll_hide_dark, s_scroll_hide_light;
 static nt_ui_scroll_style_t s_scroll_always_dark, s_scroll_always_light;
 static nt_ui_scroll_style_t s_scroll_horiz_dark, s_scroll_horiz_light;
@@ -116,28 +106,22 @@ static nt_ui_scroll_style_t s_scroll_xy_dark, s_scroll_xy_light;
 /* Slice9 panel image style (untinted, atlas-default slice9). */
 static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
 
-/* Per-palette base modal styles: the palette pointer flip restyles the modal on hot-swap
- * (D-60-14). The Modals tab seeds a RUNTIME style from these each frame, then overlays the
- * props-panel transition/ease/scale-start/backdrop-alpha (D-60-13) before passing to nt_ui_modal. */
+/* Per-palette modal base; the palette pointer flip restyles the modal on hot-swap. */
 static nt_ui_modal_style_t s_modal_dark, s_modal_light;
 // #endregion
 
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
 typedef struct {
     const nt_ui_label_style_t *h1, *body, *caption;
-    const nt_ui_label_style_t *title, *row_sel, *link; /* header title, selected tab-row label, source-link */
-    /* Widget styles are non-const: the engine memoizes the resolved atlas region index in
-     * place on first emit, so these point at mutable runtime storage. */
+    const nt_ui_label_style_t *title, *row_sel, *link;
+    /* Non-const: the engine memoizes the resolved atlas region index in place on first emit. */
     nt_ui_button_style_t *btn_primary, *btn_secondary, *listrow;
-    /* Buttons-tab variety: exaggerated-scale / per-state art-swap / no-pad touch-target. */
     nt_ui_button_style_t *btn_scale, *btn_swap, *btn_nopad;
-    nt_ui_checkbox_style_t *check, *radio, *toggle; /* one shared checkbox style each */
+    nt_ui_checkbox_style_t *check, *radio, *toggle;
     nt_ui_slider_style_t *slider;
     nt_ui_progress_style_t *progress;
-    nt_ui_progress_style_t *progress_crop, *progress_vert; /* CROP + vertical variants */
-    /* Four scroll variants (the engine memoizes the resolved atlas index in place -> non-const). */
+    nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
-    /* Modal base style: restyles on the palette pointer flip (D-60-14). */
     const nt_ui_modal_style_t *modal;
     Clay_Color bg, panel, list_bg, list_sel, accent, border;
     const char *name;
@@ -211,12 +195,11 @@ static ui_palette_t g_light = {
     .name = "LIGHT",
 };
 
-/* Pointer write IS the hot-swap -- engine ships no nt_ui_set_theme (Model D). */
+/* Pointer write IS the hot-swap -- engine ships no nt_ui_set_theme. */
 static const ui_palette_t *g_current = &g_dark;
 // #endregion
 
 // #region per-tab state (game-owned; re-fed each frame so it survives tab switches)
-/* Per-tab param structs that the focused props panels read+write. */
 typedef struct {
     int inset_l, inset_r, inset_t, inset_b; /* slice9 override insets (px) */
     int target_w, target_h;                 /* panel target size driven by the panel */
@@ -228,8 +211,7 @@ typedef struct {
     bool ramp_up;
 } progress_params_t;
 
-/* Transform-aware button props (D-60-13): the panel drives a live transform around a button to
- * prove inverse-affine hit-test still clicks correctly when rotated/scaled/offset. */
+/* Live transform the panel drives around a button to prove inverse-affine hit-test still clicks. */
 typedef struct {
     float rotation_deg; /* -180..180 */
     float scale;        /* 0.5..2.0 */
@@ -238,7 +220,6 @@ typedef struct {
     uint32_t clicks; /* proof counter: still clickable while transformed */
 } btn_xform_params_t;
 
-/* Modal props (D-60-13): transition selector + tween/anim params the panel drives live. */
 typedef struct {
     int transition;       /* 0 = scale-pop, 1 = fade, 2 = slide (segmented control) */
     float ease_speed;     /* open/close tween value_speed */
@@ -246,13 +227,10 @@ typedef struct {
     float backdrop_alpha; /* peak backdrop opacity 0..1 */
 } modal_params_t;
 
-/* Stress props (D-60-13): label count driving the render_stress loop. */
 typedef struct {
     int label_count; /* segmented control: 50 / 100 / 200 / 400 */
 } stress_params_t;
 
-/* All per-tab logical state (slider floats, checkbox bools, radio int, scroll positions,
- * plus the props-panel param structs). Re-fed each frame -> retained across tab switches. */
 struct tab_state {
     /* Toggles tab. */
     bool cb_value;
@@ -289,7 +267,7 @@ static struct tab_state s_state = {
 };
 // #endregion
 
-// #region registry types (Druid-style metadata; nullable props_fn per D-60-13)
+// #region registry types (Druid-style metadata; nullable props_fn)
 typedef void (*showcase_render_fn)(struct nt_ui_context *ctx, tab_state_t *st);
 typedef void (*showcase_props_fn)(struct nt_ui_context *ctx, tab_state_t *st); /* nullable */
 typedef struct {
@@ -353,7 +331,6 @@ static bool s_font_bound;
 static nt_atlas_region_ref_t s_panel_beige_ref;
 static nt_atlas_region_ref_t s_panel_blue_ref;
 static nt_atlas_region_ref_t s_panel_brown_ref;
-static nt_atlas_region_ref_t s_button_green_ref;
 /* Icon-button art (Kenney bunny); untinted so it shows its natural color. */
 static nt_atlas_region_ref_t s_icon_bunny_ref;
 
@@ -361,8 +338,7 @@ static int s_active_tab;
 // #endregion
 
 // #region reusable focused-panel helper (game-side; built from existing nt_ui widgets)
-/* A titled control strip the props_fn populates. Same spirit as the palette swap -- NO engine
- * symbol. begin opens a padded panel container with a title; end closes it. */
+/* A titled control strip the props_fn populates; no engine symbol involved. */
 static void showcase_panel_begin(nt_ui_context_t *ctx, const char *title) {
     Clay_ElementDeclaration decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIT(0)},
@@ -379,7 +355,7 @@ static void showcase_panel_begin(nt_ui_context_t *ctx, const char *title) {
 static void showcase_panel_end(nt_ui_context_t *ctx) { nt_ui_group_end(ctx); }
 // #endregion
 
-// #region widget tab render fns (filled in Task 2; stubs in Task 1)
+// #region widget tab render fns
 static void render_labels(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st);
@@ -397,8 +373,7 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_stress(nt_ui_context_t *ctx, tab_state_t *st);
 // #endregion
 
-// #region registry (one entry per widget category present in this plan)
-/* 8 logical categories (DEMO-02). Buttons render as 3 sibling entries (D-60-13). */
+// #region registry (one entry per widget category)
 static const showcase_entry_t g_tabs[] = {
     {"Labels", "h1 / body / caption label variants, themed via the palette.", "examples/ui_showcase/main.c:render_labels", render_labels, NULL},
     {"Buttons", "Standard / scale / per-state ART SWAP / no-pad touch-target / icon / disabled.", "examples/ui_showcase/main.c:render_buttons", render_buttons, NULL},
@@ -437,14 +412,9 @@ static void init_styles(void) {
     s_panel_beige_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BEIGE.value);
     s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE.value);
     s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN.value);
-    s_button_green_ref = btn_green;
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
 
-    /* ---- Buttons: FLAT generic buttons (no atlas art -> idle.bg.atlas.id stays 0). Solid theme-color
-     * bg via per-state bg_tint (0xAABBGGRR); rounded corners come from the cell's cornerRadius. The
-     * per-state ART SWAP demo (s_btn_swap_*) is the ONLY button that keeps the blue/green/red depth
-     * art -- that's the intended art showcase. ---- */
-    /* Flat primary (blue): idle/hover/pressed/disabled solid tints; hover lightens, pressed darkens. */
+    /* Flat buttons: no atlas art (idle.bg.atlas.id stays 0); solid bg via per-state bg_tint. */
     nt_ui_button_style_t flat_primary = {
         .idle = {.bg_tint = 0xFFCC7A3CU, .scale = 1.0F, .opacity = 1.0F},                       /* solid blue */
         .hover = {.bg_tint = 0xFFE08F4FU, .scale = 1.05F, .opacity = 1.0F},                     /* lighter */
@@ -454,14 +424,14 @@ static void init_styles(void) {
         .hit_padding_lrtb = {16, 16, 16, 16},
         .slice9_scale = 1.0F,
     };
-    /* Flat secondary (green): same shape, green tints. */
+    /* Flat secondary: same shape, green tints. */
     nt_ui_button_style_t flat_secondary = flat_primary;
     flat_secondary.idle.bg_tint = 0xFF5FA84FU;
     flat_secondary.hover.bg_tint = 0xFF72C25FU;
     flat_secondary.pressed.bg_tint = 0xFF4A8A3CU;
     flat_secondary.disabled.bg_tint = 0xFF5FA84FU;
 
-    /* Generic flat styles are theme-agnostic (consistent on both palettes -> dark==light). */
+    /* Flat styles are theme-agnostic -> dark == light. */
     s_btn_primary_dark = flat_primary;
     s_btn_primary_light = flat_primary;
 
@@ -475,8 +445,7 @@ static void init_styles(void) {
     s_btn_scale_dark.pressed.offset_y = 0.0F;
     s_btn_scale_light = s_btn_scale_dark;
 
-    /* Per-state VISUAL ART SWAP (the ONLY art button): blue idle/disabled, green hover, red pressed.
-     * Uses the depth-art slice9; bg_tint stays no-tint (0xFFFFFFFF) so the art shows its own color. */
+    /* Per-state art swap: bg_tint stays no-tint (0xFFFFFFFF) so the art shows its own color. */
     nt_ui_button_style_t swap_base = {
         .idle = {.bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
         .hover = {.bg_tint = 0xFFFFFFFFU, .scale = 1.05F, .opacity = 1.0F},
@@ -492,7 +461,7 @@ static void init_styles(void) {
     s_btn_swap_dark.pressed.bg = btn_red;
     s_btn_swap_light = s_btn_swap_dark;
 
-    /* No-pad / touch-target variant: flat blue, zero hit padding so visual==hit (vs the padded primary). */
+    /* No-pad variant: zero hit padding so visual == hit. */
     s_btn_nopad_dark = flat_primary;
     s_btn_nopad_dark.hit_padding_lrtb[0] = 0;
     s_btn_nopad_dark.hit_padding_lrtb[1] = 0;
@@ -500,9 +469,7 @@ static void init_styles(void) {
     s_btn_nopad_dark.hit_padding_lrtb[3] = 0;
     s_btn_nopad_light = s_btn_nopad_dark;
 
-    /* ---- Tab-row click target: no art, idle transparent, hover/pressed translucent-white lighten. ---- */
-    /* idle.bg.atlas.id stays 0 => text-only button (no IMAGE); bg_tint 0xFFFFFFFF unpacks to no-tint
-     * (transparent), so the row's selected/unselected CLAY bg shows through. No scale-pop on rows. */
+    /* Tab-row target: idle bg_tint 0xFFFFFFFF is no-tint, so the row's CLAY bg shows through. */
     nt_ui_button_style_t listrow_base = {
         .idle = {.bg_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F},
         .hover = {.bg_tint = 0x22FFFFFFU, .scale = 1.0F, .opacity = 1.0F},   /* ~13% white lighten */
@@ -592,8 +559,7 @@ static void init_styles(void) {
     s_progress_dark = progress_base;
     s_progress_light = progress_base;
 
-    /* CROP variant: same recessed track, shaped diagonal-stripe fill revealed by a clip scissor
-     * (stripes stay crisp; slice9 is ignored in CROP). */
+    /* CROP variant: shaped fill revealed by a clip scissor (slice9 is ignored in CROP). */
     nt_ui_progress_style_t progress_crop = progress_base;
     progress_crop.fill = bar_fill_shaped;
     progress_crop.fill_mode = NT_UI_FILL_CROP;
@@ -611,8 +577,7 @@ static void init_styles(void) {
     s_progress_vert_dark = progress_vert;
     s_progress_vert_light = progress_vert;
 
-    /* ---- Scroll: recessed slot track + capsule thumb. Four variants differ only in bar ---- */
-    /* visibility (AUTO_HIDE vs ALWAYS) + which axes scroll; same art on dark+light. */
+    /* Scroll: four variants differ only in bar visibility + which axes scroll; same art. */
     nt_ui_scroll_style_t scroll_base = nt_ui_scroll_style_defaults();
     scroll_base.bar_thickness = 12.0F;
     scroll_base.bar_thumb_min_px = 28.0F;
@@ -646,16 +611,13 @@ static void init_styles(void) {
     s_scroll_xy_dark = scroll_xy;
     s_scroll_xy_light = scroll_xy;
 
-    /* ---- Modal: scale-pop + alpha; backdrop tuned per palette (dark dims to black, ---- */
-    /* light dims to a soft slate so the panel stays legible against a bright page). */
+    /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
     modal_base.layer = LAYER_BG;
     s_modal_dark = modal_base;
     s_modal_dark.backdrop_color = 0xFF000000U; /* black */
-    s_modal_dark.backdrop_alpha = 0.60F;
     s_modal_light = modal_base;
     s_modal_light.backdrop_color = 0xFF202830U; /* slate */
-    s_modal_light.backdrop_alpha = 0.40F;
 }
 // #endregion
 
@@ -680,10 +642,8 @@ static void try_bind_resources(void) {
 }
 // #endregion
 
-// #region widget tab render fns (fold the superseded demos' content as tabs)
-/* A labelled button slot: one button + an inline label, themed via the active palette.
- * rounded=false for atlas-region-bg buttons: a non-zero cornerRadius on the bg IMAGE asserts in the
- * engine (rounding must be pre-baked into the art); flat colored-rect buttons keep the rounding. */
+// #region widget tab render fns
+/* rounded=false for atlas-bg buttons: a non-zero cornerRadius on a bg IMAGE asserts in the engine. */
 static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t *style, const char *text, bool enabled, bool rounded) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
@@ -717,9 +677,7 @@ static void labelled_button_cell(nt_ui_context_t *ctx, const char *title, const 
     }
 }
 
-/* Buttons tab: the full variety the old ui_buttons_demo showed -- standard states, exaggerated
- * scale, per-state VISUAL ART SWAP (blue/green/red), no-pad touch-target, an icon button, and a
- * disabled button. Two rows of three cells. */
+/* Buttons tab: standard / scale / art-swap / no-pad / icon / disabled, in two rows of three. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
@@ -729,8 +687,7 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
     CLAY(grid_row) {
         labelled_button_cell(ctx, "Standard", "idle/hover/pressed/disabled", nt_ui_id("showcase/btn_standard"), g_current->btn_primary, "Primary", true, true);
         labelled_button_cell(ctx, "Scale", "hover 1.20 / press 0.80", nt_ui_id("showcase/btn_scale"), g_current->btn_scale, "Boom", true, true);
-        /* Art-swap bg is an atlas region (depth art) -> IMAGE element; rounding is baked into the art,
-         * so the cell MUST NOT set cornerRadius (a non-zero radius on the bg IMAGE asserts in the engine). */
+        /* Art-swap bg is an atlas IMAGE: rounding is baked into the art, so the cell sets no cornerRadius. */
         labelled_button_cell(ctx, "Art swap", "blue idle / green hover / red press", nt_ui_id("showcase/btn_swap"), g_current->btn_swap, "Swap", true, false);
     }
     CLAY(grid_row) {
@@ -753,9 +710,7 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* Buttons: Transform tab. A button wrapped in a live transform (rotation/scale/offset from the
- * props panel) -- proves inverse-affine hit-test: it still clicks while rotated/scaled/translated.
- * The click counter is the proof. */
+/* Buttons: Transform tab. Proves inverse-affine hit-test: the button still clicks while transformed. */
 static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[80];
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The button below is transformed by the properties panel. It STILL hit-tests correctly.", g_current->caption);
@@ -773,8 +728,7 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
             .scale_y = st->btn_xform.scale,
             .scale_z = 1.0F,
         };
-        /* The wrapping CLAY's transform composes into the button's tree_baked, so both the renderer
-         * and the inverse-affine hit-test see it. */
+        /* The wrapping CLAY's transform composes into the button's bake, so renderer + hit-test agree. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &xform, 1.0F)}) {
             nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform"), g_current->btn_primary,
                                &(Clay_ElementDeclaration){
@@ -789,7 +743,7 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* One reference panel at a fixed size (DEMO-07: corners stay non-stretched). */
+/* One reference panel at a fixed size; corners stay non-stretched. */
 static void slice9_ref(nt_ui_context_t *ctx, nt_atlas_region_ref_t *ref, float w, float h, const char *cap) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), cap, g_current->caption);
@@ -798,14 +752,14 @@ static void slice9_ref(nt_ui_context_t *ctx, nt_atlas_region_ref_t *ref, float w
 }
 
 static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
-    /* Three reference sizes prove corners stay crisp while the center stretches (DEMO-07). */
+    /* Three reference sizes prove corners stay crisp while the center stretches. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
         slice9_ref(ctx, &s_panel_blue_ref, 300.0F, 100.0F, "300x100");
         slice9_ref(ctx, &s_panel_blue_ref, 600.0F, 100.0F, "600x100");
     }
     slice9_ref(ctx, &s_panel_blue_ref, 600.0F, 400.0F, "600x400");
 
-    /* A slice9-backed nt_ui_panel container with a child label (folds the slice9_demo panel use). */
+    /* A slice9-backed nt_ui_panel container with a child label. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(360), CLAY_SIZING_FIXED(90)}, .padding = CLAY_PADDING_ALL(14), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_panel_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_img_style, NULL);
         {
@@ -902,9 +856,7 @@ static void scroll_tile_begin(nt_ui_context_t *ctx, const char *title, uint32_t 
                                                   .cornerRadius = CLAY_CORNER_RADIUS(8)});
 }
 
-/* DEMO-12: four independent scroll containers in a labelled 2x2 grid -- vertical AUTO_HIDE,
- * vertical ALWAYS, horizontal-only, both-axes. None nested inside another scroll (the stage
- * scroll is gone), so each gets its own drag-capture + its own clipped bars. */
+/* Four independent (non-nested) scroll containers in a 2x2 grid; each owns its drag-capture + bars. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
@@ -968,7 +920,7 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* D-60-13 Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
+/* Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
@@ -1001,7 +953,7 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     showcase_panel_end(ctx);
 }
 
-/* D-60-13 Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
+/* Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
@@ -1018,9 +970,7 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     showcase_panel_end(ctx);
 }
 
-/* D-60-13 Button-transform panel: rotation / scale / offset sliders drive the live transform around
- * the transform-aware button (read in render_button_transform each frame). Props panel over global
- * Q/E/arrow keys -- those collide with the showcase's T/D/Esc. */
+/* Button-transform panel: rotation / scale / offset sliders drive the live transform each frame. */
 static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
@@ -1057,9 +1007,7 @@ static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     showcase_panel_end(ctx);
 }
 
-/* Runtime modal style the props panel mutates -- seeded from the palette modal style each frame,
- * then overlaid with the panel's transition/ease/scale-start/backdrop-alpha so the open/close
- * animation visibly tracks the panel (D-60-13). NOT a static-const. */
+/* Runtime modal style: re-seeded from the palette each frame, then overlaid with the panel values. */
 static nt_ui_modal_style_t s_modal_style_runtime;
 
 /* Map the segmented transition index to the modal flag bits, preserving close-source flags. */
@@ -1085,9 +1033,8 @@ static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text
     return nt_ui_button_end(ctx);
 }
 
-/* DEMO-05 (tab body): description + the "Show confirm" trigger ONLY. The modal itself is declared
- * at ROOT in render_modal_overlay (called from frame()) so its floating panel is never clipped by
- * the stage's scissor stack. This fn must NOT call nt_ui_modal (would re-clip it). */
+/* Tab body: description + the trigger only. The modal is declared at ROOT in render_modal_overlay
+ * so its floating panel is never clipped by the stage scissor; this fn must NOT call nt_ui_modal. */
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Open a confirm dialog; the properties panel drives the transition + tween live.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes the TOP modal; clicking the backdrop closes; the backdrop blocks click-through.", g_current->caption);
@@ -1103,11 +1050,8 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* DEMO-05 (root overlay): the confirm modal (high-level one-bool wrapper) + a nested depth-2 modal;
- * Esc + backdrop close. Declared at ROOT (no scissor ancestor) so the floating panel renders + the
- * OK/Cancel/nested buttons win z over the backdrop. Self-gates on confirm_open; the runtime style is
- * driven by props_modal so the anim tracks live. The body is declared while the wrapper returns true
- * (keep declaring through the close animation -- Pitfall 2). */
+/* Root overlay: confirm modal + nested depth-2 modal; Esc + backdrop close. Declared at ROOT (no
+ * scissor ancestor) so the panel renders unclipped; the body stays declared through the close tween. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Seed the runtime style from the active palette, then overlay the props-panel values. */
@@ -1163,9 +1107,8 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* DEMO-06: a cell of N labels @14pt + a frame gpu_ms readout (n/a guard on WebGL2 absent ext,
- * Pitfall 3). NO nested ui_text GPU segment (the host frame loop owns the "frame" segment;
- * nesting trips nt_gfx_gl.c:483). */
+/* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
+ * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = {200.0F, 210.0F, 220.0F, 255.0F}};
@@ -1180,8 +1123,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "draw calls: %u   labels: %d", nt_ui_get_last_walk_draw_calls(ctx), st->stress.label_count);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
 
-    /* N small labels at 14pt -- the Slug GPU-cost proxy cell. The stage no longer scrolls, so the
-     * 400-label case is wrapped in a fixed-size scroll container -- it can't overflow the window. */
+    /* Fixed-size scroll container so the 400-label case can't overflow the window. */
     nt_ui_scroll_begin(ctx, NULL, s_id_stress_scroll, g_current->scroll_always,
                        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(760), CLAY_SIZING_FIXED(420)}, .padding = CLAY_PADDING_ALL(6)},
                                                   .backgroundColor = g_current->bg,
@@ -1204,8 +1146,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_scroll_end(ctx);
 }
 
-/* D-60-13 Modal panel (the showcase piece): segmented transition + sliders for ease / scale-start
- * / backdrop-alpha, all written into the Modals param struct that render_modals reads each frame. */
+/* Modal panel: segmented transition + sliders for ease / scale-start / backdrop-alpha. */
 static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
@@ -1242,8 +1183,7 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     showcase_panel_end(ctx);
 }
 
-/* D-60-13 Stress panel: segmented label count (50/100/200/400) driving render_stress + the live
- * frame gpu_ms / draw-calls readout. */
+/* Stress panel: segmented label count (50/100/200/400) + the live frame gpu_ms / draw-calls readout. */
 static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const int counts[4] = {50, 100, 200, 400};
@@ -1326,8 +1266,8 @@ static void ensure_ids(void) {
     s_ids_ready = true;
 }
 
-/* Header (DEMO-04): a Dark/Light toggle button + a live ui_draw_calls + frame gpu_ms readout
- * (the draw-call count IS the batching evidence -- no sort-by-material toggle, DEMO-09 REMOVED). */
+/* Header: theme toggle + a live ui_draw_calls / frame gpu_ms readout (the draw-call count is the
+ * batching evidence; the engine has no sort-by-material toggle). */
 static void declare_header(nt_ui_context_t *ctx) {
     char buf[96];
     /* Title | theme button | live readout | (GROW spacer) | dim keyboard hints, with a 1px
@@ -1396,11 +1336,8 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
     }
 }
 
-/* Right stage: title/info, the tab content in a VERTICAL scroll (tall tabs like Slice9 fit/scroll),
- * and (if set) the focused props panel BESIDE the scroll (short -> not scrolled). The modal is NOT
- * here: it's declared at ROOT in frame() so its floating panel is never clipped by the stage scissor.
- * The Scroll tab + render_stress size their own containers to fit the stage, so the stage scroll
- * won't engage there (avoids scroll-in-scroll). */
+/* Right stage: title/info, the tab content in a vertical scroll, and (if set) the props panel beside
+ * it. The modal is declared at ROOT in frame(), not here, so its panel escapes the stage scissor. */
 static void declare_stage(nt_ui_context_t *ctx) {
     NT_ASSERT(s_active_tab >= 0 && s_active_tab < TAB_COUNT && "active tab out of range");
     const showcase_entry_t *e = &g_tabs[s_active_tab];

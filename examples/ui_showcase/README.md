@@ -13,19 +13,25 @@ The stage is wrapped in a scroll container (exercises the scissor stack). A tab
 that sets a `props_fn` also renders a focused live properties panel beside its
 content; all other tabs render no panel.
 
-## Tabs (8 logical categories)
+## Tabs (9 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
-2. **Buttons** - Primary / Secondary / Disabled as three sibling entries
-   (idle / hover / pressed / disabled).
-3. **Images & Slice9** - panels at 300x100 / 600x100 / 600x400 (corners stay
+2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
+   scale / per-state art swap (blue idle / green hover / red press) / no-pad
+   touch-target / icon button / disabled.
+3. **Buttons: Transform** - a single button wrapped in a live rotation / scale /
+   offset transform driven by a properties panel; the click counter proves the
+   transform-aware (inverse-affine) hit-test still clicks while it is rotated,
+   scaled, and offset.
+4. **Images & Slice9** - panels at 300x100 / 600x100 / 600x400 (corners stay
    crisp) + a live insets/size properties panel.
-4. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle.
-5. **Sliders & Progress** - float + int sliders + a progress bar with a live
+5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle.
+6. **Sliders & Progress** - float + int sliders + a progress bar with a live
    value / auto-animate properties panel.
-6. **Scroll** - a tall list with a nested inner scroll (capture-steal).
-7. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
-8. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+7. **Scroll** - four independent (non-nested) scroll containers in a 2x2 grid:
+   vertical AUTO_HIDE bar / vertical ALWAYS bar / horizontal-only / both axes (XY).
+8. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
+9. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
