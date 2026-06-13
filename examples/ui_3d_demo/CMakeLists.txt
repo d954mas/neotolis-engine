@@ -24,7 +24,14 @@ nt_set_warning_flags(ui_3d_demo)
 nt_set_sanitizer_flags(ui_3d_demo)
 set_target_properties(ui_3d_demo PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${UI_3D_DEMO_OUTPUT_DIR}")
 
-# Pack builder (native only)
+set(UI_3D_DEMO_PACK_NAMES ui_3d_demo.ntpack)
+
+# Pack builder + copy wiring.
+# Native: the builder runs at BUILD time to produce the pack, then the pack copies into the
+# preset's assets/. The copy DEPENDS on the pack output, which DEPENDS on the builder target --
+# so a clean configure+build always produces and copies the pack with no reconfigure step.
+# Emscripten: the builder can't run under wasm, so the pack must already exist from a prior native
+# build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
     add_executable(build_ui_3d_demo_packs build_packs.c)
     target_link_libraries(build_ui_3d_demo_packs PRIVATE nt_builder)
@@ -35,18 +42,20 @@ if(NOT EMSCRIPTEN)
     set_target_properties(build_ui_3d_demo_packs PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${UI_3D_DEMO_OUTPUT_DIR}"
     )
-endif()
 
-# Per-preset asset sync: copy ui_3d_demo.ntpack into preset's assets/
-set(UI_3D_DEMO_PACK_NAMES ui_3d_demo.ntpack)
-set(UI_3D_DEMO_PACKS_PRESENT TRUE)
-foreach(PACK ${UI_3D_DEMO_PACK_NAMES})
-    if(NOT EXISTS "${UI_3D_DEMO_PACK_DIR}/${PACK}")
-        set(UI_3D_DEMO_PACKS_PRESENT FALSE)
-    endif()
-endforeach()
+    # build_packs.c reads raw assets via paths relative to the project root.
+    foreach(PACK ${UI_3D_DEMO_PACK_NAMES})
+        list(APPEND UI_3D_DEMO_PACK_FILES "${UI_3D_DEMO_PACK_DIR}/${PACK}")
+    endforeach()
+    add_custom_command(
+        OUTPUT ${UI_3D_DEMO_PACK_FILES}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${UI_3D_DEMO_PACK_DIR}"
+        COMMAND "$<TARGET_FILE:build_ui_3d_demo_packs>" "${UI_3D_DEMO_PACK_DIR}"
+        DEPENDS build_ui_3d_demo_packs
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Building ui_3d_demo pack(s)"
+    )
 
-if(UI_3D_DEMO_PACKS_PRESENT)
     foreach(PACK ${UI_3D_DEMO_PACK_NAMES})
         add_custom_command(
             OUTPUT "${UI_3D_DEMO_ASSETS_DIR}/${PACK}"
@@ -61,10 +70,32 @@ if(UI_3D_DEMO_PACKS_PRESENT)
     add_custom_target(ui_3d_demo_packs DEPENDS ${UI_3D_DEMO_PACK_OUTPUTS})
     add_dependencies(ui_3d_demo ui_3d_demo_packs)
 else()
-    message(WARNING
-        "ui_3d_demo: source packs not found at ${UI_3D_DEMO_PACK_DIR}. "
-        "Run build_ui_3d_demo_packs before building ui_3d_demo, then "
-        "re-run cmake configure to wire the per-preset copy step.")
+    # WASM: builder can't run; copy the pack a prior native build produced into this preset.
+    set(UI_3D_DEMO_PACKS_PRESENT TRUE)
+    foreach(PACK ${UI_3D_DEMO_PACK_NAMES})
+        if(NOT EXISTS "${UI_3D_DEMO_PACK_DIR}/${PACK}")
+            set(UI_3D_DEMO_PACKS_PRESENT FALSE)
+        endif()
+    endforeach()
+    if(UI_3D_DEMO_PACKS_PRESENT)
+        foreach(PACK ${UI_3D_DEMO_PACK_NAMES})
+            add_custom_command(
+                OUTPUT "${UI_3D_DEMO_ASSETS_DIR}/${PACK}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${UI_3D_DEMO_ASSETS_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${UI_3D_DEMO_PACK_DIR}/${PACK}" "${UI_3D_DEMO_ASSETS_DIR}/${PACK}"
+                DEPENDS "${UI_3D_DEMO_PACK_DIR}/${PACK}"
+                COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
+            )
+            list(APPEND UI_3D_DEMO_PACK_OUTPUTS "${UI_3D_DEMO_ASSETS_DIR}/${PACK}")
+        endforeach()
+        add_custom_target(ui_3d_demo_packs DEPENDS ${UI_3D_DEMO_PACK_OUTPUTS})
+        add_dependencies(ui_3d_demo ui_3d_demo_packs)
+    else()
+        message(WARNING
+            "ui_3d_demo: pack not found at ${UI_3D_DEMO_PACK_DIR}. "
+            "Build a native preset first (it produces the pack), then build the wasm preset.")
+    endif()
 endif()
 
 # Optional CDN base URL
