@@ -16,6 +16,8 @@ static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_key(int key, int down) { nt_input_set_key((nt_key_t)key, down != 0); }
 
+EMSCRIPTEN_KEEPALIVE void nt_input_web_on_char(unsigned int cp) { nt_input_buffer_char((uint32_t)cp); }
+
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_down(int id, float cx, float cy, float pressure, int ptype, int buttons) {
     float fx;
     float fy;
@@ -98,6 +100,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
        Pointer: stride 7  [type, id, x, y, pressure, ptype, buttons, ...]
        Wheel:   stride 2  [dx, dy, ...] */
     Module['_ntKeyBuf'] = [];
+    Module['_ntCharBuf'] = [];
     Module['_ntPtrBuf'] = [];
     Module['_ntWheelBuf'] = [];
     Module['_ntBlurred'] = false;
@@ -108,6 +111,12 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         var k = keyMap[e.code];
         if (k !== undefined) {
             Module['_ntKeyBuf'].push(k, 1);
+        }
+        /* Typed character: e.key is a single printable char (not "Enter"/"ArrowUp"/...).
+           Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No glfwSetCharCallback
+           on web — this hand-rolled path is the char source (Pitfall 3). */
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+            Module['_ntCharBuf'].push(e.key.codePointAt(0));
         }
         if (preventSet[e.code]) {
             e.preventDefault();
@@ -203,6 +212,7 @@ EM_JS(void, nt_input_web_flush_events, (void), {
         Module['_nt_input_web_on_blur']();
         Module['_ntBlurred'] = false;
         Module['_ntKeyBuf'].length = 0;
+        Module['_ntCharBuf'].length = 0;
         Module['_ntPtrBuf'].length = 0;
         Module['_ntWheelBuf'].length = 0;
         return;
@@ -214,6 +224,13 @@ EM_JS(void, nt_input_web_flush_events, (void), {
         Module['_nt_input_web_on_key'](kb[i], kb[i + 1]);
     }
     kb.length = 0;
+
+    /* Drain char buffer (stride 1: UTF-32 codepoint) */
+    var cb = Module['_ntCharBuf'];
+    for (var i = 0; i < cb.length; i++) {
+        Module['_nt_input_web_on_char'](cb[i]);
+    }
+    cb.length = 0;
 
     /* Drain pointer buffer (stride 7: type, id, x, y, pressure, ptype, buttons) */
     var pb = Module['_ntPtrBuf'];
