@@ -95,6 +95,8 @@ static nt_ui_checkbox_style_t s_check_dark, s_check_light;
 static nt_ui_checkbox_style_t s_radio_dark, s_radio_light;
 static nt_ui_checkbox_style_t s_switch_dark, s_switch_light;
 static nt_ui_slider_style_t s_slider_dark, s_slider_light;
+/* Narrower slider for the focused-properties card: track+thumb fit inside the card's inner width. */
+static nt_ui_slider_style_t s_slider_props_dark, s_slider_props_light;
 static nt_ui_progress_style_t s_progress_dark, s_progress_light;
 static nt_ui_progress_style_t s_progress_crop_dark, s_progress_crop_light;
 static nt_ui_progress_style_t s_progress_vert_dark, s_progress_vert_light;
@@ -119,6 +121,7 @@ typedef struct {
     nt_ui_button_style_t *btn_scale, *btn_swap, *btn_nopad;
     nt_ui_checkbox_style_t *check, *radio, *toggle;
     nt_ui_slider_style_t *slider;
+    nt_ui_slider_style_t *slider_props; /* card-fitted slider for the focused-properties panel */
     nt_ui_progress_style_t *progress;
     nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
@@ -146,6 +149,7 @@ static ui_palette_t g_dark = {
     .radio = &s_radio_dark,
     .toggle = &s_switch_dark,
     .slider = &s_slider_dark,
+    .slider_props = &s_slider_props_dark,
     .progress = &s_progress_dark,
     .progress_crop = &s_progress_crop_dark,
     .progress_vert = &s_progress_vert_dark,
@@ -180,6 +184,7 @@ static ui_palette_t g_light = {
     .radio = &s_radio_light,
     .toggle = &s_switch_light,
     .slider = &s_slider_light,
+    .slider_props = &s_slider_props_light,
     .progress = &s_progress_light,
     .progress_crop = &s_progress_crop_light,
     .progress_vert = &s_progress_vert_light,
@@ -232,7 +237,7 @@ typedef struct {
 } modal_params_t;
 
 typedef struct {
-    int label_count; /* segmented control: 50 / 100 / 200 / 400 */
+    int label_count; /* segmented control: 500 / 1500 / 3000 / 6000 */
 } stress_params_t;
 
 struct tab_state {
@@ -269,7 +274,7 @@ static struct tab_state s_state = {
     .confirm_open = false,
     .nested_open = false,
     .modal = {.transition = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .backdrop_alpha = 0.55F},
-    .stress = {.label_count = 200},
+    .stress = {.label_count = 3000},
 };
 // #endregion
 
@@ -310,8 +315,12 @@ static bool s_ids_ready;
 // #endregion
 
 // #region engine state
-#define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
-#define SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
+/* Stress tab emits up to 6000 labels + ~500 row containers; size the UI arena + Clay element cap
+ * for that worst case. nt_ui_min_arena_size(7168) in the DEBUG_TOOLS build is ~8.02 MB (Clay arena +
+ * pow2 widget registry dominate), so a 9 MB arena clears the create-context assert with headroom. */
+#define UI_MAX_ELEMENTS ((uint32_t)7168U)
+#define UI_ARENA_SIZE ((size_t)9U * 1024U * 1024U)
+#define SCRATCH_ARENA_SIZE ((size_t)512U * 1024U)
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
@@ -562,6 +571,13 @@ static void init_styles(void) {
     slider_base.states[NT_UI_SLIDER_IDLE].thumb = thumb;
     s_slider_dark = slider_base;
     s_slider_light = slider_base;
+
+    /* Props-card slider: narrower track so track + full thumb travel stay inside the card's inner
+     * width (card 300 - 2x14 pad = 272; track 260 leaves ~6px each side, thumb stays within track_w). */
+    nt_ui_slider_style_t slider_props = slider_base;
+    slider_props.track_w = 260;
+    s_slider_props_dark = slider_props;
+    s_slider_props_light = slider_props;
 
     /* ---- Progress: track + smooth STRETCH slice9 fill. ---- */
     nt_ui_progress_style_t progress_base = nt_ui_progress_style_defaults();
@@ -938,37 +954,37 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
     showcase_panel_begin(ctx, "Slice9 properties");
 
     (void)snprintf(buf, sizeof buf, "Inset L  %d", st->s9.inset_l);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_il, NULL, &st->s9.inset_l, 0, 48, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_il, NULL, &st->s9.inset_l, 0, 48, 1, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Inset R  %d", st->s9.inset_r);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ir, NULL, &st->s9.inset_r, 0, 48, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ir, NULL, &st->s9.inset_r, 0, 48, 1, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Inset T  %d", st->s9.inset_t);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_it, NULL, &st->s9.inset_t, 0, 48, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_it, NULL, &st->s9.inset_t, 0, 48, 1, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Inset B  %d", st->s9.inset_b);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ib, NULL, &st->s9.inset_b, 0, 48, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ib, NULL, &st->s9.inset_b, 0, 48, 1, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Width  %d", st->s9.target_w);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 320, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 320, 1, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Height  %d", st->s9.target_h);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_h, NULL, &st->s9.target_h, 60, 300, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_h, NULL, &st->s9.target_h, 60, 300, 1, g_current->slider_props, &sdecl, true);
 
     /* Corner scale grows/shrinks the slice9 border thickness while the center keeps stretching. */
     (void)snprintf(buf, sizeof buf, "Corner scale  %.2f", (double)st->s9.slice9_scale);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_s9scale, NULL, &st->s9.slice9_scale, 0.5F, 3.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_s9scale, NULL, &st->s9.slice9_scale, 0.5F, 3.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     showcase_panel_end(ctx);
 }
@@ -976,14 +992,14 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
     showcase_panel_begin(ctx, "Progress properties");
 
     (void)snprintf(buf, sizeof buf, "Value  %.2f", (double)st->prog.value);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     /* Manual value slider is disabled while auto-animate drives the value. */
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_value, NULL, &st->prog.value, 0.0F, 1.0F, 0.0F, g_current->slider, &sdecl, !st->prog.auto_anim);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_value, NULL, &st->prog.value, 0.0F, 1.0F, 0.0F, g_current->slider_props, &sdecl, !st->prog.auto_anim);
 
     (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/props_auto"), "Auto-animate", &st->prog.auto_anim, g_current->toggle, &row, true);
 
@@ -993,24 +1009,24 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Button-transform panel: rotation / scale / offset sliders drive the live transform each frame. */
 static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
     showcase_panel_begin(ctx, "Transform properties");
 
     (void)snprintf(buf, sizeof buf, "Rotation  %.0f deg", (double)st->btn_xform.rotation_deg);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_rot, NULL, &st->btn_xform.rotation_deg, -180.0F, 180.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_rot, NULL, &st->btn_xform.rotation_deg, -180.0F, 180.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Scale  %.2f", (double)st->btn_xform.scale);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_bscale, NULL, &st->btn_xform.scale, 0.5F, 2.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_bscale, NULL, &st->btn_xform.scale, 0.5F, 2.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Offset X  %.0f", (double)st->btn_xform.offset_x);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_offx, NULL, &st->btn_xform.offset_x, -120.0F, 120.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_offx, NULL, &st->btn_xform.offset_x, -120.0F, 120.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Offset Y  %.0f", (double)st->btn_xform.offset_y);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_offy, NULL, &st->btn_xform.offset_y, -120.0F, 120.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_offy, NULL, &st->btn_xform.offset_y, -120.0F, 120.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform_reset"), g_current->btn_secondary,
@@ -1143,7 +1159,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "draw calls: %u   labels: %d", nt_ui_get_last_walk_draw_calls(ctx), st->stress.label_count);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
 
-    /* Fixed-size scroll container so the 400-label case can't overflow the window. */
+    /* Fixed-size scroll container so the 6000-label case can't overflow the window. */
     nt_ui_scroll_begin(ctx, NULL, s_id_stress_scroll, g_current->scroll_always,
                        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(760), CLAY_SIZING_FIXED(420)}, .padding = CLAY_PADDING_ALL(6)},
                                                   .backgroundColor = g_current->bg,
@@ -1169,7 +1185,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Modal panel: segmented transition + sliders for ease / scale-start / backdrop-alpha. */
 static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
     static const char *const names[3] = {"Scale-pop", "Fade", "Slide"};
     showcase_panel_begin(ctx, "Modal properties");
 
@@ -1190,23 +1206,23 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
 
     (void)snprintf(buf, sizeof buf, "Ease speed  %.1f", (double)st->modal.ease_speed);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ease, NULL, &st->modal.ease_speed, 4.0F, 30.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ease, NULL, &st->modal.ease_speed, 4.0F, 30.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Scale start  %.2f", (double)st->modal.scale_start);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_scale, NULL, &st->modal.scale_start, 0.85F, 1.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_scale, NULL, &st->modal.scale_start, 0.85F, 1.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Backdrop alpha  %.2f", (double)st->modal.backdrop_alpha);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_backdrop, NULL, &st->modal.backdrop_alpha, 0.0F, 1.0F, 0.0F, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_backdrop, NULL, &st->modal.backdrop_alpha, 0.0F, 1.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
     showcase_panel_end(ctx);
 }
 
-/* Stress panel: segmented label count (50/100/200/400) + the live frame gpu_ms / draw-calls readout. */
+/* Stress panel: segmented label count (500/1500/3000/6000) + the live frame gpu_ms / draw-calls readout. */
 static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const int counts[4] = {50, 100, 200, 400};
+    static const int counts[4] = {500, 1500, 3000, 6000};
     showcase_panel_begin(ctx, "Stress properties");
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Label count", g_current->caption);
@@ -1611,7 +1627,8 @@ int main(int argc, char *argv[]) {
     nt_text_renderer_init();
 
     nt_ui_module_init();
-    const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
+    nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
+    ui_desc.max_elements = UI_MAX_ELEMENTS; /* Stress tab worst case (6000 labels + rows). */
     s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ctx != NULL && "ui_showcase: failed to create UI context");
 
