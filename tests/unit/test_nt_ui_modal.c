@@ -43,13 +43,15 @@ static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
 static void test_modal_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_modal_result_t));
-    TEST_ASSERT_EQUAL_UINT(24U, (unsigned)sizeof(nt_ui_modal_style_t));
+    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_modal_anim_t));
+    TEST_ASSERT_EQUAL_UINT(40U, (unsigned)sizeof(nt_ui_modal_style_t));
 }
 
 /* ---- Defaults are a valid (non-zero-init) style: scale_start > 0 dodges the anim trap. ---- */
 static void test_modal_defaults_valid(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    TEST_ASSERT_TRUE(st.scale_start > 0.0F);
+    TEST_ASSERT_TRUE(st.open.scale_start > 0.0F);
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_MODAL_ANIM_SCALE_POP, st.open.type);
     TEST_ASSERT_TRUE(st.ease_speed > 0.0F);
     TEST_ASSERT_TRUE((st.flags & NT_UI_MODAL_LISTEN_ESC) != 0U);
     TEST_ASSERT_TRUE((st.flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U);
@@ -127,7 +129,7 @@ static void test_modal_depth_overflow_asserts(void) {
 static void test_modal_esc_top_only(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    st.flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_TRANSITION_FADE);
+    st.flags = NT_UI_MODAL_LISTEN_ESC;
 
     /* Frame 1: establish A (outer) then B (inner, deepest) — no Esc yet. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
@@ -154,7 +156,7 @@ static void test_modal_esc_top_only(void) {
 static void test_modal_esc_requires_flag(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    st.flags = NT_UI_MODAL_TRANSITION_FADE; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
+    st.flags = 0U; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
     nt_input_set_key(NT_KEY_ESCAPE, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
     nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
@@ -254,7 +256,7 @@ static void test_modal_open_instant_snaps(void) {
 static void test_modal_wrapper_contract(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 8.0F;
-    st.flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_TRANSITION_FADE);
+    st.flags = NT_UI_MODAL_LISTEN_ESC;
     bool open = true;
 
     /* Frame 1: open -> wrapper returns true, declares body. */
@@ -367,7 +369,7 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
 static void test_modal_no_backdrop_close_still_gates(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    st.flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_TRANSITION_FADE); /* no CLOSE_ON_BACKDROP */
+    st.flags = NT_UI_MODAL_LISTEN_ESC; /* no CLOSE_ON_BACKDROP */
 
     /* Frame 1: register the base button + the modal's block_pointer occluder. */
     nt_pointer_t f1 = modal_pointer_at(100.0F, 60.0F, false, false, false);
@@ -437,7 +439,7 @@ static void test_modal_backdrop_close_pad(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     st.backdrop_close_pad = 16;
-    st.flags = (uint8_t)(NT_UI_MODAL_CLOSE_ON_BACKDROP | NT_UI_MODAL_TRANSITION_FADE);
+    st.flags = NT_UI_MODAL_CLOSE_ON_BACKDROP;
 
     /* Click 8px to the right of the (centered) panel's right edge: outside the bbox but inside the 16px
      * pad -> close suppressed. */
@@ -541,7 +543,7 @@ static void test_modal_active_prev_frame(void) {
 static void test_modal_closed_same_depth_does_not_steal_top(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F; /* instant: open -> t=1, closed -> t=0 fully closed */
-    st.flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_TRANSITION_FADE);
+    st.flags = NT_UI_MODAL_LISTEN_ESC;
 
     /* Frame 1: establish top. A declared first but CLOSED (no backdrop), B declared second and OPEN.
      * Both sit at depth 1 (sequential, not nested) since each balances before the next. */
@@ -616,16 +618,15 @@ static void test_modal_oversize_stride_asserts(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
-/* ---- SLIDE direction: each origin edge drives the panel offset on the right axis + sign. A finite
- *      ease keeps the first frame's t well below 1, so offset ~= slide_offset on the active axis and
- *      ~0 on the other. +x = right, +y = down; FROM_<edge> starts displaced toward that edge. ---- */
-static void modal_slide_offset_frame(uint8_t dir, float *ox, float *oy) {
+/* ---- SLIDE edge: each edge drives the panel offset on the right axis + sign. A finite ease keeps the
+ *      first frame's t well below 1, so offset ~= anim.offset on the active axis and ~0 on the other.
+ *      +x = right, +y = down; the panel starts displaced toward `edge`. ---- */
+static void modal_slide_offset_frame(nt_ui_modal_edge_t edge, float *ox, float *oy) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 8.0F; /* finite: first frame t << 1 -> offset near slide_offset */
-    st.slide_offset = 40.0F;
-    st.flags = (uint8_t)(NT_UI_MODAL_TRANSITION_SLIDE | dir);
+    st.ease_speed = 8.0F; /* finite: first frame t << 1 -> offset near anim.offset */
+    st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = (uint8_t)edge, .offset = 40.0F};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A + dir, &st, true); /* distinct id per dir -> each eases from a fresh slot */
+    nt_ui_modal_begin(s_fx.ctx, MODAL_A + (uint32_t)edge, &st, true); /* distinct id per edge -> each eases from a fresh slot */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     nt_ui_modal_test_last_panel_offset(ox, oy);
@@ -636,20 +637,48 @@ static void test_modal_slide_dir(void) {
     float ox = 0.0F;
     float oy = 0.0F;
 
-    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_BOTTOM, &ox, &oy);
+    modal_slide_offset_frame(NT_UI_MODAL_BOTTOM, &ox, &oy);
     TEST_ASSERT_TRUE(oy > 0.0F); /* starts below center, rises */
     TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F));
 
-    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_TOP, &ox, &oy);
+    modal_slide_offset_frame(NT_UI_MODAL_TOP, &ox, &oy);
     TEST_ASSERT_TRUE(oy < 0.0F); /* starts above center, descends */
     TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F));
 
-    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_LEFT, &ox, &oy);
+    modal_slide_offset_frame(NT_UI_MODAL_LEFT, &ox, &oy);
     TEST_ASSERT_TRUE(ox < 0.0F); /* starts left of center, slides right */
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
 
-    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_RIGHT, &ox, &oy);
+    modal_slide_offset_frame(NT_UI_MODAL_RIGHT, &ox, &oy);
     TEST_ASSERT_TRUE(ox > 0.0F); /* starts right of center, slides left */
+    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
+}
+
+/* ---- Asymmetric open/close: open=slide-from-bottom shows a vertical offset while opening; close=fade
+ *      shows none (identity) while closing. Proves the per-phase recipe is picked by `open`. ---- */
+static void test_modal_asymmetric_open_close(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 8.0F;
+    st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_BOTTOM, .offset = 40.0F};
+    st.close = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_FADE};
+    float ox = 0.0F;
+    float oy = 0.0F;
+
+    /* Opening (open=true): slide recipe -> vertical offset present. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    TEST_ASSERT_TRUE(oy > 0.0F); /* slide-from-bottom while opening */
+
+    /* Closing (open=false): fade recipe -> identity, no offset regardless of t. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, false);
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F)); /* fade close -> no offset */
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
 }
 
@@ -676,6 +705,7 @@ int main(void) {
     RUN_TEST(test_modal_active_prev_frame);
     RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
     RUN_TEST(test_modal_slide_dir);
+    RUN_TEST(test_modal_asymmetric_open_close);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
     RUN_TEST(test_modal_oversize_stride_asserts);

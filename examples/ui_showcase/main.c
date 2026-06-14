@@ -232,11 +232,12 @@ typedef struct {
 } btn_xform_params_t;
 
 typedef struct {
-    int transition;       /* 0 = scale-pop, 1 = fade, 2 = slide (segmented control) */
-    int slide_dir;        /* 0 = bottom, 1 = top, 2 = left, 3 = right (SLIDE origin edge) */
-    float ease_speed;     /* open/close tween value_speed */
-    float scale_start;    /* scale-pop start (~0.85..1.0) */
-    float backdrop_alpha; /* peak backdrop opacity 0..1 */
+    int open_type, close_type; /* 0 = scale-pop, 1 = fade, 2 = slide (segmented) */
+    int open_edge, close_edge; /* 0 = bottom, 1 = top, 2 = left, 3 = right (SLIDE) */
+    float ease_speed;          /* open/close tween value_speed */
+    float scale_start;         /* shared scale-pop start (~0.85..1.0) */
+    float slide_offset;        /* shared SLIDE distance px */
+    float backdrop_alpha;      /* peak backdrop opacity 0..1 */
 } modal_params_t;
 
 typedef struct {
@@ -276,7 +277,8 @@ static struct tab_state s_state = {
     .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
     .confirm_open = false,
     .nested_open = false,
-    .modal = {.transition = 0, .slide_dir = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .backdrop_alpha = 0.55F},
+    .modal = {.open_type = 2, .close_type = 1, .open_edge = 0, .close_edge = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .slide_offset = 32.0F, .backdrop_alpha = 0.55F}, /* default demo: slide-in /
+                                                                                                                                                                               fade-out */
     .stress = {.label_count = 3000},
 };
 // #endregion
@@ -311,7 +313,7 @@ static uint32_t s_id_props_value;
 static uint32_t s_id_props_rot, s_id_props_bscale, s_id_props_offx, s_id_props_offy; /* button transform panel */
 static uint32_t s_id_modal_confirm, s_id_modal_nested;
 static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s_id_modal_nested_btn, s_id_modal_nested_close_btn;
-static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop;
+static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop, s_id_props_slide_dist;
 static uint32_t s_id_theme_btn;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 static bool s_ids_ready;
@@ -1036,16 +1038,17 @@ static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Runtime modal style: re-seeded from the palette each frame, then overlaid with the panel values. */
 static nt_ui_modal_style_t s_modal_style_runtime;
 
-/* Map the segmented transition index to the modal flag bits, preserving close-source flags. */
-static void modal_set_transition(nt_ui_modal_style_t *s, int transition) {
-    s->flags &= (uint8_t)~NT_UI_MODAL_TRANSITION_MASK;
-    if (transition == 1) {
-        s->flags |= NT_UI_MODAL_TRANSITION_FADE;
-    } else if (transition == 2) {
-        s->flags |= NT_UI_MODAL_TRANSITION_SLIDE;
-    } else {
-        s->flags |= NT_UI_MODAL_TRANSITION_SCALE_POP;
+/* Build one animation recipe from the segmented props (type index 0/1/2, edge 0..3, shared scalars). */
+static nt_ui_modal_anim_t modal_param_anim(int type, int edge, float scale_start, float offset) {
+    nt_ui_modal_anim_t a = {.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = scale_start};
+    if (type == 1) {
+        a.type = NT_UI_MODAL_ANIM_FADE;
+    } else if (type == 2) {
+        a.type = NT_UI_MODAL_ANIM_SLIDE;
+        a.edge = (uint8_t)edge;
+        a.offset = offset;
     }
+    return a;
 }
 
 /* A labelled action button inside a modal body. */
@@ -1083,13 +1086,10 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Seed the runtime style from the active palette, then overlay the props-panel values. */
     s_modal_style_runtime = *g_current->modal;
     s_modal_style_runtime.ease_speed = st->modal.ease_speed;
-    s_modal_style_runtime.scale_start = st->modal.scale_start;
     s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
     s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
-    modal_set_transition(&s_modal_style_runtime, st->modal.transition);
-    /* SLIDE origin edge (no effect on fade/scale-pop). */
-    static const uint8_t slide_dir_bits[4] = {NT_UI_MODAL_SLIDE_FROM_BOTTOM, NT_UI_MODAL_SLIDE_FROM_TOP, NT_UI_MODAL_SLIDE_FROM_LEFT, NT_UI_MODAL_SLIDE_FROM_RIGHT};
-    s_modal_style_runtime.flags = (uint8_t)((s_modal_style_runtime.flags & (uint8_t)~NT_UI_MODAL_SLIDE_DIR_MASK) | slide_dir_bits[st->modal.slide_dir]);
+    s_modal_style_runtime.open = modal_param_anim(st->modal.open_type, st->modal.open_edge, st->modal.scale_start, st->modal.slide_offset);
+    s_modal_style_runtime.close = modal_param_anim(st->modal.close_type, st->modal.close_edge, st->modal.scale_start, st->modal.slide_offset);
 
     if (nt_ui_modal_visible(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIT(0)},
@@ -1176,56 +1176,59 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_scroll_end(ctx);
 }
 
-/* Modal panel: segmented transition + sliders for ease / scale-start / backdrop-alpha. */
-static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
-    char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
-    static const char *const names[3] = {"Scale-pop", "Fade", "Slide"};
-    showcase_panel_begin(ctx, "Modal properties");
-
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Transition", g_current->caption);
+/* Segmented selector row: `count` buttons; clicking sets *value to the index. */
+static void modal_seg_select(nt_ui_context_t *ctx, const char *title, uint32_t base_id, const char *const *names, int count, int *value, int btn_w) {
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->caption);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
-        for (int i = 0; i < 3; ++i) {
-            const bool sel = (st->modal.transition == i);
-            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_trans") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
-                               &(Clay_ElementDeclaration){
-                                   .layout = {.sizing = {CLAY_SIZING_FIXED(84), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true);
+        for (int i = 0; i < count; ++i) {
+            const bool sel = (*value == i);
+            nt_ui_button_begin(
+                ctx, NT_UI_DATA_LAYER(LAYER_IMG), base_id + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
+                &(Clay_ElementDeclaration){
+                    .layout = {.sizing = {CLAY_SIZING_FIXED((float)btn_w), CLAY_SIZING_FIXED(36)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                true);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &g_seg_label);
             if (nt_ui_button_end(ctx)) {
-                st->modal.transition = i;
+                *value = i;
             }
         }
     }
+}
 
-    if (st->modal.transition == 2) { /* Slide: choose the origin edge */
-        static const char *const dirs[4] = {"Bottom", "Top", "Left", "Right"};
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Slide from", g_current->caption);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
-            for (int i = 0; i < 4; ++i) {
-                const bool sel = (st->modal.slide_dir == i);
-                nt_ui_button_begin(
-                    ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_slide_dir") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
-                    &(Clay_ElementDeclaration){
-                        .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(36)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                        .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                    true);
-                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), dirs[i], &g_seg_label);
-                if (nt_ui_button_end(ctx)) {
-                    st->modal.slide_dir = i;
-                }
-            }
-        }
+/* Modal panel: independent Open/Close animation selectors + shared sliders. Slide-only (edge + distance)
+ * and scale-only (scale start) controls show conditionally so the fixed-height panel never overflows. */
+static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
+    static const char *const types[3] = {"Scale-pop", "Fade", "Slide"};
+    static const char *const edges[4] = {"Bottom", "Top", "Left", "Right"};
+    showcase_panel_begin(ctx, "Modal properties");
+
+    modal_seg_select(ctx, "Open", nt_ui_id("showcase/modal_open_type"), types, 3, &st->modal.open_type, 80);
+    if (st->modal.open_type == 2) {
+        modal_seg_select(ctx, "Open from", nt_ui_id("showcase/modal_open_edge"), edges, 4, &st->modal.open_edge, 60);
+    }
+    modal_seg_select(ctx, "Close", nt_ui_id("showcase/modal_close_type"), types, 3, &st->modal.close_type, 80);
+    if (st->modal.close_type == 2) {
+        modal_seg_select(ctx, "Close to", nt_ui_id("showcase/modal_close_edge"), edges, 4, &st->modal.close_edge, 60);
+    }
+
+    if (st->modal.open_type == 2 || st->modal.close_type == 2) {
+        (void)snprintf(buf, sizeof buf, "Slide distance  %.0f", (double)st->modal.slide_offset);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+        (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_slide_dist, NULL, &st->modal.slide_offset, 0.0F, 240.0F, 0.0F, g_current->slider_props, &sdecl, true);
     }
 
     (void)snprintf(buf, sizeof buf, "Ease speed  %.1f", (double)st->modal.ease_speed);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_ease, NULL, &st->modal.ease_speed, 4.0F, 30.0F, 0.0F, g_current->slider_props, &sdecl, true);
 
-    (void)snprintf(buf, sizeof buf, "Scale start  %.2f", (double)st->modal.scale_start);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_scale, NULL, &st->modal.scale_start, 0.85F, 1.0F, 0.0F, g_current->slider_props, &sdecl, true);
+    if (st->modal.open_type == 0 || st->modal.close_type == 0) {
+        (void)snprintf(buf, sizeof buf, "Scale start  %.2f", (double)st->modal.scale_start);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+        (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_scale, NULL, &st->modal.scale_start, 0.85F, 1.0F, 0.0F, g_current->slider_props, &sdecl, true);
+    }
 
     (void)snprintf(buf, sizeof buf, "Backdrop alpha  %.2f", (double)st->modal.backdrop_alpha);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
@@ -1314,6 +1317,7 @@ static void ensure_ids(void) {
     s_id_props_ease = nt_ui_id("showcase/props_ease");
     s_id_props_scale = nt_ui_id("showcase/props_scale");
     s_id_props_backdrop = nt_ui_id("showcase/props_backdrop");
+    s_id_props_slide_dist = nt_ui_id("showcase/props_slide_dist");
     s_id_theme_btn = nt_ui_id("showcase/theme_btn");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
     s_ids_ready = true;

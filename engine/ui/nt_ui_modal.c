@@ -53,16 +53,53 @@ static float s_last_panel_off_y;
 #endif
 
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
+    const nt_ui_modal_anim_t scale_pop = {.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.92F}; /* Material/iOS default */
     return (nt_ui_modal_style_t){
         .ease_speed = 14.0F,
-        .scale_start = 0.92F, /* scale-pop start; eases to 1.0 (Material/iOS default) */
         .backdrop_alpha = 0.55F,
-        .slide_offset = 32.0F,
+        .open = scale_pop,
+        .close = scale_pop,            /* symmetric: the exit reverses the entrance */
         .backdrop_color = 0xFF000000U, /* black; alpha is scaled by t*backdrop_alpha */
         .layer = 0U,
-        .flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP | NT_UI_MODAL_TRANSITION_SCALE_POP),
+        .flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP),
         .backdrop_close_pad = 16,
     };
+}
+
+/* Eased panel transform for one animation recipe (opacity rides t separately, applied by the caller).
+ * +x = right, +y = down; eases to identity at t=1. edge = origin edge on open / exit edge on close. */
+static nt_ui_transform_t modal_anim_transform(const nt_ui_modal_anim_t *a, float t) {
+    nt_ui_transform_t xf = nt_ui_transform_defaults();
+    const float k = 1.0F - t;
+    switch ((nt_ui_modal_anim_type_t)a->type) {
+    case NT_UI_MODAL_ANIM_FADE:
+        break; /* identity; the always-on opacity carries the fade */
+    case NT_UI_MODAL_ANIM_SLIDE:
+        switch ((nt_ui_modal_edge_t)a->edge) {
+        case NT_UI_MODAL_TOP:
+            xf.offset_y = -a->offset * k;
+            break;
+        case NT_UI_MODAL_LEFT:
+            xf.offset_x = -a->offset * k;
+            break;
+        case NT_UI_MODAL_RIGHT:
+            xf.offset_x = a->offset * k;
+            break;
+        case NT_UI_MODAL_BOTTOM:
+        default:
+            xf.offset_y = a->offset * k;
+            break;
+        }
+        break;
+    case NT_UI_MODAL_ANIM_SCALE_POP:
+    default: {
+        const float scale = a->scale_start + ((1.0F - a->scale_start) * t);
+        xf.scale_x = scale;
+        xf.scale_y = scale;
+        break;
+    }
+    }
+    return xf;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -72,9 +109,7 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     NT_ASSERT(id != 0U && "nt_ui_modal_begin: id must be non-zero");
     NT_ASSERT(style != NULL && "nt_ui_modal_begin: style must be non-NULL");
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
-    NT_ASSERT(isfinite(style->scale_start) && style->scale_start > 0.0F && "nt_ui_modal_begin: scale_start must be finite > 0 (use defaults, never {0})");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
-    NT_ASSERT(isfinite(style->slide_offset) && "nt_ui_modal_begin: slide_offset must be finite");
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_modal_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
@@ -114,33 +149,12 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t; /* eased 0..1 */
     // #endregion
-    // #region transition -> panel transform (scale-pop / fade / slide)
-    const uint8_t transition = (uint8_t)(style->flags & NT_UI_MODAL_TRANSITION_MASK);
-    nt_ui_transform_t panel_xf = nt_ui_transform_defaults();
-    if (transition == NT_UI_MODAL_TRANSITION_FADE) {
-        /* alpha only — scale fixed at 1 */
-    } else if (transition == NT_UI_MODAL_TRANSITION_SLIDE) {
-        /* Eased displacement from the origin edge (+x = right, +y = down); decays to 0 as it opens. */
-        const float d = style->slide_offset * (1.0F - t);
-        switch ((uint8_t)(style->flags & NT_UI_MODAL_SLIDE_DIR_MASK)) {
-        case NT_UI_MODAL_SLIDE_FROM_TOP:
-            panel_xf.offset_y = -d;
-            break;
-        case NT_UI_MODAL_SLIDE_FROM_LEFT:
-            panel_xf.offset_x = -d;
-            break;
-        case NT_UI_MODAL_SLIDE_FROM_RIGHT:
-            panel_xf.offset_x = d;
-            break;
-        default: /* NT_UI_MODAL_SLIDE_FROM_BOTTOM */
-            panel_xf.offset_y = d;
-            break;
-        }
-    } else {
-        const float scale = style->scale_start + ((1.0F - style->scale_start) * t);
-        panel_xf.scale_x = scale;
-        panel_xf.scale_y = scale;
-    }
+    // #region transition -> panel transform (typed per-phase recipe; opacity rides t)
+    const nt_ui_modal_anim_t *anim = open ? &style->open : &style->close;
+    NT_ASSERT(anim->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
+    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(anim->scale_start) && anim->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
+    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SLIDE || isfinite(anim->offset)) && "nt_ui_modal_begin: SLIDE offset must be finite");
+    const nt_ui_transform_t panel_xf = modal_anim_transform(anim, t);
     // #endregion
     // #region backdrop floating decl + input-gate occluder + close-scan (present-only)
     /* A FULLY-CLOSED modal (!open && settled) must declare NO backdrop: the block_pointer occluder

@@ -34,36 +34,47 @@ typedef struct {
 } nt_ui_modal_result_t;
 _Static_assert(sizeof(nt_ui_modal_result_t) == 12, "nt_ui_modal_result_t stable ABI (1 float + 1 enum[4] + 3 bool + 1 pad)");
 
-/* Style flags. The transition selector is 2 bits (fade / scale-pop / slide). A flag
- * only lets a source RAISE close_requested — it never closes. */
+/* Style flags — only gate close SOURCES (Esc / backdrop click). A flag lets a source RAISE
+ * close_requested; it never closes by itself. */
 #define NT_UI_MODAL_LISTEN_ESC ((uint8_t)(1U << 0))
 #define NT_UI_MODAL_CLOSE_ON_BACKDROP ((uint8_t)(1U << 1))
-/* Transition selector occupies bits 2-3; mask with NT_UI_MODAL_TRANSITION_MASK. */
-#define NT_UI_MODAL_TRANSITION_SCALE_POP ((uint8_t)(0U << 2)) /* default: scale 0.92->1 + alpha */
-#define NT_UI_MODAL_TRANSITION_FADE ((uint8_t)(1U << 2))      /* alpha only, scale fixed at 1 */
-#define NT_UI_MODAL_TRANSITION_SLIDE ((uint8_t)(2U << 2))     /* slide-from-edge + alpha */
-#define NT_UI_MODAL_TRANSITION_MASK ((uint8_t)(3U << 2))
-/* SLIDE origin edge occupies bits 4-5 (mask NT_UI_MODAL_SLIDE_DIR_MASK); only meaningful with
- * NT_UI_MODAL_TRANSITION_SLIDE. Default 0 = from bottom (preserves the prior single-direction behavior). */
-#define NT_UI_MODAL_SLIDE_FROM_BOTTOM ((uint8_t)(0U << 4))
-#define NT_UI_MODAL_SLIDE_FROM_TOP ((uint8_t)(1U << 4))
-#define NT_UI_MODAL_SLIDE_FROM_LEFT ((uint8_t)(2U << 4))
-#define NT_UI_MODAL_SLIDE_FROM_RIGHT ((uint8_t)(3U << 4))
-#define NT_UI_MODAL_SLIDE_DIR_MASK ((uint8_t)(3U << 4))
+
+/* Animation recipe: a typed t->transform mapping. opacity always rides t (every type fades); the
+ * type only picks the spatial part. open and close are independent (e.g. slide-in / fade-out). */
+typedef enum {
+    NT_UI_MODAL_ANIM_SCALE_POP = 0, /* scale scale_start->1 */
+    NT_UI_MODAL_ANIM_FADE,          /* alpha only, no transform */
+    NT_UI_MODAL_ANIM_SLIDE,         /* slide `offset` px from/toward `edge` */
+} nt_ui_modal_anim_type_t;
+
+typedef enum {
+    NT_UI_MODAL_BOTTOM = 0,
+    NT_UI_MODAL_TOP,
+    NT_UI_MODAL_LEFT,
+    NT_UI_MODAL_RIGHT,
+} nt_ui_modal_edge_t;
 
 typedef struct {
-    float ease_speed;           /* value_speed for the open/close tween; > 0 (0 = instant snap) */
-    float scale_start;          /* scale-pop start (default 0.92); eases to 1.0. Asserted > 0 */
+    uint8_t type;      /* nt_ui_modal_anim_type_t */
+    uint8_t edge;      /* nt_ui_modal_edge_t — SLIDE origin (open) / exit (close) edge */
+    float offset;      /* SLIDE: start/exit offset px (eased to 0) */
+    float scale_start; /* SCALE_POP: start scale, eases to 1.0. Asserted > 0 */
+} nt_ui_modal_anim_t;
+_Static_assert(sizeof(nt_ui_modal_anim_t) == 12, "nt_ui_modal_anim_t stable ABI (2 u8 + 2 pad + 2 float)");
+
+typedef struct {
+    float ease_speed;           /* value_speed for the open/close tween; >= 0 (0 = instant snap) */
     float backdrop_alpha;       /* peak backdrop opacity at t==1 (0..1) */
-    float slide_offset;         /* SLIDE: start offset px from the origin edge (NT_UI_MODAL_SLIDE_FROM_*), eased to 0 */
+    nt_ui_modal_anim_t open;    /* entrance recipe */
+    nt_ui_modal_anim_t close;   /* exit recipe; independent (e.g. slide-in / fade-out). symmetric = close == open */
     uint32_t backdrop_color;    /* 0xAABBGGRR; alpha multiplied by t*backdrop_alpha */
     nt_ui_layer_t layer;        /* draw layer for backdrop + panel element data */
-    uint8_t flags;              /* LISTEN_ESC | CLOSE_ON_BACKDROP | transition selector | SLIDE dir */
-    int16_t backdrop_close_pad; /* clicks within this px margin around the panel do NOT close — avoids accidental close on near-panel taps; mobile-aware */
+    uint8_t flags;              /* LISTEN_ESC | CLOSE_ON_BACKDROP */
+    int16_t backdrop_close_pad; /* clicks within this px margin around the panel do NOT close — avoids accidental close on near-panel taps */
 } nt_ui_modal_style_t;
-_Static_assert(sizeof(nt_ui_modal_style_t) == 24, "nt_ui_modal_style_t stable ABI (4 float + 1 u32 + 1 u8 + 1 u8 + 1 int16)");
+_Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable ABI (2 float + 2 anim[12] + 1 u32 + 2 u8 + 1 int16)");
 
-/* Valid baseline (scale-pop + alpha). scale_start must be > 0 (nt_ui_anim asserts scale_* > 0). */
+/* Valid baseline: symmetric scale-pop entrance + exit. scale_start > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
 /* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
