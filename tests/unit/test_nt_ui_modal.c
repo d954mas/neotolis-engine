@@ -1,7 +1,7 @@
-/* Modal helper tests — Clay-floating smoke (Pitfall 6, front-loaded), z-band math,
- * stack push/pop balance, depth-overflow death, top-only close targeting, open/close
- * tween clamp + fully_closed/visible transition, high-level wrapper contract, and the
- * world auto-gate via wants_pointer.
+/* Modal helper tests — Clay-floating smoke, z-band math, stack push/pop balance,
+ * depth-overflow death, top-only close targeting, open/close tween clamp +
+ * fully_closed/visible transition, high-level wrapper contract, and the world
+ * auto-gate via wants_pointer.
  *
  * Driven through the walker fixture + NT_TEST_ACCESS probes (no GL surface).
  * UNITY_EXCLUDE_FLOAT: compare floats via an eps helper. */
@@ -55,7 +55,7 @@ static void test_modal_defaults_valid(void) {
     TEST_ASSERT_TRUE((st.flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U);
 }
 
-/* ---- Pitfall 6 smoke: a floating modal (z=1000, transform + opacity) declared over base content;
+/* ---- Floating-modal smoke: a floating modal (z=1000, transform + opacity) declared over base content;
  *      the walker exits with a balanced scissor stack and composes the panel transform. ---- */
 static void test_modal_floating_smoke(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -105,7 +105,7 @@ static void test_modal_stack_depth_zero_balanced(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Pushing past NT_UI_MODAL_MAX_DEPTH fires NT_ASSERT (MODAL-05, no silent fallback). ---- */
+/* ---- Pushing past NT_UI_MODAL_MAX_DEPTH fires NT_ASSERT (no silent fallback). ---- */
 static void test_modal_depth_overflow_asserts(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
@@ -215,7 +215,7 @@ static void test_modal_open_entrance_eases_from_zero(void) {
 
     /* Frame 1 (first ever sight, open): t starts at ~0 and has only one dt of ease -> well under 1. */
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(r.t < 0.5F);  /* RED if the fresh slot snapped straight to 1 */
+    TEST_ASSERT_TRUE(r.t < 0.5F);  /* a fresh open slot eases, never snaps to 1 */
     TEST_ASSERT_TRUE(r.t >= 0.0F); /* eased up from 0, not negative */
 
     /* After many frames it settles near 1. */
@@ -223,6 +223,18 @@ static void test_modal_open_entrance_eases_from_zero(void) {
         modal_frame(MODAL_A, &st, true, &r);
     }
     TEST_ASSERT_TRUE(float_near(r.t, 1.0F, 0.02F));
+}
+
+/* ---- An explicitly-open modal declares its body on frame 1 even before t crosses epsilon: visible
+ *      carries the open term, so a slow ease (t still ~0 the first frames) never skips the body. ---- */
+static void test_modal_open_visible_before_epsilon(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.1F; /* very slow: first eased t stays well below epsilon (1/256) */
+    nt_ui_modal_result_t r;
+    modal_frame(MODAL_A, &st, true, &r);
+    TEST_ASSERT_TRUE(r.t < (1.0F / 256.0F)); /* still under epsilon on frame 1 */
+    TEST_ASSERT_TRUE(r.visible);             /* yet visible because open == true */
+    TEST_ASSERT_FALSE(r.fully_closed);
 }
 
 /* ---- ease_speed=0 (instant) entrance still snaps to 1 on the first frame: the prime-then-snap path
@@ -284,8 +296,8 @@ static void test_modal_wrapper_contract(void) {
     TEST_ASSERT_TRUE(went_false);
 }
 
-/* ---- World auto-gate: while the backdrop is up, nt_ui_wants_pointer is true (D-60-03). The
- *      occluder is recorded this frame and wins the resolve on the NEXT frame's step/query. ---- */
+/* ---- World auto-gate: while the backdrop is up, nt_ui_wants_pointer is true. The occluder is
+ *      recorded this frame and wins the resolve on the NEXT frame's step/query. ---- */
 static void test_modal_wants_pointer_while_open(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
@@ -305,9 +317,8 @@ static void test_modal_wants_pointer_while_open(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
-/* ---- CR-01 regression (option F): a button inside the modal body must be clickable. The fix DROPS
- *      the panel self-occluder that used to tie the body widgets on zIndex and steal their clicks.
- *      Needs 3 frames: F1 registers button, F2 press, F3 release-inside -> clicked. ---- */
+/* ---- Modal body button must be clickable: the helper declares no panel self-occluder, so the button
+ *      is the sole interactive record and wins. Needs 3 frames (register / press / release-inside). ---- */
 /* The panel floats attached-to-root CENTER_CENTER, so it sits at the viewport center. The button is a
  * NORMAL (non-floating) child of the panel -> it shares the panel's floating tree root and inherits the
  * panel's uniform zindex; with no self-occluder it's the sole interactive record and wins. With the
@@ -335,6 +346,45 @@ static nt_pointer_t modal_pointer_at(float x, float y, bool is_down, bool is_pre
 
 static nt_pointer_t modal_btn_pointer(bool is_down, bool is_pressed, bool is_released) { return modal_pointer_at(MODAL_BTN_CX, MODAL_BTN_CY, is_down, is_pressed, is_released); }
 
+/* ---- A modal WITHOUT CLOSE_ON_BACKDROP (LISTEN_ESC only) still gates click-through: the backdrop
+ *      registers as an inert block_pointer occluder that wins topmost-z, so a base widget behind the
+ *      open modal never goes hot and gets neither press nor click. Two frames for the IM-lag. ---- */
+static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
+    bool open = true;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1);
+    nt_ui_interaction_t in;
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
+        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("gated_base_btn"));
+    }
+    const bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, st, &open);
+    if (declared) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return in;
+}
+
+static void test_modal_no_backdrop_close_still_gates(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    st.flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_TRANSITION_FADE); /* no CLOSE_ON_BACKDROP */
+
+    /* Frame 1: register the base button + the modal's block_pointer occluder. */
+    nt_pointer_t f1 = modal_pointer_at(100.0F, 60.0F, false, false, false);
+    modal_gate_base_frame(&st, &f1);
+
+    /* Frame 2: press over the base button. The block_pointer backdrop won the prev-frame topmost-z,
+     * so the base widget never goes hot and the press is gated. */
+    nt_pointer_t f2 = modal_pointer_at(100.0F, 60.0F, true, true, false);
+    nt_ui_interaction_t in2 = modal_gate_base_frame(&st, &f2);
+    TEST_ASSERT_FALSE(in2.pressed_now); /* base click-through blocked by the occluder */
+
+    /* Frame 3: release over the base button -> still no click; the occluder gated the whole gesture. */
+    nt_pointer_t f3 = modal_pointer_at(100.0F, 60.0F, false, false, true);
+    nt_ui_interaction_t in3 = modal_gate_base_frame(&st, &f3);
+    TEST_ASSERT_FALSE(in3.clicked); /* base widget never clicks behind the open modal */
+}
+
 /* One modal frame with a stepped button child. The button id is stepped INSIDE the body — mirrors the
  * showcase's action-button pattern. */
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
@@ -361,12 +411,12 @@ static void test_modal_body_button_clickable(void) {
      * button is the sole interactive record, so the press lands on it. */
     nt_pointer_t f2 = modal_btn_pointer(true, true, false);
     nt_ui_interaction_t in2 = modal_button_frame(&st, &f2);
-    TEST_ASSERT_TRUE(in2.pressed_now); /* RED on the pre-fix occluder code: it stole hot -> false */
+    TEST_ASSERT_TRUE(in2.pressed_now); /* press lands on the sole interactive record */
 
     /* Frame 3: release inside -> clicked exactly once. */
     nt_pointer_t f3 = modal_btn_pointer(false, false, true);
     nt_ui_interaction_t in3 = modal_button_frame(&st, &f3);
-    TEST_ASSERT_TRUE(in3.clicked); /* CR-01: action button must be clickable inside a modal */
+    TEST_ASSERT_TRUE(in3.clicked); /* action button is clickable inside a modal */
 }
 
 /* ---- backdrop_close_pad: a CLOSE_ON_BACKDROP click JUST OUTSIDE the panel but within the pad must NOT
@@ -397,11 +447,9 @@ static void test_modal_backdrop_close_pad(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_BACKDROP, (int)modal_backdrop_click_reason(&st, 40.0F, 40.0F));
 }
 
-/* ---- D-60 closed-modal regression: a FULLY-CLOSED modal (open=false, settled t=0) called every
- *      frame must NOT block a base widget. Before the fix the backdrop block_pointer was registered
- *      unconditionally at backdrop_z, occluding the whole viewport -> the base button never went hot.
- *      The wrapper (open=false, ease_speed=0) reports fully_closed on frame 1 and declares no backdrop;
- *      the base button (at the same screen point) is then the sole interactive record and clicks. ---- */
+/* ---- A FULLY-CLOSED modal (open=false, settled t=0) called every frame must NOT block a base widget:
+ *      it declares no backdrop, so the base button (at the same screen point) is the sole interactive
+ *      record and clicks. The wrapper (open=false, ease_speed=0) reports fully_closed on frame 1. ---- */
 #define CLOSED_BTN_W 200.0F
 #define CLOSED_BTN_H 120.0F
 #define CLOSED_BTN_CX (CLOSED_BTN_W * 0.5F)
@@ -432,8 +480,7 @@ static void test_modal_closed_does_not_block_base(void) {
     closed_modal_base_frame(&st, &f1);
 
     /* Frame 2: press inside the base button. With the closed modal declaring NO backdrop occluder,
-     * the base button is the sole interactive record and the press lands on it.
-     * RED on the pre-fix code: the unconditional backdrop block_pointer stole hot -> pressed_now false. */
+     * the base button is the sole interactive record and the press lands on it. */
     nt_pointer_t f2 = modal_pointer_at(CLOSED_BTN_CX, CLOSED_BTN_CY, true, true, false);
     nt_ui_interaction_t in2 = closed_modal_base_frame(&st, &f2);
     TEST_ASSERT_TRUE(in2.pressed_now);
@@ -450,7 +497,7 @@ static void test_modal_closed_does_not_block_base(void) {
     closed_modal_base_frame(&st, &empty1);
     nt_pointer_t empty2 = modal_pointer_at(700.0F, 500.0F, false, false, false);
     closed_modal_base_frame(&st, &empty2);
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx)); /* RED pre-fix: backdrop gated the whole viewport */
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx)); /* closed modal must not gate empty space */
 }
 
 /* ---- nt_ui_modal_active reports PREV-FRAME presence (not the live within-frame depth, which is
@@ -536,9 +583,11 @@ int main(void) {
     RUN_TEST(test_modal_esc_requires_flag);
     RUN_TEST(test_modal_tween_clamp_and_transition);
     RUN_TEST(test_modal_open_entrance_eases_from_zero);
+    RUN_TEST(test_modal_open_visible_before_epsilon);
     RUN_TEST(test_modal_open_instant_snaps);
     RUN_TEST(test_modal_wrapper_contract);
     RUN_TEST(test_modal_wants_pointer_while_open);
+    RUN_TEST(test_modal_no_backdrop_close_still_gates);
     RUN_TEST(test_modal_body_button_clickable);
     RUN_TEST(test_modal_backdrop_close_pad);
     RUN_TEST(test_modal_closed_does_not_block_base);

@@ -71,6 +71,11 @@ Open the **Stress** tab and read the **frame `gpu_ms`** overlay. Pick a label
 count with the panel (50 / 100 / 200 / 400) and watch the frame `gpu_ms` and the
 live `ui_draw_calls` readout respond.
 
+**GL-timer latency:** `gpu_ms` comes from an asynchronous `GL_TIME_ELAPSED`
+query, so the displayed value lags the current frame by a frame or two — after
+you change the label count the reading settles one or two frames later. It is an
+honest informational proxy, not an exact same-frame measurement.
+
 **GPU-timing limitation (no-nest):** `GL_TIME_ELAPSED` query segments **cannot
 nest** (`engine/graphics/gl/nt_gfx_gl.c:483` asserts no-nest). The host frame
 loop already wraps the whole frame in one `nt_gfx_begin_segment("frame")`

@@ -73,6 +73,7 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     NT_ASSERT(isfinite(style->scale_start) && style->scale_start > 0.0F && "nt_ui_modal_begin: scale_start must be finite > 0 (use defaults, never {0})");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
     NT_ASSERT(isfinite(style->slide_offset) && "nt_ui_modal_begin: slide_offset must be finite");
+    NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_modal_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
@@ -206,7 +207,7 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
         .t = t,
         .reason = reason,
         .close_requested = (reason != NT_UI_MODAL_CLOSE_NONE),
-        .visible = (t > NT_UI_MODAL_EPSILON),
+        .visible = (open || (t > NT_UI_MODAL_EPSILON)),
         .fully_closed = (!open && t <= NT_UI_MODAL_EPSILON),
     };
 }
