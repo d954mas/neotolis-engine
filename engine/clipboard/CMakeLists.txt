@@ -10,6 +10,13 @@ nt_declare_interface(nt_clipboard)
 
 if(EMSCRIPTEN)
     nt_add_module(nt_clipboard LOG_DOMAIN "clipboard" web/nt_clipboard_web.c nt_clipboard.h)
+    # Web backend bridges the DOM paste string into C: stringToNewUTF8 (runtime
+    # method) allocates it, _free releases it. INTERFACE so any exe linking
+    # nt_clipboard inherits the exports.
+    target_link_options(nt_clipboard INTERFACE
+        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_free']"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS=['stringToNewUTF8','UTF8ToString']"
+    )
     target_link_libraries(nt_clipboard PUBLIC nt_core nt_clipboard_interface)
 else()
     nt_add_module(nt_clipboard LOG_DOMAIN "clipboard" native/nt_clipboard_native.c nt_clipboard.h)
