@@ -600,23 +600,12 @@ static void test_modal_custom_zband_stride(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* ---- A 0 (or negative) stride resolves to the default NT_UI_MODAL_ZBAND_STRIDE, so a {0}-init desc
- *      still produces the 1000-stride band. ---- */
-static void test_modal_zero_stride_uses_default(void) {
+/* ---- No 0->default fallback: the default lives only in nt_ui_create_desc_defaults() (same as
+ *      max_elements). A 0 stride is invalid and must fail-early at create. ---- */
+static void test_modal_zero_stride_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = 0; /* unset -> default */
-    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
-    TEST_ASSERT_NOT_NULL(ctx);
-
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F;
-    nt_ui_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    nt_ui_modal_begin(ctx, MODAL_A, &st, true);
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)NT_UI_MODAL_ZBAND_STRIDE, nt_ui_modal_test_last_zband());
-    nt_ui_modal_end(ctx);
-    nt_ui_end(ctx);
-
-    nt_ui_destroy_context(ctx);
+    desc.modal_zband_stride = 0;
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
 /* ---- An over-large stride (stride*MAX_DEPTH > INT16_MAX) trips the create-time NT_ASSERT
@@ -650,7 +639,7 @@ int main(void) {
     RUN_TEST(test_modal_active_prev_frame);
     RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
     RUN_TEST(test_modal_custom_zband_stride);
-    RUN_TEST(test_modal_zero_stride_uses_default);
+    RUN_TEST(test_modal_zero_stride_asserts);
     RUN_TEST(test_modal_oversize_stride_asserts);
     return UNITY_END();
 }
