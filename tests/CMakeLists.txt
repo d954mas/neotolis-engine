@@ -297,7 +297,10 @@ if(NOT EMSCRIPTEN)
 
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
-    target_link_libraries(test_resource PRIVATE nt_resource nt_http_stub nt_fs_stub nt_log_stub unity)
+    # Real nt_fs/nt_http: test_resource drives the real loader pipeline (native
+    # file reads + request-fail paths). Stubs make nt_fs_read_file return INVALID,
+    # so assets never activate and the activation/resolve callbacks never fire.
+    target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
@@ -516,7 +519,9 @@ if(EMSCRIPTEN)
     endif()
 
     add_executable(wasm_smoke wasm/smoke_entry.c)
-    target_link_libraries(wasm_smoke PRIVATE nt_core)
+    # nt_core links nt_log_interface (header only); the exe picks the impl. Smoke
+    # test needs no real logging -> nt_log_stub.
+    target_link_libraries(wasm_smoke PRIVATE nt_core nt_log_stub)
 
     # Strict warning and sanitizer policy (same as engine code)
     nt_set_warning_flags(wasm_smoke)
