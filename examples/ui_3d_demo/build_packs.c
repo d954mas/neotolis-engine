@@ -1,6 +1,6 @@
-/* Build ui_buttons demo pack:
- *   ui_buttons_demo.ntpack -- atlas (button_blue slice9 + white pixel) + shaders + font.
- * Usage: build_ui_buttons_demo_packs <pack_dir>
+/* Build ui_3d demo pack:
+ *   ui_3d_demo.ntpack -- atlas (button slice9 + icon + white pixel) + shaders + font.
+ * Usage: build_ui_3d_demo_packs <pack_dir>
  * Run from the project root directory. */
 
 /* clang-format off */
@@ -19,10 +19,8 @@
 #define MKDIR(p) mkdir(p, 0755)
 #endif
 
-#define HEADER_DIR "examples/ui_buttons_demo/generated"
-/* Reuse the ui_theme_demo font (mirrors slice9_demo's FONT_PATH precedent --
- * the .ttf is not duplicated into this demo's raw/). */
-#define FONT_PATH "examples/ui_theme_demo/raw/font.ttf"
+#define HEADER_DIR "examples/ui_3d_demo/generated"
+#define FONT_PATH "examples/ui_3d_demo/raw/font.ttf"
 
 static char s_path_buf[512];
 
@@ -36,12 +34,12 @@ static const char *pack_path(const char *dir, const char *name) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        (void)fprintf(stderr, "Usage: build_ui_buttons_demo_packs <pack_dir>\n");
+        (void)fprintf(stderr, "Usage: build_ui_3d_demo_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
 
-    (void)printf("=== Build UI Buttons Demo Pack -> %s ===\n\n", out_dir);
+    (void)printf("=== Build UI 3D Demo Pack -> %s ===\n\n", out_dir);
 
     MKDIR(out_dir);
     MKDIR(HEADER_DIR);
@@ -50,10 +48,10 @@ int main(int argc, char *argv[]) {
     (void)snprintf(cache_dir, sizeof(cache_dir), "%s/_cache", out_dir);
     MKDIR(cache_dir);
 
-    // #region pack: ui_buttons_demo.ntpack
-    NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "ui_buttons_demo.ntpack"));
+    // #region pack: ui_3d_demo.ntpack
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "ui_3d_demo.ntpack"));
     if (!ctx) {
-        (void)fprintf(stderr, "Failed to start ui_buttons_demo.ntpack\n");
+        (void)fprintf(stderr, "Failed to start ui_3d_demo.ntpack\n");
         return 1;
     }
 
@@ -65,14 +63,14 @@ int main(int argc, char *argv[]) {
     // #region shaders (sprite for UI rects + Slug for text)
     nt_builder_add_shader(ctx, "assets/shaders/sprite.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
-    /* Depth-writing world UI (ui_3d_demo overlapping panels) uses this alpha-cutoff sprite variant. */
+    /* Depth-writing world UI (overlapping panels) uses this alpha-cutoff sprite variant. */
     nt_builder_add_shader(ctx, "assets/shaders/sprite_cutoff.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
     (void)printf("  Shaders added: 5 (sprite + sprite_cutoff + slug_text)\n");
     // #endregion
 
-    // #region atlas: button_blue (slice9) + white pixel
+    // #region atlas: button slice9 + icon + white pixel
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
     atlas_opts.allow_transform = false;
@@ -88,9 +86,9 @@ int main(int argc, char *argv[]) {
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.gen_mipmaps = false;
 
-    nt_builder_begin_atlas(ctx, "ui_buttons_demo_atlas", &atlas_opts);
+    nt_builder_begin_atlas(ctx, "ui_3d_demo_atlas", &atlas_opts);
 
-    /* Kenney buttons (384x128, 16px corners). Three colors so VISUAL-SWAP can
+    /* Kenney buttons (384x128, 16px corners). Three colors so panels can
      * show idle=blue, hover=green, pressed=red. */
     nt_atlas_sprite_opts_t btn_opts = nt_atlas_sprite_opts_defaults();
     btn_opts.name = "button_blue";
@@ -98,13 +96,13 @@ int main(int argc, char *argv[]) {
     btn_opts.slice9_right = BUTTON_BORDER;
     btn_opts.slice9_top = BUTTON_BORDER;
     btn_opts.slice9_bottom = BUTTON_BORDER;
-    nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/button_blue_depth.png", &btn_opts);
+    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/button_blue_depth.png", &btn_opts);
 
     btn_opts.name = "button_green";
-    nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/button_green_depth.png", &btn_opts);
+    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/button_green_depth.png", &btn_opts);
 
     btn_opts.name = "button_red";
-    nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/button_red_depth.png", &btn_opts);
+    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/button_red_depth.png", &btn_opts);
 
     (void)printf("  Atlas: 3 buttons (384x128 s9:%d)\n", BUTTON_BORDER);
 
@@ -116,50 +114,49 @@ int main(int argc, char *argv[]) {
     (void)printf("  Atlas region '_white': 1x1\n");
 
     /* Real icon art (Kenney CC0 bunny, 32x32 sprite) for the ICON-ONLY and
-     * ICON+TEXT button variants -- replaces a gold-tinted stretched _white
-     * placeholder so the user sees a real "icon" instead of a flat square. */
+     * ICON+TEXT button variants. */
     nt_atlas_sprite_opts_t icon_opts = nt_atlas_sprite_opts_defaults();
     icon_opts.name = "icon_bunny";
-    nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/icon_bunny.png", &icon_opts);
+    nt_builder_atlas_add(ctx, "examples/ui_3d_demo/raw/icon_bunny.png", &icon_opts);
     (void)printf("  Atlas region 'icon_bunny': 32x32 (Kenney bunnymark sd)\n");
 
     nt_builder_end_atlas(ctx);
     // #endregion
 
-    // #region font: ASCII Latin only (reuse ui_theme_demo font)
+    // #region font: ASCII Latin only
     nt_builder_add_font(ctx, FONT_PATH,
                         &(nt_font_opts_t){
                             .charset = NT_CHARSET_ASCII,
-                            .resource_name = "ui_buttons_demo/font",
+                            .resource_name = "ui_3d_demo/font",
                         });
-    (void)printf("  Font (ASCII) added: ui_buttons_demo/font\n");
+    (void)printf("  Font (ASCII) added: ui_3d_demo/font\n");
     // #endregion
 
     // #region finish + codegen
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
     if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "ui_buttons_demo.ntpack failed: %d\n", r);
+        (void)fprintf(stderr, "ui_3d_demo.ntpack failed: %d\n", r);
         return 1;
     }
 
     char base_hdr[512];
-    (void)snprintf(base_hdr, sizeof(base_hdr), "%s/ui_buttons_demo.h", HEADER_DIR);
+    (void)snprintf(base_hdr, sizeof(base_hdr), "%s/ui_3d_demo.h", HEADER_DIR);
     const char *headers[] = {base_hdr};
     char combined[512];
-    (void)snprintf(combined, sizeof(combined), "%s/ui_buttons_demo_assets.h", HEADER_DIR);
+    (void)snprintf(combined, sizeof(combined), "%s/ui_3d_demo_assets.h", HEADER_DIR);
     nt_builder_merge_headers(headers, 1, combined);
     (void)printf("Generated: %s\n", combined);
     // #endregion
 
     /* Pack size summary. */
     (void)printf("\n=== Pack Size Summary ===\n");
-    FILE *f = fopen(pack_path(out_dir, "ui_buttons_demo.ntpack"), "rb");
+    FILE *f = fopen(pack_path(out_dir, "ui_3d_demo.ntpack"), "rb");
     if (f) {
         (void)fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         (void)fclose(f);
-        (void)printf("  ui_buttons_demo.ntpack    %8.1f KB\n", (double)sz / 1024.0);
+        (void)printf("  ui_3d_demo.ntpack    %8.1f KB\n", (double)sz / 1024.0);
     }
 
     (void)printf("\n=== Done ===\n");

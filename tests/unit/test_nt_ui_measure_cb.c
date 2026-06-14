@@ -27,7 +27,7 @@
 /* clang-format on */
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
-static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT};
+static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE};
 
 /* Per-test counter so virtual-pack ids stay unique across the binary. */
 static uint32_t s_vpack_counter;

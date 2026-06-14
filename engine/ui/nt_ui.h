@@ -62,6 +62,11 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
+/* Default per-depth modal z-band stride; each nested modal sits panel_z = stride*(depth+1).
+ * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
+ * nt_ui_create_desc_defaults; must be > 0). */
+#define NT_UI_MODAL_ZBAND_STRIDE 1000
+
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
 
@@ -184,6 +189,8 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
 #define NT_UI_DATA_XFORM(layer_value, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), NULL, (t_ptr), (opacity_value))
 #define NT_UI_DATA_XFORM_FULL(layer_value, user_ptr, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), (user_ptr), (t_ptr), (opacity_value))
 #define NT_UI_CLAY_DATA(layer_value) ((void *)nt_ui_make_element_data((layer_value), NULL))
+/* void*-returning xform variant so Clay's .userData slot needs no const-cast. */
+#define NT_UI_CLAY_DATA_XFORM(layer_value, t_ptr, opacity_value) ((void *)nt_ui_make_element_data_xform((layer_value), NULL, (t_ptr), (opacity_value)))
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
@@ -204,6 +211,8 @@ typedef struct {
     /* 3D ctx render-only depth bias. 0 = off. Positive values draw deeper hierarchy levels
      * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. */
     float element_depth_bias_ndc;
+    /* Per-depth modal z-band stride; 0 = default NT_UI_MODAL_ZBAND_STRIDE. */
+    int16_t modal_zband_stride;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
@@ -211,6 +220,7 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
+        .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
     };
 }
 

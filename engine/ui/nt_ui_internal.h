@@ -146,6 +146,13 @@ typedef struct {
 #define NT_UI_WHEEL_CANDIDATES 24
 #endif
 
+/* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap).
+ * Depth drives the z-band stride*(depth+1) and close-signal top-targeting.
+ * Build-overridable; raising it requires stride*depth to still fit int16 (see _Static_assert). */
+#ifndef NT_UI_MODAL_MAX_DEPTH
+#define NT_UI_MODAL_MAX_DEPTH 16
+#endif
+
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -170,11 +177,26 @@ struct nt_ui_context {
     /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
      * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
     nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
+    /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
+     * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
+     * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
+     * the inner begin's return, so we use last frame's resolved top). */
+    uint32_t modal_top_id_prev;
+    uint32_t modal_top_id_cur;
     uint32_t wheel_candidate_count;
+    /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
+    int16_t modal_zband_stride;
     uint16_t wheel_depth;
+    uint8_t active_modal_depth;
+    uint8_t modal_max_depth_cur; /* deepest active_modal_depth reached this frame (drives modal_top_id_cur) */
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
     bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
+    /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
+     * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
+     * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
+    bool modal_present_cur;
+    bool modal_present_prev;
 
     /* Buttons do not nest (asserted). */
     struct {
@@ -387,5 +409,9 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
 /* End-of-frame wheel-owner resolve: picks, per pointer, the winning scroll candidate (max depth,
  * then min bbox area, then latest declaration) into ctx->wheel_owner[] for NEXT frame's consume. */
 void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
+
+/* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
+ * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */
+bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
 
 #endif /* NT_UI_INTERNAL_H */

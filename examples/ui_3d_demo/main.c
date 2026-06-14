@@ -51,7 +51,7 @@
 #include "window/nt_window.h"
 
 #include "nt_pack_format.h"
-#include "ui_buttons_demo_assets.h"
+#include "ui_3d_demo_assets.h"
 
 #include "clay.h"
 #include <math.h>
@@ -452,8 +452,8 @@ static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, c
 /* Fill the button-bg refs upfront; the handle is valid before the atlas data loads
  * and the widget resolves + memoizes the region lazily. */
 static void init_button_styles(void) {
-    const uint64_t blue = ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value;
-    const uint64_t green = ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value;
+    const uint64_t blue = ASSET_ATLAS_REGION_UI_3D_DEMO_ATLAS_BUTTON_BLUE.value;
+    const uint64_t green = ASSET_ATLAS_REGION_UI_3D_DEMO_ATLAS_BUTTON_GREEN.value;
 
     /* IDLE: blue everywhere with a small hover-press ease. */
     s_btn_idle = (nt_ui_button_style_t){
@@ -475,7 +475,7 @@ static void init_button_styles(void) {
 /* White-region + font stay is_ready-gated (white is the deferred path; font needs the loaded resource). */
 static void try_bind_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
-        s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS__WHITE.value);
+        s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_3D_DEMO_ATLAS__WHITE.value);
         NT_ASSERT(s_white_region_idx != NT_ATLAS_INVALID_REGION);
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
         s_atlas_bound = true;
@@ -995,12 +995,12 @@ int main(int argc, char *argv[]) {
         .label = "frame_uniforms",
     });
 
-    s_pack_id = nt_hash32_str("ui_buttons_demo");
+    s_pack_id = nt_hash32_str("ui_3d_demo");
     nt_resource_mount(s_pack_id, 100);
 #ifdef NT_CDN_URL
-    nt_resource_load_auto(s_pack_id, NT_CDN_URL "/ui_buttons_demo/ui_buttons_demo.ntpack");
+    nt_resource_load_auto(s_pack_id, NT_CDN_URL "/ui_3d_demo/ui_3d_demo.ntpack");
 #else
-    nt_resource_load_auto(s_pack_id, "assets/ui_buttons_demo.ntpack");
+    nt_resource_load_auto(s_pack_id, "assets/ui_3d_demo.ntpack");
 #endif
 
     s_sprite_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
@@ -1008,9 +1008,9 @@ int main(int argc, char *argv[]) {
     s_sprite_cutoff_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
     s_text_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
-    s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_BUTTONS_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_BUTTONS_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_BUTTONS_DEMO_FONT, NT_ASSET_FONT);
+    s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
+    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_3D_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
+    s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound button-bg refs upfront. */
     init_button_styles();
