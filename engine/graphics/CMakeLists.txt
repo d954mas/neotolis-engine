@@ -1,9 +1,8 @@
 # nt_gfx -- graphics rendering
 #
 # GL backend: WebGL 2 via Emscripten (GLES 3.0) or OpenGL 3.3 Core via glad (desktop).
-# Basis Universal transcoder is optional — disable with -DNT_BASISU=OFF for smaller binaries.
-
-option(NT_BASISU "Link Basis Universal transcoder for GPU texture compression" ON)
+# Basis Universal transcoder is a normal linkable module (#126 / D-05): nt_gfx links it
+# unconditionally and the NT_HAS_BASISU code-path is always compiled.
 
 # Header-only interface carries nt_gfx.h's include root; the exe selects the impl.
 nt_declare_interface(nt_gfx)
@@ -33,10 +32,9 @@ else()
     target_link_libraries(nt_gfx PRIVATE OpenGL::GL)
 endif()
 
-if(NT_BASISU)
-    target_link_libraries(nt_gfx PUBLIC nt_basisu_transcoder)
-    target_compile_definitions(nt_gfx PRIVATE NT_HAS_BASISU=1)
-endif()
+# basisu is a normal module now (D-05); link + define are unconditional and in sync.
+target_link_libraries(nt_gfx PUBLIC nt_basisu_transcoder)
+target_compile_definitions(nt_gfx PRIVATE NT_HAS_BASISU=1)
 
 # Stub implementation for headless builds (CI, builder, tests)
 # No transcoder in stub — compressed textures return dummy handle
