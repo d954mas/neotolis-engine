@@ -259,7 +259,7 @@ static void test_modal_wrapper_contract(void) {
 
     /* Frame 1: open -> wrapper returns true, declares body. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &open);
+    bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
     TEST_ASSERT_TRUE(declared);
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
@@ -270,7 +270,7 @@ static void test_modal_wrapper_contract(void) {
     /* Frame 2: Esc -> wrapper clears *open but STILL returns true (animating closed). */
     nt_input_set_key(NT_KEY_ESCAPE, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    declared = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &open);
+    declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
     TEST_ASSERT_TRUE(declared); /* body still declared during the close animation */
     TEST_ASSERT_FALSE(open);    /* close_requested cleared the bool */
     if (declared) {
@@ -283,7 +283,7 @@ static void test_modal_wrapper_contract(void) {
     bool went_false = false;
     for (int i = 0; i < 300; ++i) {
         nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-        declared = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &open);
+        declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
         if (declared) {
             nt_ui_modal_end(s_fx.ctx);
         }
@@ -356,7 +356,7 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
         in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("gated_base_btn"));
     }
-    const bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, st, &open);
+    const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, st, &open);
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -465,7 +465,7 @@ static nt_ui_interaction_t closed_modal_base_frame(const nt_ui_modal_style_t *st
         in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("closed_base_btn"));
     }
     /* Settled-closed modal called every frame (the showcase Modals-tab pattern). */
-    const bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, st, &open);
+    const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, st, &open);
     TEST_ASSERT_FALSE(declared); /* fully closed -> wrapper balances its own stack, no body */
     nt_ui_end(s_fx.ctx);
     return in;
@@ -527,7 +527,7 @@ static void test_modal_active_prev_frame(void) {
     /* A fully-closed modal (settled, declares no backdrop) does NOT count as present. */
     bool open = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    const bool declared = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &open);
+    const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -547,7 +547,7 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
      * Both sit at depth 1 (sequential, not nested) since each balances before the next. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
     bool a_open = false;
-    const bool a_decl = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &a_open); /* closed -> balances itself */
+    const bool a_decl = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &a_open); /* closed -> balances itself */
     if (a_decl) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -560,7 +560,7 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
     nt_input_set_key(NT_KEY_ESCAPE, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
     a_open = false;
-    const bool a_decl2 = nt_ui_modal(s_fx.ctx, MODAL_A, &st, &a_open);
+    const bool a_decl2 = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &a_open);
     if (a_decl2) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -616,6 +616,43 @@ static void test_modal_oversize_stride_asserts(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
+/* ---- SLIDE direction: each origin edge drives the panel offset on the right axis + sign. A finite
+ *      ease keeps the first frame's t well below 1, so offset ~= slide_offset on the active axis and
+ *      ~0 on the other. +x = right, +y = down; FROM_<edge> starts displaced toward that edge. ---- */
+static void modal_slide_offset_frame(uint8_t dir, float *ox, float *oy) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 8.0F; /* finite: first frame t << 1 -> offset near slide_offset */
+    st.slide_offset = 40.0F;
+    st.flags = (uint8_t)(NT_UI_MODAL_TRANSITION_SLIDE | dir);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_A + dir, &st, true); /* distinct id per dir -> each eases from a fresh slot */
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    nt_ui_modal_test_last_panel_offset(ox, oy);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_modal_slide_dir(void) {
+    float ox = 0.0F;
+    float oy = 0.0F;
+
+    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_BOTTOM, &ox, &oy);
+    TEST_ASSERT_TRUE(oy > 0.0F); /* starts below center, rises */
+    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F));
+
+    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_TOP, &ox, &oy);
+    TEST_ASSERT_TRUE(oy < 0.0F); /* starts above center, descends */
+    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F));
+
+    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_LEFT, &ox, &oy);
+    TEST_ASSERT_TRUE(ox < 0.0F); /* starts left of center, slides right */
+    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
+
+    modal_slide_offset_frame(NT_UI_MODAL_SLIDE_FROM_RIGHT, &ox, &oy);
+    TEST_ASSERT_TRUE(ox > 0.0F); /* starts right of center, slides left */
+    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
@@ -638,6 +675,7 @@ int main(void) {
     RUN_TEST(test_modal_closed_does_not_block_base);
     RUN_TEST(test_modal_active_prev_frame);
     RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
+    RUN_TEST(test_modal_slide_dir);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
     RUN_TEST(test_modal_oversize_stride_asserts);

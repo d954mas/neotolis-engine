@@ -48,6 +48,8 @@ _Static_assert(NT_UI_MODAL_ZBAND_STRIDE *(NT_UI_MODAL_MAX_DEPTH) <= INT16_MAX, "
 static uint16_t s_last_panel_zband;
 static uint16_t s_last_backdrop_zband;
 static nt_ui_modal_close_reason_t s_last_close_reason;
+static float s_last_panel_off_x;
+static float s_last_panel_off_y;
 #endif
 
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
@@ -118,7 +120,22 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     if (transition == NT_UI_MODAL_TRANSITION_FADE) {
         /* alpha only — scale fixed at 1 */
     } else if (transition == NT_UI_MODAL_TRANSITION_SLIDE) {
-        panel_xf.offset_y = style->slide_offset * (1.0F - t); /* slides up to 0 as it opens */
+        /* Eased displacement from the origin edge (+x = right, +y = down); decays to 0 as it opens. */
+        const float d = style->slide_offset * (1.0F - t);
+        switch ((uint8_t)(style->flags & NT_UI_MODAL_SLIDE_DIR_MASK)) {
+        case NT_UI_MODAL_SLIDE_FROM_TOP:
+            panel_xf.offset_y = -d;
+            break;
+        case NT_UI_MODAL_SLIDE_FROM_LEFT:
+            panel_xf.offset_x = -d;
+            break;
+        case NT_UI_MODAL_SLIDE_FROM_RIGHT:
+            panel_xf.offset_x = d;
+            break;
+        default: /* NT_UI_MODAL_SLIDE_FROM_BOTTOM */
+            panel_xf.offset_y = d;
+            break;
+        }
     } else {
         const float scale = style->scale_start + ((1.0F - style->scale_start) * t);
         panel_xf.scale_x = scale;
@@ -201,6 +218,8 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     s_last_panel_zband = (uint16_t)panel_z;
     s_last_backdrop_zband = (uint16_t)backdrop_z;
     s_last_close_reason = reason;
+    s_last_panel_off_x = panel_xf.offset_x;
+    s_last_panel_off_y = panel_xf.offset_y;
 #endif
 
     return (nt_ui_modal_result_t){
@@ -222,8 +241,8 @@ void nt_ui_modal_end(nt_ui_context_t *ctx) {
     --ctx->active_modal_depth;
 }
 
-bool nt_ui_modal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open) {
-    NT_ASSERT(p_open != NULL && "nt_ui_modal: p_open must be non-NULL");
+bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open) {
+    NT_ASSERT(p_open != NULL && "nt_ui_modal_visible: p_open must be non-NULL");
     const nt_ui_modal_result_t r = nt_ui_modal_begin(ctx, id, style, *p_open);
     if (r.close_requested) {
         *p_open = false; /* signal -> game's bool clears; t decays over the next frames */
@@ -263,5 +282,13 @@ float nt_ui_modal_test_tween(const nt_ui_context_t *ctx, uint32_t id) {
         }
     }
     return 0.0F; /* no slot = never animated */
+}
+void nt_ui_modal_test_last_panel_offset(float *ox, float *oy) {
+    if (ox != NULL) {
+        *ox = s_last_panel_off_x;
+    }
+    if (oy != NULL) {
+        *oy = s_last_panel_off_y;
+    }
 }
 #endif

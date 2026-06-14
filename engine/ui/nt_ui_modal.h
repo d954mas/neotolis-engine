@@ -43,15 +43,22 @@ _Static_assert(sizeof(nt_ui_modal_result_t) == 12, "nt_ui_modal_result_t stable 
 #define NT_UI_MODAL_TRANSITION_FADE ((uint8_t)(1U << 2))      /* alpha only, scale fixed at 1 */
 #define NT_UI_MODAL_TRANSITION_SLIDE ((uint8_t)(2U << 2))     /* slide-from-edge + alpha */
 #define NT_UI_MODAL_TRANSITION_MASK ((uint8_t)(3U << 2))
+/* SLIDE origin edge occupies bits 4-5 (mask NT_UI_MODAL_SLIDE_DIR_MASK); only meaningful with
+ * NT_UI_MODAL_TRANSITION_SLIDE. Default 0 = from bottom (preserves the prior single-direction behavior). */
+#define NT_UI_MODAL_SLIDE_FROM_BOTTOM ((uint8_t)(0U << 4))
+#define NT_UI_MODAL_SLIDE_FROM_TOP ((uint8_t)(1U << 4))
+#define NT_UI_MODAL_SLIDE_FROM_LEFT ((uint8_t)(2U << 4))
+#define NT_UI_MODAL_SLIDE_FROM_RIGHT ((uint8_t)(3U << 4))
+#define NT_UI_MODAL_SLIDE_DIR_MASK ((uint8_t)(3U << 4))
 
 typedef struct {
     float ease_speed;           /* value_speed for the open/close tween; > 0 (0 = instant snap) */
     float scale_start;          /* scale-pop start (default 0.92); eases to 1.0. Asserted > 0 */
     float backdrop_alpha;       /* peak backdrop opacity at t==1 (0..1) */
-    float slide_offset;         /* SLIDE transition: start offset px (additive, eased to 0) */
+    float slide_offset;         /* SLIDE: start offset px from the origin edge (NT_UI_MODAL_SLIDE_FROM_*), eased to 0 */
     uint32_t backdrop_color;    /* 0xAABBGGRR; alpha multiplied by t*backdrop_alpha */
     nt_ui_layer_t layer;        /* draw layer for backdrop + panel element data */
-    uint8_t flags;              /* LISTEN_ESC | CLOSE_ON_BACKDROP | transition selector */
+    uint8_t flags;              /* LISTEN_ESC | CLOSE_ON_BACKDROP | transition selector | SLIDE dir */
     int16_t backdrop_close_pad; /* clicks within this px margin around the panel do NOT close — avoids accidental close on near-panel taps; mobile-aware */
 } nt_ui_modal_style_t;
 _Static_assert(sizeof(nt_ui_modal_style_t) == 24, "nt_ui_modal_style_t stable ABI (4 float + 1 u32 + 1 u8 + 1 u8 + 1 int16)");
@@ -59,17 +66,28 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 24, "nt_ui_modal_style_t stable AB
 /* Valid baseline (scale-pop + alpha). scale_start must be > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
-/* Low-level: opens the backdrop + panel floating elements (z-band ctx->modal_zband_stride*(depth+1)) and eases t toward
- * open?1:0. The panel stays OPEN until nt_ui_modal_end (balanced). id non-zero, style non-NULL.
- * Asserts depth < NT_UI_MODAL_MAX_DEPTH BEFORE push (overflow, no silent fallback). */
+/* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
+ * backdrop + panel floating elements (z-band ctx->modal_zband_stride*(depth+1)) and eases t toward
+ * open?1:0; returns the full result (t / close reason / visible). Panel stays OPEN until nt_ui_modal_end.
+ * id non-zero, style non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH BEFORE push (overflow, no fallback).
+ * Prefer the scoped nt_ui_modal_visible() unless you need the close reason. */
 nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool open);
 void nt_ui_modal_end(nt_ui_context_t *ctx);
 
-/* High-level: the game stores ONE bool. Returns true while the body must be declared (open OR
- * animating-closed); clears *p_open on close_requested; returns false (and balances the stack
- * itself) once fully closed. Usage:
- *   if (nt_ui_modal(ctx, ID, &style, &open)) { ...body...; nt_ui_modal_end(ctx); } */
-bool nt_ui_modal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open);
+/* High-level scoped form: the game stores ONE bool. Returns "declare the body THIS frame?" — true while
+ * open OR still animating closed; this is NOT "is open" (the block keeps running a few frames after you
+ * set open=false, so the close tween plays). On close it clears *p_open; once fully closed it balances
+ * the stack itself (no nt_ui_modal_end in that branch). Open from anywhere by just setting your bool:
+ *
+ *   if (clicked_show) open = true;                       // "open" = set your bool (any site)
+ *   if (nt_ui_modal_visible(ctx, ID, &style, &open)) {   // declare once per frame, stable place
+ *       CLAY({ ...panel... }) { if (ok_clicked) open = false; }
+ *       nt_ui_modal_end(ctx);
+ *   }
+ *
+ * One window, many open sites = ONE bool + ONE id; call this from the active container's body so
+ * nesting/z follow context. Two windows at once = two ids + two bools. */
+bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open);
 
 /* True if a modal was up LAST frame (prev-frame presence — the live depth is 0 after nt_ui_end).
  * The game gates its keyboard/gameplay hotkeys on this; pointer routing is already auto-gated by
@@ -82,6 +100,7 @@ uint16_t nt_ui_modal_test_last_backdrop_zband(void);                   /* backdr
 uint8_t nt_ui_modal_test_stack_depth(const nt_ui_context_t *ctx);      /* live active_modal_depth */
 nt_ui_modal_close_reason_t nt_ui_modal_test_last_close_reason(void);   /* reason of the last begin */
 float nt_ui_modal_test_tween(const nt_ui_context_t *ctx, uint32_t id); /* eased t in the anim slot */
+void nt_ui_modal_test_last_panel_offset(float *ox, float *oy);         /* panel transform offset of the last begin */
 #endif
 
 #endif /* NT_UI_MODAL_H */
