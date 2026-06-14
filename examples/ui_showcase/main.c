@@ -771,9 +771,7 @@ static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     /* A slice9-backed nt_ui_panel container with a child label. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(360), CLAY_SIZING_FIXED(90)}, .padding = CLAY_PADDING_ALL(14), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_panel_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_img_style, NULL);
-        {
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panel with child (corners crisp)", g_current->body);
-        }
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panel with child (corners crisp)", g_current->body);
         nt_ui_panel_end(ctx);
     }
 
