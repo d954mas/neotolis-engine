@@ -13,7 +13,7 @@ The stage is wrapped in a scroll container (exercises the scissor stack). A tab
 that sets a `props_fn` also renders a focused live properties panel beside its
 content; all other tabs render no panel.
 
-## Tabs (9 entries)
+## Tabs (10 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -31,7 +31,9 @@ content; all other tabs render no panel.
 7. **Scroll** - four independent (non-nested) scroll containers in a 2x2 grid:
    vertical AUTO_HIDE bar / vertical ALWAYS bar / horizontal-only / both axes (XY).
 8. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
-9. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+9. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
+   (`nt_ui_input_text`); see the **Input controls** table below.
+10. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -43,6 +45,33 @@ content; all other tabs render no panel.
 | **Esc** (native) | quit |
 | **Esc** (modal up) | close the TOP modal only |
 | backdrop click (modal up) | close-on-backdrop (the backdrop blocks click-through) |
+
+## Input controls (Input tab)
+
+Each field edits a **game-owned** `char[]` buffer in place (`nt_ui_input_text`, ImGui-style); the
+engine state pool holds only the caret / selection / scroll / blink, never the string.
+
+| Input | Action |
+|-------|--------|
+| click a field | focus it (the bg/border brighten); the caret blinks |
+| type | inserts at the caret — Latin **and** Cyrillic (the demo font bakes both, D-17) |
+| Left / Right | move the caret one **codepoint** (never splits a multi-byte char) |
+| Home / End | caret to start / end |
+| Backspace / Delete | delete the codepoint before / after the caret |
+| Shift+arrows / Shift+Home/End | extend the selection |
+| mouse drag | select a range; **double-click** selects a word; **Ctrl+A** selects all |
+| Ctrl+C / Ctrl+X / Ctrl+V | copy / cut / paste via the real `nt_clipboard` (paste is filtered + clamped) |
+| **Tab** | advance focus to the next field (wraps to the first) |
+| **Esc** | unfocus the field (a modal-less field; otherwise Esc closes the top modal first) |
+
+Per-field behavior:
+
+- **Plain text** — any printable codepoint.
+- **Numeric only** — an `nt_ui_filter_numeric` allow-predicate rejects everything but `[0-9.+-]`
+  (typed letters and pasted letters are dropped); web gets the numeric soft-keyboard hint.
+- **Password (masked)** — renders one mask glyph per codepoint instead of the text (render-only;
+  the buffer is untouched); web gets `type=password`.
+- **Cyrillic** — pre-filled with a Cyrillic string to exercise multi-byte UTF-8 edit + measure + render.
 
 ## Theme hot-swap
 
