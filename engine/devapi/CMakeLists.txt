@@ -14,7 +14,7 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
 
 # cjson is PUBLIC: the nt_devapi_handler_fn typedef in the public header takes
 # cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_app nt_window nt_log)
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window nt_log)
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)

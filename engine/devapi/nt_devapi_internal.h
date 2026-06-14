@@ -30,6 +30,10 @@ typedef struct nt_devapi_slot {
    state — the statics are file-local to nt_devapi.c, hence this teardown hook. */
 void nt_devapi_resp_reset(void);
 
+/* True once nt_devapi_init has run (and not yet shut down). Lets the dispatch core
+   enforce the init-before-use invariant — the registry statics are file-local. */
+bool nt_devapi_initialized(void);
+
 /* Registry-table accessors (used by Plan 02 dispatch + Plan 03 discovery). */
 int nt_devapi_registry_count(void);
 const nt_devapi_slot *nt_devapi_registry_slot(int index);

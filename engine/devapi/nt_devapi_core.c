@@ -1,4 +1,3 @@
-#include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 #include "window/nt_window.h"
