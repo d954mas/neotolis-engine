@@ -35,13 +35,14 @@ typedef struct {
 /* Double-click + long-press cell (D-16); generic, keyed by the gesture's widget id. */
 #define NT_UI_INPUT_GESTURE_SALT 0x10D7C002U
 typedef struct {
-    float last_press_time; /* seconds (gesture clock) of the previous press */
+    float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
     float origin_x, origin_y;
     float clock;        /* monotonic accumulator fed by ctx->frame_dt */
     float press_clock;  /* clock value at the live press (for long-press timing) */
+    uint8_t has_prev;   /* 1 once a first press has been seen (clock==0 is a valid time) */
     uint8_t press_live; /* 1 while a press is held without firing long-press yet */
     uint8_t long_fired; /* 1 once long-press fired for the current hold (one-shot) */
-    uint8_t _pad[2];
+    uint8_t _pad[1];
 } nt_ui_input_gesture_t;
 
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
@@ -175,12 +176,13 @@ nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id
         const float dx = pos_x - g->origin_x;
         const float dy = pos_y - g->origin_y;
         const bool in_radius = (dx * dx + dy * dy) <= (move_radius_px * move_radius_px);
-        const bool in_window = (g->last_press_time > 0.0F) && ((g->clock - g->last_press_time) <= dbl_window_secs);
+        const bool in_window = (g->has_prev != 0U) && ((g->clock - g->last_press_time) <= dbl_window_secs);
         if (in_window && in_radius) {
             out.double_clicked = true;
-            g->last_press_time = 0.0F; /* consume so a triple-press isn't two double-clicks */
+            g->has_prev = 0U; /* consume so a triple-press isn't two double-clicks */
         } else {
             g->last_press_time = g->clock;
+            g->has_prev = 1U;
         }
         g->origin_x = pos_x;
         g->origin_y = pos_y;
@@ -369,10 +371,14 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     if (ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
-    /* A pending Tab seek set by the previously-declared focused field: this field claims focus. */
+    /* A pending Tab seek set by the previously-declared focused field: this field claims focus.
+     * claimed_now suppresses this field's OWN Tab handling so the still-pressed Tab key does not
+     * immediately re-advance focus off the field that just received it. */
+    bool claimed_now = false;
     if (ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
+        claimed_now = true;
     }
     // #endregion
 
@@ -455,8 +461,9 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
             submitted = true;
         }
-        if (nt_input_key_is_pressed(NT_KEY_TAB)) {
-            /* Advance focus to the next field declared this frame; wrap to the first. */
+        if (nt_input_key_is_pressed(NT_KEY_TAB) && !claimed_now) {
+            /* Advance focus to the next field declared this frame; wrap to the first. claimed_now
+             * fields skip this so the field that just received Tab focus does not re-advance. */
             ctx->focus_tab_seek = id;
             ctx->focused_input_id = ctx->focus_first_id; /* fallback: wrap (overridden if a later field claims) */
         }

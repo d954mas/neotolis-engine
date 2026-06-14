@@ -495,6 +495,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_scroll
         test_nt_ui_modal
         test_nt_ui_slider
+        test_ui_input
         test_nt_ui_progress
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
