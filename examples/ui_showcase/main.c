@@ -571,7 +571,7 @@ static void init_styles(void) {
     nt_ui_progress_style_t progress_vert = progress_base;
     progress_vert.track_w = 28.0F;
     progress_vert.track_h = 150.0F;
-    progress_vert.fill_tint = 0xFFF09040U; /* blue mana (0xAABBGGRR) */
+    progress_vert.fill_tint = 0xFFF06030U; /* blue mana: 0xAABBGGRR, blue-dominant over low green/red */
     progress_vert.fill_mode = NT_UI_FILL_STRETCH;
     progress_vert.fill_direction = NT_UI_FILL_BOTTOM_UP;
     s_progress_vert_dark = progress_vert;
@@ -723,13 +723,13 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
         const nt_ui_transform_t xform = {
             .offset_x = st->btn_xform.offset_x,
             .offset_y = st->btn_xform.offset_y,
-            .rotation_z = st->btn_xform.rotation_deg * 0.017453292F, /* deg -> rad */
+            .rotation_z = glm_rad(st->btn_xform.rotation_deg),
             .scale_x = st->btn_xform.scale,
             .scale_y = st->btn_xform.scale,
             .scale_z = 1.0F,
         };
         /* The wrapping CLAY's transform composes into the button's bake, so renderer + hit-test agree. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &xform, 1.0F)}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = NT_UI_CLAY_DATA_XFORM(0U, &xform, 1.0F)}) {
             nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform"), g_current->btn_primary,
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
@@ -817,15 +817,15 @@ static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
             (void)snprintf(buf, sizeof buf, "STRETCH (slice9)  %d%%", (int)(st->prog.value * 100.0F));
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress, st->prog.value, g_current->progress, &pdecl);
+            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_IMG, s_id_progress, st->prog.value, g_current->progress, &pdecl);
 
             (void)snprintf(buf, sizeof buf, "CROP (clip)  %d%%", (int)(st->prog.value * 100.0F));
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress_crop, st->prog.value, g_current->progress_crop, &pdecl);
+            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_IMG, s_id_progress_crop, st->prog.value, g_current->progress_crop, &pdecl);
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}}}) {
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Mana", g_current->caption);
-            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_progress_vert, st->prog.value, g_current->progress_vert,
+            nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_IMG, s_id_progress_vert, st->prog.value, g_current->progress_vert,
                            &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(150)}}});
         }
     }

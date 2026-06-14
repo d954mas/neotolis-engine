@@ -184,6 +184,8 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
 #define NT_UI_DATA_XFORM(layer_value, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), NULL, (t_ptr), (opacity_value))
 #define NT_UI_DATA_XFORM_FULL(layer_value, user_ptr, t_ptr, opacity_value) nt_ui_make_element_data_xform((layer_value), (user_ptr), (t_ptr), (opacity_value))
 #define NT_UI_CLAY_DATA(layer_value) ((void *)nt_ui_make_element_data((layer_value), NULL))
+/* void*-returning xform variant so Clay's .userData slot needs no const-cast. */
+#define NT_UI_CLAY_DATA_XFORM(layer_value, t_ptr, opacity_value) ((void *)nt_ui_make_element_data_xform((layer_value), NULL, (t_ptr), (opacity_value)))
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
