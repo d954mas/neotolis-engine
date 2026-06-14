@@ -123,7 +123,8 @@ typedef struct {
     nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
     const nt_ui_modal_style_t *modal;
-    Clay_Color bg, panel, list_bg, list_sel, accent, border;
+    /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
+    Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
     const char *name;
 } ui_palette_t;
 
@@ -155,6 +156,7 @@ static ui_palette_t g_dark = {
     .modal = &s_modal_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
+    .panel_alt = {40.0F, 45.0F, 56.0F, 255.0F},
     .list_bg = {24.0F, 26.0F, 34.0F, 255.0F},
     .list_sel = {46.0F, 98.0F, 158.0F, 255.0F},
     .accent = {86.0F, 156.0F, 230.0F, 255.0F},
@@ -188,6 +190,7 @@ static ui_palette_t g_light = {
     .modal = &s_modal_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
+    .panel_alt = {232.0F, 235.0F, 243.0F, 255.0F},
     .list_bg = {224.0F, 227.0F, 235.0F, 255.0F},
     .list_sel = {138.0F, 182.0F, 240.0F, 255.0F},
     .accent = {52.0F, 120.0F, 214.0F, 255.0F},
@@ -344,14 +347,16 @@ static int s_active_tab;
 // #region reusable focused-panel helper (game-side; built from existing nt_ui widgets)
 /* A titled control strip the props_fn populates; no engine symbol involved. */
 static void showcase_panel_begin(nt_ui_context_t *ctx, const char *title) {
+    /* Distinct card: panel_alt shade + a border so the control strip reads apart from the content. */
     Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIT(0)},
+        .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIT(0)},
                    .padding = CLAY_PADDING_ALL(14),
                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
                    .childGap = 8,
                    .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
-        .backgroundColor = g_current->panel,
+        .backgroundColor = g_current->panel_alt,
         .cornerRadius = CLAY_CORNER_RADIUS(10),
+        .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}},
     };
     nt_ui_group_begin(ctx, NT_UI_DATA_LAYER(LAYER_BG), &decl);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body);
@@ -761,12 +766,15 @@ static void slice9_ref(nt_ui_context_t *ctx, nt_atlas_region_ref_t *ref, float w
 }
 
 static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
-    /* Three reference sizes prove corners stay crisp while the center stretches. */
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-        slice9_ref(ctx, &s_panel_blue_ref, 220.0F, 80.0F, "220x80");
-        slice9_ref(ctx, &s_panel_blue_ref, 360.0F, 80.0F, "360x80");
-        slice9_ref(ctx, &s_panel_blue_ref, 300.0F, 200.0F, "300x200");
+    /* Three reference sizes prove corners stay crisp while the center stretches. Wrapped over two
+     * rows so the widest set still fits the content column beside the props card (no overflow). */
+    static const Clay_ElementDeclaration ref_row = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}};
+    CLAY(ref_row) {
+        slice9_ref(ctx, &s_panel_blue_ref, 200.0F, 70.0F, "200x70");
+        slice9_ref(ctx, &s_panel_blue_ref, 300.0F, 70.0F, "300x70");
     }
+    CLAY(ref_row) { slice9_ref(ctx, &s_panel_blue_ref, 260.0F, 160.0F, "260x160"); }
 
     /* A slice9-backed nt_ui_panel container with a child label. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(360), CLAY_SIZING_FIXED(90)}, .padding = CLAY_PADDING_ALL(14), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
@@ -930,7 +938,7 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
     showcase_panel_begin(ctx, "Slice9 properties");
 
     (void)snprintf(buf, sizeof buf, "Inset L  %d", st->s9.inset_l);
@@ -951,7 +959,7 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
 
     (void)snprintf(buf, sizeof buf, "Width  %d", st->s9.target_w);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 400, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 320, 1, g_current->slider, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Height  %d", st->s9.target_h);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
@@ -968,7 +976,7 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
     showcase_panel_begin(ctx, "Progress properties");
 
@@ -985,7 +993,7 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Button-transform panel: rotation / scale / offset sliders drive the live transform each frame. */
 static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
     showcase_panel_begin(ctx, "Transform properties");
 
     (void)snprintf(buf, sizeof buf, "Rotation  %.0f deg", (double)st->btn_xform.rotation_deg);
@@ -1161,7 +1169,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Modal panel: segmented transition + sliders for ease / scale-start / backdrop-alpha. */
 static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(280), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(272), CLAY_SIZING_FIXED(26)}}};
     static const char *const names[3] = {"Scale-pop", "Fade", "Slide"};
     showcase_panel_begin(ctx, "Modal properties");
 
@@ -1368,10 +1376,10 @@ static void declare_stage(nt_ui_context_t *ctx) {
         /* Content (scrolled) + (optional) props panel side by side. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
             /* Vertical scroll bounds the content to the stage height; the inner column FITs (grows
-             * taller than the viewport on tall tabs -> scrolls). Width capped ~736 (720 + bar) so
-             * text/cards don't stretch edge-to-edge. */
-            nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0, 736), CLAY_SIZING_GROW(0)}}});
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0, 720), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
+             * taller than the viewport on tall tabs -> scrolls). Width GROWs to fill whatever the
+             * props card leaves, so the row always fits the stage (no overflow onto the card). */
+            nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
             nt_ui_scroll_end(ctx);
 
             if (e->props_fn != NULL) {
