@@ -1,5 +1,8 @@
 # nt_input -- input polling with swappable backends
 
+# Header-only interface carries nt_input.h's include root; the exe selects the impl.
+nt_declare_interface(nt_input)
+
 if(EMSCRIPTEN)
     nt_add_module(nt_input LOG_DOMAIN "input"
         nt_input.c
@@ -16,15 +19,15 @@ else()
     )
 endif()
 
+target_link_libraries(nt_input PUBLIC nt_core nt_input_interface)
 if(EMSCRIPTEN)
-    # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping
-    target_link_libraries(nt_input PUBLIC nt_core nt_window)
-else()
-    # Native: nt_input_native.c reads g_nt_window.dpr at flush time.
-    # The header is found via the shared engine/ include root; the symbol
-    # g_nt_window resolves at executable link time (app links nt_window).
-    target_link_libraries(nt_input PUBLIC nt_core)
+    # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping.
+    # g_nt_window resolves at executable link time (exe picks a window impl).
+    target_link_libraries(nt_input PUBLIC nt_window_interface)
 endif()
+# Native: nt_input_native.c reads g_nt_window.dpr at flush time. The header is
+# found via the shared engine/ include root; the symbol g_nt_window resolves at
+# executable link time (app links a window impl).
 
 # Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"
@@ -33,4 +36,4 @@ nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"
     nt_input.h
 )
 
-target_link_libraries(nt_input_stub PUBLIC nt_core)
+target_link_libraries(nt_input_stub PUBLIC nt_core nt_input_interface)

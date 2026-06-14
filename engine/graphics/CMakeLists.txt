@@ -5,6 +5,9 @@
 
 option(NT_BASISU "Link Basis Universal transcoder for GPU texture compression" ON)
 
+# Header-only interface carries nt_gfx.h's include root; the exe selects the impl.
+nt_declare_interface(nt_gfx)
+
 if(EMSCRIPTEN)
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
@@ -14,7 +17,7 @@ if(EMSCRIPTEN)
         nt_gfx_internal.h
         gl/nt_gfx_gl_ctx.h
     )
-    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log_interface nt_hash)
+    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window_interface nt_log_interface nt_hash nt_gfx_interface)
 else()
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
@@ -24,7 +27,7 @@ else()
         nt_gfx_internal.h
         gl/nt_gfx_gl_ctx.h
     )
-    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log_interface nt_hash)
+    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window_interface nt_log_interface nt_hash nt_gfx_interface)
     target_link_libraries(nt_gfx PRIVATE glad)
     find_package(OpenGL REQUIRED)
     target_link_libraries(nt_gfx PRIVATE OpenGL::GL)
@@ -44,4 +47,4 @@ nt_add_module(nt_gfx_stub LOG_DOMAIN "gfx_stub"
     nt_gfx_internal.h
 )
 
-target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_pool nt_log_stub nt_hash)
+target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_pool nt_log_stub nt_hash nt_gfx_interface)

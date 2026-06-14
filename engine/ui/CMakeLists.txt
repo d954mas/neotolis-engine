@@ -117,13 +117,13 @@ target_link_libraries(nt_ui
         nt_resource
         nt_font
         nt_material
-        nt_input
+        nt_input_interface
         nt_mem_scratch
         # PUBLIC: nt_atlas_region_ref_t appears in public widget headers
         # (nt_ui_button.h / nt_ui_image.h / nt_ui_panel.h).
         nt_atlas
     PRIVATE
-        nt_gfx
+        nt_gfx_interface
         nt_sprite_renderer
         nt_text_renderer
         nt_time
