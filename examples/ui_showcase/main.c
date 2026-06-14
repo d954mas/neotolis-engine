@@ -203,6 +203,7 @@ static const ui_palette_t *g_current = &g_dark;
 typedef struct {
     int inset_l, inset_r, inset_t, inset_b; /* slice9 override insets (px) */
     int target_w, target_h;                 /* panel target size driven by the panel */
+    float slice9_scale;                     /* corner/border thickness scale (>0) */
 } slice9_params_t;
 
 typedef struct {
@@ -259,7 +260,7 @@ static struct tab_state s_state = {
     .toggle_value = false,
     .slider_float = 0.65F,
     .slider_int = 4,
-    .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 480, .target_h = 200},
+    .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 300, .target_h = 150, .slice9_scale = 1.0F},
     .prog = {.value = 0.4F, .auto_anim = false, .ramp_up = true},
     .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
     .confirm_open = false,
@@ -294,6 +295,7 @@ static uint32_t s_id_stress_scroll;                     /* fixed-size scroll so 
 static uint32_t s_id_stage_scroll;                      /* vertical scroll around the stage content so tall tabs fit */
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
 static uint32_t s_id_props_w, s_id_props_h;
+static uint32_t s_id_props_s9scale; /* slice9 corner-scale slider */
 static uint32_t s_id_props_value;
 static uint32_t s_id_props_rot, s_id_props_bscale, s_id_props_offx, s_id_props_offy; /* button transform panel */
 static uint32_t s_id_modal_confirm, s_id_modal_nested;
@@ -761,10 +763,10 @@ static void slice9_ref(nt_ui_context_t *ctx, nt_atlas_region_ref_t *ref, float w
 static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Three reference sizes prove corners stay crisp while the center stretches. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-        slice9_ref(ctx, &s_panel_blue_ref, 300.0F, 100.0F, "300x100");
-        slice9_ref(ctx, &s_panel_blue_ref, 600.0F, 100.0F, "600x100");
+        slice9_ref(ctx, &s_panel_blue_ref, 220.0F, 80.0F, "220x80");
+        slice9_ref(ctx, &s_panel_blue_ref, 360.0F, 80.0F, "360x80");
+        slice9_ref(ctx, &s_panel_blue_ref, 300.0F, 200.0F, "300x200");
     }
-    slice9_ref(ctx, &s_panel_blue_ref, 600.0F, 400.0F, "600x400");
 
     /* A slice9-backed nt_ui_panel container with a child label. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(360), CLAY_SIZING_FIXED(90)}, .padding = CLAY_PADDING_ALL(14), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
@@ -779,7 +781,7 @@ static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panel-driven (insets + size from the properties panel):", g_current->caption);
     nt_ui_image_style_t live = {
         .color_packed = 0xFFFFFFFF,
-        .slice9_scale = 1.0F,
+        .slice9_scale = st->s9.slice9_scale,
         .slice9_lrtb = {(uint16_t)st->s9.inset_l, (uint16_t)st->s9.inset_r, (uint16_t)st->s9.inset_t, (uint16_t)st->s9.inset_b},
         .flags = NT_UI_IMAGE_SLICE9_OVERRIDE,
     };
@@ -951,11 +953,16 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
 
     (void)snprintf(buf, sizeof buf, "Width  %d", st->s9.target_w);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 700, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_w, NULL, &st->s9.target_w, 100, 400, 1, g_current->slider, &sdecl, true);
 
     (void)snprintf(buf, sizeof buf, "Height  %d", st->s9.target_h);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_h, NULL, &st->s9.target_h, 60, 460, 1, g_current->slider, &sdecl, true);
+    (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_h, NULL, &st->s9.target_h, 60, 300, 1, g_current->slider, &sdecl, true);
+
+    /* Corner scale grows/shrinks the slice9 border thickness while the center keeps stretching. */
+    (void)snprintf(buf, sizeof buf, "Corner scale  %.2f", (double)st->s9.slice9_scale);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_s9scale, NULL, &st->s9.slice9_scale, 0.5F, 3.0F, 0.0F, g_current->slider, &sdecl, true);
 
     showcase_panel_end(ctx);
 }
@@ -1253,6 +1260,7 @@ static void ensure_ids(void) {
     s_id_props_ib = nt_ui_id("showcase/props_ib");
     s_id_props_w = nt_ui_id("showcase/props_w");
     s_id_props_h = nt_ui_id("showcase/props_h");
+    s_id_props_s9scale = nt_ui_id("showcase/props_s9scale");
     s_id_props_value = nt_ui_id("showcase/props_value");
     s_id_props_rot = nt_ui_id("showcase/props_rot");
     s_id_props_bscale = nt_ui_id("showcase/props_bscale");
