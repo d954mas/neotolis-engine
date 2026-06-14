@@ -33,6 +33,11 @@ static inline uint32_t scrollbar_id(uint32_t scroll_id, int axis) { return nt_ui
 /* Below this eased fade the AUTO_HIDE bar is not worth a draw call — skip its emit. */
 #define NT_UI_SCROLLBAR_FADE_EPS 0.01F
 
+/* A freshly-created scroll cell zero-inits idle=0, which on frame 1 reads as "just scrolled" and
+ * pops the AUTO_HIDE bar fully visible before it fades (startup flash). Seed idle large so a new
+ * cell is born past ANY bar_hide_delay (per-style) → bar starts hidden; real activity resets to 0. */
+#define NT_UI_SCROLL_BORN_IDLE 1.0e9F
+
 /* All physics is in Clay's NEGATIVE-down sign convention: childOffset is negative
  * going down/right, content moves up/left. Clamp bounds are [-(content-container), 0].
  * Only the input edge (wheel) and scrollbar-thumb mapping flip sign. */
@@ -869,8 +874,12 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         NT_ASSERT(decl->userData == NULL && "nt_ui_scroll_begin: decl->userData must be NULL (data param controls)");
     }
 
+    const bool fresh_state = nt_ui_state_find(ctx, id) == NULL;
     nt_ui_scroll_state_t *s = nt_ui_state(ctx, id, (uint32_t)sizeof *s, NT_UI_STATE_TAG('s', 'c', 'r', 'l'));
     NT_ASSERT(s != NULL && "nt_ui_scroll_begin: state pool returned NULL");
+    if (fresh_state) {
+        s->idle = NT_UI_SCROLL_BORN_IDLE; /* born idle: AUTO_HIDE bar starts hidden, no frame-1 flash (any activity resets to 0) */
+    }
 
     /* Clamp bounds from Clay's post-layout measurement (found==false on frame 1 ->
      * dims 0 -> bounds default to 0, accepted 1-frame lag). */
