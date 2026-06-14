@@ -356,23 +356,10 @@ static int s_active_tab;
 // #endregion
 
 // #region reusable focused-panel helper (game-side; built from existing nt_ui widgets)
-/* A titled control strip the props_fn populates; no engine symbol involved. */
-static void showcase_panel_begin(nt_ui_context_t *ctx, const char *title) {
-    /* Distinct card: panel_alt shade + a border so the control strip reads apart from the content. */
-    Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIT(0)},
-                   .padding = CLAY_PADDING_ALL(14),
-                   .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                   .childGap = 8,
-                   .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
-        .backgroundColor = g_current->panel_alt,
-        .cornerRadius = CLAY_CORNER_RADIUS(10),
-        .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}},
-    };
-    nt_ui_group_begin(ctx, NT_UI_DATA_LAYER(LAYER_BG), &decl);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body);
-}
-static void showcase_panel_end(nt_ui_context_t *ctx) { nt_ui_group_end(ctx); }
+/* Props_fn populates the right-hand props card directly (declare_props_panel owns the card), so this
+ * only emits the per-tab title -- no nested card, avoiding a card-in-card double border. */
+static void showcase_panel_begin(nt_ui_context_t *ctx, const char *title) { nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body); }
+static void showcase_panel_end(nt_ui_context_t *ctx) { (void)ctx; }
 // #endregion
 
 // #region widget tab render fns
@@ -574,10 +561,10 @@ static void init_styles(void) {
     s_slider_dark = slider_base;
     s_slider_light = slider_base;
 
-    /* Props-card slider: narrower track so track + full thumb travel stay inside the card's inner
-     * width (card 300 - 2x14 pad = 272; track 260 leaves ~6px each side, thumb stays within track_w). */
+    /* Props-card slider: narrower track so track + full thumb travel stay inside the props card's
+     * inner width (card 340 - 2x14 pad = 312; track 290 leaves ~11px each side, thumb within track_w). */
     nt_ui_slider_style_t slider_props = slider_base;
-    slider_props.track_w = 260;
+    slider_props.track_w = 290;
     s_slider_props_dark = slider_props;
     s_slider_props_light = slider_props;
 
@@ -956,7 +943,7 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Slice9 panel: sliders for insets L/R/T/B + target size, fed into render_slice9. */
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
     showcase_panel_begin(ctx, "Slice9 properties");
 
     (void)snprintf(buf, sizeof buf, "Inset L  %d", st->s9.inset_l);
@@ -994,7 +981,7 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
     showcase_panel_begin(ctx, "Progress properties");
 
@@ -1011,7 +998,7 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Button-transform panel: rotation / scale / offset sliders drive the live transform each frame. */
 static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
     showcase_panel_begin(ctx, "Transform properties");
 
     (void)snprintf(buf, sizeof buf, "Rotation  %.0f deg", (double)st->btn_xform.rotation_deg);
@@ -1187,7 +1174,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Modal panel: segmented transition + sliders for ease / scale-start / backdrop-alpha. */
 static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(260), CLAY_SIZING_FIXED(26)}}};
+    static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
     static const char *const names[3] = {"Scale-pop", "Fade", "Slide"};
     showcase_panel_begin(ctx, "Modal properties");
 
@@ -1362,7 +1349,8 @@ static void tab_row(nt_ui_context_t *ctx, int i, bool selected) {
     }
 }
 
-/* Left tab list: one full-row click target per registry entry; clicking selects the active tab. */
+/* Demo-selection panel (left, FIXED 240): one full-row click target per registry entry; clicking
+ * selects the active tab. Styled as a card (bg + border + radius) consistent with the other panels. */
 static void declare_tab_list(nt_ui_context_t *ctx) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(10),
@@ -1370,6 +1358,7 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
                      .childGap = 6,
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
           .backgroundColor = g_current->list_bg,
+          .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         for (int i = 0; i < TAB_COUNT; ++i) {
             tab_row(ctx, i, i == s_active_tab);
@@ -1377,9 +1366,10 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
     }
 }
 
-/* Right stage: title/info, the tab content in a vertical scroll, and (if set) the props panel beside
- * it. The modal is declared at ROOT in frame(), not here, so its panel escapes the stage scissor. */
-static void declare_stage(nt_ui_context_t *ctx) {
+/* Content panel (middle, GROW): tab title/info/source-link, then the tab content in a vertical scroll
+ * so tall tabs (Slice9/Stress) fit. Props live in a separate sibling card; the modal is declared at
+ * ROOT in frame(), not here, so its panel escapes this card's scissor. */
+static void declare_content(nt_ui_context_t *ctx) {
     NT_ASSERT(s_active_tab >= 0 && s_active_tab < TAB_COUNT && "active tab out of range");
     const showcase_entry_t *e = &g_tabs[s_active_tab];
 
@@ -1387,24 +1377,42 @@ static void declare_stage(nt_ui_context_t *ctx) {
                      .padding = CLAY_PADDING_ALL(16),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 10,
-                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = g_current->panel,
+          .cornerRadius = CLAY_CORNER_RADIUS(10),
+          .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->name, g_current->h1);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->info, g_current->caption);
         /* Source reference: a dim "link" style distinct from body/caption copy. */
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->link);
 
-        /* Content (scrolled) + (optional) props panel side by side. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
-            /* Vertical scroll bounds the content to the stage height; the inner column FITs (grows
-             * taller than the viewport on tall tabs -> scrolls). Width GROWs to fill whatever the
-             * props card leaves, so the row always fits the stage (no overflow onto the card). */
-            nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
-            nt_ui_scroll_end(ctx);
+        /* Vertical scroll bounds the content to the card height; the inner column FITs (grows taller
+         * than the viewport on tall tabs -> scrolls). */
+        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
+        nt_ui_scroll_end(ctx);
+    }
+}
 
-            if (e->props_fn != NULL) {
-                e->props_fn(ctx, &s_state);
-            }
+/* Properties panel (right, FIXED 340): a distinct panel_alt card always present so the layout doesn't
+ * jump between tabs. Tabs with a props_fn populate it directly (the card IS this panel -- no nested
+ * card); tabs without show a muted placeholder. */
+static void declare_props_panel(nt_ui_context_t *ctx) {
+    const showcase_entry_t *e = &g_tabs[s_active_tab];
+
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(340), CLAY_SIZING_GROW(0)},
+                     .padding = CLAY_PADDING_ALL(14),
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                     .childGap = 8,
+                     .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
+          .backgroundColor = g_current->panel_alt,
+          .cornerRadius = CLAY_CORNER_RADIUS(10),
+          .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
+        if (e->props_fn != NULL) {
+            e->props_fn(ctx, &s_state);
+        } else {
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Properties", g_current->body);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "No properties for this tab.", g_current->caption);
         }
     }
 }
@@ -1544,15 +1552,11 @@ static void frame(void) {
                          .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}},
               .backgroundColor = g_current->bg}) {
             declare_header(s_ctx);
-            /* Left tab list -> right content stage. */
+            /* Three sibling panels: demo selection (left) | content (middle, GROW) | properties (right). */
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
                 declare_tab_list(s_ctx);
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-                      .backgroundColor = g_current->panel,
-                      .cornerRadius = CLAY_CORNER_RADIUS(10),
-                      .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-                    declare_stage(s_ctx);
-                }
+                declare_content(s_ctx);
+                declare_props_panel(s_ctx);
             }
         }
 
