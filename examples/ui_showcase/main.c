@@ -1148,16 +1148,17 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "draw calls: %u   labels: %d", nt_ui_get_last_walk_draw_calls(ctx), st->stress.label_count);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
 
-    /* Fixed-size scroll container so the 6000-label case can't overflow the window. */
-    nt_ui_scroll_begin(ctx, NULL, s_id_stress_scroll, g_current->scroll_always,
-                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(760), CLAY_SIZING_FIXED(420)}, .padding = CLAY_PADDING_ALL(6)},
+    /* GROW scroll container: fills the content panel's allocation (min 0) so the 6000-label case
+     * can't force the GROW content panel wider and push the FIXED props panel off-screen. */
+    nt_ui_scroll_begin(ctx, NULL, s_id_stress_scroll, g_current->scroll_xy,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(420)}, .padding = CLAY_PADDING_ALL(6)},
                                                   .backgroundColor = g_current->bg,
                                                   .cornerRadius = CLAY_CORNER_RADIUS(8)});
     {
-        /* Fixed-width column of LEFT_TO_RIGHT rows (12 labels/row): fills the box width and grows
-         * DOWN, so vertical scroll reaches every label regardless of count. */
-        enum { STRESS_COLS = 12 };
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(740), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
+        /* GROW column of LEFT_TO_RIGHT rows: fills the viewport width and grows DOWN, so vertical
+         * scroll reaches every label. Both-axes scroll covers any horizontal extent on narrow windows. */
+        enum { STRESS_COLS = 10 };
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}}) {
             for (int i = 0; i < st->stress.label_count; i += STRESS_COLS) {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
                     for (int c = 0; c < STRESS_COLS && (i + c) < st->stress.label_count; ++c) {
