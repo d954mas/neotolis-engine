@@ -1,7 +1,4 @@
 # nt_devapi -- self-describing command layer (dev-only, gated by NT_DEVAPI_ENABLED)
-#
-# Plan 02 adds the dispatch core (nt_devapi.c) + core group (nt_devapi_core.c).
-# Plan 03 adds nt_devapi_discovery.c (endpoints/command.describe/features).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
     nt_devapi_core.c
@@ -19,12 +16,12 @@ target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window nt_log)
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 
-# D-09: per-group compile-time opt-in. Plans 02/03 wrap their core handlers in
-# #ifdef NT_DEVAPI_REGISTER_core; 65-69 clone this pattern per group.
+# Per-group compile-time opt-in: handlers are wrapped in
+# #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 
-# engine.info version sourcing (consumed in Plan 02), injected now so the def
-# exists from module creation — mirrors the Clay-pin compile-def precedent.
+# engine.info version sourcing, injected so the def exists from module creation
+# — mirrors the Clay-pin compile-def precedent.
 target_compile_definitions(nt_devapi PRIVATE
     NT_DEVAPI_ENGINE_VERSION="1.9-dev"
     NT_PRESET_NAME="${NT_PRESET_NAME}"

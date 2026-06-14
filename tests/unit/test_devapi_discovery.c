@@ -1,5 +1,5 @@
-/* PROTO-03/04/05/08/09: discovery group — endpoints / command.describe /
-   features over the registry, plus the zero-engine-edits game-layer path. */
+/* Discovery group — endpoints / command.describe / features over the registry,
+   plus the zero-engine-edits game-layer path. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdbool.h>
@@ -12,7 +12,7 @@
 #include "unity.h"
 /* clang-format on */
 
-/* PROTO-08: a game command registered via the PUBLIC API with no engine edit.
+/* A game command registered via the PUBLIC API with no engine edit.
    Its handler flips a flag through user_data so we can prove it is callable. */
 static bool s_game_poked;
 
@@ -39,8 +39,8 @@ void setUp(void) {
     s_game_poked = false;
     /* init registers core + discovery groups. */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    /* PROTO-08: register the game command through the public API only — the test
-       touches no engine devapi source to add it (zero engine edits). */
+    /* Register the game command through the public API only — the test touches
+       no engine devapi source to add it (zero engine edits). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&k_game_poke, cmd_game_poke, &s_game_poked));
     /* register the "game" group name so features can report it. */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("game"));
@@ -82,7 +82,7 @@ static bool field_is_string(const cJSON *obj, const char *key) { return cJSON_Is
 
 /* Submit an endpoints request line; return the parsed response root (caller frees)
    and the commands array via out-param. Keeps the ok/object/array shape checks out
-   of the per-field tests (D-05: result is object-wrapped, commands is an array). */
+   of the per-field tests (result is object-wrapped, commands is an array). */
 static cJSON *submit_endpoints(const char *request, const cJSON **commands_out) {
     cJSON *root = cJSON_Parse(nt_devapi_submit(request));
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
@@ -181,12 +181,12 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_TRUE(array_has_string(groups, "core"));
     TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
-    /* PROTO-09: an unregistered group is absent from features. */
+    /* an unregistered group is absent from features. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
     cJSON_Delete(root);
 }
 
-/* ---- PROTO-08: game-layer registration discoverable + callable ---- */
+/* ---- game-layer registration discoverable + callable ---- */
 
 static void test_game_command_discoverable(void) {
     const cJSON *commands = NULL;
@@ -218,7 +218,7 @@ static void test_game_command_callable(void) {
     cJSON_Delete(root);
 }
 
-/* ---- PROTO-09: absent command is absent from endpoints ---- */
+/* ---- absent command is absent from endpoints ---- */
 
 static void test_absent_command_not_in_endpoints(void) {
     const cJSON *commands = NULL;

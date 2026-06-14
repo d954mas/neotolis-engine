@@ -1,4 +1,4 @@
-/* SC2 / PROTO-02: registry register / dup-reject / owned-copy survival. */
+/* Registry register / dup-reject / owned-copy survival. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -27,8 +27,8 @@ static bool dummy_handler(const cJSON *params, cJSON *result_obj, nt_devapi_erro
     return true;
 }
 
-/* nt_devapi_init auto-registers the compiled-in `core` group (D-09), so the
-   registry is non-empty after setUp. Tests assert DELTAS from these baselines. */
+/* nt_devapi_init auto-registers the compiled-in `core` group, so the registry is
+   non-empty after setUp. Tests assert DELTAS from these baselines. */
 static int s_base_cmds;
 static int s_base_groups;
 
@@ -71,7 +71,7 @@ static void test_register_seven_fields_round_trip(void) {
     TEST_ASSERT_EQUAL_PTR(dummy_handler, slot->handler);
 }
 
-/* D-03: descriptors are strdup-copied — mutating/freeing the source after
+/* Descriptors are strdup-copied — mutating/freeing the source after
    register must not corrupt the stored copy. */
 static void test_owned_copy_survives_source_free(void) {
     char *method = heap_copy("foo");
@@ -100,7 +100,7 @@ static void test_owned_copy_survives_source_free(void) {
     TEST_ASSERT_EQUAL_STRING("first summary", slot->summary);
 }
 
-/* D-06: a duplicate method is rejected, not overwritten. */
+/* A duplicate method is rejected, not overwritten. */
 static void test_dup_method_rejected_first_preserved(void) {
     nt_devapi_command_desc first = {
         .method = "foo",

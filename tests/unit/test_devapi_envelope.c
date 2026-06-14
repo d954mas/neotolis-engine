@@ -1,5 +1,5 @@
-/* PROTO-06 / PROTO-07: submit() envelope, request_id echo, unknown-method,
-   batch order + continue-on-error, D-04 pointer-lifetime contract. */
+/* submit() envelope, request_id echo, unknown-method, batch order +
+   continue-on-error, pointer-lifetime contract. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -11,7 +11,7 @@
 #include "unity.h"
 /* clang-format on */
 
-/* Trivial handler so the envelope tests don't depend on Task 2's core group.
+/* Trivial handler so the envelope tests don't depend on the core group.
    Echoes back a marker + (if present) the params "n" so we can assert routing. */
 static bool ok_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
     (void)err;
@@ -54,7 +54,7 @@ static void test_single_ok_envelope(void) {
     TEST_ASSERT_NOT_NULL(root);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_TRUE(cJSON_IsObject(result)); /* D-05: result is always an object */
+    TEST_ASSERT_TRUE(cJSON_IsObject(result)); /* result is always an object */
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "ran")));
     cJSON_Delete(root);
 }
@@ -69,7 +69,7 @@ static void test_params_routed_to_handler(void) {
     cJSON_Delete(root);
 }
 
-/* ---- request_id echo: number / string / absent (Pitfall 5) ---- */
+/* ---- request_id echo: number / string / absent ---- */
 
 static void test_request_id_number_echoed(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"ok\",\"request_id\":7}");
@@ -125,7 +125,7 @@ static void test_request_id_echoed_on_error(void) {
     cJSON_Delete(root);
 }
 
-/* ---- batch: order + continue-on-error (D-07) ---- */
+/* ---- batch: order + continue-on-error ---- */
 
 static void test_batch_order_and_continue_on_error(void) {
     const char *resp = nt_devapi_submit("[{\"method\":\"ok\"},{\"method\":\"nope\"},{\"method\":\"ok\"}]");
@@ -143,7 +143,7 @@ static void test_batch_order_and_continue_on_error(void) {
     cJSON_Delete(root);
 }
 
-/* ---- D-04 pointer-lifetime contract ----
+/* ---- pointer-lifetime contract ----
    The returned const char* is valid only until the next submit. The SAFE pattern
    (which this test asserts) is: copy the first result BEFORE calling submit again,
    then compare the copy. We never dereference the first pointer after submit #2 —
@@ -211,7 +211,7 @@ static void test_batch_of_non_objects_each_bad_params(void) {
     cJSON_Delete(root);
 }
 
-/* ---- request_id fidelity on the error + per-batch-entry paths (Pitfall 5) ---- */
+/* ---- request_id fidelity on the error + per-batch-entry paths ---- */
 
 static void test_request_id_string_echoed_on_error(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"nope\",\"request_id\":\"xyz\"}");

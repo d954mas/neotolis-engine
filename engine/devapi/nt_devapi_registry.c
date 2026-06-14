@@ -4,7 +4,7 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 
-/* Dev-only registry: fixed table, linear scan. Not a frame-hot path (Pitfall 4). */
+/* Dev-only registry: fixed table, linear scan. Not a frame-hot path. */
 
 #ifndef NT_DEVAPI_MAX_GROUPS
 #define NT_DEVAPI_MAX_GROUPS 16
@@ -49,8 +49,8 @@ nt_result_t nt_devapi_init(void) {
     s_group_count = 0;
     s_initialized = true;
 
-    /* D-09: wire the compiled-in engine groups. Each group is opt-in via its
-       NT_DEVAPI_REGISTER_<group> define; phases 65-69 add their own block here. */
+    /* Wire the compiled-in engine groups. Each group is opt-in via its
+       NT_DEVAPI_REGISTER_<group> define; later groups add their own block here. */
 #ifdef NT_DEVAPI_REGISTER_core
     nt_devapi_register_core();
 #endif
@@ -82,12 +82,12 @@ nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_han
     NT_ASSERT(s_initialized && desc != NULL && handler != NULL && desc->method != NULL && desc->layer != NULL && desc->summary != NULL && desc->params_shape != NULL && desc->result_shape != NULL &&
               desc->frame_behavior != NULL && desc->side_effects != NULL);
 
-    /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite (D-06). */
+    /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite. */
     if (nt_devapi_registry_find(desc->method) != NULL) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Table overflow is an invariant bug at this scale — assert (T-63-02). */
+    /* Table overflow is an invariant bug at this scale — assert. */
     NT_ASSERT(s_count < NT_DEVAPI_MAX_COMMANDS);
 
     nt_devapi_slot *slot = &s_slots[s_count];

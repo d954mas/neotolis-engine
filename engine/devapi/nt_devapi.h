@@ -33,7 +33,7 @@ nt_result_t nt_devapi_register_group(const char *group_name);
 /* Submit one JSON request line, returns the JSON response line.
    LIFETIME: the returned pointer is valid only until the next nt_devapi_submit
    call — the caller MUST consume or copy it before calling submit again.
-   (Defined in Plan 02; declared here so the contract is single-sourced.) */
+   (Declared here so the lifetime contract is single-sourced.) */
 const char *nt_devapi_submit(const char *line);
 
 #endif /* NT_DEVAPI_H */

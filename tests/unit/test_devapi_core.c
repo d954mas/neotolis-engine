@@ -1,4 +1,4 @@
-/* PROTO-11: core command group — ping / engine.info / view via submit(). */
+/* Core command group — ping / engine.info / view via submit(). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -23,7 +23,7 @@ void setUp(void) {
     g_nt_window.height = 540;
     g_nt_window.dpr = 2.5F; /* fractional on purpose: catches int-truncation of dpr (WR). */
 
-    /* init auto-registers the core group (D-09 NT_DEVAPI_REGISTER_core). */
+    /* init auto-registers the core group (NT_DEVAPI_REGISTER_core). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
 }
 

@@ -3,12 +3,12 @@
 #include "window/nt_window.h"
 
 /* The engine `core` command group: ping / engine.info / view. First instance of
-   the D-09 per-group #ifdef NT_DEVAPI_REGISTER_core pattern that phases 65-69
-   clone. The whole group compiles out when the define is absent. */
+   the per-group #ifdef NT_DEVAPI_REGISTER_core pattern that later groups clone.
+   The whole group compiles out when the define is absent. */
 
 #ifdef NT_DEVAPI_REGISTER_core
 
-/* Compile-time facts for engine.info (Pitfall 6: no runtime module registry). */
+/* Compile-time facts for engine.info — no runtime module registry. */
 #ifndef NT_DEVAPI_ENGINE_VERSION
 #define NT_DEVAPI_ENGINE_VERSION "unknown"
 #endif
@@ -24,7 +24,7 @@ static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     (void)err;
     (void)ud;
     cJSON_AddBoolToObject(result, "pong", true);
-    return true; /* D-05: success result is always an object */
+    return true; /* success result is always an object */
 }
 
 /* Read-only veneer over g_nt_window (L2 rule: never mutates the window). */
@@ -41,7 +41,7 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
 }
 
 /* version/build/preset from compile-defs; "modules" = the active compiled-group
-   list (A3 — the meaningful "linked modules" answer with no runtime registry). */
+   list — the meaningful "linked modules" answer with no runtime registry. */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -99,7 +99,7 @@ void nt_devapi_register_core(void) {
     /* Engine-internal registration: a dup group/method here is a build-time collision
        (programming bug), so assert NT_OK. Capture first — NT_ASSERT compiles out under
        NT_ASSERT_MODE=0, so the call must NOT live inside the macro. */
-    nt_result_t gr = nt_devapi_register_group("core"); /* D-08: group-name registered once */
+    nt_result_t gr = nt_devapi_register_group("core"); /* group-name registered once */
     NT_ASSERT(gr == NT_OK);
     (void)gr;
     int n = (int)(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]));

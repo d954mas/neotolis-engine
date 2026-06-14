@@ -1,4 +1,4 @@
-/* SC1 / PROTO-01: cJSON is usable standalone, WITHOUT devapi.
+/* cJSON is usable standalone, WITHOUT devapi.
    Includes cJSON.h directly — no nt_devapi.h. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */

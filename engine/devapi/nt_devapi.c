@@ -5,16 +5,16 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 
-/* Transport-agnostic dispatch core (D-01: zero platform/socket code). submit()
+/* Transport-agnostic dispatch core — zero platform/socket code. submit()
    parses one JSON line, routes object-vs-array, wraps each request in the
    {ok,result}/{ok,error} envelope, echoes request_id unchanged, and serializes
    into one growing reusable buffer. The whole core is reachable from CTest via
    literal JSON strings — no transport. */
 
-/* D-04: single growing reusable response buffer. The pointer returned by
+/* Single growing reusable response buffer. The pointer returned by
    nt_devapi_submit is valid ONLY until the next submit — the next call memcpys a
    new payload here and a grow reallocs (the pointer may MOVE). Dev-only, single
-   client: T-63-06 accepts unbounded growth (one buffer, reused across calls). */
+   client: unbounded growth is accepted (one buffer, reused across calls). */
 static char *s_resp_buf;
 static size_t s_resp_cap;
 
@@ -45,7 +45,7 @@ void nt_devapi_resp_reset(void) {
     s_resp_cap = 0U;
 }
 
-/* Serialize `tree` into the growing buffer and return it (D-04 lifetime). */
+/* Serialize `tree` into the growing buffer and return it (valid until the next submit). */
 static const char *resp_serialize(cJSON *tree) {
     char *unformatted = cJSON_PrintUnformatted(tree);
     NT_ASSERT(unformatted != NULL);
@@ -70,7 +70,7 @@ static cJSON *make_error_entry(const char *code, const char *message) {
 }
 
 /* Echo request_id unchanged into `entry` if present (number OR string; absent
-   → omitted). cJSON_Duplicate preserves the exact item type (Pitfall 5). */
+   → omitted). cJSON_Duplicate preserves the exact item type (number vs string). */
 static void echo_request_id(cJSON *entry, const cJSON *req) {
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "request_id");
     if (id == NULL) {
@@ -82,8 +82,8 @@ static void echo_request_id(cJSON *entry, const cJSON *req) {
 }
 
 /* Dispatch ONE request object → a fresh response entry object (caller owns it).
-   D-02: kept separate from in-call assembly so the Phase 64/65 deferred path can
-   reuse it. D-05: the dispatcher pre-creates AND always frees result_obj, so a
+   Kept separate from in-call assembly so a future deferred dispatch path can
+   reuse it. The dispatcher pre-creates AND always frees result_obj, so a
    handler cannot leak and cannot free the tree itself. */
 static cJSON *dispatch_one(const cJSON *req) {
     if (!cJSON_IsObject(req)) {
@@ -106,7 +106,7 @@ static cJSON *dispatch_one(const cJSON *req) {
 
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
 
-    /* D-05: dispatcher owns result_obj; the handler only fills it. */
+    /* Dispatcher owns result_obj; the handler only fills it. */
     cJSON *result_obj = cJSON_CreateObject();
     NT_ASSERT(result_obj != NULL);
     nt_devapi_error err = {0};
@@ -125,7 +125,7 @@ static cJSON *dispatch_one(const cJSON *req) {
         entry = make_error_entry(code, message);
     }
 
-    /* D-05 never-leak: on the error path result_obj was unused → always free it.
+    /* Never-leak: on the error path result_obj was unused → always free it.
        On the ok path it was detached (set NULL) → this is a no-op. */
     cJSON_Delete(result_obj);
 
@@ -133,7 +133,7 @@ static cJSON *dispatch_one(const cJSON *req) {
     return entry;
 }
 
-/* D-07: ordered batch, continue-on-error — each request yields its own envelope
+/* Ordered batch, continue-on-error — each request yields its own envelope
    entry in order; one failure does not abort the loop. */
 static cJSON *dispatch_batch(const cJSON *root) {
     cJSON *response = cJSON_CreateArray();
@@ -151,7 +151,7 @@ const char *nt_devapi_submit(const char *line) {
     NT_ASSERT(nt_devapi_initialized()); /* dispatch before init is a caller bug (empty registry). */
     cJSON *root = cJSON_Parse(line);
     if (root == NULL) {
-        /* API contract path, NOT an assert (T-63-05): malformed JSON → bad_params. */
+        /* API contract path, NOT an assert: malformed JSON → bad_params. */
         cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "malformed JSON");
         const char *out = resp_serialize(entry);
         cJSON_Delete(entry);

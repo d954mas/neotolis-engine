@@ -25,7 +25,7 @@ static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
     (void)added;
 }
 
-/* D-05 invariant: result is an OBJECT containing a `commands` array — never a
+/* Invariant: result is an OBJECT containing a `commands` array — never a
    bare top-level array. detail flag toggles cheap vs full descriptor form. */
 static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)err;
@@ -46,7 +46,7 @@ static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *e
 }
 
 /* The full 7-field contract for one command named in params.method. Missing /
-   non-string method → bad_params; unknown name → unknown_method (D-06). */
+   non-string method → bad_params; unknown name → unknown_method. */
 static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
@@ -73,8 +73,8 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     return true;
 }
 
-/* PROTO-05: active command groups = the compile-time policy state (D-09 — a group
-   is present only if its NT_DEVAPI_REGISTER_<group> was compiled). */
+/* Active command groups = the compile-time policy state — a group is present only
+   if its NT_DEVAPI_REGISTER_<group> was compiled. */
 static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -130,7 +130,7 @@ void nt_devapi_register_discovery(void) {
     /* Engine-internal registration: a dup group/method here is a build-time collision
        (programming bug), so assert NT_OK. Capture first — NT_ASSERT compiles out under
        NT_ASSERT_MODE=0, so the call must NOT live inside the macro. */
-    nt_result_t gr = nt_devapi_register_group("discovery"); /* D-08: group-name registered once */
+    nt_result_t gr = nt_devapi_register_group("discovery"); /* group-name registered once */
     NT_ASSERT(gr == NT_OK);
     (void)gr;
     int n = (int)(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]));

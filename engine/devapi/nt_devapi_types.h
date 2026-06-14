@@ -20,7 +20,7 @@ typedef struct nt_devapi_error {
 
 /* Self-describing command metadata. All 7 fields are documentation strings the
    registry copies (strdup) at registration — the caller may free its buffers after.
-   D-08: NO `group` field; group membership is tracked separately via register_group. */
+   NO `group` field; group membership is tracked separately via register_group. */
 typedef struct nt_devapi_command_desc {
     const char *method;
     const char *layer;
