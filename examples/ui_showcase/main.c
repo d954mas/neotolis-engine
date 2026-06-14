@@ -233,6 +233,7 @@ typedef struct {
 
 typedef struct {
     int transition;       /* 0 = scale-pop, 1 = fade, 2 = slide (segmented control) */
+    int slide_dir;        /* 0 = bottom, 1 = top, 2 = left, 3 = right (SLIDE origin edge) */
     float ease_speed;     /* open/close tween value_speed */
     float scale_start;    /* scale-pop start (~0.85..1.0) */
     float backdrop_alpha; /* peak backdrop opacity 0..1 */
@@ -275,7 +276,7 @@ static struct tab_state s_state = {
     .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
     .confirm_open = false,
     .nested_open = false,
-    .modal = {.transition = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .backdrop_alpha = 0.55F},
+    .modal = {.transition = 0, .slide_dir = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .backdrop_alpha = 0.55F},
     .stress = {.label_count = 3000},
 };
 // #endregion
@@ -1086,6 +1087,9 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
     s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
     modal_set_transition(&s_modal_style_runtime, st->modal.transition);
+    /* SLIDE origin edge (no effect on fade/scale-pop). */
+    static const uint8_t slide_dir_bits[4] = {NT_UI_MODAL_SLIDE_FROM_BOTTOM, NT_UI_MODAL_SLIDE_FROM_TOP, NT_UI_MODAL_SLIDE_FROM_LEFT, NT_UI_MODAL_SLIDE_FROM_RIGHT};
+    s_modal_style_runtime.flags = (uint8_t)((s_modal_style_runtime.flags & (uint8_t)~NT_UI_MODAL_SLIDE_DIR_MASK) | slide_dir_bits[st->modal.slide_dir]);
 
     if (nt_ui_modal_visible(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIT(0)},
@@ -1191,6 +1195,26 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 st->modal.transition = i;
+            }
+        }
+    }
+
+    if (st->modal.transition == 2) { /* Slide: choose the origin edge */
+        static const char *const dirs[4] = {"Bottom", "Top", "Left", "Right"};
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Slide from", g_current->caption);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
+            for (int i = 0; i < 4; ++i) {
+                const bool sel = (st->modal.slide_dir == i);
+                nt_ui_button_begin(
+                    ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_slide_dir") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
+                    &(Clay_ElementDeclaration){
+                        .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(36)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                        .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                    true);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), dirs[i], &g_seg_label);
+                if (nt_ui_button_end(ctx)) {
+                    st->modal.slide_dir = i;
+                }
             }
         }
     }
