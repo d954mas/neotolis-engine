@@ -146,7 +146,7 @@ bool nt_input_pop_char(uint32_t *out_codepoint) {
     if (s_char_tail == s_char_head) {
         return false; /* empty — leave *out untouched */
     }
-    *out_codepoint = s_char_ring[s_char_tail & (NT_INPUT_CHAR_RING - 1u)];
+    *out_codepoint = s_char_ring[s_char_tail & (NT_INPUT_CHAR_RING - 1U)];
     s_char_tail++;
     return true;
 }
@@ -215,7 +215,7 @@ void nt_input_buffer_char(uint32_t cp) {
     if (s_char_head - s_char_tail >= NT_INPUT_CHAR_RING) {
         return;
     }
-    s_char_ring[s_char_head & (NT_INPUT_CHAR_RING - 1u)] = cp;
+    s_char_ring[s_char_head & (NT_INPUT_CHAR_RING - 1U)] = cp;
     s_char_head++;
 }
 

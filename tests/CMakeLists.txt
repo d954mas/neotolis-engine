@@ -152,6 +152,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input COMMAND test_input)
 
+    # --- Input char ring tests (INPUT-01: FIFO + UTF-32 + overflow) ---
+    add_executable(test_input_char unit/test_input_char.c)
+    target_link_libraries(test_input_char PRIVATE nt_input_stub nt_log_stub unity)
+    nt_set_warning_flags(test_input_char)
+    nt_set_sanitizer_flags(test_input_char)
+    set_target_properties(test_input_char PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_input_char COMMAND test_input_char)
+
     # --- Graphics module tests ---
     add_executable(test_gfx unit/test_gfx.c)
     target_link_libraries(test_gfx PRIVATE nt_gfx_stub nt_log_stub unity)
