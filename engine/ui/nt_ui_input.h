@@ -94,4 +94,10 @@ typedef struct {
 nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id, bool pressed_now, bool released_now, bool held, float pos_x, float pos_y, float dbl_window_secs,
                                                float long_press_secs, float move_radius_px);
 
+#ifdef NT_TEST_ACCESS
+/* Test probe: builds the password mask render string (one mask glyph per codepoint of
+ * [buffer,len)) into frame scratch. Lets the password branch be asserted without a GL capture. */
+const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len);
+#endif
+
 #endif /* NT_UI_INPUT_H */

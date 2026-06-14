@@ -16,6 +16,38 @@
 #include "ui/nt_ui_state.h"
 #include "utf8/nt_utf8.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+/* Map the field's keyboard hint to a web soft-keyboard via the canvas `inputmode` + `type`
+ * (D-14). Called on focus; mobile browsers pick the keyboard layout from inputmode, and
+ * type=password masks the OS-level overlay. kb is nt_ui_input_keyboard_t. */
+/* clang-format off */
+EM_JS(void, nt_ui_input_web_apply_keyboard, (int kb), {
+    var modes = ['text', 'numeric', 'email', 'url', 'text'];
+    var el = Module['canvas'] || document.activeElement;
+    if (!el) { return; }
+    el.setAttribute('inputmode', modes[kb] || 'text');
+    if (kb === 4 /* NT_UI_KB_PASSWORD */) {
+        el.setAttribute('type', 'password');
+    } else {
+        el.removeAttribute('type');
+    }
+})
+/* clang-format on */
+#endif
+
+/* Apply the mobile keyboard-type hint on focus (web inputmode/type; native is a no-op — the
+ * enum is stored but desktop edit behavior is unchanged). */
+static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
+#ifdef __EMSCRIPTEN__
+    const int eff = password ? (int)NT_UI_KB_PASSWORD : (int)kb;
+    nt_ui_input_web_apply_keyboard(eff);
+#else
+    (void)kb;
+    (void)password;
+#endif
+}
+
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
     .name = "nt_input",
     .pill_color = 0xFF70A0D0U,
@@ -488,6 +520,23 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
     nt_ui_clay_priv_close_element();
 }
 
+/* Build the password mask string: one NT_UI_INPUT_MASK_CHAR per codepoint of [buffer,len), into
+ * frame scratch (NUL-terminated). Render-only — the game buffer is never modified. Exposed for the
+ * test probe (no GL capture) under NT_TEST_ACCESS. */
+const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
+    uint32_t count = 0U;
+    uint32_t i = 0U;
+    while (i < len) {
+        i += (utf8_seq_len(buffer, i, len) > 0U) ? utf8_seq_len(buffer, i, len) : 1U;
+        ++count;
+    }
+    char *masked = (char *)nt_mem_scratch_alloc(count + 1U, 1U);
+    NT_ASSERT(masked != NULL && "nt_ui_input: scratch alloc failed (mask)");
+    memset(masked, NT_UI_INPUT_MASK_CHAR, count);
+    masked[count] = '\0';
+    return masked;
+}
+
 static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
@@ -552,6 +601,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
         claimed_now = true;
+        apply_keyboard_hint(style->keyboard, style->password); /* Tab into the field also surfaces the keyboard */
     }
     // #endregion
 
@@ -576,6 +626,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     if (enabled && in.pressed_now) {
+        const bool was_focused = (ctx->focused_input_id == id);
         ctx->focused_input_id = id;
         st->blink = 0.0F;
         if (bb.found) {
@@ -584,6 +635,9 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         }
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
         st->drag = 1U;
+        if (!was_focused) {
+            apply_keyboard_hint(style->keyboard, style->password); /* surface the soft keyboard on web */
+        }
     }
 
     /* Generic dbl-click / long-press edges (D-16); double-click select-word rides this. */
@@ -815,22 +869,11 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     const bool empty = (cur_len == 0U);
     if (!empty) {
         nt_ui_label_style_t ts = style->text;
-        if (style->password) {
-            /* Render a mask string of the same codepoint count into scratch. */
-            uint32_t count = 0U;
-            uint32_t i = 0U;
-            while (i < cur_len) {
-                i += (utf8_seq_len(buffer, i, cur_len) > 0U) ? utf8_seq_len(buffer, i, cur_len) : 1U;
-                ++count;
-            }
-            char *masked = (char *)nt_mem_scratch_alloc(count + 1U, 1U);
-            NT_ASSERT(masked != NULL && "nt_ui_input: scratch alloc failed (mask)");
-            memset(masked, NT_UI_INPUT_MASK_CHAR, count);
-            masked[count] = '\0';
-            nt_ui_label(ctx, nt_ui_make_element_data(text_layer, NULL), masked, &ts);
-        } else {
-            nt_ui_label(ctx, nt_ui_make_element_data(text_layer, NULL), buffer, &ts);
-        }
+        /* Password fields render one mask glyph per codepoint instead of the real bytes; the mask
+         * is render-only (the game buffer is untouched). build_display_text is shared with the test
+         * probe so the password branch is asserted without a GL capture. */
+        const char *disp = (style->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
+        nt_ui_label(ctx, nt_ui_make_element_data(text_layer, NULL), disp, &ts);
     }
     /* Placeholder text is a 61-07 demo concern: T0 has no placeholder string param (the buffer IS
      * the value). style->placeholder carries the dimmed style for when that lands. */

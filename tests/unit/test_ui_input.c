@@ -550,6 +550,35 @@ static void test_clipboard_paste_replaces_selection(void) {
     TEST_ASSERT_EQUAL_STRING("XYcd", buf);
 }
 
+/* ---- Test 22: password mask renders one mask glyph per codepoint (non-visual render-state probe). ---- */
+static void test_password_mask_render(void) {
+    /* "Аб" = 2 codepoints / 4 bytes -> the mask string is exactly 2 glyphs, not 4. */
+    const char *src = "\xD0\x90\xD0\xB1";
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1); /* scratch frame for the mask alloc */
+    const char *masked = nt_ui_input_build_display_text(src, (uint32_t)strlen(src));
+    TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(masked)); /* 2 codepoints -> 2 mask chars */
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)'*', (uint8_t)masked[0]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)'*', (uint8_t)masked[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)masked[2]);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 23: a password field edits the real buffer (mask is render-only) + keyboard enum plumbs. ---- */
+static void test_password_buffer_and_keyboard(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    s_style.password = true;
+    s_style.keyboard = NT_UI_KB_PASSWORD;
+    warmup_focus(id, buf, sizeof buf);
+
+    /* Typing fills the REAL buffer (the mask only affects rendering). */
+    nt_input_buffer_char((uint32_t)'s');
+    nt_input_buffer_char((uint32_t)'e');
+    nt_input_buffer_char((uint32_t)'c');
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_EQUAL_STRING("sec", buf); /* native: keyboard enum stored, edit behavior unchanged */
+}
+
 /* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink). ---- */
 static void test_style_defaults_valid(void) {
     nt_ui_input_style_t s = nt_ui_input_style_defaults();
@@ -605,6 +634,8 @@ int main(void) {
     RUN_TEST(test_clipboard_paste_clamp_no_split);
     RUN_TEST(test_clipboard_paste_filtered);
     RUN_TEST(test_clipboard_paste_replaces_selection);
+    RUN_TEST(test_password_mask_render);
+    RUN_TEST(test_password_buffer_and_keyboard);
     RUN_TEST(test_style_defaults_valid);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
