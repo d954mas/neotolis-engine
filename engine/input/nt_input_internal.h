@@ -22,6 +22,10 @@ void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t b
 void nt_input_buffer_wheel(float dx, float dy);
 void nt_input_buffer_focus_lost(void);
 
+/* Push a typed UTF-32 codepoint into the shared char ring. Lives in nt_input.c
+   (platform-agnostic), called by the native/web char sources. Drop-when-full. */
+void nt_input_buffer_char(uint32_t cp);
+
 /* Platform lifecycle — implemented by each backend (web, native, stub). */
 
 void nt_input_platform_init(void);

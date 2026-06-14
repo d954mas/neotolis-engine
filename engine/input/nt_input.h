@@ -135,6 +135,10 @@ bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
 
+/* Drain one typed UTF-32 codepoint (FIFO). Returns false and leaves *out
+   untouched when the char ring is empty. Fed by the platform char source. */
+bool nt_input_pop_char(uint32_t *out_codepoint);
+
 /* ---- Mouse convenience helpers ---- */
 
 bool nt_input_mouse_is_down(nt_button_t button);

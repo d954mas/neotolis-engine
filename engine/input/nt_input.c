@@ -12,6 +12,14 @@ static bool s_keys_current[NT_KEY_COUNT];
 static bool s_keys_pressed[NT_KEY_COUNT];
 static bool s_keys_released[NT_KEY_COUNT];
 
+/* ---- UTF-32 char ring (typed text, fed by platform char sources) ---- */
+
+#define NT_INPUT_CHAR_RING 32 /* power-of-2: one frame's typing < 32 (A6) */
+
+static uint32_t s_char_ring[NT_INPUT_CHAR_RING];
+static uint32_t s_char_head; /* next write slot */
+static uint32_t s_char_tail; /* next read slot */
+
 /* ---- Internal pointer helpers ---- */
 
 static nt_pointer_t *find_pointer_by_id(uint32_t id) {
@@ -62,6 +70,8 @@ void nt_input_init(void) {
     memset(s_keys_current, 0, sizeof(s_keys_current));
     memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
     memset(s_keys_released, 0, sizeof(s_keys_released));
+    s_char_head = 0;
+    s_char_tail = 0;
     nt_input_platform_init();
 }
 
@@ -96,6 +106,8 @@ void nt_input_poll(void) {
 void nt_input_shutdown(void) {
     nt_input_platform_shutdown();
     memset(&g_nt_input, 0, sizeof(g_nt_input));
+    s_char_head = 0;
+    s_char_tail = 0;
 }
 
 /* ---- Key query functions ---- */
@@ -128,6 +140,15 @@ bool nt_input_any_key_pressed(void) {
         }
     }
     return false;
+}
+
+bool nt_input_pop_char(uint32_t *out_codepoint) {
+    if (s_char_tail == s_char_head) {
+        return false; /* empty — leave *out untouched */
+    }
+    *out_codepoint = s_char_ring[s_char_tail & (NT_INPUT_CHAR_RING - 1u)];
+    s_char_tail++;
+    return true;
 }
 
 /* ---- Mouse convenience helpers ---- */
@@ -187,6 +208,15 @@ void nt_input_set_key(nt_key_t key, bool down) {
         s_keys_released[key] = true;
     }
     s_keys_current[key] = down;
+}
+
+void nt_input_buffer_char(uint32_t cp) {
+    /* Drop when full so unread chars are never clobbered (A6). */
+    if (s_char_head - s_char_tail >= NT_INPUT_CHAR_RING) {
+        return;
+    }
+    s_char_ring[s_char_head & (NT_INPUT_CHAR_RING - 1u)] = cp;
+    s_char_head++;
 }
 
 void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
