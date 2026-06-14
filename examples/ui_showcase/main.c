@@ -1195,7 +1195,7 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
             const bool sel = (st->modal.transition == i);
             if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_trans") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
                              &(Clay_ElementDeclaration){
-                                 .layout = {.sizing = {CLAY_SIZING_FIXED(92), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                 .layout = {.sizing = {CLAY_SIZING_FIXED(84), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                  .cornerRadius = CLAY_CORNER_RADIUS(8)},
                              true)) {
                 st->modal.transition = i;
@@ -1232,7 +1232,7 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
             (void)snprintf(buf, sizeof buf, "%d", counts[i]);
             if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/stress_n") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
                              &(Clay_ElementDeclaration){
-                                 .layout = {.sizing = {CLAY_SIZING_FIXED(66), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                 .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                  .cornerRadius = CLAY_CORNER_RADIUS(8)},
                              true)) {
                 st->stress.label_count = counts[i];
