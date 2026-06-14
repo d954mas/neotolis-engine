@@ -33,7 +33,7 @@ set(UI_SHOWCASE_PACK_NAMES ui_showcase.ntpack)
 # build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
     add_executable(build_ui_showcase_packs build_packs.c)
-    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder)
+    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(build_ui_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(build_ui_showcase_packs PRIVATE -U_DLL)
     nt_set_warning_flags(build_ui_showcase_packs)

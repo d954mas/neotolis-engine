@@ -36,7 +36,7 @@ set(SLICE9_DEMO_PACK_NAMES slice9_demo.ntpack)
 # build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
     add_executable(slice9_demo_build_packs build_packs.c)
-    target_link_libraries(slice9_demo_build_packs PRIVATE nt_builder)
+    target_link_libraries(slice9_demo_build_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(slice9_demo_build_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(slice9_demo_build_packs PRIVATE -U_DLL)
     nt_set_warning_flags(slice9_demo_build_packs)

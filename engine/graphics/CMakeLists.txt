@@ -14,7 +14,7 @@ if(EMSCRIPTEN)
         nt_gfx_internal.h
         gl/nt_gfx_gl_ctx.h
     )
-    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log nt_hash)
+    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log_interface nt_hash)
 else()
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
@@ -24,7 +24,7 @@ else()
         nt_gfx_internal.h
         gl/nt_gfx_gl_ctx.h
     )
-    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log nt_hash)
+    target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log_interface nt_hash)
     target_link_libraries(nt_gfx PRIVATE glad)
     find_package(OpenGL REQUIRED)
     target_link_libraries(nt_gfx PRIVATE OpenGL::GL)
