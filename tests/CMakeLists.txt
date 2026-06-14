@@ -336,6 +336,18 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_fs WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # --- Clipboard module tests (real/stub twins, same source) ---
+    # Native impl: real round-trip needs an initialized GLFW (nt_window pulls glfw).
+    add_executable(test_clipboard unit/test_clipboard.c)
+    target_link_libraries(test_clipboard PRIVATE nt_clipboard nt_window nt_input_stub nt_log_stub unity)
+    target_compile_definitions(test_clipboard PRIVATE NT_CLIPBOARD_TEST_NATIVE)
+    nt_setup_test_target(test_clipboard)
+
+    # Stub impl: get -> "", set -> noop (same source, no GLFW).
+    add_executable(test_clipboard_stub unit/test_clipboard.c)
+    target_link_libraries(test_clipboard_stub PRIVATE nt_clipboard_stub nt_log_stub unity)
+    nt_setup_test_target(test_clipboard_stub)
+
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
     target_link_libraries(test_builder PRIVATE nt_builder nt_log unity)

@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Swappable real impl targets that engine modules must NEVER link directly.
-SWAPPABLE=(nt_log nt_input nt_http nt_gfx nt_window nt_app nt_fs)
+SWAPPABLE=(nt_log nt_input nt_http nt_gfx nt_window nt_app nt_fs nt_clipboard)
 
 FAIL=0
 while IFS= read -r cmake; do
