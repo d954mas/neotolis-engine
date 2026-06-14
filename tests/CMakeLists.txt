@@ -512,6 +512,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_tree_build
         test_nt_ui_state
         test_nt_ui_scroll
+        test_nt_ui_modal
         test_nt_ui_slider
         test_nt_ui_progress
     )

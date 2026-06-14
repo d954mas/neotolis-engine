@@ -8,7 +8,7 @@
  *   4) drawing zero zones / max-cap (silently saturated) does not crash
  *
  * Pixel output of the overlay is intentionally NOT unit-tested -- visual
- * verification happens in the ui_buttons_demo. */
+ * verification happens in the ui_showcase. */
 
 #include <math.h>
 #include <stdalign.h>

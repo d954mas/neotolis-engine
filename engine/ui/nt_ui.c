@@ -214,6 +214,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     NT_ASSERT(isfinite(desc->element_depth_bias_ndc) && desc->element_depth_bias_ndc >= 0.0F && "nt_ui_create_context: element_depth_bias_ndc must be finite and non-negative");
     NT_ASSERT((desc->element_depth_bias_ndc == 0.0F || desc->use_raycast_input) && "nt_ui_create_context: element_depth_bias_ndc requires use_raycast_input=true");
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
+    /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
+    ctx->modal_zband_stride = desc->modal_zband_stride;
+    NT_ASSERT((int)ctx->modal_zband_stride > 0 && (int)ctx->modal_zband_stride * NT_UI_MODAL_MAX_DEPTH <= INT16_MAX &&
+              "nt_ui_create_context: modal_zband_stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -336,6 +340,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* New frame of wheel candidates; depth counter re-zeroes (begin++/end-- balance across the frame). */
     ctx->wheel_candidate_count = 0U;
     ctx->wheel_depth = 0U;
+    ctx->active_modal_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
+    /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
+    ctx->modal_top_id_prev = ctx->modal_top_id_cur;
+    ctx->modal_top_id_cur = 0U;
+    ctx->modal_max_depth_cur = 0U;
+    /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
+     * nt_ui_modal_active BEFORE this frame's begin still sees last frame's result). */
+    ctx->modal_present_cur = false;
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
 
@@ -405,6 +417,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
+    NT_ASSERT(ctx->active_modal_depth == 0U && "nt_ui_end: unbalanced nt_ui_modal_begin/end (missing modal_end)");
 #if NT_UI_DEBUG_TOOLS
     if (ctx->inspector_active) {
         nt_ui_internal_emit_inspector_layout_extern(ctx);
@@ -422,6 +435,10 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 
     /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
     nt_ui_internal_resolve_wheel_owners(ctx);
+
+    /* Publish this frame's modal presence for nt_ui_modal_active: a game polls it next frame BEFORE
+     * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
+    ctx->modal_present_prev = ctx->modal_present_cur;
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
@@ -2058,6 +2075,15 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
     const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
+}
+
+bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_hit_test_padded: ctx must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL, NULL);
+    Clay_SetCurrentContext(saved);
+    return hit;
 }
 
 #if NT_UI_DEBUG_TOOLS

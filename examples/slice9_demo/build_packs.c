@@ -20,7 +20,7 @@
 #endif
 
 #define HEADER_DIR "examples/slice9_demo/generated"
-#define FONT_PATH "examples/ui_theme_demo/raw/font.ttf"
+#define FONT_PATH "examples/slice9_demo/raw/font.ttf"
 
 static char s_path_buf[512];
 
@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
     nt_builder_end_atlas(ctx);
     // #endregion
 
-    // #region font: ASCII Latin only (reuse ui_theme_demo font)
+    // #region font: ASCII Latin only
     nt_builder_add_font(ctx, FONT_PATH,
                         &(nt_font_opts_t){
                             .charset = NT_CHARSET_ASCII,

@@ -1226,22 +1226,96 @@ static void test_scrollbar_auto_hide_fades_in_on_activity(void) {
 }
 
 /* ---- Test 35 (fix 1b): hovering the bar keeps it visible even with no scroll motion. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scrollbar_auto_hide_hover_keeps_visible(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
     style.bar_fade_speed = 8.0F;
     style.bar_hide_delay = 0.2F;
     nt_pointer_t p = {0};
     p.active = true;
-    p.x = 195.0F; /* over the right-edge vertical bar */
+    p.x = 195.0F; /* over the right-edge vertical bar (also inside the 200-wide container) */
     p.y = 100.0F;
 
-    /* Idle clock runs past the linger, but the pointer hovers the bar -> stays opaque. */
+    /* Born idle: reveal the bar first via wheel notches so it draws (and registers its hit bbox);
+     * an invisible overlay bar has nothing on screen to hover, mirroring macOS overlay scrollbars.
+     * The pointer already sits on the bar, so hover takes over once the bar has drawn a frame. */
+    for (int i = 0; i < 12; ++i) {
+        p.wheel_dy = 1.0F; /* keep activity alive while the fade climbs and the bbox registers */
+        scrollbar_frame(&p, &style, 800.0F);
+    }
+    p.wheel_dy = 0.0F;
+
+    /* Idle clock now runs past the linger, but the pointer hovers the bar -> stays opaque. */
     float op = 0.0F;
     for (int i = 0; i < 120; ++i) {
         scrollbar_frame(&p, &style, 800.0F);
         nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
     }
     TEST_ASSERT_TRUE(op > 0.8F); /* hover held it visible past the idle linger */
+}
+
+/* ---- Test 35b (born-idle): a fresh AUTO_HIDE scroll starts HIDDEN — no frame-1 flash. The bar
+ *      stays faded out with no activity, then fades IN once a wheel notch resets the idle clock. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scrollbar_auto_hide_born_idle_no_flash(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
+    style.bar_fade_speed = 8.0F;
+    nt_pointer_t p = {0};
+    p.active = true; /* pointer NOT over the bar */
+    p.x = 10.0F;
+    p.y = 10.0F;
+
+    /* Frame 1 solves dims (no bar yet); frame 2 emits with the born-idle cell -> target 0, hidden. */
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    float op_start = 1.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_start);
+    TEST_ASSERT_TRUE(op_start < 0.1F); /* born hidden — no startup flash */
+
+    /* Stays hidden across more idle frames (idle never dips below the linger on its own). */
+    float op_idle = 1.0F;
+    for (int i = 0; i < 30; ++i) {
+        scrollbar_frame(&p, &style, 800.0F);
+        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_idle);
+    }
+    TEST_ASSERT_TRUE(op_idle < 0.1F);
+
+    /* A wheel notch over the container resets idle to 0 -> the bar fades IN. */
+    p.wheel_dy = 1.0F;
+    p.x = 100.0F; /* over the container so the wheel is gathered */
+    p.y = 100.0F;
+    scrollbar_frame(&p, &style, 800.0F);
+    p.wheel_dy = 0.0F;
+    bool rose = false;
+    float op_prev = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_prev);
+    for (int i = 0; i < 10; ++i) {
+        scrollbar_frame(&p, &style, 800.0F); /* fling-in-motion keeps idle reset -> target stays 1 */
+        float op = 0.0F;
+        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+        if (op > op_prev + 0.01F) {
+            rose = true;
+        }
+        op_prev = op;
+    }
+    TEST_ASSERT_TRUE(rose);           /* appeared on real scroll activity */
+    TEST_ASSERT_TRUE(op_prev > 0.4F); /* climbed well off the floor */
+}
+
+/* ---- Test 35c (born-idle): ALWAYS bars ignore the idle seed — visible on frame 1 regardless. ---- */
+static void test_scrollbar_always_born_visible(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_pointer_t p = {0};
+    p.active = true;
+    p.x = 10.0F;
+    p.y = 10.0F;
+
+    /* No activity at all; ALWAYS opacity is a constant 1, unaffected by the born-idle seed. */
+    scrollbar_frame(&p, &style, 800.0F);
+    scrollbar_frame(&p, &style, 800.0F);
+    float op = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+    TEST_ASSERT_TRUE(op > 0.9F); /* always visible from the first emit */
 }
 
 /* ---- Test 36 (fix 3): a wheel notch during a fling kills momentum and eases toward the wheel
@@ -1996,6 +2070,8 @@ int main(void) {
     RUN_TEST(test_scroll_release_reclaims_on_next_edge);
     RUN_TEST(test_scrollbar_auto_hide_fades_in_on_activity);
     RUN_TEST(test_scrollbar_auto_hide_hover_keeps_visible);
+    RUN_TEST(test_scrollbar_auto_hide_born_idle_no_flash);
+    RUN_TEST(test_scrollbar_always_born_visible);
     RUN_TEST(test_scroll_wheel_kills_fling);
     RUN_TEST(test_scroll_velocity_clamp_on_dt_hitch);
     RUN_TEST(test_scroll_no_overflow_takes_no_gesture);
