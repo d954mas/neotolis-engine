@@ -234,6 +234,7 @@ typedef struct {
 struct tab_state {
     /* Toggles tab. */
     bool cb_value;
+    bool cb_locked; /* disabled-checkbox demo: own fixed value (enabled=false never toggles it). */
     int radio_sel;
     bool toggle_value;
     /* Sliders tab. */
@@ -253,6 +254,7 @@ struct tab_state {
 
 static struct tab_state s_state = {
     .cb_value = true,
+    .cb_locked = true, /* demos a locked-ON feature; disabled so it stays fixed. */
     .radio_sel = 1,
     .toggle_value = false,
     .slider_float = 0.65F,
@@ -495,6 +497,11 @@ static void init_styles(void) {
     check_base.checked[NT_UI_CB_IDLE].box = box;
     check_base.checked[NT_UI_CB_IDLE].check = check;
     check_base.checked[NT_UI_CB_IDLE].check_tint = 0xFF7CE08C;
+    /* Disabled dim: box/check refs left {0} inherit the idle art (engine ref_or); only opacity
+     * differs per cell (no fallback), so set it here to match the buttons' 0.4 disabled dim.
+     * On check_base => radio/toggle inherit the same disabled look. */
+    check_base.unchecked[NT_UI_CB_DISABLED].opacity = 0.4F;
+    check_base.checked[NT_UI_CB_DISABLED].opacity = 0.4F;
     s_check_dark = check_base;
     s_check_light = check_base;
     s_check_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
@@ -786,7 +793,7 @@ static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Checkbox", g_current->caption);
     (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_cb, "Enable feature", &st->cb_value, g_current->check, &row, true);
     /* A second, disabled checkbox for the disabled-state config. */
-    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/cb_locked"), "Locked (disabled)", &st->cb_value, g_current->check, &row, false);
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/cb_locked"), "Locked (disabled)", &st->cb_locked, g_current->check, &row, false);
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Radio group (exclusive)", g_current->caption);
     (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_radio_a, "Low", &st->radio_sel, 0, g_current->radio, &row, true);
