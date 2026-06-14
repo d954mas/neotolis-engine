@@ -23,6 +23,7 @@
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_checkbox.h"
 #include "ui/nt_ui_image.h"
+#include "ui/nt_ui_input.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_modal.h"
@@ -106,6 +107,11 @@ static nt_ui_scroll_style_t s_scroll_hide_dark, s_scroll_hide_light;
 static nt_ui_scroll_style_t s_scroll_always_dark, s_scroll_always_light;
 static nt_ui_scroll_style_t s_scroll_horiz_dark, s_scroll_horiz_light;
 static nt_ui_scroll_style_t s_scroll_xy_dark, s_scroll_xy_light;
+/* Input field styles (flat colors, theme-agnostic except text color). plain shares with cyrillic;
+ * numeric/password vary the allow predicate + mask/keyboard flags. */
+static nt_ui_input_style_t s_input_dark, s_input_light;
+static nt_ui_input_style_t s_input_numeric_dark, s_input_numeric_light;
+static nt_ui_input_style_t s_input_password_dark, s_input_password_light;
 
 /* Slice9 panel image style (untinted, atlas-default slice9). */
 static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
@@ -127,6 +133,7 @@ typedef struct {
     nt_ui_progress_style_t *progress;
     nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
+    nt_ui_input_style_t *input, *input_numeric, *input_password;
     const nt_ui_modal_style_t *modal;
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
@@ -159,6 +166,9 @@ static ui_palette_t g_dark = {
     .scroll_always = &s_scroll_always_dark,
     .scroll_horiz = &s_scroll_horiz_dark,
     .scroll_xy = &s_scroll_xy_dark,
+    .input = &s_input_dark,
+    .input_numeric = &s_input_numeric_dark,
+    .input_password = &s_input_password_dark,
     .modal = &s_modal_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
@@ -194,6 +204,9 @@ static ui_palette_t g_light = {
     .scroll_always = &s_scroll_always_light,
     .scroll_horiz = &s_scroll_horiz_light,
     .scroll_xy = &s_scroll_xy_light,
+    .input = &s_input_light,
+    .input_numeric = &s_input_numeric_light,
+    .input_password = &s_input_password_light,
     .modal = &s_modal_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
@@ -244,6 +257,15 @@ typedef struct {
     int label_count; /* segmented control: 500 / 1500 / 3000 / 6000 */
 } stress_params_t;
 
+/* Input tab: four game-owned field buffers (D-09, ImGui-style). The widget edits these in place;
+ * the engine state pool holds only caret/selection/scroll/blink, never the string. */
+typedef struct {
+    char plain[64];
+    char numeric[16];
+    char password[32];
+    char cyrillic[64];
+} input_params_t;
+
 struct tab_state {
     /* Toggles tab. */
     bool cb_value;
@@ -263,6 +285,8 @@ struct tab_state {
     modal_params_t modal;
     /* Stress tab. */
     stress_params_t stress;
+    /* Input tab. */
+    input_params_t input;
 };
 
 static struct tab_state s_state = {
@@ -280,6 +304,7 @@ static struct tab_state s_state = {
     .modal = {.open_type = 2, .close_type = 1, .open_edge = 0, .close_edge = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .slide_offset = 32.0F, .backdrop_alpha = 0.55F}, /* default demo: slide-in /
                                                                                                                                                                                fade-out */
     .stress = {.label_count = 3000},
+    .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
 };
 // #endregion
 
@@ -316,6 +341,7 @@ static uint32_t s_id_modal_confirm, s_id_modal_nested;
 static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s_id_modal_nested_btn, s_id_modal_nested_close_btn;
 static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop, s_id_props_slide_dist;
 static uint32_t s_id_theme_btn;
+static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -376,6 +402,7 @@ static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
@@ -395,6 +422,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Sliders & Progress", "Float + int sliders + a progress bar driven by a live value panel.", "examples/ui_showcase/main.c:render_sliders", render_sliders, props_progress},
     {"Scroll", "Four scroll variants: vertical AUTO_HIDE / ALWAYS bar / horizontal-only / both axes.", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
+    {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
 #define TAB_COUNT ((int)(sizeof g_tabs / sizeof g_tabs[0]))
@@ -633,6 +661,38 @@ static void init_styles(void) {
     scroll_xy.scroll_y = true;
     s_scroll_xy_dark = scroll_xy;
     s_scroll_xy_light = scroll_xy;
+
+    /* Input field: flat-color field (no atlas art) with a focused-vs-idle bg/border variant.
+     * Light palette darkens the entered text; numeric/password vary only the filter + mask flags. */
+    nt_ui_input_style_t input_base = nt_ui_input_style_defaults();
+    input_base.text.font_id = 0;
+    input_base.text.font_size = 22.0F;
+    input_base.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
+    input_base.placeholder.font_size = 22.0F;
+    input_base.pad_x = 10.0F;
+    input_base.pad_y = 8.0F;
+    s_input_dark = input_base;
+    s_input_light = input_base;
+    s_input_light.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
+    s_input_light.bg_color = 0xFFF0F0F0U;
+    s_input_light.focused_bg_color = 0xFFFFFFFFU;
+    s_input_light.caret_color = 0xFF202020U;
+
+    /* Numeric: same look, [0-9.+-] filter + numeric soft-keyboard hint. */
+    s_input_numeric_dark = s_input_dark;
+    s_input_numeric_dark.allow = nt_ui_filter_numeric;
+    s_input_numeric_dark.keyboard = NT_UI_KB_NUMERIC;
+    s_input_numeric_light = s_input_light;
+    s_input_numeric_light.allow = nt_ui_filter_numeric;
+    s_input_numeric_light.keyboard = NT_UI_KB_NUMERIC;
+
+    /* Password: mask glyph per codepoint + password soft-keyboard hint. */
+    s_input_password_dark = s_input_dark;
+    s_input_password_dark.password = true;
+    s_input_password_dark.keyboard = NT_UI_KB_PASSWORD;
+    s_input_password_light = s_input_light;
+    s_input_password_light.password = true;
+    s_input_password_light.keyboard = NT_UI_KB_PASSWORD;
 
     /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
@@ -1137,6 +1197,28 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
+/* One captioned text field: a caption above a fixed-width field that edits the game-owned buffer. */
+static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_style_t *style) {
+    static const Clay_ElementDeclaration field_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), caption, g_current->caption);
+        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, style, &field_decl, true, NULL);
+    }
+}
+
+/* Input tab: plain / numeric-filtered / password-masked / Cyrillic fields (D-18). All four edit
+ * game-owned buffers in place; click to focus, type, select, Ctrl+C/X/V, Tab to advance, Esc to unfocus. */
+static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a field to focus; type Latin or Cyrillic; select with Shift+arrows / drag / double-click / Ctrl+A; Ctrl+C/X/V clipboard.",
+                g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tab advances to the next field; Esc unfocuses.", g_current->caption);
+
+    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, g_current->input);
+    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, g_current->input_numeric);
+    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, g_current->input_password);
+    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, g_current->input);
+}
+
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
  * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1321,6 +1403,10 @@ static void ensure_ids(void) {
     s_id_props_backdrop = nt_ui_id("showcase/props_backdrop");
     s_id_props_slide_dist = nt_ui_id("showcase/props_slide_dist");
     s_id_theme_btn = nt_ui_id("showcase/theme_btn");
+    s_id_input_plain = nt_ui_id("showcase/input_plain");
+    s_id_input_numeric = nt_ui_id("showcase/input_numeric");
+    s_id_input_password = nt_ui_id("showcase/input_password");
+    s_id_input_cyrillic = nt_ui_id("showcase/input_cyrillic");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
     s_ids_ready = true;
 }
