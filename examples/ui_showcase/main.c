@@ -81,6 +81,8 @@ static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 1
 static const nt_ui_label_style_t g_title_light = {.font_id = 0, .font_size = 26, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
 static const nt_ui_label_style_t g_row_sel_light = {.font_id = 0, .font_size = 16, .color = {12.0F, 28.0F, 56.0F, 255.0F}};
 static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, .color = {56.0F, 100.0F, 170.0F, 255.0F}};
+/* Segment-button label: small + bright so multi-char text fits the narrow segment buttons (body 22 spills). */
+static const nt_ui_label_style_t g_seg_label = {.font_id = 0, .font_size = 14, .color = {245.0F, 247.0F, 252.0F, 255.0F}};
 // #endregion
 
 // #region palette widget styles (filled with late-bound atlas refs at init)
@@ -1198,7 +1200,7 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(84), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
                                true);
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], g_current->body);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 st->modal.transition = i;
             }
@@ -1236,7 +1238,7 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
                                true);
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 st->stress.label_count = counts[i];
             }
