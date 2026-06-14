@@ -185,6 +185,8 @@ static void test_json_null_is_bad_params(void) {
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(root);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
     cJSON_Delete(root);
 }
 

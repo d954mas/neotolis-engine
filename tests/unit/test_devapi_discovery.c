@@ -155,6 +155,21 @@ static void test_command_describe_unknown_method(void) {
     cJSON_Delete(root);
 }
 
+/* The two bad_params sub-cases carry distinct messages: absent vs wrong-typed method. */
+static void test_command_describe_message_distinguishes_absent_vs_nonstring(void) {
+    cJSON *r1 = cJSON_Parse(nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{}}"));
+    cJSON *e1 = cJSON_GetObjectItemCaseSensitive(r1, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(e1, "code")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("missing params.method", cJSON_GetObjectItemCaseSensitive(e1, "message")->valuestring);
+    cJSON_Delete(r1);
+
+    cJSON *r2 = cJSON_Parse(nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":5}}"));
+    cJSON *e2 = cJSON_GetObjectItemCaseSensitive(r2, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(e2, "code")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("non-string params.method", cJSON_GetObjectItemCaseSensitive(e2, "message")->valuestring);
+    cJSON_Delete(r2);
+}
+
 /* ---- features ---- */
 
 static void test_features_lists_active_groups(void) {
@@ -220,6 +235,7 @@ int main(void) {
     RUN_TEST(test_command_describe_ping);
     RUN_TEST(test_command_describe_missing_method_bad_params);
     RUN_TEST(test_command_describe_unknown_method);
+    RUN_TEST(test_command_describe_message_distinguishes_absent_vs_nonstring);
     RUN_TEST(test_features_lists_active_groups);
     RUN_TEST(test_game_command_discoverable);
     RUN_TEST(test_game_command_describe);

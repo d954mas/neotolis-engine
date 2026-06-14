@@ -139,6 +139,17 @@ static void test_register_group_tracked(void) {
     TEST_ASSERT_EQUAL_STRING("test_grp", nt_devapi_group_name(s_base_groups));
 }
 
+/* A duplicate group is rejected (mirror dup_method), not silently double-listed. */
+static void test_dup_group_rejected(void) {
+    /* "core" is auto-registered by init → re-registering it is rejected. */
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_devapi_register_group("core"));
+    /* a fresh group registers once, then its duplicate is rejected. */
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("dup_grp"));
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_devapi_register_group("dup_grp"));
+    /* exactly one NEW group added across all of the above. */
+    TEST_ASSERT_EQUAL_INT(s_base_groups + 1, nt_devapi_group_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_double_init);
@@ -146,5 +157,6 @@ int main(void) {
     RUN_TEST(test_owned_copy_survives_source_free);
     RUN_TEST(test_dup_method_rejected_first_preserved);
     RUN_TEST(test_register_group_tracked);
+    RUN_TEST(test_dup_group_rejected);
     return UNITY_END();
 }
