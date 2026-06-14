@@ -430,6 +430,10 @@ if(NOT EMSCRIPTEN)
         unit/test_helpers/ui_atlas.c
         unit/test_helpers/nt_assert_trap.c
         unit/test_helpers/ui_walker_fixture.c
+        # In-memory clipboard impl: nt_ui now references nt_clipboard_get/set_text
+        # (Ctrl+C/X/V). The real native backend is headless-flaky and the stub never
+        # round-trips, so the test exes link a deterministic fake instead.
+        unit/test_helpers/nt_clipboard_fake.c
     )
 
     # Helpers need `tests/unit/` on the include path so

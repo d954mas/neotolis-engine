@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "clipboard/nt_clipboard.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
@@ -331,6 +332,97 @@ static void delete_right(char *buffer, uint32_t caret, uint32_t cur_len, bool *c
 
 // #endregion
 
+// #region clipboard (Ctrl+C/X/V — D-14)
+
+/* Copy the selected byte range to the system clipboard. No-op on an empty selection. */
+static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state_t *st) {
+    if (st->anchor == st->caret) {
+        return;
+    }
+    uint32_t lo = 0U;
+    uint32_t hi = 0U;
+    selection_span(st, &lo, &hi);
+    const uint32_t n = hi - lo;
+    char *tmp = (char *)nt_mem_scratch_alloc(n + 1U, 1U);
+    NT_ASSERT(tmp != NULL && "nt_ui_input: scratch alloc failed (clipboard copy)");
+    memcpy(tmp, &buffer[lo], n);
+    tmp[n] = '\0';
+    nt_clipboard_set_text(tmp);
+}
+
+/* Decode one codepoint from src[off..len). On success writes *out_cp and returns the bytes
+ * consumed (>=1). On a malformed/truncated run writes *out_cp=0 and returns the bytes to skip
+ * (>=1) so the caller resyncs without reading OOB. */
+static uint32_t decode_one(const char *src, uint32_t off, uint32_t len, uint32_t *out_cp) {
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t cp = 0U;
+    uint32_t consumed = 0U;
+    while (off + consumed < len) {
+        const uint32_t s = nt_utf8_decode(&state, &cp, (uint8_t)src[off + consumed]);
+        ++consumed;
+        if (s == NT_UTF8_ACCEPT) {
+            *out_cp = cp;
+            return consumed;
+        }
+        if (s == NT_UTF8_REJECT) {
+            break; /* malformed: skip this run, resync from the next byte */
+        }
+    }
+    *out_cp = 0U;
+    return (consumed > 0U) ? consumed : 1U;
+}
+
+/* Splice clipboard text at the caret (replacing any selection). Each codepoint is decoded from the
+ * untrusted clipboard bytes, run through the allow-predicate, and inserted via insert_codepoint —
+ * which clamps to buffer_size-1 / max_length and drops a non-fitting multi-byte codepoint WHOLE.
+ * A malformed lead byte is skipped one byte at a time (never read OOB). Returns the new caret. */
+static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_style_t *style, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
+    const char *clip = nt_clipboard_get_text(); /* engine-owned, valid until the next clipboard call */
+    if (clip == NULL || clip[0] == '\0') {
+        return st->caret;
+    }
+    /* Snapshot the clipboard into scratch: get_text storage is only valid until the next call, and
+     * insert below does not call clipboard again, but copying keeps the contract explicit + bounded. */
+    const uint32_t clip_len = (uint32_t)strlen(clip);
+    char *src = (char *)nt_mem_scratch_alloc((size_t)clip_len + 1U, 1U);
+    NT_ASSERT(src != NULL && "nt_ui_input: scratch alloc failed (clipboard paste)");
+    memcpy(src, clip, (size_t)clip_len + 1U);
+
+    /* Replace any selection first. */
+    if (st->anchor != st->caret) {
+        uint32_t lo = 0U;
+        uint32_t hi = 0U;
+        selection_span(st, &lo, &hi);
+        st->caret = delete_range(buffer, lo, hi, cur_len, changed);
+        st->anchor = st->caret;
+        cur_len = (uint32_t)strlen(buffer);
+    }
+
+    uint32_t i = 0U;
+    while (i < clip_len) {
+        uint32_t cp = 0U;
+        const uint32_t consumed = decode_one(src, i, clip_len, &cp);
+        i += consumed;
+        if (cp == 0U) {
+            continue; /* malformed run skipped */
+        }
+        const bool ok = (style->allow != NULL) ? style->allow(cp) : allow_printable(cp);
+        if (!ok) {
+            continue; /* predicate-filtered (e.g. numeric field drops letters) */
+        }
+        const uint32_t before = st->caret;
+        st->caret = insert_codepoint(buffer, buffer_size, style->max_length, st->caret, cur_len, cp, changed);
+        if (st->caret == before) {
+            break; /* buffer full: stop (clamp), the rest of the paste is dropped */
+        }
+        st->anchor = st->caret;
+        cur_len = (uint32_t)strlen(buffer);
+    }
+    return st->caret;
+}
+
+// #endregion
+
 /* Caret x (px from text origin) at byte offset `caret` using prefix measure. password masks
  * each codepoint to one fixed glyph so the caret tracks the rendered dots, not the raw bytes. */
 static float caret_x_at(const nt_ui_input_style_t *style, nt_font_t font, const char *buffer, uint32_t caret) {
@@ -626,6 +718,28 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             st->caret = cur_len;
             st->blink = 0.0F;
         }
+        // #region clipboard chords (Ctrl+C/X/V — D-14)
+        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_C)) {
+            clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
+        }
+        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_X)) {
+            clipboard_copy_selection(buffer, st);
+            if (st->anchor != st->caret) {
+                uint32_t lo = 0U;
+                uint32_t hi = 0U;
+                selection_span(st, &lo, &hi);
+                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->anchor = st->caret;
+                cur_len = (uint32_t)strlen(buffer);
+                st->blink = 0.0F;
+            }
+        }
+        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_V)) {
+            st->caret = clipboard_paste(buffer, buffer_size, style, st, cur_len, &changed);
+            cur_len = (uint32_t)strlen(buffer);
+            st->blink = 0.0F;
+        }
+        // #endregion
         if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
             submitted = true;
         }

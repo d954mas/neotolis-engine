@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "clay.h"
+#include "clipboard/nt_clipboard.h"
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h" /* nt_input_buffer_char + nt_input_set_key */
@@ -460,6 +461,95 @@ static void test_double_click_word_select(void) {
     TEST_ASSERT_EQUAL_STRING(" bar", buf);
 }
 
+/* ---- Test 16: Ctrl+C copies the selection; Ctrl+V pastes it (round-trip via the fake clipboard). ---- */
+static void test_clipboard_copy_paste_roundtrip(void) {
+    char buf[32];
+    strcpy(buf, "abcd");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+
+    /* Select "ab" (Home, Shift+Right x2), copy it. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_C);
+    TEST_ASSERT_EQUAL_STRING("ab", nt_clipboard_get_text());
+
+    /* Caret to end, paste -> "abcdab". */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("abcdab", buf);
+}
+
+/* ---- Test 17: Ctrl+X copies then deletes the selection. ---- */
+static void test_clipboard_cut(void) {
+    char buf[32];
+    strcpy(buf, "hello");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+
+    /* Ctrl+A select-all then Ctrl+X: clipboard holds "hello", buffer empties. */
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_X);
+    TEST_ASSERT_EQUAL_STRING("hello", nt_clipboard_get_text());
+    TEST_ASSERT_EQUAL_STRING("", buf);
+}
+
+/* ---- Test 18: paste longer than remaining capacity is clamped (no OOB, NUL intact, no split). ---- */
+static void test_clipboard_paste_clamp(void) {
+    /* cap 5 -> room for 4 bytes + NUL. Paste "ABCDEFGH"; only "ABCD" fits. */
+    char buf[5] = {0};
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    nt_clipboard_set_text("ABCDEFGH");
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_UINT(4U, (unsigned)strlen(buf));
+    TEST_ASSERT_EQUAL_STRING("ABCD", buf);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)buf[4]); /* NUL intact at the last slot */
+}
+
+/* ---- Test 19: paste clamp never splits a multi-byte codepoint. ---- */
+static void test_clipboard_paste_clamp_no_split(void) {
+    /* cap 5 -> 4 bytes. Paste "Абв" (3 Cyrillic = 6 bytes); "Аб" (4 bytes) fits, 'в' dropped whole. */
+    char buf[5] = {0};
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    nt_clipboard_set_text("\xD0\x90\xD0\xB1\xD0\xB2"); /* Абв */
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_UINT(4U, (unsigned)strlen(buf)); /* "Аб" only */
+    TEST_ASSERT_EQUAL_UINT8(0xD0U, (uint8_t)buf[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x90U, (uint8_t)buf[1]);
+    TEST_ASSERT_EQUAL_UINT8(0xD0U, (uint8_t)buf[2]);
+    TEST_ASSERT_EQUAL_UINT8(0xB1U, (uint8_t)buf[3]);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)buf[4]); /* no split byte written */
+}
+
+/* ---- Test 20: a numeric-filtered field drops non-numeric pasted chars. ---- */
+static void test_clipboard_paste_filtered(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    s_style.allow = nt_ui_filter_numeric;
+    warmup_focus(id, buf, sizeof buf);
+    nt_clipboard_set_text("a1b2c3"); /* letters dropped, digits kept */
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("123", buf);
+}
+
+/* ---- Test 21: paste replaces a non-empty selection. ---- */
+static void test_clipboard_paste_replaces_selection(void) {
+    char buf[32];
+    strcpy(buf, "abcd");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    nt_clipboard_set_text("XY");
+    /* Select "ab" then paste -> "XYcd". */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("XYcd", buf);
+}
+
 /* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink). ---- */
 static void test_style_defaults_valid(void) {
     nt_ui_input_style_t s = nt_ui_input_style_defaults();
@@ -509,6 +599,12 @@ int main(void) {
     RUN_TEST(test_shift_select_cyrillic);
     RUN_TEST(test_ctrl_a_select_all);
     RUN_TEST(test_double_click_word_select);
+    RUN_TEST(test_clipboard_copy_paste_roundtrip);
+    RUN_TEST(test_clipboard_cut);
+    RUN_TEST(test_clipboard_paste_clamp);
+    RUN_TEST(test_clipboard_paste_clamp_no_split);
+    RUN_TEST(test_clipboard_paste_filtered);
+    RUN_TEST(test_clipboard_paste_replaces_selection);
     RUN_TEST(test_style_defaults_valid);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
