@@ -27,9 +27,12 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
  * caret stays visible, and the accumulated blink phase. The STRING stays game-owned (D-09). */
 #define NT_UI_INPUT_STATE_SALT 0x10D70001U
 typedef struct {
-    uint32_t caret; /* caret byte offset; always on a codepoint boundary */
-    float scroll_x; /* horizontal scroll px (text origin shifts left by this) */
-    float blink;    /* accumulated seconds since the caret last reset its phase */
+    uint32_t caret;  /* caret byte offset (the active selection end); always on a codepoint boundary */
+    uint32_t anchor; /* selection anchor byte offset; anchor == caret = empty selection */
+    float scroll_x;  /* horizontal scroll px (text origin shifts left by this) */
+    float blink;     /* accumulated seconds since the caret last reset its phase */
+    uint8_t drag;    /* 1 while a press is dragging to extend the selection */
+    uint8_t _pad[3];
 } nt_ui_input_state_t;
 
 /* Double-click + long-press cell (D-16); generic, keyed by the gesture's widget id. */
@@ -107,6 +110,51 @@ static uint32_t utf8_encode(uint32_t cp, char out[4]) {
     out[2] = (char)(0x80U | ((cp >> 6) & 0x3FU));
     out[3] = (char)(0x80U | (cp & 0x3FU));
     return 4U;
+}
+
+// #endregion
+
+// #region selection helpers
+
+/* Whitespace test for word-class scanning (double-click select-word). ASCII space class only;
+ * a non-whitespace codepoint (incl. any multi-byte letter) is a "word" byte. */
+static bool byte_is_word(char c) {
+    const unsigned char u = (unsigned char)c;
+    return !(u == ' ' || u == '\t' || u == '\n' || u == '\r' || u == '\f' || u == '\v');
+}
+
+/* Word bounds around byte offset `off`: scan left/right over a single class (word vs whitespace).
+ * Lands on codepoint boundaries automatically since UTF-8 continuation bytes (0x80..0xBF) are all
+ * non-whitespace, so a multi-byte letter is one contiguous word run. */
+static void word_bounds(const char *buffer, uint32_t len, uint32_t off, uint32_t *out_start, uint32_t *out_end) {
+    if (len == 0U) {
+        *out_start = 0U;
+        *out_end = 0U;
+        return;
+    }
+    uint32_t probe = (off < len) ? off : (len - 1U);
+    const bool word = byte_is_word(buffer[probe]);
+    uint32_t s = probe;
+    while (s > 0U && byte_is_word(buffer[s - 1U]) == word) {
+        --s;
+    }
+    uint32_t e = (off < len) ? off : len;
+    while (e < len && byte_is_word(buffer[e]) == word) {
+        ++e;
+    }
+    *out_start = s;
+    *out_end = e;
+}
+
+/* Order the selection endpoints (anchor/caret) into [lo,hi). */
+static void selection_span(const nt_ui_input_state_t *st, uint32_t *lo, uint32_t *hi) {
+    if (st->anchor <= st->caret) {
+        *lo = st->anchor;
+        *hi = st->caret;
+    } else {
+        *lo = st->caret;
+        *hi = st->anchor;
+    }
 }
 
 // #endregion
@@ -212,6 +260,9 @@ nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id
 
 // #endregion
 
+static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
+static inline bool ctrl_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL); }
+
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_input_focused: ctx must be non-NULL");
     return id != 0U && ctx->focused_input_id == id;
@@ -253,6 +304,17 @@ static uint32_t delete_left(char *buffer, uint32_t caret, uint32_t cur_len, bool
     memmove(&buffer[start], &buffer[caret], (size_t)(cur_len - caret) + 1U);
     *changed = true;
     (void)n;
+    return start;
+}
+
+/* Delete the byte range [start,end) in the buffer (selection delete). Returns the new caret
+ * (= start). Endpoints must already be codepoint-aligned + ordered. */
+static uint32_t delete_range(char *buffer, uint32_t start, uint32_t end, uint32_t cur_len, bool *changed) {
+    if (end <= start) {
+        return start;
+    }
+    memmove(&buffer[start], &buffer[end], (size_t)(cur_len - end) + 1U);
+    *changed = true;
     return start;
 }
 
@@ -314,6 +376,25 @@ static uint32_t caret_from_x(const nt_ui_input_style_t *style, nt_font_t font, c
 }
 
 // #region render
+
+/* A filled rect floated at (x,y) inside the field; used for both the caret and the selection
+ * highlight (the highlight sits BEHIND the text by emitting before the label). */
+static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
+    nt_ui_transform_t tt = nt_ui_transform_defaults();
+    tt.offset_x = x;
+    tt.offset_y = y;
+    nt_ui_element_data_t *rd = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(rd != NULL && "nt_ui_input: scratch alloc failed (rect data)");
+    *rd = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
+    const Clay_ElementDeclaration rect_decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
+        .backgroundColor = nt_ui_unpack_abgr(color),
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+    };
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(rect_decl);
+    nt_ui_clay_priv_close_element();
+}
 
 static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
@@ -396,21 +477,46 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     if (st->caret > cur_len) {
         st->caret = cur_len; /* the game shortened the buffer behind our back */
     }
+    if (st->anchor > cur_len) {
+        st->anchor = cur_len; /* keep the selection anchor in-bounds too */
+    }
 
+    /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     if (enabled && in.pressed_now) {
         ctx->focused_input_id = id;
         st->blink = 0.0F;
-        /* Place the caret at the click via hit-test against the prev-frame bbox. */
-        const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
         if (bb.found) {
             const float local_x = (in.press_pos[0] - bb.x - style->pad_x) + st->scroll_x;
             st->caret = caret_from_x(style, font, buffer, cur_len, local_x);
         }
+        st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
+        st->drag = 1U;
     }
-    const bool focused = enabled && (ctx->focused_input_id == id);
 
-    /* Generic dbl-click / long-press edges (D-16); 61-06 layers word-select on these. */
-    (void)nt_ui_dblclick_longpress(ctx, id, enabled && in.pressed_now, enabled && in.released_now, enabled && in.pressed, in.pos[0], in.pos[1], 0.30F, 0.50F, 6.0F);
+    /* Generic dbl-click / long-press edges (D-16); double-click select-word rides this. */
+    const nt_ui_click_gesture_t gesture = nt_ui_dblclick_longpress(ctx, id, enabled && in.pressed_now, enabled && in.released_now, enabled && in.pressed, in.pos[0], in.pos[1], 0.30F, 0.50F, 6.0F);
+    if (enabled && gesture.double_clicked) {
+        uint32_t ws = 0U;
+        uint32_t we = 0U;
+        word_bounds(buffer, cur_len, st->caret, &ws, &we);
+        st->anchor = ws;
+        st->caret = we;
+        st->drag = 0U; /* word-select replaces the drag selection */
+        st->blink = 0.0F;
+    }
+
+    /* Held drag extends the selection: the anchor stays at the press point, the caret tracks x. */
+    if (enabled && st->drag != 0U && in.pressed && bb.found) {
+        const float local_x = (in.pos[0] - bb.x - style->pad_x) + st->scroll_x;
+        st->caret = caret_from_x(style, font, buffer, cur_len, local_x);
+        st->blink = 0.0F;
+    }
+    if (in.released_now) {
+        st->drag = 0U;
+    }
+
+    const bool focused = enabled && (ctx->focused_input_id == id);
     // #endregion
 
     bool changed = false;
@@ -424,37 +530,99 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             if (!ok) {
                 continue;
             }
+            /* A non-empty selection is replaced by the typed char (standard editor semantics). */
+            if (st->anchor != st->caret) {
+                uint32_t lo = 0U;
+                uint32_t hi = 0U;
+                selection_span(st, &lo, &hi);
+                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->anchor = st->caret;
+                cur_len = (uint32_t)strlen(buffer);
+            }
             st->caret = insert_codepoint(buffer, buffer_size, style->max_length, st->caret, cur_len, cp, &changed);
+            st->anchor = st->caret;
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
         // #endregion
 
         // #region physical editing keys
+        const bool sel = (st->anchor != st->caret);
+        const bool shift = shift_held();
         if (nt_input_key_is_pressed(NT_KEY_BACKSPACE)) {
-            st->caret = delete_left(buffer, st->caret, cur_len, &changed);
+            if (sel) {
+                uint32_t lo = 0U;
+                uint32_t hi = 0U;
+                selection_span(st, &lo, &hi);
+                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->anchor = st->caret;
+            } else {
+                st->caret = delete_left(buffer, st->caret, cur_len, &changed);
+                st->anchor = st->caret;
+            }
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
         if (nt_input_key_is_pressed(NT_KEY_DELETE)) {
-            delete_right(buffer, st->caret, cur_len, &changed);
+            if (sel) {
+                uint32_t lo = 0U;
+                uint32_t hi = 0U;
+                selection_span(st, &lo, &hi);
+                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->anchor = st->caret;
+            } else {
+                delete_right(buffer, st->caret, cur_len, &changed);
+            }
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
         if (nt_input_key_is_pressed(NT_KEY_ARROW_LEFT)) {
-            st->caret = utf8_prev_boundary(buffer, st->caret);
+            /* Shift extends (move only the caret); a plain arrow with a selection collapses to its
+             * left edge, otherwise steps one codepoint left. */
+            if (!shift && sel) {
+                uint32_t lo = 0U;
+                uint32_t hi = 0U;
+                selection_span(st, &lo, &hi);
+                st->caret = lo;
+            } else {
+                st->caret = utf8_prev_boundary(buffer, st->caret);
+            }
+            if (!shift) {
+                st->anchor = st->caret;
+            }
             st->blink = 0.0F;
         }
-        if (nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) && st->caret < cur_len) {
-            const uint32_t step = (utf8_seq_len(buffer, st->caret, cur_len) > 0U) ? utf8_seq_len(buffer, st->caret, cur_len) : 1U;
-            st->caret += step;
+        if (nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT)) {
+            if (!shift && sel) {
+                uint32_t lo = 0U;
+                uint32_t hi = 0U;
+                selection_span(st, &lo, &hi);
+                st->caret = hi;
+            } else if (st->caret < cur_len) {
+                const uint32_t step = (utf8_seq_len(buffer, st->caret, cur_len) > 0U) ? utf8_seq_len(buffer, st->caret, cur_len) : 1U;
+                st->caret += step;
+            }
+            if (!shift) {
+                st->anchor = st->caret;
+            }
             st->blink = 0.0F;
         }
         if (nt_input_key_is_pressed(NT_KEY_HOME)) {
             st->caret = 0U;
+            if (!shift) {
+                st->anchor = st->caret;
+            }
             st->blink = 0.0F;
         }
         if (nt_input_key_is_pressed(NT_KEY_END)) {
+            st->caret = cur_len;
+            if (!shift) {
+                st->anchor = st->caret;
+            }
+            st->blink = 0.0F;
+        }
+        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_A)) {
+            st->anchor = 0U; /* Ctrl+A selects the whole buffer */
             st->caret = cur_len;
             st->blink = 0.0F;
         }
@@ -516,6 +684,20 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     nt_ui_clay_priv_configure_open_element(root);
     nt_ui_widget_register(ctx, id, &NT_UI_INPUT_DEF, NULL);
 
+    /* Selection highlight behind the text: emit before the label so it renders underneath. */
+    if (focused && st->anchor != st->caret) {
+        uint32_t lo = 0U;
+        uint32_t hi = 0U;
+        selection_span(st, &lo, &hi);
+        const float x0 = caret_x_at(style, font, buffer, lo) - st->scroll_x;
+        const float x1 = caret_x_at(style, font, buffer, hi) - st->scroll_x;
+        const float sel_w = x1 - x0;
+        if (sel_w > 0.0F) {
+            const uint32_t scol = (style->selection_color != 0U) ? style->selection_color : 0x80E0B080U;
+            emit_rect(ctx, text_layer, style->pad_x + x0, style->pad_y, sel_w, style->text.font_size, scol);
+        }
+    }
+
     const bool empty = (cur_len == 0U);
     if (!empty) {
         nt_ui_label_style_t ts = style->text;
@@ -568,6 +750,7 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void) {
     s.border_color = 0xFF505050U;
     s.focused_border_color = 0xFF80B0E0U;
     s.caret_color = 0xFFFFFFFFU;
+    s.selection_color = 0x80E0B080U; /* translucent blue-grey highlight behind the text */
     s.caret_blink_rate = 1.0F;
     s.caret_width = 2.0F;
     s.border_width = 1.0F;

@@ -381,6 +381,85 @@ static void test_dblclick_longpress_primitive(void) {
     TEST_ASSERT_TRUE(fired);
 }
 
+/* Hold/release a modifier across a key-frame: many selection ops need Shift or Ctrl DOWN while
+ * the action key fires its press edge. Sets both keys, runs one field frame, then clears. */
+static void chord_frame(uint32_t id, char *buf, size_t cap, nt_key_t mod, nt_key_t key) {
+    nt_input_poll();
+    nt_input_set_key(mod, true);
+    nt_input_set_key(key, true);
+    (void)field_frame(&IDLE_PTR, id, buf, cap, true, NULL);
+    nt_input_set_key(key, false);
+    nt_input_set_key(mod, false);
+}
+
+/* ---- Test 12: Shift+arrows extend a selection; a plain arrow collapses it. ---- */
+static void test_shift_select_and_collapse(void) {
+    char buf[32];
+    strcpy(buf, "abcd");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME); /* caret = 0, selection empty */
+
+    /* Shift+Right twice selects "ab"; typing replaces the selection. */
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    nt_input_buffer_char((uint32_t)'Z');
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_EQUAL_STRING("Zcd", buf); /* "ab" replaced by 'Z' */
+}
+
+/* ---- Test 13: Shift+Right over Cyrillic selects whole codepoints; replace stays UTF-8-valid. ---- */
+static void test_shift_select_cyrillic(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1"); /* "Аб" */
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+
+    /* Shift+Right selects the first codepoint 'А' (2 bytes); Backspace deletes the selection. */
+    chord_frame(id, buf, sizeof buf, NT_KEY_LSHIFT, NT_KEY_ARROW_RIGHT);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE);
+    TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(buf)); /* 'б' remains, 2 bytes */
+    TEST_ASSERT_EQUAL_UINT8(0xD0U, (uint8_t)buf[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xB1U, (uint8_t)buf[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)buf[2]);
+}
+
+/* ---- Test 14: Ctrl+A selects the whole buffer; typing replaces everything. ---- */
+static void test_ctrl_a_select_all(void) {
+    char buf[32];
+    strcpy(buf, "hello");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A);
+    nt_input_buffer_char((uint32_t)'!');
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_EQUAL_STRING("!", buf);
+}
+
+/* ---- Test 15: double-click selects the word under the caret (codepoint-class scan). ---- */
+static void test_double_click_word_select(void) {
+    char buf[32];
+    strcpy(buf, "foo bar"); /* two words */
+    const uint32_t id = nt_ui_id("f");
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL); /* warm the bbox */
+
+    /* Two presses inside "foo" within the dbl window => double-click selects "foo". */
+    const float click_x = IN_X + PAD_X + (GLYPH_W * 1.0F); /* over the 'o' of foo */
+    nt_pointer_t p1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&p1, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t r1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
+    (void)field_frame(&r1, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t p2 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&p2, id, buf, sizeof buf, true, NULL);
+
+    /* Backspace now deletes the selected word "foo" (the leading space stays). */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE);
+    TEST_ASSERT_EQUAL_STRING(" bar", buf);
+}
+
 /* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink). ---- */
 static void test_style_defaults_valid(void) {
     nt_ui_input_style_t s = nt_ui_input_style_defaults();
@@ -426,6 +505,10 @@ int main(void) {
     RUN_TEST(test_submit_and_change);
     RUN_TEST(test_unfocused_ignores_chars);
     RUN_TEST(test_dblclick_longpress_primitive);
+    RUN_TEST(test_shift_select_and_collapse);
+    RUN_TEST(test_shift_select_cyrillic);
+    RUN_TEST(test_ctrl_a_select_all);
+    RUN_TEST(test_double_click_word_select);
     RUN_TEST(test_style_defaults_valid);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);

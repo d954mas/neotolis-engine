@@ -44,6 +44,7 @@ typedef struct {
     uint32_t border_color;                /* idle border (0 = none) */
     uint32_t focused_border_color;        /* focused border */
     uint32_t caret_color;                 /* caret rect tint */
+    uint32_t selection_color;             /* selection highlight rect tint (0 = a sensible default) */
     nt_atlas_region_ref_t bg_art;         /* idle bg sprite (INPUT-06); atlas.id==0 = flat color */
     nt_atlas_region_ref_t focused_bg_art; /* focused bg sprite; atlas.id==0 = inherit bg_art */
     float caret_blink_rate;               /* seconds per full blink cycle; <= 0 = no blink (always on) */
