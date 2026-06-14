@@ -1193,14 +1193,15 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
         for (int i = 0; i < 3; ++i) {
             const bool sel = (st->modal.transition == i);
-            if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_trans") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
-                             &(Clay_ElementDeclaration){
-                                 .layout = {.sizing = {CLAY_SIZING_FIXED(84), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                 .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                             true)) {
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/modal_trans") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
+                               &(Clay_ElementDeclaration){
+                                   .layout = {.sizing = {CLAY_SIZING_FIXED(84), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                               true);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], g_current->body);
+            if (nt_ui_button_end(ctx)) {
                 st->modal.transition = i;
             }
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], g_current->caption);
         }
     }
 
@@ -1230,14 +1231,15 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
         for (int i = 0; i < 4; ++i) {
             const bool sel = (st->stress.label_count == counts[i]);
             (void)snprintf(buf, sizeof buf, "%d", counts[i]);
-            if (nt_ui_button(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/stress_n") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
-                             &(Clay_ElementDeclaration){
-                                 .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                 .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                             true)) {
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/stress_n") + (uint32_t)i, sel ? g_current->btn_primary : g_current->btn_secondary,
+                               &(Clay_ElementDeclaration){
+                                   .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                               true);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+            if (nt_ui_button_end(ctx)) {
                 st->stress.label_count = counts[i];
             }
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
         }
     }
 
