@@ -77,20 +77,27 @@ echo "Zero-delta check: $WASM_FILE ($PRESET)"
 
 OBJDUMP=$(wasm-objdump -x "$WASM_FILE")
 
-# Positive control: this check only means something if internal symbol names survive
-# in this binary. If NO engine nt_* names are visible, the name section was stripped
+# Patterns are anchored to a token boundary: engine symbols start `nt_` at the start of
+# an identifier (objdump prints them like `<nt_app_init>`). A bare `nt_` substring would
+# also hit benign tokens (font_, count_, component_, current_) and mis-pass the positive
+# control / mis-fail the negative one — the boundary class avoids both.
+NT_SYMBOL='(^|[^A-Za-z0-9_])nt_[a-z]'
+NT_DEVAPI_SYMBOL='(^|[^A-Za-z0-9_])nt_devapi_'
+
+# Positive control: this check only means something if internal symbol names survive in
+# this binary. If NO engine nt_* function names are visible, the name section was stripped
 # and a grep for nt_devapi_* is vacuous — fail loudly instead of false-passing.
-if ! printf '%s\n' "$OBJDUMP" | grep -q 'nt_'; then
-    echo "ERROR: no engine nt_* symbols visible in $WASM_FILE — the name section is"
+if ! printf '%s\n' "$OBJDUMP" | grep -Eq "$NT_SYMBOL"; then
+    echo "ERROR: no engine nt_* function names visible in $WASM_FILE — the name section is"
     echo "  stripped, so a grep for nt_devapi_* would pass vacuously. Inspect a"
     echo "  names-retaining preset instead (default: PRESET=wasm-analysis-paired)."
     exit 1
 fi
 
-if printf '%s\n' "$OBJDUMP" | grep -q 'nt_devapi_'; then
+if printf '%s\n' "$OBJDUMP" | grep -Eq "$NT_DEVAPI_SYMBOL"; then
     echo "ZERO-DELTA FAIL: nt_devapi_* symbols present in $PRESET wasm"
     echo "  A devapi-OFF build must not contain the dev surface. Offending symbols:"
-    printf '%s\n' "$OBJDUMP" | grep 'nt_devapi_' || true
+    printf '%s\n' "$OBJDUMP" | grep -E "$NT_DEVAPI_SYMBOL" || true
     exit 1
 fi
 
