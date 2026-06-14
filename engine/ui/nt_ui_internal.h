@@ -146,10 +146,11 @@ typedef struct {
 #define NT_UI_WHEEL_CANDIDATES 24
 #endif
 
-/* Nested-modal cap. Fixed array keeps the stack in BSS (no heap in hot path);
- * depth drives the z-band stride*(depth+1) and close-signal top-targeting. */
+/* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap).
+ * Depth drives the z-band stride*(depth+1) and close-signal top-targeting.
+ * Build-overridable; raising it requires stride*depth to still fit int16 (see _Static_assert). */
 #ifndef NT_UI_MODAL_MAX_DEPTH
-#define NT_UI_MODAL_MAX_DEPTH 8
+#define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */

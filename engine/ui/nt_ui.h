@@ -63,10 +63,9 @@
 #endif
 
 /* Default per-depth modal z-band stride; each nested modal sits panel_z = stride*(depth+1).
- * Per-context overridable via nt_ui_create_desc_t.modal_zband_stride (0 = this default). */
-#ifndef NT_UI_MODAL_ZBAND_STRIDE
+ * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
+ * nt_ui_create_desc_defaults; must be > 0). */
 #define NT_UI_MODAL_ZBAND_STRIDE 1000
-#endif
 
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
