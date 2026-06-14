@@ -59,7 +59,7 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 24, "nt_ui_modal_style_t stable AB
 /* Valid baseline (scale-pop + alpha). scale_start must be > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
-/* Low-level: opens the backdrop + panel floating elements (z-band 1000*(depth+1)) and eases t toward
+/* Low-level: opens the backdrop + panel floating elements (z-band ctx->modal_zband_stride*(depth+1)) and eases t toward
  * open?1:0. The panel stays OPEN until nt_ui_modal_end (balanced). id non-zero, style non-NULL.
  * Asserts depth < NT_UI_MODAL_MAX_DEPTH BEFORE push (overflow, no silent fallback). */
 nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool open);

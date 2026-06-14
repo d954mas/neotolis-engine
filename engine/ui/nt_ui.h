@@ -62,6 +62,12 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
+/* Default per-depth modal z-band stride; each nested modal sits panel_z = stride*(depth+1).
+ * Per-context overridable via nt_ui_create_desc_t.modal_zband_stride (0 = this default). */
+#ifndef NT_UI_MODAL_ZBAND_STRIDE
+#define NT_UI_MODAL_ZBAND_STRIDE 1000
+#endif
+
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
 
@@ -206,6 +212,8 @@ typedef struct {
     /* 3D ctx render-only depth bias. 0 = off. Positive values draw deeper hierarchy levels
      * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. */
     float element_depth_bias_ndc;
+    /* Per-depth modal z-band stride; 0 = default NT_UI_MODAL_ZBAND_STRIDE. */
+    int16_t modal_zband_stride;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
@@ -213,6 +221,7 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
+        .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
     };
 }
 

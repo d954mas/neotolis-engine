@@ -40,8 +40,8 @@ static bool modal_anim_slot_absent(const nt_ui_context_t *ctx, uint32_t id) {
  * (epsilon = 1/256 so the modal disappears exactly when its alpha quantizes out). */
 #define NT_UI_MODAL_EPSILON (1.0F / 256.0F)
 
-/* Per-depth z-band: each modal sits panel_z = STRIDE*(depth+1), backdrop one below. */
-#define NT_UI_MODAL_ZBAND_STRIDE 1000
+/* Build-time sanity net on the DEFAULT stride; the configured per-ctx value is validated at runtime
+ * in nt_ui_create_context. Per-depth z-band: panel_z = stride*(depth+1), backdrop one below. */
 _Static_assert(NT_UI_MODAL_ZBAND_STRIDE *(NT_UI_MODAL_MAX_DEPTH) <= INT16_MAX, "modal z-band exceeds int16 zIndex");
 
 #ifdef NT_TEST_ACCESS
@@ -80,7 +80,7 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     // #region stack push + z-band
     const uint8_t depth = ctx->active_modal_depth; /* 0-based depth of THIS modal */
     ++ctx->active_modal_depth;
-    const int16_t panel_z = (int16_t)(NT_UI_MODAL_ZBAND_STRIDE * (depth + 1));
+    const int16_t panel_z = (int16_t)(ctx->modal_zband_stride * (depth + 1));
     const int16_t backdrop_z = (int16_t)(panel_z - 1);
     const uint32_t backdrop_id = modal_backdrop_id(id);
     // #endregion

@@ -147,7 +147,7 @@ typedef struct {
 #endif
 
 /* Nested-modal cap. Fixed array keeps the stack in BSS (no heap in hot path);
- * depth drives the z-band 1000*(depth+1) and close-signal top-targeting. */
+ * depth drives the z-band stride*(depth+1) and close-signal top-targeting. */
 #ifndef NT_UI_MODAL_MAX_DEPTH
 #define NT_UI_MODAL_MAX_DEPTH 8
 #endif
@@ -183,6 +183,8 @@ struct nt_ui_context {
     uint32_t modal_top_id_prev;
     uint32_t modal_top_id_cur;
     uint32_t wheel_candidate_count;
+    /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
+    int16_t modal_zband_stride;
     uint16_t wheel_depth;
     uint8_t active_modal_depth;
     uint8_t modal_max_depth_cur; /* deepest active_modal_depth reached this frame (drives modal_top_id_cur) */

@@ -571,6 +571,62 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_ESC, b.reason);
 }
 
+/* ---- Per-context modal_zband_stride: a custom stride drives panel_z = stride*(depth+1). The default
+ *      fixture ctx uses 1000; a second ctx created with a custom desc reflects the configured value.
+ *      Module is already inited by setUp, so a second ctx coexists (mirrors test_nt_ui_multictx). ---- */
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
+
+static void test_modal_custom_zband_stride(void) {
+    const int16_t custom_stride = 500;
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = custom_stride;
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_pointer_t p = {.active = true};
+    nt_ui_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_modal_begin(ctx, MODAL_A, &st, true); /* depth 0 -> stride*1 */
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)(custom_stride * 1), nt_ui_modal_test_last_zband());
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)((custom_stride * 1) - 1), nt_ui_modal_test_last_backdrop_zband());
+    nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* depth 1 -> stride*2 */
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)(custom_stride * 2), nt_ui_modal_test_last_zband());
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)((custom_stride * 2) - 1), nt_ui_modal_test_last_backdrop_zband());
+    nt_ui_modal_end(ctx);
+    nt_ui_modal_end(ctx);
+    nt_ui_end(ctx);
+
+    nt_ui_destroy_context(ctx);
+}
+
+/* ---- A 0 (or negative) stride resolves to the default NT_UI_MODAL_ZBAND_STRIDE, so a {0}-init desc
+ *      still produces the 1000-stride band. ---- */
+static void test_modal_zero_stride_uses_default(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = 0; /* unset -> default */
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)NT_UI_MODAL_ZBAND_STRIDE, nt_ui_modal_test_last_zband());
+    nt_ui_modal_end(ctx);
+    nt_ui_end(ctx);
+
+    nt_ui_destroy_context(ctx);
+}
+
+/* ---- An over-large stride (stride*MAX_DEPTH > INT16_MAX) trips the create-time NT_ASSERT
+ *      (fail-early, no silent clamp). ---- */
+static void test_modal_oversize_stride_asserts(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = (int16_t)(INT16_MAX / NT_UI_MODAL_MAX_DEPTH + 1000);
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
@@ -593,5 +649,8 @@ int main(void) {
     RUN_TEST(test_modal_closed_does_not_block_base);
     RUN_TEST(test_modal_active_prev_frame);
     RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
+    RUN_TEST(test_modal_custom_zband_stride);
+    RUN_TEST(test_modal_zero_stride_uses_default);
+    RUN_TEST(test_modal_oversize_stride_asserts);
     return UNITY_END();
 }
