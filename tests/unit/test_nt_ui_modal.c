@@ -682,6 +682,57 @@ static void test_modal_asymmetric_open_close(void) {
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
 }
 
+/* ---- Invalid anim recipes fail early at begin. Asserts run BEFORE the push, so a trapped begin leaves
+ *      the stack balanced and the next case runs in the same frame. ---- */
+static void test_modal_anim_asserts(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+
+    nt_ui_modal_style_t bad = st;
+    bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.0F};
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* SCALE_POP scale_start must be > 0 */
+
+    bad = st;
+    bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_BOTTOM, .offset = NAN};
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* SLIDE offset must be finite */
+
+    bad = st;
+    bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = 4, .offset = 10.0F};
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* edge out of range */
+
+    bad = st;
+    bad.open.type = 7;
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* type out of range */
+
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- The close phase uses style.close, not style.open: open=slide-LEFT (offset_x < 0 opening),
+ *      close=slide-RIGHT (offset_x > 0 closing). A bug reading style.open on close keeps the sign < 0. ---- */
+static void test_modal_close_uses_close_recipe(void) {
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 8.0F;
+    st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_LEFT, .offset = 40.0F};
+    st.close = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_RIGHT, .offset = 40.0F};
+    float ox = 0.0F;
+    float oy = 0.0F;
+
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    TEST_ASSERT_TRUE(ox < 0.0F); /* open recipe = LEFT */
+
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, false);
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    TEST_ASSERT_TRUE(ox > 0.0F); /* close recipe = RIGHT (from style.close) */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
@@ -706,6 +757,8 @@ int main(void) {
     RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
     RUN_TEST(test_modal_slide_dir);
     RUN_TEST(test_modal_asymmetric_open_close);
+    RUN_TEST(test_modal_close_uses_close_recipe);
+    RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
     RUN_TEST(test_modal_oversize_stride_asserts);

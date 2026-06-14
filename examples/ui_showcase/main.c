@@ -306,6 +306,7 @@ static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / 
 static uint32_t s_id_scroll_horiz, s_id_scroll_xy;      /* horizontal-only / both-axes */
 static uint32_t s_id_stress_scroll;                     /* fixed-size scroll so the label cell can't overflow */
 static uint32_t s_id_stage_scroll;                      /* vertical scroll around the stage content so tall tabs fit */
+static uint32_t s_id_props_scroll;                      /* vertical scroll around the props content for tall configs */
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
 static uint32_t s_id_props_w, s_id_props_h;
 static uint32_t s_id_props_s9scale; /* slice9 corner-scale slider */
@@ -1197,7 +1198,7 @@ static void modal_seg_select(nt_ui_context_t *ctx, const char *title, uint32_t b
 }
 
 /* Modal panel: independent Open/Close animation selectors + shared sliders. Slide-only (edge + distance)
- * and scale-only (scale start) controls show conditionally so the fixed-height panel never overflows. */
+ * and scale-only (scale start) controls show conditionally to stay compact; the props panel scrolls. */
 static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
@@ -1295,6 +1296,7 @@ static void ensure_ids(void) {
     s_id_scroll_xy = nt_ui_id("showcase/scroll_xy");
     s_id_stress_scroll = nt_ui_id("showcase/stress_scroll");
     s_id_stage_scroll = nt_ui_id("showcase/stage_scroll");
+    s_id_props_scroll = nt_ui_id("showcase/props_scroll");
     s_id_props_il = nt_ui_id("showcase/props_il");
     s_id_props_ir = nt_ui_id("showcase/props_ir");
     s_id_props_it = nt_ui_id("showcase/props_it");
@@ -1437,12 +1439,17 @@ static void declare_props_panel(nt_ui_context_t *ctx) {
           .backgroundColor = g_current->panel_alt,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        if (e->props_fn != NULL) {
-            e->props_fn(ctx, &s_state);
-        } else {
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Properties", g_current->body);
-            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "No properties for this tab.", g_current->caption);
+        /* Vertical scroll so a tall props set (e.g. modal Open+Close = Slide) never clips on short windows. */
+        nt_ui_scroll_begin(ctx, NULL, s_id_props_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+            if (e->props_fn != NULL) {
+                e->props_fn(ctx, &s_state);
+            } else {
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Properties", g_current->body);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "No properties for this tab.", g_current->caption);
+            }
         }
+        nt_ui_scroll_end(ctx);
     }
 }
 // #endregion

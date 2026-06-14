@@ -111,6 +111,11 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
+    /* Active recipe (open vs close phase). Validate before any push so a bad recipe fails early. */
+    const nt_ui_modal_anim_t *anim = open ? &style->open : &style->close;
+    NT_ASSERT(anim->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
+    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(anim->scale_start) && anim->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
+    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SLIDE || (isfinite(anim->offset) && anim->edge <= NT_UI_MODAL_RIGHT)) && "nt_ui_modal_begin: SLIDE offset finite + edge in range");
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_modal_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
@@ -150,10 +155,6 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const float t = a->value_t; /* eased 0..1 */
     // #endregion
     // #region transition -> panel transform (typed per-phase recipe; opacity rides t)
-    const nt_ui_modal_anim_t *anim = open ? &style->open : &style->close;
-    NT_ASSERT(anim->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
-    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(anim->scale_start) && anim->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
-    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SLIDE || isfinite(anim->offset)) && "nt_ui_modal_begin: SLIDE offset must be finite");
     const nt_ui_transform_t panel_xf = modal_anim_transform(anim, t);
     // #endregion
     // #region backdrop floating decl + input-gate occluder + close-scan (present-only)
