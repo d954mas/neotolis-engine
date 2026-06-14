@@ -491,8 +491,13 @@ jobs:
           find engine shared tools examples -name '*.c' -o -name '*.h' | \
             xargs clang-format --dry-run --Werror
 
+      # NT_DEVAPI_ENABLED=ON so the devapi TUs are in compile_commands.json. devapi uses
+      # CMake subdir-exclusion (D-10) rather than the body-#if-guard convention, so at the
+      # default (OFF) tidy.sh lints engine/devapi/*.c with fallback flags (no cjson include,
+      # no NT_DEVAPI_ENABLED) and fails. Linting the devapi-ON config is the correct check —
+      # zero-delta concerns only release builds, asserted separately by the wasm job.
       - name: Configure
-        run: cmake --preset native-debug
+        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
