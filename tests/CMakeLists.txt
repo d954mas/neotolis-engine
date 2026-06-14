@@ -169,7 +169,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
     target_link_libraries(test_nt_gfx_scissor PRIVATE
         nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_gfx_stub nt_log_stub unity
+        nt_resource nt_hash nt_pool nt_gfx_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_nt_gfx_scissor PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_gfx_scissor)
@@ -246,7 +246,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Font module tests ---
     add_executable(test_font unit/test_font.c)
-    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_log_stub unity)
+    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(nt_font PRIVATE -U_DLL)
     nt_setup_test_target(test_font)
@@ -255,7 +255,7 @@ if(NOT EMSCRIPTEN)
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
-    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time nt_log_stub unity)
+    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
 
@@ -268,13 +268,13 @@ if(NOT EMSCRIPTEN)
 
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
-    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time nt_log_stub unity)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_text_renderer)
 
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
-    target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash nt_log_stub unity)
+    target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_material PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_warning_flags(test_material)
     nt_set_sanitizer_flags(test_material)
@@ -297,13 +297,13 @@ if(NOT EMSCRIPTEN)
 
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
-    target_link_libraries(test_resource PRIVATE nt_resource nt_log_stub unity)
+    target_link_libraries(test_resource PRIVATE nt_resource nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash nt_log_stub unity)
+    target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
     target_include_directories(test_atlas PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
@@ -311,7 +311,7 @@ if(NOT EMSCRIPTEN)
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE
-        nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared nt_log_stub unity
+        nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_include_directories(test_sprite_comp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_sprite_comp PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -346,7 +346,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_mesh_renderer PRIVATE
         nt_mesh_renderer nt_render nt_gfx_stub
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
-        nt_material nt_resource nt_hash nt_log_stub unity
+        nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_mesh_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_warning_flags(test_mesh_renderer)
@@ -361,7 +361,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_sprite_renderer PRIVATE
         nt_sprite_renderer nt_atlas nt_sprite_comp nt_transform_comp
         nt_drawable_comp nt_material_comp nt_material nt_render
-        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub nt_log_stub unity
+        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_sprite_renderer PRIVATE
         _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
@@ -380,7 +380,10 @@ if(NOT EMSCRIPTEN)
     # --- nt_ui element_data macro tests (exercises macros -> scratch path) ---
     add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_ui_element_data PRIVATE
-        nt_ui nt_mem_scratch nt_core nt_log_stub unity
+        nt_ui nt_mem_scratch nt_core
+        nt_gfx_stub nt_input_stub nt_resource nt_font nt_material nt_atlas
+        nt_sprite_renderer nt_text_renderer nt_hash nt_pool
+        nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_include_directories(test_nt_ui_element_data PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -390,7 +393,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_stats unit/test_stats.c)
     target_link_libraries(test_stats PRIVATE
         nt_stats nt_text_renderer nt_font nt_material nt_resource
-        nt_gfx_stub nt_hash nt_pool nt_log_stub unity
+        nt_gfx_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_stats)
@@ -420,7 +423,7 @@ if(NOT EMSCRIPTEN)
     # under the unified NT_TEST_ACCESS define.
     target_link_libraries(test_nt_sprite_renderer_emit_region PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core nt_log_stub unity
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_nt_sprite_renderer_emit_region PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_sprite_renderer_emit_region)
@@ -431,7 +434,7 @@ if(NOT EMSCRIPTEN)
     set(_nt_ui_test_libs
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
         nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core
-        nt_log_stub unity
+        nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 
     set(_nt_ui_test_names
