@@ -183,6 +183,15 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t modal_top_id_prev;
     uint32_t modal_top_id_cur;
+    /* Keyboard-focus arbiter (D-15): the input field that eats typed chars + editing keys.
+     * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
+     * field declared this frame. Survives across frames (not reset by begin). */
+    uint32_t focused_input_id;
+    /* Tab focus-advance bookkeeping, scoped to one frame: _seek set the frame a focused field
+     * sees Tab; the NEXT field declared that frame claims focus and clears _seek. _first_id
+     * tracks the earliest field so Tab off the last field wraps to the first. */
+    uint32_t focus_tab_seek;
+    uint32_t focus_first_id;
     uint32_t wheel_candidate_count;
     /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
     int16_t modal_zband_stride;

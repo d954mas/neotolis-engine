@@ -68,6 +68,8 @@ set(NT_UI_SOURCES
     nt_ui_checkbox.h
     nt_ui_slider.c
     nt_ui_slider.h
+    nt_ui_input.c
+    nt_ui_input.h
     nt_ui_progress.c
     nt_ui_progress.h
     nt_ui_debug_hit_zones.c
@@ -128,6 +130,7 @@ target_link_libraries(nt_ui
         nt_text_renderer
         nt_time
         nt_math
+        nt_utf8
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.
