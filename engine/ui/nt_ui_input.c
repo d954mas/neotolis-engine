@@ -333,10 +333,8 @@ static uint32_t delete_left(char *buffer, uint32_t caret, uint32_t cur_len, bool
         return 0U;
     }
     const uint32_t start = utf8_prev_boundary(buffer, caret);
-    const uint32_t n = caret - start;
     memmove(&buffer[start], &buffer[caret], (size_t)(cur_len - caret) + 1U);
     *changed = true;
-    (void)n;
     return start;
 }
 
@@ -455,41 +453,54 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
 
 // #endregion
 
-/* Caret x (px from text origin) at byte offset `caret` using prefix measure. password masks
- * each codepoint to one fixed glyph so the caret tracks the rendered dots, not the raw bytes. */
+/* Codepoint count in [0,caret) (one decode pass). password mode measures one mask glyph per
+ * codepoint, so the caret tracks the rendered dots not the raw bytes. */
+static uint32_t codepoint_count(const char *buffer, uint32_t caret) {
+    uint32_t count = 0U;
+    uint32_t i = 0U;
+    while (i < caret) {
+        const uint32_t step = utf8_seq_len(buffer, i, caret);
+        i += (step > 0U) ? step : 1U;
+        ++count;
+    }
+    return count;
+}
+
+/* Width of `count` mask glyphs (closed form: N glyphs + (N-1) tracking gaps). */
+static float mask_width(const nt_ui_input_style_t *style, nt_font_t font, uint32_t count) {
+    if (count == 0U) {
+        return 0.0F;
+    }
+    const char m = NT_UI_INPUT_MASK_CHAR;
+    const float glyph_w = nt_font_measure_n(font, &m, 1U, style->text.font_size, (float)style->text.letter_tracking).width;
+    return ((float)count * glyph_w) + ((float)(count - 1U) * (float)style->text.letter_tracking);
+}
+
+/* Caret x (px from text origin) at byte offset `caret` using prefix measure. */
 static float caret_x_at(const nt_ui_input_style_t *style, nt_font_t font, const char *buffer, uint32_t caret) {
     if (!style->password) {
         return nt_font_measure_n(font, buffer, (size_t)caret, style->text.font_size, (float)style->text.letter_tracking).width;
     }
-    /* Count codepoints in [0,caret), measure that many mask chars. */
-    uint32_t count = 0U;
-    uint32_t i = 0U;
-    while (i < caret) {
-        i = i + ((utf8_seq_len(buffer, i, caret) > 0U) ? utf8_seq_len(buffer, i, caret) : 1U);
-        ++count;
-    }
-    float w = 0.0F;
-    for (uint32_t k = 0U; k < count; ++k) {
-        const char m = NT_UI_INPUT_MASK_CHAR;
-        w += nt_font_measure_n(font, &m, 1U, style->text.font_size, (float)style->text.letter_tracking).width;
-        if (k + 1U < count) {
-            w += (float)style->text.letter_tracking;
-        }
-    }
-    return w;
+    return mask_width(style, font, codepoint_count(buffer, caret));
 }
 
-/* Map a click x (px from text origin, scroll already added) to the nearest codepoint boundary. */
+/* Map a click x (px from text origin, scroll already added) to the nearest codepoint boundary.
+ * One forward decode pass (hoisted seq_len). Non-password prefix widths come from the font's
+ * cached measure_n so kerning + tracking stay exact; password measures fixed-width mask glyphs. */
 static uint32_t caret_from_x(const nt_ui_input_style_t *style, nt_font_t font, const char *buffer, uint32_t len, float local_x) {
     if (local_x <= 0.0F || len == 0U) {
         return 0U;
     }
     uint32_t off = 0U;
+    uint32_t cp_index = 0U; /* codepoints consumed so far -- avoids re-counting from 0 (password) */
     float prev_w = 0.0F;
     while (off < len) {
-        const uint32_t step = (utf8_seq_len(buffer, off, len) > 0U) ? utf8_seq_len(buffer, off, len) : 1U;
+        const uint32_t raw = utf8_seq_len(buffer, off, len);
+        const uint32_t step = (raw > 0U) ? raw : 1U;
         const uint32_t next = off + step;
-        const float next_w = caret_x_at(style, font, buffer, next);
+        ++cp_index;
+        /* Password closed-form by running index; non-password prefix via cached measure_n (kern-exact). */
+        const float next_w = style->password ? mask_width(style, font, cp_index) : nt_font_measure_n(font, buffer, (size_t)next, style->text.font_size, (float)style->text.letter_tracking).width;
         if (local_x < (prev_w + ((next_w - prev_w) * 0.5F))) {
             return off; /* click landed in the left half of this glyph */
         }
@@ -524,12 +535,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
  * frame scratch (NUL-terminated). Render-only — the game buffer is never modified. Exposed for the
  * test probe (no GL capture) under NT_TEST_ACCESS. */
 const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
-    uint32_t count = 0U;
-    uint32_t i = 0U;
-    while (i < len) {
-        i += (utf8_seq_len(buffer, i, len) > 0U) ? utf8_seq_len(buffer, i, len) : 1U;
-        ++count;
-    }
+    const uint32_t count = codepoint_count(buffer, len);
     char *masked = (char *)nt_mem_scratch_alloc(count + 1U, 1U);
     NT_ASSERT(masked != NULL && "nt_ui_input: scratch alloc failed (mask)");
     memset(masked, NT_UI_INPUT_MASK_CHAR, count);
