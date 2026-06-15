@@ -1,4 +1,5 @@
 #include "core/nt_assert.h"
+#include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
 #include "window/nt_window.h"
 
@@ -8,9 +9,6 @@
 #ifdef NT_DEVAPI_REGISTER_core
 
 /* Compile-time facts for engine.info — no runtime module registry. */
-#ifndef NT_DEVAPI_ENGINE_VERSION
-#define NT_DEVAPI_ENGINE_VERSION "unknown"
-#endif
 #ifndef NT_DEVAPI_BUILD_TYPE
 #define NT_DEVAPI_BUILD_TYPE "unknown"
 #endif
@@ -22,7 +20,7 @@ static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     (void)params;
     (void)err;
     (void)ud;
-    cJSON_AddBoolToObject(result, "pong", true);
+    devapi_add_bool(result, "pong", true);
     return true; /* success result is always an object */
 }
 
@@ -31,11 +29,11 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     (void)params;
     (void)err;
     (void)ud;
-    cJSON_AddNumberToObject(result, "fb_width", g_nt_window.fb_width);
-    cJSON_AddNumberToObject(result, "fb_height", g_nt_window.fb_height);
-    cJSON_AddNumberToObject(result, "width", g_nt_window.width); /* logical */
-    cJSON_AddNumberToObject(result, "height", g_nt_window.height);
-    cJSON_AddNumberToObject(result, "dpr", (double)g_nt_window.dpr);
+    devapi_add_number(result, "fb_width", g_nt_window.fb_width);
+    devapi_add_number(result, "fb_height", g_nt_window.fb_height);
+    devapi_add_number(result, "width", g_nt_window.width); /* logical */
+    devapi_add_number(result, "height", g_nt_window.height);
+    devapi_add_number(result, "dpr", (double)g_nt_window.dpr);
     return true;
 }
 
@@ -53,9 +51,9 @@ static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error 
     (void)params;
     (void)err;
     (void)ud;
-    cJSON_AddStringToObject(result, "version", NT_DEVAPI_ENGINE_VERSION);
-    cJSON_AddStringToObject(result, "build", NT_DEVAPI_BUILD_TYPE);
-    cJSON_AddStringToObject(result, "preset", NT_PRESET_NAME);
+    devapi_add_string(result, "version", nt_engine_version_string());
+    devapi_add_string(result, "build", NT_DEVAPI_BUILD_TYPE);
+    devapi_add_string(result, "preset", NT_PRESET_NAME);
 
     cJSON *modules = cJSON_AddArrayToObject(result, "modules");
     NT_ASSERT(modules != NULL);
@@ -99,6 +97,7 @@ static const nt_devapi_command_desc k_core_cmds[] = {
 };
 
 static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info, cmd_view};
+_Static_assert(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]) == sizeof(k_core_handlers) / sizeof(k_core_handlers[0]), "core: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_core(void) {
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT

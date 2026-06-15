@@ -20,10 +20,8 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 
-# engine.info version sourcing, injected so the def exists from module creation
-# — mirrors the Clay-pin compile-def precedent.
+# engine.info build/preset facts (version comes from nt_core's nt_engine_version_string()).
 target_compile_definitions(nt_devapi PRIVATE
-    NT_DEVAPI_ENGINE_VERSION="1.9-dev"
     NT_PRESET_NAME="${NT_PRESET_NAME}"
     NT_DEVAPI_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
 )

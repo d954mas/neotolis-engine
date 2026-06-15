@@ -65,7 +65,7 @@ endif()
 # Must come before engine so targets like cglm_headers are visible.
 add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
 add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
-# cJSON is pure C and must link on all 4 presets (PROTO-01) — NOT inside the
+# cJSON is pure C and must link on all 4 presets — NOT inside the
 # if(NOT EMSCRIPTEN) block. Reusable by games independent of devapi.
 add_subdirectory(deps/cjson EXCLUDE_FROM_ALL)
 

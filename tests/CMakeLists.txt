@@ -353,13 +353,12 @@ if(NOT EMSCRIPTEN)
         )
         nt_setup_test_target(test_devapi_envelope)
 
-        # core command group via submit(). NT_DEVAPI_ENGINE_VERSION mirrors the value
-        # injected on nt_devapi so the test can assert engine.info.version against it.
+        # core command group via submit(). engine.info.version comes from nt_core, so the
+        # test asserts it against nt_engine_version_string() directly.
         add_executable(test_devapi_core unit/test_devapi_core.c)
         target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson unity)
         target_compile_definitions(test_devapi_core PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
-            NT_DEVAPI_ENGINE_VERSION="1.9-dev"
         )
         nt_setup_test_target(test_devapi_core)
 

@@ -50,15 +50,36 @@ static const char *resp_serialize(cJSON *tree) {
     return s_resp_buf;
 }
 
+/* cJSON_Add{String,Number,Bool}ToObject wrappers that assert success (OOM traps rather
+   than silently dropping a field). Result captured first — NT_ASSERT compiles out at
+   NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+void devapi_add_string(cJSON *obj, const char *key, const char *value) {
+    cJSON *item = cJSON_AddStringToObject(obj, key, value);
+    NT_ASSERT(item != NULL);
+    (void)item;
+}
+
+void devapi_add_number(cJSON *obj, const char *key, double value) {
+    cJSON *item = cJSON_AddNumberToObject(obj, key, value);
+    NT_ASSERT(item != NULL);
+    (void)item;
+}
+
+void devapi_add_bool(cJSON *obj, const char *key, bool value) {
+    cJSON *item = cJSON_AddBoolToObject(obj, key, value);
+    NT_ASSERT(item != NULL);
+    (void)item;
+}
+
 /* Build an owned {ok:false,error} entry. code/message are copied by cJSON, not owned. */
 static cJSON *make_error_entry(const char *code, const char *message) {
     cJSON *entry = cJSON_CreateObject();
     NT_ASSERT(entry != NULL);
-    cJSON_AddBoolToObject(entry, "ok", false);
+    devapi_add_bool(entry, "ok", false);
     cJSON *err = cJSON_AddObjectToObject(entry, "error");
     NT_ASSERT(err != NULL);
-    cJSON_AddStringToObject(err, "code", code);
-    cJSON_AddStringToObject(err, "message", message);
+    devapi_add_string(err, "code", code);
+    devapi_add_string(err, "message", message);
     return entry;
 }
 
@@ -80,7 +101,7 @@ static void echo_request_id(cJSON *entry, const cJSON *req) {
 static cJSON *make_ok_entry(cJSON *result_obj) {
     cJSON *entry = cJSON_CreateObject();
     NT_ASSERT(entry != NULL);
-    cJSON_AddBoolToObject(entry, "ok", true);
+    devapi_add_bool(entry, "ok", true);
     cJSON_bool added = cJSON_AddItemToObject(entry, "result", result_obj);
     NT_ASSERT(added);
     (void)added;

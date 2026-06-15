@@ -10,6 +10,12 @@
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 
+/* cJSON_Add{String,Number,Bool}ToObject wrappers that assert success — OOM traps
+   (fail-early) instead of silently producing an incomplete response. */
+void devapi_add_string(cJSON *obj, const char *key, const char *value);
+void devapi_add_number(cJSON *obj, const char *key, double value);
+void devapi_add_bool(cJSON *obj, const char *key, bool value);
+
 /* One registered command. The 7 descriptor strings are strdup-owned copies
    freed at shutdown; handler + user_data are stored verbatim. */
 typedef struct nt_devapi_slot {

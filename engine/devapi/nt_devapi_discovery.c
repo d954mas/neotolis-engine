@@ -8,14 +8,14 @@
 static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
     cJSON *obj = cJSON_CreateObject();
     NT_ASSERT(obj != NULL);
-    cJSON_AddStringToObject(obj, "method", slot->method);
-    cJSON_AddStringToObject(obj, "group", slot->group);
-    cJSON_AddStringToObject(obj, "summary", slot->summary);
+    devapi_add_string(obj, "method", slot->method);
+    devapi_add_string(obj, "group", slot->group);
+    devapi_add_string(obj, "summary", slot->summary);
     if (detail) {
-        cJSON_AddStringToObject(obj, "params_shape", slot->params_shape);
-        cJSON_AddStringToObject(obj, "result_shape", slot->result_shape);
-        cJSON_AddStringToObject(obj, "frame_behavior", slot->frame_behavior);
-        cJSON_AddStringToObject(obj, "side_effects", slot->side_effects);
+        devapi_add_string(obj, "params_shape", slot->params_shape);
+        devapi_add_string(obj, "result_shape", slot->result_shape);
+        devapi_add_string(obj, "frame_behavior", slot->frame_behavior);
+        devapi_add_string(obj, "side_effects", slot->side_effects);
     }
     cJSON_bool added = cJSON_AddItemToArray(arr, obj);
     NT_ASSERT(added);
@@ -63,13 +63,13 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
         return false;
     }
 
-    cJSON_AddStringToObject(result, "method", slot->method);
-    cJSON_AddStringToObject(result, "group", slot->group);
-    cJSON_AddStringToObject(result, "summary", slot->summary);
-    cJSON_AddStringToObject(result, "params_shape", slot->params_shape);
-    cJSON_AddStringToObject(result, "result_shape", slot->result_shape);
-    cJSON_AddStringToObject(result, "frame_behavior", slot->frame_behavior);
-    cJSON_AddStringToObject(result, "side_effects", slot->side_effects);
+    devapi_add_string(result, "method", slot->method);
+    devapi_add_string(result, "group", slot->group);
+    devapi_add_string(result, "summary", slot->summary);
+    devapi_add_string(result, "params_shape", slot->params_shape);
+    devapi_add_string(result, "result_shape", slot->result_shape);
+    devapi_add_string(result, "frame_behavior", slot->frame_behavior);
+    devapi_add_string(result, "side_effects", slot->side_effects);
     return true;
 }
 
@@ -130,6 +130,7 @@ static const nt_devapi_command_desc k_discovery_cmds[] = {
 };
 
 static const nt_devapi_handler_fn k_discovery_handlers[] = {cmd_endpoints, cmd_command_describe, cmd_features};
+_Static_assert(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]) == sizeof(k_discovery_handlers) / sizeof(k_discovery_handlers[0]), "discovery: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_discovery(void) {
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT

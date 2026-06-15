@@ -6,6 +6,7 @@
 #include <string.h>
 
 /* clang-format off */
+#include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
 #include "window/nt_window.h"
 #include "unity.h"
@@ -21,7 +22,7 @@ void setUp(void) {
     g_nt_window.fb_height = 1080;
     g_nt_window.width = 960;
     g_nt_window.height = 540;
-    g_nt_window.dpr = 2.5F; /* fractional on purpose: catches int-truncation of dpr (WR). */
+    g_nt_window.dpr = 2.5F; /* fractional on purpose: catches int-truncation of dpr. */
 
     /* init auto-registers the core group (NT_DEVAPI_REGISTER_core). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
@@ -70,8 +71,8 @@ static void test_engine_info(void) {
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_TRUE(cJSON_IsObject(result));
 
-    /* version is sourced from the NT_DEVAPI_ENGINE_VERSION compile-def. */
-    TEST_ASSERT_EQUAL_STRING(NT_DEVAPI_ENGINE_VERSION, cJSON_GetObjectItemCaseSensitive(result, "version")->valuestring);
+    /* version comes from the central nt_engine_version_string(). */
+    TEST_ASSERT_EQUAL_STRING(nt_engine_version_string(), cJSON_GetObjectItemCaseSensitive(result, "version")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "build")));
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "preset")));
 

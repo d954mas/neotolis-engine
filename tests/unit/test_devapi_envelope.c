@@ -159,7 +159,7 @@ static void test_batch_order_and_continue_on_error(void) {
    (which this test asserts) is: copy the first result BEFORE calling submit again,
    then compare the copy. We never dereference the first pointer after submit #2 —
    under ASan that would be a documented-invalid read. */
-static void test_d04_copy_before_next_submit(void) {
+static void test_copy_before_next_submit(void) {
     const char *first = nt_devapi_submit("{\"method\":\"ok\",\"request_id\":1}");
     char copy[256];
     size_t n = strlen(first);
@@ -279,7 +279,7 @@ int main(void) {
     RUN_TEST(test_trailing_garbage_rejected);
     RUN_TEST(test_request_id_echoed_on_error);
     RUN_TEST(test_batch_order_and_continue_on_error);
-    RUN_TEST(test_d04_copy_before_next_submit);
+    RUN_TEST(test_copy_before_next_submit);
     RUN_TEST(test_bare_number_is_bad_params);
     RUN_TEST(test_json_null_is_bad_params);
     RUN_TEST(test_empty_batch_returns_empty_array);
