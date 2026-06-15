@@ -37,14 +37,15 @@ EMSCRIPTEN_KEEPALIVE void nt_clipboard_web_on_paste(const char *utf8) { cache_st
 EM_JS(void, nt_clipboard_web_register, (void), {
     document.addEventListener("paste", function(e) {
         var text = (e.clipboardData || window.clipboardData).getData("text");
-        var ptr = stringToNewUTF8(text);
+        /* Module[...] access: bare globals get renamed by Closure (release). */
+        var ptr = Module["stringToNewUTF8"](text);
         Module["_nt_clipboard_web_on_paste"](ptr);
-        _free(ptr);
+        Module["_free"](ptr);
     });
 })
 
 EM_JS(void, nt_clipboard_web_write, (const char *utf8), {
-    var text = UTF8ToString(utf8);
+    var text = Module["UTF8ToString"](utf8);
     if (navigator.clipboard && navigator.clipboard.writeText) {
         /* Fire-and-forget: the Promise never crosses back into C. */
         navigator.clipboard.writeText(text);
