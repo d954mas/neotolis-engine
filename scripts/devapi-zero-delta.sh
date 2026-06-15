@@ -4,26 +4,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# SC5 / PROTO-10 zero-delta gate. The PRIMARY structural guarantee is the
-# engine/CMakeLists.txt subdir-exclusion at NT_DEVAPI_ENABLED=0 (D-10): a release
-# build never compiles engine/devapi, so the dev surface is physically absent.
-# This script is the explicit belt-and-suspenders assertion (D-11): it greps the
-# WASM for nt_devapi_* symbols and FAILS if any leak through. Per D-11 there is NO
-# build-twice / byte-identity baseline — the size-tracking CI catches a leak as a jump.
-#
-# IMPORTANT: nt_devapi_* are INTERNAL symbols — their names live only in the WASM
-# "name" custom section, which a fully-stripped release build discards. Grepping a
-# stripped binary for nt_devapi_* therefore "passes" vacuously regardless of leakage.
-# So this gate (a) runs against a names-retaining preset by default and (b) enforces a
-# POSITIVE CONTROL: it first proves engine nt_* names are visible, and errors out if
-# not — converting a silent false-pass into a loud, actionable failure.
+# Belt-and-suspenders zero-delta check: assert a devapi-OFF WASM has no nt_devapi_*
+# symbols. (The real guarantee is the CMake subdir-exclusion — devapi isn't compiled at
+# all when off.) devapi names are internal and stripped in release, so run a names-retaining
+# preset and prove engine nt_* names are visible first (positive control), else the check
+# would pass vacuously.
 
 PRESET="${PRESET:-wasm-analysis-paired}"
 
 usage() {
     echo "Usage: devapi-zero-delta.sh [target-name]"
     echo ""
-    echo "Assert a release WASM build contains zero nt_devapi_* symbols (SC5/PROTO-10)."
+    echo "Assert a devapi-OFF WASM build contains zero nt_devapi_* symbols."
     echo ""
     echo "Arguments:"
     echo "  target-name   Example target to inspect (default: hello)"

@@ -1,10 +1,8 @@
 #ifndef NT_DEVAPI_STUB_H
 #define NT_DEVAPI_STUB_H
 
-/* No-op stubs for NT_DEVAPI_ENABLED=0 builds. Engine AND game call-sites include
-   this instead of nt_devapi.h when devapi is compiled out, so the calls vanish to
-   nothing with zero release cost. Signatures mirror nt_devapi.h exactly (shared
-   value types via nt_devapi_types.h) so opt-in registration code compiles unchanged. */
+/* No-op stubs for NT_DEVAPI_ENABLED=0 builds: call-sites include this instead of
+   nt_devapi.h, so devapi calls vanish at zero release cost. Signatures mirror the real API. */
 
 #include "core/nt_types.h"
 #include "devapi/nt_devapi_types.h"

@@ -6,8 +6,7 @@
 
 #include "devapi/nt_devapi.h"
 
-/* Stable machine error tokens, single-sourced for the dispatch core and the
-   discovery handlers (was duplicated in nt_devapi.c + nt_devapi_discovery.c). */
+/* Stable machine error tokens, shared by the dispatch core and discovery handlers. */
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 
@@ -25,13 +24,11 @@ typedef struct nt_devapi_slot {
     void *user_data;
 } nt_devapi_slot;
 
-/* Release the dispatch-core reusable response buffer (defined in nt_devapi.c).
-   Called from nt_devapi_shutdown so init -> shutdown -> init returns to a pristine
-   state — the statics are file-local to nt_devapi.c, hence this teardown hook. */
+/* Release the response buffer (statics are file-local to nt_devapi.c). Called from
+   shutdown so init->shutdown->init is leak-free. */
 void nt_devapi_resp_reset(void);
 
-/* True once nt_devapi_init has run (and not yet shut down). Lets the dispatch core
-   enforce the init-before-use invariant — the registry statics are file-local. */
+/* True between init and shutdown — lets submit enforce init-before-use. */
 bool nt_devapi_initialized(void);
 
 /* Registry-table accessors (used by the dispatch core + discovery handlers). */
@@ -49,9 +46,8 @@ const char *nt_devapi_group_name(int index);
 void nt_devapi_register_core(void);
 #endif
 
-/* Discovery group registrar (endpoints / command.describe / features). Always-on
-   when devapi is built — no optional-L1 dependency, so NOT behind an #ifdef.
-   Defined in nt_devapi_discovery.c, invoked from nt_devapi_init. */
+/* Discovery group registrar — always-on (not behind an #ifdef). Defined in
+   nt_devapi_discovery.c, invoked from nt_devapi_init. */
 void nt_devapi_register_discovery(void);
 
 #endif /* NT_DEVAPI_INTERNAL_H */

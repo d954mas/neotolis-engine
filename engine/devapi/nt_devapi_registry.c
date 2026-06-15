@@ -49,13 +49,12 @@ nt_result_t nt_devapi_init(void) {
     s_group_count = 0;
     s_initialized = true;
 
-    /* Wire the compiled-in engine groups. Each group is opt-in via its
-       NT_DEVAPI_REGISTER_<group> define; later groups add their own block here. */
+    /* Wire compiled-in engine groups; each is opt-in via its NT_DEVAPI_REGISTER_<group> define. */
 #ifdef NT_DEVAPI_REGISTER_core
     nt_devapi_register_core();
 #endif
 
-    /* Discovery is always-on when devapi is built (no optional-L1 module). */
+    /* Discovery is always-on when devapi is built. */
     nt_devapi_register_discovery();
 
     return NT_OK;
@@ -76,9 +75,8 @@ void nt_devapi_shutdown(void) {
 }
 
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data) {
-    /* Preconditions (all caller bugs): must be initialized first, then desc + handler +
-       all 7 self-describing fields non-NULL. A NULL field would strdup to NULL and
-       silently vanish from endpoints/command.describe; short-circuit keeps the guards ordered. */
+    /* Preconditions (caller bugs): initialized + desc/handler/all-7-fields non-NULL — a NULL
+       field would strdup to NULL and silently vanish from the self-describing surface. */
     NT_ASSERT(s_initialized && desc != NULL && handler != NULL && desc->method != NULL && desc->layer != NULL && desc->summary != NULL && desc->params_shape != NULL && desc->result_shape != NULL &&
               desc->frame_behavior != NULL && desc->side_effects != NULL);
 

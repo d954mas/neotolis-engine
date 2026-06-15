@@ -1,11 +1,9 @@
 #ifndef NT_DEVAPI_TYPES_H
 #define NT_DEVAPI_TYPES_H
 
-/* Shared devapi value types — available WITH or WITHOUT NT_DEVAPI_ENABLED, so the
-   no-op stub surface (nt_devapi_stub.h) can mirror the real API signatures exactly
-   and opt-in registration code compiles unchanged at NT_DEVAPI_ENABLED=0.
-   cJSON is forward-declared (signatures use cJSON* only) to keep cJSON.h out of
-   zero-delta release builds. */
+/* Value types shared by the public header and the no-op stub, so both match at
+   NT_DEVAPI_ENABLED on/off. cJSON is forward-declared (cJSON* only) to keep cJSON.h
+   out of devapi-OFF builds. */
 
 #include <stdbool.h>
 

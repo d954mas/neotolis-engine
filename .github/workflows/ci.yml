@@ -267,12 +267,8 @@ jobs:
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
 
-      # SC5 / PROTO-10: assert a devapi-OFF WASM contains zero nt_devapi_* symbols.
-      # Structural guarantee is the devapi subdir-exclusion (D-10); this grep is the
-      # explicit assertion (D-11). Runs against wasm-analysis-paired (built+verified
-      # above): NT_WASM_ANALYSIS=ON RETAINS the name section while NT_DEVAPI_ENABLED is
-      # OFF, so the symbol-absence check is real. A stripped wasm-release would pass
-      # vacuously — the script's positive control now rejects a stripped binary.
+      # Assert a devapi-OFF WASM has zero nt_devapi_* symbols. Runs on wasm-analysis-paired
+      # (names retained, devapi off) so the symbol-absence check is real, not vacuous.
       - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
         run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
 
@@ -407,9 +403,7 @@ jobs:
       - name: Smoke test builder (debug)
         run: ./build/tools/builder/native-debug/builder
 
-      # NT_DEVAPI_ENABLED=ON so the 5 devapi test targets build + run here (WR-01): they
-      # are gated behind if(NT_DEVAPI_ENABLED) in tests/CMakeLists.txt and would otherwise
-      # never execute in CI. FULL asserts exercise the devapi NT_ASSERT contract paths.
+      # devapi ON so the 5 devapi test targets (gated by if(NT_DEVAPI_ENABLED)) build + run.
       - name: Configure native debug tests (FULL asserts, devapi ON)
         run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON
 
@@ -491,11 +485,8 @@ jobs:
           find engine shared tools examples -name '*.c' -o -name '*.h' | \
             xargs clang-format --dry-run --Werror
 
-      # NT_DEVAPI_ENABLED=ON so the devapi TUs are in compile_commands.json. devapi uses
-      # CMake subdir-exclusion (D-10) rather than the body-#if-guard convention, so at the
-      # default (OFF) tidy.sh lints engine/devapi/*.c with fallback flags (no cjson include,
-      # no NT_DEVAPI_ENABLED) and fails. Linting the devapi-ON config is the correct check —
-      # zero-delta concerns only release builds, asserted separately by the wasm job.
+      # devapi ON so its TUs are in compile_commands.json. tidy.sh lints every .c, but devapi
+      # uses CMake subdir-exclusion, so at the default (off) it would lint them with wrong flags.
       - name: Configure
         run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON
 

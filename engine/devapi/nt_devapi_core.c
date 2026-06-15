@@ -2,9 +2,8 @@
 #include "devapi/nt_devapi_internal.h"
 #include "window/nt_window.h"
 
-/* The engine `core` command group: ping / engine.info / view. First instance of
-   the per-group #ifdef NT_DEVAPI_REGISTER_core pattern that later groups clone.
-   The whole group compiles out when the define is absent. */
+/* Engine `core` command group: ping / engine.info / view. Compiles out entirely
+   when NT_DEVAPI_REGISTER_core is absent. */
 
 #ifdef NT_DEVAPI_REGISTER_core
 
@@ -27,7 +26,7 @@ static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     return true; /* success result is always an object */
 }
 
-/* Read-only veneer over g_nt_window (L2 rule: never mutates the window). */
+/* Read-only veneer over g_nt_window — never mutates it. */
 static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -40,8 +39,7 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     return true;
 }
 
-/* version/build/preset from compile-defs; "modules" = the active compiled-group
-   list — the meaningful "linked modules" answer with no runtime registry. */
+/* version/build/preset from compile-defs; "modules" = the active compiled groups. */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -96,10 +94,9 @@ static const nt_devapi_command_desc k_core_cmds[] = {
 static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info, cmd_view};
 
 void nt_devapi_register_core(void) {
-    /* Engine-internal registration: a dup group/method here is a build-time collision
-       (programming bug), so assert NT_OK. Capture first — NT_ASSERT compiles out under
-       NT_ASSERT_MODE=0, so the call must NOT live inside the macro. */
-    nt_result_t gr = nt_devapi_register_group("core"); /* group-name registered once */
+    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
+       compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    nt_result_t gr = nt_devapi_register_group("core");
     NT_ASSERT(gr == NT_OK);
     (void)gr;
     int n = (int)(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]));

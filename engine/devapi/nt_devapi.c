@@ -5,20 +5,15 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 
-/* Transport-agnostic dispatch core — zero platform/socket code. submit()
-   parses one JSON line, routes object-vs-array, wraps each request in the
-   {ok,result}/{ok,error} envelope, echoes request_id unchanged, and serializes
-   into one growing reusable buffer. The whole core is reachable from CTest via
-   literal JSON strings — no transport. */
+/* Transport-agnostic dispatch core: no platform/socket code, so it runs from
+   CTest with literal JSON lines. */
 
-/* Single growing reusable response buffer. The pointer returned by
-   nt_devapi_submit is valid ONLY until the next submit — the next call memcpys a
-   new payload here and a grow reallocs (the pointer may MOVE). Dev-only, single
-   client: unbounded growth is accepted (one buffer, reused across calls). */
+/* Reusable response buffer. The pointer nt_devapi_submit returns is valid only
+   until the next submit (a grow may move it). Dev-only: unbounded growth accepted. */
 static char *s_resp_buf;
 static size_t s_resp_cap;
 
-/* Grow s_resp_buf to hold at least `need` bytes (geometric, min 256). */
+/* Grow to hold >= need bytes (geometric, min 256). */
 static void resp_reserve(size_t need) {
     if (need <= s_resp_cap) {
         return;
@@ -37,8 +32,7 @@ static void resp_reserve(size_t need) {
     s_resp_cap = cap;
 }
 
-/* Release the reusable response buffer. Called from nt_devapi_shutdown so an
-   init -> shutdown -> init cycle returns to a pristine state (no buffer leak). */
+/* Release the response buffer on shutdown so init->shutdown->init stays leak-free. */
 void nt_devapi_resp_reset(void) {
     free(s_resp_buf);
     s_resp_buf = NULL;
@@ -56,8 +50,7 @@ static const char *resp_serialize(cJSON *tree) {
     return s_resp_buf;
 }
 
-/* Build {ok:false,error:{code,message}} and return it (caller owns the returned
-   object). code/message are borrowed — cJSON copies them, this takes no ownership. */
+/* Build an owned {ok:false,error} entry. code/message are copied by cJSON, not owned. */
 static cJSON *make_error_entry(const char *code, const char *message) {
     cJSON *entry = cJSON_CreateObject();
     NT_ASSERT(entry != NULL);
@@ -69,8 +62,7 @@ static cJSON *make_error_entry(const char *code, const char *message) {
     return entry;
 }
 
-/* Echo request_id unchanged into `entry` if present (number OR string; absent
-   → omitted). cJSON_Duplicate preserves the exact item type (number vs string). */
+/* Echo request_id unchanged if present — Duplicate preserves number-vs-string type. */
 static void echo_request_id(cJSON *entry, const cJSON *req) {
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "request_id");
     if (id == NULL) {
@@ -81,10 +73,8 @@ static void echo_request_id(cJSON *entry, const cJSON *req) {
     cJSON_AddItemToObject(entry, "request_id", dup);
 }
 
-/* Dispatch ONE request object → a fresh response entry object (caller owns it).
-   Kept separate from in-call assembly so a future deferred dispatch path can
-   reuse it. The dispatcher pre-creates AND always frees result_obj, so a
-   handler cannot leak and cannot free the tree itself. */
+/* Dispatch one request object → an owned response entry. The dispatcher pre-creates
+   and always frees result_obj, so a handler can neither leak it nor free it itself. */
 static cJSON *dispatch_one(const cJSON *req) {
     if (!cJSON_IsObject(req)) {
         return make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "request must be a JSON object");
@@ -106,7 +96,6 @@ static cJSON *dispatch_one(const cJSON *req) {
 
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
 
-    /* Dispatcher owns result_obj; the handler only fills it. */
     cJSON *result_obj = cJSON_CreateObject();
     NT_ASSERT(result_obj != NULL);
     nt_devapi_error err = {0};
@@ -116,7 +105,7 @@ static cJSON *dispatch_one(const cJSON *req) {
         entry = cJSON_CreateObject();
         NT_ASSERT(entry != NULL);
         cJSON_AddBoolToObject(entry, "ok", true);
-        /* result_obj is detached into the envelope; it is no longer free'd below. */
+        /* detached into the envelope — no longer freed below. */
         cJSON_AddItemToObject(entry, "result", result_obj);
         result_obj = NULL;
     } else {
@@ -125,16 +114,14 @@ static cJSON *dispatch_one(const cJSON *req) {
         entry = make_error_entry(code, message);
     }
 
-    /* Never-leak: on the error path result_obj was unused → always free it.
-       On the ok path it was detached (set NULL) → this is a no-op. */
+    /* Always free result_obj: unused on the error path, NULL (detached) on the ok path. */
     cJSON_Delete(result_obj);
 
     echo_request_id(entry, req);
     return entry;
 }
 
-/* Ordered batch, continue-on-error — each request yields its own envelope
-   entry in order; one failure does not abort the loop. */
+/* Ordered batch: each request gets its own entry; one failure doesn't abort the rest. */
 static cJSON *dispatch_batch(const cJSON *root) {
     cJSON *response = cJSON_CreateArray();
     NT_ASSERT(response != NULL);
@@ -151,7 +138,7 @@ const char *nt_devapi_submit(const char *line) {
     NT_ASSERT(nt_devapi_initialized()); /* dispatch before init is a caller bug (empty registry). */
     cJSON *root = cJSON_Parse(line);
     if (root == NULL) {
-        /* API contract path, NOT an assert: malformed JSON → bad_params. */
+        /* Contract path, not an assert: malformed JSON → bad_params. */
         cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "malformed JSON");
         const char *out = resp_serialize(entry);
         cJSON_Delete(entry);

@@ -1,13 +1,10 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 
-/* The discovery group: endpoints / command.describe / features. Self-describing
-   contract — a bot reads the whole surface + each command's shape without source.
-   Always-on when devapi is built (no optional-L1 dependency), but still routed
-   through register_group so it appears in `features`. */
+/* Discovery group: endpoints / command.describe / features — the self-describing
+   surface a client reads without source. Always-on when devapi is built. */
 
-/* Emit one command descriptor into `arr`. detail=false → cheap {method,layer,
-   summary}; detail=true → all 7 self-describing fields. */
+/* Emit one descriptor: detail=false → {method,layer,summary}; true → all 7 fields. */
 static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
     cJSON *obj = cJSON_CreateObject();
     NT_ASSERT(obj != NULL);
@@ -25,8 +22,7 @@ static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
     (void)added;
 }
 
-/* Invariant: result is an OBJECT containing a `commands` array — never a
-   bare top-level array. detail flag toggles cheap vs full descriptor form. */
+/* result wraps a `commands` array — never a bare top-level array. */
 static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)err;
     (void)ud;
@@ -45,8 +41,7 @@ static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-/* The full 7-field contract for one command named in params.method. Missing /
-   non-string method → bad_params; unknown name → unknown_method. */
+/* Full 7-field contract for params.method. Missing/non-string → bad_params; unknown → unknown_method. */
 static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(params, "method");
@@ -73,8 +68,7 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     return true;
 }
 
-/* Active command groups = the compile-time policy state — a group is present only
-   if its NT_DEVAPI_REGISTER_<group> was compiled. */
+/* Active groups = compile-time policy: a group exists only if its NT_DEVAPI_REGISTER_<group> compiled. */
 static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -92,8 +86,7 @@ static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *er
     return true;
 }
 
-/* Discovery commands carry layer="core": they are engine-level introspection,
-   not a game layer. Group name is "discovery" so `features` lists it distinctly. */
+/* Discovery commands are layer="core" (engine introspection); group name "discovery". */
 static const nt_devapi_command_desc k_discovery_cmds[] = {
     {
         .method = "endpoints",
@@ -127,10 +120,9 @@ static const nt_devapi_command_desc k_discovery_cmds[] = {
 static const nt_devapi_handler_fn k_discovery_handlers[] = {cmd_endpoints, cmd_command_describe, cmd_features};
 
 void nt_devapi_register_discovery(void) {
-    /* Engine-internal registration: a dup group/method here is a build-time collision
-       (programming bug), so assert NT_OK. Capture first — NT_ASSERT compiles out under
-       NT_ASSERT_MODE=0, so the call must NOT live inside the macro. */
-    nt_result_t gr = nt_devapi_register_group("discovery"); /* group-name registered once */
+    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
+       compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    nt_result_t gr = nt_devapi_register_group("discovery");
     NT_ASSERT(gr == NT_OK);
     (void)gr;
     int n = (int)(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]));
