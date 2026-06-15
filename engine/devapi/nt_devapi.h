@@ -13,9 +13,10 @@
 #include "core/nt_types.h"
 #include "devapi/nt_devapi_types.h" /* nt_devapi_error / _command_desc / _handler_fn (shared with the stub) */
 
-/* Registry table cap. Dev-only, linear-scanned — 64 covers engine + game groups. */
+/* Registry table cap. Dev-only static slots; lookup scans s_count, not the cap.
+   512 leaves wide headroom for engine + game groups (~18KB BSS wasm32, dev-only). */
 #ifndef NT_DEVAPI_MAX_COMMANDS
-#define NT_DEVAPI_MAX_COMMANDS 64
+#define NT_DEVAPI_MAX_COMMANDS 512
 #endif
 
 /* Lifecycle. init returns NT_OK once; a second init without shutdown returns NT_ERR_INIT_FAILED. */
