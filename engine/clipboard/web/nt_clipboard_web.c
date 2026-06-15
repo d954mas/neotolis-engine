@@ -47,8 +47,10 @@ EM_JS(void, nt_clipboard_web_register, (void), {
 EM_JS(void, nt_clipboard_web_write, (const char *utf8), {
     var text = Module["UTF8ToString"](utf8);
     if (navigator.clipboard && navigator.clipboard.writeText) {
-        /* Fire-and-forget: the Promise never crosses back into C. */
-        navigator.clipboard.writeText(text);
+        /* Best-effort OS write: writeText needs recent user-activation, which may be gone by the
+         * frame loop, so the Promise can reject. We swallow it via .catch (no unhandled rejection);
+         * in-app copy->paste stays reliable regardless because the paste cache holds the text. */
+        navigator.clipboard.writeText(text).catch(function() {});
     }
 })
 /* clang-format on */
@@ -60,6 +62,11 @@ static void ensure_registered(void) {
     s_registered = 1;
     nt_clipboard_web_register();
 }
+
+/* Register the DOM paste listener EAGERLY at module init so it exists before the user's first
+ * Ctrl+V — a lazy registration on the first get_text would miss the paste event that already fired.
+ * Runs after the wasm runtime is ready (KEEPALIVE/runtime methods are live) and the DOM exists. */
+__attribute__((constructor)) static void nt_clipboard_web_autoregister(void) { ensure_registered(); }
 
 const char *nt_clipboard_get_text(void) {
     ensure_registered();
