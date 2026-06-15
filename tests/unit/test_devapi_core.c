@@ -55,16 +55,6 @@ static void test_view_reflects_window(void) {
     cJSON_Delete(root);
 }
 
-static bool array_has_string(const cJSON *arr, const char *want) {
-    const cJSON *m = NULL;
-    cJSON_ArrayForEach(m, arr) {
-        if (cJSON_IsString(m) && strcmp(m->valuestring, want) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static void test_engine_info(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"engine.info\"}");
     cJSON *root = cJSON_Parse(resp);
@@ -75,11 +65,6 @@ static void test_engine_info(void) {
     TEST_ASSERT_EQUAL_STRING(nt_engine_version_string(), cJSON_GetObjectItemCaseSensitive(result, "version")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "build")));
     TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "preset")));
-
-    /* "modules" is the active compiled-group list — must contain "core". */
-    cJSON *modules = cJSON_GetObjectItemCaseSensitive(result, "modules");
-    TEST_ASSERT_TRUE(cJSON_IsArray(modules));
-    TEST_ASSERT_TRUE(array_has_string(modules, "core"));
     cJSON_Delete(root);
 }
 

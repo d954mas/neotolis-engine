@@ -114,9 +114,10 @@ const nt_devapi_slot *nt_devapi_registry_find(const char *method) {
    engine.info emit each distinct group once, derived from the commands (no separate list). */
 bool nt_devapi_group_is_first(int index) {
     NT_ASSERT(index >= 0 && index < s_count);
+    /* Every slot's group is non-NULL (nt_devapi_register asserts all fields), so no NULL guards. */
     const char *group = s_slots[index].group;
     for (int i = 0; i < index; i++) {
-        if (s_slots[i].group != NULL && strcmp(s_slots[i].group, group) == 0) {
+        if (strcmp(s_slots[i].group, group) == 0) {
             return false;
         }
     }
