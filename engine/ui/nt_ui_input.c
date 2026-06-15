@@ -577,12 +577,32 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     nt_ui_clay_priv_close_element();
 }
 
+/* Float the text at (x,y) inside the field, clipped to the field box, so it shares the SAME
+ * pad_x - scroll_x origin as the caret/selection rects (an inline label would ignore scroll_x and
+ * desync once the text scrolls). The label is the single child of this floating clip wrapper. */
+static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y, const char *disp, const nt_ui_label_style_t *ts) {
+    nt_ui_transform_t tt = nt_ui_transform_defaults();
+    tt.offset_x = x;
+    tt.offset_y = y;
+    nt_ui_element_data_t *wd = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(wd != NULL && "nt_ui_input: scratch alloc failed (text wrapper data)");
+    *wd = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
+    const Clay_ElementDeclaration text_decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+    };
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(text_decl);
+    nt_ui_label(ctx, nt_ui_make_element_data(text_layer, NULL), disp, ts);
+    nt_ui_clay_priv_close_element();
+}
+
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_style_t *style,
                       const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted) {
-    // #region entry asserts (STYLE-VALIDATION-01)
+    // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_input_text: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_input_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_input_text: style must be non-NULL");
@@ -904,7 +924,9 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
          * is render-only (the game buffer is untouched). build_display_text is shared with the test
          * probe so the password branch is asserted without a GL capture. */
         const char *disp = (style->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
-        nt_ui_label(ctx, nt_ui_make_element_data(text_layer, NULL), disp, &ts);
+        /* Float the text at pad_x - scroll_x (clipped to the field) so it tracks the caret/selection
+         * when the line scrolls; an inline label would stay at x=0 and desync. */
+        emit_text(ctx, text_layer, style->pad_x - st->scroll_x, style->pad_y, disp, &ts);
     }
     /* Placeholder text is a future concern: there is no placeholder string param yet (the buffer IS
      * the value). style->placeholder carries the dimmed style for when that lands. */
