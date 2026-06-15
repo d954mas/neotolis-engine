@@ -14,7 +14,7 @@
    freed at shutdown; handler + user_data are stored verbatim. */
 typedef struct nt_devapi_slot {
     char *method;
-    char *layer;
+    char *group;
     char *summary;
     char *params_shape;
     char *result_shape;
@@ -36,9 +36,9 @@ int nt_devapi_registry_count(void);
 const nt_devapi_slot *nt_devapi_registry_slot(int index);
 const nt_devapi_slot *nt_devapi_registry_find(const char *method);
 
-/* Group-name list accessors (used by `features`). */
-int nt_devapi_group_count(void);
-const char *nt_devapi_group_name(int index);
+/* True if slot[index]'s group first appears at index — lets `features` / engine.info emit
+   each distinct group once, derived from the registered commands. */
+bool nt_devapi_group_is_first(int index);
 
 /* Engine `core` group registrar (per-group #ifdef). Defined in
    nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */

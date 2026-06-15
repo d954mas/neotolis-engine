@@ -17,11 +17,6 @@ static inline nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc,
     return NT_OK;
 }
 
-static inline nt_result_t nt_devapi_register_group(const char *group_name) {
-    (void)group_name;
-    return NT_OK;
-}
-
 static inline const char *nt_devapi_submit(const char *line) {
     (void)line;
     return NULL;

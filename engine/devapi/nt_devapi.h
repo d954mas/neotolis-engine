@@ -26,9 +26,6 @@ void nt_devapi_shutdown(void);
    is already registered — the dup is rejected, not overwritten. */
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data);
 
-/* Record one group-name string (e.g. "core") for the `features` discovery list. */
-nt_result_t nt_devapi_register_group(const char *group_name);
-
 /* Submit one JSON request line → the JSON response line. The returned pointer is valid
    only until the next submit — copy it before calling submit again. */
 const char *nt_devapi_submit(const char *line);

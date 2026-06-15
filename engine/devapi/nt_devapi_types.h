@@ -16,12 +16,12 @@ typedef struct nt_devapi_error {
     const char *message;
 } nt_devapi_error;
 
-/* Self-describing command metadata. All 7 fields are documentation strings the
-   registry copies (strdup) at registration — the caller may free its buffers after.
-   NO `group` field; group membership is tracked separately via register_group. */
+/* Self-describing command metadata. All 7 fields are documentation strings the registry
+   copies (strdup) at registration. `group` names the command's capability bundle; the
+   `features` command lists the distinct groups across all registered commands. */
 typedef struct nt_devapi_command_desc {
     const char *method;
-    const char *layer;
+    const char *group;
     const char *summary;
     const char *params_shape;
     const char *result_shape;

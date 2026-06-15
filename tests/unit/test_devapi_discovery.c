@@ -27,7 +27,7 @@ static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *e
 
 static const nt_devapi_command_desc k_game_poke = {
     .method = "game.poke",
-    .layer = "game",
+    .group = "game",
     .summary = "test game-layer command (flips a flag)",
     .params_shape = "{}",
     .result_shape = "{poked:bool}",
@@ -42,8 +42,6 @@ void setUp(void) {
     /* Register the game command through the public API only — the test touches
        no engine devapi source to add it (zero engine edits). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&k_game_poke, cmd_game_poke, &s_game_poked));
-    /* register the "game" group name so features can report it. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("game"));
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -100,12 +98,12 @@ static void test_endpoints_cheap_has_three_fields(void) {
     const cJSON *commands = NULL;
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
 
-    /* cheap form: exactly method+layer+summary. */
+    /* cheap form: exactly method+group+summary. */
     const cJSON *ping = find_command(commands, "ping");
     TEST_ASSERT_NOT_NULL(ping);
     TEST_ASSERT_EQUAL_INT(3, count_object_fields(ping));
     TEST_ASSERT_TRUE(field_is_string(ping, "method"));
-    TEST_ASSERT_TRUE(field_is_string(ping, "layer"));
+    TEST_ASSERT_TRUE(field_is_string(ping, "group"));
     TEST_ASSERT_TRUE(field_is_string(ping, "summary"));
     cJSON_Delete(root);
 }
@@ -143,7 +141,7 @@ static void test_command_describe_ping(void) {
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_EQUAL_INT(7, count_object_fields(result));
     TEST_ASSERT_EQUAL_STRING("ping", cJSON_GetObjectItemCaseSensitive(result, "method")->valuestring);
-    TEST_ASSERT_EQUAL_STRING("core", cJSON_GetObjectItemCaseSensitive(result, "layer")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("core", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -191,8 +189,10 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_TRUE(array_has_string(groups, "core"));
     TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
-    /* an unregistered group is absent from features. */
+    /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
+    /* groups are distinct: 3 core + 3 discovery commands collapse to one entry each. */
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(groups));
     cJSON_Delete(root);
 }
 
@@ -203,7 +203,7 @@ static void test_game_command_discoverable(void) {
     cJSON *root = submit_endpoints("{\"method\":\"endpoints\"}", &commands);
     const cJSON *poke = find_command(commands, "game.poke");
     TEST_ASSERT_NOT_NULL(poke);
-    TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(poke, "layer")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(poke, "group")->valuestring);
     cJSON_Delete(root);
 }
 
@@ -212,7 +212,7 @@ static void test_game_command_describe(void) {
     cJSON *root = cJSON_Parse(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(result, "layer")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("game", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
     TEST_ASSERT_EQUAL_STRING("{poked:bool}", cJSON_GetObjectItemCaseSensitive(result, "result_shape")->valuestring);
     cJSON_Delete(root);
 }

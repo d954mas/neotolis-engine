@@ -2592,7 +2592,7 @@ Recommended stats: frame time, fixed step count, draw call count, batch count, l
 
 **Transport-agnostic core.** The dispatch core is `submit(line) -> response line`: one JSON request line in, one JSON response line out, with no platform/socket/transport code. Real transports (loopback TCP, web `ccall`) are separate, opt-in, and added by later phases.
 
-**Self-describing registry.** Commands are registered once into a fixed-size table, each with a 7-field descriptor (`method`, `layer`, `summary`, `params_shape`, `result_shape`, `frame_behavior`, `side_effects`). The discovery group (`endpoints`, `command.describe`, `features`) exposes the whole surface so a client reads it without source. A game registers `layer="game"` commands through the public API with zero engine edits; commands are grouped — engine groups are compile-gated, while a game registers its own at runtime.
+**Self-describing registry.** Commands are registered once into a fixed-size table, each with a 7-field descriptor (`method`, `group`, `summary`, `params_shape`, `result_shape`, `frame_behavior`, `side_effects`). The discovery commands (`endpoints`, `command.describe`, `features`) expose the whole surface so a client reads it without source. A game registers `group="game"` commands through the public API with zero engine edits. `features` lists the distinct `group` values across all registered commands — which groups exist depends on which commands are compiled in (engine) or registered at runtime (game).
 
 **Envelope.** Each request returns `{ok:true,result}` or `{ok:false,error:{code,message}}`, echoes `request_id` unchanged, and a JSON-array line runs as an ordered batch with continue-on-error.
 

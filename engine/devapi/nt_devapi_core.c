@@ -39,7 +39,16 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     return true;
 }
 
-/* version/build/preset from compile-defs; "modules" = the active command groups. */
+/* Append a group-name string to `arr` (OOM traps, never silently dropped). */
+static void emit_group(cJSON *arr, const char *name) {
+    cJSON *item = cJSON_CreateString(name);
+    NT_ASSERT(item != NULL);
+    cJSON_bool added = cJSON_AddItemToArray(arr, item);
+    NT_ASSERT(added);
+    (void)added;
+}
+
+/* version/build/preset from compile-defs; "modules" = the distinct active groups. */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -50,13 +59,11 @@ static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error 
 
     cJSON *modules = cJSON_AddArrayToObject(result, "modules");
     NT_ASSERT(modules != NULL);
-    int n = nt_devapi_group_count();
+    int n = nt_devapi_registry_count();
     for (int i = 0; i < n; i++) {
-        cJSON *name = cJSON_CreateString(nt_devapi_group_name(i));
-        NT_ASSERT(name != NULL); /* OOM: trap rather than silently drop a module name. */
-        cJSON_bool added = cJSON_AddItemToArray(modules, name);
-        NT_ASSERT(added);
-        (void)added;
+        if (nt_devapi_group_is_first(i)) {
+            emit_group(modules, nt_devapi_registry_slot(i)->group);
+        }
     }
     return true;
 }
@@ -64,7 +71,7 @@ static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error 
 static const nt_devapi_command_desc k_core_cmds[] = {
     {
         .method = "ping",
-        .layer = "core",
+        .group = "core",
         .summary = "liveness check",
         .params_shape = "{}",
         .result_shape = "{pong:bool}",
@@ -73,7 +80,7 @@ static const nt_devapi_command_desc k_core_cmds[] = {
     },
     {
         .method = "engine.info",
-        .layer = "core",
+        .group = "core",
         .summary = "engine version/build/preset + active command groups",
         .params_shape = "{}",
         .result_shape = "{version:string,build:string,preset:string,modules:string[]}",
@@ -82,7 +89,7 @@ static const nt_devapi_command_desc k_core_cmds[] = {
     },
     {
         .method = "view",
-        .layer = "core",
+        .group = "core",
         .summary = "framebuffer + logical size + device pixel ratio",
         .params_shape = "{}",
         .result_shape = "{fb_width:number,fb_height:number,width:number,height:number,dpr:number}",
@@ -96,9 +103,6 @@ static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info
 void nt_devapi_register_core(void) {
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
        compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
-    nt_result_t gr = nt_devapi_register_group("core");
-    NT_ASSERT(gr == NT_OK);
-    (void)gr;
     int n = (int)(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_core_cmds[i], k_core_handlers[i], NULL);

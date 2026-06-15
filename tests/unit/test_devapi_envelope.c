@@ -27,7 +27,7 @@ static bool ok_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *
 static void register_ok(void) {
     nt_devapi_command_desc desc = {
         .method = "ok",
-        .layer = "core",
+        .group = "test",
         .summary = "test handler",
         .params_shape = "{n?:number}",
         .result_shape = "{ran:bool}",

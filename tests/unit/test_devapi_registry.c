@@ -27,15 +27,13 @@ static bool dummy_handler(const cJSON *params, cJSON *result_obj, nt_devapi_erro
     return true;
 }
 
-/* nt_devapi_init auto-registers the compiled-in `core` group, so the registry is
-   non-empty after setUp. Tests assert DELTAS from these baselines. */
+/* init auto-registers the compiled-in commands, so the registry is non-empty after
+   setUp. Tests assert DELTAS from this baseline count. */
 static int s_base_cmds;
-static int s_base_groups;
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     s_base_cmds = nt_devapi_registry_count();
-    s_base_groups = nt_devapi_group_count();
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -46,10 +44,9 @@ static void test_init_double_init(void) {
 }
 
 static void test_register_seven_fields_round_trip(void) {
-    /* Unique method (avoid colliding with the auto-registered core group). */
     nt_devapi_command_desc desc = {
         .method = "test.liveness",
-        .layer = "engine",
+        .group = "test",
         .summary = "liveness check",
         .params_shape = "{}",
         .result_shape = "{pong:bool}",
@@ -62,7 +59,7 @@ static void test_register_seven_fields_round_trip(void) {
     const nt_devapi_slot *slot = nt_devapi_registry_find("test.liveness");
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_EQUAL_STRING("test.liveness", slot->method);
-    TEST_ASSERT_EQUAL_STRING("engine", slot->layer);
+    TEST_ASSERT_EQUAL_STRING("test", slot->group);
     TEST_ASSERT_EQUAL_STRING("liveness check", slot->summary);
     TEST_ASSERT_EQUAL_STRING("{}", slot->params_shape);
     TEST_ASSERT_EQUAL_STRING("{pong:bool}", slot->result_shape);
@@ -79,7 +76,7 @@ static void test_owned_copy_survives_source_free(void) {
 
     nt_devapi_command_desc desc = {
         .method = method,
-        .layer = "engine",
+        .group = "test",
         .summary = summary,
         .params_shape = "{}",
         .result_shape = "{}",
@@ -104,7 +101,7 @@ static void test_owned_copy_survives_source_free(void) {
 static void test_dup_method_rejected_first_preserved(void) {
     nt_devapi_command_desc first = {
         .method = "foo",
-        .layer = "engine",
+        .group = "test",
         .summary = "the original",
         .params_shape = "{}",
         .result_shape = "{}",
@@ -113,7 +110,7 @@ static void test_dup_method_rejected_first_preserved(void) {
     };
     nt_devapi_command_desc second = {
         .method = "foo",
-        .layer = "game",
+        .group = "impostor",
         .summary = "the impostor",
         .params_shape = "{}",
         .result_shape = "{}",
@@ -128,26 +125,8 @@ static void test_dup_method_rejected_first_preserved(void) {
     TEST_ASSERT_EQUAL_INT(s_base_cmds + 1, nt_devapi_registry_count());
     const nt_devapi_slot *slot = nt_devapi_registry_find("foo");
     TEST_ASSERT_NOT_NULL(slot);
-    TEST_ASSERT_EQUAL_STRING("engine", slot->layer);
+    TEST_ASSERT_EQUAL_STRING("test", slot->group);
     TEST_ASSERT_EQUAL_STRING("the original", slot->summary);
-}
-
-static void test_register_group_tracked(void) {
-    /* Unique name (core is already auto-registered by init). */
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("test_grp"));
-    TEST_ASSERT_EQUAL_INT(s_base_groups + 1, nt_devapi_group_count());
-    TEST_ASSERT_EQUAL_STRING("test_grp", nt_devapi_group_name(s_base_groups));
-}
-
-/* A duplicate group is rejected (mirror dup_method), not silently double-listed. */
-static void test_dup_group_rejected(void) {
-    /* "core" is auto-registered by init → re-registering it is rejected. */
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_devapi_register_group("core"));
-    /* a fresh group registers once, then its duplicate is rejected. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register_group("dup_grp"));
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_devapi_register_group("dup_grp"));
-    /* exactly one NEW group added across all of the above. */
-    TEST_ASSERT_EQUAL_INT(s_base_groups + 1, nt_devapi_group_count());
 }
 
 int main(void) {
@@ -156,7 +135,5 @@ int main(void) {
     RUN_TEST(test_register_seven_fields_round_trip);
     RUN_TEST(test_owned_copy_survives_source_free);
     RUN_TEST(test_dup_method_rejected_first_preserved);
-    RUN_TEST(test_register_group_tracked);
-    RUN_TEST(test_dup_group_rejected);
     return UNITY_END();
 }

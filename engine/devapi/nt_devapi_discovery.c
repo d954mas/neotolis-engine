@@ -4,12 +4,12 @@
 /* Discovery group: endpoints / command.describe / features — the self-describing
    surface a client reads without source. Always-on when devapi is built. */
 
-/* Emit one descriptor: detail=false → {method,layer,summary}; true → all 7 fields. */
+/* Emit one descriptor: detail=false → {method,group,summary}; true → all 7 fields. */
 static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
     cJSON *obj = cJSON_CreateObject();
     NT_ASSERT(obj != NULL);
     cJSON_AddStringToObject(obj, "method", slot->method);
-    cJSON_AddStringToObject(obj, "layer", slot->layer);
+    cJSON_AddStringToObject(obj, "group", slot->group);
     cJSON_AddStringToObject(obj, "summary", slot->summary);
     if (detail) {
         cJSON_AddStringToObject(obj, "params_shape", slot->params_shape);
@@ -64,7 +64,7 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     }
 
     cJSON_AddStringToObject(result, "method", slot->method);
-    cJSON_AddStringToObject(result, "layer", slot->layer);
+    cJSON_AddStringToObject(result, "group", slot->group);
     cJSON_AddStringToObject(result, "summary", slot->summary);
     cJSON_AddStringToObject(result, "params_shape", slot->params_shape);
     cJSON_AddStringToObject(result, "result_shape", slot->result_shape);
@@ -73,47 +73,54 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     return true;
 }
 
-/* Active command groups: engine groups are compile-gated, games register theirs at runtime. */
+/* Append a group-name string to `arr` (OOM traps, never silently dropped). */
+static void emit_group(cJSON *arr, const char *name) {
+    cJSON *item = cJSON_CreateString(name);
+    NT_ASSERT(item != NULL);
+    cJSON_bool added = cJSON_AddItemToArray(arr, item);
+    NT_ASSERT(added);
+    (void)added;
+}
+
+/* The distinct groups across all registered commands (engine + game). */
 static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
     (void)ud;
     cJSON *groups = cJSON_AddArrayToObject(result, "groups");
     NT_ASSERT(groups != NULL);
-    int n = nt_devapi_group_count();
+    int n = nt_devapi_registry_count();
     for (int i = 0; i < n; i++) {
-        cJSON *name = cJSON_CreateString(nt_devapi_group_name(i));
-        NT_ASSERT(name != NULL); /* OOM: trap rather than silently drop a group name. */
-        cJSON_bool added = cJSON_AddItemToArray(groups, name);
-        NT_ASSERT(added);
-        (void)added;
+        if (nt_devapi_group_is_first(i)) {
+            emit_group(groups, nt_devapi_registry_slot(i)->group);
+        }
     }
     return true;
 }
 
-/* Discovery commands are layer="core" (engine introspection); group name "discovery". */
+/* Engine introspection commands; group "discovery". */
 static const nt_devapi_command_desc k_discovery_cmds[] = {
     {
         .method = "endpoints",
-        .layer = "core",
+        .group = "discovery",
         .summary = "list all registered commands (cheap; detail=true for full descriptors)",
         .params_shape = "{detail?:bool}",
-        .result_shape = "{commands:[{method,layer,summary}]|[{...7 fields}]}",
+        .result_shape = "{commands:[{method,group,summary}]|[{...7 fields}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
     {
         .method = "command.describe",
-        .layer = "core",
+        .group = "discovery",
         .summary = "full self-describing contract for one command",
         .params_shape = "{method:string}",
-        .result_shape = "{method,layer,summary,params_shape,result_shape,frame_behavior,side_effects}",
+        .result_shape = "{method,group,summary,params_shape,result_shape,frame_behavior,side_effects}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
     {
         .method = "features",
-        .layer = "core",
+        .group = "discovery",
         .summary = "active command groups",
         .params_shape = "{}",
         .result_shape = "{groups:string[]}",
@@ -127,9 +134,6 @@ static const nt_devapi_handler_fn k_discovery_handlers[] = {cmd_endpoints, cmd_c
 void nt_devapi_register_discovery(void) {
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
        compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
-    nt_result_t gr = nt_devapi_register_group("discovery");
-    NT_ASSERT(gr == NT_OK);
-    (void)gr;
     int n = (int)(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_discovery_cmds[i], k_discovery_handlers[i], NULL);
