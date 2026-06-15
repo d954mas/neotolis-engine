@@ -8,14 +8,6 @@
 
 #ifdef NT_DEVAPI_REGISTER_core
 
-/* Compile-time facts for engine.info — no runtime module registry. */
-#ifndef NT_DEVAPI_BUILD_TYPE
-#define NT_DEVAPI_BUILD_TYPE "unknown"
-#endif
-#ifndef NT_PRESET_NAME
-#define NT_PRESET_NAME "unknown"
-#endif
-
 static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -37,15 +29,15 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     return true;
 }
 
-/* version/build/preset from compile-defs. The active command-group list lives in
-   `features`, so engine.info doesn't duplicate it. */
+/* version/build/preset are engine-identity facts owned by nt_core. The active
+   command-group list lives in `features`, so engine.info doesn't duplicate it. */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
     (void)ud;
     devapi_add_string(result, "version", nt_engine_version_string());
-    devapi_add_string(result, "build", NT_DEVAPI_BUILD_TYPE);
-    devapi_add_string(result, "preset", NT_PRESET_NAME);
+    devapi_add_string(result, "build", nt_engine_build_string());
+    devapi_add_string(result, "preset", nt_engine_preset_string());
     return true;
 }
 

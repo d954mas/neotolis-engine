@@ -20,8 +20,4 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 
-# engine.info build/preset facts (version comes from nt_core's nt_engine_version_string()).
-target_compile_definitions(nt_devapi PRIVATE
-    NT_PRESET_NAME="${NT_PRESET_NAME}"
-    NT_DEVAPI_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-)
+# engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).

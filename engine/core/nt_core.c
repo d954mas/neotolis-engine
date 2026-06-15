@@ -2,6 +2,15 @@
 #include "log/nt_log.h"
 #include <stdio.h>
 
+/* Build identity injected by CMake (engine/core/CMakeLists.txt). "unknown" keeps
+   core compilable when the build facts aren't passed (e.g. bare unit tests). */
+#ifndef NT_BUILD_TYPE
+#define NT_BUILD_TYPE "unknown"
+#endif
+#ifndef NT_PRESET_NAME
+#define NT_PRESET_NAME "unknown"
+#endif
+
 static bool s_initialized = false;
 
 nt_result_t nt_engine_init(const nt_engine_config_t *config) {
@@ -37,3 +46,7 @@ const char *nt_engine_version_string(void) {
     }
     return version_buf;
 }
+
+const char *nt_engine_build_string(void) { return NT_BUILD_TYPE; }
+
+const char *nt_engine_preset_string(void) { return NT_PRESET_NAME; }
