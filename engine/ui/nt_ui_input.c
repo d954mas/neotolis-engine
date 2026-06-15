@@ -301,6 +301,11 @@ bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id) {
     return id != 0U && ctx->focused_input_id == id;
 }
 
+bool nt_ui_input_any_focused(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_input_any_focused: ctx must be non-NULL");
+    return ctx->focused_input_id != 0U;
+}
+
 // #region edit ops
 
 /* Splice the UTF-8 encoding of `cp` into buffer at `caret`, clamping to buffer_size-1 and the

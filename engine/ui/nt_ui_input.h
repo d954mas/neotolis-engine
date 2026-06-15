@@ -76,6 +76,10 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
 /* True if `id` currently holds keyboard focus (D-15). */
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id);
 
+/* True if ANY text field currently holds keyboard focus. Lets the host gate a global Esc=quit so
+ * Esc unfocuses a field first (the focus state is the previous frame's, read before nt_ui_begin). */
+bool nt_ui_input_any_focused(const nt_ui_context_t *ctx);
+
 /* Stock allow-predicates (D-12). numeric = [0-9.+-]; email = alnum + @._%+-; url = alnum +
  * a small URL-safe punctuation set. */
 bool nt_ui_filter_numeric(uint32_t codepoint);

@@ -1442,7 +1442,7 @@ static void declare_header(nt_ui_context_t *ctx) {
 
         /* Spacer pushes the keyboard hints to the far right, dimmer than the live readout. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "[T] palette  [D] inspector  [Esc] quit", g_current->caption);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "[T] palette  [D] inspector  [Esc] unfocus/quit", g_current->caption);
     }
 }
 
@@ -1554,7 +1554,9 @@ static void frame(void) {
     const bool modal_was_active = nt_ui_modal_active(s_ctx);
 
 #ifndef NT_PLATFORM_WEB
-    if (!modal_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    /* Esc unfocuses a focused field first (the field consumes it in its own pass); only quit when
+     * no modal is up AND no field holds focus. focused_input_id is last frame's (read pre-begin). */
+    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif
