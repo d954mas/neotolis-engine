@@ -1832,7 +1832,7 @@ int main(int argc, char *argv[]) {
     nt_platform_web_loading_complete();
 #endif
 
-    nt_log_info("ui_showcase: starting (T=palette, D=inspector, Esc quit)");
+    nt_log_info("ui_showcase: starting (T=palette, D=inspector, Esc unfocus/quit)");
 
     nt_app_run(frame);
 

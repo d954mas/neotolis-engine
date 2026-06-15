@@ -152,7 +152,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input COMMAND test_input)
 
-    # --- Input char ring tests (INPUT-01: FIFO + UTF-32 + overflow) ---
+    # --- Input char ring tests (FIFO + UTF-32 + overflow) ---
     add_executable(test_input_char unit/test_input_char.c)
     target_link_libraries(test_input_char PRIVATE nt_input_stub nt_log_stub unity)
     nt_set_warning_flags(test_input_char)

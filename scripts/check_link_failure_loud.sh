@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gate (D-01): omitting a swappable impl must be a LOUD unresolved-symbol link
+# Gate: omitting a swappable impl must be a LOUD unresolved-symbol link
 # error, never a silent no-op. Build a throwaway TU that calls nt_log_write but
 # links NO nt_log impl (interface only -- header, no symbols), and assert the
 # linker reports an undefined reference to nt_log_write.
@@ -41,7 +41,7 @@ RC=$?
 set -e 2>/dev/null || true
 
 if [ "$RC" -eq 0 ]; then
-    echo "check_link_failure_loud: FAILED -- impl-less target linked successfully (D-01 broken)"
+    echo "check_link_failure_loud: FAILED -- impl-less target linked successfully (loud-link gate broken)"
     exit 1
 fi
 

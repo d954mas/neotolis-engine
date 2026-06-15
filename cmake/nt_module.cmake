@@ -56,7 +56,7 @@ endfunction()
 # Creates a header-only INTERFACE target <module_name>_interface that carries
 # only the engine/ include root — no TU, so no LOG_DOMAIN injection. Modules
 # link this interface; the executable picks exactly one real/stub impl. Forgetting
-# the impl is a loud unresolved-symbol link error (D-01), never a silent no-op.
+# the impl is a loud unresolved-symbol link error, never a silent no-op.
 #
 # Example: nt_declare_interface(nt_log) -> nt_log_interface + nt::log_interface
 function(nt_declare_interface name)

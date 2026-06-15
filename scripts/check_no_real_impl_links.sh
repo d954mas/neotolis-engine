@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Gate: no engine module may link a REAL swappable impl (re-poisons the link
-# graph and makes stubs unreachable -- the #126 anti-pattern). Modules link the
-# header-only nt_X_interface; the executable picks exactly one impl.
+# graph and makes stubs unreachable -- the module-composition anti-pattern). Modules
+# link the header-only nt_X_interface; the executable picks exactly one impl.
 #
-# All 7 swappable pairs are decoupled (61-01 keystone nt_log + 61-02 rest).
+# All swappable pairs are decoupled: the keystone nt_log plus the rest.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
