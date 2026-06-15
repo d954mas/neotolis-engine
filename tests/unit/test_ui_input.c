@@ -28,6 +28,7 @@
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
+#include "utf8/nt_utf8.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
@@ -579,6 +580,84 @@ static void test_password_buffer_and_keyboard(void) {
     TEST_ASSERT_EQUAL_STRING("sec", buf); /* native: keyboard enum stored, edit behavior unchanged */
 }
 
+/* ---- Test 24: Delete key removes the codepoint to the RIGHT of the caret; caret stays put. ---- */
+static void test_delete_key_right(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1"); /* "Аб" */
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME); /* caret = 0 */
+
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_DELETE);
+    TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(buf)); /* removed 'А' (2 bytes), caret still 0 */
+    TEST_ASSERT_EQUAL_UINT8(0xD0U, (uint8_t)buf[0]);   /* 'б' remains */
+    TEST_ASSERT_EQUAL_UINT8(0xB1U, (uint8_t)buf[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)buf[2]);
+
+    /* A second Delete clears the last codepoint. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_DELETE);
+    TEST_ASSERT_EQUAL_UINT(0U, (unsigned)strlen(buf));
+}
+
+/* ---- Test 25: a malformed/truncated UTF-8 paste yields a valid buffer; only the valid 'A' lands. ---- */
+static void test_clipboard_paste_malformed_utf8(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    /* lone 0xFF (reject), 0xC0 (overlong lead, no continuation), 0xE0 (3-byte lead, truncated),
+     * then a valid 'A'. The decoder must resync and splice only 'A' -- never read OOB. */
+    nt_clipboard_set_text("\xFF\xC0\xE0\x41");
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
+    TEST_ASSERT_EQUAL_STRING("A", buf); /* only the valid codepoint survived */
+
+    /* The buffer is valid UTF-8 end-to-end (a full decode accepts with no reject). */
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t cp = 0U;
+    for (const char *p = buf; *p != '\0'; ++p) {
+        const uint32_t s = nt_utf8_decode(&state, &cp, (uint8_t)*p);
+        TEST_ASSERT_NOT_EQUAL_UINT(NT_UTF8_REJECT, s);
+    }
+    TEST_ASSERT_EQUAL_UINT(NT_UTF8_ACCEPT, state); /* ends on a codepoint boundary */
+}
+
+/* ---- Test 26: press -> move -> release selects the spanned range (drag-select). ---- */
+static void test_drag_select_range(void) {
+    char buf[32];
+    strcpy(buf, "abcd"); /* 4 single-byte glyphs, 10px advance each */
+    const uint32_t id = nt_ui_id("f");
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL); /* warm the bbox */
+
+    /* Press at the start (caret/anchor = 0), drag to ~3 glyphs, release: selects "abc". */
+    const float x0 = IN_X + PAD_X + (GLYPH_W * 0.1F);
+    const float x3 = IN_X + PAD_X + (GLYPH_W * 3.0F);
+    nt_pointer_t press = make_pointer(x0, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t move = make_pointer(x3, IN_Y + (IN_H * 0.5F), true, false, false);
+    (void)field_frame(&move, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t rel = make_pointer(x3, IN_Y + (IN_H * 0.5F), false, false, true);
+    (void)field_frame(&rel, id, buf, sizeof buf, true, NULL);
+
+    /* Backspace deletes the dragged selection "abc", leaving "d". */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE);
+    TEST_ASSERT_EQUAL_STRING("d", buf);
+}
+
+/* ---- Test 27: a password field never mutates the game buffer when its masked display renders. ---- */
+static void test_password_buffer_unchanged_after_render(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1!"); /* "Аб!" -- mixed multi-byte + ASCII */
+    char snapshot[32];
+    memcpy(snapshot, buf, sizeof buf);
+    const uint32_t id = nt_ui_id("f");
+    s_style.password = true;
+    warmup_focus(id, buf, sizeof buf);
+
+    /* A plain render frame (no edit) must leave every byte of the game buffer intact. */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_EQUAL_MEMORY(snapshot, buf, sizeof buf);
+}
+
 /* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink). ---- */
 static void test_style_defaults_valid(void) {
     nt_ui_input_style_t s = nt_ui_input_style_defaults();
@@ -636,6 +715,10 @@ int main(void) {
     RUN_TEST(test_clipboard_paste_replaces_selection);
     RUN_TEST(test_password_mask_render);
     RUN_TEST(test_password_buffer_and_keyboard);
+    RUN_TEST(test_delete_key_right);
+    RUN_TEST(test_clipboard_paste_malformed_utf8);
+    RUN_TEST(test_drag_select_range);
+    RUN_TEST(test_password_buffer_unchanged_after_render);
     RUN_TEST(test_style_defaults_valid);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);

@@ -400,7 +400,11 @@ static uint32_t decode_one(const char *src, uint32_t off, uint32_t len, uint32_t
             return consumed;
         }
         if (s == NT_UTF8_REJECT) {
-            break; /* malformed: skip this run, resync from the next byte */
+            /* Malformed. The DFA rejects ON the offending byte: if a multi-byte run was interrupted
+             * by a non-continuation (consumed > 1), back up one so that byte is re-decoded (it may be
+             * a valid lead or ASCII). A lone bad first byte (consumed == 1) is just skipped. */
+            *out_cp = 0U;
+            return (consumed > 1U) ? (consumed - 1U) : 1U;
         }
     }
     *out_cp = 0U;
@@ -417,11 +421,19 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         return st->caret;
     }
     /* Snapshot the clipboard into scratch: get_text storage is only valid until the next call, and
-     * insert below does not call clipboard again, but copying keeps the contract explicit + bounded. */
-    const uint32_t clip_len = (uint32_t)strlen(clip);
+     * insert below does not call clipboard again, but copying keeps the contract explicit + bounded.
+     * Cap to buffer_size: insert clamps to buffer_size-1 anyway, so a longer paste can't add more --
+     * the cap kills the size_t->uint32_t narrowing on a huge paste. A mid-codepoint cut is harmless
+     * (decode_one resyncs; a split trailing run is dropped). */
+    size_t raw_len = strlen(clip);
+    if (raw_len > buffer_size) {
+        raw_len = buffer_size;
+    }
+    const uint32_t clip_len = (uint32_t)raw_len;
     char *src = (char *)nt_mem_scratch_alloc((size_t)clip_len + 1U, 1U);
     NT_ASSERT(src != NULL && "nt_ui_input: scratch alloc failed (clipboard paste)");
-    memcpy(src, clip, (size_t)clip_len + 1U);
+    memcpy(src, clip, (size_t)clip_len); /* clip_len, not +1: clip may be longer than the cap */
+    src[clip_len] = '\0';
 
     /* Replace any selection first. */
     if (st->anchor != st->caret) {
@@ -627,6 +639,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     }
 
     nt_ui_input_state_t *st = (nt_ui_input_state_t *)nt_ui_state(ctx, input_state_id(id), (uint32_t)sizeof(nt_ui_input_state_t), NT_UI_STATE_TAG('i', 'n', 'p', 't'));
+    /* Contract: the game must not rewrite a FOCUSED field's buffer CONTENT mid-edit. Only length
+     * changes are clamped here; a content rewrite that lands the caret mid-codepoint is undefined. */
     if (st->caret > cur_len) {
         st->caret = cur_len; /* the game shortened the buffer behind our back */
     }

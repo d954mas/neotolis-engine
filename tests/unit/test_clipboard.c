@@ -12,8 +12,33 @@
 const char *__lsan_default_suppressions(void);                                           // NOLINT(bugprone-reserved-identifier)
 const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedGLX\n"; } // NOLINT(bugprone-reserved-identifier)
 
-void setUp(void) { TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed"); }
-void tearDown(void) { glfwTerminate(); }
+/* The round-trip tests write the developer's REAL OS clipboard. Snapshot it on the first setUp
+ * and restore it in the final tearDown so running the suite does not clobber the user's clip. */
+#define NT_CLIPBOARD_SAVE_CAP 8192
+static char s_saved_clip[NT_CLIPBOARD_SAVE_CAP];
+static bool s_saved_clip_valid = false;
+
+void setUp(void) {
+    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
+    if (!s_saved_clip_valid) {
+        const char *cur = nt_clipboard_get_text(); /* engine-owned; copy before any set clobbers it */
+        if (cur != NULL) {
+            size_t n = strlen(cur);
+            if (n >= NT_CLIPBOARD_SAVE_CAP) {
+                n = NT_CLIPBOARD_SAVE_CAP - 1U;
+            }
+            memcpy(s_saved_clip, cur, n);
+            s_saved_clip[n] = '\0';
+            s_saved_clip_valid = true;
+        }
+    }
+}
+void tearDown(void) {
+    if (s_saved_clip_valid) {
+        nt_clipboard_set_text(s_saved_clip); /* best-effort restore (no-op if access is denied) */
+    }
+    glfwTerminate();
+}
 #else
 void setUp(void) {}
 void tearDown(void) {}
