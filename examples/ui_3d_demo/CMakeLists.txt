@@ -14,10 +14,11 @@ target_link_libraries(ui_3d_demo PRIVATE
 # Generated asset headers from builder (ui_3d_demo_assets.h etc.)
 target_include_directories(ui_3d_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
+# nt_ui calls nt_clipboard_* (no text field here, but the symbols must resolve); stub = no exports.
 if(EMSCRIPTEN)
-    target_link_libraries(ui_3d_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
+    target_link_libraries(ui_3d_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_clipboard_stub)
 else()
-    target_link_libraries(ui_3d_demo PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(ui_3d_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub)
 endif()
 
 nt_set_warning_flags(ui_3d_demo)
