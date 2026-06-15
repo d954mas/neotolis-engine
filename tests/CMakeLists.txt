@@ -327,9 +327,8 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_http COMMAND test_http)
 
-    # SC1: cJSON standalone round-trip. Links cjson only — its whole point is to prove
-    # cjson is usable WITHOUT devapi, so it must NOT sit behind the NT_DEVAPI_ENABLED
-    # gate (cjson is built unconditionally, so this always builds + runs).
+    # cJSON standalone round-trip. Links cjson only (proves cjson works WITHOUT devapi),
+    # so it must NOT sit behind the NT_DEVAPI_ENABLED gate — cjson is built unconditionally.
     add_executable(test_devapi_cjson unit/test_devapi_cjson.c)
     target_link_libraries(test_devapi_cjson PRIVATE cjson unity)
     target_compile_definitions(test_devapi_cjson PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -337,7 +336,7 @@ if(NOT EMSCRIPTEN)
 
     # --- DevAPI module tests (NT_DEVAPI_ENABLED-gated) ---
     if(NT_DEVAPI_ENABLED)
-        # SC2: registry register / dup-reject / owned-copy survival.
+        # registry register / dup-reject / owned-copy survival.
         add_executable(test_devapi_registry unit/test_devapi_registry.c)
         target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson unity)
         target_compile_definitions(test_devapi_registry PRIVATE
@@ -345,8 +344,8 @@ if(NOT EMSCRIPTEN)
         )
         nt_setup_test_target(test_devapi_registry)
 
-        # PROTO-06/07: submit() envelope, request_id echo, unknown-method,
-        # batch order + continue-on-error, D-04 pointer lifetime (ASan via sanitizer flags).
+        # submit() envelope, request_id echo, unknown-method, batch order +
+        # continue-on-error, pointer lifetime (ASan via sanitizer flags).
         add_executable(test_devapi_envelope unit/test_devapi_envelope.c)
         target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson unity)
         target_compile_definitions(test_devapi_envelope PRIVATE
@@ -354,9 +353,8 @@ if(NOT EMSCRIPTEN)
         )
         nt_setup_test_target(test_devapi_envelope)
 
-        # PROTO-11: core command group — ping / engine.info / view via submit().
-        # NT_DEVAPI_ENGINE_VERSION mirrors the value injected on nt_devapi (PRIVATE),
-        # so the test can assert engine.info.version against the same compile-def.
+        # core command group via submit(). NT_DEVAPI_ENGINE_VERSION mirrors the value
+        # injected on nt_devapi so the test can assert engine.info.version against it.
         add_executable(test_devapi_core unit/test_devapi_core.c)
         target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson unity)
         target_compile_definitions(test_devapi_core PRIVATE
@@ -365,8 +363,8 @@ if(NOT EMSCRIPTEN)
         )
         nt_setup_test_target(test_devapi_core)
 
-        # PROTO-03/04/05/08/09: discovery group — endpoints / command.describe /
-        # features + the zero-engine-edits game-layer registration path.
+        # discovery group (endpoints / command.describe / features) + the
+        # zero-engine-edits game-layer registration path.
         add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
         target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson unity)
         target_compile_definitions(test_devapi_discovery PRIVATE

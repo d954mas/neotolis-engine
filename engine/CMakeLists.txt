@@ -32,7 +32,7 @@ if(NT_BASISU)
     add_subdirectory(basisu)
 endif()
 # Master gate: subdir EXCLUDED at NT_DEVAPI_ENABLED=0 so release binaries
-# contain zero devapi object code (D-10, Pitfall 1 — not the empty-TU pattern).
+# contain zero devapi object code (not an empty-TU pattern).
 if(NT_DEVAPI_ENABLED)
     add_subdirectory(devapi)
 endif()
