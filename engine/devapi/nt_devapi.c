@@ -32,11 +32,43 @@ static void resp_reserve(size_t need) {
     s_resp_cap = cap;
 }
 
+// #region deferred queue (D-09)
+/* Pending deferred responses. Small preallocated queue: devapi is low-frequency, so no
+   steady-state heap. A slot stores the owned request_id + continuation only — NEVER a
+   pointer into s_resp_buf (Pitfall 4 / D-04); the envelope is serialized at yield time. */
+static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
+
+/* Set around the handler call in dispatch_one so nt_devapi_defer_current can signal the
+   third "deferred" outcome without changing the bool handler ABI (out-param route, D-09). */
+static bool *s_out_deferred;
+static int s_defer_frames;
+
+bool nt_devapi_defer_current(int frames_left) {
+    NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
+    *s_out_deferred = true;
+    s_defer_frames = frames_left;
+    return true; /* handler returns normally; the bool path is unchanged. */
+}
+
+/* Free owned ids + clear the queue. Called from shutdown so init->shutdown->init is leak-free. */
+void nt_devapi_deferred_reset(void) {
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        if (s_deferred[i].id != NULL) {
+            cJSON_Delete(s_deferred[i].id);
+        }
+        s_deferred[i].id = NULL;
+        s_deferred[i].in_use = false;
+        s_deferred[i].frames_left = 0;
+    }
+}
+// #endregion
+
 /* Release the response buffer on shutdown so init->shutdown->init stays leak-free. */
 void nt_devapi_resp_reset(void) {
     free(s_resp_buf);
     s_resp_buf = NULL;
     s_resp_cap = 0U;
+    nt_devapi_deferred_reset(); /* shutdown path: drop any pending deferred slots. */
 }
 
 /* Serialize `tree` into the growing buffer and return it (valid until the next submit). */
@@ -83,18 +115,32 @@ static cJSON *make_error_entry(const char *code, const char *message) {
     return entry;
 }
 
-/* Echo request_id if present and a scalar (number/string); absent or non-scalar is not
-   echoed. Duplicate preserves number-vs-string type. */
-static void echo_request_id(cJSON *entry, const cJSON *req) {
+/* Duplicate request_id if present and a scalar (number/string); NULL if absent or non-scalar.
+   Duplicate preserves number-vs-string type. Caller owns the returned node. */
+static cJSON *dup_request_id(const cJSON *req) {
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "request_id");
     if (!cJSON_IsNumber(id) && !cJSON_IsString(id)) {
-        return;
+        return NULL;
     }
     cJSON *dup = cJSON_Duplicate(id, true);
     NT_ASSERT(dup != NULL);
-    cJSON_bool added = cJSON_AddItemToObject(entry, "request_id", dup);
+    return dup;
+}
+
+/* Attach an owned request_id node into entry (ownership transfers into the cJSON tree). */
+static void attach_request_id(cJSON *entry, cJSON *id) {
+    cJSON_bool added = cJSON_AddItemToObject(entry, "request_id", id);
     NT_ASSERT(added);
     (void)added;
+}
+
+/* Echo request_id if present and a scalar; absent or non-scalar is not echoed. */
+static void echo_request_id(cJSON *entry, const cJSON *req) {
+    cJSON *dup = dup_request_id(req);
+    if (dup == NULL) {
+        return;
+    }
+    attach_request_id(entry, dup);
 }
 
 /* Build {ok:true,result}, taking ownership of result_obj. */
@@ -122,8 +168,30 @@ static const char *request_reject_reason(const cJSON *req) {
     return NULL;
 }
 
-/* Dispatch one request object → an owned response entry. The dispatcher pre-creates
-   and always frees result_obj, so a handler can neither leak it nor free it itself. */
+/* dispatch_one sentinel: the command deferred, so the caller must emit NOTHING for it
+   (submit returns NULL; batch skips the entry). Distinct from NULL (no response built).
+   Address of a file-local marker — a unique non-NULL pointer, never dereferenced. */
+static cJSON s_deferred_marker;
+#define DEFERRED_SENTINEL (&s_deferred_marker)
+
+/* Enqueue a deferred command: store the owned duplicated id + continuation into a free
+   slot. Returns true on success; false on overflow (caller emits a structured error). */
+static bool deferred_enqueue(const cJSON *req, int frames_left) {
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        if (s_deferred[i].in_use) {
+            continue;
+        }
+        s_deferred[i].id = dup_request_id(req); /* owned; NULL if absent — fine. */
+        s_deferred[i].frames_left = frames_left;
+        s_deferred[i].in_use = true;
+        return true;
+    }
+    return false; /* no free slot — fail-early, leave no partial slot. */
+}
+
+/* Dispatch one request object → an owned response entry, DEFERRED_SENTINEL if the command
+   deferred, or NULL never (a deferred command yields the sentinel). The dispatcher
+   pre-creates and always frees result_obj, so a handler can neither leak it nor free it. */
 static cJSON *dispatch_one(const cJSON *req) {
     if (!cJSON_IsObject(req)) {
         return make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "request must be a JSON object");
@@ -157,8 +225,28 @@ static cJSON *dispatch_one(const cJSON *req) {
     NT_ASSERT(result_obj != NULL);
     nt_devapi_error err = {0};
 
+    /* Wire the deferral out-param around the handler call: a handler that never calls
+       nt_devapi_defer_current behaves exactly as before (deferred stays false). */
+    bool deferred = false;
+    s_out_deferred = &deferred;
+    s_defer_frames = 0;
+    bool ok = slot->handler(params, result_obj, &err, slot->user_data);
+    s_out_deferred = NULL;
+
+    if (deferred) {
+        /* No ok/error entry: enqueue the continuation (with the owned request_id) and emit
+           nothing. Overflow rejects the command whole — fail-early, no partial slot. */
+        cJSON_Delete(result_obj);
+        if (!deferred_enqueue(req, s_defer_frames)) {
+            cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred queue full");
+            echo_request_id(entry, req);
+            return entry;
+        }
+        return DEFERRED_SENTINEL;
+    }
+
     cJSON *entry;
-    if (slot->handler(params, result_obj, &err, slot->user_data)) {
+    if (ok) {
         entry = make_ok_entry(result_obj); /* detaches result_obj into the envelope */
         result_obj = NULL;
     } else {
@@ -180,7 +268,11 @@ static cJSON *dispatch_batch(const cJSON *root) {
     NT_ASSERT(response != NULL);
     const cJSON *req = NULL;
     cJSON_ArrayForEach(req, root) {
-        cJSON_bool added = cJSON_AddItemToArray(response, dispatch_one(req));
+        cJSON *entry = dispatch_one(req);
+        if (entry == DEFERRED_SENTINEL) {
+            continue; /* deferred: emit nothing for this entry, its result arrives via poll. */
+        }
+        cJSON_bool added = cJSON_AddItemToArray(response, entry);
         NT_ASSERT(added);
         (void)added;
     }
@@ -199,10 +291,55 @@ const char *nt_devapi_submit(const char *line) {
         return out;
     }
 
-    cJSON *response = cJSON_IsArray(root) ? dispatch_batch(root) : dispatch_one(root);
+    if (!cJSON_IsArray(root)) {
+        cJSON *entry = dispatch_one(root);
+        if (entry == DEFERRED_SENTINEL) {
+            /* The lone command deferred (D-06): no sync response — drain it via poll_response. */
+            cJSON_Delete(root);
+            return NULL;
+        }
+        const char *out = resp_serialize(entry);
+        cJSON_Delete(entry);
+        cJSON_Delete(root);
+        return out;
+    }
 
+    cJSON *response = dispatch_batch(root);
     const char *out = resp_serialize(response);
     cJSON_Delete(response);
     cJSON_Delete(root);
     return out;
+}
+
+const char *nt_devapi_poll_response(void) {
+    NT_ASSERT(nt_devapi_initialized());
+    /* Advance every in-flight continuation; yield the FIRST that became ready this call.
+       One ready result per call — the transport drains in a loop (D-07/D-08). */
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        if (!s_deferred[i].in_use) {
+            continue;
+        }
+        s_deferred[i].frames_left--;
+        if (s_deferred[i].frames_left > 0) {
+            continue;
+        }
+
+        /* Minimal continuation result — the real shape lands with each deferred command
+           (Phase 65 frame.wait). Here the slot only proves the yield path. */
+        cJSON *result_obj = cJSON_CreateObject();
+        NT_ASSERT(result_obj != NULL);
+        devapi_add_bool(result_obj, "deferred", true);
+        cJSON *entry = make_ok_entry(result_obj); /* takes ownership of result_obj. */
+        if (s_deferred[i].id != NULL) {
+            attach_request_id(entry, s_deferred[i].id); /* transfer ownership into the tree. */
+            s_deferred[i].id = NULL;                    /* so reset doesn't double-free. */
+        }
+
+        const char *out = resp_serialize(entry);
+        cJSON_Delete(entry);
+        s_deferred[i].in_use = false;
+        s_deferred[i].frames_left = 0;
+        return out;
+    }
+    return NULL; /* nothing ready this call. */
 }

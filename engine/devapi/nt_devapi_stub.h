@@ -22,4 +22,6 @@ static inline const char *nt_devapi_submit(const char *line) {
     return NULL;
 }
 
+static inline const char *nt_devapi_poll_response(void) { return NULL; }
+
 #endif /* NT_DEVAPI_STUB_H */
