@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 08d9a02
+# Commit: 4dbae40
 
 ## WASM Section Sizes
 
@@ -64,11 +64,11 @@ Total code size: 16610 B
 Module                         Size
 ------------------------ ----------
 libnt_app.a                 1442 B
-libnt_core.a                2178 B
+libnt_core.a                2422 B
 libnt_input.a              16594 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)             24154 B
+TOTAL (linked)             24398 B
 
 Not linked to hello:
 libnt_app_stub.a            1428 B

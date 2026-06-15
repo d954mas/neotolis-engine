@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: 08d9a02
+# Commit: 4dbae40
 
 ## WASM Section Sizes
 
@@ -64,7 +64,7 @@ Total code size: 594736 B
 Module                         Size
 ------------------------ ----------
 libnt_app.a                 1442 B
-libnt_core.a                2178 B
+libnt_core.a                2422 B
 libnt_drawable_comp.a       4214 B
 libnt_entity.a              3076 B
 libnt_fs.a                  2620 B
@@ -84,7 +84,7 @@ libnt_time.a                 868 B
 libnt_transform_comp.a      4696 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            327424 B
+TOTAL (linked)            327668 B
 
 Not linked to atlas:
 libnt_app_stub.a            1428 B

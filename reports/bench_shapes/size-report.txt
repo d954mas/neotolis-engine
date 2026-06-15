@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 08d9a02
+# Commit: 4dbae40
 
 ## WASM Section Sizes
 
@@ -64,13 +64,13 @@ Total code size: 76362 B
 Module                         Size
 ------------------------ ----------
 libnt_app.a                 1442 B
-libnt_core.a                2178 B
+libnt_core.a                2422 B
 libnt_gfx.a                54562 B
 libnt_input.a              16594 B
 libnt_shape_renderer.a   1140902 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1219618 B
+TOTAL (linked)           1219862 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            1428 B
