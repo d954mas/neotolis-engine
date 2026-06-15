@@ -136,7 +136,8 @@ static cJSON *dispatch_batch(const cJSON *root) {
 
 const char *nt_devapi_submit(const char *line) {
     NT_ASSERT(nt_devapi_initialized()); /* dispatch before init is a caller bug (empty registry). */
-    cJSON *root = cJSON_Parse(line);
+    /* Strict: a line protocol rejects trailing garbage ('{...} junk'). */
+    cJSON *root = cJSON_ParseWithOpts(line, NULL, true);
     if (root == NULL) {
         /* Contract path, not an assert: malformed JSON → bad_params. */
         cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "malformed JSON");

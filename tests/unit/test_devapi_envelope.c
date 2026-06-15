@@ -118,6 +118,17 @@ static void test_malformed_json_bad_params(void) {
     cJSON_Delete(root);
 }
 
+/* A line protocol must reject trailing garbage after a valid value. */
+static void test_trailing_garbage_rejected(void) {
+    const char *resp = nt_devapi_submit("{\"method\":\"ok\"} junk");
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
+    cJSON_Delete(root);
+}
+
 static void test_request_id_echoed_on_error(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"nope\",\"request_id\":99}");
     cJSON *root = cJSON_Parse(resp);
@@ -244,6 +255,7 @@ int main(void) {
     RUN_TEST(test_request_id_absent_omitted);
     RUN_TEST(test_unknown_method);
     RUN_TEST(test_malformed_json_bad_params);
+    RUN_TEST(test_trailing_garbage_rejected);
     RUN_TEST(test_request_id_echoed_on_error);
     RUN_TEST(test_batch_order_and_continue_on_error);
     RUN_TEST(test_d04_copy_before_next_submit);
