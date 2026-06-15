@@ -12,19 +12,20 @@ add_subdirectory(${ENGINE_ROOT} ${CMAKE_BINARY_DIR}/engine)
 add_executable(submodule_test main.c)
 nt_set_sanitizer_flags(submodule_test)
 target_link_libraries(submodule_test PRIVATE
-    nt_core
-    nt_log
-    nt_time
-    nt_pool
-    nt_hash
     nt_gfx_stub
-    # nt_resource links nt_http/nt_fs via interface only; a consuming exe must pick impls.
-    nt_http_stub
-    nt_fs_stub
     nt_resource
     nt_entity
     nt_comp_storage
     nt_material
     nt_sort
     nt_render
+    nt_core
+    nt_time
+    nt_pool
+    nt_hash
+    # GNU ld resolves archives left-to-right, so swappable impls and nt_log must
+    # trail every lib that references them (nt_resource -> nt_http/nt_fs -> nt_log).
+    nt_http_stub
+    nt_fs_stub
+    nt_log_stub
 )
