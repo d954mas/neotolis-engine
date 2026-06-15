@@ -1,9 +1,10 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
+#include "window/nt_window.h"
 
-/* Engine `core` command group: ping / engine.info. Compiles out entirely when
-   NT_DEVAPI_REGISTER_core is absent. (view lives in the `window` group.) */
+/* Engine `core` command group: ping / engine.info / view. Compiles out entirely
+   when NT_DEVAPI_REGISTER_core is absent. */
 
 #ifdef NT_DEVAPI_REGISTER_core
 
@@ -21,6 +22,19 @@ static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     (void)ud;
     devapi_add_bool(result, "pong", true);
     return true; /* success result is always an object */
+}
+
+/* Read-only veneer over g_nt_window — never mutates it. */
+static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)err;
+    (void)ud;
+    devapi_add_number(result, "fb_width", g_nt_window.fb_width);
+    devapi_add_number(result, "fb_height", g_nt_window.fb_height);
+    devapi_add_number(result, "width", g_nt_window.width); /* logical */
+    devapi_add_number(result, "height", g_nt_window.height);
+    devapi_add_number(result, "dpr", (double)g_nt_window.dpr);
+    return true;
 }
 
 /* Append a group-name string to `arr` (OOM traps, never silently dropped). */
@@ -71,9 +85,18 @@ static const nt_devapi_command_desc k_core_cmds[] = {
         .frame_behavior = "any",
         .side_effects = "none",
     },
+    {
+        .method = "view",
+        .group = "core",
+        .summary = "framebuffer + logical size + device pixel ratio",
+        .params_shape = "{}",
+        .result_shape = "{fb_width:number,fb_height:number,width:number,height:number,dpr:number}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    },
 };
 
-static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info};
+static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info, cmd_view};
 _Static_assert(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]) == sizeof(k_core_handlers) / sizeof(k_core_handlers[0]), "core: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_core(void) {
