@@ -88,7 +88,9 @@ void nt_input_poll(void) {
     memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
     memset(s_keys_released, 0, sizeof(s_keys_released));
     /* Typed text is frame-local like key edges: drop any chars unconsumed last frame so they can't
-     * leak into a field focused later. platform_poll below refills the ring with this frame's chars. */
+     * leak into a field focused later. platform_poll below refills the ring with this frame's chars
+     * -- BOTH backends stage chars and drain them in platform_poll (web: _ntCharBuf; native:
+     * s_char_buf via nt_input_buffer_char_event), so a same-frame typed char survives this clear. */
     s_char_tail = s_char_head;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         g_nt_input.pointers[i].dx = 0.0F;

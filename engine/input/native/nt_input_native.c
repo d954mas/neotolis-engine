@@ -6,6 +6,7 @@
 #define NT_MAX_KEY_EVENTS 64
 #define NT_MAX_PTR_EVENTS 64
 #define NT_MAX_WHEEL_EVENTS 16
+#define NT_MAX_CHAR_EVENTS 32
 
 typedef struct {
     nt_key_t key;
@@ -30,6 +31,9 @@ static uint32_t s_ptr_count;
 
 static nt_wheel_event_t s_wheel_buf[NT_MAX_WHEEL_EVENTS];
 static uint32_t s_wheel_count;
+
+static uint32_t s_char_buf[NT_MAX_CHAR_EVENTS];
+static uint32_t s_char_count;
 
 static bool s_focus_lost;
 
@@ -76,6 +80,14 @@ void nt_input_buffer_wheel(float dx, float dy) {
     }
 }
 
+void nt_input_buffer_char_event(uint32_t cp) {
+    /* Drop-when-full: stage here, drained into the shared ring during platform_poll (after the
+       frame ring clear) so a typed char enters the ring the same frame, not the prior one. */
+    if (s_char_count < NT_MAX_CHAR_EVENTS) {
+        s_char_buf[s_char_count++] = cp;
+    }
+}
+
 void nt_input_buffer_focus_lost(void) { s_focus_lost = true; }
 
 /* ---- Platform lifecycle ---- */
@@ -91,6 +103,7 @@ void nt_input_platform_poll(void) {
         s_key_count = 0;
         s_ptr_count = 0;
         s_wheel_count = 0;
+        s_char_count = 0;
         return;
     }
 
@@ -117,6 +130,13 @@ void nt_input_platform_poll(void) {
         nt_input_wheel(s_wheel_buf[i].dx, s_wheel_buf[i].dy);
     }
     s_wheel_count = 0;
+
+    /* Drain staged chars into the shared ring AFTER nt_input_poll's frame clear so this frame's
+       typing is readable by a focused widget (the clear ran before platform_poll). */
+    for (uint32_t i = 0; i < s_char_count; i++) {
+        nt_input_buffer_char(s_char_buf[i]);
+    }
+    s_char_count = 0;
 }
 
 void nt_input_platform_shutdown(void) {}
