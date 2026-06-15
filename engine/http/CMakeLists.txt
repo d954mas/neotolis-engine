@@ -7,9 +7,10 @@ if(EMSCRIPTEN)
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c web/nt_http_web.c nt_http.h)
     # Web backend EM_JS uses Module._malloc/_free and Module.HEAPU8
     # INTERFACE propagates to any executable linking nt_http
+    # += not =: multiple modules contribute exports; = would clobber (emcc last-wins). _main is a default.
     target_link_options(nt_http INTERFACE
-        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_malloc','_free']"
-        "SHELL:-sEXPORTED_RUNTIME_METHODS=['HEAPU8']"
+        "SHELL:-sEXPORTED_FUNCTIONS+=_malloc,_free"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS+=HEAPU8"
     )
 else()
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c native/nt_http_native.c nt_http.h)

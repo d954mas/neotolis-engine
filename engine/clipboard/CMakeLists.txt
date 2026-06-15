@@ -13,9 +13,10 @@ if(EMSCRIPTEN)
     # Web backend bridges the DOM paste string into C: stringToNewUTF8 (runtime
     # method) allocates it, _free releases it. INTERFACE so any exe linking
     # nt_clipboard inherits the exports.
+    # += not =: multiple modules contribute exports; = would clobber (emcc last-wins). _main is a default.
     target_link_options(nt_clipboard INTERFACE
-        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_free']"
-        "SHELL:-sEXPORTED_RUNTIME_METHODS=['stringToNewUTF8','UTF8ToString']"
+        "SHELL:-sEXPORTED_FUNCTIONS+=_free"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS+=stringToNewUTF8,UTF8ToString"
     )
     target_link_libraries(nt_clipboard PUBLIC nt_core nt_clipboard_interface)
 else()
