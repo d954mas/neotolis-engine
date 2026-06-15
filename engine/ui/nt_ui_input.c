@@ -656,6 +656,12 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
         nt_ui_debug_record_disabled_zone(ctx, id, NULL);
+        /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
+         * a still-declared disabled field would hold focus forever (any_focused stuck true). Drop it
+         * the frame it's declared disabled. */
+        if (ctx->focused_input_id == id) {
+            ctx->focused_input_id = 0U;
+        }
     }
 
     nt_ui_input_state_t *st = (nt_ui_input_state_t *)nt_ui_state(ctx, input_state_id(id), (uint32_t)sizeof(nt_ui_input_state_t), NT_UI_STATE_TAG('i', 'n', 'p', 't'));

@@ -334,6 +334,19 @@ static void test_focus_orphan_cleared(void) {
     TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
 }
 
+/* ---- Test 7c: focus is dropped the frame a focused field is declared disabled. ---- */
+static void test_focus_dropped_when_disabled(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_any_focused(s_fx.ctx)); /* field holds focus */
+
+    /* Re-declare the same field disabled: it can't be clicked to refocus and gates out Esc, so
+     * holding focus would soft-lock any_focused forever. The disabled declaration must drop it. */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, false, NULL);
+    TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
+}
+
 /* ---- Test 8: Enter raises submit; on_change is true the frame the buffer mutates. ---- */
 static void test_submit_and_change(void) {
     char buf[32] = {0};
@@ -748,6 +761,7 @@ int main(void) {
     RUN_TEST(test_click_hit_test_boundary);
     RUN_TEST(test_focus_tab_esc);
     RUN_TEST(test_focus_orphan_cleared);
+    RUN_TEST(test_focus_dropped_when_disabled);
     RUN_TEST(test_submit_and_change);
     RUN_TEST(test_unfocused_ignores_chars);
     RUN_TEST(test_dblclick_longpress_primitive);
