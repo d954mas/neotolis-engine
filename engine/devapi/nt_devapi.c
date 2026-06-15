@@ -70,7 +70,20 @@ static void echo_request_id(cJSON *entry, const cJSON *req) {
     }
     cJSON *dup = cJSON_Duplicate(id, true);
     NT_ASSERT(dup != NULL);
-    cJSON_AddItemToObject(entry, "request_id", dup);
+    cJSON_bool added = cJSON_AddItemToObject(entry, "request_id", dup);
+    NT_ASSERT(added);
+    (void)added;
+}
+
+/* Build {ok:true,result}, taking ownership of result_obj. */
+static cJSON *make_ok_entry(cJSON *result_obj) {
+    cJSON *entry = cJSON_CreateObject();
+    NT_ASSERT(entry != NULL);
+    cJSON_AddBoolToObject(entry, "ok", true);
+    cJSON_bool added = cJSON_AddItemToObject(entry, "result", result_obj);
+    NT_ASSERT(added);
+    (void)added;
+    return entry;
 }
 
 /* Dispatch one request object → an owned response entry. The dispatcher pre-creates
@@ -102,11 +115,7 @@ static cJSON *dispatch_one(const cJSON *req) {
 
     cJSON *entry;
     if (slot->handler(params, result_obj, &err, slot->user_data)) {
-        entry = cJSON_CreateObject();
-        NT_ASSERT(entry != NULL);
-        cJSON_AddBoolToObject(entry, "ok", true);
-        /* detached into the envelope — no longer freed below. */
-        cJSON_AddItemToObject(entry, "result", result_obj);
+        entry = make_ok_entry(result_obj); /* detaches result_obj into the envelope */
         result_obj = NULL;
     } else {
         const char *code = err.code ? err.code : NT_DEVAPI_ERR_BAD_PARAMS;
