@@ -11,3 +11,5 @@ const char *nt_clipboard_get_text(void) {
 }
 
 void nt_clipboard_set_text(const char *utf8) { glfwSetClipboardString(NULL, utf8 != NULL ? utf8 : ""); }
+
+bool nt_clipboard_available(void) { return true; }

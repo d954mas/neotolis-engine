@@ -70,3 +70,7 @@ void nt_clipboard_set_text(const char *utf8) {
     cache_store(utf8);
     nt_clipboard_web_write(utf8 != NULL ? utf8 : "");
 }
+
+/* Could later narrow to navigator.clipboard presence + secure-context, but the paste cache works
+ * regardless (DOM paste event), so the façade is always available on web. */
+bool nt_clipboard_available(void) { return true; }

@@ -9,6 +9,12 @@
 #define NT_CLIPBOARD_FAKE_CAP 4096
 
 static char s_buf[NT_CLIPBOARD_FAKE_CAP] = {0};
+static bool s_fake_available = true; /* test-controllable; default mirrors a real backend */
+
+/* Test-only: flip availability to exercise the clipboard-unavailable code paths. */
+void nt_clipboard_fake_set_available(bool available) { s_fake_available = available; }
+
+bool nt_clipboard_available(void) { return s_fake_available; }
 
 const char *nt_clipboard_get_text(void) { return s_buf; }
 

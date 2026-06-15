@@ -801,7 +801,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_X)) {
+        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
+            /* No-op cut when the clipboard is unavailable: deleting locally without a store is data loss. */
             clipboard_copy_selection(buffer, st);
             if (st->anchor != st->caret) {
                 uint32_t lo = 0U;

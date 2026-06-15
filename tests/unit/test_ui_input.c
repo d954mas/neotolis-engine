@@ -496,6 +496,32 @@ static void test_clipboard_cut(void) {
     TEST_ASSERT_EQUAL_STRING("", buf);
 }
 
+/* The fake clipboard exposes a test-only availability toggle (no fake header; declared here). */
+extern void nt_clipboard_fake_set_available(bool available);
+
+/* ---- Test 17b: Ctrl+X is a full no-op when the clipboard is unavailable (no data loss). ---- */
+static void test_clipboard_cut_unavailable_noop(void) {
+    char buf[32];
+    strcpy(buf, "hello");
+    char snapshot[32];
+    memcpy(snapshot, buf, sizeof buf);
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+
+    nt_clipboard_fake_set_available(false);
+    /* Select-all then Ctrl+X: with no clipboard, nothing is deleted -- the buffer is byte-identical. */
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A);
+    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_X);
+    TEST_ASSERT_EQUAL_MEMORY(snapshot, buf, sizeof buf); /* buffer untouched */
+
+    /* The selection also survived: typing a char now replaces the whole still-active selection. */
+    nt_input_buffer_char((uint32_t)'!');
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_EQUAL_STRING("!", buf);
+
+    nt_clipboard_fake_set_available(true); /* restore so test order stays stable */
+}
+
 /* ---- Test 18: paste longer than remaining capacity is clamped (no OOB, NUL intact, no split). ---- */
 static void test_clipboard_paste_clamp(void) {
     /* cap 5 -> room for 4 bytes + NUL. Paste "ABCDEFGH"; only "ABCD" fits. */
@@ -709,6 +735,7 @@ int main(void) {
     RUN_TEST(test_double_click_word_select);
     RUN_TEST(test_clipboard_copy_paste_roundtrip);
     RUN_TEST(test_clipboard_cut);
+    RUN_TEST(test_clipboard_cut_unavailable_noop);
     RUN_TEST(test_clipboard_paste_clamp);
     RUN_TEST(test_clipboard_paste_clamp_no_split);
     RUN_TEST(test_clipboard_paste_filtered);
