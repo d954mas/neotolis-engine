@@ -25,7 +25,7 @@
 #define HEADER_DIR "examples/ui_showcase/generated"
 #define FONT_PATH "examples/ui_showcase/raw/font.ttf"
 
-/* Demo-only Cyrillic block (D-17): the engine is codepoint-agnostic; the SHOWCASE bakes Latin +
+/* Demo-only Cyrillic block: the engine is codepoint-agnostic; the SHOWCASE bakes Latin +
  * Cyrillic so the Input tab's Cyrillic field renders real multi-byte UTF-8 glyphs, not tofu. */
 #define CHARSET_CYRILLIC "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя"
 
@@ -215,7 +215,7 @@ int main(int argc, char *argv[]) {
     nt_builder_end_atlas(ctx);
     // #endregion
 
-    // #region font: ASCII Latin + Cyrillic (demo-only, D-17)
+    // #region font: ASCII Latin + Cyrillic (demo-only)
     nt_builder_add_font(ctx, FONT_PATH,
                         &(nt_font_opts_t){
                             .charset = NT_CHARSET_ASCII CHARSET_CYRILLIC,

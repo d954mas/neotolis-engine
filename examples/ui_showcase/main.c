@@ -257,7 +257,7 @@ typedef struct {
     int label_count; /* segmented control: 500 / 1500 / 3000 / 6000 */
 } stress_params_t;
 
-/* Input tab: four game-owned field buffers (D-09, ImGui-style). The widget edits these in place;
+/* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
  * the engine state pool holds only caret/selection/scroll/blink, never the string. */
 typedef struct {
     char plain[64];
@@ -1206,7 +1206,7 @@ static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, 
     }
 }
 
-/* Input tab: plain / numeric-filtered / password-masked / Cyrillic fields (D-18). All four edit
+/* Input tab: plain / numeric-filtered / password-masked / Cyrillic fields. All four edit
  * game-owned buffers in place; click to focus, type, select, Ctrl+C/X/V, Tab to advance, Esc to unfocus. */
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a field to focus; type Latin or Cyrillic; select with Shift+arrows / drag / double-click / Ctrl+A; Ctrl+C/X/V clipboard.",

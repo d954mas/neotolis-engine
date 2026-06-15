@@ -19,7 +19,7 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 /* Map the field's keyboard hint to a web soft-keyboard via the canvas `inputmode` + `type`
- * (D-14). Called on focus; mobile browsers pick the keyboard layout from inputmode, and
+ * Called on focus; mobile browsers pick the keyboard layout from inputmode, and
  * type=password masks the OS-level overlay. kb is nt_ui_input_keyboard_t. */
 /* clang-format off */
 EM_JS(void, nt_ui_input_web_apply_keyboard, (int kb), {
@@ -57,7 +57,7 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
 #define NT_UI_INPUT_MASK_CHAR '*'
 
 /* Per-field retained cell: caret byte-offset into the game buffer, horizontal scroll px so the
- * caret stays visible, and the accumulated blink phase. The STRING stays game-owned (D-09). */
+ * caret stays visible, and the accumulated blink phase. The STRING stays game-owned. */
 #define NT_UI_INPUT_STATE_SALT 0x10D70001U
 typedef struct {
     uint32_t caret;  /* caret byte offset (the active selection end); always on a codepoint boundary */
@@ -68,7 +68,7 @@ typedef struct {
     uint8_t _pad[3];
 } nt_ui_input_state_t;
 
-/* Double-click + long-press cell (D-16); generic, keyed by the gesture's widget id. */
+/* Double-click + long-press cell; generic, keyed by the gesture's widget id. */
 #define NT_UI_INPUT_GESTURE_SALT 0x10D7C002U
 typedef struct {
     float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
@@ -118,7 +118,7 @@ static uint32_t utf8_prev_boundary(const char *buf, uint32_t off) {
 }
 
 /* Encode `cp` to UTF-8 in `out` (>= 4 bytes). Returns the byte count, or 0 for an
- * unencodable / control / NUL codepoint (dropped, never spliced -- D-17). */
+ * unencodable / control / NUL codepoint (dropped, never spliced). */
 static uint32_t utf8_encode(uint32_t cp, char out[4]) {
     if (cp == 0U || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
         return 0U; /* NUL, out-of-range, or surrogate: never splice */
@@ -242,7 +242,7 @@ static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && 
 
 // #endregion
 
-// #region double-click + long-press primitive (D-16)
+// #region double-click + long-press primitive
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id, bool pressed_now, bool released_now, bool held, float pos_x, float pos_y, float dbl_window_secs,
@@ -367,7 +367,7 @@ static void delete_right(char *buffer, uint32_t caret, uint32_t cur_len, bool *c
 
 // #endregion
 
-// #region clipboard (Ctrl+C/X/V — D-14)
+// #region clipboard (Ctrl+C/X/V)
 
 /* Copy the selected byte range to the system clipboard. No-op on an empty selection. */
 static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state_t *st) {
@@ -651,7 +651,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         }
     }
 
-    /* Generic dbl-click / long-press edges (D-16); double-click select-word rides this. */
+    /* Generic dbl-click / long-press edges; double-click select-word rides this. */
     const nt_ui_click_gesture_t gesture = nt_ui_dblclick_longpress(ctx, id, enabled && in.pressed_now, enabled && in.released_now, enabled && in.pressed, in.pos[0], in.pos[1], 0.30F, 0.50F, 6.0F);
     if (enabled && gesture.double_clicked) {
         uint32_t ws = 0U;
@@ -783,7 +783,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             st->caret = cur_len;
             st->blink = 0.0F;
         }
-        // #region clipboard chords (Ctrl+C/X/V — D-14)
+        // #region clipboard chords (Ctrl+C/X/V)
         if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
@@ -886,7 +886,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         const char *disp = (style->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
         nt_ui_label(ctx, nt_ui_make_element_data(text_layer, NULL), disp, &ts);
     }
-    /* Placeholder text is a 61-07 demo concern: T0 has no placeholder string param (the buffer IS
+    /* Placeholder text is a future concern: there is no placeholder string param yet (the buffer IS
      * the value). style->placeholder carries the dimmed style for when that lands. */
     (void)style->placeholder;
 

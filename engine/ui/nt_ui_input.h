@@ -20,11 +20,11 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_INPUT_DEF;
 
-/* Codepoint allow-predicate (D-12). Returns true to keep the codepoint, false to drop it on
+/* Codepoint allow-predicate. Returns true to keep the codepoint, false to drop it on
  * insert. NULL style->allow = allow any printable (non-control) codepoint. */
 typedef bool (*nt_ui_char_filter_fn)(uint32_t codepoint);
 
-/* Mobile soft-keyboard hint (D-14). Maps to web inputmode / type=password; native no-op. */
+/* Mobile soft-keyboard hint. Maps to web inputmode / type=password; native no-op. */
 typedef enum {
     NT_UI_KB_TEXT = 0,
     NT_UI_KB_NUMERIC,
@@ -52,8 +52,8 @@ typedef struct {
     float border_width;                   /* border thickness px (0 = no border) */
     float pad_x, pad_y;                   /* inner padding px */
     size_t max_length;                    /* max BYTES (incl. NUL room); 0 = bound by buffer_size only */
-    nt_ui_char_filter_fn allow;           /* codepoint filter (D-12); NULL = allow printable */
-    nt_ui_input_keyboard_t keyboard;      /* soft-keyboard hint (D-14) */
+    nt_ui_char_filter_fn allow;           /* codepoint filter; NULL = allow printable */
+    nt_ui_input_keyboard_t keyboard;      /* soft-keyboard hint */
     bool password;                        /* render a mask glyph per codepoint instead of the text */
 } nt_ui_input_style_t;
 _Static_assert(sizeof(nt_ui_input_style_t) >= 64, "nt_ui_input_style_t stable ABI");
@@ -62,7 +62,7 @@ _Static_assert(sizeof(nt_ui_input_style_t) >= 64, "nt_ui_input_style_t stable AB
  * supplies font ids + colors. Avoids the zero-init trap (caret_width must be > 0). */
 nt_ui_input_style_t nt_ui_input_style_defaults(void);
 
-/* Edits a game-owned NUL-terminated UTF-8 buffer in place (D-09). buffer_size is the FULL
+/* Edits a game-owned NUL-terminated UTF-8 buffer in place. buffer_size is the FULL
  * capacity incl. the NUL terminator; inserts clamp to buffer_size-1 and never split a
  * multi-byte codepoint. Only a FOCUSED field consumes typed chars + editing keys.
  *
@@ -73,23 +73,23 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void);
 bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_style_t *style,
                       const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted);
 
-/* True if `id` currently holds keyboard focus (D-15). */
+/* True if `id` currently holds keyboard focus. */
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id);
 
 /* True if ANY text field currently holds keyboard focus. Lets the host gate a global Esc=quit so
  * Esc unfocuses a field first (the focus state is the previous frame's, read before nt_ui_begin). */
 bool nt_ui_input_any_focused(const nt_ui_context_t *ctx);
 
-/* Stock allow-predicates (D-12). numeric = [0-9.+-]; email = alnum + @._%+-; url = alnum +
+/* Stock allow-predicates. numeric = [0-9.+-]; email = alnum + @._%+-; url = alnum +
  * a small URL-safe punctuation set. */
 bool nt_ui_filter_numeric(uint32_t codepoint);
 bool nt_ui_filter_email(uint32_t codepoint);
 bool nt_ui_filter_url(uint32_t codepoint);
 
-/* Generic double-click + long-press detector (D-16), keyed by widget id in the state pool.
+/* Generic double-click + long-press detector, keyed by widget id in the state pool.
  * Feed it the press/release edges + the current pointer pos; it tracks last-press time +
  * origin and reports the edges. long_press_secs <= 0 disables the long-press report.
- * Reused by 61-06 (word-select) so it is built generically, not inlined in the field. */
+ * Reused by word-select so it is built generically, not inlined in the field. */
 typedef struct {
     bool double_clicked; /* a second press landed within the dbl window + radius */
     bool long_pressed;   /* held past long_press_secs without moving past the radius */

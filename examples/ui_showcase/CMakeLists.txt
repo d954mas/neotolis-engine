@@ -13,8 +13,8 @@ target_link_libraries(ui_showcase PRIVATE
 # Generated asset headers from builder (ui_showcase_assets.h etc.)
 target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
-# nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface (61-06); the exe picks the
-# real impl so Ctrl+C/X/V work in the Input tab (D-14). web = async cache-on-paste, native = glfw.
+# nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the
+# real impl so Ctrl+C/X/V work in the Input tab. web = async cache-on-paste, native = glfw.
 if(EMSCRIPTEN)
     target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_clipboard)
 else()

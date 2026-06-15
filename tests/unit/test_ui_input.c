@@ -346,7 +346,7 @@ static void test_unfocused_ignores_chars(void) {
     TEST_ASSERT_EQUAL_STRING("", buf);
 }
 
-/* ---- Test 10: the generic dblclick/longpress primitive reports edges (D-16). ---- */
+/* ---- Test 10: the generic dblclick/longpress primitive reports edges. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dblclick_longpress_primitive(void) {
     const uint32_t gid = nt_ui_id("gesture");

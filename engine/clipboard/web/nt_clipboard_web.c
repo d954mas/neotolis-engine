@@ -15,7 +15,7 @@ static char s_cache[NT_CLIPBOARD_WEB_CACHE_SIZE] = {0};
 static int s_registered = 0;
 
 /* Copy a NUL-terminated UTF-8 string into the cache, clamped so an arbitrarily
- * large external paste can never overflow (T-61-04). Clamp on a byte boundary;
+ * large external paste can never overflow. Clamp on a byte boundary;
  * a split trailing multi-byte sequence is harmless for display. */
 static void cache_store(const char *utf8) {
     if (utf8 == NULL) {

@@ -183,7 +183,7 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t modal_top_id_prev;
     uint32_t modal_top_id_cur;
-    /* Keyboard-focus arbiter (D-15): the input field that eats typed chars + editing keys.
+    /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
      * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
      * field declared this frame. Survives across frames (not reset by begin). */
     uint32_t focused_input_id;
