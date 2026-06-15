@@ -124,6 +124,16 @@ static void test_endpoints_detail_has_seven_fields(void) {
     cJSON_Delete(root);
 }
 
+/* detail is optional, but a present non-bool detail is rejected (not silently ignored). */
+static void test_endpoints_non_bool_detail_bad_params(void) {
+    const char *resp = nt_devapi_submit("{\"method\":\"endpoints\",\"params\":{\"detail\":\"yes\"}}");
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
+    cJSON_Delete(root);
+}
+
 /* ---- command.describe ---- */
 
 static void test_command_describe_ping(void) {
@@ -232,6 +242,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_endpoints_cheap_has_three_fields);
     RUN_TEST(test_endpoints_detail_has_seven_fields);
+    RUN_TEST(test_endpoints_non_bool_detail_bad_params);
     RUN_TEST(test_command_describe_ping);
     RUN_TEST(test_command_describe_missing_method_bad_params);
     RUN_TEST(test_command_describe_unknown_method);

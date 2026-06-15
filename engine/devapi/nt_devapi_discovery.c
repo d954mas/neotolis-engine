@@ -24,11 +24,16 @@ static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
 
 /* result wraps a `commands` array — never a bare top-level array. */
 static bool cmd_endpoints(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)err;
     (void)ud;
+    /* detail is optional; if present it must be a bool (explicit over implicit). */
     bool detail = false;
     const cJSON *detail_item = cJSON_GetObjectItemCaseSensitive(params, "detail");
-    if (cJSON_IsBool(detail_item)) {
+    if (detail_item != NULL) {
+        if (!cJSON_IsBool(detail_item)) {
+            err->code = NT_DEVAPI_ERR_BAD_PARAMS;
+            err->message = "params.detail must be a bool";
+            return false;
+        }
         detail = cJSON_IsTrue(detail_item);
     }
 
