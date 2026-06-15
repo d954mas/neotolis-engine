@@ -158,6 +158,10 @@ struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds;
     bool in_frame;
+    /* Orphan-focus cleanup (mirrors capture_seen): set to 1 the frame the focused field runs; if the
+     * focused field is not re-declared next frame, nt_ui_begin clears focused_input_id (else a vanished
+     * field gates global Esc forever). Reset to 0 each begin. Placed here to reuse in_frame's pad. */
+    uint8_t focused_input_seen;
 
     nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
     uint32_t frame_pointer_count;

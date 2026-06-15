@@ -687,6 +687,11 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->drag = 0U;
     }
 
+    /* Mark this field not-orphan for next begin's focus cleanup whenever it holds focus (even if
+     * disabled this frame — it's still declared, so focus should survive). */
+    if (ctx->focused_input_id == id) {
+        ctx->focused_input_seen = 1U;
+    }
     const bool focused = enabled && (ctx->focused_input_id == id);
     // #endregion
 

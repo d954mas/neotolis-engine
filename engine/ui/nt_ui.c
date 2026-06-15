@@ -348,6 +348,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
      * nt_ui_modal_active BEFORE this frame's begin still sees last frame's result). */
     ctx->modal_present_cur = false;
+    /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
+     * so drop focus before this frame runs (mirrors the capture_seen orphan sweep above). */
+    if (ctx->focused_input_id != 0U && ctx->focused_input_seen == 0U) {
+        ctx->focused_input_id = 0U;
+    }
+    ctx->focused_input_seen = 0U;
     /* Tab focus-advance is single-frame: the seek is consumed by the next field this frame; the
      * first-field tracker re-zeroes so a Tab off the last field wraps to this frame's first. */
     ctx->focus_tab_seek = 0U;

@@ -313,6 +313,27 @@ static void test_focus_tab_esc(void) {
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_b));
 }
 
+/* ---- Test 7b: focus is dropped when the focused field is not re-declared next frame. ---- */
+static void test_focus_orphan_cleared(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_any_focused(s_fx.ctx)); /* field holds focus */
+
+    /* Frame 1 without the field: begin still sees last frame's seen=1, so focus survives this begin
+     * but seen stays 0 (the field never runs). */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    CLAY({.id = CLAY_ID("root")}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2's begin runs the orphan sweep on seen==0 -> focus is cleared so a global Esc=quit is
+     * no longer gated forever. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    CLAY({.id = CLAY_ID("root")}) {}
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
+}
+
 /* ---- Test 8: Enter raises submit; on_change is true the frame the buffer mutates. ---- */
 static void test_submit_and_change(void) {
     char buf[32] = {0};
@@ -726,6 +747,7 @@ int main(void) {
     RUN_TEST(test_numeric_predicate);
     RUN_TEST(test_click_hit_test_boundary);
     RUN_TEST(test_focus_tab_esc);
+    RUN_TEST(test_focus_orphan_cleared);
     RUN_TEST(test_submit_and_change);
     RUN_TEST(test_unfocused_ignores_chars);
     RUN_TEST(test_dblclick_longpress_primitive);
