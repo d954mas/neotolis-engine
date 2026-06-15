@@ -108,6 +108,12 @@ static cJSON *dispatch_one(const cJSON *req) {
     }
 
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
+    /* params is optional, but if present it must be a JSON object. */
+    if (params != NULL && !cJSON_IsObject(params)) {
+        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "params must be a JSON object");
+        echo_request_id(entry, req);
+        return entry;
+    }
 
     cJSON *result_obj = cJSON_CreateObject();
     NT_ASSERT(result_obj != NULL);
