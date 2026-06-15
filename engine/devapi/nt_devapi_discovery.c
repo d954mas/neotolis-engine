@@ -73,7 +73,7 @@ static bool cmd_command_describe(const cJSON *params, cJSON *result, nt_devapi_e
     return true;
 }
 
-/* Active groups = compile-time policy: a group exists only if its NT_DEVAPI_REGISTER_<group> compiled. */
+/* Active command groups: engine groups are compile-gated, games register theirs at runtime. */
 static bool cmd_features(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -114,7 +114,7 @@ static const nt_devapi_command_desc k_discovery_cmds[] = {
     {
         .method = "features",
         .layer = "core",
-        .summary = "active command groups (compile-time policy state)",
+        .summary = "active command groups",
         .params_shape = "{}",
         .result_shape = "{groups:string[]}",
         .frame_behavior = "any",

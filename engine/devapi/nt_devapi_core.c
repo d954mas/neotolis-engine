@@ -39,7 +39,7 @@ static bool cmd_view(const cJSON *params, cJSON *result, nt_devapi_error *err, v
     return true;
 }
 
-/* version/build/preset from compile-defs; "modules" = the active compiled groups. */
+/* version/build/preset from compile-defs; "modules" = the active command groups. */
 static bool cmd_engine_info(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
