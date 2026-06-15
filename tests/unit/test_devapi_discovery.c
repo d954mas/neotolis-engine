@@ -187,12 +187,13 @@ static void test_features_lists_active_groups(void) {
     cJSON *groups = cJSON_GetObjectItemCaseSensitive(result, "groups");
     TEST_ASSERT_TRUE(cJSON_IsArray(groups));
     TEST_ASSERT_TRUE(array_has_string(groups, "core"));
+    TEST_ASSERT_TRUE(array_has_string(groups, "window"));
     TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
     /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
-    /* groups are distinct: 3 core + 3 discovery commands collapse to one entry each. */
-    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(groups));
+    /* groups are distinct: multiple commands per group collapse to one entry each. */
+    TEST_ASSERT_EQUAL_INT(4, cJSON_GetArraySize(groups));
     cJSON_Delete(root);
 }
 

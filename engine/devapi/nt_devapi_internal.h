@@ -52,6 +52,12 @@ bool nt_devapi_group_is_first(int index);
 void nt_devapi_register_core(void);
 #endif
 
+/* Engine `window` group registrar (view). Defined in nt_devapi_window.c, invoked from
+   nt_devapi_init under the same compile gate. */
+#ifdef NT_DEVAPI_REGISTER_window
+void nt_devapi_register_window(void);
+#endif
+
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in
    nt_devapi_discovery.c, invoked from nt_devapi_init. */
 void nt_devapi_register_discovery(void);
