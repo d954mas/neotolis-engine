@@ -54,7 +54,7 @@ engine state pool holds only the caret / selection / scroll / blink, never the s
 | Input | Action |
 |-------|--------|
 | click a field | focus it (the bg/border brighten); the caret blinks |
-| type | inserts at the caret — Latin **and** Cyrillic (the demo font bakes both, D-17) |
+| type | inserts at the caret — Latin **and** Cyrillic (the demo font bakes both) |
 | Left / Right | move the caret one **codepoint** (never splits a multi-byte char) |
 | Home / End | caret to start / end |
 | Backspace / Delete | delete the codepoint before / after the caret |
@@ -82,7 +82,7 @@ is **no engine API in the swap** (Model D). Pressing **T** or the header button
 flips the pointer; every widget — including the modal — restyles on the next
 frame.
 
-## Focused properties panels (D-60-13)
+## Focused properties panels
 
 - **Modal** (the headline panel): a segmented transition selector
   (scale-pop / fade / slide), plus sliders for ease speed, scale-start
@@ -118,15 +118,15 @@ guards `< 0` and shows `gpu: n/a` instead of garbage.
 
 **Threshold is INFORMATIONAL only.** The historical target was `< 4 ms` of text
 GPU cost on a mid-tier mobile device. Exceeding it does **not** block this phase
-— it merely files a v1.9 bitmap-font-fallback issue (D-07). The frame `gpu_ms`
+— it merely files a v1.9 bitmap-font-fallback issue. The frame `gpu_ms`
 proxy is reported for that decision, not as a gate.
 
 ## Batching evidence
 
-The header shows a live `ui_draw_calls` readout (Phase 52). Batching is driven by
+The header shows a live `ui_draw_calls` readout. Batching is driven by
 **explicit `nt_ui_layer_t`** (0..255, lower draws first) — there is **no
-sort-by-material toggle** (`NT_UI_WALK_SORT_BY_MATERIAL` does not exist; DEMO-09
-was removed per D-60-16). The draw-call count is the batching evidence.
+sort-by-material toggle** (`NT_UI_WALK_SORT_BY_MATERIAL` does not exist). The
+draw-call count is the batching evidence.
 
 ## Build & run
 

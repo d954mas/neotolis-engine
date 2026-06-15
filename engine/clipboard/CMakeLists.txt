@@ -1,4 +1,4 @@
-# nt_clipboard -- sync clipboard façade with swappable backends (#126, D-07/D-08)
+# nt_clipboard -- sync clipboard façade with swappable backends
 # API header: nt_clipboard.h (shared by all implementations)
 # Real impl:  native/nt_clipboard_native.c (glfwGet/SetClipboardString)
 #             web/nt_clipboard_web.c       (cache-on-paste EM_JS, async contained)

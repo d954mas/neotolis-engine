@@ -114,7 +114,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         }
         /* Typed character: e.key is a single printable char (not "Enter"/"ArrowUp"/...).
            Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No glfwSetCharCallback
-           on web — this hand-rolled path is the char source (Pitfall 3). */
+           on web — this hand-rolled path is the char source. */
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
             Module['_ntCharBuf'].push(e.key.codePointAt(0));
         }

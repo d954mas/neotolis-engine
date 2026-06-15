@@ -14,7 +14,7 @@ static bool s_keys_released[NT_KEY_COUNT];
 
 /* ---- UTF-32 char ring (typed text, fed by platform char sources) ---- */
 
-#define NT_INPUT_CHAR_RING 32 /* power-of-2: one frame's typing < 32 (A6) */
+#define NT_INPUT_CHAR_RING 32 /* power-of-2: one frame's typing < 32 */
 
 static uint32_t s_char_ring[NT_INPUT_CHAR_RING];
 static uint32_t s_char_head; /* next write slot */
@@ -214,7 +214,7 @@ void nt_input_set_key(nt_key_t key, bool down) {
 }
 
 void nt_input_buffer_char(uint32_t cp) {
-    /* Drop when full so unread chars are never clobbered (A6). */
+    /* Drop when full so unread chars are never clobbered. */
     if (s_char_head - s_char_tail >= NT_INPUT_CHAR_RING) {
         return;
     }
