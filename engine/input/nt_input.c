@@ -87,6 +87,9 @@ void nt_input_poll(void) {
     /* Clear edge flags accumulated since last poll */
     memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
     memset(s_keys_released, 0, sizeof(s_keys_released));
+    /* Typed text is frame-local like key edges: drop any chars unconsumed last frame so they can't
+     * leak into a field focused later. platform_poll below refills the ring with this frame's chars. */
+    s_char_tail = s_char_head;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         g_nt_input.pointers[i].dx = 0.0F;
         g_nt_input.pointers[i].dy = 0.0F;

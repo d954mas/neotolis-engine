@@ -59,11 +59,32 @@ void test_pop_char_empty_leaves_out_untouched(void) {
     TEST_ASSERT_EQUAL_UINT32(0xDEADBEEFU, cp);
 }
 
+/* ---- Frame-local: an unconsumed char is dropped at the next poll (no leak into a later field) ---- */
+
+void test_poll_clears_unconsumed_chars(void) {
+    nt_input_buffer_char(0x41U); /* 'A' typed but never popped this frame */
+    nt_input_buffer_char(0x42U); /* 'B' too */
+
+    nt_input_poll(); /* frame boundary: typed text is frame-local, like key edges */
+
+    /* The ring is empty -- the stale chars cannot leak into a field focused next frame. */
+    uint32_t cp = 0xDEADBEEFU;
+    TEST_ASSERT_FALSE(nt_input_pop_char(&cp));
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEFU, cp);
+
+    /* A char buffered AFTER the poll is still readable this frame (same-frame typing survives). */
+    nt_input_buffer_char(0x43U); /* 'C' */
+    TEST_ASSERT_TRUE(nt_input_pop_char(&cp));
+    TEST_ASSERT_EQUAL_UINT32(0x43U, cp);
+    TEST_ASSERT_FALSE(nt_input_pop_char(&cp));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_pop_char_fifo_order);
     RUN_TEST(test_pop_char_utf32_roundtrip);
     RUN_TEST(test_pop_char_overflow_drop);
     RUN_TEST(test_pop_char_empty_leaves_out_untouched);
+    RUN_TEST(test_poll_clears_unconsumed_chars);
     return UNITY_END();
 }
