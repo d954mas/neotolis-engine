@@ -18,6 +18,9 @@ target_link_libraries(submodule_test PRIVATE
     nt_pool
     nt_hash
     nt_gfx_stub
+    # nt_resource links nt_http/nt_fs via interface only; a consuming exe must pick impls.
+    nt_http_stub
+    nt_fs_stub
     nt_resource
     nt_entity
     nt_comp_storage
