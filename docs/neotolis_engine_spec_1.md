@@ -351,6 +351,11 @@ If a decision can be deferred without loss of base architecture — it is deferr
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
+- a command/RPC API in the shipped runtime (NOTE: the `nt_devapi` milestone adds a
+  dev-only, self-describing JSON command surface for engine introspection and
+  automation. It is gated by `NT_DEVAPI_ENABLED` (OFF by default) and the
+  `engine/devapi` subdir is compile-excluded from release, so it is **not** part of
+  the shipped runtime or the asset/format pipeline. See §24.5.)
 
 ---
 
@@ -2512,6 +2517,18 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 Recommended stats: frame time, fixed step count, draw call count, batch count, loaded resource count, active pack count, temp memory usage, audio voice count.
 
+## 24.5 Developer API (devapi)
+
+`nt_devapi` is an **optional, dev-only** self-describing command surface for engine introspection and automation (probing, testing, external tooling). It is gated by `NT_DEVAPI_ENABLED` (OFF by default); the `engine/devapi` subdirectory is excluded at the CMake level when off, so a release binary contains zero devapi code or symbols. A CI "zero-delta" check asserts a devapi-OFF WASM has no `nt_devapi_*` symbols. devapi is the one sanctioned exception to the runtime's no-parser rule — it is dev-only and compiled out of release.
+
+**Transport-agnostic core.** The dispatch core is `submit(line) -> response line`: one JSON request line in, one JSON response line out, with no platform/socket/transport code. Real transports (loopback TCP, web `ccall`) are separate, opt-in, and added by later phases.
+
+**Self-describing registry.** Commands are registered once into a fixed-size table, each with a 7-field descriptor (`method`, `group`, `summary`, `params_shape`, `result_shape`, `frame_behavior`, `side_effects`). The discovery commands (`endpoints`, `command.describe`, `features`) expose the whole surface so a client reads it without source. A game registers `group="game"` commands through the public API with zero engine edits. `features` lists the distinct `group` values across all registered commands — which groups exist depends on which commands are compiled in (engine) or registered at runtime (game).
+
+**Envelope.** Each request returns `{ok:true,result}` or `{ok:false,error:{code,message}}`, echoes `request_id` unchanged, and a JSON-array line runs as an ordered batch with continue-on-error.
+
+**cJSON dependency.** devapi parses/serializes with vendored cJSON, exposed as a standalone reusable `cjson` static-lib target (not an engine module, `EXCLUDE_FROM_ALL`). cJSON is usable by games independently of devapi; only targets that link it pull it in.
+
 ---
 
 # 25. Engine/Game Boundary
@@ -2584,6 +2601,10 @@ engine/
     packs/
     formats/
     audio/
+    devapi/    (dev-only, NT_DEVAPI_ENABLED — see §24.5)
+
+deps/
+    cjson/     (vendored standalone lib, EXCLUDE_FROM_ALL; linked only by consumers)
 
 builder/   (separate program)
 

@@ -340,6 +340,51 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_http COMMAND test_http)
 
+    # cJSON standalone round-trip. Links cjson only (proves cjson works WITHOUT devapi),
+    # so it must NOT sit behind the NT_DEVAPI_ENABLED gate — cjson is built unconditionally.
+    add_executable(test_devapi_cjson unit/test_devapi_cjson.c)
+    target_link_libraries(test_devapi_cjson PRIVATE cjson unity)
+    target_compile_definitions(test_devapi_cjson PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_devapi_cjson)
+
+    # --- DevAPI module tests (NT_DEVAPI_ENABLED-gated) ---
+    if(NT_DEVAPI_ENABLED)
+        # registry register / dup-reject / owned-copy survival.
+        add_executable(test_devapi_registry unit/test_devapi_registry.c)
+        target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson nt_window_stub nt_log_stub unity)
+        target_compile_definitions(test_devapi_registry PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+        )
+        nt_setup_test_target(test_devapi_registry)
+
+        # submit() envelope, request_id echo, unknown-method, batch order +
+        # continue-on-error, pointer lifetime (ASan via sanitizer flags).
+        add_executable(test_devapi_envelope unit/test_devapi_envelope.c)
+        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson nt_window_stub nt_log_stub unity)
+        target_compile_definitions(test_devapi_envelope PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+        )
+        nt_setup_test_target(test_devapi_envelope)
+
+        # core command group via submit(). engine.info.version comes from nt_core, so the
+        # test asserts it against nt_engine_version_string() directly.
+        add_executable(test_devapi_core unit/test_devapi_core.c)
+        target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson nt_log_stub unity)
+        target_compile_definitions(test_devapi_core PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+        )
+        nt_setup_test_target(test_devapi_core)
+
+        # discovery group (endpoints / command.describe / features) + the
+        # zero-engine-edits game-layer registration path.
+        add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
+        target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson nt_window_stub nt_log_stub unity)
+        target_compile_definitions(test_devapi_discovery PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+        )
+        nt_setup_test_target(test_devapi_discovery)
+    endif()
+
     # --- File system module tests ---
     add_executable(test_fs unit/test_fs.c)
     target_link_libraries(test_fs PRIVATE nt_fs unity)
