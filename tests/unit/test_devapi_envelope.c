@@ -232,6 +232,17 @@ static void test_non_object_params_bad_params(void) {
     cJSON_Delete(root);
 }
 
+/* request_id must be a scalar; a present non-scalar (array/object) id is rejected and NOT echoed. */
+static void test_non_scalar_request_id_rejected(void) {
+    const char *resp = nt_devapi_submit("{\"method\":\"ok\",\"request_id\":[1,2,3]}");
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(error, "code")->valuestring);
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(root, "request_id")); /* invalid id not echoed */
+    cJSON_Delete(root);
+}
+
 /* ---- request_id fidelity on the error + per-batch-entry paths ---- */
 
 static void test_request_id_string_echoed_on_error(void) {
@@ -274,6 +285,7 @@ int main(void) {
     RUN_TEST(test_empty_batch_returns_empty_array);
     RUN_TEST(test_batch_of_non_objects_each_bad_params);
     RUN_TEST(test_non_object_params_bad_params);
+    RUN_TEST(test_non_scalar_request_id_rejected);
     RUN_TEST(test_request_id_string_echoed_on_error);
     RUN_TEST(test_batch_echoes_each_request_id);
     return UNITY_END();

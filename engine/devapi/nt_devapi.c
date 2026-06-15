@@ -62,10 +62,11 @@ static cJSON *make_error_entry(const char *code, const char *message) {
     return entry;
 }
 
-/* Echo request_id unchanged if present — Duplicate preserves number-vs-string type. */
+/* Echo request_id if present and a scalar (number/string); absent or non-scalar is not
+   echoed. Duplicate preserves number-vs-string type. */
 static void echo_request_id(cJSON *entry, const cJSON *req) {
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "request_id");
-    if (id == NULL) {
+    if (!cJSON_IsNumber(id) && !cJSON_IsString(id)) {
         return;
     }
     cJSON *dup = cJSON_Duplicate(id, true);
@@ -86,11 +87,33 @@ static cJSON *make_ok_entry(cJSON *result_obj) {
     return entry;
 }
 
+/* Request-level preconditions: request_id (if present) must be a scalar; params (if present)
+   must be an object. Returns the rejection reason, or NULL if the request is well-formed. */
+static const char *request_reject_reason(const cJSON *req) {
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "request_id");
+    if (id != NULL && !cJSON_IsNumber(id) && !cJSON_IsString(id)) {
+        return "request_id must be a number or string";
+    }
+    const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
+    if (params != NULL && !cJSON_IsObject(params)) {
+        return "params must be a JSON object";
+    }
+    return NULL;
+}
+
 /* Dispatch one request object → an owned response entry. The dispatcher pre-creates
    and always frees result_obj, so a handler can neither leak it nor free it itself. */
 static cJSON *dispatch_one(const cJSON *req) {
     if (!cJSON_IsObject(req)) {
         return make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "request must be a JSON object");
+    }
+
+    const char *reject = request_reject_reason(req);
+    if (reject != NULL) {
+        /* echo_request_id is type-safe: it skips an invalid (non-scalar) id automatically. */
+        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, reject);
+        echo_request_id(entry, req);
+        return entry;
     }
 
     const cJSON *method_item = cJSON_GetObjectItemCaseSensitive(req, "method");
@@ -107,13 +130,7 @@ static cJSON *dispatch_one(const cJSON *req) {
         return entry;
     }
 
-    const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
-    /* params is optional, but if present it must be a JSON object. */
-    if (params != NULL && !cJSON_IsObject(params)) {
-        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "params must be a JSON object");
-        echo_request_id(entry, req);
-        return entry;
-    }
+    const cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params"); /* validated above */
 
     cJSON *result_obj = cJSON_CreateObject();
     NT_ASSERT(result_obj != NULL);
