@@ -7,6 +7,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h" /* DBG */
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_debug_hit_zones.h"
@@ -953,9 +954,14 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     }
 
     if (focused) {
+        const float caret_px = caret_x_at(style, font, buffer, st->caret) - st->scroll_x;
+        static uint32_t dbg_last = 0xFFFFFFFFU;                                                                                                                  /* DBG */
+        if (st->caret != dbg_last) {                                                                                                                             /* DBG */
+            nt_log_info("[dbg] caret render id=%u caret=%u caret_px=%.1f scroll_x=%.1f -> x=%.1f", (unsigned)id, (unsigned)st->caret, (double)caret_px, (double)st->scroll_x, (double)(style->pad_x + caret_px)); /* DBG */
+            dbg_last = st->caret;                                                                                                                                /* DBG */
+        }                                                                                                                                                        /* DBG */
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));
         if (blink_on) {
-            const float caret_px = caret_x_at(style, font, buffer, st->caret) - st->scroll_x;
             const float caret_h = style->text.font_size;
             emit_caret(ctx, text_layer, style->pad_x + caret_px, style->pad_y, style->caret_width, caret_h, style->caret_color);
         }

@@ -1,4 +1,5 @@
 #include "input/nt_input_internal.h"
+#include "log/nt_log.h" /* DBG */
 #include "window/nt_window.h" /* g_nt_window.dpr for coordinate mapping */
 
 /* ---- Event buffers (filled by nt_window callbacks, drained by platform_poll) ---- */
@@ -133,6 +134,9 @@ void nt_input_platform_poll(void) {
 
     /* Drain staged chars into the shared ring AFTER nt_input_poll's frame clear so this frame's
        typing is readable by a focused widget (the clear ran before platform_poll). */
+    if (s_char_count > 0U) {
+        nt_log_info("[dbg] platform_poll: drain %u staged chars -> ring", (unsigned)s_char_count); /* DBG */
+    }
     for (uint32_t i = 0; i < s_char_count; i++) {
         nt_input_buffer_char(s_char_buf[i]);
     }
