@@ -36,7 +36,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                     if (result.done) {
                         var totalLen = received;
                         console.log('INFO [http] stream done slot=' + slot_index + ' size=' + totalLen);
-                        var ptr = _malloc(totalLen);
+                        var ptr = wasmExports['malloc'](totalLen);
                         var offset = 0;
                         for (var i = 0; i < chunks.length; i++) {
                             HEAPU8.set(chunks[i], ptr + offset);
@@ -60,7 +60,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
             /* Fallback: no streaming progress */
             response.arrayBuffer().then(function(buf) {
                 var arr = new Uint8Array(buf);
-                var ptr = _malloc(arr.length);
+                var ptr = wasmExports['malloc'](arr.length);
                 HEAPU8.set(arr, ptr);
                 _nt_http_web_on_complete(slot_index, generation, ptr, arr.length, 1);
             }).catch(function() {
