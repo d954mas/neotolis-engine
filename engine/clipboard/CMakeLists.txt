@@ -21,8 +21,10 @@ if(EMSCRIPTEN)
     target_link_libraries(nt_clipboard PUBLIC nt_core nt_clipboard_interface)
 else()
     nt_add_module(nt_clipboard LOG_DOMAIN "clipboard" native/nt_clipboard_native.c nt_clipboard.h)
-    # nt_window_interface carries glfw's include path on native (the fixed windowing
-    # dep); glfw symbols resolve at exe link via the real nt_window.
+    # nt_window_interface carries glfw's include path on native (the fixed windowing dep); glfw
+    # symbols resolve at exe link via the real nt_window. So real native nt_clipboard REQUIRES the
+    # exe to link the real nt_window -- nt_clipboard + nt_window_stub is not a valid pairing (the
+    # glfw clipboard symbols stay unresolved: a loud link error, by design).
     target_link_libraries(nt_clipboard PUBLIC nt_core nt_clipboard_interface nt_window_interface)
 endif()
 

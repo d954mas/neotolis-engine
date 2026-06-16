@@ -134,11 +134,12 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
                 Module['_ntKeyBuf'].push(k, 1);
             }
         }
-        /* Typed character: e.key is a single printable char (not "Enter"/"ArrowUp"/...).
-           Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No glfwSetCharCallback on web —
-           this hand-rolled path is the char source. Emitted on e.repeat too so a held key types a run,
-           matching native GLFW char-repeat (and the platform's own text fields). */
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        /* Typed character: e.key is a single printable codepoint (not "Enter"/"ArrowUp"/...).
+           Array.from counts CODEPOINTS, so a non-BMP char (e.key.length 2 surrogate pair) still
+           passes -- the ring is UTF-32. Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No
+           glfwSetCharCallback on web; this hand-rolled path is the char source. Emitted on e.repeat
+           too so a held key types a run, matching native GLFW char-repeat. */
+        if (Array.from(e.key).length === 1 && !e.ctrlKey && !e.metaKey) {
             Module['_ntCharBuf'].push(e.key.codePointAt(0));
         }
         if (preventSet[e.code]) {

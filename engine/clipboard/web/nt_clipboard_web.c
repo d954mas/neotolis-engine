@@ -14,9 +14,9 @@
 static char s_cache[NT_CLIPBOARD_WEB_CACHE_SIZE] = {0};
 static int s_registered = 0;
 
-/* Copy a NUL-terminated UTF-8 string into the cache, clamped so an arbitrarily
- * large external paste can never overflow. Clamp on a byte boundary;
- * a split trailing multi-byte sequence is harmless for display. */
+/* Copy a NUL-terminated UTF-8 string into the cache, clamped so an arbitrarily large external
+ * paste can never overflow. The clamp backs off a split multi-byte sequence so get_text() always
+ * returns valid UTF-8 (the public contract), not a truncated trailing codepoint. */
 static void cache_store(const char *utf8) {
     if (utf8 == NULL) {
         s_cache[0] = '\0';
@@ -25,6 +25,10 @@ static void cache_store(const char *utf8) {
     size_t n = strlen(utf8);
     if (n >= sizeof(s_cache)) {
         n = sizeof(s_cache) - 1;
+        /* Drop a partial trailing codepoint: UTF-8 continuation bytes are 10xxxxxx. */
+        while (n > 0U && ((unsigned char)utf8[n] & 0xC0U) == 0x80U) {
+            n--;
+        }
     }
     memcpy(s_cache, utf8, n);
     s_cache[n] = '\0';
