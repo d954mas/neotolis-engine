@@ -19,7 +19,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
     fetch(url, { signal: controller.signal }).then(function(response) {
         console.log('INFO [http] response slot=' + slot_index + ' status=' + response.status + ' ok=' + response.ok + ' hasBody=' + !!response.body);
         if (!response.ok) {
-            Module['_nt_http_web_on_complete'](slot_index, generation, 0, 0, 0);
+            _nt_http_web_on_complete(slot_index, generation, 0, 0, 0);
             return;
         }
 
@@ -36,23 +36,23 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                     if (result.done) {
                         var totalLen = received;
                         console.log('INFO [http] stream done slot=' + slot_index + ' size=' + totalLen);
-                        var ptr = Module['_malloc'](totalLen);
+                        var ptr = _malloc(totalLen);
                         var offset = 0;
                         for (var i = 0; i < chunks.length; i++) {
-                            Module['HEAPU8'].set(chunks[i], ptr + offset);
+                            HEAPU8.set(chunks[i], ptr + offset);
                             offset += chunks[i].length;
                         }
-                        Module['_nt_http_web_on_complete'](slot_index, generation, ptr, totalLen, 1);
+                        _nt_http_web_on_complete(slot_index, generation, ptr, totalLen, 1);
                         return;
                     }
                     var chunk = result.value;
                     chunks.push(chunk);
                     received += chunk.length;
-                    Module['_nt_http_web_on_progress'](slot_index, generation, received, total);
+                    _nt_http_web_on_progress(slot_index, generation, received, total);
                     pump();
                 }).catch(function(e) {
                     console.error('ERROR [http] stream error slot=' + slot_index, e);
-                    Module['_nt_http_web_on_complete'](slot_index, generation, 0, 0, 0);
+                    _nt_http_web_on_complete(slot_index, generation, 0, 0, 0);
                 });
             }
             pump();
@@ -60,16 +60,16 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
             /* Fallback: no streaming progress */
             response.arrayBuffer().then(function(buf) {
                 var arr = new Uint8Array(buf);
-                var ptr = Module['_malloc'](arr.length);
-                Module['HEAPU8'].set(arr, ptr);
-                Module['_nt_http_web_on_complete'](slot_index, generation, ptr, arr.length, 1);
+                var ptr = _malloc(arr.length);
+                HEAPU8.set(arr, ptr);
+                _nt_http_web_on_complete(slot_index, generation, ptr, arr.length, 1);
             }).catch(function() {
-                Module['_nt_http_web_on_complete'](slot_index, generation, 0, 0, 0);
+                _nt_http_web_on_complete(slot_index, generation, 0, 0, 0);
             });
         }
     }).catch(function(err) {
         if (err && err.name === 'AbortError') return;
-        Module['_nt_http_web_on_complete'](slot_index, generation, 0, 0, 0);
+        _nt_http_web_on_complete(slot_index, generation, 0, 0, 0);
     });
 })
 
