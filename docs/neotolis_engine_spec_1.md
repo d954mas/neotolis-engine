@@ -330,6 +330,24 @@ If a decision can be deferred without loss of base architecture — it is deferr
   "Scissor limitation" note below still holds (AABB clip of a rotated scroll
   container is unchanged).
 
+  **Text input.** `nt_ui_input_text` is a single-line field over a game-owned
+  `char*` buffer (Model D — the engine never reallocs or owns the string; it stores
+  only caret/selection/scroll/blink/focus in the state pool). Editing is UTF-8
+  codepoint-aware: insert/backspace/delete/arrows never split a multi-byte sequence
+  and clamp to `buffer_size-1` / `max_length`. Typed text arrives via the
+  `nt_input_pop_char` UTF-32 ring (frame-local, drained each frame while focused);
+  physical keys drive navigation/edit. T2 adds selection (Shift+arrows, mouse drag,
+  double-click word-select, Ctrl+A), copy/cut/paste via the swappable `nt_clipboard`
+  façade (paste decodes untrusted bytes per-codepoint, runs the allow-predicate,
+  clamps, and drops a non-fitting multibyte codepoint whole), a render-only password
+  mask, stock allow-predicates (numeric/email/url), a per-field `placeholder` string
+  shown dimmed while empty+unfocused, and a minimal focus arbiter (Esc unfocus, Tab
+  advance/wrap). Caret, selection highlight, and the text all float as clipped
+  children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Clay
+  element `userData`, which the walker reads for layer+transform), so the line
+  scrolls to keep the caret visible while clipping to the field box. Cut is a no-op
+  when `nt_clipboard_available()` is false (no silent delete-without-copy).
+
   **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
   uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
   is the unset handle; consumers assign their own meaning). The widget APIs
