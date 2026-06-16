@@ -6,10 +6,8 @@
 //      command. Used by nt_ui's build_tree pass to map each render command
 //      back to its source element. Search "nt_" for patch sites (4 total).
 //   2. CLAY__MAX_SCROLL_CONTAINERS overrides the hardcoded scroll/clip-container
-//      pool size (upstream literal 10). EVERY .clip element takes one slot and
-//      Clay only reclaims them inside Clay_UpdateScrollContainers; 10 is too low
-//      for UIs with per-field text-input clips + tab-transition overlap. Search
-//      "NT patch" for the 2 sites (define + allocation).
+//      pool size (upstream 10): every .clip takes one slot, reclaimed only in
+//      Clay_UpdateScrollContainers. Search "NT patch" for the 2 sites.
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.

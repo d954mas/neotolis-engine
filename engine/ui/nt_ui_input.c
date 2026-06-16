@@ -56,9 +56,7 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
 
 #define NT_UI_INPUT_MASK_CHAR '*'
 
-/* PC-style auto-repeat for held nav/edit keys: an initial delay then a faster repeat rate (ImGui
- * reference). One-frame is_pressed is the initial action; while is_down + same key, repeat_t counts
- * down and fires every NT_UI_INPUT_REPEAT_RATE once the delay elapses. */
+/* PC-style auto-repeat for held nav/edit keys: an initial delay, then a faster repeat rate (ImGui reference). */
 #define NT_UI_INPUT_REPEAT_DELAY 0.275F
 #define NT_UI_INPUT_REPEAT_RATE 0.05F
 
@@ -304,13 +302,8 @@ nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id
 static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
 static inline bool ctrl_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL); }
 
-/* PC-style auto-repeat core: a fresh press fires immediately and arms the timer at the initial delay;
- * while the SAME key stays held the timer counts down by dt and fires every NT_UI_INPUT_REPEAT_RATE
- * once the delay elapses. Last-pressed wins (a different repeatable key re-arms to it). Releasing the
- * armed key clears it. Returns true on the frames the key should act. The held/pressed edges arrive as
- * params so the unit test can drive timing with fake input. The repeat_key + repeat_t out-params are
- * the per-field retained accumulator. Exposed (with explicit storage, not the internal cell type)
- * under NT_TEST_ACCESS. */
+/* PC-style auto-repeat core. Last-pressed wins (a newer repeatable key re-arms to it).
+ * Edges arrive as params so the unit test can drive timing with fake input. */
 #ifdef NT_TEST_ACCESS
 bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
 bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
