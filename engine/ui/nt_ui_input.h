@@ -49,7 +49,8 @@ typedef struct {
     float caret_blink_rate;               /* seconds per full blink cycle; <= 0 = no blink (always on) */
     float caret_width;                    /* caret rect width px; asserted > 0 */
     float border_width;                   /* border thickness px (0 = no border) */
-    float pad_x, pad_y;                   /* inner padding px */
+    float pad_x;                          /* horizontal inner padding px (text origin + clip bound) */
+    float pad_y;                          /* vertical padding px: UNUSED -- the line is auto-centered, vertical margin = (field_h - line_h)/2 */
     size_t max_length;                    /* max BYTES (incl. NUL room); 0 = bound by buffer_size only */
     nt_ui_char_filter_fn allow;           /* codepoint filter; NULL = allow printable */
     nt_ui_input_keyboard_t keyboard;      /* soft-keyboard hint */

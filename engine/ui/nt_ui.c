@@ -76,7 +76,13 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
     if (s.width > 0.0F && ls != 0.0F) {
         s.width += ls;
     }
-    return (Clay_Dimensions){.width = s.width, .height = s.height};
+    /* Height = font LINE box (ascent-descent), NOT the run's ink box (s.height): a tall glyph (tofu,
+     * or a descender) must not change the element height, else the TEXT render's vertical center-offset
+     * (= (bbox.height - (ascent-descent)*scale)/2) drifts and shifts the whole line down. Mirrors the
+     * exact text_h the render path uses, so center_offset stays 0 for an intrinsically-sized line. */
+    const nt_font_metrics_t m = nt_font_get_metrics(font);
+    const float line_h = (m.units_per_em > 0) ? ((float)(m.ascent - m.descent) * ((float)config->fontSize / (float)m.units_per_em)) : s.height;
+    return (Clay_Dimensions){.width = s.width, .height = line_h};
 }
 // #endregion
 

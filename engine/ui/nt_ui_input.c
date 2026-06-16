@@ -590,7 +590,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
         .backgroundColor = nt_ui_unpack_abgr(color),
         .userData = (void *)rd, /* carries layer + transform offset; without it the walker ignores both */
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
     };
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(rect_decl);
@@ -629,17 +629,17 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
         .backgroundColor = nt_ui_unpack_abgr(color),
         .userData = (void *)cd, /* carries layer + transform offset; without it the walker ignores both */
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
     };
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(caret_decl);
     nt_ui_clay_priv_close_element();
 }
 
-/* Open a non-floating child that fills the field's CONTENT box (the root's pad_x/pad_y positions it
- * there) and clips its children. The selection/text/caret floats are emitted INSIDE it and attach to
- * it, so they clip to pad_x..width-pad_x / pad_y..height-pad_y — a clip on the ROOT would scissor to
- * the full border box and leak scrolled text into the padding. Caller must close it. */
+/* Open a non-floating child that fills the field's content box: pad_x-inset horizontally, FULL field
+ * height vertically (root vertical padding is 0). The selection/text/caret floats attach to it and clip
+ * to its box on both axes (Clay floating clipTo), so horizontal overflow is scissored at pad_x while the
+ * vertically-centered line keeps its descenders. Caller must close it. */
 static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
     nt_ui_element_data_t *id = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     NT_ASSERT(id != NULL && "nt_ui_input: scratch alloc failed (content clip data)");
@@ -666,7 +666,7 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
     const Clay_ElementDeclaration text_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}},
         .userData = (void *)wd, /* carries layer + transform offset (pad_x - scroll_x); without it the text ignores scroll */
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
     };
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(text_decl);
@@ -704,6 +704,10 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     const uint8_t layer = (data != NULL) ? data->layer : 0U;
     void *user = (data != NULL) ? data->user_data : NULL;
     nt_font_t font = ctx->fonts[style->text.font_id];
+    /* Font line box (ascent-descent) at the field's font size: the single line, caret and selection are
+     * all this tall and vertically centered in the content box, so descenders fit and the caret matches. */
+    const nt_font_metrics_t fm = nt_font_get_metrics(font);
+    const float line_h = (fm.units_per_em > 0) ? ((float)(fm.ascent - fm.descent) * (style->text.font_size / (float)fm.units_per_em)) : style->text.font_size;
 
     /* The string is game-owned; the engine assumes a valid NUL-terminated buffer. */
     NT_ASSERT(memchr(buffer, '\0', buffer_size) != NULL && "nt_ui_input_text: buffer must be NUL-terminated within buffer_size");
@@ -984,17 +988,20 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             .color = nt_ui_unpack_abgr(bcol),
             .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
     }
-    /* Engine owns inner padding so the caret/scroll math matches the text origin. */
-    root.layout.padding = (Clay_Padding){.left = (uint16_t)style->pad_x, .right = (uint16_t)style->pad_x, .top = (uint16_t)style->pad_y, .bottom = (uint16_t)style->pad_y};
+    /* Horizontal inset only: pad_x positions the text origin + bounds the clip. Vertical padding is 0 on
+     * purpose — the single line is vertically CENTERED and the text/caret float clip to this box on BOTH
+     * axes (Clay floating clipTo), so a pad_y inset would shrink the clip below the line height and shave
+     * descenders. The vertical margin is the natural (field_height - line_height)/2 from centering. */
+    root.layout.padding = (Clay_Padding){.left = (uint16_t)style->pad_x, .right = (uint16_t)style->pad_x, .top = 0, .bottom = 0};
 
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(root);
     nt_ui_widget_register(ctx, id, &NT_UI_INPUT_DEF, NULL);
 
-    /* Content-clip child fills the inner box (root padding positions it at pad_x/pad_y) and scissors
-     * the selection/text/caret to pad_x..width-pad_x — they attach to it, so their origins are already
-     * at the content top-left (no manual + pad_x/pad_y). Without this the floats clip to the root's
-     * border box and scrolled text leaks into both padding zones. */
+    /* Content-clip child: pad_x-inset horizontally (scissors long text), full field height vertically.
+     * The selection/text/caret attach to it and are vertically centered, so descenders are never shaved
+     * by a pad_y inset. Without this child the floats would clip to the root's border box and scrolled
+     * text would leak past pad_x. */
     emit_content_clip_open(ctx, text_layer);
 
     /* Selection highlight behind the text: emit before the label so it renders underneath. */
@@ -1007,7 +1014,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         const float sel_w = x1 - x0;
         if (sel_w > 0.0F) {
             const uint32_t scol = (style->selection_color != 0U) ? style->selection_color : 0x80E0B080U;
-            emit_rect(ctx, text_layer, x0, 0.0F, sel_w, style->text.font_size, scol);
+            emit_rect(ctx, text_layer, x0, 0.0F, sel_w, line_h, scol);
         }
     }
 
@@ -1035,8 +1042,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         const float caret_px = caret_x_at(style, font, buffer, st->caret) - st->scroll_x;
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));
         if (blink_on) {
-            const float caret_h = style->text.font_size;
-            emit_caret(ctx, text_layer, caret_px, 0.0F, style->caret_width, caret_h, style->caret_color);
+            emit_caret(ctx, text_layer, caret_px, 0.0F, style->caret_width, line_h, style->caret_color);
         }
     }
 
