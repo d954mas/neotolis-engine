@@ -953,8 +953,12 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     const float inner_w = (decl != NULL && decl->layout.sizing.width.type == CLAY__SIZING_TYPE_FIXED) ? (decl->layout.sizing.width.size.minMax.min - (style->pad_x * 2.0F)) : 0.0F;
     if (inner_w > 0.0F) {
         const float caret_px = caret_x_at(style, font, buffer, st->caret);
-        if (caret_px - st->scroll_x > inner_w) {
-            st->scroll_x = caret_px - inner_w;
+        /* Reserve the caret width on the right edge: the content clip is the inner box, so a caret at
+         * end-of-line sitting exactly on the clip edge would be scissored away. Scroll so its RIGHT
+         * edge (caret_px + caret_width) stays inside inner_w, keeping it visible. */
+        const float caret_right = caret_px + style->caret_width;
+        if (caret_right - st->scroll_x > inner_w) {
+            st->scroll_x = caret_right - inner_w;
         } else if (caret_px < st->scroll_x) {
             st->scroll_x = caret_px;
         }
