@@ -1605,7 +1605,10 @@ static void frame(void) {
     }
 #endif
 
-    if (!modal_was_active) {
+    /* Single-key [T]/[D] hotkeys yield while a field holds focus so typing 'd'/'t' edits the field
+     * instead of toggling the inspector/palette. any_focused reads last frame's focus, same as the
+     * modal gate above (both polled here before this frame's nt_ui_begin). */
+    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx)) {
         if (nt_input_key_is_pressed(NT_KEY_T)) {
             g_current = (g_current == &g_dark) ? &g_light : &g_dark;
             nt_log_info("ui_showcase: palette -> %s", g_current->name);
