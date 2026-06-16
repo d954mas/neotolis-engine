@@ -112,6 +112,10 @@ static nt_ui_scroll_style_t s_scroll_xy_dark, s_scroll_xy_light;
 static nt_ui_input_style_t s_input_dark, s_input_light;
 static nt_ui_input_style_t s_input_numeric_dark, s_input_numeric_light;
 static nt_ui_input_style_t s_input_password_dark, s_input_password_light;
+/* Visual-style variants: a thick non-blinking caret + a distinct selection color, to show the
+ * caret/selection style fields are configurable. */
+static nt_ui_input_style_t s_input_caret_dark, s_input_caret_light;
+static nt_ui_input_style_t s_input_sel_dark, s_input_sel_light;
 
 /* Slice9 panel image style (untinted, atlas-default slice9). */
 static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
@@ -133,7 +137,7 @@ typedef struct {
     nt_ui_progress_style_t *progress;
     nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
-    nt_ui_input_style_t *input, *input_numeric, *input_password;
+    nt_ui_input_style_t *input, *input_numeric, *input_password, *input_caret, *input_sel;
     const nt_ui_modal_style_t *modal;
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
@@ -169,6 +173,8 @@ static ui_palette_t g_dark = {
     .input = &s_input_dark,
     .input_numeric = &s_input_numeric_dark,
     .input_password = &s_input_password_dark,
+    .input_caret = &s_input_caret_dark,
+    .input_sel = &s_input_sel_dark,
     .modal = &s_modal_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
@@ -207,6 +213,8 @@ static ui_palette_t g_light = {
     .input = &s_input_light,
     .input_numeric = &s_input_numeric_light,
     .input_password = &s_input_password_light,
+    .input_caret = &s_input_caret_light,
+    .input_sel = &s_input_sel_light,
     .modal = &s_modal_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
@@ -264,6 +272,8 @@ typedef struct {
     char numeric[16];
     char password[32];
     char cyrillic[64];
+    char caret_thick[64]; /* thick, bright, non-blinking caret variant */
+    char caret_sel[64];   /* distinct selection-highlight color variant */
 } input_params_t;
 
 struct tab_state {
@@ -342,6 +352,7 @@ static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s
 static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop, s_id_props_slide_dist;
 static uint32_t s_id_theme_btn;
 static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
+static uint32_t s_id_input_caret, s_id_input_sel;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -668,12 +679,16 @@ static void init_styles(void) {
     input_base.text.font_id = 0;
     input_base.text.font_size = 22.0F;
     input_base.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
+    input_base.placeholder.font_id = 0;
     input_base.placeholder.font_size = 22.0F;
+    input_base.placeholder_text = "edit me"; /* empty-field hint; hidden once focused or typed-into */
     input_base.pad_x = 10.0F;
     input_base.pad_y = 8.0F;
     s_input_dark = input_base;
+    s_input_dark.placeholder.color = (Clay_Color){120.0F, 126.0F, 138.0F, 255.0F}; /* dimmed vs the bright text */
     s_input_light = input_base;
     s_input_light.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
+    s_input_light.placeholder.color = (Clay_Color){150.0F, 154.0F, 162.0F, 255.0F}; /* dimmed grey on the light bg */
     s_input_light.bg_color = 0xFFF0F0F0U;
     s_input_light.focused_bg_color = 0xFFFFFFFFU;
     s_input_light.caret_color = 0xFF202020U;
@@ -693,6 +708,30 @@ static void init_styles(void) {
     s_input_password_light = s_input_light;
     s_input_password_light.password = true;
     s_input_password_light.keyboard = NT_UI_KB_PASSWORD;
+
+    /* Caret variant: a thick, bright-amber caret that never blinks (blink_rate <= 0 = always on) --
+     * shows caret_color/caret_width/caret_blink_rate are configurable. */
+    s_input_caret_dark = s_input_dark;
+    s_input_caret_dark.caret_color = 0xFF30A0FFU; /* amber (0xAABBGGRR) */
+    s_input_caret_dark.caret_width = 4.0F;
+    s_input_caret_dark.caret_blink_rate = 0.0F;
+    s_input_caret_dark.placeholder_text = "thick amber caret";
+    s_input_caret_light = s_input_light;
+    s_input_caret_light.caret_color = 0xFF30A0FFU;
+    s_input_caret_light.caret_width = 4.0F;
+    s_input_caret_light.caret_blink_rate = 0.0F;
+    s_input_caret_light.placeholder_text = "thick amber caret";
+
+    /* Selection variant: a distinct magenta selection highlight (vs the default blue-grey) -- shows
+     * selection_color is configurable. Faster blink to vary the caret too. */
+    s_input_sel_dark = s_input_dark;
+    s_input_sel_dark.selection_color = 0x80C040C0U; /* translucent magenta */
+    s_input_sel_dark.caret_blink_rate = 0.4F;       /* faster than the 1.0s default */
+    s_input_sel_dark.placeholder_text = "select me (magenta)";
+    s_input_sel_light = s_input_light;
+    s_input_sel_light.selection_color = 0x80C040C0U;
+    s_input_sel_light.caret_blink_rate = 0.4F;
+    s_input_sel_light.placeholder_text = "select me (magenta)";
 
     /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
@@ -1211,12 +1250,15 @@ static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, 
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a field to focus; type Latin or Cyrillic; select with Shift+arrows / drag / double-click / Ctrl+A; Ctrl+C/X/V clipboard.",
                 g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tab advances to the next field; Esc unfocuses.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tab advances to the next field; Esc unfocuses. Empty fields show a dimmed 'edit me' hint. [T]/[D] hotkeys yield while typing.", g_current->caption);
 
     input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, g_current->input);
     input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, g_current->input_numeric);
     input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, g_current->input_password);
     input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, g_current->input);
+    /* Visual-style variants: prove caret_color/width/blink + selection_color are configurable. */
+    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, g_current->input_caret);
+    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, g_current->input_sel);
 }
 
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
@@ -1407,6 +1449,8 @@ static void ensure_ids(void) {
     s_id_input_numeric = nt_ui_id("showcase/input_numeric");
     s_id_input_password = nt_ui_id("showcase/input_password");
     s_id_input_cyrillic = nt_ui_id("showcase/input_cyrillic");
+    s_id_input_caret = nt_ui_id("showcase/input_caret");
+    s_id_input_sel = nt_ui_id("showcase/input_sel");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
     s_ids_ready = true;
 }
