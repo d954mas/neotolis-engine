@@ -37,8 +37,7 @@ typedef enum {
  * 0xAABBGGRR. The bg-art fields are RESERVED (not yet read by the impl); see notes below. */
 typedef struct {
     nt_ui_label_style_t text;             /* the entered text */
-    nt_ui_label_style_t placeholder;      /* dimmed style for the empty-field hint (used with placeholder_text) */
-    const char *placeholder_text;         /* empty-field hint string (NULL = none); shown only when empty AND unfocused */
+    nt_ui_label_style_t placeholder;      /* dimmed render style for the empty-field hint (the hint STRING is a per-field param) */
     uint32_t bg_color;                    /* idle background (0 = transparent) */
     uint32_t focused_bg_color;            /* focused background */
     uint32_t border_color;                /* idle border (0 = none) */
@@ -69,9 +68,12 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void);
  * Returns true the frame the buffer mutated (on_change). Pass on_submit non-NULL to receive
  * an Enter event (fires after the frame's edits). enabled=false = inert occluder, no edit.
  *
+ * placeholder is per-field CONTENT (NULL or "" = no hint); the dimmed appearance comes from
+ * style->placeholder. The hint shows only when the buffer is EMPTY and the field is NOT focused.
+ *
  * Engine owns the decl id/userData; data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY. */
-bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_style_t *style,
-                      const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted);
+bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const char *placeholder,
+                      const nt_ui_input_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted);
 
 /* True if `id` currently holds keyboard focus. */
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id);
@@ -103,10 +105,10 @@ nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id
  * [buffer,len)) into frame scratch. Lets the password branch be asserted without a GL capture. */
 const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len);
 
-/* Test probe: the hint string the field would render for the given (buffer, focused) -- the dimmed
- * placeholder only when empty AND unfocused, else NULL. Asserts the empty/placeholder branch
+/* Test probe: the hint string the field would render for the given (buffer, placeholder, focused) --
+ * the placeholder only when empty AND unfocused, else NULL. Asserts the empty/placeholder branch
  * (which display string the compose path picks) without a GL capture. */
-const char *nt_ui_input_placeholder_for(const char *buffer, bool focused, const nt_ui_input_style_t *style);
+const char *nt_ui_input_placeholder_for(const char *buffer, const char *placeholder, bool focused);
 #endif
 
 #endif /* NT_UI_INPUT_H */

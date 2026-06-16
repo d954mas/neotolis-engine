@@ -681,7 +681,6 @@ static void init_styles(void) {
     input_base.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
     input_base.placeholder.font_id = 0;
     input_base.placeholder.font_size = 22.0F;
-    input_base.placeholder_text = "edit me"; /* empty-field hint; hidden once focused or typed-into */
     input_base.pad_x = 10.0F;
     input_base.pad_y = 8.0F;
     s_input_dark = input_base;
@@ -715,23 +714,19 @@ static void init_styles(void) {
     s_input_caret_dark.caret_color = 0xFF30A0FFU; /* amber (0xAABBGGRR) */
     s_input_caret_dark.caret_width = 4.0F;
     s_input_caret_dark.caret_blink_rate = 0.0F;
-    s_input_caret_dark.placeholder_text = "thick amber caret";
     s_input_caret_light = s_input_light;
     s_input_caret_light.caret_color = 0xFF30A0FFU;
     s_input_caret_light.caret_width = 4.0F;
     s_input_caret_light.caret_blink_rate = 0.0F;
-    s_input_caret_light.placeholder_text = "thick amber caret";
 
     /* Selection variant: a distinct magenta selection highlight (vs the default blue-grey) -- shows
      * selection_color is configurable. Faster blink to vary the caret too. */
     s_input_sel_dark = s_input_dark;
     s_input_sel_dark.selection_color = 0x80C040C0U; /* translucent magenta */
     s_input_sel_dark.caret_blink_rate = 0.4F;       /* faster than the 1.0s default */
-    s_input_sel_dark.placeholder_text = "select me (magenta)";
     s_input_sel_light = s_input_light;
     s_input_sel_light.selection_color = 0x80C040C0U;
     s_input_sel_light.caret_blink_rate = 0.4F;
-    s_input_sel_light.placeholder_text = "select me (magenta)";
 
     /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
@@ -1236,12 +1231,13 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* One captioned text field: a caption above a fixed-width field that edits the game-owned buffer. */
-static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_style_t *style) {
+/* One captioned text field: a caption above a fixed-width field that edits the game-owned buffer.
+ * placeholder is the per-field empty hint (one shared style, distinct hint per field). */
+static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const char *placeholder, const nt_ui_input_style_t *style) {
     static const Clay_ElementDeclaration field_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), caption, g_current->caption);
-        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, style, &field_decl, true, NULL);
+        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, placeholder, style, &field_decl, true, NULL);
     }
 }
 
@@ -1252,13 +1248,13 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
                 g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tab advances to the next field; Esc unfocuses. Empty fields show a dimmed 'edit me' hint. [T]/[D] hotkeys yield while typing.", g_current->caption);
 
-    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, g_current->input);
-    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, g_current->input_numeric);
-    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, g_current->input_password);
-    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, g_current->input);
+    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, "edit me", g_current->input);
+    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, "edit me", g_current->input_numeric);
+    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, "edit me", g_current->input_password);
+    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, "edit me", g_current->input);
     /* Visual-style variants: prove caret_color/width/blink + selection_color are configurable. */
-    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, g_current->input_caret);
-    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, g_current->input_sel);
+    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, "thick amber caret", g_current->input_caret);
+    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, "select me (magenta)", g_current->input_sel);
 }
 
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns

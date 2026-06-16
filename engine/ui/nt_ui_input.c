@@ -560,12 +560,13 @@ const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
     return masked;
 }
 
-/* Picks the hint string the field shows when nothing is entered: the dimmed placeholder, but only
+/* Picks the hint string the field shows when nothing is entered: the per-field placeholder, but only
  * while empty AND unfocused (focusing clears it so the caret reads against a blank field). Render-
- * only -- the game buffer is never written. NULL = render nothing. Exposed for the test probe. */
-const char *nt_ui_input_placeholder_for(const char *buffer, bool focused, const nt_ui_input_style_t *style) {
+ * only -- the game buffer is never written. NULL/"" placeholder = render nothing. Test probe. */
+const char *nt_ui_input_placeholder_for(const char *buffer, const char *placeholder, bool focused) {
     const bool empty = (buffer[0] == '\0');
-    return (empty && !focused) ? style->placeholder_text : NULL;
+    const bool has_hint = (placeholder != NULL && placeholder[0] != '\0');
+    return (empty && !focused && has_hint) ? placeholder : NULL;
 }
 
 static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
@@ -608,8 +609,8 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_style_t *style,
-                      const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted) {
+bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const char *placeholder,
+                      const nt_ui_input_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_input_text: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_input_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
@@ -944,7 +945,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     } else {
         /* Empty: render the dimmed hint via the same clipped emit path as the real text (so it
          * clips/scrolls identically). Render-only -- the game buffer is never touched. */
-        const char *hint = nt_ui_input_placeholder_for(buffer, focused, style);
+        const char *hint = nt_ui_input_placeholder_for(buffer, placeholder, focused);
         if (hint != NULL) {
             nt_ui_label_style_t ps = style->placeholder;
             emit_text(ctx, text_layer, style->pad_x - st->scroll_x, style->pad_y, hint, &ps);

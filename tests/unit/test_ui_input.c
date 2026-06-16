@@ -95,7 +95,7 @@ static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t ca
     bool changed = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
-        changed = nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_style, &s_field_decl, enabled, submitted);
+        changed = nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, NULL, &s_style, &s_field_decl, enabled, submitted);
     }
     nt_ui_end(s_fx.ctx);
     return changed;
@@ -250,8 +250,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -261,8 +261,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &press, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -275,8 +275,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -289,8 +289,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -303,8 +303,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -728,19 +728,17 @@ static void test_style_defaults_valid(void) {
 
 /* ---- Test 28: placeholder shows only when empty AND unfocused; hidden when focused or non-empty. ---- */
 static void test_placeholder_empty_unfocused_only(void) {
-    s_style.placeholder_text = "edit me";
-
     /* Empty + unfocused -> the hint renders. */
-    TEST_ASSERT_EQUAL_STRING("edit me", nt_ui_input_placeholder_for("", false, &s_style));
+    TEST_ASSERT_EQUAL_STRING("edit me", nt_ui_input_placeholder_for("", "edit me", false));
     /* Empty but focused -> hidden (the user clicked in). */
-    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", true, &s_style));
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", "edit me", true));
     /* Non-empty -> hidden regardless of focus (the real text shows). */
-    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("x", false, &s_style));
-    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("x", true, &s_style));
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("x", "edit me", false));
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("x", "edit me", true));
 
-    /* No placeholder string set -> nothing, even when empty + unfocused. */
-    s_style.placeholder_text = NULL;
-    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", false, &s_style));
+    /* No placeholder string (NULL or "") -> nothing, even when empty + unfocused. */
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", NULL, false));
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", "", false));
 }
 
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
@@ -748,21 +746,21 @@ static void test_placeholder_empty_unfocused_only(void) {
 
 static void test_assert_null_buffer(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), NULL, 32U, &s_style, &s_field_decl, true, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), NULL, 32U, NULL, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_zero_cap(void) {
     char buf[4] = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, 0U, &s_style, &s_field_decl, true, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, 0U, NULL, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_null_style(void) {
     char buf[4] = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, NULL, &s_field_decl, true, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, NULL, NULL, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
