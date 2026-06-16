@@ -560,6 +560,14 @@ const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
     return masked;
 }
 
+/* Picks the hint string the field shows when nothing is entered: the dimmed placeholder, but only
+ * while empty AND unfocused (focusing clears it so the caret reads against a blank field). Render-
+ * only -- the game buffer is never written. NULL = render nothing. Exposed for the test probe. */
+const char *nt_ui_input_placeholder_for(const char *buffer, bool focused, const nt_ui_input_style_t *style) {
+    const bool empty = (buffer[0] == '\0');
+    return (empty && !focused) ? style->placeholder_text : NULL;
+}
+
 static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
@@ -933,10 +941,15 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         /* Float the text at pad_x - scroll_x (clipped to the field) so it tracks the caret/selection
          * when the line scrolls; an inline label would stay at x=0 and desync. */
         emit_text(ctx, text_layer, style->pad_x - st->scroll_x, style->pad_y, disp, &ts);
+    } else {
+        /* Empty: render the dimmed hint via the same clipped emit path as the real text (so it
+         * clips/scrolls identically). Render-only -- the game buffer is never touched. */
+        const char *hint = nt_ui_input_placeholder_for(buffer, focused, style);
+        if (hint != NULL) {
+            nt_ui_label_style_t ps = style->placeholder;
+            emit_text(ctx, text_layer, style->pad_x - st->scroll_x, style->pad_y, hint, &ps);
+        }
     }
-    /* Placeholder text is a future concern: there is no placeholder string param yet (the buffer IS
-     * the value). style->placeholder carries the dimmed style for when that lands. */
-    (void)style->placeholder;
 
     if (focused) {
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));

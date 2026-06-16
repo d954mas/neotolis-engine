@@ -34,10 +34,11 @@ typedef enum {
 } nt_ui_input_keyboard_t;
 
 /* Style for the field. text reuses nt_ui_label_style_t (font/size/color/align). Colors are packed
- * 0xAABBGGRR. The placeholder + bg-art fields are RESERVED (not yet read by the impl); see notes below. */
+ * 0xAABBGGRR. The bg-art fields are RESERVED (not yet read by the impl); see notes below. */
 typedef struct {
     nt_ui_label_style_t text;             /* the entered text */
-    nt_ui_label_style_t placeholder;      /* RESERVED: dimmed style for a future empty-field hint (no placeholder string param yet) */
+    nt_ui_label_style_t placeholder;      /* dimmed style for the empty-field hint (used with placeholder_text) */
+    const char *placeholder_text;         /* empty-field hint string (NULL = none); shown only when empty AND unfocused */
     uint32_t bg_color;                    /* idle background (0 = transparent) */
     uint32_t focused_bg_color;            /* focused background */
     uint32_t border_color;                /* idle border (0 = none) */
@@ -101,6 +102,11 @@ nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id
 /* Test probe: builds the password mask render string (one mask glyph per codepoint of
  * [buffer,len)) into frame scratch. Lets the password branch be asserted without a GL capture. */
 const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len);
+
+/* Test probe: the hint string the field would render for the given (buffer, focused) -- the dimmed
+ * placeholder only when empty AND unfocused, else NULL. Asserts the empty/placeholder branch
+ * (which display string the compose path picks) without a GL capture. */
+const char *nt_ui_input_placeholder_for(const char *buffer, bool focused, const nt_ui_input_style_t *style);
 #endif
 
 #endif /* NT_UI_INPUT_H */

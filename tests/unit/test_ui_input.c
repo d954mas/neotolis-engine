@@ -726,6 +726,23 @@ static void test_style_defaults_valid(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_KB_TEXT, s.keyboard);
 }
 
+/* ---- Test 28: placeholder shows only when empty AND unfocused; hidden when focused or non-empty. ---- */
+static void test_placeholder_empty_unfocused_only(void) {
+    s_style.placeholder_text = "edit me";
+
+    /* Empty + unfocused -> the hint renders. */
+    TEST_ASSERT_EQUAL_STRING("edit me", nt_ui_input_placeholder_for("", false, &s_style));
+    /* Empty but focused -> hidden (the user clicked in). */
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", true, &s_style));
+    /* Non-empty -> hidden regardless of focus (the real text shows). */
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("x", false, &s_style));
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("x", true, &s_style));
+
+    /* No placeholder string set -> nothing, even when empty + unfocused. */
+    s_style.placeholder_text = NULL;
+    TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", false, &s_style));
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -783,6 +800,7 @@ int main(void) {
     RUN_TEST(test_drag_select_range);
     RUN_TEST(test_password_buffer_unchanged_after_render);
     RUN_TEST(test_style_defaults_valid);
+    RUN_TEST(test_placeholder_empty_unfocused_only);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);
