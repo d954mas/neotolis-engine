@@ -718,6 +718,59 @@ static void test_password_buffer_unchanged_after_render(void) {
     TEST_ASSERT_EQUAL_MEMORY(snapshot, buf, sizeof buf);
 }
 
+/* The auto-repeat core is exposed under NT_TEST_ACCESS with explicit storage (no internal cell type). */
+extern bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
+
+/* ---- Test 29: key-repeat fires once on press, then after the initial delay repeats at the fast rate;
+ * a release stops it. Driven directly with fake pressed/down edges so timing is deterministic. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_key_repeat_timing(void) {
+    uint16_t rk = 0U;
+    float rt = 0.0F;
+    const float dt = 0.016F; /* ~60fps */
+
+    /* Press edge: fires immediately (initial action) and arms the delay (~0.40s). */
+    TEST_ASSERT_TRUE(nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, true, true, dt));
+
+    /* Held (no new press) until the initial delay elapses: no repeat yet. */
+    int frames_to_first_repeat = 0;
+    bool fired = false;
+    for (int i = 0; i < 200; ++i) {
+        fired = nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, false, true, dt);
+        ++frames_to_first_repeat;
+        if (fired) {
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(fired);
+    /* First repeat lands after the DELAY (~0.40s / 0.016 ~ 25 frames), not on frame 1. */
+    TEST_ASSERT_TRUE(frames_to_first_repeat >= 20);
+
+    /* Subsequent repeats land at the faster RATE (~0.04s / 0.016 ~ 3 frames) — far quicker than delay. */
+    int frames_to_next_repeat = 0;
+    fired = false;
+    for (int i = 0; i < 200; ++i) {
+        fired = nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, false, true, dt);
+        ++frames_to_next_repeat;
+        if (fired) {
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(fired);
+    TEST_ASSERT_TRUE(frames_to_next_repeat < frames_to_first_repeat); /* rate < delay */
+
+    /* Release (not down): no fire, and the armed key disarms. */
+    TEST_ASSERT_FALSE(nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, false, false, dt));
+    TEST_ASSERT_EQUAL_UINT16(0U, rk);
+
+    /* A different repeatable key pressed while the first is held: last-pressed wins (re-arms to it). */
+    (void)nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, true, true, dt);              /* arm LEFT */
+    TEST_ASSERT_TRUE(nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_RIGHT, true, true, dt)); /* RIGHT wins */
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)NT_KEY_ARROW_RIGHT, rk);
+    /* LEFT still down but no longer armed: it does not repeat. */
+    TEST_ASSERT_FALSE(nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, false, true, dt));
+}
+
 /* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink). ---- */
 static void test_style_defaults_valid(void) {
     nt_ui_input_style_t s = nt_ui_input_style_defaults();
@@ -799,6 +852,7 @@ int main(void) {
     RUN_TEST(test_password_buffer_unchanged_after_render);
     RUN_TEST(test_style_defaults_valid);
     RUN_TEST(test_placeholder_empty_unfocused_only);
+    RUN_TEST(test_key_repeat_timing);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

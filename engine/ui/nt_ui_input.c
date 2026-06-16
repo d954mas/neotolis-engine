@@ -56,16 +56,24 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
 
 #define NT_UI_INPUT_MASK_CHAR '*'
 
+/* PC-style auto-repeat for held nav/edit keys: an initial delay then a faster repeat rate (ImGui
+ * reference). One-frame is_pressed is the initial action; while is_down + same key, repeat_t counts
+ * down and fires every NT_UI_INPUT_REPEAT_RATE once the delay elapses. */
+#define NT_UI_INPUT_REPEAT_DELAY 0.40F
+#define NT_UI_INPUT_REPEAT_RATE 0.04F
+
 /* Per-field retained cell: caret byte-offset into the game buffer, horizontal scroll px so the
  * caret stays visible, and the accumulated blink phase. The STRING stays game-owned. */
 #define NT_UI_INPUT_STATE_SALT 0x10D70001U
 typedef struct {
-    uint32_t caret;  /* caret byte offset (the active selection end); always on a codepoint boundary */
-    uint32_t anchor; /* selection anchor byte offset; anchor == caret = empty selection */
-    float scroll_x;  /* horizontal scroll px (text origin shifts left by this) */
-    float blink;     /* accumulated seconds since the caret last reset its phase */
-    uint8_t drag;    /* 1 while a press is dragging to extend the selection */
-    uint8_t _pad[3];
+    uint32_t caret;      /* caret byte offset (the active selection end); always on a codepoint boundary */
+    uint32_t anchor;     /* selection anchor byte offset; anchor == caret = empty selection */
+    float scroll_x;      /* horizontal scroll px (text origin shifts left by this) */
+    float blink;         /* accumulated seconds since the caret last reset its phase */
+    float repeat_t;      /* seconds until the held repeat_key fires again (initial delay, then rate) */
+    uint16_t repeat_key; /* the nt_key_t currently auto-repeating (0 = none) */
+    uint8_t drag;        /* 1 while a press is dragging to extend the selection */
+    uint8_t _pad[1];
 } nt_ui_input_state_t;
 
 /* Double-click + long-press cell; generic, keyed by the gesture's widget id. */
@@ -295,6 +303,46 @@ nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id
 
 static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
 static inline bool ctrl_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL); }
+
+/* PC-style auto-repeat core: a fresh press fires immediately and arms the timer at the initial delay;
+ * while the SAME key stays held the timer counts down by dt and fires every NT_UI_INPUT_REPEAT_RATE
+ * once the delay elapses. Last-pressed wins (a different repeatable key re-arms to it). Releasing the
+ * armed key clears it. Returns true on the frames the key should act. The held/pressed edges arrive as
+ * params so the unit test can drive timing with fake input. The repeat_key + repeat_t out-params are
+ * the per-field retained accumulator. Exposed (with explicit storage, not the internal cell type)
+ * under NT_TEST_ACCESS. */
+#ifdef NT_TEST_ACCESS
+bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
+bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
+#else
+static bool key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
+#endif
+{
+    if (pressed) {
+        *repeat_key = (uint16_t)k; /* last-pressed wins: re-arm to this key */
+        *repeat_t = NT_UI_INPUT_REPEAT_DELAY;
+        return true; /* initial action */
+    }
+    if (down && *repeat_key == (uint16_t)k) {
+        *repeat_t -= dt;
+        if (*repeat_t <= 0.0F) {
+            *repeat_t = NT_UI_INPUT_REPEAT_RATE;
+            return true; /* delay/rate elapsed: repeat */
+        }
+        return false;
+    }
+    if (*repeat_key == (uint16_t)k) {
+        *repeat_key = 0U; /* the armed key is no longer down: disarm */
+    }
+    return false;
+}
+
+#ifdef NT_TEST_ACCESS
+static bool key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt) { return nt_ui_input_key_repeat_step(repeat_key, repeat_t, k, pressed, down, dt); }
+#endif
+
+/* Field-side wrapper: reads the live input edges for `k` and steps the per-field accumulator. */
+static bool key_repeat_fires(nt_ui_input_state_t *st, nt_key_t k, float dt) { return key_repeat_step(&st->repeat_key, &st->repeat_t, k, nt_input_key_is_pressed(k), nt_input_key_is_down(k), dt); }
 
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_input_focused: ctx must be non-NULL");
@@ -780,7 +828,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         // #region physical editing keys
         const bool sel = (st->anchor != st->caret);
         const bool shift = shift_held();
-        if (nt_input_key_is_pressed(NT_KEY_BACKSPACE)) {
+        const float dt = ctx->frame_dt;
+        if (key_repeat_fires(st, NT_KEY_BACKSPACE, dt)) {
             if (sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -794,7 +843,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
-        if (nt_input_key_is_pressed(NT_KEY_DELETE)) {
+        if (key_repeat_fires(st, NT_KEY_DELETE, dt)) {
             if (sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -807,7 +856,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
-        if (nt_input_key_is_pressed(NT_KEY_ARROW_LEFT)) {
+        if (key_repeat_fires(st, NT_KEY_ARROW_LEFT, dt)) {
             /* Shift extends (move only the caret); a plain arrow with a selection collapses to its
              * left edge, otherwise steps one codepoint left. */
             if (!shift && sel) {
@@ -823,7 +872,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             }
             st->blink = 0.0F;
         }
-        if (nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT)) {
+        if (key_repeat_fires(st, NT_KEY_ARROW_RIGHT, dt)) {
             if (!shift && sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -838,14 +887,14 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             }
             st->blink = 0.0F;
         }
-        if (nt_input_key_is_pressed(NT_KEY_HOME)) {
+        if (key_repeat_fires(st, NT_KEY_HOME, dt)) {
             st->caret = 0U;
             if (!shift) {
                 st->anchor = st->caret;
             }
             st->blink = 0.0F;
         }
-        if (nt_input_key_is_pressed(NT_KEY_END)) {
+        if (key_repeat_fires(st, NT_KEY_END, dt)) {
             st->caret = cur_len;
             if (!shift) {
                 st->anchor = st->caret;
