@@ -59,8 +59,8 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
 /* PC-style auto-repeat for held nav/edit keys: an initial delay then a faster repeat rate (ImGui
  * reference). One-frame is_pressed is the initial action; while is_down + same key, repeat_t counts
  * down and fires every NT_UI_INPUT_REPEAT_RATE once the delay elapses. */
-#define NT_UI_INPUT_REPEAT_DELAY 0.40F
-#define NT_UI_INPUT_REPEAT_RATE 0.04F
+#define NT_UI_INPUT_REPEAT_DELAY 0.275F
+#define NT_UI_INPUT_REPEAT_RATE 0.05F
 
 /* Per-field retained cell: caret byte-offset into the game buffer, horizontal scroll px so the
  * caret stays visible, and the accumulated blink phase. The STRING stays game-owned. */

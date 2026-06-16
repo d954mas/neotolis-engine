@@ -729,7 +729,7 @@ static void test_key_repeat_timing(void) {
     float rt = 0.0F;
     const float dt = 0.016F; /* ~60fps */
 
-    /* Press edge: fires immediately (initial action) and arms the delay (~0.40s). */
+    /* Press edge: fires immediately (initial action) and arms the delay (~0.275s, ImGui default). */
     TEST_ASSERT_TRUE(nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, true, true, dt));
 
     /* Held (no new press) until the initial delay elapses: no repeat yet. */
@@ -743,10 +743,10 @@ static void test_key_repeat_timing(void) {
         }
     }
     TEST_ASSERT_TRUE(fired);
-    /* First repeat lands after the DELAY (~0.40s / 0.016 ~ 25 frames), not on frame 1. */
-    TEST_ASSERT_TRUE(frames_to_first_repeat >= 20);
+    /* First repeat lands after the DELAY (~0.275s / 0.016 ~ 17 frames), not on frame 1. */
+    TEST_ASSERT_TRUE(frames_to_first_repeat >= 14);
 
-    /* Subsequent repeats land at the faster RATE (~0.04s / 0.016 ~ 3 frames) — far quicker than delay. */
+    /* Subsequent repeats land at the faster RATE (~0.05s / 0.016 ~ 3 frames) — far quicker than delay. */
     int frames_to_next_repeat = 0;
     fired = false;
     for (int i = 0; i < 200; ++i) {
