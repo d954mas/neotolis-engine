@@ -107,14 +107,18 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
-        if (e.repeat) return;
-        var k = keyMap[e.code];
-        if (k !== undefined) {
-            Module['_ntKeyBuf'].push(k, 1);
+        /* First press emits the key event; OS auto-repeat (e.repeat) does NOT — nav/edit-key
+           repeat is the input field's own timer (is_down), so re-pushing key edges would double it. */
+        if (!e.repeat) {
+            var k = keyMap[e.code];
+            if (k !== undefined) {
+                Module['_ntKeyBuf'].push(k, 1);
+            }
         }
         /* Typed character: e.key is a single printable char (not "Enter"/"ArrowUp"/...).
-           Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No glfwSetCharCallback
-           on web — this hand-rolled path is the char source. */
+           Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No glfwSetCharCallback on web —
+           this hand-rolled path is the char source. Emitted on e.repeat too so a held key types a run,
+           matching native GLFW char-repeat (and the platform's own text fields). */
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
             Module['_ntCharBuf'].push(e.key.codePointAt(0));
         }
