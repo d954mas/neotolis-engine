@@ -588,9 +588,26 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     nt_ui_clay_priv_close_element();
 }
 
-/* Float the text at (x,y) inside the field, clipped to the field box, so it shares the SAME
- * pad_x - scroll_x origin as the caret/selection rects (an inline label would ignore scroll_x and
- * desync once the text scrolls). The label is the single child of this floating clip wrapper. */
+/* Open a non-floating child that fills the field's CONTENT box (the root's pad_x/pad_y positions it
+ * there) and clips its children. The selection/text/caret floats are emitted INSIDE it and attach to
+ * it, so they clip to pad_x..width-pad_x / pad_y..height-pad_y — a clip on the ROOT would scissor to
+ * the full border box and leak scrolled text into the padding. Caller must close it. */
+static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
+    nt_ui_element_data_t *id = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(id != NULL && "nt_ui_input: scratch alloc failed (content clip data)");
+    *id = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = 0U, .transform = nt_ui_transform_defaults(), .opacity = 1.0F};
+    const Clay_ElementDeclaration content_decl = {
+        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+        .userData = (void *)id,
+        .clip = {.horizontal = true, .vertical = true},
+    };
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(content_decl);
+}
+
+/* Float the text at (x,y) inside the content-clip child, so it shares the SAME -scroll_x origin as
+ * the caret/selection rects (an inline label would ignore scroll_x and desync once the text scrolls).
+ * The label is the single child of this floating wrapper; clipping comes from the content-clip parent. */
 static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y, const char *disp, const nt_ui_label_style_t *ts) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
@@ -921,6 +938,12 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     nt_ui_clay_priv_configure_open_element(root);
     nt_ui_widget_register(ctx, id, &NT_UI_INPUT_DEF, NULL);
 
+    /* Content-clip child fills the inner box (root padding positions it at pad_x/pad_y) and scissors
+     * the selection/text/caret to pad_x..width-pad_x — they attach to it, so their origins are already
+     * at the content top-left (no manual + pad_x/pad_y). Without this the floats clip to the root's
+     * border box and scrolled text leaks into both padding zones. */
+    emit_content_clip_open(ctx, text_layer);
+
     /* Selection highlight behind the text: emit before the label so it renders underneath. */
     if (focused && st->anchor != st->caret) {
         uint32_t lo = 0U;
@@ -931,7 +954,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         const float sel_w = x1 - x0;
         if (sel_w > 0.0F) {
             const uint32_t scol = (style->selection_color != 0U) ? style->selection_color : 0x80E0B080U;
-            emit_rect(ctx, text_layer, style->pad_x + x0, style->pad_y, sel_w, style->text.font_size, scol);
+            emit_rect(ctx, text_layer, x0, 0.0F, sel_w, style->text.font_size, scol);
         }
     }
 
@@ -942,16 +965,16 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
          * is render-only (the game buffer is untouched). build_display_text is shared with the test
          * probe so the password branch is asserted without a GL capture. */
         const char *disp = (style->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
-        /* Float the text at pad_x - scroll_x (clipped to the field) so it tracks the caret/selection
-         * when the line scrolls; an inline label would stay at x=0 and desync. */
-        emit_text(ctx, text_layer, style->pad_x - st->scroll_x, style->pad_y, disp, &ts);
+        /* Float the text at -scroll_x inside the content clip so it tracks the caret/selection when
+         * the line scrolls; an inline label would stay at x=0 and desync. */
+        emit_text(ctx, text_layer, -st->scroll_x, 0.0F, disp, &ts);
     } else {
         /* Empty: render the dimmed hint via the same clipped emit path as the real text (so it
          * clips/scrolls identically). Render-only -- the game buffer is never touched. */
         const char *hint = nt_ui_input_placeholder_for(buffer, placeholder, focused);
         if (hint != NULL) {
             nt_ui_label_style_t ps = style->placeholder;
-            emit_text(ctx, text_layer, style->pad_x - st->scroll_x, style->pad_y, hint, &ps);
+            emit_text(ctx, text_layer, -st->scroll_x, 0.0F, hint, &ps);
         }
     }
 
@@ -960,11 +983,12 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));
         if (blink_on) {
             const float caret_h = style->text.font_size;
-            emit_caret(ctx, text_layer, style->pad_x + caret_px, style->pad_y, style->caret_width, caret_h, style->caret_color);
+            emit_caret(ctx, text_layer, caret_px, 0.0F, style->caret_width, caret_h, style->caret_color);
         }
     }
 
-    nt_ui_clay_priv_close_element();
+    nt_ui_clay_priv_close_element(); /* content clip */
+    nt_ui_clay_priv_close_element(); /* root */
     // #endregion
 
     if (out_submitted != NULL) {
