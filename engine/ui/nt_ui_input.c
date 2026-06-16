@@ -16,36 +16,34 @@
 #include "ui/nt_ui_state.h"
 #include "utf8/nt_utf8.h"
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-/* Map the field's keyboard hint to a web soft-keyboard via the canvas `inputmode` + `type`
- * Called on focus; mobile browsers pick the keyboard layout from inputmode, and
- * type=password masks the OS-level overlay. kb is nt_ui_input_keyboard_t. */
-/* clang-format off */
-EM_JS(void, nt_ui_input_web_apply_keyboard, (int kb), {
-    var modes = ['text', 'numeric', 'email', 'url', 'text'];
-    var el = Module['canvas'] || document.activeElement;
-    if (!el) { return; }
-    el.setAttribute('inputmode', modes[kb] || 'text');
-    if (kb === 4 /* NT_UI_KB_PASSWORD */) {
-        el.setAttribute('type', 'password');
-    } else {
-        el.removeAttribute('type');
-    }
-})
-/* clang-format on */
-#endif
-
-/* Apply the mobile keyboard-type hint on focus (web inputmode/type; native is a no-op — the
- * enum is stored but desktop edit behavior is unchanged). */
+/* Apply the field's keyboard hint on focus via the input platform layer (web shows the matching
+ * soft keyboard; native/stub no-op). This is a UX hint only -- actual input restriction is the
+ * allow filter, not this. The enum maps explicitly so the two vocabularies stay decoupled. */
 static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
-#ifdef __EMSCRIPTEN__
-    const int eff = password ? (int)NT_UI_KB_PASSWORD : (int)kb;
-    nt_ui_input_web_apply_keyboard(eff);
-#else
-    (void)kb;
-    (void)password;
-#endif
+    nt_text_input_mode_t mode = NT_TEXT_INPUT_TEXT;
+    if (password) {
+        mode = NT_TEXT_INPUT_PASSWORD;
+    } else {
+        switch (kb) {
+        case NT_UI_KB_NUMERIC:
+            mode = NT_TEXT_INPUT_NUMERIC;
+            break;
+        case NT_UI_KB_EMAIL:
+            mode = NT_TEXT_INPUT_EMAIL;
+            break;
+        case NT_UI_KB_URL:
+            mode = NT_TEXT_INPUT_URL;
+            break;
+        case NT_UI_KB_PASSWORD:
+            mode = NT_TEXT_INPUT_PASSWORD;
+            break;
+        case NT_UI_KB_TEXT:
+        default:
+            mode = NT_TEXT_INPUT_TEXT;
+            break;
+        }
+    }
+    nt_input_set_text_input_mode(mode);
 }
 
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {

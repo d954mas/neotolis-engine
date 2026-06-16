@@ -94,6 +94,9 @@ void nt_input_buffer_focus_lost(void) { s_focus_lost = true; }
 
 void nt_input_platform_init(void) {}
 
+/* Soft-keyboard hint is web-only; desktop has a physical keyboard. */
+void nt_input_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; }
+
 void nt_input_platform_poll(void) {
     /* Focus lost: clear all state, discard buffered events */
     if (s_focus_lost) {
