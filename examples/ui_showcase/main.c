@@ -1775,9 +1775,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Startup build-stamp: lets you confirm in the console/stdout that you are running freshly-built
-     * code and not a cached/stale artifact. If you don't see this exact line, the build is stale. */
-    nt_log_info("ui_showcase: %s build | input fields v2 (placeholder + caret/selection variants)", nt_engine_build_string());
+    /* Startup build provenance: confirms which build (type + preset) is actually running -- handy for
+     * telling a freshly-built artifact apart from a stale/cached one. */
+    nt_log_info("ui_showcase: %s build (%s)", nt_engine_build_string(), nt_engine_preset_string());
 
     g_nt_window.width = 1280;
     g_nt_window.height = 800;

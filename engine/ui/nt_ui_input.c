@@ -7,7 +7,6 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
-#include "log/nt_log.h" /* DBG */
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_debug_hit_zones.h"
@@ -542,6 +541,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
     const Clay_ElementDeclaration rect_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
         .backgroundColor = nt_ui_unpack_abgr(color),
+        .userData = (void *)rd, /* carries layer + transform offset; without it the walker ignores both */
         .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
     };
     nt_ui_clay_priv_open_element();
@@ -580,6 +580,7 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     const Clay_ElementDeclaration caret_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
         .backgroundColor = nt_ui_unpack_abgr(color),
+        .userData = (void *)cd, /* carries layer + transform offset; without it the walker ignores both */
         .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
     };
     nt_ui_clay_priv_open_element();
@@ -599,6 +600,7 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
     *wd = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
     const Clay_ElementDeclaration text_decl = {
         .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}},
+        .userData = (void *)wd, /* carries layer + transform offset (pad_x - scroll_x); without it the text ignores scroll */
         .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
     };
     nt_ui_clay_priv_open_element();
@@ -955,11 +957,6 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
 
     if (focused) {
         const float caret_px = caret_x_at(style, font, buffer, st->caret) - st->scroll_x;
-        static uint32_t dbg_last = 0xFFFFFFFFU;                                                                                                                  /* DBG */
-        if (st->caret != dbg_last) {                                                                                                                             /* DBG */
-            nt_log_info("[dbg] caret render id=%u caret=%u caret_px=%.1f scroll_x=%.1f -> x=%.1f", (unsigned)id, (unsigned)st->caret, (double)caret_px, (double)st->scroll_x, (double)(style->pad_x + caret_px)); /* DBG */
-            dbg_last = st->caret;                                                                                                                                /* DBG */
-        }                                                                                                                                                        /* DBG */
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));
         if (blink_on) {
             const float caret_h = style->text.font_size;
