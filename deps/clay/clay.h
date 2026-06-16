@@ -5,6 +5,11 @@
 //      in Clay_Context. Stores source layout element index on every render
 //      command. Used by nt_ui's build_tree pass to map each render command
 //      back to its source element. Search "nt_" for patch sites (4 total).
+//   2. CLAY__MAX_SCROLL_CONTAINERS overrides the hardcoded scroll/clip-container
+//      pool size (upstream literal 10). EVERY .clip element takes one slot and
+//      Clay only reclaims them inside Clay_UpdateScrollContainers; 10 is too low
+//      for UIs with per-field text-input clips + tab-transition overlap. Search
+//      "NT patch" for the 2 sites (define + allocation).
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -954,6 +959,11 @@ extern uint32_t Clay__debugViewWidth;
 
 #ifndef CLAY__MAXFLOAT
 #define CLAY__MAXFLOAT 3.40282346638528859812e+38F
+#endif
+
+// NT patch: scroll/clip-container pool size (upstream hardcoded 10). Overridable from the build.
+#ifndef CLAY__MAX_SCROLL_CONTAINERS
+#define CLAY__MAX_SCROLL_CONTAINERS 64
 #endif
 
 Clay_LayoutConfig CLAY_LAYOUT_DEFAULT = CLAY__DEFAULT_STRUCT;
@@ -2202,7 +2212,7 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     int32_t maxMeasureTextCacheWordCount = context->maxMeasureTextCacheWordCount;
     Clay_Arena *arena = &context->internalArena;
 
-    context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(10, arena);
+    context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(CLAY__MAX_SCROLL_CONTAINERS, arena); // NT patch: was hardcoded 10
     context->layoutElementsHashMapInternal = Clay__LayoutElementHashMapItemArray_Allocate_Arena(maxElementCount, arena);
     context->layoutElementsHashMap = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->measureTextHashMapInternal = Clay__MeasureTextCacheItemArray_Allocate_Arena(maxElementCount, arena);

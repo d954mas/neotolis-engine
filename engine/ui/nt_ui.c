@@ -417,7 +417,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Clay v0.14 has no right/middle/wheel buttons; left only. */
     Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
-    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed. */
+    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed,
+     * so drag-scrolling stays off. Still REQUIRED every frame: it runs Clay's clip/scroll-container GC.
+     * Clay caps that pool (CLAY__MAX_SCROLL_CONTAINERS in clay.h, raised from upstream 10) and never
+     * reclaims entries on its own -- without this call any CLIP element (e.g. each input field's content
+     * clip) leaks a slot until the pool overflows. */
+    Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
     Clay_BeginLayout();
 }
