@@ -21,7 +21,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_INPUT_DEF;
 
 /* Codepoint allow-predicate. Returns true to keep the codepoint, false to drop it on
- * insert. NULL style->allow = allow any printable (non-control) codepoint. */
+ * insert. NULL props->allow = allow any printable (non-control) codepoint. */
 typedef bool (*nt_ui_char_filter_fn)(uint32_t codepoint);
 
 /* Mobile soft-keyboard hint. Maps to web inputmode / type=password; native no-op. */
@@ -33,11 +33,12 @@ typedef enum {
     NT_UI_KB_PASSWORD,
 } nt_ui_input_keyboard_t;
 
-/* Style for the field. text reuses nt_ui_label_style_t (font/size/color/align). Colors are packed
- * 0xAABBGGRR. The bg-art fields are RESERVED (not yet read by the impl); see notes below. */
+/* Style for the field -- PURELY visual, so many fields can share one look. text reuses
+ * nt_ui_label_style_t (font/size/color/align). Colors are packed 0xAABBGGRR. The bg-art fields are
+ * RESERVED (not yet read by the impl); see notes below. Per-field behaviour lives in nt_ui_input_props_t. */
 typedef struct {
     nt_ui_label_style_t text;             /* the entered text */
-    nt_ui_label_style_t placeholder;      /* dimmed render style for the empty-field hint (the hint STRING is a per-field param) */
+    nt_ui_label_style_t placeholder;      /* dimmed render style for the empty-field hint (the hint STRING is in props) */
     uint32_t bg_color;                    /* idle background (0 = transparent) */
     uint32_t focused_bg_color;            /* focused background */
     uint32_t border_color;                /* idle border (0 = none) */
@@ -51,12 +52,18 @@ typedef struct {
     float border_width;                   /* border thickness px (0 = no border) */
     float pad_x;                          /* horizontal inner padding px (text origin + clip bound) */
     float pad_y;                          /* vertical padding px: UNUSED -- the line is auto-centered, vertical margin = (field_h - line_h)/2 */
-    size_t max_length;                    /* max BYTES (incl. NUL room); 0 = bound by buffer_size only */
-    nt_ui_char_filter_fn allow;           /* codepoint filter; NULL = allow printable */
-    nt_ui_input_keyboard_t keyboard;      /* soft-keyboard hint */
-    bool password;                        /* render a mask glyph per codepoint instead of the text */
 } nt_ui_input_style_t;
-_Static_assert(sizeof(nt_ui_input_style_t) >= 64, "nt_ui_input_style_t stable ABI");
+_Static_assert(sizeof(nt_ui_input_style_t) >= 48, "nt_ui_input_style_t stable ABI");
+
+/* Per-field behaviour -- distinct from the shared visual style, so many fields can share one
+ * style but differ in validation/length/keyboard/mask. Zero-init = plain text field. */
+typedef struct {
+    const char *placeholder;         /* empty-field hint STRING (NULL/"" = none); dimmed via style->placeholder */
+    nt_ui_char_filter_fn allow;      /* codepoint filter; NULL = allow printable */
+    size_t max_length;               /* max BYTES incl. NUL room; 0 = bound by buffer_size */
+    nt_ui_input_keyboard_t keyboard; /* soft-keyboard hint (mobile) */
+    bool password;                   /* render a mask glyph per codepoint */
+} nt_ui_input_props_t;
 
 /* Valid baseline style: visible caret, sensible padding/blink, no art, allow-all. The caller
  * supplies font ids + colors. Avoids the zero-init trap (caret_width must be > 0). */
@@ -69,11 +76,12 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void);
  * Returns true the frame the buffer mutated (on_change). Pass on_submit non-NULL to receive
  * an Enter event (fires after the frame's edits). enabled=false = inert occluder, no edit.
  *
- * placeholder is per-field CONTENT (NULL or "" = no hint); the dimmed appearance comes from
- * style->placeholder. The hint shows only when the buffer is EMPTY and the field is NOT focused.
+ * props carries per-field behaviour (allow filter, max_length, keyboard, password) and the
+ * placeholder CONTENT (props->placeholder; NULL or "" = no hint). The hint's dimmed appearance
+ * comes from style->placeholder; it shows only when the buffer is EMPTY and the field is NOT focused.
  *
  * Engine owns the decl id/userData; data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY. */
-bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const char *placeholder,
+bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props,
                       const nt_ui_input_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted);
 
 /* True if `id` currently holds keyboard focus. */

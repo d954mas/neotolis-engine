@@ -107,11 +107,9 @@ static nt_ui_scroll_style_t s_scroll_hide_dark, s_scroll_hide_light;
 static nt_ui_scroll_style_t s_scroll_always_dark, s_scroll_always_light;
 static nt_ui_scroll_style_t s_scroll_horiz_dark, s_scroll_horiz_light;
 static nt_ui_scroll_style_t s_scroll_xy_dark, s_scroll_xy_light;
-/* Input field styles (flat colors, theme-agnostic except text color). plain shares with cyrillic;
- * numeric/password vary the allow predicate + mask/keyboard flags. */
+/* Input field styles (flat colors, theme-agnostic except text color) -- purely visual now; the
+ * plain/numeric/password/cyrillic fields share this one look and differ only via per-field props. */
 static nt_ui_input_style_t s_input_dark, s_input_light;
-static nt_ui_input_style_t s_input_numeric_dark, s_input_numeric_light;
-static nt_ui_input_style_t s_input_password_dark, s_input_password_light;
 /* Visual-style variants: a thick non-blinking caret + a distinct selection color, to show the
  * caret/selection style fields are configurable. */
 static nt_ui_input_style_t s_input_caret_dark, s_input_caret_light;
@@ -137,7 +135,7 @@ typedef struct {
     nt_ui_progress_style_t *progress;
     nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
-    nt_ui_input_style_t *input, *input_numeric, *input_password, *input_caret, *input_sel;
+    nt_ui_input_style_t *input, *input_caret, *input_sel;
     const nt_ui_modal_style_t *modal;
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
@@ -171,8 +169,6 @@ static ui_palette_t g_dark = {
     .scroll_horiz = &s_scroll_horiz_dark,
     .scroll_xy = &s_scroll_xy_dark,
     .input = &s_input_dark,
-    .input_numeric = &s_input_numeric_dark,
-    .input_password = &s_input_password_dark,
     .input_caret = &s_input_caret_dark,
     .input_sel = &s_input_sel_dark,
     .modal = &s_modal_dark,
@@ -211,8 +207,6 @@ static ui_palette_t g_light = {
     .scroll_horiz = &s_scroll_horiz_light,
     .scroll_xy = &s_scroll_xy_light,
     .input = &s_input_light,
-    .input_numeric = &s_input_numeric_light,
-    .input_password = &s_input_password_light,
     .input_caret = &s_input_caret_light,
     .input_sel = &s_input_sel_light,
     .modal = &s_modal_light,
@@ -691,22 +685,6 @@ static void init_styles(void) {
     s_input_light.bg_color = 0xFFF0F0F0U;
     s_input_light.focused_bg_color = 0xFFFFFFFFU;
     s_input_light.caret_color = 0xFF202020U;
-
-    /* Numeric: same look, [0-9.+-] filter + numeric soft-keyboard hint. */
-    s_input_numeric_dark = s_input_dark;
-    s_input_numeric_dark.allow = nt_ui_filter_numeric;
-    s_input_numeric_dark.keyboard = NT_UI_KB_NUMERIC;
-    s_input_numeric_light = s_input_light;
-    s_input_numeric_light.allow = nt_ui_filter_numeric;
-    s_input_numeric_light.keyboard = NT_UI_KB_NUMERIC;
-
-    /* Password: mask glyph per codepoint + password soft-keyboard hint. */
-    s_input_password_dark = s_input_dark;
-    s_input_password_dark.password = true;
-    s_input_password_dark.keyboard = NT_UI_KB_PASSWORD;
-    s_input_password_light = s_input_light;
-    s_input_password_light.password = true;
-    s_input_password_light.keyboard = NT_UI_KB_PASSWORD;
 
     /* Caret variant: a thick, bright-amber caret that never blinks (blink_rate <= 0 = always on) --
      * shows caret_color/caret_width/caret_blink_rate are configurable. */
@@ -1232,12 +1210,12 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 /* One captioned text field: a caption above a fixed-width field that edits the game-owned buffer.
- * placeholder is the per-field empty hint (one shared style, distinct hint per field). */
-static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const char *placeholder, const nt_ui_input_style_t *style) {
+ * props carries the per-field behaviour + empty-hint string; style is the shared per-look visual. */
+static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, const nt_ui_input_style_t *style) {
     static const Clay_ElementDeclaration field_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), caption, g_current->caption);
-        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, placeholder, style, &field_decl, true, NULL);
+        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, props, style, &field_decl, true, NULL);
     }
 }
 
@@ -1248,13 +1226,20 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
                 g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tab advances to the next field; Esc unfocuses. Empty fields show a dimmed 'edit me' hint. [T]/[D] hotkeys yield while typing.", g_current->caption);
 
-    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, "edit me", g_current->input);
-    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, "edit me", g_current->input_numeric);
-    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, "edit me", g_current->input_password);
-    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, "edit me", g_current->input);
+    /* One shared visual style (g_current->input) per look; per-field behaviour + hint via props. */
+    static const nt_ui_input_props_t props_plain = {.placeholder = "edit me", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
+    static const nt_ui_input_props_t props_numeric = {.placeholder = "edit me", .allow = nt_ui_filter_numeric, .max_length = 0U, .keyboard = NT_UI_KB_NUMERIC, .password = false};
+    static const nt_ui_input_props_t props_password = {.placeholder = "edit me", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_PASSWORD, .password = true};
+    static const nt_ui_input_props_t props_caret = {.placeholder = "thick amber caret", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
+    static const nt_ui_input_props_t props_sel = {.placeholder = "select me (magenta)", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
+
+    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, &props_plain, g_current->input);
+    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, &props_numeric, g_current->input);
+    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, &props_password, g_current->input);
+    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, &props_plain, g_current->input);
     /* Visual-style variants: prove caret_color/width/blink + selection_color are configurable. */
-    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, "thick amber caret", g_current->input_caret);
-    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, "select me (magenta)", g_current->input_sel);
+    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, &props_caret, g_current->input_caret);
+    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, &props_sel, g_current->input_sel);
 }
 
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns

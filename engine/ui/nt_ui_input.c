@@ -241,7 +241,7 @@ bool nt_ui_filter_url(uint32_t cp) {
     }
 }
 
-/* Default allow when style->allow == NULL: any printable (drop C0/C1 control + DEL). */
+/* Default allow when props->allow == NULL: any printable (drop C0/C1 control + DEL). */
 static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && !(cp >= 0x80U && cp <= 0x9FU); }
 
 // #endregion
@@ -454,7 +454,7 @@ static uint32_t decode_one(const char *src, uint32_t off, uint32_t len, uint32_t
  * untrusted clipboard bytes, run through the allow-predicate, and inserted via insert_codepoint —
  * which clamps to buffer_size-1 / max_length and drops a non-fitting multi-byte codepoint WHOLE.
  * A malformed lead byte is skipped one byte at a time (never read OOB). Returns the new caret. */
-static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_style_t *style, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
+static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
     const char *clip = nt_clipboard_get_text(); /* engine-owned, valid until the next clipboard call */
     if (clip == NULL || clip[0] == '\0') {
         return st->caret;
@@ -492,12 +492,12 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
         if (cp == 0U) {
             continue; /* malformed run skipped */
         }
-        const bool ok = (style->allow != NULL) ? style->allow(cp) : allow_printable(cp);
+        const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);
         if (!ok) {
             continue; /* predicate-filtered (e.g. numeric field drops letters) */
         }
         const uint32_t before = st->caret;
-        st->caret = insert_codepoint(buffer, buffer_size, style->max_length, st->caret, cur_len, cp, changed);
+        st->caret = insert_codepoint(buffer, buffer_size, props->max_length, st->caret, cur_len, cp, changed);
         if (st->caret == before) {
             break; /* buffer full: stop (clamp), the rest of the paste is dropped */
         }
@@ -533,8 +533,8 @@ static float mask_width(const nt_ui_input_style_t *style, nt_font_t font, uint32
 }
 
 /* Caret x (px from text origin) at byte offset `caret` using prefix measure. */
-static float caret_x_at(const nt_ui_input_style_t *style, nt_font_t font, const char *buffer, uint32_t caret) {
-    if (!style->password) {
+static float caret_x_at(const nt_ui_input_style_t *style, bool password, nt_font_t font, const char *buffer, uint32_t caret) {
+    if (!password) {
         return nt_font_measure_n(font, buffer, (size_t)caret, style->text.font_size, (float)style->text.letter_tracking).width;
     }
     return mask_width(style, font, codepoint_count(buffer, caret));
@@ -543,7 +543,7 @@ static float caret_x_at(const nt_ui_input_style_t *style, nt_font_t font, const 
 /* Map a click x (px from text origin, scroll already added) to the nearest codepoint boundary.
  * One forward decode pass (hoisted seq_len). Non-password prefix widths come from the font's
  * cached measure_n so kerning + tracking stay exact; password measures fixed-width mask glyphs. */
-static uint32_t caret_from_x(const nt_ui_input_style_t *style, nt_font_t font, const char *buffer, uint32_t len, float local_x) {
+static uint32_t caret_from_x(const nt_ui_input_style_t *style, bool password, nt_font_t font, const char *buffer, uint32_t len, float local_x) {
     if (local_x <= 0.0F || len == 0U) {
         return 0U;
     }
@@ -556,7 +556,7 @@ static uint32_t caret_from_x(const nt_ui_input_style_t *style, nt_font_t font, c
         const uint32_t next = off + step;
         ++cp_index;
         /* Password closed-form by running index; non-password prefix via cached measure_n (kern-exact). */
-        const float next_w = style->password ? mask_width(style, font, cp_index) : nt_font_measure_n(font, buffer, (size_t)next, style->text.font_size, (float)style->text.letter_tracking).width;
+        const float next_w = password ? mask_width(style, font, cp_index) : nt_font_measure_n(font, buffer, (size_t)next, style->text.font_size, (float)style->text.letter_tracking).width;
         if (local_x < (prev_w + ((next_w - prev_w) * 0.5F))) {
             return off; /* click landed in the left half of this glyph */
         }
@@ -668,11 +668,12 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const char *placeholder,
+bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props,
                       const nt_ui_input_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_input_text: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_input_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(props != NULL && "nt_ui_input_text: props must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_input_text: style must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_input_text: id 0 is the no-widget sentinel");
     NT_ASSERT(buffer != NULL && "nt_ui_input_text: buffer must be non-NULL (game owns the string)");
@@ -716,7 +717,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
         claimed_now = true;
-        apply_keyboard_hint(style->keyboard, style->password); /* Tab into the field also surfaces the keyboard */
+        apply_keyboard_hint(props->keyboard, props->password); /* Tab into the field also surfaces the keyboard */
     }
     // #endregion
 
@@ -754,12 +755,12 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->blink = 0.0F;
         if (bb.found) {
             const float local_x = (in.press_pos[0] - bb.x - style->pad_x) + st->scroll_x;
-            st->caret = caret_from_x(style, font, buffer, cur_len, local_x);
+            st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         }
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
         st->drag = 1U;
         if (!was_focused) {
-            apply_keyboard_hint(style->keyboard, style->password); /* surface the soft keyboard on web */
+            apply_keyboard_hint(props->keyboard, props->password); /* surface the soft keyboard on web */
         }
     }
 
@@ -778,7 +779,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     /* Held drag extends the selection: the anchor stays at the press point, the caret tracks x. */
     if (enabled && st->drag != 0U && in.pressed && bb.found) {
         const float local_x = (in.pos[0] - bb.x - style->pad_x) + st->scroll_x;
-        st->caret = caret_from_x(style, font, buffer, cur_len, local_x);
+        st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         st->blink = 0.0F;
     }
     if (in.released_now) {
@@ -800,7 +801,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         // #region drain typed chars (FIFO from the input ring)
         uint32_t cp = 0U;
         while (nt_input_pop_char(&cp)) {
-            const bool ok = (style->allow != NULL) ? style->allow(cp) : allow_printable(cp);
+            const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);
             if (!ok) {
                 continue;
             }
@@ -813,7 +814,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
                 st->anchor = st->caret;
                 cur_len = (uint32_t)strlen(buffer);
             }
-            st->caret = insert_codepoint(buffer, buffer_size, style->max_length, st->caret, cur_len, cp, &changed);
+            st->caret = insert_codepoint(buffer, buffer_size, props->max_length, st->caret, cur_len, cp, &changed);
             st->anchor = st->caret;
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
@@ -919,7 +920,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             }
         }
         if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_V)) {
-            st->caret = clipboard_paste(buffer, buffer_size, style, st, cur_len, &changed);
+            st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, &changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
@@ -947,7 +948,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     // #region keep caret visible (horizontal scroll)
     const float inner_w = (decl != NULL && decl->layout.sizing.width.type == CLAY__SIZING_TYPE_FIXED) ? (decl->layout.sizing.width.size.minMax.min - (style->pad_x * 2.0F)) : 0.0F;
     if (inner_w > 0.0F) {
-        const float caret_px = caret_x_at(style, font, buffer, st->caret);
+        const float caret_px = caret_x_at(style, props->password, font, buffer, st->caret);
         /* Reserve the caret width on the right edge: the content clip is the inner box, so a caret at
          * end-of-line sitting exactly on the clip edge would be scissored away. Scroll so its RIGHT
          * edge (caret_px + caret_width) stays inside inner_w, keeping it visible. */
@@ -1000,8 +1001,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         uint32_t lo = 0U;
         uint32_t hi = 0U;
         selection_span(st, &lo, &hi);
-        const float x0 = caret_x_at(style, font, buffer, lo) - st->scroll_x;
-        const float x1 = caret_x_at(style, font, buffer, hi) - st->scroll_x;
+        const float x0 = caret_x_at(style, props->password, font, buffer, lo) - st->scroll_x;
+        const float x1 = caret_x_at(style, props->password, font, buffer, hi) - st->scroll_x;
         const float sel_w = x1 - x0;
         if (sel_w > 0.0F) {
             const uint32_t scol = (style->selection_color != 0U) ? style->selection_color : 0x80E0B080U;
@@ -1015,14 +1016,14 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         /* Password fields render one mask glyph per codepoint instead of the real bytes; the mask
          * is render-only (the game buffer is untouched). build_display_text is shared with the test
          * probe so the password branch is asserted without a GL capture. */
-        const char *disp = (style->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
+        const char *disp = (props->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
         /* Float the text at -scroll_x inside the content clip so it tracks the caret/selection when
          * the line scrolls; an inline label would stay at x=0 and desync. */
         emit_text(ctx, text_layer, -st->scroll_x, 0.0F, disp, &ts);
     } else {
         /* Empty: render the dimmed hint via the same clipped emit path as the real text (so it
          * clips/scrolls identically). Render-only -- the game buffer is never touched. */
-        const char *hint = nt_ui_input_placeholder_for(buffer, placeholder, focused);
+        const char *hint = nt_ui_input_placeholder_for(buffer, props->placeholder, focused);
         if (hint != NULL) {
             nt_ui_label_style_t ps = style->placeholder;
             emit_text(ctx, text_layer, -st->scroll_x, 0.0F, hint, &ps);
@@ -1030,7 +1031,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     }
 
     if (focused) {
-        const float caret_px = caret_x_at(style, font, buffer, st->caret) - st->scroll_x;
+        const float caret_px = caret_x_at(style, props->password, font, buffer, st->caret) - st->scroll_x;
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));
         if (blink_on) {
             emit_caret(ctx, text_layer, caret_px, 0.0F, style->caret_width, line_h, style->caret_color);
@@ -1063,9 +1064,5 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void) {
     s.border_width = 1.0F;
     s.pad_x = 6.0F;
     s.pad_y = 4.0F;
-    s.max_length = 0U;
-    s.allow = NULL;
-    s.keyboard = NT_UI_KB_TEXT;
-    s.password = false;
     return s;
 }

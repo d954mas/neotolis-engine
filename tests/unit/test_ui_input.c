@@ -33,6 +33,7 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 static nt_ui_input_style_t s_style;
+static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/password/keyboard here */
 
 /* Field pinned at a fixed absolute position; non-origin so an axis swap is visible. */
 #define IN_X 100.0F
@@ -60,8 +61,8 @@ static void init_style(void) {
     s_style.placeholder.font_size = FONT_SIZE;
     s_style.pad_x = PAD_X;
     s_style.pad_y = 4.0F;
-    s_style.caret_blink_rate = 0.0F; /* always-on caret -> deterministic render */
-    s_style.allow = NULL;
+    s_style.caret_blink_rate = 0.0F;     /* always-on caret -> deterministic render */
+    memset(&s_props, 0, sizeof s_props); /* zero-init = plain text field (no filter/mask, default keyboard) */
 }
 
 void setUp(void) {
@@ -95,7 +96,7 @@ static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t ca
     bool changed = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
-        changed = nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, NULL, &s_style, &s_field_decl, enabled, submitted);
+        changed = nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &s_field_decl, enabled, submitted);
     }
     nt_ui_end(s_fx.ctx);
     return changed;
@@ -207,7 +208,7 @@ static void test_clamp_no_split_no_oob(void) {
 static void test_numeric_predicate(void) {
     char buf[32] = {0};
     const uint32_t id = nt_ui_id("f");
-    s_style.allow = nt_ui_filter_numeric;
+    s_props.allow = nt_ui_filter_numeric;
     warmup_focus(id, buf, sizeof buf);
 
     nt_input_buffer_char((uint32_t)'A'); /* rejected */
@@ -250,8 +251,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_props, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -261,8 +262,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &press, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_props, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -275,8 +276,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_props, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -289,8 +290,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_props, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -303,8 +304,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, NULL, &s_style, &s_field_decl, true, NULL);
-            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, NULL, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, sizeof b, &s_props, &s_style, &s_field_decl, true, NULL);
         }
     }
     nt_ui_end(s_fx.ctx);
@@ -589,7 +590,7 @@ static void test_clipboard_paste_clamp_no_split(void) {
 static void test_clipboard_paste_filtered(void) {
     char buf[32] = {0};
     const uint32_t id = nt_ui_id("f");
-    s_style.allow = nt_ui_filter_numeric;
+    s_props.allow = nt_ui_filter_numeric;
     warmup_focus(id, buf, sizeof buf);
     nt_clipboard_set_text("a1b2c3"); /* letters dropped, digits kept */
     chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_V);
@@ -628,8 +629,8 @@ static void test_password_mask_render(void) {
 static void test_password_buffer_and_keyboard(void) {
     char buf[32] = {0};
     const uint32_t id = nt_ui_id("f");
-    s_style.password = true;
-    s_style.keyboard = NT_UI_KB_PASSWORD;
+    s_props.password = true;
+    s_props.keyboard = NT_UI_KB_PASSWORD;
     warmup_focus(id, buf, sizeof buf);
 
     /* Typing fills the REAL buffer (the mask only affects rendering). */
@@ -710,7 +711,7 @@ static void test_password_buffer_unchanged_after_render(void) {
     char snapshot[32];
     memcpy(snapshot, buf, sizeof buf);
     const uint32_t id = nt_ui_id("f");
-    s_style.password = true;
+    s_props.password = true;
     warmup_focus(id, buf, sizeof buf);
 
     /* A plain render frame (no edit) must leave every byte of the game buffer intact. */
@@ -771,12 +772,15 @@ static void test_key_repeat_timing(void) {
     TEST_ASSERT_FALSE(nt_ui_input_key_repeat_step(&rk, &rt, NT_KEY_ARROW_LEFT, false, true, dt));
 }
 
-/* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink). ---- */
+/* ---- Test 11: style defaults are a valid baseline (caret_width > 0, sensible blink); zero-init
+ * props is a plain text field (default keyboard). ---- */
 static void test_style_defaults_valid(void) {
     nt_ui_input_style_t s = nt_ui_input_style_defaults();
     TEST_ASSERT_TRUE(s.caret_width > 0.0F);
     TEST_ASSERT_TRUE(s.text.font_size > 0.0F);
-    TEST_ASSERT_EQUAL_INT(NT_UI_KB_TEXT, s.keyboard);
+    nt_ui_input_props_t p;
+    memset(&p, 0, sizeof p);
+    TEST_ASSERT_EQUAL_INT(NT_UI_KB_TEXT, p.keyboard);
 }
 
 /* ---- Test 28: placeholder shows only when empty AND unfocused; hidden when focused or non-empty. ---- */
@@ -799,21 +803,28 @@ static void test_placeholder_empty_unfocused_only(void) {
 
 static void test_assert_null_buffer(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), NULL, 32U, NULL, &s_style, &s_field_decl, true, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), NULL, 32U, &s_props, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_zero_cap(void) {
     char buf[4] = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, 0U, NULL, &s_style, &s_field_decl, true, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, 0U, &s_props, &s_style, &s_field_decl, true, NULL)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_assert_null_props(void) {
+    char buf[4] = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, NULL, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_null_style(void) {
     char buf[4] = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, NULL, NULL, &s_field_decl, true, NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, &s_props, NULL, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -856,6 +867,7 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);
+    RUN_TEST(test_assert_null_props);
     RUN_TEST(test_assert_null_style);
 #endif
     return UNITY_END();
