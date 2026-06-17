@@ -32,14 +32,14 @@ static void resp_reserve(size_t need) {
     s_resp_cap = cap;
 }
 
-// #region deferred queue (D-09)
+// #region deferred queue
 /* Pending deferred responses. Small preallocated queue: devapi is low-frequency, so no
    steady-state heap. A slot stores the owned request_id + continuation only — NEVER a
-   pointer into s_resp_buf (Pitfall 4 / D-04); the envelope is serialized at yield time. */
+   pointer into s_resp_buf; the envelope is serialized at yield time. */
 static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
 
 /* Set around the handler call in dispatch_one so nt_devapi_defer_current can signal the
-   third "deferred" outcome without changing the bool handler ABI (out-param route, D-09). */
+   third "deferred" outcome without changing the bool handler ABI (out-param route). */
 static bool *s_out_deferred;
 static int s_defer_frames;
 
@@ -294,7 +294,7 @@ const char *nt_devapi_submit(const char *line) {
     if (!cJSON_IsArray(root)) {
         cJSON *entry = dispatch_one(root);
         if (entry == DEFERRED_SENTINEL) {
-            /* The lone command deferred (D-06): no sync response — drain it via poll_response. */
+            /* The lone command deferred: no sync response — drain it via poll_response. */
             cJSON_Delete(root);
             return NULL;
         }
@@ -314,7 +314,7 @@ const char *nt_devapi_submit(const char *line) {
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
     /* Advance every in-flight continuation; yield the FIRST that became ready this call.
-       One ready result per call — the transport drains in a loop (D-07/D-08). */
+       One ready result per call — the transport drains in a loop. */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (!s_deferred[i].in_use) {
             continue;
@@ -324,8 +324,8 @@ const char *nt_devapi_poll_response(void) {
             continue;
         }
 
-        /* Minimal continuation result — the real shape lands with each deferred command
-           (Phase 65 frame.wait). Here the slot only proves the yield path. */
+        /* Minimal continuation result — the slot only proves the yield path; real per-command
+           shapes land with their respective deferred commands. */
         cJSON *result_obj = cJSON_CreateObject();
         NT_ASSERT(result_obj != NULL);
         devapi_add_bool(result_obj, "deferred", true);

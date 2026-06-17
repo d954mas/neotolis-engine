@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""DevAPI engine-probe — the SC4 transport-proof (HARNESS-02).
+"""DevAPI engine-probe — native transport proof.
 
 Connects to a running examples/devapi_host over loopback TCP, discovers the
 self-describing surface (endpoints / command.describe / features), drives the
 game-registered game.echo command end-to-end, and asserts correct request_id
 correlation. This proves the WHOLE native transport chain over a real socket.
 
-Input/UI probe coverage folds in at Phases 66/67 (CONTEXT Deferred) — at Phase
-64 the probe is discovery + a game.echo round-trip.
+Input/UI probe coverage will extend this as further commands are registered.
 
 Usage: python tools/devapi/engine_probe.py [--port N]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
@@ -29,7 +28,7 @@ else:
 
 
 def resolve_port(argv) -> int:
-    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT (D-15)."""
+    """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
     for i, a in enumerate(argv):
         if a == "--port" and i + 1 < len(argv):
             return int(argv[i + 1])
@@ -46,7 +45,7 @@ def resolve_port(argv) -> int:
 
 
 def run(client: DevApiClient) -> None:
-    """Drive the SC4 steps; raise AssertionError on any contract violation."""
+    """Drive the probe steps; raise AssertionError on any contract violation."""
     # 1. Sanity ping (engine.info/ping exist in the core group).
     client.result("ping")
 

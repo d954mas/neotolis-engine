@@ -14,7 +14,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Default listen port. Override env var: NT_DEVAPI_PORT (read by the host, Plan 03). */
+/* Default listen port. Override via env var: NT_DEVAPI_PORT (read by the host at startup). */
 #ifndef NT_DEVAPI_DEFAULT_PORT
 #define NT_DEVAPI_DEFAULT_PORT 17890
 #endif
@@ -25,7 +25,9 @@
 bool nt_devapi_net_start(uint16_t port);
 
 /* Poll the transport once per frame: non-blocking accept + recv + framed dispatch + send +
-   deferred drain. Never blocks the loop. Safe to call before a client connects. */
+   deferred drain. Non-blocking accept/recv/dispatch; a wedged send buffer gets a bounded
+   best-effort retry, then the client is dropped (never an unbounded spin). Safe to call
+   before a client connects. */
 void nt_devapi_net_poll(void);
 
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
@@ -33,7 +35,7 @@ void nt_devapi_net_stop(void);
 
 /* Opt-in pre-loop gate: bounded-busy non-blocking accept until a client connects or timeout_ms
    elapses. Returns true if a client is connected. The game wires this BEFORE its loop when the
-   bot must push setup before frame 0 (D-04); normal per-frame accept continues after it returns. */
+   bot must push setup before frame 0; normal per-frame accept continues after it returns. */
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms);
 
 #endif /* NT_DEVAPI_NET_H */

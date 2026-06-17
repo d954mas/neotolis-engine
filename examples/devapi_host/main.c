@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 /* game-layer command: echo {msg} back as {msg}. Registered via the public
-   nt_devapi_register path only — zero engine edits (SC4). Uses the public cJSON
+   nt_devapi_register path only — zero engine edits. Uses the public cJSON
    API for the result (devapi_add_* is internal to the devapi module). */
 static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -37,8 +37,8 @@ static const nt_devapi_command_desc k_game_echo = {
     .side_effects = "none",
 };
 
-/* Resolve the listen port: NT_DEVAPI_DEFAULT_PORT, overridden by env NT_DEVAPI_PORT
-   (D-15). Falls back to the default on a missing / unparseable / out-of-range value. */
+/* Resolve the listen port: NT_DEVAPI_DEFAULT_PORT, overridden by env NT_DEVAPI_PORT.
+   Falls back to the default on a missing / unparseable / out-of-range value. */
 static uint16_t resolve_port(void) {
     // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded host startup, getenv is fine
     const char *env = getenv("NT_DEVAPI_PORT");
@@ -56,8 +56,8 @@ static uint16_t resolve_port(void) {
 
 static void frame(void) {
     nt_window_poll();
-    /* D-12 / XPORT-03: poll the transport BEFORE input so injected commands this
-       frame observe the same input state the engine is about to read. */
+    /* Poll the transport BEFORE input so injected commands this frame observe the same
+       input state the engine is about to read. */
     nt_devapi_net_poll();
     nt_input_poll();
 
@@ -104,7 +104,7 @@ int main(void) {
     }
     printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
 
-    /* D-04: opt-in pre-loop gate so a bot can hand over setup before frame 0.
+    /* Opt-in pre-loop gate so a bot can hand over setup before frame 0.
        Bounded; the host does NOT require a client to start. */
     if (nt_devapi_net_wait_for_client(2000)) {
         printf("[devapi_host] client connected before loop\n");

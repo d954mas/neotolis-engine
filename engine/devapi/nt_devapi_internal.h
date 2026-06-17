@@ -34,7 +34,7 @@ typedef struct nt_devapi_slot {
    shutdown so init->shutdown->init is leak-free. */
 void nt_devapi_resp_reset(void);
 
-// #region deferred queue (D-09)
+// #region deferred queue
 /* Preallocated deferred-response queue cap. Small + static: devapi is low-frequency,
    so a steady-state heap-free queue is enough. Overflow is rejected (fail-early). */
 #ifndef NT_DEVAPI_MAX_DEFERRED
@@ -42,7 +42,7 @@ void nt_devapi_resp_reset(void);
 #endif
 
 /* One pending deferred response. The slot owns the duplicated request_id and the
-   continuation state ONLY — never a pointer into the shared s_resp_buf (Pitfall 4 / D-04). */
+   continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
     cJSON *id;       /* owned duplicate of request_id (number or string); NULL if absent. */
     int frames_left; /* continuation: yields when it reaches 0. */

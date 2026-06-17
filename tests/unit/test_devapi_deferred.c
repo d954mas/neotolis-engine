@@ -1,4 +1,4 @@
-/* Honest proof of the deferred yield path (D-09): submit()->NULL on defer, K-1 NULL polls,
+/* Proof of the deferred yield path: submit()->NULL on defer, K-1 NULL polls,
    the K-th poll yields {ok,result,request_id} with the original id, drain, and overflow. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
@@ -12,7 +12,7 @@
 /* clang-format on */
 
 /* Test-only deferred command — registered LOCALLY in this binary, NEVER in the engine
-   `core` group (D-09). Defers K frames (params {frames?:number}, default DEFER_FRAMES). */
+   `core` group. Defers K frames (params {frames?:number}, default DEFER_FRAMES). */
 #define DEFER_FRAMES 3
 
 static bool defer_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {

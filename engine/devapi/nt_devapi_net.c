@@ -1,4 +1,4 @@
-// #region platform shim (D-02: this file IS the platform boundary)
+// #region platform shim — this file IS the platform boundary
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -35,11 +35,11 @@ typedef socklen_t nt_socklen_t;
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_net.h"
 
-/* Single loopback client; reconnect allowed (D-03). */
+/* Single loopback client; reconnect allowed. */
 static nt_sock_t s_listen = NT_INVALID_SOCK;
 static nt_sock_t s_client = NT_INVALID_SOCK;
 
-/* Growing recv accumulation buffer; JSON-lines split on '\n' (D-05). Dev-only, no input cap.
+/* Growing recv accumulation buffer; JSON-lines split on '\n'. Dev-only, no input cap.
    s_recv_len bytes are the unconsumed remainder carried between polls/frames. */
 static char *s_recv_buf;
 static size_t s_recv_cap;
@@ -94,22 +94,22 @@ static void set_client_opts(nt_sock_t s) {
     int yes = 1;
     (void)setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&yes, (nt_socklen_t)sizeof yes);
 #if defined(SO_NOSIGPIPE)
-    (void)setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&yes, (nt_socklen_t)sizeof yes); /* macOS/BSD (D-25) */
+    (void)setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&yes, (nt_socklen_t)sizeof yes); /* macOS/BSD */
 #endif
     set_nonblocking(s);
 }
 // #endregion
 
-// #region send (partial-send safe, D-23/D-25)
+// #region send (partial-send safe)
 /* Returns false on a real peer error so the caller drops the client. EWOULDBLOCK gets a short
-   bounded retry — devapi payloads are tiny/low-frequency (D-08), never a forever busy-spin. */
+   bounded retry — devapi payloads are tiny/low-frequency, never a forever busy-spin. */
 static bool send_all(const char *p, size_t len) {
     size_t off = 0;
     int eagain_spins = 0;
     while (off < len) {
         int flags = 0;
 #if defined(MSG_NOSIGNAL)
-        flags = MSG_NOSIGNAL; /* suppress SIGPIPE on write-to-closed-peer (Linux, D-25). */
+        flags = MSG_NOSIGNAL; /* suppress SIGPIPE on write-to-closed-peer (Linux). */
 #endif
 #ifdef _WIN32
         int chunk = (int)(len - off);
@@ -139,7 +139,7 @@ static bool send_all(const char *p, size_t len) {
     return true;
 }
 
-/* Frame a response line: D-26 defence-in-depth — compact cJSON already escapes '\n' inside
+/* Frame a response line: defence-in-depth — compact cJSON already escapes '\n' inside
    strings, so a raw '\n' before the framing newline would desync the client's line parser. */
 static bool send_line(const char *resp) {
     size_t len = strlen(resp);
@@ -160,7 +160,7 @@ bool nt_devapi_net_start(uint16_t port) {
         return false;
     }
 #else
-    signal(SIGPIPE, SIG_IGN); /* global fallback; MSG_NOSIGNAL/SO_NOSIGPIPE are the per-call guard (D-25). */
+    signal(SIGPIPE, SIG_IGN); /* global fallback; MSG_NOSIGNAL/SO_NOSIGPIPE are the per-call guard. */
 #endif
 
     s_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -173,10 +173,10 @@ bool nt_devapi_net_start(uint16_t port) {
 
     int yes = 1;
 #ifdef _WIN32
-    /* SO_REUSEADDR is a port-hijack vector on Windows — use EXCLUSIVE (D-21). */
+    /* SO_REUSEADDR is a port-hijack vector on Windows — use EXCLUSIVE. */
     (void)setsockopt(s_listen, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&yes, (nt_socklen_t)sizeof yes);
 #else
-    /* SO_REUSEADDR on POSIX avoids TIME_WAIT "address in use" on rapid restart (D-21). */
+    /* SO_REUSEADDR on POSIX avoids TIME_WAIT "address in use" on rapid restart. */
     (void)setsockopt(s_listen, SOL_SOCKET, SO_REUSEADDR, &yes, (nt_socklen_t)sizeof yes);
 #endif
     (void)setsockopt(s_listen, IPPROTO_TCP, TCP_NODELAY, (const char *)&yes, (nt_socklen_t)sizeof yes);
@@ -186,7 +186,7 @@ bool nt_devapi_net_start(uint16_t port) {
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* 127.0.0.1 ONLY — never INADDR_ANY (XPORT-02). */
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* 127.0.0.1 ONLY — never INADDR_ANY. */
 
     if (bind(s_listen, (struct sockaddr *)&addr, (nt_socklen_t)sizeof addr) != 0 || listen(s_listen, 1) != 0) {
         nt_close_sock(s_listen);
@@ -224,7 +224,7 @@ static void try_accept(void) {
         s_recv_len = 0;
         set_client_opts(c);
     }
-    /* else EWOULDBLOCK == no pending connection (D-03) — try again next frame. */
+    /* else EWOULDBLOCK == no pending connection — try again next frame. */
 }
 
 void nt_devapi_net_poll(void) {
@@ -238,7 +238,7 @@ void nt_devapi_net_poll(void) {
         return;
     }
 
-    // #region recv (D-22 orderly close vs D-24 no-data)
+    // #region recv (orderly close vs no-data)
     char tmp[4096];
     for (;;) {
 #ifdef _WIN32
@@ -251,12 +251,12 @@ void nt_devapi_net_poll(void) {
             continue;
         }
         if (n == 0) {
-            close_client(); /* orderly disconnect (D-22) — distinct from EWOULDBLOCK. */
+            close_client(); /* orderly disconnect — distinct from EWOULDBLOCK. */
             return;
         }
         int e = nt_sock_errno();
         if (e == NT_EWOULDBLOCK) {
-            break; /* no more data this frame (D-24). */
+            break; /* no more data this frame. */
         }
 #ifndef _WIN32
         if (e == EAGAIN || e == EINTR) {
@@ -268,10 +268,10 @@ void nt_devapi_net_poll(void) {
     }
     // #endregion
 
-    // #region framed dispatch (D-05/D-07): submit each line, write its response inline
+    // #region framed dispatch — submit each line, write its response inline
     /* Read cursor across the accumulated buffer; the remainder is shifted to the front after
        the line loop, so the returned submit/poll_response pointers are never held across a
-       recv_append (Pitfall 4 / D-04). */
+       recv_append. */
     size_t cur = 0;
     for (;;) {
         char *nl = (char *)memchr(s_recv_buf + cur, '\n', s_recv_len - cur);
@@ -282,15 +282,15 @@ void nt_devapi_net_poll(void) {
         char *line = s_recv_buf + cur;
         cur = (size_t)(nl - s_recv_buf) + 1U;
 
-        const char *resp = nt_devapi_submit(line); /* Phase 63 core, unchanged for sync. */
+        const char *resp = nt_devapi_submit(line);
         if (resp != NULL) {
-            /* Write BEFORE the next core call — s_resp_buf is reused (D-07). */
+            /* Write BEFORE the next core call — s_resp_buf is reused each submit. */
             if (!send_line(resp)) {
                 close_client();
                 return;
             }
         }
-        /* resp == NULL → deferred (D-06): nothing now; arrives via the drain below. */
+        /* resp == NULL → deferred: nothing now; arrives via the drain below. */
     }
     /* Shift the unconsumed remainder to the front. */
     if (cur > 0) {
@@ -302,7 +302,7 @@ void nt_devapi_net_poll(void) {
     }
     // #endregion
 
-    // #region deferred drain (D-07/D-08): write every ready result, no per-poll cap
+    // #region deferred drain — write every ready result, no per-poll cap
     const char *dr;
     while ((dr = nt_devapi_poll_response()) != NULL) {
         if (!send_line(dr)) {
@@ -314,7 +314,7 @@ void nt_devapi_net_poll(void) {
 }
 // #endregion
 
-// #region wait_for_client (D-04 opt-in pre-loop gate, bounded)
+// #region wait_for_client (opt-in pre-loop gate, bounded)
 static uint64_t now_ms(void) { return (uint64_t)((double)clock() * 1000.0 / (double)CLOCKS_PER_SEC); }
 
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
