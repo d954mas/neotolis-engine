@@ -9,6 +9,7 @@
 
 #include "clay.h"
 #include "input/nt_input_internal.h"
+#include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -55,32 +56,53 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
 }
 
 /* ---- ABI sanity ---- */
-static void test_dropdown_abi_size(void) { TEST_ASSERT_EQUAL_UINT(40U, (unsigned)sizeof(nt_ui_dropdown_style_t)); }
+static void test_dropdown_abi_size(void) {
+    TEST_ASSERT_EQUAL_UINT(312U, (unsigned)sizeof(nt_ui_dropdown_style_t));
+    TEST_ASSERT_EQUAL_UINT(32U, (unsigned)sizeof(nt_ui_dd_state_t));
+}
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat TEST_ASSERT chain, not real nesting
 static void test_dropdown_defaults_valid(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     TEST_ASSERT_TRUE(st.font_size > 0.0F);
     TEST_ASSERT_TRUE(st.row_height > 0U);
     TEST_ASSERT_TRUE(st.min_width > 0U);
     TEST_ASSERT_TRUE(st.max_visible_rows > 0U);
+    TEST_ASSERT_TRUE(st.slice9_scale > 0.0F);
+    TEST_ASSERT_TRUE(st.state_speed >= 0.0F);
+    TEST_ASSERT_TRUE(st.value_speed >= 0.0F);
+    /* Atlas-free baseline: per-state bgs carry no art (flat fallback path). */
+    TEST_ASSERT_EQUAL_UINT(0U, st.trigger_idle.bg.atlas.id);
+    TEST_ASSERT_EQUAL_UINT(0U, st.row_idle.bg.atlas.id);
+    TEST_ASSERT_TRUE(st.trigger_idle.scale > 0.0F);
+    TEST_ASSERT_TRUE(st.row_selected.scale > 0.0F);
+    /* Default is text-only (no icon gutter). */
+    TEST_ASSERT_EQUAL_UINT(0U, st.icon_size);
 }
 
 /* One full dropdown frame: a trigger at a fixed position, then the open list. Returns whether a
  * selection was made this frame. The trigger uses a floating element so its bbox is at (tx,ty). */
-static bool dropdown_frame(const nt_pointer_t *p, float tx, float ty, const char *const *labels, int count, int *selected, bool *open, const nt_ui_dropdown_style_t *st, bool *out_made) {
+static bool dropdown_frame_icons(const nt_pointer_t *p, float tx, float ty, const char *const *labels, const nt_atlas_region_ref_t *icons, int count, int *selected, bool *open,
+                                 nt_ui_dropdown_style_t *st, bool *out_made) {
     bool toggled = false;
     bool made = false;
+    nt_mem_scratch_reset(); /* per-frame scratch reset, exactly as the engine main loop does */
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
         toggled = nt_ui_dropdown_trigger(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, count, *selected, "Select...", st,
                                          &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(32)}}}, open);
     }
-    made = nt_ui_dropdown_list(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, count, selected, st, open);
+    made = nt_ui_dropdown_list(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, icons, count, selected, st, open);
     nt_ui_end(s_fx.ctx);
     if (out_made != NULL) {
         *out_made = made;
     }
     return toggled;
+}
+
+/* No-icon convenience wrapper (text-only list) so existing tests keep their call shape. */
+static bool dropdown_frame(const nt_pointer_t *p, float tx, float ty, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, bool *out_made) {
+    return dropdown_frame_icons(p, tx, ty, labels, NULL, count, selected, open, st, out_made);
 }
 
 /* ---- Trigger toggles the game-owned open bool. ---- */
@@ -180,6 +202,59 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_ABOVE, nt_ui_dropdown_test_last_side());
 }
 
+/* The row's label x after two warm frames (1-frame IM lag bakes the bbox). */
+static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, const nt_atlas_region_ref_t *icons, int idx) {
+    int selected = 0;
+    bool open = true;
+    dropdown_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, st, NULL);
+    dropdown_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, st, NULL);
+    const nt_ui_bbox_t bb = nt_ui_dropdown_test_row_label_bbox(s_fx.ctx, DD_A, idx);
+    TEST_ASSERT_TRUE(bb.found);
+    return bb.x;
+}
+
+/* ---- icon_size opens a leading gutter: the row label shifts RIGHT vs the text-only (icon_size=0) row. ---- */
+static void test_dropdown_icon_size_gutter_shifts_label(void) {
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+
+    nt_ui_dropdown_style_t no_gut = nt_ui_dropdown_style_defaults();
+    no_gut.icon_size = 0U; /* text-only */
+    const float x_text_only = row_label_x(&idle, &no_gut, NULL, 0);
+
+    nt_ui_dropdown_style_t gut = nt_ui_dropdown_style_defaults();
+    gut.icon_size = 24U; /* reserves a 24px leading gutter */
+    const float x_gutter = row_label_x(&idle, &gut, NULL, 0);
+
+    /* The gutter + child gap push the label right by at least the gutter width. */
+    TEST_ASSERT_TRUE_MESSAGE(x_gutter >= x_text_only + (float)gut.icon_size, "icon_size gutter must shift the label right by >= icon_size");
+}
+
+/* ---- NULL-icon alignment: with the gutter open, a row whose icon ref is set and a row whose icon is
+ *      absent both keep the SAME label x (the gutter holds alignment either way). ---- */
+static void test_dropdown_null_icon_aligns(void) {
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.icon_size = 24U;
+
+    /* Row 0 carries an icon ref (atlas.id != 0); rows 1/2 are unset ({0} = aligned-empty gutter). */
+    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x1234U), {0}, {0}};
+
+    int selected = 0;
+    bool open = true;
+    dropdown_frame_icons(&idle, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, &st, NULL);
+    dropdown_frame_icons(&idle, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, &st, NULL);
+
+    const nt_ui_bbox_t iconed = nt_ui_dropdown_test_row_label_bbox(s_fx.ctx, DD_A, 0);
+    const nt_ui_bbox_t empty = nt_ui_dropdown_test_row_label_bbox(s_fx.ctx, DD_A, 1);
+    TEST_ASSERT_TRUE(iconed.found);
+    TEST_ASSERT_TRUE(empty.found);
+    /* Same gutter width -> same label x regardless of whether the icon is present (Unity float asserts
+     * are disabled project-wide, so compare a manual epsilon). */
+    const float dx = (iconed.x > empty.x) ? (iconed.x - empty.x) : (empty.x - iconed.x);
+    TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "NULL icon must keep the same aligned label x as an iconed row");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dropdown_abi_size);
@@ -188,5 +263,7 @@ int main(void) {
     RUN_TEST(test_dropdown_row_select_sets_int_and_closes);
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
+    RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);
+    RUN_TEST(test_dropdown_null_icon_aligns);
     return UNITY_END();
 }
