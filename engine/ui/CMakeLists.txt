@@ -71,6 +71,8 @@ set(NT_UI_SOURCES
     nt_ui_dropdown.h
     nt_ui_tabbar.c
     nt_ui_tabbar.h
+    nt_ui_tooltip.c
+    nt_ui_tooltip.h
     nt_ui_button.c
     nt_ui_button.h
     nt_ui_checkbox.c
