@@ -133,6 +133,8 @@ static nt_ui_dropdown_style_t s_dropdown_dark, s_dropdown_light;
 static nt_ui_tooltip_style_t s_tooltip_dark, s_tooltip_light;
 static nt_ui_menu_style_t s_menu_dark, s_menu_light;
 static nt_ui_tabbar_style_t s_tabbar_dark, s_tabbar_light;
+/* Begin/end-core demo strip: horizontal, flat-color, BOTTOM accent (distinct from the vertical nav's LEFT). */
+static nt_ui_tabbar_style_t s_tabs_demo_dark, s_tabs_demo_light;
 // #endregion
 
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
@@ -153,7 +155,8 @@ typedef struct {
     const nt_ui_dropdown_style_t *dropdown;
     const nt_ui_tooltip_style_t *tooltip;
     const nt_ui_menu_style_t *menu;
-    nt_ui_tabbar_style_t *tabbar; /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
+    nt_ui_tabbar_style_t *tabbar;    /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
+    nt_ui_tabbar_style_t *tabs_demo; /* begin/end-core demo strip (horizontal, BOTTOM accent) */
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
     const char *name;
@@ -193,6 +196,7 @@ static ui_palette_t g_dark = {
     .tooltip = &s_tooltip_dark,
     .menu = &s_menu_dark,
     .tabbar = &s_tabbar_dark,
+    .tabs_demo = &s_tabs_demo_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
     .panel_alt = {40.0F, 45.0F, 56.0F, 255.0F},
@@ -235,6 +239,7 @@ static ui_palette_t g_light = {
     .tooltip = &s_tooltip_light,
     .menu = &s_menu_light,
     .tabbar = &s_tabbar_light,
+    .tabs_demo = &s_tabs_demo_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
     .panel_alt = {232.0F, 235.0F, 243.0F, 255.0F},
@@ -343,6 +348,8 @@ struct tab_state {
     events_params_t events;
     dropdown_params_t dropdown;
     menu_params_t menu;
+    /* Tabs tab: the begin/end-core demo strip's game-owned active index (Model D). */
+    int tabs_demo_active;
 };
 
 static struct tab_state s_state = {
@@ -410,6 +417,7 @@ static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
 static uint32_t s_id_dd_fruit, s_id_dd_city;        /* dropdown triggers */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
 static uint32_t s_id_menu;                          /* context menu (drives every level) */
+static uint32_t s_id_tabs_demo_base;                /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
 
@@ -448,6 +456,9 @@ static nt_atlas_region_ref_t s_panel_blue_ref;
 static nt_atlas_region_ref_t s_panel_brown_ref;
 /* Icon-button art (Kenney bunny); untinted so it shows its natural color. */
 static nt_atlas_region_ref_t s_icon_bunny_ref;
+/* Tabs-demo icons: bunny on idle/hover, checkmark on the selected tab (game-owned content swap). */
+static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
+static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
 
 static int s_active_tab;
 // #endregion
@@ -474,6 +485,7 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
@@ -498,6 +510,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
     {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
     {"Menu", "Right-click / long-press context menu with a nested submenu: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
+    {"Tabs", "Tab-bar begin/end core: icon+text tabs with a distinct selected-tab icon; BOTTOM accent.", "examples/ui_showcase/main.c:render_tabs", render_tabs, NULL},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
 #define TAB_COUNT ((int)(sizeof g_tabs / sizeof g_tabs[0]))
@@ -527,6 +540,8 @@ static void init_styles(void) {
     s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE.value);
     s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN.value);
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
+    s_tabs_icon_idle_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
+    s_tabs_icon_sel_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK.value);
 
     /* Flat buttons: no atlas art (idle.bg.atlas.id stays 0); solid bg via per-state bg_tint. */
     nt_ui_button_style_t flat_primary = {
@@ -854,15 +869,40 @@ static void init_styles(void) {
     s_tabbar_dark.text_selected = 0xFFFCF7F5U;    /* row_sel {245,247,252} */
     s_tabbar_dark.font_size = 16.0F;
     s_tabbar_light = s_tabbar_dark;
-    s_tabbar_light.idle.bg_tint = 0xFFB0B0B0U;  /* lighter neutral on the pale card */
-    s_tabbar_light.idle.fill = 0xFFEBE3E0U;     /* fallback: list_bg {224,227,235} */
+    s_tabbar_light.idle.bg_tint = 0xFFB0B0B0U;     /* lighter neutral on the pale card */
+    s_tabbar_light.idle.fill = 0xFFEBE3E0U;        /* fallback: list_bg {224,227,235} */
     s_tabbar_light.hover.bg_tint = 0xFFC4C4C4U;    /* same panel, gentle lift on the pale card */
     s_tabbar_light.hover.fill = 0xFFDDD3D0U;       /* fallback */
     s_tabbar_light.selected.bg_tint = 0xFFFFFFFFU; /* full warm panel on the active tab */
     s_tabbar_light.selected.fill = 0xFFF0B68AU;    /* fallback: list_sel */
     s_tabbar_light.accent = 0xFF3C8CC8U;           /* warm amber accent for the pale theme */
-    s_tabbar_light.text = 0xFF685C5AU;          /* caption {90,92,104} */
-    s_tabbar_light.text_selected = 0xFF381C0CU; /* row_sel {12,28,56} */
+    s_tabbar_light.text = 0xFF685C5AU;             /* caption {90,92,104} */
+    s_tabbar_light.text_selected = 0xFF381C0CU;    /* row_sel {12,28,56} */
+
+    /* ---- Tabs demo strip (begin/end core): horizontal, flat-color, BOTTOM accent. The game owns each
+     * tab's content (icon + text, and a brighter icon when selected) -- the style only carries the bar
+     * bg / per-state fill / accent. accent_side differs from the nav's LEFT to show it's configurable. ---- */
+    s_tabs_demo_dark = nt_ui_tabbar_style_defaults();
+    s_tabs_demo_dark.dir = NT_UI_TABBAR_HORIZONTAL;
+    s_tabs_demo_dark.accent_side = NT_UI_TABBAR_ACCENT_BOTTOM;
+    s_tabs_demo_dark.bar_bg = 0xFF221A18U; /* card list_bg */
+    s_tabs_demo_dark.tab_extent = 132U;    /* width (horizontal): room for icon + label */
+    s_tabs_demo_dark.corner_radius = 8U;
+    s_tabs_demo_dark.idle.fill = 0U; /* transparent: the bar bg shows through */
+    s_tabs_demo_dark.hover.fill = 0xFF332826U;
+    s_tabs_demo_dark.selected.fill = 0xFF4A3A34U; /* list_sel */
+    s_tabs_demo_dark.selected.scale = 1.04F;
+    s_tabs_demo_dark.accent = 0xFF50B0E0U; /* warm gold */
+    s_tabs_demo_dark.text = 0xFFB6AAA5U;
+    s_tabs_demo_dark.text_selected = 0xFFFCF7F5U;
+    s_tabs_demo_dark.font_size = 16.0F;
+    s_tabs_demo_light = s_tabs_demo_dark;
+    s_tabs_demo_light.bar_bg = 0xFFEBE3E0U; /* pale card list_bg */
+    s_tabs_demo_light.hover.fill = 0xFFDDD3D0U;
+    s_tabs_demo_light.selected.fill = 0xFFF0B68AU; /* list_sel */
+    s_tabs_demo_light.accent = 0xFF3C8CC8U;
+    s_tabs_demo_light.text = 0xFF685C5AU;
+    s_tabs_demo_light.text_selected = 0xFF381C0CU;
 }
 // #endregion
 
@@ -1553,6 +1593,42 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
+/* Tabs tab: the nt_ui_tabbar begin/end CORE dogfooded. The engine owns each tab's styled per-state bg
+ * (eased) + the BOTTOM accent + the click; the GAME owns the content -- an icon + a label, with a
+ * DIFFERENT icon on the selected tab (branch on `on`). Contrast the LEFT nav, which uses the one-call
+ * labels[] convenience wrapper. The strip's accent_side (BOTTOM) differs from the nav's (LEFT). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — the tab loop + per-tab content, not real nesting
+static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st) {
+    static const char *const names[] = {"Home", "Search", "Profile", "Settings"};
+    static const int count = (int)(sizeof names / sizeof names[0]);
+    nt_ui_tabbar_style_t *style = g_current->tabs_demo;
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "Begin/end core: the GAME composes each tab (icon + text); the selected tab swaps in a different icon. The engine owns the bg, the BOTTOM accent, and the click.", g_current->caption);
+
+    /* Wrap the strip so it sizes to content height instead of growing to fill the scroll. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(72)}}}) {
+        nt_ui_tabbar_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tabs_demo_base, style);
+        for (int i = 0; i < count; ++i) {
+            const bool on = (i == st->tabs_demo_active);
+            if (nt_ui_tab_begin(ctx, i, on)) {
+                st->tabs_demo_active = i; /* Model D */
+            }
+            /* Game-owned content: a 24px icon (checkmark when selected, bunny otherwise) + the label. */
+            nt_atlas_region_ref_t *icon = on ? &s_tabs_icon_sel_ref : &s_tabs_icon_idle_ref;
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), icon, &g_panel_img_style, NULL); }
+            const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = on ? g_current->row_sel->color : g_current->caption->color};
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &lbl);
+            nt_ui_tab_end(ctx);
+        }
+        nt_ui_tabbar_end(ctx);
+    }
+
+    char buf[64];
+    (void)snprintf(buf, sizeof buf, "selected: %s", names[st->tabs_demo_active]);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
  * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1746,6 +1822,7 @@ static void ensure_ids(void) {
     s_id_input_art = nt_ui_id("showcase/input_art");
     s_id_input_disabled = nt_ui_id("showcase/input_disabled");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
+    s_id_tabs_demo_base = nt_ui_id("showcase/tabs_demo");
     s_id_events_hold = nt_ui_id("showcase/events_hold");
     s_id_events_dbl = nt_ui_id("showcase/events_dbl");
     s_id_events_fill = nt_ui_id("showcase/events_fill");
