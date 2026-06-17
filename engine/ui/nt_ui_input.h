@@ -106,18 +106,6 @@ bool nt_ui_filter_numeric(uint32_t codepoint);
 bool nt_ui_filter_email(uint32_t codepoint);
 bool nt_ui_filter_url(uint32_t codepoint);
 
-/* Generic double-click + long-press detector, keyed by widget id in the state pool.
- * Feed it the press/release edges + the current pointer pos; it tracks last-press time +
- * origin and reports the edges. long_press_secs <= 0 disables the long-press report.
- * Reused by word-select so it is built generically, not inlined in the field. */
-typedef struct {
-    bool double_clicked; /* a second press landed within the dbl window + radius */
-    bool long_pressed;   /* held past long_press_secs without moving past the radius */
-} nt_ui_click_gesture_t;
-
-nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id, bool pressed_now, bool released_now, bool held, float pos_x, float pos_y, float dbl_window_secs,
-                                               float long_press_secs, float move_radius_px);
-
 #ifdef NT_TEST_ACCESS
 /* Test probe: builds the password mask render string (one mask glyph per codepoint of
  * [buffer,len)) into frame scratch. Lets the password branch be asserted without a GL capture. */

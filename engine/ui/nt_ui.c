@@ -2491,8 +2491,8 @@ nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { 
 
 // #region nt_ui_events (consolidated step + cfg-gated gesture)
 
-/* Gesture cell for nt_ui_events; mirrors nt_ui_input_gesture_t but is owned by this TU (tag
- * 'evgs'). hold_progress is derived from press_clock/clock, so it needs NO stored field. */
+/* Gesture cell for nt_ui_events, owned by this TU (tag 'evgs'). hold_progress is derived from
+ * press_clock/clock, so it needs NO stored field. */
 #define NT_UI_EVENTS_GESTURE_SALT 0x65C0E5A7U
 typedef struct {
     float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
@@ -2529,7 +2529,7 @@ static nt_ui_events_t events_from_interaction(const nt_ui_interaction_t *in) {
 static inline bool events_want_gesture(const nt_ui_events_cfg_t *cfg) { return cfg != NULL && (cfg->double_click || cfg->long_press_secs > 0.0F); }
 
 /* The mutating gesture step: advance the cell clock + dbl/long machine, fill the gesture fields.
- * `e` already carries the base edges. Lifted verbatim from nt_ui_dblclick_longpress (D-65-02). */
+ * `e` already carries the base edges. Double-click + one-shot long-press machine (D-65-02). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, bool pressed_now, bool released_now, nt_ui_events_t *e) {
     const float dbl_window = ctx->gesture_dbl_window_secs;
