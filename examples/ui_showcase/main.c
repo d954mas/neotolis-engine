@@ -153,7 +153,7 @@ typedef struct {
     const nt_ui_dropdown_style_t *dropdown;
     const nt_ui_tooltip_style_t *tooltip;
     const nt_ui_menu_style_t *menu;
-    const nt_ui_tabbar_style_t *tabbar;
+    nt_ui_tabbar_style_t *tabbar; /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
     const char *name;
@@ -833,17 +833,18 @@ static void init_styles(void) {
      * nav keeps its accent + selected fill + hover lighten across the theme flip. ---- */
     s_tabbar_dark = nt_ui_tabbar_style_defaults();
     s_tabbar_dark.bar_bg = 0U;                 /* the surrounding card owns the bg; tabs sit on it */
-    s_tabbar_dark.tab_bg = 0xFF221A18U;        /* list_bg {24,26,34} */
-    s_tabbar_dark.tab_selected = 0xFF9E622EU;  /* list_sel {46,98,158} */
-    s_tabbar_dark.tab_hover = 0x22FFFFFFU;     /* ~13% white lighten, mirrors the old row hover */
+    s_tabbar_dark.idle.fill = 0xFF221A18U;     /* list_bg {24,26,34} */
+    s_tabbar_dark.hover.fill = 0xFF3A2E2AU;    /* subtle warm lighten over the idle fill */
+    s_tabbar_dark.selected.fill = 0xFF9E622EU; /* list_sel {46,98,158} */
+    s_tabbar_dark.selected.scale = 1.04F;      /* gentle pop on the active tab */
     s_tabbar_dark.accent = 0xFFE69C56U;        /* accent {86,156,230} */
     s_tabbar_dark.text = 0xFFB6AAA5U;          /* caption {165,170,182} */
     s_tabbar_dark.text_selected = 0xFFFCF7F5U; /* row_sel {245,247,252} */
     s_tabbar_dark.font_size = 16.0F;
     s_tabbar_light = s_tabbar_dark;
-    s_tabbar_light.tab_bg = 0xFFEBE3E0U;        /* list_bg {224,227,235} */
-    s_tabbar_light.tab_selected = 0xFFF0B68AU;  /* list_sel {138,182,240} */
-    s_tabbar_light.tab_hover = 0x18000000U;     /* slight darken on the light card */
+    s_tabbar_light.idle.fill = 0xFFEBE3E0U;     /* list_bg {224,227,235} */
+    s_tabbar_light.hover.fill = 0xFFDDD3D0U;    /* slight darken on the light card */
+    s_tabbar_light.selected.fill = 0xFFF0B68AU; /* list_sel {138,182,240} */
     s_tabbar_light.accent = 0xFFD67834U;        /* accent {52,120,214} */
     s_tabbar_light.text = 0xFF685C5AU;          /* caption {90,92,104} */
     s_tabbar_light.text_selected = 0xFF381C0CU; /* row_sel {12,28,56} */

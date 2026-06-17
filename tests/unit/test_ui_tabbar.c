@@ -51,7 +51,7 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
 
 /* One tab-bar frame: a FIXED-width vertical bar floated at the top-left so each tab's bbox is known.
  * Returns the clicked index (-1 if none). */
-static int tabbar_frame(const nt_pointer_t *p, int count, int *active, const nt_ui_tabbar_style_t *st) {
+static int tabbar_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) {
     int clicked = -1;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
@@ -64,12 +64,18 @@ static int tabbar_frame(const nt_pointer_t *p, int count, int *active, const nt_
 }
 
 /* ---- ABI sanity ---- */
-static void test_tabbar_abi_size(void) { TEST_ASSERT_EQUAL_UINT(44U, (unsigned)sizeof(nt_ui_tabbar_style_t)); }
+static void test_tabbar_abi_size(void) { TEST_ASSERT_EQUAL_UINT(144U, (unsigned)sizeof(nt_ui_tabbar_style_t)); }
 
 static void test_tabbar_defaults_valid(void) {
     nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
     TEST_ASSERT_TRUE(st.font_size > 0.0F);
     TEST_ASSERT_TRUE(st.tab_extent > 0U);
+    /* Per-state model: every state scale/opacity must be a valid eased target. */
+    TEST_ASSERT_TRUE(st.idle.scale > 0.0F && st.hover.scale > 0.0F && st.selected.scale > 0.0F);
+    TEST_ASSERT_TRUE(st.state_speed >= 0.0F && st.value_speed >= 0.0F);
+    TEST_ASSERT_TRUE(st.slice9_scale > 0.0F);
+    /* Atlas-free defaults: idle carries no art (flat-color fallback path). */
+    TEST_ASSERT_EQUAL_UINT(0U, st.idle.bg.atlas.id);
 }
 
 /* Center of tab i for a vertical bar floated at (0,0): each tab is `tab_extent` tall, gap between. */

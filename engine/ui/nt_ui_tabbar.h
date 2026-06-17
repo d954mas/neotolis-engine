@@ -2,16 +2,17 @@
 #define NT_UI_TABBAR_H
 
 /* Reusable tab-bar (WGT-02). A column (or row) of full-width click targets; the active tab carries an
- * accent bar + a selected fill, hovered tabs lighten. A click sets the game-owned `int *active` (Model D
- * — the widget never owns the index). No popup, no gesture cell: a tab is a plain click. Self-contained
- * so a vitrine can dogfood it (the showcase's ad-hoc tab_row migrates onto this).
+ * accent bar + a selected fill, hovered tabs lighten and ease. A click sets the game-owned `int *active`
+ * (Model D — the widget never owns the index). No popup, no gesture cell: a tab is a plain click.
  *
- * Lifted from examples/ui_showcase tab_row: transparent full-row button, 3px accent on the active row,
- * hover/selected bg from the style, click sets the active index. */
+ * Customizable game UI (button/checkbox parity): each tab visual is a per-state model (idle/hover/
+ * selected) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat fallback color — atlas-free still
+ * looks good. Hover/selected ease via nt_ui_anim through the data->layer xform channel. */
 
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "ui/nt_ui.h" /* nt_ui_layer_t, nt_ui_widget_def_t, nt_ui_element_data_t */
 
@@ -23,27 +24,44 @@ extern const nt_ui_widget_def_t NT_UI_TABBAR_DEF;
  * top tab strip. The accent bar sits on the leading edge (left for vertical, top for horizontal). */
 typedef enum { NT_UI_TABBAR_VERTICAL = 0, NT_UI_TABBAR_HORIZONTAL } nt_ui_tabbar_dir_t;
 
-/* Visual knobs. Colors are 0xAABBGGRR. */
+/* One tab visual state (idle/hover/selected). bg is an atomic nt_atlas_region_ref_t:
+ *   non-idle atlas.id==0 -> inherit the idle state's WHOLE ref (region 0 is a valid index, so it can't
+ *   double as a per-field sentinel); idle atlas.id==0 -> NO ART, fall back to the flat `fill` color.
+ * `fill` is the flat fallback rect color (0xAABBGGRR; 0 = transparent, bar bg shows through).
+ * `bg_tint` multiplies the atlas art (0xFFFFFFFF = no tint). scale/opacity are the eased render-only
+ * transform applied through the data->layer xform channel. */
 typedef struct {
-    uint32_t bar_bg;        /* the bar container background (0 = transparent) */
-    uint32_t tab_bg;        /* unselected tab fill */
-    uint32_t tab_selected;  /* selected tab fill */
-    uint32_t tab_hover;     /* hovered tab fill */
-    uint32_t accent;        /* active-tab accent bar color */
-    uint32_t text;          /* unselected tab text */
-    uint32_t text_selected; /* selected tab text */
-    float font_size;        /* px; asserted > 0 */
-    uint16_t tab_extent;    /* px height (vertical) or width (horizontal) of each tab */
-    uint16_t accent_px;     /* px accent-bar thickness on the leading edge */
-    uint16_t pad;           /* px inner padding */
-    uint16_t gap;           /* px gap between tabs */
-    uint16_t font_id;       /* label font */
-    uint8_t dir;            /* nt_ui_tabbar_dir_t */
-    uint8_t _pad[1];        /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
-} nt_ui_tabbar_style_t;
-_Static_assert(sizeof(nt_ui_tabbar_style_t) == 44, "nt_ui_tabbar_style_t stable ABI (7 u32 + 1 float + 5 u16 + 1 u8 dir + 1 pad)");
+    nt_atlas_region_ref_t bg; /* atomic ref; atlas.id==0 = inherit idle.bg whole (idle = no art -> flat) */
+    uint32_t fill;            /* flat fallback rect color 0xAABBGGRR (0 = transparent) */
+    uint32_t bg_tint;         /* multiplies atlas art; 0xFFFFFFFF = no tint */
+    float scale;              /* eased render-only scale (1.0 = none) */
+    float opacity;            /* eased render-only opacity [0,1] */
+} nt_ui_tab_state_t;
+_Static_assert(sizeof(nt_ui_tab_state_t) == 32, "nt_ui_tab_state_t stable ABI (16 ref + 2 u32 + 2 float)");
 
-/* Valid baseline style (dark, vertical). */
+/* Visual knobs. Colors are 0xAABBGGRR. Per-tab art/fill lives in the idle/hover/selected states. */
+typedef struct {
+    nt_ui_tab_state_t idle, hover, selected; /* per-state bg ref + flat fill + tint + eased scale/opacity */
+    uint32_t bar_bg;                         /* the bar container background (0 = transparent) */
+    uint32_t accent;                         /* active-tab accent bar color */
+    uint32_t text;                           /* unselected tab text */
+    uint32_t text_selected;                  /* selected tab text */
+    float font_size;                         /* px; asserted > 0 */
+    float slice9_scale;                      /* multiplies the atlas region's baked slice9 borders; > 0 */
+    float state_speed;                       /* eases hover/selected scale+opacity (0 = instant) */
+    float value_speed;                       /* eases the selected accent-bar grow-in (0 = instant) */
+    uint16_t tab_extent;                     /* px height (vertical) or width (horizontal) of each tab */
+    uint16_t accent_px;                      /* px accent-bar thickness on the leading edge */
+    uint16_t corner_radius;                  /* px tab corner rounding */
+    uint16_t pad;                            /* px inner padding */
+    uint16_t gap;                            /* px gap between tabs */
+    uint16_t font_id;                        /* label font */
+    uint8_t dir;                             /* nt_ui_tabbar_dir_t */
+    uint8_t _pad[3];                         /* layer comes from the call (data->layer), NOT the style */
+} nt_ui_tabbar_style_t;
+_Static_assert(sizeof(nt_ui_tabbar_style_t) == 144, "nt_ui_tabbar_style_t stable ABI (3x32 state + 4 u32 + 4 float + 6 u16 + 1 dir + 3 pad)");
+
+/* Valid baseline style (dark, vertical) that looks polished with flat colors and NO atlas art. */
 nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
 
 /* Declare the tab-bar: a container holding `count` full-extent tabs. A click on tab i sets *active = i
@@ -54,6 +72,6 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
  * Layers: the bar bg + tab fills draw on data->layer; the tab labels on label_layer -- pass them split
  * (fills on the img layer, text on the text layer) to batch fills-then-text in one segment. data may be
  * NULL (fills fall to layer 0). */
-int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, int count, int *active, const nt_ui_tabbar_style_t *style);
+int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, int count, int *active, nt_ui_tabbar_style_t *style);
 
 #endif /* NT_UI_TABBAR_H */
