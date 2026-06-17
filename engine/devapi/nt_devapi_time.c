@@ -7,9 +7,8 @@
 #include "devapi/nt_devapi_internal.h"
 #include "stats/nt_stats.h"
 
-/* L2 time/render/frame command group: thin veneer over the Plan-01 nt_app L1 API.
-   Bot input is range/type-checked → bad_params (never assert on bot input — AGENTS
-   fail-early split: invariants assert, untrusted input returns a structured error).
+/* time/render/frame command group. Bot input is range/type-checked → bad_params; never assert
+   on untrusted input (invariants assert, untrusted input returns a structured error).
    Compiles out entirely when NT_DEVAPI_REGISTER_time is absent. */
 
 #ifdef NT_DEVAPI_REGISTER_time
@@ -38,13 +37,8 @@ static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
-/* D-10: L2 lockstep-crunch step command — advance exactly N fixed-dt sim frames; default 1.
-   Deferred: queues the advances AND holds the response until all N sim-advances complete, so the
-   caller observes frame already advanced by exactly count (the synchronous lockstep contract the
-   client step() helper promises). The managed loop drains one pending_step per iteration, each
-   firing one managed_sim_tick that decrements this slot → it resolves on the count-th advance.
-   Without this the response returned before the async drain finished, so a follow-up frame.current
-   read raced the queue and saw frame advanced by ~1 instead of count. */
+/* Lockstep-crunch step (default 1). Deferred: the response is held until all count sim-advances
+   complete, so the caller observes frame already advanced by exactly count, not mid-drain. */
 static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
@@ -61,9 +55,8 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         set_bad_params(err, "time.step: count out of range [1, NT_DEVAPI_STEP_MAX]");
         return false;
     }
-    /* Only MANUAL drains pending_steps. Queuing into RUN would never drain (RUN advances on wall
-       time), and under RUN+pause the deferred reply could never resolve → the caller blocks until
-       its socket timeout. Reject before any side effect so bot input fails fast, never hangs. */
+    /* Only MANUAL drains pending_steps; queued into RUN they never drain, and under RUN+pause the
+       deferred reply could never resolve → the caller would block until its socket timeout. */
     if (g_nt_app.mode != NT_APP_MODE_MANUAL) {
         set_bad_params(err, "time.step: only valid in 'manual' mode");
         return false;
@@ -84,8 +77,8 @@ static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_err
         set_bad_params(err, "time.set_scale: scale must be finite and >= 0");
         return false;
     }
-    /* A huge finite double narrows to +inf in float (CR-01's sibling); +inf scale → dt = wall_dt*inf
-       poisons g_nt_app.time/dt. Reject any scale whose float form is not finite. */
+    /* A huge finite double narrows to +inf in float; +inf scale → dt = wall_dt*inf poisons
+       g_nt_app.time/dt. Reject any scale whose float form is not finite. */
     float fscale = (float)scale;
     if (!isfinite(fscale)) {
         set_bad_params(err, "time.set_scale: scale out of representable range");
@@ -118,7 +111,7 @@ static bool cmd_time_set_mode(const cJSON *params, cJSON *result, nt_devapi_erro
 }
 
 /* Writes g_nt_app.target_dt directly (existing field semantics): fps>0 → 1/fps, fps==0 → uncapped.
-   No new engine setter needed — target_dt is the canonical frame-cap field (D-15). */
+   No new engine setter needed — target_dt is the canonical frame-cap field. */
 static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "fps");
@@ -173,7 +166,7 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
 // #endregion
 
 // #region frame.*
-/* D-14: frame.current → {frame, time, dt}; g_nt_app.time = sum of applied dts = game-elapsed time. */
+/* frame.current → {frame, time, dt}; g_nt_app.time = sum of applied dts = game-elapsed time. */
 static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -184,8 +177,8 @@ static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_erro
     return true;
 }
 
-/* Clone of test.defer: range-check then ride the Phase 64 deferred queue. PAUSE never advances the
-   sim, so a wait during pause simply never resolves; over-cap fails fast (never spins) (D-08/Pitfall 4). */
+/* Range-check then ride the bounded deferred queue. PAUSE never advances the sim, so a wait
+   during pause never resolves; over-cap fails fast (never spins). */
 static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;

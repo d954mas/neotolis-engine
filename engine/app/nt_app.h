@@ -39,13 +39,13 @@ void nt_app_quit(void);
 
 /* ---- Managed loop + time control (opt-in; raw nt_app_run stays byte-identical) ---- */
 
-/* Opt-in loop that owns the single g_nt_app.dt scalar per mode (D-07). Same single-callback
+/* Opt-in loop that owns the single g_nt_app.dt scalar per mode. Same single-callback
    signature as nt_app_run; the game keeps wiring poll/input/update/render inside fn. */
 void nt_app_run_managed(nt_app_frame_fn fn);
 
 void nt_app_pause(void); /* RUN: dt -> 0, frame frozen, fn still runs */
 void nt_app_resume(void);
-void nt_app_set_scale(float scale); /* RUN dt multiplier (NOT a determinism primitive, D-13) */
+void nt_app_set_scale(float scale); /* RUN dt multiplier (NOT a determinism primitive) */
 void nt_app_set_mode(nt_app_mode_t mode);
 void nt_app_set_step_dt(float step_dt);
 void nt_app_step(int count); /* MANUAL: queue `count` fixed-dt advances */

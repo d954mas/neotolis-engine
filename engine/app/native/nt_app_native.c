@@ -4,8 +4,8 @@
 
 #include "core/nt_builtins.h"
 
-/* D-11 tick seam — devapi is dev-only and not linked in release; include only when enabled so the
-   app module gains zero nt_devapi_* symbols by default (PROTO-10 zero-delta canary). */
+/* devapi is dev-only and stripped in release; conditional include keeps this backend
+   symbol-clean (zero nt_devapi_* symbols) when devapi is absent. */
 #ifdef NT_DEVAPI_ENABLED
 #include "devapi/nt_devapi_internal.h"
 #endif
@@ -47,9 +47,8 @@ void nt_app_run(nt_app_frame_fn fn) {
     }
 }
 
-/* Managed sibling of nt_app_run: owns the single g_nt_app.dt scalar per mode (D-07).
-   Raw nt_app_run above is untouched (TIME-06). dt is computed per mode BEFORE the chokepoint
-   block; frame advances + the deferred tick fire only on a sim-advance (D-09/D-11). */
+/* Managed variant: owns the single g_nt_app.dt scalar (computed per mode); frame and the
+   deferred tick advance only on a sim-advance. Raw nt_app_run is intentionally unchanged. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_app_run_managed(nt_app_frame_fn fn) {
     s_frame_fn = fn;
@@ -57,7 +56,7 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
     double prev_time = nt_time_now();
 
 #ifdef NT_DEVAPI_ENABLED
-    nt_devapi_set_managed_tick(true); /* managed loop owns the deferred tick (D-11) */
+    nt_devapi_set_managed_tick(true); /* tick ownership: managed loop, not net_poll */
 #endif
 
     while (!nt_window_should_close()) {
@@ -67,17 +66,17 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
 
         float dt = 0.0F;
         bool sim_advanced = false;
-        // #region dt per mode (D-07/D-10)
+        // #region dt per mode
         switch (g_nt_app.mode) {
         case NT_APP_MODE_RUN:
             if (!g_nt_app.paused) {
-                dt = wall_dt * g_nt_app.scale; /* scale: observation only (D-13) */
+                dt = wall_dt * g_nt_app.scale; /* scale: observation only, not a determinism primitive */
                 sim_advanced = true;
             }
             break;
         case NT_APP_MODE_MANUAL:
             if (g_nt_app.pending_steps > 0) {
-                dt = g_nt_app.step_dt; /* EXACT: no wall clock, no max_dt clamp (D-10/D-12) */
+                dt = g_nt_app.step_dt; /* exact step_dt: no wall clock, no max_dt clamp (lockstep determinism) */
                 g_nt_app.pending_steps--;
                 sim_advanced = true;
             }
@@ -88,7 +87,7 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
         g_nt_app.dt = dt;
         g_nt_app.time += dt;
         if (sim_advanced) {
-            g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter (D-09) */
+            g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter */
 #ifdef NT_DEVAPI_ENABLED
             /* Tick the deferred queue once per sim-advance, BEFORE the frame fn enqueues new
                commands (mirrors net_poll's "tick before commands enqueue" invariant). */
@@ -110,7 +109,7 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
     }
 
 #ifdef NT_DEVAPI_ENABLED
-    nt_devapi_set_managed_tick(false); /* relinquish tick ownership on loop exit (D-11) */
+    nt_devapi_set_managed_tick(false); /* release tick ownership on exit */
 #endif
 }
 

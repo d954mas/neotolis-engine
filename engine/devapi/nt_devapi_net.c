@@ -275,7 +275,7 @@ void nt_devapi_net_poll(void) {
     /* Advance every in-flight deferred slot once per frame, BEFORE this frame's commands enqueue
        new ones — otherwise a slot enqueued this frame would be ticked the same frame and resolve
        one frame early (a 1-frame deferral would resolve in the poll it arrived in).
-       D-11: skip when the managed loop owns the tick — it ticks once per sim-advance instead, so
+       Skip when the managed loop owns the tick — it ticks once per sim-advance instead, so
        frame.wait counts game frames, not idle pause/manual spins (no double-tick). */
     if (!nt_devapi_managed_tick_active()) {
         nt_devapi_deferred_tick();

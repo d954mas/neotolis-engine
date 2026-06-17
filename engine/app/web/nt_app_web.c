@@ -46,10 +46,10 @@ void nt_app_run(nt_app_frame_fn fn) {
     emscripten_request_animation_frame_loop(nt_app_web_frame, NULL);
 }
 
-/* Managed-loop web parity is deferred to Phase 70 (native is the backbone in 65). */
+/* Not supported on web; the assert prevents a silent no-op. */
 void nt_app_run_managed(nt_app_frame_fn fn) {
     (void)fn;
-    NT_ASSERT(0 && "nt_app_run_managed not supported on web (deferred to Phase 70)");
+    NT_ASSERT(0 && "nt_app_run_managed not supported on web");
 }
 
 void nt_app_quit(void) { NT_ASSERT(0 && "nt_app_quit not supported on web"); }

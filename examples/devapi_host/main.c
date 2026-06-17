@@ -65,10 +65,9 @@ static void frame(void) {
     nt_devapi_net_poll();
     nt_input_poll();
 
-    /* D-01/D-02: draw + the host's own swap go TOGETHER under the render flag —
-       never skip-draw-but-swap (that would present a stale buffer). render off
-       => draw_calls stays 0 (TIME-04 observable). This host has no real draw
-       yet; the placeholder marks where draw would issue before the swap. */
+    /* Draw + the host's own swap go TOGETHER under the render flag — never skip-draw-but-swap
+       (that would present a stale buffer). Render off => draw_calls stays 0. This host has no
+       real draw yet; the placeholder marks where draw would issue before the swap. */
     if (nt_app_render_enabled()) {
         /* placeholder: real draw / nt_ui_walk goes here */
         nt_window_swap_buffers();
@@ -93,7 +92,7 @@ int main(void) {
     g_nt_window.width = 800;
     g_nt_window.height = 600;
     nt_window_init();
-    /* D-16: vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
+    /* vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 
