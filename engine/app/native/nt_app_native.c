@@ -4,6 +4,12 @@
 
 #include "core/nt_builtins.h"
 
+/* D-11 tick seam — devapi is dev-only and not linked in release; include only when enabled so the
+   app module gains zero nt_devapi_* symbols by default (PROTO-10 zero-delta canary). */
+#ifdef NT_DEVAPI_ENABLED
+#include "devapi/nt_devapi_internal.h"
+#endif
+
 /* ---- File-scope statics (zero-initialized by C standard) ---- */
 
 static nt_app_frame_fn s_frame_fn;
@@ -50,6 +56,10 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
 
     double prev_time = nt_time_now();
 
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_set_managed_tick(true); /* managed loop owns the deferred tick (D-11) */
+#endif
+
     while (!nt_window_should_close()) {
         double now = nt_time_now();
         float wall_dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
@@ -79,6 +89,11 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
         g_nt_app.time += dt;
         if (sim_advanced) {
             g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter (D-09) */
+#ifdef NT_DEVAPI_ENABLED
+            /* Tick the deferred queue once per sim-advance, BEFORE the frame fn enqueues new
+               commands (mirrors net_poll's "tick before commands enqueue" invariant). */
+            nt_devapi_managed_sim_tick();
+#endif
         }
         s_frame_fn();
 
@@ -93,6 +108,10 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
             }
         }
     }
+
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_set_managed_tick(false); /* relinquish tick ownership on loop exit (D-11) */
+#endif
 }
 
 void nt_app_quit(void) { nt_window_request_close(); }

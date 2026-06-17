@@ -335,6 +335,17 @@ void nt_devapi_deferred_tick(void) {
     }
 }
 
+/* D-11 managed-tick seam: when set, the managed loop owns the tick (one per sim-advance) and
+   net_poll skips its own. Raw loop leaves this false → net_poll ticks every frame (Phase 64). */
+static bool s_managed_tick;
+
+void nt_devapi_set_managed_tick(bool on) { s_managed_tick = on; }
+bool nt_devapi_managed_tick_active(void) { return s_managed_tick; }
+
+/* Named seam so the app's "tick before this frame's commands enqueue" intent is explicit at the
+   call site. Forwards to deferred_tick; the only added meaning is the sim-advance ordering. */
+void nt_devapi_managed_sim_tick(void) { nt_devapi_deferred_tick(); }
+
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
     /* Read results only: pop the FIRST in-flight slot already at frames_left <= 0. Never

@@ -151,6 +151,20 @@ void test_scale_multiplies_wall_dt(void) {
     }
 }
 
+/* D-11 sim-advance proxy: MANUAL with no pending steps never advances the frame (so the deferred
+   tick — driven by sim-advance in managed mode — would never fire during manual-idle). The full
+   L1+L2 "yield after N sim-advances, never during pause/idle" test lands in Plan 02's
+   test_devapi_time.c, where the deferred queue + submit() are linked. */
+void test_manual_idle_freezes_frame(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL; /* no nt_app_step() -> pending_steps == 0 */
+    s_iter_target = 5;
+
+    nt_app_run_managed(record_frame_fn);
+
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_app.frame); /* frozen: no sim-advance, no tick */
+    TEST_ASSERT_TRUE_MESSAGE(s_frame_log_count >= 5, "frame fn must keep running in manual-idle");
+}
+
 /* TIME-04 (L1 half): render flag defaults true and toggles; loop-agnostic engine state. */
 void test_render_flag_default_true_and_toggles(void) {
     TEST_ASSERT_TRUE(nt_app_render_enabled());
@@ -167,6 +181,7 @@ int main(void) {
     RUN_TEST(test_manual_step_bit_exact_1_60);
     RUN_TEST(test_manual_reproducible_across_two_runs);
     RUN_TEST(test_scale_multiplies_wall_dt);
+    RUN_TEST(test_manual_idle_freezes_frame);
     RUN_TEST(test_render_flag_default_true_and_toggles);
     return UNITY_END();
 }

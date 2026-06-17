@@ -1,6 +1,13 @@
 #include "app/nt_app.h"
 #include "time/nt_time.h"
 
+/* D-11 tick seam — devapi is dev-only; include only when enabled so the stub backend gains zero
+   nt_devapi_* symbols by default. The L1 test_app_managed does NOT define NT_DEVAPI_ENABLED, so it
+   stays pure L1; the seam is exercised by the L2 test (Plan 02) which defines it. */
+#ifdef NT_DEVAPI_ENABLED
+#include "devapi/nt_devapi_internal.h"
+#endif
+
 /* No-op platform backend for headless builds and testing.
    Simple frame loop without GLFW dependency. */
 
@@ -51,6 +58,10 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
 
     double prev_time = nt_time_now();
 
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_set_managed_tick(true); /* managed loop owns the deferred tick (D-11) */
+#endif
+
     while (!s_should_quit) {
         double now = nt_time_now();
         float wall_dt = (float)(now - prev_time);
@@ -83,6 +94,11 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
         g_nt_app.time += dt;
         if (sim_advanced) {
             g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter (D-09) */
+#ifdef NT_DEVAPI_ENABLED
+            /* Tick the deferred queue once per sim-advance, BEFORE the frame fn enqueues new
+               commands (mirrors net_poll's "tick before commands enqueue" invariant). */
+            nt_devapi_managed_sim_tick();
+#endif
         }
         s_frame_fn();
 
@@ -97,6 +113,10 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
             }
         }
     }
+
+#ifdef NT_DEVAPI_ENABLED
+    nt_devapi_set_managed_tick(false); /* relinquish tick ownership on loop exit (D-11) */
+#endif
 }
 
 void nt_app_quit(void) { s_should_quit = true; }

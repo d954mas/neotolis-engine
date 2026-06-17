@@ -41,6 +41,13 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_MAX_DEFERRED 128
 #endif
 
+/* Upper bound for frame.wait{frames} (Plan 02 consumes it). Independent of the slot-count cap:
+   a single long wait holds ONE slot for its whole duration, so a wait of a few thousand frames is
+   the legitimate ceiling, not the concurrent-slot limit. Override per build with -D. */
+#ifndef NT_DEVAPI_FRAME_WAIT_MAX
+#define NT_DEVAPI_FRAME_WAIT_MAX 4096
+#endif
+
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
@@ -61,6 +68,15 @@ void nt_devapi_deferred_reset(void);
 /* Advance all in-flight deferred slots once per frame (decrement frames_left exactly once).
    Call before draining with nt_devapi_poll_response, which only pops ready slots. */
 void nt_devapi_deferred_tick(void);
+
+/* D-11 managed-tick seam. The managed loop (nt_app_run_managed) owns the tick when active:
+   it sets s_managed_tick true at entry and calls nt_devapi_managed_sim_tick() once per SIM-ADVANCE
+   (not per loop iteration) so frame.wait counts game frames, never idle pause/manual spins. When
+   the flag is set, net_poll skips its own per-iteration tick to avoid a double-tick. The raw loop
+   never sets the flag, so net_poll ticks every frame as in Phase 64. */
+void nt_devapi_set_managed_tick(bool on);
+void nt_devapi_managed_sim_tick(void);
+bool nt_devapi_managed_tick_active(void);
 // #endregion
 
 /* True between init and shutdown — lets submit enforce init-before-use. */
