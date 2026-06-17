@@ -49,8 +49,14 @@ static nt_sock_t s_client = NT_INVALID_SOCK;
 static bool s_wsa_init = false;
 #endif
 
-/* Growing recv accumulation buffer; JSON-lines split on '\n'. Dev-only, no input cap.
-   s_recv_len bytes are the unconsumed remainder carried between polls/frames. */
+/* Bounded line cap: an unterminated line larger than this is a framing desync / abuse on this
+   dev-only channel; the client is dropped. Mirrors the Python client's 1 MiB cap. Overridable. */
+#ifndef NT_DEVAPI_NET_MAX_LINE
+#define NT_DEVAPI_NET_MAX_LINE ((size_t)1024U * 1024U)
+#endif
+
+/* Growing recv accumulation buffer; JSON-lines split on '\n'. s_recv_len bytes are the unconsumed
+   remainder carried between polls/frames, bounded above by NT_DEVAPI_NET_MAX_LINE. */
 static char *s_recv_buf;
 static size_t s_recv_cap;
 static size_t s_recv_len;
@@ -334,6 +340,13 @@ void nt_devapi_net_poll(void) {
             }
             s_recv_len = rest;
         }
+    }
+    /* Bounded line cap (mirrors the Python client's 1 MiB cap): an unterminated remainder larger
+       than the cap is a framing desync / abuse — drop the client (it may reconnect) rather than
+       grow the buffer without limit. Complete lines were already consumed above. */
+    if (s_recv_len > NT_DEVAPI_NET_MAX_LINE) {
+        close_client();
+        return;
     }
     // #endregion
 
