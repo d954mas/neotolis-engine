@@ -47,69 +47,6 @@ static const char *pack_path(const char *dir, const char *name) {
     return s_path_buf;
 }
 
-// #region procedural icon rasterizer
-/* Coverage-AA triangle icons baked white so widgets tint them per-theme. The atlas is premultiplied,
- * so coverage IS the premultiplied white value (R=G=B=A=coverage). 4x supersample edge for soft AA. */
-#define ICON_MAX_DIM 32
-#define ICON_SS 4
-
-/* dir: 0=down (chevron), 1=right (submenu arrow), 2=up (tooltip caret). Triangle inset 1px so the
- * extrude/AA edge never clips. Returns coverage [0,1] for sample (sx,sy) in [0,1] unit space. */
-static float icon_tri_cover(int dir, float ux, float uy) {
-    /* Map to a 0..1 isosceles triangle pointing along `dir`; inside test via the apex/base edges. */
-    float a;
-    float b; /* a = across-axis position [-1,1] from center, b = along-axis progress [0,1] base->apex */
-    switch (dir) {
-    case 1: /* right: apex at x=1, base at x=0 */
-        a = uy * 2.0F - 1.0F;
-        b = ux;
-        break;
-    case 2: /* up: apex at y=0, base at y=1 */
-        a = ux * 2.0F - 1.0F;
-        b = 1.0F - uy;
-        break;
-    default: /* down: apex at y=1, base at y=0 */
-        a = ux * 2.0F - 1.0F;
-        b = uy;
-        break;
-    }
-    /* Inside when |a| <= (1 - b): full width at the base, narrowing to a point at the apex. */
-    const float half = 1.0F - b;
-    return (b >= 0.0F && b <= 1.0F && (a < 0.0F ? -a : a) <= half) ? 1.0F : 0.0F;
-}
-
-/* Rasterize a white coverage-AA triangle into rgba[w*h*4] (premultiplied: rgb == a == coverage). */
-static void icon_raster_tri(uint8_t *rgba, int w, int h, int dir) {
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            float acc = 0.0F;
-            for (int sy = 0; sy < ICON_SS; ++sy) {
-                for (int sx = 0; sx < ICON_SS; ++sx) {
-                    const float ux = ((float)x + ((float)sx + 0.5F) / (float)ICON_SS) / (float)w;
-                    const float uy = ((float)y + ((float)sy + 0.5F) / (float)ICON_SS) / (float)h;
-                    acc += icon_tri_cover(dir, ux, uy);
-                }
-            }
-            const float cov = acc / (float)(ICON_SS * ICON_SS);
-            const uint8_t v = (uint8_t)((cov * 255.0F) + 0.5F);
-            uint8_t *px = &rgba[((size_t)y * (size_t)w + (size_t)x) * 4U];
-            px[0] = v;
-            px[1] = v;
-            px[2] = v;
-            px[3] = v; /* premultiplied white */
-        }
-    }
-}
-
-static void add_icon_tri(NtBuilderContext *ctx, const char *name, int w, int h, int dir) {
-    static uint8_t buf[ICON_MAX_DIM * ICON_MAX_DIM * 4];
-    icon_raster_tri(buf, w, h, dir);
-    nt_atlas_sprite_opts_t o = nt_atlas_sprite_opts_defaults();
-    o.name = name;
-    nt_builder_atlas_add_raw(ctx, buf, (uint32_t)w, (uint32_t)h, &o);
-}
-// #endregion
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -275,10 +212,17 @@ int main(int argc, char *argv[]) {
     nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
 
-    /* App-widget icon affordances (white, tintable): dropdown chevron, submenu arrow, tooltip caret. */
-    add_icon_tri(ctx, "chevron_down", 16, 16, 0);
-    add_icon_tri(ctx, "arrow_right", 12, 12, 1);
-    add_icon_tri(ctx, "caret", 14, 10, 2);
+    /* App-widget icon affordances (white, tintable): dropdown chevron, submenu arrow, tooltip caret.
+     * Saved PNGs (tools/gen_icons.c regenerates them); builder premultiplies like every other sprite. */
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "chevron_down";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/chevron_down.png", &opts);
+
+    opts.name = "arrow_right";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/arrow_right.png", &opts);
+
+    opts.name = "caret";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/caret.png", &opts);
     (void)printf("  Atlas icons (tintable): chevron_down 16x16, arrow_right 12x12, caret 14x10\n");
 
     nt_builder_end_atlas(ctx);
