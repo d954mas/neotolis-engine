@@ -1,6 +1,7 @@
 #include "app/nt_app.h"
 
 #include <limits.h>
+#include <math.h>
 
 #include "core/nt_assert.h"
 
@@ -13,9 +14,20 @@ nt_app_t g_nt_app = {.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .re
 
 void nt_app_pause(void) { g_nt_app.paused = true; }
 void nt_app_resume(void) { g_nt_app.paused = false; }
-void nt_app_set_scale(float scale) { g_nt_app.scale = scale; }
-void nt_app_set_mode(nt_app_mode_t mode) { g_nt_app.mode = mode; }
-void nt_app_set_step_dt(float step_dt) { g_nt_app.step_dt = step_dt; }
+/* L1 invariants: callers are trusted game code (bot input is range-checked at L2 → bad_params).
+   A NaN/negative scale or non-positive step_dt poisons dt/time or stalls the loop — fail early. */
+void nt_app_set_scale(float scale) {
+    NT_ASSERT(isfinite(scale) && scale >= 0.0F);
+    g_nt_app.scale = scale;
+}
+void nt_app_set_mode(nt_app_mode_t mode) {
+    NT_ASSERT(mode == NT_APP_MODE_RUN || mode == NT_APP_MODE_MANUAL);
+    g_nt_app.mode = mode;
+}
+void nt_app_set_step_dt(float step_dt) {
+    NT_ASSERT(isfinite(step_dt) && step_dt > 0.0F);
+    g_nt_app.step_dt = step_dt;
+}
 
 void nt_app_step(int count) {
     NT_ASSERT(count >= 0); /* engine invariant: callers (L2 range-checks bot input) pass count >= 0 */

@@ -1,8 +1,7 @@
-/* L2 devapi time/render/frame group via submit() (no socket): discovery lists the new commands
-   with shapes (TIME-07), thin handlers forward to the nt_app L1 API, every bot-input range
-   violation returns bad_params (TIME-05), render.info reports {enabled,draw_calls} (TIME-04 L2),
-   frame.current reports {frame,time,dt} (D-14), and the highest-value D-11 test: frame.wait{frames:N}
-   yields after exactly N sim-advances and NEVER during PAUSE. */
+/* L2 devapi time/render/frame group via submit() (no socket): discovery lists the commands with
+   shapes, thin handlers forward to the nt_app L1 API, every bot-input range violation returns
+   bad_params, render.info reports {enabled,draw_calls}, frame.current reports {frame,time,dt}, and
+   the highest-value test: frame.wait{frames:N} yields after exactly N sim-advances and NEVER during PAUSE. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -25,7 +24,7 @@ void tearDown(void) { nt_devapi_shutdown(); }
 
 /* ---- helpers (clone of test_devapi_deferred.c cadence) ---- */
 
-/* One game-frame advance: bump g_nt_app.frame (what the managed loop does on a sim-advance), then
+/* One game-frame advance: bump g_nt_app.frame (what the loop does on a sim-advance), then
    read any deferred slot whose game-frame deadline was reached. */
 static const char *advance_sim(void) {
     g_nt_app.frame++;
@@ -72,7 +71,7 @@ static bool endpoints_has_method_with_shapes(const char *method) {
     return found;
 }
 
-/* ---- discovery (TIME-07) ---- */
+/* ---- discovery ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_discovery_lists_new_group(void) {
@@ -98,7 +97,7 @@ static void test_command_describe_time_step(void) {
     cJSON_Delete(root);
 }
 
-/* ---- forwarding (TIME-07 / TIME-04 L2) ---- */
+/* ---- forwarding ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_forwarding_to_nt_app(void) {
@@ -140,7 +139,7 @@ static void test_forwarding_to_nt_app(void) {
 /* time.step is DEFERRED (lockstep contract): it queues advances on pending_steps immediately, but
    holds the response until exactly `count` sim-advances have completed — so a follow-up read sees
    frame advanced by count, not by however many drained before the read. (Unit harness ticks the
-   deferred queue directly via advance_sim(); the real managed loop also drains pending_steps.) */
+   deferred queue directly via advance_sim(); the real loop also drains pending_steps.) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_step_deferred_resolves_after_count(void) {
     (void)parse_ok(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"manual\"}}"));
@@ -167,7 +166,7 @@ static void test_step_deferred_resolves_after_count(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
 }
 
-/* ---- render.* (TIME-04 L2 / D-03) ---- */
+/* ---- render.* ---- */
 
 static void test_render_info_reflects_flag(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"render.set_enabled\",\"params\":{\"enabled\":false}}"));
@@ -182,7 +181,7 @@ static void test_render_info_reflects_flag(void) {
     cJSON_Delete(root);
 }
 
-/* ---- frame.current (D-14) ---- */
+/* ---- frame.current ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_frame_current_matches_app(void) {
@@ -200,7 +199,7 @@ static void test_frame_current_matches_app(void) {
     cJSON_Delete(root);
 }
 
-/* ---- bad_params (TIME-05 fail-fast, never assert, never spin) ---- */
+/* ---- bad_params (fail-fast, never assert, never spin) ---- */
 
 static void test_bad_params_cases(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":0}}"));
@@ -220,7 +219,7 @@ static void test_frame_wait_over_cap_bad_params(void) {
     TEST_ASSERT_NULL(advance_sim());
 }
 
-/* CR-02: time.step{count} over the cap → bad_params, no backlog queued. cJSON clamps huge JSON
+/* time.step{count} over the cap → bad_params, no backlog queued. cJSON clamps huge JSON
    numbers to INT_MAX, so an uncapped count would wedge the host for billions of frames. */
 static void test_step_over_cap_bad_params(void) {
     char line[96];
@@ -229,8 +228,8 @@ static void test_step_over_cap_bad_params(void) {
     TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* rejected → nothing queued */
 }
 
-/* CR-01: a finite-but-tiny fps must fail fast, never store a +inf frame cap (which would spin-wait
-   the managed loop forever). target_dt must stay exactly its prior value (0 = uncapped from setUp). */
+/* a finite-but-tiny fps must fail fast, never store a +inf frame cap (which would spin-wait the
+   loop forever). target_dt must stay exactly its prior value (0 = uncapped from setUp). */
 static void test_set_fps_tiny_underflow_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_fps\",\"params\":{\"fps\":1e-50}}"));
     float zero = 0.0F;
@@ -244,16 +243,16 @@ static void test_step_requires_manual_mode(void) {
     TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* rejected before any side effect */
 }
 
-/* set_scale: a huge finite double narrows to +inf in float (CR-01's sibling) — reject so it can't
+/* set_scale: a huge finite double narrows to +inf in float — reject so it can't
    poison g_nt_app.time/dt. scale stays at its setUp default (1.0). */
 static void test_set_scale_huge_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_scale\",\"params\":{\"scale\":1e300}}"));
     TEST_ASSERT_TRUE(g_nt_app.scale > 0.99F && g_nt_app.scale < 1.01F); /* unchanged */
 }
 
-/* ---- D-11: yield after exactly N sim-advances (the highest-value test) ---- */
+/* ---- yield after exactly N sim-advances (the highest-value test) ---- */
 
-#define D11_WAIT_FRAMES 3
+#define WAIT_FRAMES 3
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_frame_wait_yields_after_n_sim_advances(void) {
@@ -261,7 +260,7 @@ static void test_frame_wait_yields_after_n_sim_advances(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":7,\"params\":{\"frames\":3}}"));
 
     /* N-1 sim-advances: still pending. */
-    for (int i = 0; i < D11_WAIT_FRAMES - 1; i++) {
+    for (int i = 0; i < WAIT_FRAMES - 1; i++) {
         TEST_ASSERT_NULL(advance_sim());
     }
 
@@ -288,7 +287,7 @@ static void test_frame_wait_never_yields_during_pause(void) {
 
     /* Drive many idle loop iterations: paused -> no sim-advance -> NO tick -> never yields. */
     for (int i = 0; i < 100; i++) {
-        /* The paused managed loop runs the frame fn but does NOT advance g_nt_app.frame. */
+        /* The paused loop runs the frame fn but does NOT advance g_nt_app.frame. */
         TEST_ASSERT_NULL(nt_devapi_poll_response());
     }
 }

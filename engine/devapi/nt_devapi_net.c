@@ -357,8 +357,8 @@ void nt_devapi_net_poll(void) {
 }
 // #endregion
 
-/* Per-tick game-facing update: for now just the TCP transport poll. Phase 70 will split the
-   transport poll (net/web) out of this core entry so both transports share it. */
+/* Per-tick game-facing update: for now just the TCP transport poll. A future web transport will
+   split the transport poll (net/web) out of this core entry so both transports share it. */
 void nt_devapi_update(void) { nt_devapi_net_poll(); }
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
