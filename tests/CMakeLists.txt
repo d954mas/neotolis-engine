@@ -406,6 +406,17 @@ if(NOT EMSCRIPTEN)
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
         nt_setup_test_target(test_devapi_discovery)
+
+        # L2 time/render/frame group via submit(): discovery + forwarding to nt_app L1 +
+        # bad_params + render.info + frame.current + the D-11 yield-after-N-sim-advances test.
+        # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_stats_stub
+        # (nt_stats_get_draw_calls -> 0 for render.info, no nt_gfx/font/material chain).
+        add_executable(test_devapi_time unit/test_devapi_time.c)
+        target_link_libraries(test_devapi_time PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_compile_definitions(test_devapi_time PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1 NT_DEVAPI_REGISTER_time=1
+        )
+        nt_setup_test_target(test_devapi_time)
     endif()
 
     # --- File system module tests ---
