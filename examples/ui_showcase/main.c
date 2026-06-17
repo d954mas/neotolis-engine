@@ -152,7 +152,7 @@ typedef struct {
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
     nt_ui_input_style_t *input, *input_caret, *input_sel;
     const nt_ui_modal_style_t *modal;
-    const nt_ui_dropdown_style_t *dropdown;
+    nt_ui_dropdown_style_t *dropdown; /* non-const: nt_ui_dropdown memoizes atlas-ref resolves into the style */
     const nt_ui_tooltip_style_t *tooltip;
     const nt_ui_menu_style_t *menu;
     nt_ui_tabbar_style_t *tabbar;    /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
@@ -456,6 +456,8 @@ static nt_atlas_region_ref_t s_panel_blue_ref;
 static nt_atlas_region_ref_t s_panel_brown_ref;
 /* Icon-button art (Kenney bunny); untinted so it shows its natural color. */
 static nt_atlas_region_ref_t s_icon_bunny_ref;
+/* Dropdown chevron affordance (down triangle; tintable). */
+static nt_atlas_region_ref_t s_chevron_down_ref;
 /* Tabs-demo icons: bunny on idle/hover, checkmark on the selected tab (game-owned content swap). */
 static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
 static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
@@ -540,6 +542,7 @@ static void init_styles(void) {
     s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE.value);
     s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN.value);
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
+    s_chevron_down_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHEVRON_DOWN.value);
     s_tabs_icon_idle_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
     s_tabs_icon_sel_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK.value);
 
@@ -813,17 +816,41 @@ static void init_styles(void) {
     s_modal_light = modal_base;
     s_modal_light.backdrop_color = 0xFF202830U; /* slate */
 
-    /* ---- Dropdown: dark uses the widget defaults; light recolors trigger/panel/rows. ---- */
+    /* ---- Dropdown (dogfood): sprite-based game UI. The trigger rides the Kenney button_blue slice9
+     * (per-state tint: muted idle, lifted hover, dim pressed); the list panel rides panel_blue; the
+     * chevron sprite eases its open-rotation. Rows stay flat (transparent idle so the panel shows
+     * through, eased hover/selected fills) for legibility on the sprite panel. An icon gutter is opened
+     * (icon_size) so some rows show a bunny icon and the rest leave aligned empty space. Flat colors are
+     * retained as the atlas-free fallback. corner_radius is moot for IMAGE bg (baked into the sprite). ---- */
     s_dropdown_dark = nt_ui_dropdown_style_defaults();
     s_dropdown_dark.row_height = 30U;
     s_dropdown_dark.max_visible_rows = 6U; /* the long city list scrolls past this */
+    s_dropdown_dark.icon_size = 22U;       /* leading icon gutter so iconed + text-only rows align */
+    s_dropdown_dark.chevron = s_chevron_down_ref;
+    s_dropdown_dark.chevron_tint = 0xFFE8F0FCU;
+    /* Trigger: same blue button sprite across states, differentiated by tint (cohesive family). */
+    s_dropdown_dark.trigger_idle.bg = btn_blue;
+    s_dropdown_dark.trigger_idle.bg_tint = 0xFFB6CDE6U; /* muted blue at rest */
+    s_dropdown_dark.trigger_idle.fill = 0xFF3A3A3AU;    /* atlas-free fallback */
+    s_dropdown_dark.trigger_hover.bg = btn_blue;
+    s_dropdown_dark.trigger_hover.bg_tint = 0xFFE0EDFAU; /* lifted on hover */
+    s_dropdown_dark.trigger_hover.fill = 0xFF464646U;
+    s_dropdown_dark.trigger_pressed.bg = btn_blue;
+    s_dropdown_dark.trigger_pressed.bg_tint = 0xFF8FA8C4U; /* dimmed while held */
+    s_dropdown_dark.trigger_pressed.fill = 0xFF2E2E2EU;
+    s_dropdown_dark.trigger_pressed.scale = 0.98F;
+    /* List panel: panel_blue slice9 frame; rows stay flat over it. */
+    s_dropdown_dark.panel_bg = s_panel_blue_ref;
+    s_dropdown_dark.panel_tint = 0xFFFFFFFFU;
     s_dropdown_light = s_dropdown_dark;
-    s_dropdown_light.trigger_bg = 0xFFF0F0F0U;
     s_dropdown_light.trigger_text = 0xFF202830U;
-    s_dropdown_light.panel_bg = 0xFFFFFFFFU;
     s_dropdown_light.row_text = 0xFF202830U;
-    s_dropdown_light.row_hover_bg = 0xFFDCE6F4U;
-    s_dropdown_light.row_selected_bg = 0xFFBED2F0U;
+    s_dropdown_light.chevron_tint = 0xFF24364CU;
+    s_dropdown_light.trigger_idle.bg_tint = 0xFFFFFFFFU; /* full blue on the pale theme */
+    s_dropdown_light.trigger_hover.bg_tint = 0xFFFFFFFFU;
+    s_dropdown_light.trigger_pressed.bg_tint = 0xFFCFE0F2U;
+    s_dropdown_light.row_hover.fill = 0xFFDCE6F4U;
+    s_dropdown_light.row_selected.fill = 0xFFBED2F0U;
 
     /* ---- Tooltip: a short reveal delay; light flips to a pale panel + dark text. ---- */
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
@@ -1500,19 +1527,25 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
     static const int fruit_count = (int)(sizeof fruits / sizeof fruits[0]);
     static const int city_count = (int)(sizeof cities / sizeof cities[0]);
 
+    /* Per-row icons: a parallel array (same length as labels). An unset ref ({0}, atlas.id==0) leaves an
+     * ALIGNED EMPTY gutter so the text still lines up (OS-menu icon-column behavior). Some fruits get a
+     * bunny icon, the rest stay empty -- proving the gutter holds alignment either way. */
+    const nt_atlas_region_ref_t fruit_icons[] = {s_icon_bunny_ref, {0}, s_icon_bunny_ref, {0}, {0}};
+
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick an item; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
 
-    /* Short list: fits without scrolling. */
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list)", g_current->caption);
+    /* Short list: fits without scrolling. Iconed gutter (some rows iconed, some aligned-empty). */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
     (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_count, st->dropdown.fruit_sel, "Pick a fruit", g_current->dropdown, &trigger_decl,
                                  &st->dropdown.fruit_open);
-    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
+    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_icons, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
 
-    /* Long list: more than max_visible_rows -> the list wraps in a scroll container. */
+    /* Long list: more than max_visible_rows -> the list wraps in a scroll container. NULL icons -> every
+     * row reserves an aligned-empty gutter (no per-row icon). */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
     (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, city_count, st->dropdown.city_sel, "Pick a city", g_current->dropdown, &trigger_decl,
                                  &st->dropdown.city_open);
-    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
+    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, NULL, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
 
     (void)snprintf(buf, sizeof buf, "fruit: %s", (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "(none)");
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
