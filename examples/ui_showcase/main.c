@@ -719,8 +719,9 @@ static void init_styles(void) {
     s_input_art.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
     s_input_art.placeholder.color = (Clay_Color){90.0F, 80.0F, 70.0F, 255.0F};
     s_input_art.caret_color = 0xFF202020U;
-    s_input_art.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_art = s_panel_beige_ref};   /* bg_color 0 = untinted */
-    s_input_art.skin[NT_UI_INPUT_HOVER] = (nt_ui_input_skin_t){.bg_art = s_panel_brown_ref};  /* 3rd state on hover */
+    /* bg_color stays 0 (untinted); each state shows a distinct frame sprite. */
+    s_input_art.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_art = s_panel_beige_ref};
+    s_input_art.skin[NT_UI_INPUT_HOVER] = (nt_ui_input_skin_t){.bg_art = s_panel_brown_ref};
     s_input_art.skin[NT_UI_INPUT_FOCUSED] = (nt_ui_input_skin_t){.bg_art = s_panel_blue_ref};
     s_input_art.border_width = 0.0F; /* frame lives in the art now, no vector border */
 

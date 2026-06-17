@@ -646,6 +646,12 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     nt_ui_clay_priv_close_element();
 }
 
+/* BATCHING COST: each field clips (this content-clip + a clipTo scissor per selection/text/caret float),
+ * and every scissor boundary flushes the sprite+text batch -- so fields don't batch with each other
+ * (~4 draw calls per focused field). This is inherent: the overlay needs floating (overlap) and a clipped
+ * float carries its own scissor; the clip itself is REQUIRED (a field can straddle an outer scroll). The
+ * cost is accepted -- it doesn't matter at typical field counts. Revisit only for UIs with hundreds of
+ * visible fields. */
 /* Open a non-floating child that fills the field's content box and clips both axes (pad_x-inset
  * horizontally, full field height vertically). The selection/text/caret floats attach to it and clip to
  * its box; the walker further intersects that with the box's full ancestor chain (so an outer tab scroll
