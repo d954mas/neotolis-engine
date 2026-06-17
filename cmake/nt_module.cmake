@@ -50,3 +50,20 @@ function(nt_add_module name)
     string(REPLACE "nt_" "" _alias_suffix "${name}")
     add_library(nt::${_alias_suffix} ALIAS ${name})
 endfunction()
+
+# nt_declare_interface(<module_name>)
+#
+# Creates a header-only INTERFACE target <module_name>_interface that carries
+# only the engine/ include root — no TU, so no LOG_DOMAIN injection. Modules
+# link this interface; the executable picks exactly one real/stub impl. Forgetting
+# the impl is a loud unresolved-symbol link error, never a silent no-op.
+#
+# Example: nt_declare_interface(nt_log) -> nt_log_interface + nt::log_interface
+function(nt_declare_interface name)
+    add_library(${name}_interface INTERFACE)
+    target_include_directories(${name}_interface INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    string(REPLACE "nt_" "" _alias_suffix "${name}")
+    add_library(nt::${_alias_suffix}_interface ALIAS ${name}_interface)
+endfunction()

@@ -2,11 +2,16 @@
 # API header: nt_log.h (shared by both implementations)
 # Real impl:  default/nt_log.c (printf-based output)
 # Stub impl:  stub/nt_log_stub.c (no-op empty bodies)
+# Interface:  nt_log_interface (header-only; modules link this, exe picks an impl)
+
+# Header-only interface carries nt_log.h's include root; the exe selects the impl.
+nt_declare_interface(nt_log)
 
 nt_add_module(nt_log LOG_DOMAIN "log"
     default/nt_log.c
     nt_log.h
 )
+target_link_libraries(nt_log PUBLIC nt_log_interface)
 
 # Real impl dedups nt_log_write_unique by xxHash64 of the message; the stub stays dep-free.
 target_link_libraries(nt_log PRIVATE nt_hash)
@@ -15,3 +20,4 @@ nt_add_module(nt_log_stub LOG_DOMAIN "log_stub"
     stub/nt_log_stub.c
     nt_log.h
 )
+target_link_libraries(nt_log_stub PUBLIC nt_log_interface)

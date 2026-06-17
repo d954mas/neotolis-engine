@@ -16,6 +16,8 @@ static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_key(int key, int down) { nt_input_set_key((nt_key_t)key, down != 0); }
 
+EMSCRIPTEN_KEEPALIVE void nt_input_web_on_char(unsigned int cp) { nt_input_buffer_char((uint32_t)cp); }
+
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_down(int id, float cx, float cy, float pressure, int ptype, int buttons) {
     float fx;
     float fy;
@@ -38,6 +40,25 @@ EMSCRIPTEN_KEEPALIVE void nt_input_web_on_blur(void) {
     nt_input_clear_all_keys();
     nt_input_clear_all_pointers();
 }
+
+/* ---- Soft-keyboard hint ---- */
+
+/* clang-format off */
+EM_JS(void, nt_input_web_set_text_input_mode, (int mode), {
+    var modes = ['text', 'numeric', 'email', 'url', 'text'];
+    var el = Module['canvas'] || document.activeElement;
+    if (!el) { return; }
+    el.setAttribute('inputmode', modes[mode] || 'text');
+    if (mode === 4 /* NT_TEXT_INPUT_PASSWORD */) {
+        el.setAttribute('type', 'password');
+    } else {
+        el.removeAttribute('type');
+    }
+})
+/* clang-format on */
+
+/* Map the field's text-input mode to the web on-screen keyboard (canvas inputmode/type). */
+void nt_input_set_text_input_mode(nt_text_input_mode_t mode) { nt_input_web_set_text_input_mode((int)mode); }
 
 /* ---- EM_JS event registration ---- */
 
@@ -98,16 +119,28 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
        Pointer: stride 7  [type, id, x, y, pressure, ptype, buttons, ...]
        Wheel:   stride 2  [dx, dy, ...] */
     Module['_ntKeyBuf'] = [];
+    Module['_ntCharBuf'] = [];
     Module['_ntPtrBuf'] = [];
     Module['_ntWheelBuf'] = [];
     Module['_ntBlurred'] = false;
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
-        if (e.repeat) return;
-        var k = keyMap[e.code];
-        if (k !== undefined) {
-            Module['_ntKeyBuf'].push(k, 1);
+        /* First press emits the key event; OS auto-repeat (e.repeat) does NOT — nav/edit-key
+           repeat is the input field's own timer (is_down), so re-pushing key edges would double it. */
+        if (!e.repeat) {
+            var k = keyMap[e.code];
+            if (k !== undefined) {
+                Module['_ntKeyBuf'].push(k, 1);
+            }
+        }
+        /* Typed character: e.key is a single printable codepoint (not "Enter"/"ArrowUp"/...).
+           Array.from counts CODEPOINTS, so a non-BMP char (e.key.length 2 surrogate pair) still
+           passes -- the ring is UTF-32. Exclude Ctrl/Cmd shortcuts so Ctrl+A does not type 'a'. No
+           glfwSetCharCallback on web; this hand-rolled path is the char source. Emitted on e.repeat
+           too so a held key types a run, matching native GLFW char-repeat. */
+        if (Array.from(e.key).length === 1 && !e.ctrlKey && !e.metaKey) {
+            Module['_ntCharBuf'].push(e.key.codePointAt(0));
         }
         if (preventSet[e.code]) {
             e.preventDefault();
@@ -203,6 +236,7 @@ EM_JS(void, nt_input_web_flush_events, (void), {
         Module['_nt_input_web_on_blur']();
         Module['_ntBlurred'] = false;
         Module['_ntKeyBuf'].length = 0;
+        Module['_ntCharBuf'].length = 0;
         Module['_ntPtrBuf'].length = 0;
         Module['_ntWheelBuf'].length = 0;
         return;
@@ -214,6 +248,13 @@ EM_JS(void, nt_input_web_flush_events, (void), {
         Module['_nt_input_web_on_key'](kb[i], kb[i + 1]);
     }
     kb.length = 0;
+
+    /* Drain char buffer (stride 1: UTF-32 codepoint) */
+    var cb = Module['_ntCharBuf'];
+    for (var i = 0; i < cb.length; i++) {
+        Module['_nt_input_web_on_char'](cb[i]);
+    }
+    cb.length = 0;
 
     /* Drain pointer buffer (stride 7: type, id, x, y, pressure, ptype, buttons) */
     var pb = Module['_ntPtrBuf'];

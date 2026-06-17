@@ -485,6 +485,14 @@ jobs:
           find engine shared tools examples -name '*.c' -o -name '*.h' | \
             xargs clang-format --dry-run --Werror
 
+      # Module-composition gates: no engine module may link a real swappable impl, and omitting an
+      # impl must be a loud unresolved-symbol error. Both exit non-zero on a violation (clang is
+      # installed above for the loud-link check's throwaway compile).
+      - name: Run module-composition gates
+        run: |
+          bash scripts/check_no_real_impl_links.sh
+          bash scripts/check_link_failure_loud.sh
+
       # devapi ON so its TUs are in compile_commands.json. tidy.sh lints every .c, but devapi
       # uses CMake subdir-exclusion, so at the default (off) it would lint them with wrong flags.
       - name: Configure

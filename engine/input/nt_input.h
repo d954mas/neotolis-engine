@@ -128,12 +128,33 @@ typedef struct {
 
 extern nt_input_t g_nt_input;
 
+/* ---- Text input mode ---- */
+
+/* Hint to the platform on-screen keyboard / text-entry surface (mobile soft keyboard). Web maps
+ * these to the <canvas> inputmode/type; native + stub are no-ops. The web EM_JS depends on the
+ * numeric values (PASSWORD == 4) -- keep them in sync. */
+typedef enum {
+    NT_TEXT_INPUT_TEXT = 0,
+    NT_TEXT_INPUT_NUMERIC,
+    NT_TEXT_INPUT_EMAIL,
+    NT_TEXT_INPUT_URL,
+    NT_TEXT_INPUT_PASSWORD,
+} nt_text_input_mode_t;
+
 /* ---- Key query functions ---- */
 
 bool nt_input_key_is_down(nt_key_t key);
 bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
+
+/* Drain one typed UTF-32 codepoint (FIFO). Returns false and leaves *out
+   untouched when the char ring is empty. Fed by the platform char source. */
+bool nt_input_pop_char(uint32_t *out_codepoint);
+
+/* Hint the platform on-screen keyboard for the focused text field (mobile soft keyboard).
+   No-op on native/stub. Apply it when a field gains focus. */
+void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* ---- Mouse convenience helpers ---- */
 

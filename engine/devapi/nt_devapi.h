@@ -23,7 +23,7 @@
 nt_result_t nt_devapi_init(void);
 void nt_devapi_shutdown(void);
 
-/* Register a command (copies all 7 descriptor strings). NT_ERR_INIT_FAILED if `method`
+/* Register a command (copies all 7 descriptor strings). NT_ERR_INVALID_ARG if `method`
    is already registered — the dup is rejected, not overwritten. */
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data);
 

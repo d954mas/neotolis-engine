@@ -25,6 +25,10 @@
 #define HEADER_DIR "examples/ui_showcase/generated"
 #define FONT_PATH "examples/ui_showcase/raw/font.ttf"
 
+/* Demo-only Cyrillic block: the engine is codepoint-agnostic; the SHOWCASE bakes Latin +
+ * Cyrillic so the Input tab's Cyrillic field renders real multi-byte UTF-8 glyphs, not tofu. */
+#define CHARSET_CYRILLIC "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+
 /* Toggle track is a rounded pill; slice9 keeps the rounded end-caps fixed when stretched. */
 #define TRACK_BORDER_X 24
 #define TRACK_BORDER_Y 16
@@ -211,13 +215,13 @@ int main(int argc, char *argv[]) {
     nt_builder_end_atlas(ctx);
     // #endregion
 
-    // #region font: ASCII Latin only
+    // #region font: ASCII Latin + Cyrillic (demo-only)
     nt_builder_add_font(ctx, FONT_PATH,
                         &(nt_font_opts_t){
-                            .charset = NT_CHARSET_ASCII,
+                            .charset = NT_CHARSET_ASCII CHARSET_CYRILLIC,
                             .resource_name = "ui_showcase/font",
                         });
-    (void)printf("  Font (ASCII) added: ui_showcase/font\n");
+    (void)printf("  Font (ASCII + Cyrillic) added: ui_showcase/font\n");
     // #endregion
 
     // #region finish + codegen

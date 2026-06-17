@@ -1116,7 +1116,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     }
 
 #ifndef NT_HAS_BASISU
-    NT_LOG_ERROR("activate_texture: BASIS compression not available (built without NT_BASISU)");
+    NT_LOG_ERROR("activate_texture: BASIS compression not available (built without NT_HAS_BASISU)");
     return 0;
 #else
     /* Lazy transcoder init */

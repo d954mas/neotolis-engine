@@ -17,7 +17,7 @@ endif()
 
 # cjson is PUBLIC: the nt_devapi_handler_fn typedef in the public header takes
 # cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window nt_log)
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface)
 
 # Winsock: nt_devapi_net.c uses WSAStartup/socket/closesocket on Windows.
 if(WIN32)
