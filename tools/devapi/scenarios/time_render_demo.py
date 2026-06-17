@@ -93,8 +93,11 @@ def run(client: DevApiClient) -> None:
     assert info.get("enabled") is False, f"render.info.enabled is {info.get('enabled')!r}, expected False"
     assert info.get("draw_calls") == 0, f"render.info.draw_calls is {info.get('draw_calls')!r}, expected 0"
 
-    # Restore a normal live state for the next session.
+    # Restore a normal live state for the next session: render on, back to RUN, unpaused.
+    # (set_mode("run") matters — resume() only clears the pause flag; without it the host stays
+    # in MANUAL and looks frozen, dt=0, to any follow-on session.)
     client.render_set_enabled(True)
+    client.set_mode("run")
     client.resume()
 
     print(

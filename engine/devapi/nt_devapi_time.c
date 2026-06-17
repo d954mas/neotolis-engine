@@ -61,6 +61,13 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         set_bad_params(err, "time.step: count out of range [1, NT_DEVAPI_STEP_MAX]");
         return false;
     }
+    /* Only MANUAL drains pending_steps. Queuing into RUN would never drain (RUN advances on wall
+       time), and under RUN+pause the deferred reply could never resolve → the caller blocks until
+       its socket timeout. Reject before any side effect so bot input fails fast, never hangs. */
+    if (g_nt_app.mode != NT_APP_MODE_MANUAL) {
+        set_bad_params(err, "time.step: only valid in 'manual' mode");
+        return false;
+    }
     nt_app_step(count);
     return nt_devapi_defer_current(count);
 }
@@ -77,7 +84,14 @@ static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_err
         set_bad_params(err, "time.set_scale: scale must be finite and >= 0");
         return false;
     }
-    nt_app_set_scale((float)scale);
+    /* A huge finite double narrows to +inf in float (CR-01's sibling); +inf scale → dt = wall_dt*inf
+       poisons g_nt_app.time/dt. Reject any scale whose float form is not finite. */
+    float fscale = (float)scale;
+    if (!isfinite(fscale)) {
+        set_bad_params(err, "time.set_scale: scale out of representable range");
+        return false;
+    }
+    nt_app_set_scale(fscale);
     devapi_add_number(result, "scale", scale);
     return true;
 }

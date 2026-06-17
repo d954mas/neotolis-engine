@@ -237,6 +237,20 @@ static void test_set_fps_tiny_underflow_bad_params(void) {
     TEST_ASSERT_EQUAL_MEMORY(&zero, &g_nt_app.target_dt, sizeof(float)); /* unchanged, not +inf */
 }
 
+/* time.step is MANUAL-only: in RUN (setUp default) it must fail fast with bad_params and queue
+   nothing — otherwise RUN never drains the steps and RUN+pause would hang the deferred reply. */
+static void test_step_requires_manual_mode(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":5}}"));
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* rejected before any side effect */
+}
+
+/* set_scale: a huge finite double narrows to +inf in float (CR-01's sibling) — reject so it can't
+   poison g_nt_app.time/dt. scale stays at its setUp default (1.0). */
+static void test_set_scale_huge_bad_params(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_scale\",\"params\":{\"scale\":1e300}}"));
+    TEST_ASSERT_TRUE(g_nt_app.scale > 0.99F && g_nt_app.scale < 1.01F); /* unchanged */
+}
+
 /* ---- D-11: yield after exactly N sim-advances (the highest-value test) ---- */
 
 #define D11_WAIT_FRAMES 3
@@ -291,6 +305,8 @@ int main(void) {
     RUN_TEST(test_frame_wait_over_cap_bad_params);
     RUN_TEST(test_step_over_cap_bad_params);
     RUN_TEST(test_set_fps_tiny_underflow_bad_params);
+    RUN_TEST(test_step_requires_manual_mode);
+    RUN_TEST(test_set_scale_huge_bad_params);
     RUN_TEST(test_frame_wait_yields_after_n_sim_advances);
     RUN_TEST(test_frame_wait_never_yields_during_pause);
     return UNITY_END();
