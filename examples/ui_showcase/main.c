@@ -2151,12 +2151,12 @@ static void frame(void) {
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         {
-            /* Bottom-left overlay: nt_stats_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
-             * y-up text space, so anchor high enough (~5 line-heights) that the last line stays on
-             * screen and clear of the header's theme button at the top. */
+            /* Bottom-RIGHT overlay: nt_stats_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
+             * y-up text space. Anchor near the right edge (reserve ~170px for the widest line) and
+             * ~92px up so the last line stays on screen — keeps the HUD clear of the left nav tabs. */
             mat4 stats_model;
             glm_mat4_identity(stats_model);
-            glm_translate(stats_model, (vec3){10.0F, 92.0F, 0.0F});
+            glm_translate(stats_model, (vec3){scale.logical_w - 170.0F, 92.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
             nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();
