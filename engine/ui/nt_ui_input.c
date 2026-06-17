@@ -647,15 +647,15 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
 }
 
 /* Open a non-floating child that fills the field's content box and clips both axes (pad_x-inset
- * horizontally, full field height vertically). The text is an in-flow child of this box, so its scissor
- * is intersected with EVERY ancestor clip (incl. an outer tab scroll) -- it cannot bleed past the scroll.
- * childAlignment.y centers the single line; caret/selection still float over it. Caller must close it. */
+ * horizontally, full field height vertically). The selection/text/caret floats attach to it and clip to
+ * its box; the walker further intersects that with the box's full ancestor chain (so an outer tab scroll
+ * clips them too). The line is vertically centered by the floats' LEFT_CENTER attach. Caller must close. */
 static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
     nt_ui_element_data_t *id = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     NT_ASSERT(id != NULL && "nt_ui_input: scratch alloc failed (content clip data)");
     *id = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = 0U, .transform = nt_ui_transform_defaults(), .opacity = 1.0F};
     const Clay_ElementDeclaration content_decl = {
-        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
         .userData = (void *)id,
         .clip = {.horizontal = true, .vertical = true},
     };
@@ -663,11 +663,10 @@ static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
     nt_ui_clay_priv_configure_open_element(content_decl);
 }
 
-/* Emit the text as a NORMAL in-flow child of the content-clip, offset by (x,y) via transform (x =
- * -scroll_x for horizontal scroll). In-flow (NOT floating) so it inherits the FULL ancestor scissor
- * stack -- the content-clip box intersected with every outer clip (e.g. a tab scroll), so the text can
- * never bleed past an outer scroll the way a floating element does. The content-clip vertically centers
- * it (childAlignment.y); the transform shifts it horizontally without disturbing layout. */
+/* Float the text over the content-clip, sharing the SAME -scroll_x origin as the caret/selection so the
+ * overlay z-orders by declaration (selection behind, text, caret on top). clipTo=ATTACHED_PARENT clips it
+ * to the content-clip; the walker intersects that with the clip's full ancestor chain, so an outer tab
+ * scroll clips it too (a raw floating clipTo would leak the text past the scroll). */
 static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y, const char *disp, const nt_ui_label_style_t *ts) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
@@ -676,7 +675,9 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
     NT_ASSERT(wd != NULL && "nt_ui_input: scratch alloc failed (text wrapper data)");
     *wd = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
     const Clay_ElementDeclaration text_decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}, .userData = (void *)wd, /* carries layer + transform offset (-scroll_x); without it the text ignores scroll */
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}},
+        .userData = (void *)wd, /* carries layer + transform offset (-scroll_x); without it the text ignores scroll */
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
     };
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(text_decl);

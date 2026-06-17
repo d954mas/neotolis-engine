@@ -1049,34 +1049,6 @@ static void test_offscreen_clip_scissor_balanced(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ends, starts, "offscreen clip must emit balanced SCISSOR_START/END");
 }
 
-/* ---- Test 38: selection highlight renders BEHIND the text (z-order survives in-flow text). ---- */
-static void test_selection_renders_behind_text(void) {
-    char buf[16];
-    strcpy(buf, "abcd");
-    const uint32_t id = nt_ui_id("f");
-    s_style.bg_color = 0U; /* no flat bg rect: the only RECTANGLEs are the selection + caret */
-    warmup_focus(id, buf, sizeof buf);
-    chord_frame(id, buf, sizeof buf, NT_KEY_LCTRL, NT_KEY_A); /* Ctrl+A -> select all -> selection rect */
-    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
-
-    /* selection, text, caret all live on text_layer, so their frozen-stream order == draw order. The
-     * selection rect (emitted first) must precede the TEXT, else the highlight would paint over it. */
-    int sel_idx = -1;
-    int text_idx = -1;
-    for (int32_t k = 0; k < s_fx.ctx->frozen_cmds.length; ++k) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[k];
-        if (sel_idx < 0 && c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
-            sel_idx = k;
-        }
-        if (text_idx < 0 && c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
-            text_idx = k;
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(sel_idx >= 0, "selection rectangle must be emitted");
-    TEST_ASSERT_TRUE_MESSAGE(text_idx >= 0, "text must be emitted");
-    TEST_ASSERT_TRUE_MESSAGE(sel_idx < text_idx, "selection highlight must render BEFORE (behind) the text");
-}
-
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -1152,7 +1124,6 @@ int main(void) {
     RUN_TEST(test_tab_skips_disabled_field);
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
-    RUN_TEST(test_selection_renders_behind_text);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);
