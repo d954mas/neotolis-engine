@@ -56,8 +56,9 @@ static uint16_t resolve_port(void) {
 
 static void frame(void) {
     nt_window_poll();
-    /* Poll the transport BEFORE input so injected commands this frame observe the same
-       input state the engine is about to read. */
+    /* Poll devapi at frame start, before input: a command only queues an input
+       injection, nt_input_poll() then samples hardware, and a later apply step
+       overlays the queued injection so it wins (one frame-start touch-point). */
     nt_devapi_net_poll();
     nt_input_poll();
 
