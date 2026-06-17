@@ -9,7 +9,6 @@ mis-attribute a deferred result to the wrong call.
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
 import json
-import socket
 from typing import Any, Dict, List, Optional
 
 from .transport import Transport
@@ -46,15 +45,20 @@ class DevApiClient:
         while True:
             try:
                 line = self._transport.recv_line()
-            except (socket.timeout, TimeoutError) as exc:
+            except TimeoutError as exc:
                 # Name the pending request_id so a hang is diagnosable, not silent.
                 raise TimeoutError(f"no response for request_id={rid}") from exc
-            obj = json.loads(line)
+            try:
+                obj = json.loads(line)
+            except ValueError as exc:
+                raise ValueError(f"protocol error: invalid JSON from server: {line!r}") from exc
             obj_id = obj.get("request_id")
             if obj_id == rid:
                 return obj
             # A reply for a different request (deferred/pipelined) — stash and keep reading.
-            self._pending[obj_id] = obj
+            # Never key on None: an unidentified reply can't be claimed by any request.
+            if obj_id is not None:
+                self._pending[obj_id] = obj
 
     def request(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Send one command, block until its correlated reply arrives, return the raw envelope."""
@@ -78,12 +82,13 @@ class DevApiClient:
     def batch(self, calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Send one JSON-array line, receive one array reply, return entries in order.
 
-        A batch reply is a single line that is a JSON array; one rid tags the
-        envelope so the array is correlated like any other response.
+        Each entry carries its OWN request_id so the core's per-entry echoed ids
+        are distinct and individually correlatable (a single shared id would
+        collide). The reply array is returned in submission order.
         """
-        rid = self._alloc_id()
+        ids = [self._alloc_id() for _ in calls]
         arr = []
-        for c in calls:
+        for rid, c in zip(ids, calls):
             entry: Dict[str, Any] = {"method": c["method"], "request_id": rid}
             if c.get("params") is not None:
                 entry["params"] = c["params"]
@@ -92,13 +97,18 @@ class DevApiClient:
         while True:
             try:
                 line = self._transport.recv_line()
-            except (socket.timeout, TimeoutError) as exc:
-                raise TimeoutError(f"no response for batch request_id={rid}") from exc
-            obj = json.loads(line)
+            except TimeoutError as exc:
+                raise TimeoutError(f"no response for batch request_ids={ids}") from exc
+            try:
+                obj = json.loads(line)
+            except ValueError as exc:
+                raise ValueError(f"protocol error: invalid JSON from server: {line!r}") from exc
             if isinstance(obj, list):
                 return obj
             # A non-array line is an out-of-order single reply — stash by its id.
-            self._pending[obj.get("request_id")] = obj
+            rid_obj = obj.get("request_id")
+            if rid_obj is not None:
+                self._pending[rid_obj] = obj
 
     def wait_frames(self, n: int) -> Dict[str, Any]:
         """Surface-present stub. Returns the server's unknown_method envelope until frame.wait is implemented (NOT a silent no-op)."""

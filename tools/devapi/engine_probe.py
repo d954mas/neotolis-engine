@@ -20,27 +20,40 @@ import sys
 # the repo root importable, so `from tools.devapi import ...` resolves.
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-    from tools.devapi.client import DevApiClient
+    from tools.devapi.client import DevApiClient, DevApiResultError
     from tools.devapi.transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
 else:
-    from .client import DevApiClient
+    from .client import DevApiClient, DevApiResultError
     from .transport import DEFAULT_PORT, DEFAULT_READ_TIMEOUT, SocketTransport
+
+
+def _parse_port(raw: str) -> int:
+    """int() + range-check; clean exit(2) on garbage instead of a raw traceback."""
+    try:
+        port = int(raw)
+    except ValueError:
+        print("error: --port must be an integer 1..65535", file=sys.stderr)
+        sys.exit(2)
+    if not (1 <= port <= 65535):
+        print("error: --port must be an integer 1..65535", file=sys.stderr)
+        sys.exit(2)
+    return port
 
 
 def resolve_port(argv) -> int:
     """--port N (or positional) > env NT_DEVAPI_PORT > DEFAULT_PORT."""
     for i, a in enumerate(argv):
         if a == "--port" and i + 1 < len(argv):
-            return int(argv[i + 1])
+            return _parse_port(argv[i + 1])
         if a.startswith("--port="):
-            return int(a.split("=", 1)[1])
+            return _parse_port(a.split("=", 1)[1])
     env = os.environ.get("NT_DEVAPI_PORT")
     if env:
-        return int(env)
+        return _parse_port(env)
     # Lone positional integer is also accepted.
     for a in argv:
         if a.isdigit():
-            return int(a)
+            return _parse_port(a)
     return DEFAULT_PORT
 
 
@@ -87,6 +100,9 @@ def main(port: int) -> int:
         return 0
     except AssertionError as exc:
         print(f"FAIL: assertion: {exc}")
+        return 1
+    except (DevApiResultError, ValueError) as exc:
+        print(f"FAIL: protocol error: {exc}")
         return 1
     except (ConnectionError, TimeoutError, OSError) as exc:
         print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")

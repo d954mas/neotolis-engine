@@ -51,11 +51,20 @@ class SocketTransport(Transport):
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
         read_timeout: float = DEFAULT_READ_TIMEOUT,
     ) -> None:
+        # Set first so a failure mid-construction still leaves close() safe.
+        self._sock = None
+        self._f = None
         self._sock = socket.create_connection((host, port), timeout=connect_timeout)
         # The read timeout is mandatory, not optional — never block forever.
         self._sock.settimeout(read_timeout)
         # makefile handles partial-recv reassembly + UTF-8 decode; readline frames on '\n'.
         self._f = self._sock.makefile("r", encoding="utf-8")
+
+    def __enter__(self) -> "SocketTransport":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def send(self, line: str) -> None:
         # sendall loops internally on partial writes; framing newline is the line terminator.
@@ -64,14 +73,19 @@ class SocketTransport(Transport):
     def recv_line(self) -> str:
         # On read-timeout expiry readline raises socket.timeout/TimeoutError — let it
         # propagate; the client re-raises naming the pending request_id.
-        line = self._f.readline()
+        # Bound the read so a desynced stream can never grow memory without limit.
+        line = self._f.readline(1_048_576)
         if line == "":
             # Orderly disconnect: recv returned b"" (mirrors the server-side close path). Fail fast, never hang.
             raise ConnectionError("server closed the connection")
-        return line.rstrip("\n")
+        if len(line) >= 1_048_576 and not line.endswith("\n"):
+            raise ConnectionError("oversized/unterminated line — framing desync")
+        return line.rstrip("\r\n")
 
     def close(self) -> None:
         try:
-            self._f.close()
+            if self._f is not None:
+                self._f.close()
         finally:
-            self._sock.close()
+            if self._sock is not None:
+                self._sock.close()
