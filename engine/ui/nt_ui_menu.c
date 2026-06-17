@@ -28,12 +28,17 @@ static inline uint32_t menu_hover_id(uint32_t menu_id, uint8_t depth) {
     return nt_ui_derived_id(menu_id, salt);
 }
 
-/* Per-open-submenu hover-intent retained state. prev_mouse seeds the aim triangle apex next frame;
- * switch_timer accumulates dwell OFF the triangle and crosses AIM_FALLBACK to allow a sibling switch. */
+/* Per-open-submenu hover-intent retained state. apex is the STABLE triangle apex (the cursor pos when
+ * the corridor was first primed, i.e. where the user left the parent row) — NOT the per-frame previous
+ * cursor. A per-frame apex sits ~1px from the cursor, making the triangle a huge near-degenerate wedge
+ * that contains almost the whole half-plane along the submenu edge: any vertical travel toward a sibling
+ * still reads "aiming", so the corridor never released and the user was trapped (Symptom A/B). A fixed
+ * apex makes the corridor a real narrow wedge that the cursor leaves when it moves sibling-ward.
+ * switch_timer accumulates dwell OFF the corridor and crosses AIM_FALLBACK to allow a sibling switch. */
 typedef struct {
-    float prev_mouse_x, prev_mouse_y;
+    float apex_x, apex_y;
     float switch_timer;
-    bool primed; /* false on a fresh cell -> prev_mouse not yet meaningful (keep this frame) */
+    bool primed; /* false on a fresh cell -> apex not yet meaningful (latch it this frame, keep open) */
     uint8_t _pad[3];
 } nt_ui_menu_hover_t;
 
@@ -100,39 +105,42 @@ static void menu_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h,
     *cy = sub_y + sub_h;
 }
 
-/* Per-frame decision: while the cursor sits inside {prev_mouse, near_top, near_bottom} the user is
- * aiming at the open submenu -> KEEP it open + reset the dwell timer. Otherwise accumulate dwell; once
- * it passes AIM_FALLBACK allow the hovered sibling to win. A fresh (unprimed) cell keeps this frame so
- * the very first frame after opening never instantly switches. */
+/* Per-frame decision: while the cursor sits inside {apex, near_top, near_bottom} the user is aiming at
+ * the open submenu -> KEEP it open + reset the dwell timer. Otherwise accumulate dwell; once it passes
+ * AIM_FALLBACK allow the hovered sibling to win. A fresh (unprimed) cell latches the apex at the current
+ * cursor and keeps this frame so the very first frame after opening never instantly switches. */
 static bool menu_hover_intent(nt_ui_menu_hover_t *c, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, uint8_t side, float dt) {
+    if (!c->primed) {
+        /* Latch the corridor apex once: the cursor pos when the submenu was first armed (where the user
+         * left the parent row). It is the FIXED triangle tip for the whole corridor lifetime. */
+        c->apex_x = mouse_x;
+        c->apex_y = mouse_y;
+        c->switch_timer = 0.0F;
+        c->primed = true;
+        return true;
+    }
     float bx = 0.0F;
     float by = 0.0F;
     float cx = 0.0F;
     float cy = 0.0F;
     menu_aim_corners(sub_x, sub_y, sub_w, sub_h, side, &bx, &by, &cx, &cy);
+    /* Keep the submenu open if the cursor is parked OVER it (the common stationary case), else if it is
+     * inside the STABLE {apex, near corners} corridor (genuinely traveling toward the open child —
+     * Pitfall 3). Off both, the dwell timer races AIM_FALLBACK so a quick sibling pass-over has a short
+     * grace before the switch. The corridor itself is HARD-capped at AIM_FALLBACK*2 of wall-clock since
+     * priming so a cursor that parks inside the wedge still releases (spec: never trap the user). */
+    const bool over_sub = (mouse_x >= sub_x) && (mouse_x <= sub_x + sub_w) && (mouse_y >= sub_y) && (mouse_y <= sub_y + sub_h);
+    const bool in_corridor = menu_point_in_tri(mouse_x, mouse_y, c->apex_x, c->apex_y, bx, by, cx, cy);
     bool keep = true;
-    if (c->primed) {
-        /* Keep the submenu open if the cursor is parked OVER it (the common stationary case), else if it
-         * is actively AIMING at it (moving inside the prev->near-corners triangle — Pitfall 3). The
-         * triangle apex is the PREVIOUS cursor pos; a stationary cursor makes it degenerate (point ==
-         * apex reports "inside" forever), so aim-keep requires actual travel past a small epsilon. A
-         * cursor that is neither over the submenu nor aiming runs the dwell timer toward AIM_FALLBACK. */
-        const bool over_sub = (mouse_x >= sub_x) && (mouse_x <= sub_x + sub_w) && (mouse_y >= sub_y) && (mouse_y <= sub_y + sub_h);
-        const float mdx = mouse_x - c->prev_mouse_x;
-        const float mdy = mouse_y - c->prev_mouse_y;
-        const bool moved = ((mdx * mdx) + (mdy * mdy)) > 1.0F; /* > 1px travel */
-        const bool aiming = moved && menu_point_in_tri(mouse_x, mouse_y, c->prev_mouse_x, c->prev_mouse_y, bx, by, cx, cy);
-        if (over_sub || aiming) {
-            c->switch_timer = 0.0F;
-            keep = true;
-        } else {
-            c->switch_timer += dt;
-            keep = (c->switch_timer < NT_UI_MENU_AIM_FALLBACK_SECS);
-        }
+    if (over_sub) {
+        c->switch_timer = 0.0F; /* parked over the child: always keep, dwell grace resets */
+    } else if (in_corridor && (c->switch_timer < NT_UI_MENU_AIM_FALLBACK_SECS * 2.0F)) {
+        c->switch_timer += dt; /* aiming through the wedge: keep, but the corridor still ages (hard cap) */
+        keep = true;
+    } else {
+        c->switch_timer += dt;
+        keep = (c->switch_timer < NT_UI_MENU_AIM_FALLBACK_SECS);
     }
-    c->prev_mouse_x = mouse_x;
-    c->prev_mouse_y = mouse_y;
-    c->primed = true;
     return keep;
 }
 // #endregion

@@ -116,8 +116,10 @@ static void test_menu_aim_keeps_submenu_open_on_diagonal(void) {
         bool keep = nt_ui_menu_test_hover_intent(s_fx.ctx, MENU_A, 1U, path_x[i], path_y[i], sub_x, sub_y, sub_w, sub_h, NT_UI_POPUP_RIGHT, dt);
         nt_ui_end(s_fx.ctx);
         TEST_ASSERT_TRUE_MESSAGE(keep, "submenu must stay open while aiming along the diagonal");
-        TEST_ASSERT_TRUE(float_near(nt_ui_menu_test_switch_timer(s_fx.ctx, MENU_A, 1U), 0.0F, 0.0001F));
     }
+    /* The corridor times out even while aimed-in (spec: never trap): the dwell stays UNDER the grace for
+     * this short diagonal so keep held, but the timer is allowed to climb (it no longer freezes at 0). */
+    TEST_ASSERT_TRUE(nt_ui_menu_test_switch_timer(s_fx.ctx, MENU_A, 1U) < NT_UI_MENU_AIM_FALLBACK_SECS);
 }
 
 /* ---- Aim SWITCH: the cursor sits OFF the triangle (straight up, away from the submenu); after
@@ -149,6 +151,41 @@ static void test_menu_aim_switch_after_fallback(void) {
     TEST_ASSERT_FALSE_MESSAGE(last_keep, "off the triangle past AIM_FALLBACK must allow a switch");
     /* AIM_FALLBACK / dt ~= 7.2 -> switch on the 8th off-triangle frame */
     TEST_ASSERT_TRUE(frames_to_switch >= 7 && frames_to_switch <= 9);
+}
+
+/* ---- Stuck-state regression (Wave 0b): with a STABLE apex, vertical travel along the parent panel
+ *      toward a sibling LEAVES the narrow corridor, so the dwell races AIM_FALLBACK and a switch is
+ *      allowed. The old per-frame apex made the wedge near-degenerate-huge and trapped this move. ---- */
+static void test_menu_hover_switch_to_sibling_releases(void) {
+    /* submenu opened RIGHT at (300,100) 150x300; its left edge is the parent panel's right edge x~300.
+     * The cursor leaves the parent row at (295,150) and travels straight DOWN the parent panel (x stays
+     * ~150, well LEFT of the wedge) onto a lower sibling — it must release within AIM_FALLBACK. */
+    const float sub_x = 300.0F;
+    const float sub_y = 100.0F;
+    const float sub_w = 150.0F;
+    const float sub_h = 300.0F;
+    const float dt = 1.0F / 60.0F;
+
+    fx_begin(dt);
+    (void)nt_ui_menu_test_hover_intent(s_fx.ctx, MENU_A, 1U, 295.0F, 150.0F, sub_x, sub_y, sub_w, sub_h, NT_UI_POPUP_RIGHT, dt);
+    nt_ui_end(s_fx.ctx);
+
+    bool last_keep = true;
+    int frames_to_switch = 0;
+    for (int i = 0; i < 30; ++i) {
+        /* move down the parent column, far left of the submenu edge -> outside the stable wedge */
+        const float my = 200.0F + ((float)i * 6.0F);
+        fx_begin(dt);
+        last_keep = nt_ui_menu_test_hover_intent(s_fx.ctx, MENU_A, 1U, 150.0F, my, sub_x, sub_y, sub_w, sub_h, NT_UI_POPUP_RIGHT, dt);
+        nt_ui_end(s_fx.ctx);
+        if (!last_keep) {
+            frames_to_switch = i + 1;
+            break;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(last_keep, "moving onto a sibling column must release the corridor (no trap)");
+    /* released within the dwell grace (~8 frames at dt=1/60), never trapped indefinitely */
+    TEST_ASSERT_TRUE_MESSAGE(frames_to_switch >= 1 && frames_to_switch <= 9, "sibling switch must free the user within the grace");
 }
 
 /* ---- Depth-salted cells: level 1 and level 2 must own distinct timers (no aliasing). ---- */
@@ -332,6 +369,47 @@ static void test_menu_outside_click_dismisses_chain(void) {
     TEST_ASSERT_FALSE_MESSAGE(st.open, "outside-click dismisses the whole chain");
 }
 
+/* ---- Switch root branch via keyboard while a submenu is open (Wave 0b stuck-state guard): open the
+ *      File submenu, then Left collapses back to root, Down moves to another root parent (Tools), Right
+ *      opens ITS submenu. The user is never locked into the first open branch. ---- */
+static const nt_ui_menu_item_t s_tools_sub[] = {
+    {.label = "Opt", .id = 301U, .enabled = true},
+};
+static const nt_ui_menu_item_t s_root2[] = {
+    {.label = "File", .submenu = s_file_sub, .submenu_count = 3U, .enabled = true},
+    {.label = "Tools", .submenu = s_tools_sub, .submenu_count = 1U, .enabled = true},
+};
+static void menu_frame2(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+    nt_pointer_t p = {.active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu(s_fx.ctx, MENU_A, s_root2, 2U, st, style);
+    nt_ui_end(s_fx.ctx);
+}
+static void test_menu_switch_root_branch_while_submenu_open(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    menu_key(NT_KEY_ARROW_DOWN); /* focus File (root item 0) */
+    menu_frame2(&st, &style);
+    menu_key(NT_KEY_ARROW_RIGHT); /* open File submenu (depth 1) */
+    menu_frame2(&st, &style);
+    TEST_ASSERT_TRUE(st.open);
+
+    menu_key(NT_KEY_ARROW_LEFT); /* collapse File submenu back to root */
+    menu_frame2(&st, &style);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "Left collapses the submenu but the root stays open");
+
+    menu_key(NT_KEY_ARROW_DOWN); /* move to Tools (root item 1) */
+    menu_frame2(&st, &style);
+    menu_key(NT_KEY_ARROW_RIGHT); /* open Tools submenu */
+    menu_frame2(&st, &style);
+    menu_key(NT_KEY_ENTER); /* activate Opt -> id 301 */
+    menu_frame2(&st, &style);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(301U, st.chosen_id, "must reach the OTHER root branch's leaf while the first was open");
+    TEST_ASSERT_FALSE(st.open);
+}
+
 /* ---- Depth cap: a self-referential tree (an item whose submenu is itself) would nest forever; the
  *      NT_ASSERT at the recursion guard must fire before exhausting the popup stack. ---- */
 static nt_ui_menu_item_t s_cyclic[1];
@@ -376,12 +454,14 @@ int main(void) {
     RUN_TEST(test_menu_aim_corners_mirror);
     RUN_TEST(test_menu_aim_keeps_submenu_open_on_diagonal);
     RUN_TEST(test_menu_aim_switch_after_fallback);
+    RUN_TEST(test_menu_hover_switch_to_sibling_releases);
     RUN_TEST(test_menu_hover_cells_distinct_per_depth);
     RUN_TEST(test_menu_malformed_tree_asserts);
     RUN_TEST(test_menu_max_depth_constant);
     RUN_TEST(test_menu_smoke_open_and_closed);
     RUN_TEST(test_menu_kbd_nav_activates_nested_leaf);
     RUN_TEST(test_menu_nested_dismiss_esc_deepest_first);
+    RUN_TEST(test_menu_switch_root_branch_while_submenu_open);
     RUN_TEST(test_menu_outside_click_dismisses_chain);
     RUN_TEST(test_menu_depth_cap_asserts);
     return UNITY_END();
