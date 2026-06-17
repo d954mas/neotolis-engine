@@ -114,6 +114,9 @@ static nt_ui_input_style_t s_input_dark, s_input_light;
  * caret/selection style fields are configurable. */
 static nt_ui_input_style_t s_input_caret_dark, s_input_caret_light;
 static nt_ui_input_style_t s_input_sel_dark, s_input_sel_light;
+/* Sprite-backed variant: a 9-slice panel frame as the field background (idle vs focused art swap),
+ * theme-agnostic. Shows bg_art/focused_bg_art -- the .image + tint convention shared with panel/button. */
+static nt_ui_input_style_t s_input_art;
 
 /* Slice9 panel image style (untinted, atlas-default slice9). */
 static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF, .slice9_scale = 1.0F};
@@ -268,6 +271,7 @@ typedef struct {
     char cyrillic[64];
     char caret_thick[64]; /* thick, bright, non-blinking caret variant */
     char caret_sel[64];   /* distinct selection-highlight color variant */
+    char art_bg[64];      /* sprite-backed (9-slice panel frame) background variant */
 } input_params_t;
 
 struct tab_state {
@@ -346,7 +350,7 @@ static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s
 static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop, s_id_props_slide_dist;
 static uint32_t s_id_theme_btn;
 static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
-static uint32_t s_id_input_caret, s_id_input_sel;
+static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -705,6 +709,16 @@ static void init_styles(void) {
     s_input_sel_light = s_input_light;
     s_input_sel_light.selection_color = 0x80C040C0U;
     s_input_sel_light.caret_blink_rate = 0.4F;
+
+    /* Sprite background: a 9-slice panel frame instead of a flat rect; focus swaps the frame art (beige ->
+     * blue). bg_color stays 0 = untinted, so the sprite draws at its natural color. Dark text reads on the
+     * light frame. Refs were assigned above (s_panel_*_ref). */
+    s_input_art = input_base;
+    s_input_art.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
+    s_input_art.placeholder.color = (Clay_Color){90.0F, 80.0F, 70.0F, 255.0F};
+    s_input_art.caret_color = 0xFF202020U;
+    s_input_art.bg_art = s_panel_beige_ref;
+    s_input_art.focused_bg_art = s_panel_blue_ref;
 
     /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
@@ -1232,6 +1246,7 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     static const nt_ui_input_props_t props_password = {.placeholder = "edit me", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_PASSWORD, .password = true};
     static const nt_ui_input_props_t props_caret = {.placeholder = "thick amber caret", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
     static const nt_ui_input_props_t props_sel = {.placeholder = "select me (magenta)", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
+    static const nt_ui_input_props_t props_art = {.placeholder = "framed by a sprite", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
 
     input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, &props_plain, g_current->input);
     input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, &props_numeric, g_current->input);
@@ -1240,6 +1255,8 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Visual-style variants: prove caret_color/width/blink + selection_color are configurable. */
     input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, &props_caret, g_current->input_caret);
     input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, &props_sel, g_current->input_sel);
+    /* Sprite-backed field: 9-slice panel frame bg, art swaps beige -> blue on focus. */
+    input_field(ctx, "Sprite background (9-slice frame)", s_id_input_art, st->input.art_bg, sizeof st->input.art_bg, &props_art, &s_input_art);
 }
 
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
@@ -1432,6 +1449,7 @@ static void ensure_ids(void) {
     s_id_input_cyrillic = nt_ui_id("showcase/input_cyrillic");
     s_id_input_caret = nt_ui_id("showcase/input_caret");
     s_id_input_sel = nt_ui_id("showcase/input_sel");
+    s_id_input_art = nt_ui_id("showcase/input_art");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
     s_ids_ready = true;
 }

@@ -91,6 +91,17 @@ static nt_pointer_t make_pointer(float x, float y, bool down, bool pressed, bool
 
 static const nt_pointer_t IDLE_PTR = {.x = 0.0F, .y = 0.0F, .active = true};
 
+/* First IMAGE render command in the frozen list (the field's bg sprite, when bg_art is set). */
+static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx) {
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
 /* One frame with a single field. Feeds the given pointer; returns the change flag. */
 static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap, bool enabled, bool *submitted) {
     bool changed = false;
@@ -798,6 +809,43 @@ static void test_placeholder_empty_unfocused_only(void) {
     TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", "", false));
 }
 
+/* ---- Test 29: bg_art set -> field draws the sprite (IMAGE cmd) with the payload pinned. ---- */
+static void test_bg_art_emits_image(void) {
+    char buf[8] = {0};
+    s_style.bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    (void)field_frame(&IDLE_PTR, nt_ui_id("bg"), buf, sizeof buf, true, NULL);
+
+    const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL_MESSAGE(img, "bg_art set must emit a background IMAGE command");
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)img->renderData.image.imageData;
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.handle.id, p->atlas.id);
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.white_region_idx, p->region_index);
+}
+
+/* ---- Test 30: no bg_art -> flat bg color only, no IMAGE command. ---- */
+static void test_no_bg_art_no_image(void) {
+    char buf[8] = {0};
+    /* init_style() leaves bg_art zero-init (atlas.id == 0 = none). */
+    (void)field_frame(&IDLE_PTR, nt_ui_id("nobg"), buf, sizeof buf, true, NULL);
+    TEST_ASSERT_NULL_MESSAGE(find_first_image_cmd(s_fx.ctx), "unset bg_art must not emit an IMAGE command");
+}
+
+/* ---- Test 31: focus swaps bg_art -> focused_bg_art (distinct region in the payload). ---- */
+static void test_bg_art_focus_swap(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("swap");
+    s_style.bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    s_style.focused_bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.polygon_region_idx};
+    warmup_focus(id, buf, sizeof buf); /* leaves the field focused */
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(img);
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)img->renderData.image.imageData;
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.polygon_region_idx, p->region_index); /* focused art, not idle */
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -864,6 +912,9 @@ int main(void) {
     RUN_TEST(test_style_defaults_valid);
     RUN_TEST(test_placeholder_empty_unfocused_only);
     RUN_TEST(test_key_repeat_timing);
+    RUN_TEST(test_bg_art_emits_image);
+    RUN_TEST(test_no_bg_art_no_image);
+    RUN_TEST(test_bg_art_focus_swap);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

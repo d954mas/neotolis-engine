@@ -34,19 +34,20 @@ typedef enum {
 } nt_ui_input_keyboard_t;
 
 /* Style for the field -- PURELY visual, so many fields can share one look. text reuses
- * nt_ui_label_style_t (font/size/color/align). Colors are packed 0xAABBGGRR. The bg-art fields are
- * RESERVED (not yet read by the impl); see notes below. Per-field behaviour lives in nt_ui_input_props_t. */
+ * nt_ui_label_style_t (font/size/color/align). Colors are packed 0xAABBGGRR. bg_art is optional: set it
+ * and the field draws that sprite (9-slice if baked) with bg_color as the TINT; leave it unset (atlas.id
+ * == 0) and the field falls back to the flat bg_color rect. Per-field behaviour lives in nt_ui_input_props_t. */
 typedef struct {
     nt_ui_label_style_t text;             /* the entered text */
     nt_ui_label_style_t placeholder;      /* dimmed render style for the empty-field hint (the hint STRING is in props) */
-    uint32_t bg_color;                    /* idle background (0 = transparent) */
-    uint32_t focused_bg_color;            /* focused background */
+    uint32_t bg_color;                    /* idle background: flat fill when no bg_art, else sprite TINT (0 = untinted) */
+    uint32_t focused_bg_color;            /* focused background (fill or tint) */
     uint32_t border_color;                /* idle border (0 = none) */
     uint32_t focused_border_color;        /* focused border */
     uint32_t caret_color;                 /* caret rect tint */
     uint32_t selection_color;             /* selection highlight rect tint (0 = a sensible default) */
-    nt_atlas_region_ref_t bg_art;         /* RESERVED: idle bg sprite (not yet read; fields use the flat bg color) */
-    nt_atlas_region_ref_t focused_bg_art; /* RESERVED: focused bg sprite (not yet read) */
+    nt_atlas_region_ref_t bg_art;         /* idle bg sprite (atlas.id == 0 = none -> flat bg_color) */
+    nt_atlas_region_ref_t focused_bg_art; /* focused bg sprite (atlas.id == 0 = none -> flat focused_bg_color) */
     float caret_blink_rate;               /* seconds per full blink cycle; <= 0 = no blink (always on) */
     float caret_width;                    /* caret rect width px; asserted > 0 */
     float border_width;                   /* border thickness px (0 = no border) */

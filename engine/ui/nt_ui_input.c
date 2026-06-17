@@ -665,6 +665,24 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
     nt_ui_clay_priv_close_element();
 }
 
+/* Build a frame-scratch bg-sprite payload from an art ref, or NULL when unset/unresolved. The style is
+ * const + shared across fields, so we resolve a LOCAL copy (O(1) name find; a pre-resolved ref_idx is a
+ * no-op) rather than memoizing into the shared style. slice9_override={0} = use the region's BAKED slice9
+ * borders: a 9-slice frame stretches its borders, a plain sprite stretches whole (walker decides). */
+static nt_ui_image_payload_t *make_bg_payload(nt_atlas_region_ref_t art) {
+    if (art.atlas.id == 0U) {
+        return NULL;
+    }
+    nt_atlas_resolve_ref(&art);
+    if (art.region == NT_ATLAS_INVALID_REGION) {
+        return NULL;
+    }
+    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+    NT_ASSERT(p != NULL && "nt_ui_input: scratch alloc failed (bg art payload)");
+    *p = (nt_ui_image_payload_t){.atlas = art.atlas, .region_index = art.region, .slice9_scale = 1.0F};
+    return p;
+}
+
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -973,6 +991,13 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     const uint32_t bg = focused ? style->focused_bg_color : style->bg_color;
     if (bg != 0U) {
         root.backgroundColor = nt_ui_unpack_abgr(bg);
+    }
+    /* Optional sprite background: when bg_art resolves the field draws the sprite (9-slice if the region
+     * has baked borders) and bg_color above becomes its TINT (zero = untinted) -- the same .image +
+     * backgroundColor convention as nt_ui_panel/button. Unset/unresolved = the flat bg_color rect above. */
+    nt_ui_image_payload_t *bg_art_p = make_bg_payload(focused ? style->focused_bg_art : style->bg_art);
+    if (bg_art_p != NULL) {
+        root.image = (Clay_ImageElementConfig){.imageData = bg_art_p};
     }
     const uint32_t bcol = focused ? style->focused_border_color : style->border_color;
     if (style->border_width > 0.0F && bcol != 0U) {
