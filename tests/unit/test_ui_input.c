@@ -1021,6 +1021,34 @@ static void test_scroll_responsive_width(void) {
     TEST_ASSERT_TRUE_MESSAGE(scroll_x > 0.0F, "responsive-width field must scroll to keep the caret visible");
 }
 
+/* ---- Test 37: a fully-offscreen clipped field emits balanced SCISSOR_START/END (no underflow). ---- */
+static void test_offscreen_clip_scissor_balanced(void) {
+    char buf[16] = {0};
+    const uint32_t id = nt_ui_id("off");
+    /* Float the field far below the 600px viewport so its content-clip is fully offscreen. Clay culled
+     * the clip's SCISSOR_START on offscreen while still emitting SCISSOR_END (closeClipElement), leaving
+     * the render stream unbalanced -> a renderer scissor-stack underflow. The vendored patch forces the
+     * START to emit. Count the frozen command stream to assert the pair is balanced. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
+    CLAY({.id = CLAY_ID("rootOff"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = 2000.0F}}}) {
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    int starts = 0;
+    int ends = 0;
+    for (int32_t k = 0; k < s_fx.ctx->frozen_cmds.length; ++k) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[k];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START) {
+            ++starts;
+        }
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+            ++ends;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ends, starts, "offscreen clip must emit balanced SCISSOR_START/END");
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -1095,6 +1123,7 @@ int main(void) {
     RUN_TEST(test_click_refocus_other_field);
     RUN_TEST(test_tab_skips_disabled_field);
     RUN_TEST(test_scroll_responsive_width);
+    RUN_TEST(test_offscreen_clip_scissor_balanced);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

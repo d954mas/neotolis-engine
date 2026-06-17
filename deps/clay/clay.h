@@ -8,6 +8,11 @@
 //   2. CLAY__MAX_SCROLL_CONTAINERS overrides the hardcoded scroll/clip-container
 //      pool size (upstream 10): every .clip takes one slot, reclaimed only in
 //      Clay_UpdateScrollContainers. Search "NT patch" for the 2 sites.
+//   3. Structural-scissor balance: force SCISSOR_START to emit even when the clip
+//      element is offscreen, since the matching SCISSOR_END is emitted
+//      unconditionally. Without it an offscreen clip (a field scrolled past the
+//      fold) leaves an unmatched END -> renderer scissor-stack underflow. One site
+//      in the CLIP render-command case ("shouldRender = true").
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -2832,6 +2837,12 @@ void Clay__CalculateFinalLayout(void) {
                                     .vertical = elementConfig->config.clipElementConfig->vertical,
                                 }
                             };
+                            // NT patch: scissors are STRUCTURAL and must stay paired. The matching
+                            // SCISSOR_END is emitted unconditionally (closeClipElement), but this START
+                            // was gated on shouldRender (= !offscreen), so a clip element scrolled fully
+                            // offscreen emitted END without START -> renderer scissor-stack underflow.
+                            // Force the START to emit so the pair stays balanced regardless of culling.
+                            shouldRender = true;
                             break;
                         }
                         case CLAY__ELEMENT_CONFIG_TYPE_IMAGE: {
