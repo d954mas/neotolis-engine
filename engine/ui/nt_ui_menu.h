@@ -50,13 +50,15 @@ typedef struct {
     uint32_t item_hover_color; /* hovered/focused row highlight */
     uint32_t text_color;       /* enabled item text */
     uint32_t text_disabled;    /* disabled item text */
+    float font_size;           /* px; asserted > 0 */
     uint16_t item_height;      /* px row height */
     uint16_t min_width;        /* px panel min width */
     uint16_t pad;              /* px inner padding */
+    uint16_t font_id;          /* label font */
     nt_ui_layer_t layer;       /* draw layer */
-    uint8_t _pad[5];
+    uint8_t _pad[3];
 } nt_ui_menu_style_t;
-_Static_assert(sizeof(nt_ui_menu_style_t) == 28, "nt_ui_menu_style_t stable ABI (4 u32 + 3 u16 + 1 u8 layer + 5 pad)");
+_Static_assert(sizeof(nt_ui_menu_style_t) == 32, "nt_ui_menu_style_t stable ABI (4 u32 + 1 float + 4 u16 + 1 u8 layer + 3 pad)");
 
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
