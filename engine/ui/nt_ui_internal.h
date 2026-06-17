@@ -153,6 +153,15 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
+/* App-wide gesture defaults (D-65-04). Match the hard-coded 0.30F / 6.0F the text-field gesture used
+ * before consolidation. Per-ctx, settable via nt_ui_set_gesture_constants. */
+#ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
+#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.30F
+#endif
+#ifndef NT_UI_GESTURE_MOVE_RADIUS_PX
+#define NT_UI_GESTURE_MOVE_RADIUS_PX 6.0F
+#endif
+
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -270,6 +279,10 @@ struct nt_ui_context {
      * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
     float element_depth_bias_ndc;
+    /* App-wide gesture constants (nt_ui_events). Set in create_context to the #define defaults,
+     * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
+    float gesture_dbl_window_secs;
+    float gesture_move_radius_px;
     float view_proj[16];
     float inv_view_proj[16];
 #if NT_UI_DEBUG_TOOLS

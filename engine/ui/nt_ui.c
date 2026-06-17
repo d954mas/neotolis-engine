@@ -224,6 +224,9 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->modal_zband_stride = desc->modal_zband_stride;
     NT_ASSERT((int)ctx->modal_zband_stride > 0 && (int)ctx->modal_zband_stride * NT_UI_MODAL_MAX_DEPTH <= INT16_MAX &&
               "nt_ui_create_context: modal_zband_stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
+    /* memset zeroed these; restore the gesture defaults (0 is not a valid dbl window / radius). */
+    ctx->gesture_dbl_window_secs = NT_UI_GESTURE_DBL_WINDOW_SECS;
+    ctx->gesture_move_radius_px = NT_UI_GESTURE_MOVE_RADIUS_PX;
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);

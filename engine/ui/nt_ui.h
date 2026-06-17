@@ -380,6 +380,51 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
+/* Consolidated interaction result (D-65-02): the base capture edges PLUS the cfg-gated gesture cell.
+ * hovered/pressed/released/clicked/held + pos/drag/pointer_id mirror nt_ui_interaction_t; the gesture
+ * fields (double_clicked / long_pressed / hold_progress) stay zero unless nt_ui_events got a cfg that
+ * requests them. hold_progress is a linear 0..1 ramp toward long_press_secs while held && hovered. */
+typedef struct {
+    bool hovered;           /* pointer over bbox (transform-aware) */
+    bool pressed;           /* currently captured (held) */
+    bool released;          /* released this frame (even off-widget = cancel) */
+    bool held;              /* pressed && hovered (down AND over the widget) */
+    bool clicked;           /* released OVER the widget -> one-shot */
+    bool double_clicked;    /* gesture: 2nd press within the dbl window+radius (cfg->double_click) */
+    bool long_pressed;      /* gesture: held past long_press_secs without moving -> one-shot per hold */
+    float hold_progress;    /* gesture: linear 0..1 toward long_press_secs while held && hovered; 0 otherwise */
+    float pos[2];           /* current pointer pos (UI-space) */
+    float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
+    uint32_t pointer_id;    /* which pointer captured (multitouch) */
+} nt_ui_events_t;
+_Static_assert(sizeof(nt_ui_events_t) == 32, "nt_ui_events_t stable ABI (7 bool + 1 pad + 5 float + 1 u32)");
+
+/* Per-widget gesture knobs (D-65-04). long_press_secs <= 0 disables BOTH long-press AND hold_progress;
+ * double_click is opt-in. The app-wide dbl window + move radius live on the context
+ * (nt_ui_set_gesture_constants), not here. cfg==NULL on nt_ui_events = base path only, zero gesture
+ * alloc. */
+typedef struct {
+    float long_press_secs; /* > 0 enables long-press + hold_progress; <= 0 disables both */
+    bool double_click;     /* opt-in double-click detection */
+} nt_ui_events_cfg_t;
+_Static_assert(sizeof(nt_ui_events_cfg_t) == 8, "nt_ui_events_cfg_t stable ABI (1 float + 1 bool + 3 pad)");
+
+/* MUTATING — the single canonical interaction step (D-65-02). Call ONCE per widget per frame from the
+ * widget's begin, in place of nt_ui_step_interaction. Runs the base capture/edge machine; when cfg
+ * requests a gesture (cfg != NULL && (cfg->double_click || cfg->long_press_secs > 0)) it also advances
+ * the per-id gesture cell. cfg==NULL grows the state pool by zero. Returns the full result directly. */
+nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg);
+
+/* Idempotent read: same result N times per frame, advancing NOTHING (no capture commit, no gesture
+ * timer). Reads the latched gesture cell if one exists (else gesture fields stay zero). Safe outside
+ * begin/end. Mirror of nt_ui_query_interaction for the consolidated result. */
+nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id);
+
+/* App-wide gesture constants (D-65-04): the double-click window (secs) and the move radius (px) past
+ * which a hold is treated as a drag (cancels long-press / resets hold_progress). Asserts each is finite
+ * and >= 0 (fail-early, no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px);
+
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
  * arbitration over widgets behind it (the pointer can't leak through), but never captures,
  * clicks, or reports hover. Disabled widgets call this so a modal/overlay blocks input to
