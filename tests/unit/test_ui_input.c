@@ -1,4 +1,4 @@
-/* Text-field widget tests (nt_ui_input_text core, T0-T1).
+/* Text-field widget tests (nt_ui_input_text core).
  *
  * Covers the codepoint-aware contract: insert/backspace/arrow over Cyrillic "Аб"
  * (multi-byte UTF-8) moves by CODEPOINT not byte; buffer_size clamp never writes
@@ -34,6 +34,9 @@ alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 static nt_ui_input_style_t s_style;
 static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/password/keyboard here */
+
+/* The fake clipboard exposes a test-only availability toggle (no fake header; declared here). */
+extern void nt_clipboard_fake_set_available(bool available);
 
 /* Field pinned at a fixed absolute position; non-origin so an axis swap is visible. */
 #define IN_X 100.0F
@@ -74,6 +77,7 @@ void setUp(void) {
 }
 
 void tearDown(void) {
+    nt_clipboard_fake_set_available(true); /* a test may flip this false; restore unconditionally so a mid-test assert-fail can't cascade */
     ui_walker_fixture_shutdown(&s_fx);
     nt_input_shutdown();
 }
@@ -542,9 +546,6 @@ static void test_clipboard_cut(void) {
     TEST_ASSERT_EQUAL_STRING("", buf);
 }
 
-/* The fake clipboard exposes a test-only availability toggle (no fake header; declared here). */
-extern void nt_clipboard_fake_set_available(bool available);
-
 /* ---- Test 17b: Ctrl+X is a full no-op when the clipboard is unavailable (no data loss). ---- */
 static void test_clipboard_cut_unavailable_noop(void) {
     char buf[32];
@@ -565,7 +566,7 @@ static void test_clipboard_cut_unavailable_noop(void) {
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_EQUAL_STRING("!", buf);
 
-    nt_clipboard_fake_set_available(true); /* restore so test order stays stable */
+    /* tearDown restores availability unconditionally (covers a mid-test assert-fail too). */
 }
 
 /* ---- Test 18: paste longer than remaining capacity is clamped (no OOB, NUL intact, no split). ---- */
