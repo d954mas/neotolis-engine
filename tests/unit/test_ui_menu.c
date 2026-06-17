@@ -335,38 +335,50 @@ static void test_menu_nested_dismiss_esc_deepest_first(void) {
     TEST_ASSERT_FALSE_MESSAGE(st.open, "second Esc closes the root chain");
 }
 
-/* ---- Outside-click dismiss: a left-click far outside the panel raises the catcher close and dismisses
- *      the whole chain. ---- */
+/* Drive a clean primary-button press edge into the GLOBAL input state at (px,py) — the menu's
+ * outside-click dismiss reads nt_input_mouse_is_pressed (global), NOT the per-frame snapshot. A poll
+ * clears stale edges, then pointer_down with mask 1 (LEFT) raises is_pressed on the 0->1 transition. */
+static void menu_mouse_press(float px, float py) {
+    nt_input_poll();               /* clear stale pressed/released edges */
+    nt_input_clear_all_pointers(); /* drop any prior is_down so the next down is a clean rising edge */
+    nt_input_pointer_down(0U, px, py, 1.0F, NT_POINTER_MOUSE, 1U);
+}
+
+/* ---- Outside-click dismiss: a left-click far outside every open panel closes the whole chain
+ *      (menu-owned dismiss; catchers were removed in Wave 0c). ---- */
 static void test_menu_outside_click_dismisses_chain(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
 
-    /* frame 1: render so the panel bbox exists next frame */
+    /* frame 1: render so the panel bbox exists next frame (no press) */
     nt_input_clear_all_keys();
     menu_frame(&st, &style, 700.0F, 500.0F);
     TEST_ASSERT_TRUE(st.open);
 
-    /* frame 2: click far from the panel (bottom-right corner) -> outside-click dismiss */
-    nt_pointer_t p = {0};
-    p.x = 780.0F;
-    p.y = 580.0F;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu(s_fx.ctx, MENU_A, s_root, 2U, &st, &style);
-    nt_ui_end(s_fx.ctx);
-    /* release over the same outside point completes the click */
-    nt_pointer_t p2 = {0};
-    p2.x = 780.0F;
-    p2.y = 580.0F;
-    p2.active = true;
-    p2.buttons[NT_BUTTON_LEFT].is_released = true;
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p2, 1);
-    nt_ui_menu(s_fx.ctx, MENU_A, s_root, 2U, &st, &style);
-    nt_ui_end(s_fx.ctx);
+    /* frame 2: primary press far from the panel (bottom-right corner) -> menu-owned outside dismiss.
+     * The snapshot pointer carries the same pos so the menu reads a consistent cursor. */
+    menu_mouse_press(780.0F, 580.0F);
+    menu_frame(&st, &style, 780.0F, 580.0F);
 
     TEST_ASSERT_FALSE_MESSAGE(st.open, "outside-click dismisses the whole chain");
+}
+
+/* ---- Inside-click does NOT dismiss: a primary press INSIDE the root panel is a row interaction, never
+ *      a chain dismiss. The menu stays open. ---- */
+static void test_menu_inside_click_keeps_open(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    /* frame 1: render so the root panel bbox exists next frame. Anchor at (120,80) -> panel grows below. */
+    nt_input_clear_all_keys();
+    menu_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE(st.open);
+
+    /* frame 2: press well inside the root panel body (just below the anchor) -> not a dismiss. */
+    menu_mouse_press(140.0F, 100.0F);
+    menu_frame(&st, &style, 140.0F, 100.0F);
+
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "a click inside an open panel must NOT dismiss the chain");
 }
 
 /* ---- Switch root branch via keyboard while a submenu is open (Wave 0b stuck-state guard): open the
@@ -408,6 +420,85 @@ static void test_menu_switch_root_branch_while_submenu_open(void) {
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(301U, st.chosen_id, "must reach the OTHER root branch's leaf while the first was open");
     TEST_ASSERT_FALSE(st.open);
+}
+
+/* Drive one s_root2 menu frame with a positioned snapshot pointer (mouse hover/click path). The menu's
+ * row hover/click reads ctx->frame_pointers; the press-bit drives those rows. No global press here. */
+static void menu_frame2_at(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py, bool press) {
+    nt_pointer_t p = {0};
+    p.x = px;
+    p.y = py;
+    p.active = true;
+    if (press) {
+        p.buttons[NT_BUTTON_LEFT].is_down = true;
+        p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    }
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu(s_fx.ctx, MENU_A, s_root2, 2U, st, style);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Occlusion-trap regression (Wave 0c, the REAL root cause): with a submenu open, the ANCESTOR
+ *      (root) sibling row is still HITTABLE by the mouse. Before Wave 0c the submenu's full-viewport
+ *      light-dismiss catcher sat at a higher z than the root panel and occluded it, so the root row
+ *      never reported hovered and the user was trapped in the deepest level. ---- */
+static void test_menu_root_row_hittable_while_submenu_open(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    /* open File's submenu via keyboard so depth-1 panel (with its old catcher) is live */
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_frame2(&st, &style);
+    menu_key(NT_KEY_ARROW_RIGHT);
+    menu_frame2(&st, &style);
+    TEST_ASSERT_TRUE(st.open);
+
+    /* one settle frame so the root row bbox is queryable next frame (1-frame IM lag) */
+    menu_frame2_at(&st, &style, 0.0F, 0.0F, false);
+    const uint32_t tools_row = nt_ui_menu_test_row_id(MENU_A, 0U, 1U); /* root item 1 = Tools */
+    const nt_ui_bbox_t rb = nt_ui_get_bbox(s_fx.ctx, tools_row);
+    TEST_ASSERT_TRUE_MESSAGE(rb.found, "root Tools row must lay out while the submenu is open");
+
+    /* hover the Tools root row center: with the catcher removed it must report hovered (was occluded). */
+    const float cx = rb.x + (rb.width * 0.5F);
+    const float cy = rb.y + (rb.height * 0.5F);
+    menu_frame2_at(&st, &style, cx, cy, false);
+    const nt_ui_interaction_t in = nt_ui_query_interaction(s_fx.ctx, tools_row);
+    TEST_ASSERT_TRUE_MESSAGE(in.hovered, "ancestor root row must be hittable (not occluded by a submenu catcher)");
+}
+
+/* ---- Click an ancestor root parent while a submenu is open: the click reaches the root row (no
+ *      catcher occlusion) and switches the open branch to it (Wave 0c behavior #3). ---- */
+static void test_menu_click_root_parent_switches_branch(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    /* open File's submenu (depth 1) */
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_frame2(&st, &style);
+    menu_key(NT_KEY_ARROW_RIGHT);
+    menu_frame2(&st, &style);
+    TEST_ASSERT_TRUE(st.open);
+
+    /* settle so the Tools root row bbox is queryable */
+    nt_input_clear_all_keys();
+    menu_frame2_at(&st, &style, 0.0F, 0.0F, false);
+    const uint32_t tools_row = nt_ui_menu_test_row_id(MENU_A, 0U, 1U);
+    nt_ui_bbox_t rb = nt_ui_get_bbox(s_fx.ctx, tools_row);
+    TEST_ASSERT_TRUE(rb.found);
+    const float cx = rb.x + (rb.width * 0.5F);
+    const float cy = rb.y + (rb.height * 0.5F);
+
+    /* click the Tools root parent -> switches the open branch to Tools (a click INSIDE a panel is a row
+     * interaction, never a dismiss). The chain stays open on the new branch. */
+    menu_frame2_at(&st, &style, cx, cy, true);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "clicking a root parent must NOT dismiss the chain");
+
+    /* the Tools submenu (depth 1) now lays out under the Tools row -> reachable */
+    const uint32_t tools_panel = nt_ui_menu_test_panel_id(MENU_A, 1U);
+    menu_frame2_at(&st, &style, cx, cy, false);
+    const nt_ui_bbox_t pb = nt_ui_get_bbox(s_fx.ctx, tools_panel);
+    TEST_ASSERT_TRUE_MESSAGE(pb.found, "clicking the Tools root parent must open its submenu (branch switched)");
 }
 
 /* ---- Depth cap: a self-referential tree (an item whose submenu is itself) would nest forever; the
@@ -462,7 +553,10 @@ int main(void) {
     RUN_TEST(test_menu_kbd_nav_activates_nested_leaf);
     RUN_TEST(test_menu_nested_dismiss_esc_deepest_first);
     RUN_TEST(test_menu_switch_root_branch_while_submenu_open);
+    RUN_TEST(test_menu_root_row_hittable_while_submenu_open);
+    RUN_TEST(test_menu_click_root_parent_switches_branch);
     RUN_TEST(test_menu_outside_click_dismisses_chain);
+    RUN_TEST(test_menu_inside_click_keeps_open);
     RUN_TEST(test_menu_depth_cap_asserts);
     return UNITY_END();
 }

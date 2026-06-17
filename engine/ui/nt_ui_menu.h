@@ -104,6 +104,11 @@ bool nt_ui_menu_test_hover_intent(nt_ui_context_t *ctx, uint32_t menu_id, uint8_
 
 /* Live switch-timer in the depth-salted hover-intent cell (0 if absent). */
 float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
+
+/* Resolve a level's panel id / a row id so tests can query their prev-frame bbox via nt_ui_get_bbox
+ * and drive the snapshot pointer at real row geometry (Wave 0c occlusion-trap regression). */
+uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth);
+uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx);
 #endif
 
 #endif /* NT_UI_MENU_H */

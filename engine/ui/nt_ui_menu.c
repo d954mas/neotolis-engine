@@ -415,6 +415,11 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = 0.0F; /* menus snap; the open delay handles flicker, not a tween */
     pst.layer = style->layer;
+    /* Clear light-dismiss so popup-core emits NO catcher per level: a submenu's full-viewport catcher
+     * sits at a HIGHER z than ancestor panels (catcher_z(d+1) > panel_z(d)) and would occlude them,
+     * trapping the user in the deepest level (hover/click never reach ancestors). The menu owns its own
+     * outside-click dismiss in nt_ui_menu against all open panels instead. */
+    pst.flags &= (uint8_t)~NT_UI_POPUP_LIGHT_DISMISS;
     const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, menu_level_id(menu_id, depth), &pst, anchor, true);
 
     /* The currently-open child (authoritative across frames); mouse hover may switch it, gated below. */
@@ -422,11 +427,6 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_
     int16_t open_idx = menu_declare_panel(ctx, menu_id, items, count, depth, rt, style, rt->open_path[depth], &hovered, out_chosen);
     open_idx = menu_resolve_hover_switch(ctx, menu_id, items, count, depth, open_idx, hovered, mx, my, r.side, dt);
     open_idx = menu_commit_and_nav(items, count, depth, nav_depth, rt, open_idx, out_chosen, out_close_chain);
-
-    /* Outside-click on this level's catcher dismisses the whole chain (signal up to the root). */
-    if (r.close_requested) {
-        *out_close_chain = true;
-    }
 
     /* Recurse into the open submenu (if any). The open_path is authoritative — keyboard-opened menus
      * stay open regardless of cursor position; the hover-intent above only governs MOUSE sibling
@@ -442,6 +442,19 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_
     nt_ui_popup_end(ctx);
 }
 // #endregion
+
+/* True when the cursor is inside ANY open level's panel rect (depths 0..active_depth). A click inside
+ * a panel is a row interaction (select/open/switch) and must NOT dismiss; a click outside all of them
+ * is an outside-click. Uses the prev-frame bbox (1-frame IM lag); a not-yet-found panel is skipped. */
+static bool menu_cursor_over_any_panel(const nt_ui_context_t *ctx, uint32_t menu_id, const nt_ui_menu_runtime_t *rt, float mx, float my) {
+    for (uint8_t d = 0; d <= rt->active_depth && d < NT_UI_MENU_MAX_DEPTH; ++d) {
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, menu_panel_id(menu_id, d));
+        if (bb.found && mx >= bb.x && mx <= bb.x + bb.width && my >= bb.y && my <= bb.y + bb.height) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (same pattern as nt_ui_modal_begin)
 void nt_ui_menu(nt_ui_context_t *ctx, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st, const nt_ui_menu_style_t *style) {
@@ -464,6 +477,13 @@ void nt_ui_menu(nt_ui_context_t *ctx, uint32_t id, const nt_ui_menu_item_t *item
     uint32_t chosen = 0U;
     bool close_chain = false;
     menu_declare_level(ctx, id, items, count, 0U, rt->active_depth, &root_anchor, rt, style, mx, my, ctx->frame_dt, &chosen, &close_chain);
+
+    /* Menu-owned outside-click dismiss (replaces the removed per-level catcher): a primary press this
+     * frame OUTSIDE every open panel closes the whole chain. A press inside a panel is a row interaction
+     * (handled by the rows), never a dismiss. */
+    if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT) && !menu_cursor_over_any_panel(ctx, id, rt, mx, my)) {
+        close_chain = true;
+    }
 
     if (chosen != 0U) {
         st->chosen_id = chosen; /* Model D: latch the activated leaf id; the game reads + clears it */
@@ -493,4 +513,7 @@ float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id,
     const nt_ui_menu_hover_t *c = nt_ui_state_find((nt_ui_context_t *)ctx, menu_hover_id(menu_id, depth));
     return (c != NULL) ? c->switch_timer : 0.0F;
 }
+
+uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth) { return menu_panel_id(menu_id, depth); }
+uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_row_id(menu_id, depth, item_idx); }
 #endif
