@@ -1264,11 +1264,13 @@ static nt_ui_modal_anim_t modal_param_anim(int type, int edge, float scale_start
 
 /* A labelled action button inside a modal body. */
 static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text) {
-    nt_ui_button_begin(
-        ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true, NULL);
+    /* FIT width (min 140) so the longest label ("Show nested") fits; 16px side padding gives breathing room. */
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIT(.min = 140), CLAY_SIZING_FIXED(56)},
+                                                             .padding = {.left = 16, .right = 16, .top = 8, .bottom = 8},
+                                                             .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                                  .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                       true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     return nt_ui_button_end(ctx);
 }
