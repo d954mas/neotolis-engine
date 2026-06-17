@@ -6,9 +6,11 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "input/nt_input.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_popup_internal.h"
 #include "ui/nt_ui_state.h"
 
 const nt_ui_widget_def_t NT_UI_POPUP_DEF = {
@@ -136,7 +138,8 @@ static nt_ui_transform_t popup_eased_transform(const nt_ui_transform_t *start, f
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open) {
+nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open, const nt_ui_popup_ext_t *ext,
+                                                nt_ui_popup_close_src_t *out_src) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(id != 0U && "nt_ui_popup_begin: id must be non-zero");
@@ -145,8 +148,15 @@ nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const 
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_popup_begin: ease_speed must be finite >= 0");
     NT_ASSERT(anchor->prefer_side <= NT_UI_POPUP_CENTER && "nt_ui_popup_begin: prefer_side out of range");
     NT_ASSERT(isfinite(anchor->x) && isfinite(anchor->y) && isfinite(anchor->w) && isfinite(anchor->h) && "nt_ui_popup_begin: anchor rect must be finite");
-    /* scale_* must be > 0 (nt_ui_anim asserts it via the eased transform). */
+    /* Per-phase panel transform start: ext override (modal recipe) wins, else the style start. */
     const nt_ui_transform_t *xf_start = open ? &style->open_xf_start : &style->close_xf_start;
+    if (ext != NULL) {
+        const nt_ui_transform_t *ovr = open ? ext->open_xf : ext->close_xf;
+        if (ovr != NULL) {
+            xf_start = ovr;
+        }
+    }
+    /* scale_* must be > 0 (nt_ui_anim asserts it via the eased transform). */
     NT_ASSERT(xf_start->scale_x > 0.0F && xf_start->scale_y > 0.0F && xf_start->scale_z > 0.0F && "nt_ui_popup_begin: transform scale must be > 0");
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
@@ -182,16 +192,27 @@ nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const 
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t;
     // #endregion
-    // #region edge-flip side + catcher (present-only) + outside-click dismiss
+    // #region edge-flip side + catcher/backdrop (present-only) + close-scan
     const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
     const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     const nt_ui_popup_side_t side = popup_resolve_side(ctx, id, anchor, screen_w, screen_h);
 
-    /* A FULLY-CLOSED popup (!open && settled) declares NO catcher: the occluder would otherwise gate
-     * the whole viewport every frame the helper runs, making base UI unclickable (present-only guard). */
+    /* Backdrop config: ext supplies a visible dim color (modal); otherwise the catcher is transparent. */
+    const uint32_t backdrop_color = (ext != NULL) ? ext->backdrop_color : 0U;
+    const float backdrop_alpha = (ext != NULL) ? ext->backdrop_alpha : 0.0F;
+    const int16_t close_pad = (int16_t)((ext != NULL) ? ext->close_pad : 0);
+    const bool esc_close = (ext != NULL) && ext->esc_close;
+    const bool has_backdrop = backdrop_color != 0U;
+    /* A plain popup dismisses on the light-dismiss flag; the modal drives dismiss/gate explicitly. */
+    const bool light_dismiss = (style->flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U;
+    const bool dismiss_on_click = (ext != NULL) ? ext->dismiss_on_click : light_dismiss;
+    const bool force_catcher = (ext != NULL) && ext->force_catcher;
+    /* A fully-closed popup (!open && settled) declares NO catcher: the occluder would otherwise gate the
+     * whole viewport every frame the helper runs, making base UI unclickable (present-only guard). The
+     * catcher carries the dismiss source and/or the visible backdrop and/or an inert input gate. */
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
-    const bool want_catcher = present && ((style->flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U);
-    bool close_requested = false;
+    const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
+    nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     if (present) {
         ctx->modal_present_cur = true;
         if (ctx->active_modal_depth >= ctx->modal_max_depth_cur) {
@@ -200,26 +221,40 @@ nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const 
         }
     }
     if (want_catcher) {
-        /* Transparent full-viewport catcher at catcher_z. It steps interaction (so it sources the
-         * outside-click) and wins next-frame topmost-z, gating click-through to base UI. */
+        /* Full-viewport catcher at catcher_z. Transparent for a plain popup; a visible dim rect when a
+         * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element
+         * opacity too would dim t²). It wins next-frame topmost-z, gating click-through to base UI. */
         const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
         const nt_ui_element_data_t *catcher_data = nt_ui_make_element_data_xform(style->layer, NULL, &id_xf, 1.0F);
+        Clay_Color cc_col = {0};
+        if (has_backdrop) {
+            cc_col = nt_ui_unpack_abgr(backdrop_color);
+            cc_col.a = cc_col.a * t * backdrop_alpha;
+        }
         CLAY({
             .id = (Clay_ElementId){.id = catcher_id},
             .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = catcher_z},
             .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+            .backgroundColor = cc_col,
             .userData = (void *)catcher_data,
         }) {}
-        /* Outside-click closes only the TOP popup (1-frame IM lag), and only when the click lands
-         * clearly outside the popup panel bbox (a click on the panel body is the body's own). */
+        /* Close-scan on the TOP popup only (1-frame IM lag). Esc fires first; otherwise an outside-click
+         * beyond the panel grown by close_pad dismisses (a click on the panel body is the body's own).
+         * A catcher that neither dismisses nor escapes stays an inert block_pointer input gate. */
         const bool is_top = (ctx->modal_top_id_prev == id);
-        if (is_top) {
-            const nt_ui_interaction_t cc = nt_ui_step_interaction(ctx, catcher_id);
-            if (cc.clicked && !nt_ui_internal_hit_test_padded(ctx, id, cc.pos[0], cc.pos[1], NULL)) {
-                close_requested = true;
+        if (is_top && esc_close && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+            close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
+        }
+        if (is_top && dismiss_on_click) {
+            const nt_ui_interaction_t click = nt_ui_step_interaction(ctx, catcher_id);
+            if (close_src == NT_UI_POPUP_CLOSE_SRC_NONE && click.clicked) {
+                const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
+                if (!nt_ui_internal_hit_test_padded(ctx, id, click.pos[0], click.pos[1], pad_lrtb)) {
+                    close_src = NT_UI_POPUP_CLOSE_SRC_DISMISS;
+                }
             }
         } else {
-            nt_ui_block_pointer(ctx, catcher_id, NULL); /* non-top still gates click-through */
+            nt_ui_block_pointer(ctx, catcher_id, NULL); /* inert gate (non-top, or no dismiss source) */
         }
     }
     // #endregion
@@ -233,10 +268,15 @@ nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const 
         .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = panel_z, .attachPoints = popup_attach_points(side), .offset = popup_offset(side, anchor)},
     };
     panel_decl.userData = (void *)panel_data;
+    const nt_ui_widget_def_t *reg_def = (ext != NULL && ext->def != NULL) ? ext->def : &NT_UI_POPUP_DEF;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel_decl);
-    nt_ui_widget_register(ctx, id, &NT_UI_POPUP_DEF, NULL);
+    nt_ui_widget_register(ctx, id, reg_def, NULL);
     // #endregion
+
+    if (out_src != NULL) {
+        *out_src = close_src;
+    }
 
 #ifdef NT_TEST_ACCESS
     s_last_panel_zband = (uint16_t)panel_z;
@@ -247,11 +287,15 @@ nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const 
 
     return (nt_ui_popup_result_t){
         .t = t,
-        .close_requested = close_requested,
+        .close_requested = (close_src != NT_UI_POPUP_CLOSE_SRC_NONE),
         .visible = present,
         .fully_closed = (!open && t <= NT_UI_POPUP_EPSILON),
         .side = (uint8_t)side,
     };
+}
+
+nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open) {
+    return nt_ui_popup_begin_internal(ctx, id, style, anchor, open, NULL, NULL);
 }
 
 void nt_ui_popup_end(nt_ui_context_t *ctx) {

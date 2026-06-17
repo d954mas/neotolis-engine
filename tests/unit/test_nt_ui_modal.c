@@ -19,6 +19,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_modal.h"
+#include "ui/nt_ui_popup.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -733,9 +734,40 @@ static void test_modal_close_uses_close_recipe(void) {
     TEST_ASSERT_TRUE(ox > 0.0F); /* close recipe = RIGHT (from style.close) */
 }
 
+/* ---- Delegation proof: the modal's z-band equals what popup-core computes for the same depth, i.e.
+ *      the modal is re-expressed ON popup-core, not a divergent parallel copy of the z-band math. ---- */
+static void test_modal_zband_matches_popup_core(void) {
+    nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
+    mst.ease_speed = 0.0F;
+    nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
+    pst.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t panc = {.prefer_side = NT_UI_POPUP_CENTER};
+    nt_pointer_t p = {.active = true};
+
+    /* Modal at depth 0 -> panel z. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &mst, true);
+    const uint16_t modal_z = nt_ui_modal_test_last_zband();
+    const uint16_t modal_bz = nt_ui_modal_test_last_backdrop_zband();
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+
+    /* Popup at depth 0 -> same panel/backdrop z (same shared depth counter + stride). */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    nt_ui_popup_begin(s_fx.ctx, MODAL_A, &pst, &panc, true);
+    const uint16_t popup_z = nt_ui_popup_test_last_zband();
+    const uint16_t popup_cz = nt_ui_popup_test_last_catcher_zband();
+    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+
+    TEST_ASSERT_EQUAL_UINT16(popup_z, modal_z);
+    TEST_ASSERT_EQUAL_UINT16(popup_cz, modal_bz); /* modal backdrop == popup catcher z-band */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_abi_sizes);
+    RUN_TEST(test_modal_zband_matches_popup_core);
     RUN_TEST(test_modal_defaults_valid);
     RUN_TEST(test_modal_floating_smoke);
     RUN_TEST(test_modal_zband_and_nesting);

@@ -62,6 +62,7 @@ set(NT_UI_SOURCES
     nt_ui_scroll.h
     nt_ui_popup.c
     nt_ui_popup.h
+    nt_ui_popup_internal.h
     nt_ui_modal.c
     nt_ui_modal.h
     nt_ui_button.c
