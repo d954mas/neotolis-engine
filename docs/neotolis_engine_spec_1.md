@@ -348,6 +348,37 @@ If a decision can be deferred without loss of base architecture — it is deferr
   scrolls to keep the caret visible while clipping to the field box. Cut is a no-op
   when `nt_clipboard_available()` is false (no silent delete-without-copy).
 
+  **Consolidated interaction events.** `nt_ui_events(ctx, id, cfg)` is the single
+  canonical MUTATING interaction step (one per widget per frame), superseding the
+  raw `nt_ui_step_interaction` as the widget-facing call: it returns the base
+  capture edges (`hovered/pressed/released/held/clicked`) PLUS cfg-gated gestures
+  (`double_clicked`, `long_pressed`, `hold_progress` — a linear 0..1 ramp toward
+  `long_press_secs` while `held && hovered`). The base path delegates to
+  `step_interaction` verbatim (byte-for-byte capture parity); the gesture cell is
+  allocated ONLY when `cfg` opts in (`cfg==NULL` grows the state pool by zero), so
+  zero-overhead is the default — explicit-over-implicit. The dbl-click window and
+  drag move-radius are engine-global (`nt_ui_set_gesture_constants`); dragging off
+  the bbox or past the radius resets `hold_progress` and suppresses `long_pressed`.
+  `nt_ui_query_events` is the idempotent read-side mirror (advances nothing).
+  `hold_progress` is the hold-to-confirm feedback signal and feeds the radial phase.
+
+  **Popup-core.** A single floating-overlay primitive (`nt_ui_popup_begin/end` +
+  a one-bool `nt_ui_popup_visible` wrapper) underpins every transient overlay —
+  modal, dropdown, tooltip, and context-menu. It owns: a Clay floating panel
+  attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
+  missing trigger element can't trip Clay's parent-not-found); trigger-anchored
+  placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
+  read from the panel's previous-frame bbox; a `value_t` open/close tween; a shared
+  modal-depth z-band (`modal_zband_stride*(depth+1)`, NT_ASSERT before the push so
+  a runaway nesting fails early); and a present-only, transparent light-dismiss
+  catcher at `panel_z-1` (outside-click raises a close signal). A fully-closed
+  popup declares NO catcher, so the base UI stays clickable; a hover-driven
+  overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
+  SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The
+  context-menu stacks one popup-core fly-out per submenu level; the only novel
+  algorithm is the mouse-aim triangle that keeps a submenu open while the cursor
+  travels diagonally toward it (never collapse on raw hover-loss).
+
   **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
   uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
   is the unset handle; consumers assign their own meaning). The widget APIs
