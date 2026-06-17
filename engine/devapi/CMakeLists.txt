@@ -19,9 +19,11 @@ endif()
 # cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
 target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface)
 
-# Winsock: nt_devapi_net.c uses WSAStartup/socket/closesocket on Windows.
+# Winsock: nt_devapi_net.c uses WSAStartup/socket/closesocket on Windows. PUBLIC so any
+# executable/test linking nt_devapi inherits Winsock — a static lib's PRIVATE link does not
+# propagate, leaving consumers with unresolved WSA* symbols.
 if(WIN32)
-    target_link_libraries(nt_devapi PRIVATE ws2_32)
+    target_link_libraries(nt_devapi PUBLIC ws2_32)
 endif()
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.

@@ -1,7 +1,10 @@
 // #region platform shim — this file IS the platform boundary
 #ifdef _WIN32
-#include <winsock2.h>
+/* clang-format off */
+#include <winsock2.h> /* must precede windows.h — else winsock1 is pulled in and conflicts. */
+#include <windows.h>   /* GetTickCount64 */
 #include <ws2tcpip.h>
+/* clang-format on */
 typedef SOCKET nt_sock_t;
 typedef int nt_socklen_t;
 #define NT_INVALID_SOCK INVALID_SOCKET
@@ -26,6 +29,7 @@ typedef socklen_t nt_socklen_t;
 #endif
 // #endregion
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,11 +37,17 @@ typedef socklen_t nt_socklen_t;
 
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_tick — frame-advance for the deferred drain. */
 #include "devapi/nt_devapi_net.h"
 
 /* Single loopback client; reconnect allowed. */
 static nt_sock_t s_listen = NT_INVALID_SOCK;
 static nt_sock_t s_client = NT_INVALID_SOCK;
+
+#ifdef _WIN32
+/* WSAStartup refcount: balance cleanup so a failed start path doesn't over-call WSACleanup. */
+static bool s_wsa_init = false;
+#endif
 
 /* Growing recv accumulation buffer; JSON-lines split on '\n'. Dev-only, no input cap.
    s_recv_len bytes are the unconsumed remainder carried between polls/frames. */
@@ -65,6 +75,7 @@ static void recv_reserve(size_t need) {
 }
 
 static void recv_append(const char *p, size_t len) {
+    NT_ASSERT(len <= SIZE_MAX - s_recv_len); /* guard the size_t addition from wrapping. */
     recv_reserve(s_recv_len + len);
     memcpy(s_recv_buf + s_recv_len, p, len);
     s_recv_len += len;
@@ -83,10 +94,15 @@ static void close_client(void) {
 static void set_nonblocking(nt_sock_t s) {
 #ifdef _WIN32
     u_long nb = 1;
-    (void)ioctlsocket(s, (long)FIONBIO, &nb);
+    int rc = ioctlsocket(s, (long)FIONBIO, &nb);
+    NT_ASSERT(rc == 0); /* fresh socket — failure is a bug, not a runtime condition. */
+    (void)rc;
 #else
     int fl = fcntl(s, F_GETFL, 0);
-    (void)fcntl(s, F_SETFL, fl | O_NONBLOCK);
+    NT_ASSERT(fl != -1);
+    int rc = fcntl(s, F_SETFL, fl | O_NONBLOCK);
+    NT_ASSERT(rc != -1);
+    (void)rc;
 #endif
 }
 
@@ -112,6 +128,7 @@ static bool send_all(const char *p, size_t len) {
         flags = MSG_NOSIGNAL; /* suppress SIGPIPE on write-to-closed-peer (Linux). */
 #endif
 #ifdef _WIN32
+        NT_ASSERT((len - off) <= (size_t)INT_MAX); /* send() takes int; guard the narrowing cast. */
         int chunk = (int)(len - off);
         int n = send(s_client, p + off, chunk, flags);
 #else
@@ -159,6 +176,7 @@ bool nt_devapi_net_start(uint16_t port) {
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         return false;
     }
+    s_wsa_init = true;
 #else
     (void)signal(SIGPIPE, SIG_IGN); /* global fallback; MSG_NOSIGNAL/SO_NOSIGPIPE are the per-call guard. */
 #endif
@@ -167,6 +185,7 @@ bool nt_devapi_net_start(uint16_t port) {
     if (s_listen == NT_INVALID_SOCK) {
 #ifdef _WIN32
         WSACleanup();
+        s_wsa_init = false;
 #endif
         return false;
     }
@@ -179,7 +198,7 @@ bool nt_devapi_net_start(uint16_t port) {
     /* SO_REUSEADDR on POSIX avoids TIME_WAIT "address in use" on rapid restart. */
     (void)setsockopt(s_listen, SOL_SOCKET, SO_REUSEADDR, &yes, (nt_socklen_t)sizeof yes);
 #endif
-    (void)setsockopt(s_listen, IPPROTO_TCP, TCP_NODELAY, (const char *)&yes, (nt_socklen_t)sizeof yes);
+    /* No TCP_NODELAY here: it is a no-op on a listen socket. set_client_opts sets it per accept. */
     set_nonblocking(s_listen);
 
     struct sockaddr_in addr;
@@ -193,6 +212,7 @@ bool nt_devapi_net_start(uint16_t port) {
         s_listen = NT_INVALID_SOCK;
 #ifdef _WIN32
         WSACleanup();
+        s_wsa_init = false;
 #endif
         return false; /* port taken / refused — API-contract return, not an assert. */
     }
@@ -210,7 +230,10 @@ void nt_devapi_net_stop(void) {
     s_recv_cap = 0;
     s_recv_len = 0;
 #ifdef _WIN32
-    WSACleanup();
+    if (s_wsa_init) {
+        WSACleanup();
+        s_wsa_init = false;
+    }
 #endif
 }
 // #endregion
@@ -218,6 +241,7 @@ void nt_devapi_net_stop(void) {
 // #region accept / poll
 /* Non-blocking accept; sets the new client non-blocking + TCP_NODELAY. */
 static void try_accept(void) {
+    NT_ASSERT(s_client == NT_INVALID_SOCK); /* callers must not overwrite a live client. */
     nt_sock_t c = accept(s_listen, NULL, NULL);
     if (c != NT_INVALID_SOCK) {
         s_client = c;
@@ -272,38 +296,41 @@ void nt_devapi_net_poll(void) {
     // #region framed dispatch — submit each line, write its response inline
     /* Read cursor across the accumulated buffer; the remainder is shifted to the front after
        the line loop, so the returned submit/poll_response pointers are never held across a
-       recv_append. */
-    size_t cur = 0;
-    for (;;) {
-        char *nl = (char *)memchr(s_recv_buf + cur, '\n', s_recv_len - cur);
-        if (nl == NULL) {
-            break;
-        }
-        *nl = '\0';
-        char *line = s_recv_buf + cur;
-        cur = (size_t)(nl - s_recv_buf) + 1U;
-
-        const char *resp = nt_devapi_submit(line);
-        if (resp != NULL) {
-            /* Write BEFORE the next core call — s_resp_buf is reused each submit. */
-            if (!send_line(resp)) {
-                close_client();
-                return;
+       recv_append. Skip entirely when empty: s_recv_buf may still be NULL, so memchr on it is UB. */
+    if (s_recv_len > 0) {
+        size_t cur = 0;
+        for (;;) {
+            char *nl = (char *)memchr(s_recv_buf + cur, '\n', s_recv_len - cur);
+            if (nl == NULL) {
+                break;
             }
+            *nl = '\0';
+            char *line = s_recv_buf + cur;
+            cur = (size_t)(nl - s_recv_buf) + 1U;
+
+            const char *resp = nt_devapi_submit(line);
+            if (resp != NULL) {
+                /* Write BEFORE the next core call — s_resp_buf is reused each submit. */
+                if (!send_line(resp)) {
+                    close_client();
+                    return;
+                }
+            }
+            /* resp == NULL → deferred: nothing now; arrives via the drain below. */
         }
-        /* resp == NULL → deferred: nothing now; arrives via the drain below. */
-    }
-    /* Shift the unconsumed remainder to the front. */
-    if (cur > 0) {
-        size_t rest = s_recv_len - cur;
-        if (rest > 0) {
-            memmove(s_recv_buf, s_recv_buf + cur, rest);
+        /* Shift the unconsumed remainder to the front. */
+        if (cur > 0) {
+            size_t rest = s_recv_len - cur;
+            if (rest > 0) {
+                memmove(s_recv_buf, s_recv_buf + cur, rest);
+            }
+            s_recv_len = rest;
         }
-        s_recv_len = rest;
     }
     // #endregion
 
-    // #region deferred drain — write every ready result, no per-poll cap
+    // #region deferred drain — write every result that became ready this frame (tick advances all slots once, then poll pops the ready ones)
+    nt_devapi_deferred_tick();
     const char *dr;
     while ((dr = nt_devapi_poll_response()) != NULL) {
         if (!send_line(dr)) {
@@ -316,7 +343,18 @@ void nt_devapi_net_poll(void) {
 // #endregion
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
-static uint64_t now_ms(void) { return (uint64_t)((double)clock() * 1000.0 / (double)CLOCKS_PER_SEC); }
+/* Monotonic WALL clock: clock() measures CPU time (wrong for a wall-clock spin timeout). */
+static uint64_t now_ms(void) {
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    int rc = clock_gettime(CLOCK_MONOTONIC, &ts);
+    NT_ASSERT(rc == 0);
+    (void)rc;
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+#endif
+}
 
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
     if (s_listen == NT_INVALID_SOCK) {

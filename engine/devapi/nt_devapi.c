@@ -226,18 +226,23 @@ static cJSON *dispatch_one(const cJSON *req) {
     nt_devapi_error err = {0};
 
     /* Wire the deferral out-param around the handler call: a handler that never calls
-       nt_devapi_defer_current behaves exactly as before (deferred stays false). */
+       nt_devapi_defer_current behaves exactly as before (deferred stays false). Save/restore
+       the statics so a handler re-entering nt_devapi_submit can't clobber the outer dispatch. */
     bool deferred = false;
+    bool *prev_out_deferred = s_out_deferred;
+    int prev_defer_frames = s_defer_frames;
     s_out_deferred = &deferred;
     s_defer_frames = 0;
     bool ok = slot->handler(params, result_obj, &err, slot->user_data);
-    s_out_deferred = NULL;
+    int defer_frames = s_defer_frames; /* capture this dispatch's value before restore. */
+    s_out_deferred = prev_out_deferred;
+    s_defer_frames = prev_defer_frames;
 
     if (deferred) {
         /* No ok/error entry: enqueue the continuation (with the owned request_id) and emit
            nothing. Overflow rejects the command whole — fail-early, no partial slot. */
         cJSON_Delete(result_obj);
-        if (!deferred_enqueue(req, s_defer_frames)) {
+        if (!deferred_enqueue(req, defer_frames)) {
             cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred queue full");
             echo_request_id(entry, req);
             return entry;
@@ -263,15 +268,16 @@ static cJSON *dispatch_one(const cJSON *req) {
 }
 
 /* Ordered batch: each request gets its own entry; one failure doesn't abort the rest. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static cJSON *dispatch_batch(const cJSON *root) {
     cJSON *response = cJSON_CreateArray();
     NT_ASSERT(response != NULL);
     const cJSON *req = NULL;
     cJSON_ArrayForEach(req, root) {
         cJSON *entry = dispatch_one(req);
-        if (entry == DEFERRED_SENTINEL) {
-            continue; /* deferred: emit nothing for this entry, its result arrives via poll. */
-        }
+        /* Deferred commands inside a batch are unsupported until the batch-deferred protocol
+           is defined; no shipping command defers, so this is unreachable today. */
+        NT_ASSERT(entry != DEFERRED_SENTINEL);
         cJSON_bool added = cJSON_AddItemToArray(response, entry);
         NT_ASSERT(added);
         (void)added;
@@ -311,15 +317,25 @@ const char *nt_devapi_submit(const char *line) {
     return out;
 }
 
+void nt_devapi_deferred_tick(void) {
+    NT_ASSERT(nt_devapi_initialized());
+    /* Advance time once per frame: decrement every in-flight slot exactly once.
+       Pure time-step — no yielding, no popping; poll_response reads the results. */
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        if (s_deferred[i].in_use) {
+            s_deferred[i].frames_left--;
+        }
+    }
+}
+
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
-    /* Advance every in-flight continuation; yield the FIRST that became ready this call.
-       One ready result per call — the transport drains in a loop. */
+    /* Read results only: pop the FIRST in-flight slot already at frames_left <= 0. Never
+       mutates frames_left — nt_devapi_deferred_tick advances time once per frame. */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (!s_deferred[i].in_use) {
             continue;
         }
-        s_deferred[i].frames_left--;
         if (s_deferred[i].frames_left > 0) {
             continue;
         }

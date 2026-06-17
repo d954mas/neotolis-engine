@@ -57,6 +57,10 @@ bool nt_devapi_defer_current(int frames_left);
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */
 void nt_devapi_deferred_reset(void);
+
+/* Advance all in-flight deferred slots once per frame (decrement frames_left exactly once).
+   Call before draining with nt_devapi_poll_response, which only pops ready slots. */
+void nt_devapi_deferred_tick(void);
 // #endregion
 
 /* True between init and shutdown — lets submit enforce init-before-use. */
