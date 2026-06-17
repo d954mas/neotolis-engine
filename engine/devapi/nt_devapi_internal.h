@@ -35,10 +35,10 @@ typedef struct nt_devapi_slot {
 void nt_devapi_resp_reset(void);
 
 // #region deferred queue
-/* Preallocated deferred-response queue cap. Small + static: devapi is low-frequency,
-   so a steady-state heap-free queue is enough. Overflow is rejected (fail-early). */
+/* Preallocated deferred-response queue cap (static, heap-free; overflow rejected fail-early).
+   Override per build with -DNT_DEVAPI_MAX_DEFERRED=N. */
 #ifndef NT_DEVAPI_MAX_DEFERRED
-#define NT_DEVAPI_MAX_DEFERRED 16
+#define NT_DEVAPI_MAX_DEFERRED 128
 #endif
 
 /* One pending deferred response. The slot owns the duplicated request_id and the
