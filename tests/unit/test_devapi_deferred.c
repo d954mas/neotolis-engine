@@ -143,6 +143,26 @@ static void test_multi_slot_distinct_frames(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* both drained */
 }
 
+/* A deferred command inside a batch is rejected with an error entry — never dropped from the
+   array and never leaked as the DEFERRED_SENTINEL pointer (the assert-off UB hole). The response
+   array stays 1:1 (length 2 here), each entry is ok:false bad_params, and NO slot is enqueued. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_deferred_in_batch_rejected(void) {
+    const char *resp = nt_devapi_submit("[{\"method\":\"test.defer\",\"request_id\":1},{\"method\":\"test.defer\",\"request_id\":2}]");
+    TEST_ASSERT_NOT_NULL(resp); /* a batch always returns synchronously, never NULL */
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsArray(root));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(root)); /* ordered, 1:1 — nothing dropped */
+    cJSON *e0 = cJSON_GetArrayItem(root, 0);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(e0, "ok")));
+    cJSON *err0 = cJSON_GetObjectItemCaseSensitive(e0, "error");
+    TEST_ASSERT_EQUAL_STRING("bad_params", cJSON_GetObjectItemCaseSensitive(err0, "code")->valuestring);
+    cJSON_Delete(root);
+
+    /* The rejected entries enqueued no deferred slot — the queue is empty. */
+    TEST_ASSERT_NULL(advance_frame());
+}
+
 /* Overflow: more than NT_DEVAPI_MAX_DEFERRED concurrent defers rejects the overflowing
    call with a structured bad_params error (not NULL), leaving the earlier slots intact. */
 static void test_overflow_rejected_structured(void) {
@@ -175,6 +195,7 @@ int main(void) {
     RUN_TEST(test_yield_string_id);
     RUN_TEST(test_yield_absent_id);
     RUN_TEST(test_multi_slot_distinct_frames);
+    RUN_TEST(test_deferred_in_batch_rejected);
     RUN_TEST(test_overflow_rejected_structured);
     return UNITY_END();
 }

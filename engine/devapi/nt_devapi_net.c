@@ -266,6 +266,11 @@ void nt_devapi_net_poll(void) {
         return;
     }
 
+    /* Advance every in-flight deferred slot once per frame, BEFORE this frame's commands enqueue
+       new ones — so a command that defers N frames waits N real frames, not N-1 (a same-frame
+       tick of a just-enqueued slot would make frame.wait(1) resolve in the poll it arrived in). */
+    nt_devapi_deferred_tick();
+
     // #region recv (orderly close vs no-data)
     char tmp[4096];
     for (;;) {
@@ -332,8 +337,7 @@ void nt_devapi_net_poll(void) {
     }
     // #endregion
 
-    // #region deferred drain — write every result that became ready this frame (tick advances all slots once, then poll pops the ready ones)
-    nt_devapi_deferred_tick();
+    // #region deferred drain — emit every result that became ready (the per-frame tick ran at frame start)
     const char *dr;
     while ((dr = nt_devapi_poll_response()) != NULL) {
         if (!send_line(dr)) {

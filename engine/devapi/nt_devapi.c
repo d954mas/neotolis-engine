@@ -192,7 +192,7 @@ static bool deferred_enqueue(const cJSON *req, int frames_left) {
 /* Dispatch one request object → an owned response entry, DEFERRED_SENTINEL if the command
    deferred, or NULL never (a deferred command yields the sentinel). The dispatcher
    pre-creates and always frees result_obj, so a handler can neither leak it nor free it. */
-static cJSON *dispatch_one(const cJSON *req) {
+static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     if (!cJSON_IsObject(req)) {
         return make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "request must be a JSON object");
     }
@@ -242,6 +242,14 @@ static cJSON *dispatch_one(const cJSON *req) {
         /* No ok/error entry: enqueue the continuation (with the owned request_id) and emit
            nothing. Overflow rejects the command whole — fail-early, no partial slot. */
         cJSON_Delete(result_obj);
+        if (!allow_defer) {
+            /* A batch is one ordered response array; a deferred reply cannot go in it. Reject
+               this entry explicitly instead of enqueuing a slot that would later fire as a
+               stray envelope (and never return DEFERRED_SENTINEL into the array). */
+            cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred commands are not supported inside a batch");
+            echo_request_id(entry, req);
+            return entry;
+        }
         if (!deferred_enqueue(req, defer_frames)) {
             cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred queue full");
             echo_request_id(entry, req);
@@ -274,9 +282,8 @@ static cJSON *dispatch_batch(const cJSON *root) {
     NT_ASSERT(response != NULL);
     const cJSON *req = NULL;
     cJSON_ArrayForEach(req, root) {
-        cJSON *entry = dispatch_one(req);
-        /* Deferred commands inside a batch are unsupported until the batch-deferred protocol
-           is defined; no shipping command defers, so this is unreachable today. */
+        cJSON *entry = dispatch_one(req, false); /* deferral disallowed in a batch (see dispatch_one). */
+        /* allow_defer=false guarantees a real entry (never the sentinel) — safe even in assert-off. */
         NT_ASSERT(entry != DEFERRED_SENTINEL);
         cJSON_bool added = cJSON_AddItemToArray(response, entry);
         NT_ASSERT(added);
@@ -298,7 +305,7 @@ const char *nt_devapi_submit(const char *line) {
     }
 
     if (!cJSON_IsArray(root)) {
-        cJSON *entry = dispatch_one(root);
+        cJSON *entry = dispatch_one(root, true);
         if (entry == DEFERRED_SENTINEL) {
             /* The lone command deferred: no sync response — drain it via poll_response. */
             cJSON_Delete(root);
