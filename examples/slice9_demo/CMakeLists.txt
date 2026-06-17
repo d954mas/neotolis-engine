@@ -13,10 +13,11 @@ target_link_libraries(slice9_demo PRIVATE
 # Generated asset headers from builder (slice9_demo_assets.h etc.)
 target_include_directories(slice9_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
+# nt_ui calls nt_clipboard_* (no text field here, but the symbols must resolve); stub = no exports.
 if(EMSCRIPTEN)
-    target_link_libraries(slice9_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
+    target_link_libraries(slice9_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_clipboard_stub)
 else()
-    target_link_libraries(slice9_demo PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(slice9_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub)
 endif()
 
 nt_set_warning_flags(slice9_demo)
@@ -36,7 +37,7 @@ set(SLICE9_DEMO_PACK_NAMES slice9_demo.ntpack)
 # build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
     add_executable(slice9_demo_build_packs build_packs.c)
-    target_link_libraries(slice9_demo_build_packs PRIVATE nt_builder)
+    target_link_libraries(slice9_demo_build_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(slice9_demo_build_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(slice9_demo_build_packs PRIVATE -U_DLL)
     nt_set_warning_flags(slice9_demo_build_packs)

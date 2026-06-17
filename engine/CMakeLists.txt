@@ -28,9 +28,8 @@ add_subdirectory(utf8)
 add_subdirectory(sort)
 add_subdirectory(render)
 add_subdirectory(ui)
-if(NT_BASISU)
-    add_subdirectory(basisu)
-endif()
+add_subdirectory(clipboard)
+add_subdirectory(basisu)
 # Master gate: subdir EXCLUDED at NT_DEVAPI_ENABLED=0 so release binaries
 # contain zero devapi object code (not an empty-TU pattern).
 if(NT_DEVAPI_ENABLED)

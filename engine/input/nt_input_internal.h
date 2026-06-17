@@ -22,6 +22,15 @@ void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t b
 void nt_input_buffer_wheel(float dx, float dy);
 void nt_input_buffer_focus_lost(void);
 
+/* Stage a typed UTF-32 codepoint from the native GLFW char callback. The callback fires during
+   glfwPollEvents() (before nt_input_poll clears the ring), so it must NOT write the ring directly;
+   platform_poll drains these into the ring AFTER the clear (symmetric with nt_input_buffer_key). */
+void nt_input_buffer_char_event(uint32_t cp);
+
+/* Push a typed UTF-32 codepoint into the shared char ring. Lives in nt_input.c
+   (platform-agnostic), called by the web char source + native platform_poll drain. Drop-when-full. */
+void nt_input_buffer_char(uint32_t cp);
+
 /* Platform lifecycle — implemented by each backend (web, native, stub). */
 
 void nt_input_platform_init(void);

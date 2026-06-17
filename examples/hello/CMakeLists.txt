@@ -1,5 +1,5 @@
 add_executable(hello main.c)
-target_link_libraries(hello PRIVATE nt_core nt_app nt_input nt_window)
+target_link_libraries(hello PRIVATE nt_core nt_app nt_input nt_window nt_log)
 if(EMSCRIPTEN)
     target_link_libraries(hello PRIVATE nt_platform_web)
 endif()

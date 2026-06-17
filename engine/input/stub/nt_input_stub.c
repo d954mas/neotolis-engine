@@ -28,4 +28,8 @@ void nt_input_buffer_wheel(float dx, float dy) {
     (void)dy;
 }
 
+void nt_input_buffer_char_event(uint32_t cp) { (void)cp; }
+
 void nt_input_buffer_focus_lost(void) {}
+
+void nt_input_set_text_input_mode(nt_text_input_mode_t mode) { (void)mode; }

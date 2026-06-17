@@ -13,10 +13,12 @@ target_link_libraries(ui_showcase PRIVATE
 # Generated asset headers from builder (ui_showcase_assets.h etc.)
 target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
+# nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the
+# real impl so Ctrl+C/X/V work in the Input tab. web = async cache-on-paste, native = glfw.
 if(EMSCRIPTEN)
-    target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
+    target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_clipboard)
 else()
-    target_link_libraries(ui_showcase PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(ui_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard)
 endif()
 
 nt_set_warning_flags(ui_showcase)
@@ -33,7 +35,7 @@ set(UI_SHOWCASE_PACK_NAMES ui_showcase.ntpack)
 # build; the copy is a plain build-time command on that existing file.
 if(NOT EMSCRIPTEN)
     add_executable(build_ui_showcase_packs build_packs.c)
-    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder)
+    target_link_libraries(build_ui_showcase_packs PRIVATE nt_builder nt_log)
     target_compile_definitions(build_ui_showcase_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(build_ui_showcase_packs PRIVATE -U_DLL)
     nt_set_warning_flags(build_ui_showcase_packs)

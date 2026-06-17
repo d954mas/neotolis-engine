@@ -68,6 +68,8 @@ set(NT_UI_SOURCES
     nt_ui_checkbox.h
     nt_ui_slider.c
     nt_ui_slider.h
+    nt_ui_input.c
+    nt_ui_input.h
     nt_ui_progress.c
     nt_ui_progress.h
     nt_ui_debug_hit_zones.c
@@ -117,17 +119,19 @@ target_link_libraries(nt_ui
         nt_resource
         nt_font
         nt_material
-        nt_input
+        nt_input_interface
+        nt_clipboard_interface
         nt_mem_scratch
         # PUBLIC: nt_atlas_region_ref_t appears in public widget headers
         # (nt_ui_button.h / nt_ui_image.h / nt_ui_panel.h).
         nt_atlas
     PRIVATE
-        nt_gfx
+        nt_gfx_interface
         nt_sprite_renderer
         nt_text_renderer
         nt_time
         nt_math
+        nt_utf8
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.

@@ -76,7 +76,13 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
     if (s.width > 0.0F && ls != 0.0F) {
         s.width += ls;
     }
-    return (Clay_Dimensions){.width = s.width, .height = s.height};
+    /* Height = font LINE box (ascent-descent), NOT the run's ink box (s.height): a tall glyph (tofu,
+     * or a descender) must not change the element height, else the TEXT render's vertical center-offset
+     * (= (bbox.height - (ascent-descent)*scale)/2) drifts and shifts the whole line down. Mirrors the
+     * exact text_h the render path uses, so center_offset stays 0 for an intrinsically-sized line. */
+    const nt_font_metrics_t m = nt_font_get_metrics(font);
+    const float line_h = (m.units_per_em > 0) ? ((float)(m.ascent - m.descent) * ((float)config->fontSize / (float)m.units_per_em)) : s.height;
+    return (Clay_Dimensions){.width = s.width, .height = line_h};
 }
 // #endregion
 
@@ -348,6 +354,16 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
      * nt_ui_modal_active BEFORE this frame's begin still sees last frame's result). */
     ctx->modal_present_cur = false;
+    /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
+     * so drop focus before this frame runs (mirrors the capture_seen orphan sweep above). */
+    if (ctx->focused_input_id != 0U && ctx->focused_input_seen == 0U) {
+        ctx->focused_input_id = 0U;
+    }
+    ctx->focused_input_seen = 0U;
+    /* Tab focus-advance is single-frame: the seek is consumed by the next field this frame; the
+     * first-field tracker re-zeroes so a Tab off the last field wraps to this frame's first. */
+    ctx->focus_tab_seek = 0U;
+    ctx->focus_first_id = 0U;
     ctx->pointer_over_any = false;
     ctx->hot_resolved = false;
 
@@ -407,7 +423,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Clay v0.14 has no right/middle/wheel buttons; left only. */
     Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
-    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed. */
+    /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed,
+     * so drag-scrolling stays off. Still REQUIRED every frame: it runs Clay's clip/scroll-container GC.
+     * Clay caps that pool (CLAY__MAX_SCROLL_CONTAINERS in clay.h, raised from upstream 10) and never
+     * reclaims entries on its own -- without this call any CLIP element (e.g. each input field's content
+     * clip) leaks a slot until the pool overflows. */
+    Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
     Clay_BeginLayout();
 }
@@ -1077,6 +1098,18 @@ typedef struct {
     int h;
 } scissor_rect_t;
 
+/* Per-walk cache of each NORMAL clip's FINAL (ancestor-intersected) scissor, keyed by the bbox Clay
+ * emits for it. A floating clipTo=ATTACHED_PARENT marker carries the SAME bbox as its parent clip but
+ * loses that clip's own ancestor clips (e.g. an outer scroll) -- it looks the bbox up here to inherit
+ * the full chain instead of clipping to the raw parent box. Cap exceeded => float falls back (escapes). */
+#ifndef NT_UI_WALKER_CLIP_CACHE_CAP
+#define NT_UI_WALKER_CLIP_CACHE_CAP 64
+#endif
+typedef struct {
+    Clay_BoundingBox bbox;
+    scissor_rect_t rect;
+} clip_cache_entry_t;
+
 /* DIRECT mode: viewport is GL physical, Y-flip inside the viewport rect.
  * SCALED mode: viewport is logical; scale+shift to physical, Y-flip against fb height. */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
@@ -1104,7 +1137,8 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty, clip_cache_entry_t *clip_cache,
+                         int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
     /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
     if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
@@ -1142,6 +1176,23 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         hp = vh;
     }
 
+    /* Floating clipTo marker (both_false): inherit the parent clip's FULL-chain scissor cached in normal
+     * flow (matched by the identical bbox Clay emits for both) instead of the raw parent box, so an outer
+     * clip (e.g. a tab scroll) clips the float too. memcmp is exact-bit (both bboxes copy one source). */
+    if (both_false) {
+        for (int ci = 0; ci < *clip_cache_len; ++ci) {
+            const Clay_BoundingBox b = clip_cache[ci].bbox;
+            /* Exact equality: both bboxes are copies of one Clay source value (integer layout coords). */
+            if (b.x == c->boundingBox.x && b.y == c->boundingBox.y && b.width == c->boundingBox.width && b.height == c->boundingBox.height) {
+                x = clip_cache[ci].rect.x;
+                y = clip_cache[ci].rect.y;
+                wp = clip_cache[ci].rect.w;
+                hp = clip_cache[ci].rect.h;
+                break;
+            }
+        }
+    }
+
     /* Intersect with parent so inner widgets cannot escape outer clip. */
     if (*depth > 0) {
         scissor_rect_t t = stack[*depth - 1];
@@ -1153,6 +1204,14 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         y = y2;
         wp = (r2 > x2) ? (r2 - x2) : 0;
         hp = (b2 > y2) ? (b2 - y2) : 0;
+    }
+
+    /* Cache a normal clip's final scissor so floats clipping to it (above) inherit the full ancestor
+     * chain. Skip the float marker itself; cap-exceeded just stops caching (those floats fall back). */
+    if (!both_false && *clip_cache_len < NT_UI_WALKER_CLIP_CACHE_CAP) {
+        clip_cache[*clip_cache_len].bbox = c->boundingBox;
+        clip_cache[*clip_cache_len].rect = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
+        ++(*clip_cache_len);
     }
 
     /* Flush BEFORE scissor switch so staging keeps prior clip. */
@@ -1346,7 +1405,7 @@ static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierar
  * The closed-form below assumes ws->m is affine (row3 = (0,0,0,1)) — guaranteed by compose_transform_level. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
-                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters, bool force_screen_space) {
+                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters, bool force_screen_space, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
@@ -1418,7 +1477,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         if (force_screen_space) {
-            scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
+            scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty, clip_cache, clip_cache_len);
             if ((uint32_t)*depth > counters->max_scissor_depth) {
                 counters->max_scissor_depth = (uint32_t)*depth;
             }
@@ -1450,7 +1509,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         /* scissor_push reads Clay-Y-down and flips internally — convert back. */
         const float clay_top_y = vy + vh - mx_y;
         local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = clay_top_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
-        scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
+        scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty, clip_cache, clip_cache_len);
         if ((uint32_t)*depth > counters->max_scissor_depth) {
             counters->max_scissor_depth = (uint32_t)*depth;
         }
@@ -1544,6 +1603,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];
     int depth = 0;
+    /* Floating clipTo scissors inherit their parent clip's full-chain scissor from here (see scissor_push). */
+    clip_cache_entry_t clip_cache[NT_UI_WALKER_CLIP_CACHE_CAP];
+    int clip_cache_len = 0;
 
     nt_ui_walker_state_t ws;
     walker_state_init(&ws);
@@ -1614,7 +1676,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         }
         if (!is_segmentable(c->commandType)) {
             if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
-                dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
+                dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                 ++i;
                 continue;
             }
@@ -1629,7 +1691,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             memcpy(ws.m, b.m, sizeof ws.m);
             ws.accum_opacity = b.opacity;
             ws.hierarchy_depth = b.hierarchy_depth;
-            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
             ++i;
             continue;
         }
@@ -1677,7 +1739,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
                         memcpy(ws.m, b.m, sizeof ws.m);
                         ws.accum_opacity = b.opacity;
                         ws.hierarchy_depth = b.hierarchy_depth;
-                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space);
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                     }
                 }
             }

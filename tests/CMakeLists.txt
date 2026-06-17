@@ -23,7 +23,7 @@ if(NOT EMSCRIPTEN)
     endforeach()
 
     add_executable(test_core unit/test_core.c)
-    target_link_libraries(test_core PRIVATE nt_core unity)
+    target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 
     # Strict warning and sanitizer policy (same as engine code)
     nt_set_warning_flags(test_core)
@@ -42,7 +42,7 @@ if(NOT EMSCRIPTEN)
     # where sanitizers are disabled (clang interception_win can't patch UCRT).
     if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"))
         add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-        target_link_libraries(test_sanitizer_proof PRIVATE nt_core unity)
+        target_link_libraries(test_sanitizer_proof PRIVATE nt_core nt_log_stub unity)
 
         nt_set_warning_flags(test_sanitizer_proof)
         nt_set_sanitizer_flags(test_sanitizer_proof)
@@ -113,7 +113,7 @@ if(NOT EMSCRIPTEN)
 
     # --- App module tests ---
     add_executable(test_app unit/test_app.c)
-    target_link_libraries(test_app PRIVATE nt_app_stub unity)
+    target_link_libraries(test_app PRIVATE nt_app_stub nt_log_stub unity)
     nt_set_warning_flags(test_app)
     nt_set_sanitizer_flags(test_app)
     set_target_properties(test_app PROPERTIES
@@ -123,7 +123,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Window module tests ---
     add_executable(test_window unit/test_window.c)
-    target_link_libraries(test_window PRIVATE nt_window_stub unity)
+    target_link_libraries(test_window PRIVATE nt_window_stub nt_log_stub unity)
     nt_set_warning_flags(test_window)
     nt_set_sanitizer_flags(test_window)
     set_target_properties(test_window PROPERTIES
@@ -144,7 +144,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Input module tests ---
     add_executable(test_input unit/test_input.c)
-    target_link_libraries(test_input PRIVATE nt_input_stub unity)
+    target_link_libraries(test_input PRIVATE nt_input_stub nt_log_stub unity)
     nt_set_warning_flags(test_input)
     nt_set_sanitizer_flags(test_input)
     set_target_properties(test_input PROPERTIES
@@ -152,9 +152,19 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input COMMAND test_input)
 
+    # --- Input char ring tests (FIFO + UTF-32 + overflow) ---
+    add_executable(test_input_char unit/test_input_char.c)
+    target_link_libraries(test_input_char PRIVATE nt_input_stub nt_log_stub unity)
+    nt_set_warning_flags(test_input_char)
+    nt_set_sanitizer_flags(test_input_char)
+    set_target_properties(test_input_char PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_input_char COMMAND test_input_char)
+
     # --- Graphics module tests ---
     add_executable(test_gfx unit/test_gfx.c)
-    target_link_libraries(test_gfx PRIVATE nt_gfx_stub unity)
+    target_link_libraries(test_gfx PRIVATE nt_gfx_stub nt_log_stub unity)
     nt_set_warning_flags(test_gfx)
     nt_set_sanitizer_flags(test_gfx)
     set_target_properties(test_gfx PROPERTIES
@@ -169,14 +179,14 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
     target_link_libraries(test_nt_gfx_scissor PRIVATE
         nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_gfx_stub unity
+        nt_resource nt_hash nt_pool nt_gfx_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_nt_gfx_scissor PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_gfx_scissor)
 
     # --- Shape module tests ---
     add_executable(test_shape unit/test_shape.c)
-    target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_stub unity)
+    target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_stub nt_log_stub unity)
     nt_set_warning_flags(test_shape)
     nt_set_sanitizer_flags(test_shape)
     set_target_properties(test_shape PROPERTIES
@@ -196,7 +206,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Entity module tests ---
     add_executable(test_entity unit/test_entity.c)
-    target_link_libraries(test_entity PRIVATE nt_entity unity)
+    target_link_libraries(test_entity PRIVATE nt_entity nt_log_stub unity)
     nt_set_warning_flags(test_entity)
     nt_set_sanitizer_flags(test_entity)
     set_target_properties(test_entity PROPERTIES
@@ -206,7 +216,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Transform component tests ---
     add_executable(test_transform_comp unit/test_transform_comp.c)
-    target_link_libraries(test_transform_comp PRIVATE nt_transform_comp nt_entity unity)
+    target_link_libraries(test_transform_comp PRIVATE nt_transform_comp nt_entity nt_log_stub unity)
     nt_set_warning_flags(test_transform_comp)
     nt_set_sanitizer_flags(test_transform_comp)
     set_target_properties(test_transform_comp PROPERTIES
@@ -216,7 +226,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Component tests (mesh, material, drawable) ---
     add_executable(test_components unit/test_components.c)
-    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_drawable_comp nt_entity nt_hash unity)
+    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_drawable_comp nt_entity nt_hash nt_log_stub unity)
     nt_set_warning_flags(test_components)
     nt_set_sanitizer_flags(test_components)
     set_target_properties(test_components PROPERTIES
@@ -226,7 +236,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Render items tests ---
     add_executable(test_render_items unit/test_render_items.c)
-    target_link_libraries(test_render_items PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_hash nt_gfx_stub unity)
+    target_link_libraries(test_render_items PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_hash nt_gfx_stub nt_log_stub unity)
     nt_set_warning_flags(test_render_items)
     nt_set_sanitizer_flags(test_render_items)
     set_target_properties(test_render_items PROPERTIES
@@ -246,7 +256,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Font module tests ---
     add_executable(test_font unit/test_font.c)
-    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool unity)
+    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(nt_font PRIVATE -U_DLL)
     nt_setup_test_target(test_font)
@@ -255,7 +265,7 @@ if(NOT EMSCRIPTEN)
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
-    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time unity)
+    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_font_measure_bench)
 
@@ -268,13 +278,13 @@ if(NOT EMSCRIPTEN)
 
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
-    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_text_renderer)
 
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
-    target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash unity)
+    target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
     target_compile_definitions(test_material PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_warning_flags(test_material)
     nt_set_sanitizer_flags(test_material)
@@ -297,13 +307,16 @@ if(NOT EMSCRIPTEN)
 
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
-    target_link_libraries(test_resource PRIVATE nt_resource unity)
+    # Real nt_fs/nt_http: test_resource drives the real loader pipeline (native
+    # file reads + request-fail paths). Stubs make nt_fs_read_file return INVALID,
+    # so assets never activate and the activation/resolve callbacks never fire.
+    target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash unity)
+    target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
     target_include_directories(test_atlas PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
@@ -311,7 +324,7 @@ if(NOT EMSCRIPTEN)
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE
-        nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared unity
+        nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_include_directories(test_sprite_comp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_sprite_comp PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -337,8 +350,12 @@ if(NOT EMSCRIPTEN)
     # --- DevAPI module tests (NT_DEVAPI_ENABLED-gated) ---
     if(NT_DEVAPI_ENABLED)
         # registry register / dup-reject / owned-copy survival.
-        add_executable(test_devapi_registry unit/test_devapi_registry.c)
-        target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson unity)
+        # nt_core before nt_log_stub: nt_core references nt_log_write and nothing earlier does,
+        # so on GNU ld (left-to-right) the log impl must trail nt_core or it is dropped.
+        add_executable(test_devapi_registry unit/test_devapi_registry.c unit/test_helpers/nt_assert_trap.c)
+        target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson nt_window_stub nt_core nt_log_stub unity)
+        # unit/ on the include path so nt_assert_trap.c resolves "test_helpers/nt_assert_trap.h" (death tests).
+        target_include_directories(test_devapi_registry PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
         target_compile_definitions(test_devapi_registry PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -347,7 +364,7 @@ if(NOT EMSCRIPTEN)
         # submit() envelope, request_id echo, unknown-method, batch order +
         # continue-on-error, pointer lifetime (ASan via sanitizer flags).
         add_executable(test_devapi_envelope unit/test_devapi_envelope.c)
-        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson unity)
+        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson nt_window_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_envelope PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -356,7 +373,7 @@ if(NOT EMSCRIPTEN)
         # core command group via submit(). engine.info.version comes from nt_core, so the
         # test asserts it against nt_engine_version_string() directly.
         add_executable(test_devapi_core unit/test_devapi_core.c)
-        target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson unity)
+        target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_core PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -365,7 +382,7 @@ if(NOT EMSCRIPTEN)
         # discovery group (endpoints / command.describe / features) + the
         # zero-engine-edits game-layer registration path.
         add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
-        target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson unity)
+        target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson nt_window_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_discovery PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -378,9 +395,21 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_fs WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # --- Clipboard module tests (real/stub twins, same source) ---
+    # Native impl: real round-trip needs an initialized GLFW (nt_window pulls glfw).
+    add_executable(test_clipboard unit/test_clipboard.c)
+    target_link_libraries(test_clipboard PRIVATE nt_clipboard nt_window nt_input_stub nt_log_stub unity)
+    target_compile_definitions(test_clipboard PRIVATE NT_CLIPBOARD_TEST_NATIVE)
+    nt_setup_test_target(test_clipboard)
+
+    # Stub impl: get -> "", set -> noop (same source, no GLFW).
+    add_executable(test_clipboard_stub unit/test_clipboard.c)
+    target_link_libraries(test_clipboard_stub PRIVATE nt_clipboard_stub nt_log_stub unity)
+    nt_setup_test_target(test_clipboard_stub)
+
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
-    target_link_libraries(test_builder PRIVATE nt_builder unity)
+    target_link_libraries(test_builder PRIVATE nt_builder nt_log unity)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
@@ -391,7 +420,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_mesh_renderer PRIVATE
         nt_mesh_renderer nt_render nt_gfx_stub
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
-        nt_material nt_resource nt_hash unity
+        nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_mesh_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_warning_flags(test_mesh_renderer)
@@ -406,7 +435,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_sprite_renderer PRIVATE
         nt_sprite_renderer nt_atlas nt_sprite_comp nt_transform_comp
         nt_drawable_comp nt_material_comp nt_material nt_render
-        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub unity
+        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_sprite_renderer PRIVATE
         _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
@@ -416,7 +445,7 @@ if(NOT EMSCRIPTEN)
     # --- nt_mem_scratch tests ---
     add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_mem_scratch PRIVATE
-        nt_mem_scratch nt_core unity
+        nt_mem_scratch nt_core nt_log_stub unity
     )
     target_include_directories(test_nt_mem_scratch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_mem_scratch PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -425,7 +454,10 @@ if(NOT EMSCRIPTEN)
     # --- nt_ui element_data macro tests (exercises macros -> scratch path) ---
     add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_ui_element_data PRIVATE
-        nt_ui nt_mem_scratch nt_core unity
+        nt_ui nt_mem_scratch nt_core
+        nt_gfx_stub nt_input_stub nt_resource nt_font nt_material nt_atlas
+        nt_sprite_renderer nt_text_renderer nt_hash nt_pool
+        nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_include_directories(test_nt_ui_element_data PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -435,7 +467,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_stats unit/test_stats.c)
     target_link_libraries(test_stats PRIVATE
         nt_stats nt_text_renderer nt_font nt_material nt_resource
-        nt_gfx_stub nt_hash nt_pool unity
+        nt_gfx_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_stats)
@@ -447,6 +479,10 @@ if(NOT EMSCRIPTEN)
         unit/test_helpers/ui_atlas.c
         unit/test_helpers/nt_assert_trap.c
         unit/test_helpers/ui_walker_fixture.c
+        # In-memory clipboard impl: nt_ui now references nt_clipboard_get/set_text
+        # (Ctrl+C/X/V). The real native backend is headless-flaky and the stub never
+        # round-trips, so the test exes link a deterministic fake instead.
+        unit/test_helpers/nt_clipboard_fake.c
     )
 
     # Helpers need `tests/unit/` on the include path so
@@ -465,7 +501,7 @@ if(NOT EMSCRIPTEN)
     # under the unified NT_TEST_ACCESS define.
     target_link_libraries(test_nt_sprite_renderer_emit_region PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_nt_sprite_renderer_emit_region PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_sprite_renderer_emit_region)
@@ -475,7 +511,8 @@ if(NOT EMSCRIPTEN)
     # element_count via the public getter forwards.
     set(_nt_ui_test_libs
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core
+        nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 
     set(_nt_ui_test_names
@@ -511,6 +548,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_scroll
         test_nt_ui_modal
         test_nt_ui_slider
+        test_ui_input
         test_nt_ui_progress
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
@@ -557,7 +595,9 @@ if(EMSCRIPTEN)
     endif()
 
     add_executable(wasm_smoke wasm/smoke_entry.c)
-    target_link_libraries(wasm_smoke PRIVATE nt_core)
+    # nt_core links nt_log_interface (header only); the exe picks the impl. Smoke
+    # test needs no real logging -> nt_log_stub.
+    target_link_libraries(wasm_smoke PRIVATE nt_core nt_log_stub)
 
     # Strict warning and sanitizer policy (same as engine code)
     nt_set_warning_flags(wasm_smoke)

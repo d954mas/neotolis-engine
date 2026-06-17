@@ -93,6 +93,13 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
     }
 }
 
+static void glfw_char_callback(GLFWwindow *window, unsigned int codepoint) {
+    (void)window;
+    /* GLFW delivers native-endian UTF-32 already. Stage (not ring-write) so platform_poll drains
+       it into the ring after nt_input_poll's frame clear -- otherwise the clear eats the char. */
+    nt_input_buffer_char_event(codepoint);
+}
+
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
     (void)window;
     nt_input_buffer_pointer(false, xpos, ypos, s_cached_buttons);
@@ -209,6 +216,7 @@ void nt_window_init(void) {
 
     /* Register GLFW callbacks */
     glfwSetKeyCallback(s_glfw_window, glfw_key_callback);
+    glfwSetCharCallback(s_glfw_window, glfw_char_callback);
     glfwSetCursorPosCallback(s_glfw_window, glfw_cursor_pos_callback);
     glfwSetMouseButtonCallback(s_glfw_window, glfw_mouse_button_callback);
     glfwSetScrollCallback(s_glfw_window, glfw_scroll_callback);

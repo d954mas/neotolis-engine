@@ -158,6 +158,10 @@ struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds;
     bool in_frame;
+    /* Orphan-focus cleanup (mirrors capture_seen): set to 1 the frame the focused field runs; if the
+     * focused field is not re-declared next frame, nt_ui_begin clears focused_input_id (else a vanished
+     * field gates global Esc forever). Reset to 0 each begin. Placed here to reuse in_frame's pad. */
+    uint8_t focused_input_seen;
 
     nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
     uint32_t frame_pointer_count;
@@ -183,6 +187,15 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t modal_top_id_prev;
     uint32_t modal_top_id_cur;
+    /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
+     * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
+     * field declared this frame. Survives across frames (not reset by begin). */
+    uint32_t focused_input_id;
+    /* Tab focus-advance bookkeeping, scoped to one frame: _seek set the frame a focused field
+     * sees Tab; the NEXT field declared that frame claims focus and clears _seek. _first_id
+     * tracks the earliest field so Tab off the last field wraps to the first. */
+    uint32_t focus_tab_seek;
+    uint32_t focus_first_id;
     uint32_t wheel_candidate_count;
     /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
     int16_t modal_zband_stride;

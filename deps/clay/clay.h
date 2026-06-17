@@ -5,6 +5,14 @@
 //      in Clay_Context. Stores source layout element index on every render
 //      command. Used by nt_ui's build_tree pass to map each render command
 //      back to its source element. Search "nt_" for patch sites (4 total).
+//   2. CLAY__MAX_SCROLL_CONTAINERS overrides the hardcoded scroll/clip-container
+//      pool size (upstream 10): every .clip takes one slot, reclaimed only in
+//      Clay_UpdateScrollContainers. Search "NT patch" for the 2 sites.
+//   3. Structural-scissor balance: force SCISSOR_START to emit even when the clip
+//      element is offscreen, since the matching SCISSOR_END is emitted
+//      unconditionally. Without it an offscreen clip (a field scrolled past the
+//      fold) leaves an unmatched END -> renderer scissor-stack underflow. One site
+//      in the CLIP render-command case ("shouldRender = true").
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -954,6 +962,11 @@ extern uint32_t Clay__debugViewWidth;
 
 #ifndef CLAY__MAXFLOAT
 #define CLAY__MAXFLOAT 3.40282346638528859812e+38F
+#endif
+
+// NT patch: scroll/clip-container pool size (upstream hardcoded 10). Overridable from the build.
+#ifndef CLAY__MAX_SCROLL_CONTAINERS
+#define CLAY__MAX_SCROLL_CONTAINERS 64
 #endif
 
 Clay_LayoutConfig CLAY_LAYOUT_DEFAULT = CLAY__DEFAULT_STRUCT;
@@ -2202,7 +2215,7 @@ void Clay__InitializePersistentMemory(Clay_Context* context) {
     int32_t maxMeasureTextCacheWordCount = context->maxMeasureTextCacheWordCount;
     Clay_Arena *arena = &context->internalArena;
 
-    context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(10, arena);
+    context->scrollContainerDatas = Clay__ScrollContainerDataInternalArray_Allocate_Arena(CLAY__MAX_SCROLL_CONTAINERS, arena); // NT patch: was hardcoded 10
     context->layoutElementsHashMapInternal = Clay__LayoutElementHashMapItemArray_Allocate_Arena(maxElementCount, arena);
     context->layoutElementsHashMap = Clay__int32_tArray_Allocate_Arena(maxElementCount, arena);
     context->measureTextHashMapInternal = Clay__MeasureTextCacheItemArray_Allocate_Arena(maxElementCount, arena);
@@ -2824,6 +2837,12 @@ void Clay__CalculateFinalLayout(void) {
                                     .vertical = elementConfig->config.clipElementConfig->vertical,
                                 }
                             };
+                            // NT patch: scissors are STRUCTURAL and must stay paired. The matching
+                            // SCISSOR_END is emitted unconditionally (closeClipElement), but this START
+                            // was gated on shouldRender (= !offscreen), so a clip element scrolled fully
+                            // offscreen emitted END without START -> renderer scissor-stack underflow.
+                            // Force the START to emit so the pair stays balanced regardless of culling.
+                            shouldRender = true;
                             break;
                         }
                         case CLAY__ELEMENT_CONFIG_TYPE_IMAGE: {
