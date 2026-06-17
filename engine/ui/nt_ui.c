@@ -2584,9 +2584,9 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
     }
 }
 
-nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg) {
+nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, const int16_t pad_lrtb[4]) {
     /* Base path: the verbatim capture/edge state machine (asserts live there). Single mutating call. */
-    const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, id, NULL);
+    const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, id, pad_lrtb);
     nt_ui_events_t e = events_from_interaction(&in);
 
     /* Zero-alloc gate (EVT-02 / D-65-03): the gesture cell is created ONLY when requested. */
@@ -2595,6 +2595,8 @@ nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_event
     }
     return e;
 }
+
+nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg) { return nt_ui_events_padded(ctx, id, cfg, NULL); }
 
 nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id) {
     /* Idempotent read: base via the non-mutating query, gesture via find (no create, no advance). The

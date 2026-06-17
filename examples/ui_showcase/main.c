@@ -763,7 +763,7 @@ static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t 
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = rounded ? CLAY_CORNER_RADIUS(8) : CLAY_CORNER_RADIUS(0)},
-        enabled);
+        enabled, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     (void)nt_ui_button_end(ctx);
 }
@@ -815,7 +815,7 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
                 &(Clay_ElementDeclaration){
                     .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childGap = 14, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                     .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                true);
+                true, NULL);
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->body);
             (void)nt_ui_button_end(ctx);
@@ -848,7 +848,7 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true);
+                               true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click me", g_current->body);
             if (nt_ui_button_end(ctx)) {
                 st->btn_xform.clicks++;
@@ -1115,7 +1115,7 @@ static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform_reset"), g_current->btn_secondary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(44)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-        true);
+        true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reset", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->btn_xform.rotation_deg = 20.0F;
@@ -1149,7 +1149,7 @@ static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true);
+        true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     return nt_ui_button_end(ctx);
 }
@@ -1164,7 +1164,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_modal_show_btn, g_current->btn_primary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true);
+        true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->confirm_open = true;
@@ -1318,7 +1318,7 @@ static void modal_seg_select(nt_ui_context_t *ctx, const char *title, uint32_t b
                 &(Clay_ElementDeclaration){
                     .layout = {.sizing = {CLAY_SIZING_FIXED((float)btn_w), CLAY_SIZING_FIXED(36)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                     .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                true);
+                true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 *value = i;
@@ -1383,7 +1383,7 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true);
+                               true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 st->stress.label_count = counts[i];
@@ -1477,7 +1477,7 @@ static void declare_header(nt_ui_context_t *ctx) {
                            &(Clay_ElementDeclaration){
                                .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                           true);
+                           true, NULL);
         (void)snprintf(buf, sizeof buf, "Theme: %s", g_current->name);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
         if (nt_ui_button_end(ctx)) {
@@ -1510,7 +1510,7 @@ static void tab_row(nt_ui_context_t *ctx, int i, bool selected) {
                            &(Clay_ElementDeclaration){
                                .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 12, .right = 10}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
                                .cornerRadius = {0, 6, 0, 6}},
-                           true);
+                           true, NULL);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), g_tabs[i].name, selected ? g_current->row_sel : g_current->caption);
         if (nt_ui_button_end(ctx)) {
             s_active_tab = i;

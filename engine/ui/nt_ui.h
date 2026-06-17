@@ -415,6 +415,10 @@ _Static_assert(sizeof(nt_ui_events_cfg_t) == 8, "nt_ui_events_cfg_t stable ABI (
  * the per-id gesture cell. cfg==NULL grows the state pool by zero. Returns the full result directly. */
 nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg);
 
+/* Same single mutating step, but the base capture/hit-test honors an inflated hit zone (pad_lrtb,
+ * left/right/top/bottom px, NULL = none). For widgets with a hit_padding style (e.g. nt_ui_button). */
+nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, const int16_t pad_lrtb[4]);
+
 /* Idempotent read: same result N times per frame, advancing NOTHING (no capture commit, no gesture
  * timer). Reads the latched gesture cell if one exists (else gesture fields stay zero). Safe outside
  * begin/end. Mirror of nt_ui_query_interaction for the consolidated result. */

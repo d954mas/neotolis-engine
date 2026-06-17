@@ -163,7 +163,7 @@ static void test_button_widget_auto_tagged(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -313,7 +313,7 @@ static void test_inspector_many_widgets_safe(void) {
         for (int i = 0; i < 20; ++i) {
             char name[16];
             (void)snprintf(name, sizeof name, "btn%d", i);
-            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), &s_btn_style, NULL, true);
+            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), &s_btn_style, NULL, true, NULL);
             nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
             (void)nt_ui_button_end(s_fx.ctx);
         }
@@ -537,7 +537,7 @@ static void test_button_auto_records_hit_padding(void) {
     padded_style.hit_padding_lrtb[2] = 4;
     padded_style.hit_padding_lrtb[3] = 4;
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &padded_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &padded_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -975,7 +975,7 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), &padded_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), &padded_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -994,7 +994,7 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
      * highlight_id. highlight_id resets each begin so read AFTER nt_ui_end. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), &padded_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), &padded_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -1032,7 +1032,7 @@ static void test_overlay_skips_padded_zone_for_zero_padding(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("nopad_btn"), &zero_pad_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("nopad_btn"), &zero_pad_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -1341,7 +1341,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("inspect_root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
@@ -1353,7 +1353,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     CLAY({.id = CLAY_ID("inspect_root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
@@ -1415,7 +1415,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("perf_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
@@ -1427,7 +1427,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     CLAY({.id = CLAY_ID("perf_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
@@ -1547,7 +1547,7 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
         for (int i = 0; i < 20; ++i) {
             char name[24];
             (void)snprintf(name, sizeof name, "bulk_btn_%d", i);
-            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), &s_btn_style, NULL, true);
+            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), &s_btn_style, NULL, true, NULL);
             nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
             (void)nt_ui_button_end(s_fx.ctx);
         }
@@ -1562,7 +1562,7 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
         for (int i = 0; i < 20; ++i) {
             char name[24];
             (void)snprintf(name, sizeof name, "bulk_btn_%d", i);
-            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), &s_btn_style, NULL, true);
+            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), &s_btn_style, NULL, true, NULL);
             nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
             (void)nt_ui_button_end(s_fx.ctx);
         }
@@ -1672,7 +1672,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("split_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
@@ -1684,7 +1684,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     CLAY({.id = CLAY_ID("split_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), &s_btn_style, NULL, true);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), &s_btn_style, NULL, true, NULL);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
