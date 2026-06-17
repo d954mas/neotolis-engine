@@ -35,26 +35,30 @@ typedef struct {
     uint16_t pad;              /* px inner padding */
     uint16_t font_id;          /* label font */
     uint16_t max_visible_rows; /* rows shown before the list scrolls (0 = no cap, never scrolls) */
-    nt_ui_layer_t layer;       /* draw layer */
-    uint8_t _pad[1];
+    uint8_t _pad[2];           /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
 } nt_ui_dropdown_style_t;
-_Static_assert(sizeof(nt_ui_dropdown_style_t) == 40, "nt_ui_dropdown_style_t stable ABI (6 u32 + 1 float + 5 u16 + 1 u8 layer + 1 pad)");
+_Static_assert(sizeof(nt_ui_dropdown_style_t) == 40, "nt_ui_dropdown_style_t stable ABI (6 u32 + 1 float + 5 u16 + 2 pad)");
 
 /* Valid baseline style (dark). */
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
 
 /* Trigger button: shows the label of the current *selected (or `placeholder` when out of range / -1)
  * and toggles *open on click. Declared like any other widget inside the layout. id/labels/selected/
- * open/style non-NULL; count >= 0; *selected in [-1,count). Returns true on the frame it toggled. */
-bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, uint32_t id, const char *const *labels, int count, int selected, const char *placeholder, const nt_ui_dropdown_style_t *style,
-                            const Clay_ElementDeclaration *decl, bool *open);
+ * open/style non-NULL; count >= 0; *selected in [-1,count). Returns true on the frame it toggled.
+ * Layers: the trigger fill draws on data->layer, its label on label_layer (split to batch). data may be
+ * NULL (fill falls to layer 0). */
+bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int selected, const char *placeholder,
+                            const nt_ui_dropdown_style_t *style, const Clay_ElementDeclaration *decl, bool *open);
 
 /* The open list: a popup-core floating anchored to the trigger's bbox (queried by `id`) with edge-flip
  * up near the bottom border. Rows are nt_ui_buttons; a row click sets *selected and clears *open. A list
  * taller than style->max_visible_rows is wrapped in nt_ui_scroll (GC'd; no clip leak). Call every frame
  * AFTER the trigger; it self-balances when fully closed (no end needed by the caller). id/labels/
- * selected/open/style non-NULL; *selected in [-1,count). Returns true if a selection was made this frame. */
-bool nt_ui_dropdown_list(nt_ui_context_t *ctx, uint32_t id, const char *const *labels, int count, int *selected, const nt_ui_dropdown_style_t *style, bool *open);
+ * selected/open/style non-NULL; *selected in [-1,count). Returns true if a selection was made this frame.
+ * Layers: the panel + row fills draw on data->layer (also the popup panel layer), row text on label_layer
+ * (split to batch). data may be NULL (fills fall to layer 0). */
+bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int *selected,
+                         const nt_ui_dropdown_style_t *style, bool *open);
 
 #ifdef NT_TEST_ACCESS
 /* The popup side chosen for the list on the last nt_ui_dropdown_list call (edge-flip probe). */

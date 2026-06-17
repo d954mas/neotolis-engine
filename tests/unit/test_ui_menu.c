@@ -220,7 +220,7 @@ static void test_menu_malformed_tree_asserts(void) {
     nt_ui_menu_state_t st = {.open = true};
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     fx_begin(1.0F / 60.0F);
-    NT_TEST_EXPECT_ASSERT(nt_ui_menu(s_fx.ctx, MENU_A, bad, 1U, &st, &style));
+    NT_TEST_EXPECT_ASSERT(nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, bad, 1U, &st, &style));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -266,7 +266,7 @@ static void menu_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float 
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu(s_fx.ctx, MENU_A, s_root, 2U, st, style);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root, 2U, st, style);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -394,7 +394,7 @@ static const nt_ui_menu_item_t s_root2[] = {
 static void menu_frame2(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     nt_pointer_t p = {.active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu(s_fx.ctx, MENU_A, s_root2, 2U, st, style);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root2, 2U, st, style);
     nt_ui_end(s_fx.ctx);
 }
 static void test_menu_switch_root_branch_while_submenu_open(void) {
@@ -434,7 +434,7 @@ static void menu_frame2_at(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, fl
         p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     }
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu(s_fx.ctx, MENU_A, s_root2, 2U, st, style);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root2, 2U, st, style);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -517,7 +517,7 @@ static void test_menu_depth_cap_asserts(void) {
      * recursion would push past NT_UI_MENU_MAX_DEPTH. */
     menu_key(NT_KEY_ARROW_DOWN);
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    nt_ui_menu(s_fx.ctx, MENU_A, s_cyclic, 1U, &st, &style);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_cyclic, 1U, &st, &style);
     nt_ui_end(s_fx.ctx);
 
     /* Open one deeper level per frame; after MAX_DEPTH Rights the next push trips the cap assert. */
@@ -527,7 +527,7 @@ static void test_menu_depth_cap_asserts(void) {
         nt_test_assert_armed = true;
         if (setjmp(nt_test_assert_jmp) == 0) {
             nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-            nt_ui_menu(s_fx.ctx, MENU_A, s_cyclic, 1U, &st, &style);
+            nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_cyclic, 1U, &st, &style);
             nt_ui_end(s_fx.ctx);
         } else {
             tripped = true;

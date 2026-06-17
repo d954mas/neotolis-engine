@@ -57,7 +57,7 @@ static int tabbar_frame(const nt_pointer_t *p, int count, int *active, const nt_
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(300)}}}) {
-        clicked = nt_ui_tabbar(s_fx.ctx, TAB_BASE, s_tabs, count, active, st);
+        clicked = nt_ui_tabbar(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, count, active, st);
     }
     nt_ui_end(s_fx.ctx);
     return clicked;

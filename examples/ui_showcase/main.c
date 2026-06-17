@@ -800,7 +800,6 @@ static void init_styles(void) {
 
     /* ---- Dropdown: dark uses the widget defaults; light recolors trigger/panel/rows. ---- */
     s_dropdown_dark = nt_ui_dropdown_style_defaults();
-    s_dropdown_dark.layer = LAYER_BG;
     s_dropdown_dark.row_height = 30U;
     s_dropdown_dark.max_visible_rows = 6U; /* the long city list scrolls past this */
     s_dropdown_light = s_dropdown_dark;
@@ -813,7 +812,6 @@ static void init_styles(void) {
 
     /* ---- Tooltip: a short reveal delay; light flips to a pale panel + dark text. ---- */
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
-    s_tooltip_dark.layer = LAYER_BG;
     s_tooltip_dark.delay_secs = 0.5F;
     s_tooltip_dark.font_size = 16.0F;
     s_tooltip_light = s_tooltip_dark;
@@ -822,7 +820,6 @@ static void init_styles(void) {
 
     /* ---- Context menu: dark defaults; light recolors the panel + rows. ---- */
     s_menu_dark = nt_ui_menu_style_defaults();
-    s_menu_dark.layer = LAYER_BG;
     s_menu_dark.item_height = 30U;
     s_menu_dark.font_size = 16.0F;
     s_menu_dark.min_width = 200U;
@@ -835,7 +832,6 @@ static void init_styles(void) {
     /* ---- Tab-bar (dogfood): colors (0xAABBGGRR) match the old ad-hoc tab_row palette so the migrated
      * nav keeps its accent + selected fill + hover lighten across the theme flip. ---- */
     s_tabbar_dark = nt_ui_tabbar_style_defaults();
-    s_tabbar_dark.layer = LAYER_BG;
     s_tabbar_dark.bar_bg = 0U;                 /* the surrounding card owns the bg; tabs sit on it */
     s_tabbar_dark.tab_bg = 0xFF221A18U;        /* list_bg {24,26,34} */
     s_tabbar_dark.tab_selected = 0xFF9E622EU;  /* list_sel {46,98,158} */
@@ -1452,13 +1448,15 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* Short list: fits without scrolling. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list)", g_current->caption);
-    (void)nt_ui_dropdown_trigger(ctx, s_id_dd_fruit, fruits, fruit_count, st->dropdown.fruit_sel, "Pick a fruit", g_current->dropdown, &trigger_decl, &st->dropdown.fruit_open);
-    (void)nt_ui_dropdown_list(ctx, s_id_dd_fruit, fruits, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
+    (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_count, st->dropdown.fruit_sel, "Pick a fruit", g_current->dropdown, &trigger_decl,
+                                 &st->dropdown.fruit_open);
+    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
 
     /* Long list: more than max_visible_rows -> the list wraps in a scroll container. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
-    (void)nt_ui_dropdown_trigger(ctx, s_id_dd_city, cities, city_count, st->dropdown.city_sel, "Pick a city", g_current->dropdown, &trigger_decl, &st->dropdown.city_open);
-    (void)nt_ui_dropdown_list(ctx, s_id_dd_city, cities, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
+    (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, city_count, st->dropdown.city_sel, "Pick a city", g_current->dropdown, &trigger_decl,
+                                 &st->dropdown.city_open);
+    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
 
     (void)snprintf(buf, sizeof buf, "fruit: %s", (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "(none)");
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
@@ -1481,17 +1479,17 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_a, g_current->btn_primary, &target_decl, true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover me", g_current->body);
     (void)nt_ui_button_end(ctx);
-    (void)nt_ui_tooltip(ctx, s_id_tip_a, "A simple tooltip revealed after the hover delay.", g_current->tooltip);
+    (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_a, "A simple tooltip revealed after the hover delay.", g_current->tooltip);
 
     nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_b, g_current->btn_secondary, &target_decl, true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "And me", g_current->body);
     (void)nt_ui_button_end(ctx);
-    (void)nt_ui_tooltip(ctx, s_id_tip_b, "Tooltips wrap to the style max_width so long content stays readable on one panel.", g_current->tooltip);
+    (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_b, "Tooltips wrap to the style max_width so long content stays readable on one panel.", g_current->tooltip);
 
     nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Bottom edge", g_current->body);
     (void)nt_ui_button_end(ctx);
-    (void)nt_ui_tooltip(ctx, s_id_tip_c, "Near the bottom border the tooltip flips ABOVE the target instead of below.", g_current->tooltip);
+    (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_c, "Near the bottom border the tooltip flips ABOVE the target instead of below.", g_current->tooltip);
 }
 
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
@@ -1529,7 +1527,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 
     (void)nt_ui_menu_open_trigger(ctx, s_id_menu, &st->menu.state, 0.5F);
-    nt_ui_menu(ctx, s_id_menu, root_items, root_count, &st->menu.state, g_current->menu);
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu, root_items, root_count, &st->menu.state, g_current->menu);
     if (st->menu.state.chosen_id != 0U) {
         st->menu.last_chosen = st->menu.state.chosen_id;
         st->menu.state.chosen_id = 0U; /* game reads + clears (Model D) */
@@ -1805,7 +1803,7 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
           .backgroundColor = g_current->list_bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        (void)nt_ui_tabbar(ctx, s_id_tab_btn_base, s_tab_labels, TAB_COUNT, &s_active_tab, g_current->tabbar);
+        (void)nt_ui_tabbar(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tab_btn_base, s_tab_labels, TAB_COUNT, &s_active_tab, g_current->tabbar);
     }
 }
 

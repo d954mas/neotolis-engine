@@ -55,10 +55,9 @@ typedef struct {
     uint16_t min_width;        /* px panel min width */
     uint16_t pad;              /* px inner padding */
     uint16_t font_id;          /* label font */
-    nt_ui_layer_t layer;       /* draw layer */
-    uint8_t _pad[3];
+    uint8_t _pad[4];           /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
 } nt_ui_menu_style_t;
-_Static_assert(sizeof(nt_ui_menu_style_t) == 32, "nt_ui_menu_style_t stable ABI (4 u32 + 1 float + 4 u16 + 1 u8 layer + 3 pad)");
+_Static_assert(sizeof(nt_ui_menu_style_t) == 32, "nt_ui_menu_style_t stable ABI (4 u32 + 1 float + 4 u16 + 4 pad)");
 
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
@@ -85,8 +84,11 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t id, nt_ui_menu_state
  * each open submenu as a nested popup-core fly-out, driven by the mouse-aim hover-intent. Esc /
  * outside-click dismisses the deepest open level up the chain; keyboard arrows navigate. On a leaf
  * activate it latches st->chosen_id and dismisses the whole chain (Model D). id/items/st/style non-NULL;
- * NT_ASSERT on a malformed tree (NULL label with a submenu count, depth past the cap). */
-void nt_ui_menu(nt_ui_context_t *ctx, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st, const nt_ui_menu_style_t *style);
+ * NT_ASSERT on a malformed tree (NULL label with a submenu count, depth past the cap).
+ * Layers: every level's panel + row fills draw on data->layer (also the popup panel layer), item text on
+ * label_layer (split to batch). data may be NULL (fills fall to layer 0). */
+void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st,
+                const nt_ui_menu_style_t *style);
 
 #ifdef NT_TEST_ACCESS
 /* Pure barycentric point-in-triangle (CITED RESEARCH §submenu). No GL, no ctx — directly unit-tested. */

@@ -156,7 +156,6 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
         .min_width = 160U,
         .pad = 6U,
         .font_id = 0U,
-        .layer = 0U,
     };
 }
 
@@ -235,12 +234,14 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t id, nt_ui_menu_state
 
 // #region menu UI declaration (recursive popup-core fly-outs)
 /* Declared-but-not-defined yet: the recursion is mutual (a level declares its open child level). */
-static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth, const nt_ui_popup_anchor_t *anchor,
-                               nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen, bool *out_close_chain);
+static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth,
+                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen,
+                               bool *out_close_chain);
 
 /* One item row: a fixed-height rect with a label, plus a ">" affordance for a parent. Returns the
  * interaction so the caller drives hover/click. The row id is registered so its bbox is queryable. */
-static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint32_t row_id, const nt_ui_menu_item_t *it, bool focused, const nt_ui_menu_style_t *style) {
+static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, const nt_ui_menu_item_t *it, bool focused,
+                                            const nt_ui_menu_style_t *style) {
     const bool is_parent = it->submenu != NULL;
     const nt_ui_interaction_t in = it->enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
     const bool highlit = it->enabled && (in.hovered || focused);
@@ -255,12 +256,12 @@ static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint32_t row_i
                    .childGap = style->pad,
                    .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
         .backgroundColor = bg,
-        .userData = (void *)nt_ui_make_element_data(style->layer, NULL),
+        .userData = (void *)nt_ui_make_element_data(fill_layer, NULL),
     }) {
-        nt_ui_label(ctx, nt_ui_make_element_data(style->layer, NULL), it->label != NULL ? it->label : "", &lbl);
+        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), it->label != NULL ? it->label : "", &lbl);
         if (is_parent) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-            nt_ui_label(ctx, nt_ui_make_element_data(style->layer, NULL), ">", &lbl);
+            nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), ">", &lbl);
         }
     }
     /* Register the row's interaction (step) so capture/hover edges advance once per frame. */
@@ -319,8 +320,8 @@ static bool menu_keyboard_nav(const nt_ui_menu_item_t *items, uint32_t count, ui
 /* Declare the panel + item rows. Updates focus on hover, latches a leaf click into *out_chosen and a
  * parent click into the returned open_idx, and reports a hovered "switch request" (parent to open OR a
  * leaf when a sibling submenu is open) in *out_hovered. Returns the open child index after clicks. */
-static int16_t menu_declare_panel(nt_ui_context_t *ctx, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style,
-                                  int16_t open_idx, int16_t *out_hovered, uint32_t *out_chosen) {
+static int16_t menu_declare_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth,
+                                  nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, int16_t open_idx, int16_t *out_hovered, uint32_t *out_chosen) {
     int16_t hovered = -1;
     CLAY({.id = (Clay_ElementId){.id = menu_panel_id(menu_id, depth)},
           .layout = {.sizing = {.width = CLAY_SIZING_FIT(.min = (float)style->min_width), .height = CLAY_SIZING_FIT(0)},
@@ -328,11 +329,11 @@ static int16_t menu_declare_panel(nt_ui_context_t *ctx, uint32_t menu_id, const 
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
                      .childGap = 2},
           .backgroundColor = nt_ui_unpack_abgr(style->bg_color),
-          .userData = (void *)nt_ui_make_element_data(style->layer, NULL)}) {
+          .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
         for (uint32_t i = 0; i < count; ++i) {
             const nt_ui_menu_item_t *it = &items[i];
             const bool focused = (rt->focus[depth] == (int16_t)i);
-            const nt_ui_interaction_t in = menu_declare_row(ctx, menu_row_id(menu_id, depth, i), it, focused, style);
+            const nt_ui_interaction_t in = menu_declare_row(ctx, fill_layer, label_layer, menu_row_id(menu_id, depth, i), it, focused, style);
             if (!it->enabled) {
                 continue;
             }
@@ -407,14 +408,15 @@ static int16_t menu_commit_and_nav(const nt_ui_menu_item_t *items, uint32_t coun
 }
 
 // NOLINTNEXTLINE(misc-no-recursion): bounded recursion — depth capped by NT_UI_MENU_MAX_DEPTH (asserted before each push, T-65-10)
-static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth, const nt_ui_popup_anchor_t *anchor,
-                               nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen, bool *out_close_chain) {
+static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth,
+                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen,
+                               bool *out_close_chain) {
     NT_ASSERT(depth < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
     menu_assert_items(items, count);
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = 0.0F; /* menus snap; the open delay handles flicker, not a tween */
-    pst.layer = style->layer;
+    pst.ease_speed = 0.0F;  /* menus snap; the open delay handles flicker, not a tween */
+    pst.layer = fill_layer; /* each level's popup panel sits on the fill layer */
     /* Clear light-dismiss so popup-core emits NO catcher per level: a submenu's full-viewport catcher
      * sits at a HIGHER z than ancestor panels (catcher_z(d+1) > panel_z(d)) and would occlude them,
      * trapping the user in the deepest level (hover/click never reach ancestors). The menu owns its own
@@ -424,7 +426,7 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_
 
     /* The currently-open child (authoritative across frames); mouse hover may switch it, gated below. */
     int16_t hovered = -1;
-    int16_t open_idx = menu_declare_panel(ctx, menu_id, items, count, depth, rt, style, rt->open_path[depth], &hovered, out_chosen);
+    int16_t open_idx = menu_declare_panel(ctx, fill_layer, label_layer, menu_id, items, count, depth, rt, style, rt->open_path[depth], &hovered, out_chosen);
     open_idx = menu_resolve_hover_switch(ctx, menu_id, items, count, depth, open_idx, hovered, mx, my, r.side, dt);
     open_idx = menu_commit_and_nav(items, count, depth, nav_depth, rt, open_idx, out_chosen, out_close_chain);
 
@@ -436,7 +438,8 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint32_t menu_id, const nt_
          * with no fallback rather than silently truncating the chain. */
         NT_ASSERT((depth + 1U) < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
         const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(ctx, menu_row_id(menu_id, depth, (uint32_t)open_idx));
-        menu_declare_level(ctx, menu_id, items[open_idx].submenu, items[open_idx].submenu_count, (uint8_t)(depth + 1U), nav_depth, &sub_anchor, rt, style, mx, my, dt, out_chosen, out_close_chain);
+        menu_declare_level(ctx, fill_layer, label_layer, menu_id, items[open_idx].submenu, items[open_idx].submenu_count, (uint8_t)(depth + 1U), nav_depth, &sub_anchor, rt, style, mx, my, dt,
+                           out_chosen, out_close_chain);
     }
 
     nt_ui_popup_end(ctx);
@@ -457,7 +460,8 @@ static bool menu_cursor_over_any_panel(const nt_ui_context_t *ctx, uint32_t menu
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (same pattern as nt_ui_modal_begin)
-void nt_ui_menu(nt_ui_context_t *ctx, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st, const nt_ui_menu_style_t *style) {
+void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st,
+                const nt_ui_menu_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu: call between nt_ui_begin/end");
     NT_ASSERT(id != 0U && st != NULL && style != NULL && "nt_ui_menu: id non-zero, st + style non-NULL");
@@ -468,6 +472,7 @@ void nt_ui_menu(nt_ui_context_t *ctx, uint32_t id, const nt_ui_menu_item_t *item
         return; /* present-only: a closed menu declares nothing so base UI stays clickable (T-65-13) */
     }
 
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* panel + row fills on data->layer, item text on label_layer */
     nt_ui_menu_runtime_t *rt = menu_runtime(ctx, id);
     float mx = 0.0F;
     float my = 0.0F;
@@ -476,7 +481,7 @@ void nt_ui_menu(nt_ui_context_t *ctx, uint32_t id, const nt_ui_menu_item_t *item
     const nt_ui_popup_anchor_t root_anchor = {.x = st->anchor_x, .y = st->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
     uint32_t chosen = 0U;
     bool close_chain = false;
-    menu_declare_level(ctx, id, items, count, 0U, rt->active_depth, &root_anchor, rt, style, mx, my, ctx->frame_dt, &chosen, &close_chain);
+    menu_declare_level(ctx, fill_layer, label_layer, id, items, count, 0U, rt->active_depth, &root_anchor, rt, style, mx, my, ctx->frame_dt, &chosen, &close_chain);
 
     /* Menu-owned outside-click dismiss (replaces the removed per-level catcher): a primary press this
      * frame OUTSIDE every open panel closes the whole chain. A press inside a panel is a row interaction

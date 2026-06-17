@@ -39,9 +39,9 @@ typedef struct {
     uint16_t gap;           /* px gap between tabs */
     uint16_t font_id;       /* label font */
     uint8_t dir;            /* nt_ui_tabbar_dir_t */
-    nt_ui_layer_t layer;    /* draw layer */
+    uint8_t _pad[1];        /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
 } nt_ui_tabbar_style_t;
-_Static_assert(sizeof(nt_ui_tabbar_style_t) == 44, "nt_ui_tabbar_style_t stable ABI (7 u32 + 1 float + 5 u16 + 1 u8 dir + 1 u8 layer)");
+_Static_assert(sizeof(nt_ui_tabbar_style_t) == 44, "nt_ui_tabbar_style_t stable ABI (7 u32 + 1 float + 5 u16 + 1 u8 dir + 1 pad)");
 
 /* Valid baseline style (dark, vertical). */
 nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
@@ -49,7 +49,11 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
 /* Declare the tab-bar: a container holding `count` full-extent tabs. A click on tab i sets *active = i
  * (Model D). base_id salts each tab's id (base_id + i). The bar grows to fill its parent on the cross
  * axis. ctx/labels/active/style non-NULL; count >= 0; *active in [0,count) when count > 0 (or -1 = none).
- * Returns the index clicked this frame, or -1 if no tab was clicked. */
-int nt_ui_tabbar(nt_ui_context_t *ctx, uint32_t base_id, const char *const *labels, int count, int *active, const nt_ui_tabbar_style_t *style);
+ * Returns the index clicked this frame, or -1 if no tab was clicked.
+ *
+ * Layers: the bar bg + tab fills draw on data->layer; the tab labels on label_layer -- pass them split
+ * (fills on the img layer, text on the text layer) to batch fills-then-text in one segment. data may be
+ * NULL (fills fall to layer 0). */
+int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, int count, int *active, const nt_ui_tabbar_style_t *style);
 
 #endif /* NT_UI_TABBAR_H */

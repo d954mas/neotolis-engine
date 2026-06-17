@@ -29,10 +29,9 @@ typedef struct {
     uint16_t max_width;  /* px panel max width (0 = no cap, label drives width) */
     uint16_t pad;        /* px inner padding */
     uint16_t font_id;    /* label font */
-    nt_ui_layer_t layer; /* draw layer */
-    uint8_t _pad[1];
+    uint8_t _pad[2];     /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
 } nt_ui_tooltip_style_t;
-_Static_assert(sizeof(nt_ui_tooltip_style_t) == 24, "nt_ui_tooltip_style_t stable ABI (2 u32 + 2 float + 3 u16 + 1 u8 layer + 1 pad)");
+_Static_assert(sizeof(nt_ui_tooltip_style_t) == 24, "nt_ui_tooltip_style_t stable ABI (2 u32 + 2 float + 3 u16 + 2 pad)");
 
 /* Valid baseline style (dark), 0.5s reveal delay. */
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void);
@@ -42,8 +41,10 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void);
  * appears below the target (edge-flip ABOVE near the bottom border) once the cursor has hovered the
  * target for style->delay_secs, and hides the instant the cursor leaves. NO catcher is declared, so the
  * tooltip cannot gate base UI. Returns true on the frames the tooltip panel is declared (visible).
- * ctx/content/style non-NULL; target_id non-zero. */
-bool nt_ui_tooltip(nt_ui_context_t *ctx, uint32_t target_id, const char *content, const nt_ui_tooltip_style_t *style);
+ * ctx/content/style non-NULL; target_id non-zero.
+ * Layers: the panel fill draws on data->layer (also the popup panel layer), the label on label_layer
+ * (split to batch). data may be NULL (fill falls to layer 0). */
+bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t target_id, const char *content, const nt_ui_tooltip_style_t *style);
 
 #ifdef NT_TEST_ACCESS
 /* The salted state-pool id the tooltip uses for its hover-delay timer cell (test probe). */

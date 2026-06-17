@@ -30,13 +30,12 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void) {
         .gap = 6U,
         .font_id = 0U,
         .dir = NT_UI_TABBAR_VERTICAL,
-        .layer = 0U,
     };
 }
 
 /* One tab: a full-extent click target with a leading accent bar (active only) + a label. Plain rect +
  * step_interaction (no button-style construction). Returns clicked. */
-static bool tabbar_declare_tab(nt_ui_context_t *ctx, uint32_t tab_id, const char *label, bool active, const nt_ui_tabbar_style_t *style) {
+static bool tabbar_declare_tab(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t tab_id, const char *label, bool active, const nt_ui_tabbar_style_t *style) {
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, tab_id);
     const bool horizontal = (style->dir == NT_UI_TABBAR_HORIZONTAL);
 
@@ -76,15 +75,15 @@ static bool tabbar_declare_tab(nt_ui_context_t *ctx, uint32_t tab_id, const char
         .backgroundColor = (bg != 0U) ? nt_ui_unpack_abgr(bg) : (Clay_Color){0},
         .cornerRadius = CLAY_CORNER_RADIUS(6),
         .border = {.color = accent_col, .width = bw},
-        .userData = (void *)nt_ui_make_element_data(style->layer, NULL),
+        .userData = (void *)nt_ui_make_element_data(fill_layer, NULL),
     }) {
-        nt_ui_label(ctx, nt_ui_make_element_data(style->layer, NULL), (label != NULL) ? label : "", &lbl);
+        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), (label != NULL) ? label : "", &lbl);
     }
     return nt_ui_step_interaction(ctx, tab_id).clicked;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — CLAY macro expands to a for-loop; metric counts that + the tab loop + asserts, not real nesting
-int nt_ui_tabbar(nt_ui_context_t *ctx, uint32_t base_id, const char *const *labels, int count, int *active, const nt_ui_tabbar_style_t *style) {
+int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, int count, int *active, const nt_ui_tabbar_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_tabbar: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(base_id != 0U && labels != NULL && active != NULL && style != NULL && "nt_ui_tabbar: base_id non-zero, pointers non-NULL");
     NT_ASSERT(count >= 0 && "nt_ui_tabbar: count must be >= 0");                                         /* T-65-15 */
@@ -92,6 +91,7 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, uint32_t base_id, const char *const *labe
     NT_ASSERT(style->font_size > 0.0F && "nt_ui_tabbar: font_size > 0");
 
     const bool horizontal = (style->dir == NT_UI_TABBAR_HORIZONTAL);
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fills on data->layer, text on label_layer (batch split) */
     int clicked = -1;
     /* The container has no explicit id (base_id is reserved for the tabs: base_id + i). */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
@@ -99,11 +99,11 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, uint32_t base_id, const char *const *labe
                      .layoutDirection = horizontal ? CLAY_LEFT_TO_RIGHT : CLAY_TOP_TO_BOTTOM,
                      .childGap = style->gap},
           .backgroundColor = (style->bar_bg != 0U) ? nt_ui_unpack_abgr(style->bar_bg) : (Clay_Color){0},
-          .userData = (void *)nt_ui_make_element_data(style->layer, NULL)}) {
+          .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
         for (int i = 0; i < count; ++i) {
             NT_ASSERT(labels[i] != NULL && "nt_ui_tabbar: label entry must be non-NULL"); /* T-65-16 */
             /* Salt per-tab ids from base_id + i (mirrors the showcase s_id_tab_btn_base + i). */
-            if (tabbar_declare_tab(ctx, base_id + (uint32_t)i, labels[i], i == *active, style)) {
+            if (tabbar_declare_tab(ctx, fill_layer, label_layer, base_id + (uint32_t)i, labels[i], i == *active, style)) {
                 *active = i; /* Model D: latch the game-owned active index */
                 clicked = i;
             }

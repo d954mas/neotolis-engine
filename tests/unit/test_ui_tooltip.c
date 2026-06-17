@@ -73,7 +73,7 @@ static nt_ui_tooltip_style_t test_style(void) {
 static bool tooltip_frame(const nt_pointer_t *p, const nt_ui_tooltip_style_t *st) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1);
     CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
-    const bool shown = nt_ui_tooltip(s_fx.ctx, TGT_ID, "hint text", st);
+    const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
     nt_ui_end(s_fx.ctx);
     return shown;
 }
@@ -169,7 +169,7 @@ static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, cons
     CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
         in = nt_ui_step_interaction(s_fx.ctx, TGT_ID); /* the game's single mutating step */
     }
-    (void)nt_ui_tooltip(s_fx.ctx, TGT_ID, "hint text", st); /* idempotent read on the same id */
+    (void)nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st); /* idempotent read on the same id */
     nt_ui_end(s_fx.ctx);
     return in;
 }

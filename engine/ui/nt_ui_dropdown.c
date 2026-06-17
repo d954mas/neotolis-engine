@@ -47,7 +47,6 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void) {
         .pad = 6U,
         .font_id = 0U,
         .max_visible_rows = 6U,
-        .layer = 0U,
     };
 }
 
@@ -60,13 +59,14 @@ static const char *dropdown_trigger_text(const char *const *labels, int count, i
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — complexity is the validation assert chain, not control flow
-bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, uint32_t id, const char *const *labels, int count, int selected, const char *placeholder, const nt_ui_dropdown_style_t *style,
-                            const Clay_ElementDeclaration *decl, bool *open) {
+bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int selected, const char *placeholder,
+                            const nt_ui_dropdown_style_t *style, const Clay_ElementDeclaration *decl, bool *open) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_dropdown_trigger: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(id != 0U && labels != NULL && style != NULL && open != NULL && "nt_ui_dropdown_trigger: id non-zero, pointers non-NULL");
     NT_ASSERT(count >= 0 && selected >= -1 && selected < count && "nt_ui_dropdown_trigger: selected in [-1,count)"); /* T-65-15 */
     NT_ASSERT(style->font_size > 0.0F && "nt_ui_dropdown_trigger: font_size > 0");
 
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fill on data->layer, label on label_layer (batch split) */
     const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->trigger_text)};
     /* The caller owns sizing/padding via `decl`; the engine owns .id/.backgroundColor/.userData so the
      * trigger bbox is queryable for the list anchor. A {0}/NULL decl is a FIT trigger. */
@@ -80,14 +80,14 @@ bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, uint32_t id, const char *const
         d.layout.padding.left = style->pad;
         d.layout.padding.right = style->pad;
     }
-    d.userData = (void *)nt_ui_make_element_data(style->layer, NULL);
+    d.userData = (void *)nt_ui_make_element_data(fill_layer, NULL);
 
     bool toggled = false;
     /* Runtime-built decl: use the priv open/configure/close pattern (CLAY() brace-inits a wrapper from a
      * compound literal and cannot take a variable decl). */
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(d);
-    nt_ui_label(ctx, nt_ui_make_element_data(style->layer, NULL), dropdown_trigger_text(labels, count, selected, placeholder), &lbl);
+    nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), dropdown_trigger_text(labels, count, selected, placeholder), &lbl);
     nt_ui_clay_priv_close_element();
     const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, id);
     if (in.clicked) {
@@ -99,7 +99,7 @@ bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, uint32_t id, const char *const
 
 /* One list row: a fixed-height rect + label, highlighted when hovered or it is the current selection.
  * Plain rect + step_interaction (no button-style construction); returns clicked. */
-static bool dropdown_declare_row(nt_ui_context_t *ctx, uint32_t row_id, const char *label, bool selected, const nt_ui_dropdown_style_t *style) {
+static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, const char *label, bool selected, const nt_ui_dropdown_style_t *style) {
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, row_id);
     uint32_t bg = 0U;
     if (in.hovered) {
@@ -112,20 +112,21 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint32_t row_id, const ch
         .id = (Clay_ElementId){.id = row_id},
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)style->row_height)}, .padding = {.left = style->pad, .right = style->pad}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
         .backgroundColor = (bg != 0U) ? nt_ui_unpack_abgr(bg) : (Clay_Color){0},
-        .userData = (void *)nt_ui_make_element_data(style->layer, NULL),
+        .userData = (void *)nt_ui_make_element_data(fill_layer, NULL),
     }) {
-        nt_ui_label(ctx, nt_ui_make_element_data(style->layer, NULL), (label != NULL) ? label : "", &lbl);
+        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), (label != NULL) ? label : "", &lbl);
     }
     return nt_ui_step_interaction(ctx, row_id).clicked;
 }
 
 /* Declare every row; latch a click into *selected and signal close. Used both inside the scroll wrapper
  * (long list) and directly (short list). Returns true if a row was selected this frame. */
-static bool dropdown_declare_rows(nt_ui_context_t *ctx, uint32_t id, const char *const *labels, int count, int *selected, const nt_ui_dropdown_style_t *style, bool *open) {
+static bool dropdown_declare_rows(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int *selected, const nt_ui_dropdown_style_t *style,
+                                  bool *open) {
     bool made = false;
     for (int i = 0; i < count; ++i) {
         NT_ASSERT(labels[i] != NULL && "nt_ui_dropdown: label entry must be non-NULL"); /* T-65-16 */
-        if (dropdown_declare_row(ctx, dropdown_row_id(id, i), labels[i], i == *selected, style)) {
+        if (dropdown_declare_row(ctx, fill_layer, label_layer, dropdown_row_id(id, i), labels[i], i == *selected, style)) {
             *selected = i;
             *open = false;
             made = true;
@@ -135,10 +136,13 @@ static bool dropdown_declare_rows(nt_ui_context_t *ctx, uint32_t id, const char 
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — scroll/non-scroll branch + validation asserts, not deep nesting
-bool nt_ui_dropdown_list(nt_ui_context_t *ctx, uint32_t id, const char *const *labels, int count, int *selected, const nt_ui_dropdown_style_t *style, bool *open) {
+bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int *selected,
+                         const nt_ui_dropdown_style_t *style, bool *open) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_dropdown_list: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(id != 0U && labels != NULL && selected != NULL && style != NULL && open != NULL && "nt_ui_dropdown_list: id non-zero, pointers non-NULL");
     NT_ASSERT(count >= 0 && *selected >= -1 && *selected < count && "nt_ui_dropdown_list: selected in [-1,count)"); /* T-65-15 */
+
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* panel + row fills on data->layer, row text on label_layer */
 
     /* Anchor the list to the trigger's bbox; default BELOW with edge-flip ABOVE near the bottom border. */
     nt_ui_popup_anchor_t anc = {.prefer_side = NT_UI_POPUP_BELOW};
@@ -151,8 +155,8 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, uint32_t id, const char *const *l
     }
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = 0.0F; /* lists snap open; no spatial tween */
-    pst.layer = style->layer;
+    pst.ease_speed = 0.0F;  /* lists snap open; no spatial tween */
+    pst.layer = fill_layer; /* the popup panel sits on the fill layer */
 
     const uint32_t popup_id = dropdown_popup_id(id);
     bool made = false;
@@ -167,13 +171,13 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, uint32_t id, const char *const *l
             const float view_h = ((float)style->max_visible_rows * (float)style->row_height) + (2.0F * (float)style->pad);
             nt_ui_scroll_style_t sst = nt_ui_scroll_style_defaults();
             /* scroll owns .id/.clip/.userData; the decl supplies only sizing/look. */
-            nt_ui_scroll_begin(ctx, nt_ui_make_element_data(style->layer, NULL), dropdown_scroll_id(id), &sst,
+            nt_ui_scroll_begin(ctx, nt_ui_make_element_data(fill_layer, NULL), dropdown_scroll_id(id), &sst,
                                &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(view_h)}, .padding = CLAY_PADDING_ALL(style->pad)},
                                                           .backgroundColor = nt_ui_unpack_abgr(style->panel_bg),
                                                           .cornerRadius = CLAY_CORNER_RADIUS(6)});
             {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2}}) {
-                    made = dropdown_declare_rows(ctx, id, labels, count, selected, style, open);
+                    made = dropdown_declare_rows(ctx, fill_layer, label_layer, id, labels, count, selected, style, open);
                 }
             }
             nt_ui_scroll_end(ctx);
@@ -185,8 +189,8 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, uint32_t id, const char *const *l
                              .childGap = 2},
                   .backgroundColor = nt_ui_unpack_abgr(style->panel_bg),
                   .cornerRadius = CLAY_CORNER_RADIUS(6),
-                  .userData = (void *)nt_ui_make_element_data(style->layer, NULL)}) {
-                made = dropdown_declare_rows(ctx, id, labels, count, selected, style, open);
+                  .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
+                made = dropdown_declare_rows(ctx, fill_layer, label_layer, id, labels, count, selected, style, open);
             }
         }
         nt_ui_popup_end(ctx);

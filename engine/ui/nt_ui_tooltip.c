@@ -42,16 +42,17 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
         .max_width = 240U,
         .pad = 6U,
         .font_id = 0U,
-        .layer = 0U,
     };
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — complexity is the validation assert chain, not control flow
-bool nt_ui_tooltip(nt_ui_context_t *ctx, uint32_t target_id, const char *content, const nt_ui_tooltip_style_t *style) {
+bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t target_id, const char *content, const nt_ui_tooltip_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_tooltip: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(target_id != 0U && content != NULL && style != NULL && "nt_ui_tooltip: target_id non-zero, pointers non-NULL");
     NT_ASSERT(isfinite(style->delay_secs) && style->delay_secs >= 0.0F && "nt_ui_tooltip: delay_secs finite && >= 0"); /* T-65-17 */
     NT_ASSERT(style->font_size > 0.0F && "nt_ui_tooltip: font_size > 0");
+
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* panel fill on data->layer, label on label_layer */
 
     /* Engine-tracked hover-delay timer in the state pool. */
     nt_ui_tooltip_cell_t *c = nt_ui_state(ctx, tooltip_timer_id(target_id), sizeof *c, NT_UI_STATE_TAG('t', 'i', 'p', ' '));
@@ -78,9 +79,9 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, uint32_t target_id, const char *content
     }
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = 0.0F; /* tooltips snap; no spatial tween */
-    pst.flags = 0U;        /* D-65-08: NO light-dismiss catcher — hover-driven, never gates base UI */
-    pst.layer = style->layer;
+    pst.ease_speed = 0.0F;  /* tooltips snap; no spatial tween */
+    pst.flags = 0U;         /* D-65-08: NO light-dismiss catcher — hover-driven, never gates base UI */
+    pst.layer = fill_layer; /* the popup panel sits on the fill layer */
 
     bool shown = false;
     /* Low-level begin/end (no one-bool wrapper): the open state is engine-derived from the hover timer,
@@ -93,8 +94,8 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, uint32_t target_id, const char *content
               .layout = {.sizing = {.width = w, .height = CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(style->pad)},
               .backgroundColor = nt_ui_unpack_abgr(style->panel_bg),
               .cornerRadius = CLAY_CORNER_RADIUS(4),
-              .userData = (void *)nt_ui_make_element_data(style->layer, NULL)}) {
-            nt_ui_label(ctx, nt_ui_make_element_data(style->layer, NULL), content, &lbl);
+              .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
+            nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), content, &lbl);
         }
         shown = true;
     }

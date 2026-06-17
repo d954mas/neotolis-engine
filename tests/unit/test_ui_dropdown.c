@@ -72,10 +72,10 @@ static bool dropdown_frame(const nt_pointer_t *p, float tx, float ty, const char
     bool made = false;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
-        toggled =
-            nt_ui_dropdown_trigger(s_fx.ctx, DD_A, labels, count, *selected, "Select...", st, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(32)}}}, open);
+        toggled = nt_ui_dropdown_trigger(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, count, *selected, "Select...", st,
+                                         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(32)}}}, open);
     }
-    made = nt_ui_dropdown_list(s_fx.ctx, DD_A, labels, count, selected, st, open);
+    made = nt_ui_dropdown_list(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, count, selected, st, open);
     nt_ui_end(s_fx.ctx);
     if (out_made != NULL) {
         *out_made = made;
