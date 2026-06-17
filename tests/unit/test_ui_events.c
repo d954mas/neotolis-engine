@@ -274,6 +274,63 @@ static void test_query_events_idempotent(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- BUG-65-08-1: query_events surfaces the gestures the mutating step computed this frame ----
+ * The button->query_events contract: the game runs the mutating nt_ui_events (via the button) and
+ * reads gestures back via nt_ui_query_events. Prove double_clicked, long_pressed, and a ramping
+ * hold_progress all reach query_events (they were hard-zeroed before the cell-latch fix). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_query_events_surfaces_gestures_after_mutating_step(void) {
+    const float lp = 1.0F;
+    const nt_ui_events_cfg_t cfg = {.long_press_secs = lp, .double_click = true};
+
+    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&f1);
+
+    /* Press inside (progress is 0 on the press frame: press_clock == clock). */
+    nt_pointer_t fp = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)events_btn_frame(&fp, 0.0F, &cfg);
+
+    /* Hold frame: mutating step then query in the same frame -> ramping hold_progress surfaced. */
+    nt_pointer_t fh = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.25F, &fh, 1);
+    declare_btn_element();
+    (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
+    nt_ui_events_t q0 = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(q0.held);
+    TEST_ASSERT_TRUE(q0.hold_progress > 0.0F); /* ramping, not the old hard-zero */
+    TEST_ASSERT_TRUE(float_near(q0.hold_progress, 0.25F, 0.01F));
+    TEST_ASSERT_FALSE(q0.long_pressed);
+
+    /* Hold past long_press_secs: query must surface the one-shot long_pressed + full hold_progress. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F, &fh, 1);
+    declare_btn_element();
+    (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
+    nt_ui_events_t q1 = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(q1.long_pressed);
+    TEST_ASSERT_TRUE(float_near(q1.hold_progress, 1.0F, 0.001F));
+
+    /* Release, then warm a no-press frame to reset the gesture clock window cleanly. */
+    nt_pointer_t fr = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    (void)events_btn_frame(&fr, 0.0F, &cfg);
+
+    /* Double-click: two quick presses within the window/radius -> query surfaces double_clicked. */
+    nt_pointer_t fp1 = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)events_btn_frame(&fp1, 0.0F, &cfg);
+    nt_pointer_t fr1 = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    (void)events_btn_frame(&fr1, 0.05F, &cfg);
+
+    nt_pointer_t fp2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.05F, &fp2, 1);
+    declare_btn_element();
+    nt_ui_events_t mut = nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
+    nt_ui_events_t q2 = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(mut.double_clicked); /* mutating result unchanged */
+    TEST_ASSERT_TRUE(q2.double_clicked);  /* and now surfaced via query_events */
+}
+
 /* nt_ui_set_gesture_constants asserts finite & >= 0 (fail-early, no silent clamp). */
 static void test_set_gesture_constants_rejects_bad_values(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, -1.0F, 6.0F));
@@ -294,6 +351,7 @@ int main(void) {
     RUN_TEST(test_events_hold_progress_ramp_and_one_shot_long_press);
     RUN_TEST(test_events_drag_cancel_resets_progress);
     RUN_TEST(test_query_events_idempotent);
+    RUN_TEST(test_query_events_surfaces_gestures_after_mutating_step);
     RUN_TEST(test_set_gesture_constants_rejects_bad_values);
     return UNITY_END();
 }

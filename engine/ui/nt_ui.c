@@ -2497,12 +2497,17 @@ nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { 
 typedef struct {
     float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
     float origin_x, origin_y;
-    float clock;        /* monotonic accumulator fed by ctx->frame_dt */
-    float press_clock;  /* clock value at the live press (for long-press + hold_progress timing) */
-    uint8_t has_prev;   /* 1 once a first press has been seen (clock==0 is a valid time) */
-    uint8_t press_live; /* 1 while a press is held without a drag-cancel or release */
-    uint8_t long_fired; /* 1 once long-press fired for the current hold (one-shot) */
-    uint8_t _pad[1];
+    float clock;       /* monotonic accumulator fed by ctx->frame_dt */
+    float press_clock; /* clock value at the live press (for long-press + hold_progress timing) */
+    /* Latched gesture outputs so nt_ui_query_events can surface what the mutating step computed this
+     * frame (game-reads-gestures-via-query_events contract). Recomputed/cleared by the next step. */
+    float latched_hold_progress;
+    uint8_t latched_double_clicked; /* 1 if the mutating step fired a double-click this frame */
+    uint8_t latched_long_pressed;   /* 1 if the mutating step fired a long-press this frame */
+    uint8_t has_prev;               /* 1 once a first press has been seen (clock==0 is a valid time) */
+    uint8_t press_live;             /* 1 while a press is held without a drag-cancel or release */
+    uint8_t long_fired;             /* 1 once long-press fired for the current hold (one-shot) */
+    uint8_t _pad[3];
 } nt_ui_events_gesture_t;
 
 static inline uint32_t events_gesture_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_EVENTS_GESTURE_SALT); }
@@ -2540,6 +2545,11 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
 
     nt_ui_events_gesture_t *g = (nt_ui_events_gesture_t *)nt_ui_state(ctx, events_gesture_id(id), (uint32_t)sizeof(nt_ui_events_gesture_t), NT_UI_STATE_TAG('e', 'v', 'g', 's'));
     g->clock += ctx->frame_dt; /* monotonic; dt may be 0 in headless tests (caller drives time via dt) */
+
+    /* Clear last frame's latch before recomputing — query_events reads these back this frame. */
+    g->latched_double_clicked = 0U;
+    g->latched_long_pressed = 0U;
+    g->latched_hold_progress = 0.0F;
 
     if (pressed_now) {
         const float dx = pos_x - g->origin_x;
@@ -2582,6 +2592,11 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
         g->press_live = 0U;
         g->long_fired = 0U;
     }
+
+    /* Latch this frame's outputs so query_events can surface them idempotently (next step clears). */
+    g->latched_double_clicked = e->double_clicked ? 1U : 0U;
+    g->latched_long_pressed = e->long_pressed ? 1U : 0U;
+    g->latched_hold_progress = e->hold_progress;
 }
 
 nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, const int16_t pad_lrtb[4]) {
@@ -2599,15 +2614,17 @@ nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_u
 nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg) { return nt_ui_events_padded(ctx, id, cfg, NULL); }
 
 nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id) {
-    /* Idempotent read: base via the non-mutating query, gesture via find (no create, no advance). The
-     * one-shot long_pressed is never re-surfaced (the mutating step consumed it); hold_progress mirrors
-     * the latched long_fired (full when the hold already completed) without the absent per-call cfg. */
+    /* Idempotent read: base via the non-mutating query, gesture via find (no create, no advance).
+     * Gesture outputs (double_clicked / long_pressed / hold_progress) come from the cell latch the
+     * mutating step wrote this frame — same value on repeated reads; next frame's step recomputes. */
     const nt_ui_interaction_t in = nt_ui_query_interaction_padded(ctx, id, NULL);
     nt_ui_events_t e = events_from_interaction(&in);
 
     const nt_ui_events_gesture_t *g = (const nt_ui_events_gesture_t *)nt_ui_state_find(ctx, events_gesture_id(id));
-    if (g != NULL && g->press_live != 0U && e.held && g->long_fired != 0U) {
-        e.hold_progress = 1.0F;
+    if (g != NULL) {
+        e.double_clicked = g->latched_double_clicked != 0U;
+        e.long_pressed = g->latched_long_pressed != 0U;
+        e.hold_progress = g->latched_hold_progress;
     }
     return e;
 }
