@@ -272,6 +272,7 @@ typedef struct {
     char caret_thick[64]; /* thick, bright, non-blinking caret variant */
     char caret_sel[64];   /* distinct selection-highlight color variant */
     char art_bg[64];      /* sprite-backed (9-slice panel frame) background variant */
+    char disabled[64];    /* disabled-state demo field (enabled=false) */
 } input_params_t;
 
 struct tab_state {
@@ -350,7 +351,7 @@ static uint32_t s_id_modal_show_btn, s_id_modal_ok_btn, s_id_modal_cancel_btn, s
 static uint32_t s_id_props_ease, s_id_props_scale, s_id_props_backdrop, s_id_props_slide_dist;
 static uint32_t s_id_theme_btn;
 static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
-static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art;
+static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art, s_id_input_disabled;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -686,8 +687,9 @@ static void init_styles(void) {
     s_input_light = input_base;
     s_input_light.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
     s_input_light.placeholder.color = (Clay_Color){150.0F, 154.0F, 162.0F, 255.0F}; /* dimmed grey on the light bg */
-    s_input_light.bg_color = 0xFFF0F0F0U;
-    s_input_light.focused_bg_color = 0xFFFFFFFFU;
+    s_input_light.skin[NT_UI_INPUT_IDLE].bg_color = 0xFFF0F0F0U;
+    s_input_light.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFFFFFFFU;
+    s_input_light.skin[NT_UI_INPUT_DISABLED] = (nt_ui_input_skin_t){.bg_color = 0xFFD8D8D8U, .border_color = 0xFFB0B0B0U}; /* light-theme greyed */
     s_input_light.caret_color = 0xFF202020U;
 
     /* Caret variant: a thick, bright-amber caret that never blinks (blink_rate <= 0 = always on) --
@@ -710,17 +712,17 @@ static void init_styles(void) {
     s_input_sel_light.selection_color = 0x80C040C0U;
     s_input_sel_light.caret_blink_rate = 0.4F;
 
-    /* Sprite background: a 9-slice panel frame instead of a flat rect; focus swaps the frame art (beige ->
-     * blue). bg_color/focused_bg_color MUST be 0 here: they tint the sprite, and inheriting input_base's
-     * dark fill would darken the light frame into unreadability. Both frames are light, so dark text reads. */
+    /* Sprite background: a 9-slice panel frame per state -- idle beige, hover brown, focused blue -- so
+     * the field shows three distinct frame arts (skin[]) on interaction. bg_color stays 0 (untinted) so
+     * each frame draws its natural color; the frames are light enough that the dark text reads. */
     s_input_art = input_base;
     s_input_art.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
     s_input_art.placeholder.color = (Clay_Color){90.0F, 80.0F, 70.0F, 255.0F};
     s_input_art.caret_color = 0xFF202020U;
-    s_input_art.bg_color = 0U;         /* untinted: show the beige frame's natural color */
-    s_input_art.focused_bg_color = 0U; /* untinted: show the blue frame's natural color */
-    s_input_art.bg_art = s_panel_beige_ref;
-    s_input_art.focused_bg_art = s_panel_blue_ref;
+    s_input_art.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_art = s_panel_beige_ref};   /* bg_color 0 = untinted */
+    s_input_art.skin[NT_UI_INPUT_HOVER] = (nt_ui_input_skin_t){.bg_art = s_panel_brown_ref};  /* 3rd state on hover */
+    s_input_art.skin[NT_UI_INPUT_FOCUSED] = (nt_ui_input_skin_t){.bg_art = s_panel_blue_ref};
+    s_input_art.border_width = 0.0F; /* frame lives in the art now, no vector border */
 
     /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
@@ -1227,11 +1229,11 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
 
 /* One captioned text field: a caption above a fixed-width field that edits the game-owned buffer.
  * props carries the per-field behaviour + empty-hint string; style is the shared per-look visual. */
-static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, const nt_ui_input_style_t *style) {
+static void input_field(nt_ui_context_t *ctx, const char *caption, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, const nt_ui_input_style_t *style, bool enabled) {
     static const Clay_ElementDeclaration field_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}};
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_TOP}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), caption, g_current->caption);
-        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, props, style, &field_decl, true, NULL);
+        (void)nt_ui_input_text(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, buffer, buffer_size, props, style, &field_decl, enabled, NULL);
     }
 }
 
@@ -1249,16 +1251,19 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     static const nt_ui_input_props_t props_caret = {.placeholder = "thick amber caret", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
     static const nt_ui_input_props_t props_sel = {.placeholder = "select me (magenta)", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
     static const nt_ui_input_props_t props_art = {.placeholder = "framed by a sprite", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
+    static const nt_ui_input_props_t props_disabled = {.placeholder = "can't focus or type", .allow = NULL, .max_length = 0U, .keyboard = NT_UI_KB_TEXT, .password = false};
 
-    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, &props_plain, g_current->input);
-    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, &props_numeric, g_current->input);
-    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, &props_password, g_current->input);
-    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, &props_plain, g_current->input);
+    input_field(ctx, "Plain text", s_id_input_plain, st->input.plain, sizeof st->input.plain, &props_plain, g_current->input, true);
+    input_field(ctx, "Numeric only ([0-9.+-])", s_id_input_numeric, st->input.numeric, sizeof st->input.numeric, &props_numeric, g_current->input, true);
+    input_field(ctx, "Password (masked)", s_id_input_password, st->input.password, sizeof st->input.password, &props_password, g_current->input, true);
+    input_field(ctx, "Cyrillic (multi-byte UTF-8)", s_id_input_cyrillic, st->input.cyrillic, sizeof st->input.cyrillic, &props_plain, g_current->input, true);
     /* Visual-style variants: prove caret_color/width/blink + selection_color are configurable. */
-    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, &props_caret, g_current->input_caret);
-    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, &props_sel, g_current->input_sel);
-    /* Sprite-backed field: 9-slice panel frame bg, art swaps beige -> blue on focus. */
-    input_field(ctx, "Sprite background (9-slice frame)", s_id_input_art, st->input.art_bg, sizeof st->input.art_bg, &props_art, &s_input_art);
+    input_field(ctx, "Thick non-blinking amber caret", s_id_input_caret, st->input.caret_thick, sizeof st->input.caret_thick, &props_caret, g_current->input_caret, true);
+    input_field(ctx, "Magenta selection + fast blink", s_id_input_sel, st->input.caret_sel, sizeof st->input.caret_sel, &props_sel, g_current->input_sel, true);
+    /* Sprite-backed field: a 9-slice panel frame PER STATE -- beige idle, brown hover, blue focused. */
+    input_field(ctx, "Sprite frame per state (idle/hover/focus)", s_id_input_art, st->input.art_bg, sizeof st->input.art_bg, &props_art, &s_input_art, true);
+    /* Disabled field: enabled=false forces the disabled skin (dimmed) and rejects focus/typing. */
+    input_field(ctx, "Disabled (greyed, no focus)", s_id_input_disabled, st->input.disabled, sizeof st->input.disabled, &props_disabled, g_current->input, false);
 }
 
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
@@ -1452,6 +1457,7 @@ static void ensure_ids(void) {
     s_id_input_caret = nt_ui_id("showcase/input_caret");
     s_id_input_sel = nt_ui_id("showcase/input_sel");
     s_id_input_art = nt_ui_id("showcase/input_art");
+    s_id_input_disabled = nt_ui_id("showcase/input_disabled");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
     s_ids_ready = true;
 }

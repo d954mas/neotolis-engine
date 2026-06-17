@@ -703,6 +703,24 @@ static nt_ui_image_payload_t *make_bg_payload(nt_atlas_region_ref_t art) {
     return p;
 }
 
+/* Resolve the active interaction state to a visual skin. Order: disabled > focused > hover > idle.
+ * A non-idle skin left ALL-ZERO inherits idle, so hover/disabled look like idle until authored. */
+static const nt_ui_input_skin_t *resolve_skin(const nt_ui_input_style_t *style, bool enabled, bool focused, bool hovered) {
+    int state = NT_UI_INPUT_IDLE;
+    if (!enabled) {
+        state = NT_UI_INPUT_DISABLED;
+    } else if (focused) {
+        state = NT_UI_INPUT_FOCUSED;
+    } else if (hovered) {
+        state = NT_UI_INPUT_HOVER;
+    }
+    const nt_ui_input_skin_t *s = &style->skin[state];
+    if (state != NT_UI_INPUT_IDLE && s->bg_art.atlas.id == 0U && s->bg_color == 0U && s->border_color == 0U) {
+        return &style->skin[NT_UI_INPUT_IDLE]; /* unauthored non-idle state: inherit idle */
+    }
+    return s;
+}
+
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1023,21 +1041,21 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     Clay_ElementDeclaration root = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     root.id = (Clay_ElementId){.id = id};
     root.userData = (void *)nt_ui_make_element_data(layer, user);
-    const uint32_t bg = focused ? style->focused_bg_color : style->bg_color;
-    if (bg != 0U) {
-        root.backgroundColor = nt_ui_unpack_abgr(bg);
+    /* Pick the per-state skin (disabled > focused > hover > idle); the bg/border below all read from it. */
+    const nt_ui_input_skin_t *skin = resolve_skin(style, enabled, focused, in.hovered);
+    if (skin->bg_color != 0U) {
+        root.backgroundColor = nt_ui_unpack_abgr(skin->bg_color);
     }
     /* Optional sprite background: when bg_art resolves the field draws the sprite (9-slice if the region
      * has baked borders) and bg_color above becomes its TINT (zero = untinted) -- the same .image +
      * backgroundColor convention as nt_ui_panel/button. Unset/unresolved = the flat bg_color rect above. */
-    nt_ui_image_payload_t *bg_art_p = make_bg_payload(focused ? style->focused_bg_art : style->bg_art);
+    nt_ui_image_payload_t *bg_art_p = make_bg_payload(skin->bg_art);
     if (bg_art_p != NULL) {
         root.image = (Clay_ImageElementConfig){.imageData = bg_art_p};
     }
-    const uint32_t bcol = focused ? style->focused_border_color : style->border_color;
-    if (style->border_width > 0.0F && bcol != 0U) {
+    if (style->border_width > 0.0F && skin->border_color != 0U) {
         root.border = (Clay_BorderElementConfig){
-            .color = nt_ui_unpack_abgr(bcol),
+            .color = nt_ui_unpack_abgr(skin->border_color),
             .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
     }
     /* Horizontal inset only: pad_x positions the text origin + bounds the clip. Vertical padding is 0 on
@@ -1113,10 +1131,10 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void) {
     memset(&s, 0, sizeof s); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
     s.text = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
     s.placeholder = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {128.0F, 128.0F, 128.0F, 255.0F}};
-    s.bg_color = 0xFF202020U;
-    s.focused_bg_color = 0xFF303030U;
-    s.border_color = 0xFF505050U;
-    s.focused_border_color = 0xFF80B0E0U;
+    s.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_color = 0xFF202020U, .border_color = 0xFF505050U};
+    s.skin[NT_UI_INPUT_FOCUSED] = (nt_ui_input_skin_t){.bg_color = 0xFF303030U, .border_color = 0xFF80B0E0U};
+    s.skin[NT_UI_INPUT_DISABLED] = (nt_ui_input_skin_t){.bg_color = 0xFF181818U, .border_color = 0xFF383838U}; /* dimmer than idle */
+    /* skin[NT_UI_INPUT_HOVER] left zero -> inherits idle (author fills it to differentiate). */
     s.caret_color = 0xFFFFFFFFU;
     s.selection_color = 0x80E0B080U; /* translucent blue-grey highlight behind the text */
     s.caret_blink_rate = 1.0F;

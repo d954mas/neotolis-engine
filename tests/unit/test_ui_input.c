@@ -847,10 +847,10 @@ static void test_placeholder_empty_unfocused_only(void) {
     TEST_ASSERT_NULL(nt_ui_input_placeholder_for("", "", false));
 }
 
-/* ---- Test 29: bg_art set -> field draws the sprite (IMAGE cmd) with the payload pinned. ---- */
+/* ---- Test 29: idle skin bg_art set -> field draws the sprite (IMAGE cmd) with the payload pinned. ---- */
 static void test_bg_art_emits_image(void) {
     char buf[8] = {0};
-    s_style.bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    s_style.skin[NT_UI_INPUT_IDLE].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
     (void)field_frame(&IDLE_PTR, nt_ui_id("bg"), buf, sizeof buf, true, NULL);
 
     const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
@@ -863,25 +863,75 @@ static void test_bg_art_emits_image(void) {
 /* ---- Test 30: no bg_art -> flat bg color only, no IMAGE command. ---- */
 static void test_no_bg_art_no_image(void) {
     char buf[8] = {0};
-    /* init_style() leaves bg_art zero-init (atlas.id == 0 = none). */
+    /* init_style() (defaults) leaves every skin's bg_art zero-init (atlas.id == 0 = none). */
     (void)field_frame(&IDLE_PTR, nt_ui_id("nobg"), buf, sizeof buf, true, NULL);
     TEST_ASSERT_NULL_MESSAGE(find_first_image_cmd(s_fx.ctx), "unset bg_art must not emit an IMAGE command");
 }
 
-/* ---- Test 31: focus swaps bg_art -> focused_bg_art (distinct region in the payload). ---- */
-static void test_bg_art_focus_swap(void) {
+/* Region in the first IMAGE command, or UINT32_MAX if none. */
+static uint32_t first_image_region(void) {
+    const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
+    if (img == NULL) {
+        return 0xFFFFFFFFU;
+    }
+    return ((const nt_ui_image_payload_t *)img->renderData.image.imageData)->region_index;
+}
+
+/* Pointer hovering the field center (active, not pressed) -> in.hovered, no focus. */
+static nt_pointer_t hover_ptr(void) {
+    nt_pointer_t p = {0};
+    p.x = IN_X + (IN_W * 0.5F);
+    p.y = IN_Y + (IN_H * 0.5F);
+    p.active = true;
+    return p;
+}
+
+/* ---- Test 31: focus selects skin[FOCUSED].bg_art (distinct region in the payload). ---- */
+static void test_skin_focused_selected(void) {
     char buf[8] = {0};
     const uint32_t id = nt_ui_id("swap");
-    s_style.bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
-    s_style.focused_bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.polygon_region_idx};
+    s_style.skin[NT_UI_INPUT_IDLE].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    s_style.skin[NT_UI_INPUT_FOCUSED].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.polygon_region_idx};
     warmup_focus(id, buf, sizeof buf); /* leaves the field focused */
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
-    const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
-    TEST_ASSERT_NOT_NULL(img);
-    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)img->renderData.image.imageData;
-    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.polygon_region_idx, p->region_index); /* focused art, not idle */
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.polygon_region_idx, first_image_region()); /* focused art, not idle */
+}
+
+/* ---- Test 31b: enabled=false selects skin[DISABLED].bg_art. ---- */
+static void test_skin_disabled_selected(void) {
+    char buf[8] = {0};
+    s_style.skin[NT_UI_INPUT_IDLE].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    s_style.skin[NT_UI_INPUT_DISABLED].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.polygon_region_idx};
+    (void)field_frame(&IDLE_PTR, nt_ui_id("dis"), buf, sizeof buf, false, NULL);   /* enabled=false */
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.polygon_region_idx, first_image_region()); /* disabled art, not idle */
+}
+
+/* ---- Test 31c: hovering selects skin[HOVER].bg_art. ---- */
+static void test_skin_hover_selected(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("hov");
+    s_style.skin[NT_UI_INPUT_IDLE].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    s_style.skin[NT_UI_INPUT_HOVER].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.polygon_region_idx};
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL); /* warm bbox */
+    nt_pointer_t h = hover_ptr();
+    (void)field_frame(&h, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));                          /* hovered, not focused */
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.polygon_region_idx, first_image_region()); /* hover art, not idle */
+}
+
+/* ---- Test 31d: an unauthored (all-zero) hover skin inherits idle. ---- */
+static void test_skin_hover_inherits_idle(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("hin");
+    s_style.skin[NT_UI_INPUT_IDLE].bg_art = (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx};
+    /* skin[HOVER] left zero -> inherit idle. */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL); /* warm bbox */
+    nt_pointer_t h = hover_ptr();
+    (void)field_frame(&h, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.white_region_idx, first_image_region()); /* idle art via hover->idle inherit */
 }
 
 /* ---- Test 32: a drag is abandoned when focus leaves the field mid-drag (no stale caret move). ---- */
@@ -1117,7 +1167,10 @@ int main(void) {
     RUN_TEST(test_key_repeat_timing);
     RUN_TEST(test_bg_art_emits_image);
     RUN_TEST(test_no_bg_art_no_image);
-    RUN_TEST(test_bg_art_focus_swap);
+    RUN_TEST(test_skin_focused_selected);
+    RUN_TEST(test_skin_disabled_selected);
+    RUN_TEST(test_skin_hover_selected);
+    RUN_TEST(test_skin_hover_inherits_idle);
     RUN_TEST(test_drag_abandoned_on_focus_loss);
     RUN_TEST(test_max_length_byte_cap);
     RUN_TEST(test_click_refocus_other_field);

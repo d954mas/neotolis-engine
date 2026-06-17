@@ -33,28 +33,36 @@ typedef enum {
     NT_UI_KB_PASSWORD,
 } nt_ui_input_keyboard_t;
 
-/* Style for the field -- PURELY visual, so many fields can share one look. text reuses
- * nt_ui_label_style_t (font/size/color/align). Colors are packed 0xAABBGGRR. bg_art is optional: set it
- * and the field draws that sprite (9-slice if baked) with bg_color as the TINT; leave it unset (atlas.id
- * == 0) and the field falls back to the flat bg_color rect. Per-field behaviour lives in nt_ui_input_props_t. */
+/* Interaction state for the field's visual skin. Mirrors button/checkbox: bg/border vary by state,
+ * resolved disabled > focused > hover > idle. A non-idle skin left ALL-ZERO inherits idle (so hover/
+ * disabled look like idle until authored). */
+enum { NT_UI_INPUT_IDLE = 0, NT_UI_INPUT_HOVER, NT_UI_INPUT_FOCUSED, NT_UI_INPUT_DISABLED, NT_UI_INPUT_STATE_COUNT };
+
+/* Per-state background skin. bg_art is optional: set it and the field draws that sprite (9-slice if
+ * baked) with bg_color as the TINT; leave it unset (atlas.id == 0) and the field falls back to the flat
+ * bg_color rect. Colors are packed 0xAABBGGRR. */
 typedef struct {
-    nt_ui_label_style_t text;             /* the entered text */
-    nt_ui_label_style_t placeholder;      /* dimmed render style for the empty-field hint (the hint STRING is in props) */
-    uint32_t bg_color;                    /* idle background: flat fill when no bg_art, else sprite TINT (0 = untinted) */
-    uint32_t focused_bg_color;            /* focused background (fill or tint) */
-    uint32_t border_color;                /* idle border (0 = none) */
-    uint32_t focused_border_color;        /* focused border */
-    uint32_t caret_color;                 /* caret rect tint */
-    uint32_t selection_color;             /* selection highlight rect tint (0 = a sensible default) */
-    nt_atlas_region_ref_t bg_art;         /* idle bg sprite (atlas.id == 0 = none -> flat bg_color) */
-    nt_atlas_region_ref_t focused_bg_art; /* focused bg sprite (atlas.id == 0 = none -> flat focused_bg_color) */
-    float caret_blink_rate;               /* seconds per full blink cycle; <= 0 = no blink (always on) */
-    float caret_width;                    /* caret rect width px; asserted > 0 */
-    float border_width;                   /* border thickness px (0 = no border) */
-    float pad_x;                          /* horizontal inner padding px (text origin + clip bound) */
-    float pad_y;                          /* vertical padding px: UNUSED -- the line is auto-centered, vertical margin = (field_h - line_h)/2 */
+    nt_atlas_region_ref_t bg_art; /* bg sprite (atlas.id == 0 = none -> flat bg_color) */
+    uint32_t bg_color;            /* flat fill when no bg_art, else sprite TINT (0 = none/untinted) */
+    uint32_t border_color;        /* vector border color (0 = no border); thickness = style->border_width */
+} nt_ui_input_skin_t;
+
+/* Style for the field -- PURELY visual, so many fields can share one look. text reuses
+ * nt_ui_label_style_t (font/size/color/align). Per-field behaviour lives in nt_ui_input_props_t. Layers
+ * come from data->layer (bg) + the text_layer arg (mirrors button/checkbox; not in the style). */
+typedef struct {
+    nt_ui_label_style_t text;                         /* the entered text */
+    nt_ui_label_style_t placeholder;                  /* dimmed render style for the empty-field hint (the hint STRING is in props) */
+    nt_ui_input_skin_t skin[NT_UI_INPUT_STATE_COUNT]; /* [idle, hover, focused, disabled]; non-idle all-zero inherits idle */
+    uint32_t caret_color;                             /* caret rect tint */
+    uint32_t selection_color;                         /* selection highlight rect tint (0 = a sensible default) */
+    float caret_blink_rate;                           /* seconds per full blink cycle; <= 0 = no blink (always on) */
+    float caret_width;                                /* caret rect width px; asserted > 0 */
+    float border_width;                               /* border thickness px (0 = no border); per-skin border_color sets the color */
+    float pad_x;                                      /* horizontal inner padding px (text origin + clip bound) */
+    float pad_y;                                      /* vertical padding px: UNUSED -- the line is auto-centered, vertical margin = (field_h - line_h)/2 */
 } nt_ui_input_style_t;
-_Static_assert(sizeof(nt_ui_input_style_t) >= 48, "nt_ui_input_style_t stable ABI");
+_Static_assert(sizeof(nt_ui_input_style_t) >= sizeof(nt_ui_input_skin_t) * NT_UI_INPUT_STATE_COUNT, "nt_ui_input_style_t holds the full skin array");
 
 /* Per-field behaviour -- distinct from the shared visual style, so many fields can share one
  * style but differ in validation/length/keyboard/mask. Zero-init = plain text field. */
