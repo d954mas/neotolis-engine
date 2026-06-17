@@ -840,24 +840,27 @@ static void init_styles(void) {
     s_tabbar_dark.idle.bg = s_panel_brown_ref;
     s_tabbar_dark.idle.bg_tint = 0xFF6E6E6EU; /* muted neutral so unselected tabs recede */
     s_tabbar_dark.idle.fill = 0xFF221A18U;    /* atlas-free fallback: list_bg {24,26,34} */
-    s_tabbar_dark.hover.bg = btn_blue;
-    s_tabbar_dark.hover.bg_tint = 0xFFB8C8E0U; /* lightened blue on hover */
-    s_tabbar_dark.hover.fill = 0xFF3A2E2AU;    /* fallback */
-    s_tabbar_dark.selected.bg = btn_blue;
-    s_tabbar_dark.selected.bg_tint = 0xFFFFFFFFU; /* full sprite color on the active tab */
-    s_tabbar_dark.selected.fill = 0xFF9E622EU;    /* fallback: list_sel */
+    /* All states share the idle panel sprite so hover/selected stay in-family — differentiate by tint
+     * (lighter on hover, brighter on selected) + the accent bar, not a different sprite. */
+    s_tabbar_dark.hover.bg = s_panel_brown_ref;
+    s_tabbar_dark.hover.bg_tint = 0xFF8C8C8CU; /* same panel, lifted neutral on hover */
+    s_tabbar_dark.hover.fill = 0xFF332826U;    /* fallback */
+    s_tabbar_dark.selected.bg = s_panel_brown_ref;
+    s_tabbar_dark.selected.bg_tint = 0xFFD6CDC6U; /* same panel, brightened so the active tab reads */
+    s_tabbar_dark.selected.fill = 0xFF4A3A34U;    /* fallback: list_sel */
     s_tabbar_dark.selected.scale = 1.04F;         /* gentle pop on the active tab */
-    s_tabbar_dark.accent = 0xFFE69C56U;           /* accent {86,156,230} */
+    s_tabbar_dark.accent = 0xFF50B0E0U;           /* warm gold {224,176,80} — harmonizes with the brown panel */
     s_tabbar_dark.text = 0xFFB6AAA5U;             /* caption {165,170,182} */
     s_tabbar_dark.text_selected = 0xFFFCF7F5U;    /* row_sel {245,247,252} */
     s_tabbar_dark.font_size = 16.0F;
     s_tabbar_light = s_tabbar_dark;
     s_tabbar_light.idle.bg_tint = 0xFFB0B0B0U;  /* lighter neutral on the pale card */
     s_tabbar_light.idle.fill = 0xFFEBE3E0U;     /* fallback: list_bg {224,227,235} */
-    s_tabbar_light.hover.bg_tint = 0xFFD0DCF0U; /* paler blue hover */
-    s_tabbar_light.hover.fill = 0xFFDDD3D0U;    /* fallback */
-    s_tabbar_light.selected.fill = 0xFFF0B68AU; /* fallback: list_sel {138,182,240} */
-    s_tabbar_light.accent = 0xFFD67834U;        /* accent {52,120,214} */
+    s_tabbar_light.hover.bg_tint = 0xFFC4C4C4U;    /* same panel, gentle lift on the pale card */
+    s_tabbar_light.hover.fill = 0xFFDDD3D0U;       /* fallback */
+    s_tabbar_light.selected.bg_tint = 0xFFFFFFFFU; /* full warm panel on the active tab */
+    s_tabbar_light.selected.fill = 0xFFF0B68AU;    /* fallback: list_sel */
+    s_tabbar_light.accent = 0xFF3C8CC8U;           /* warm amber accent for the pale theme */
     s_tabbar_light.text = 0xFF685C5AU;          /* caption {90,92,104} */
     s_tabbar_light.text_selected = 0xFF381C0CU; /* row_sel {12,28,56} */
 }
