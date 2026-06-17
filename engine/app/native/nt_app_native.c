@@ -4,12 +4,6 @@
 
 #include "core/nt_builtins.h"
 
-/* devapi is dev-only and stripped in release; conditional include keeps this backend
-   symbol-clean (zero nt_devapi_* symbols) when devapi is absent. */
-#ifdef NT_DEVAPI_ENABLED
-#include "devapi/nt_devapi_internal.h"
-#endif
-
 /* ---- File-scope statics (zero-initialized by C standard) ---- */
 
 static nt_app_frame_fn s_frame_fn;
@@ -47,17 +41,13 @@ void nt_app_run(nt_app_frame_fn fn) {
     }
 }
 
-/* Managed variant: owns the single g_nt_app.dt scalar (computed per mode); frame and the
-   deferred tick advance only on a sim-advance. Raw nt_app_run is intentionally unchanged. */
+/* Managed variant: owns the single g_nt_app.dt scalar (computed per mode); frame advances only
+   on a sim-advance. Raw nt_app_run is intentionally unchanged. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_app_run_managed(nt_app_frame_fn fn) {
     s_frame_fn = fn;
 
     double prev_time = nt_time_now();
-
-#ifdef NT_DEVAPI_ENABLED
-    nt_devapi_set_managed_tick(true); /* tick ownership: managed loop, not net_poll */
-#endif
 
     while (!nt_window_should_close()) {
         double now = nt_time_now();
@@ -88,11 +78,6 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
         g_nt_app.time += dt;
         if (sim_advanced) {
             g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter */
-#ifdef NT_DEVAPI_ENABLED
-            /* Tick the deferred queue once per sim-advance, BEFORE the frame fn enqueues new
-               commands (mirrors net_poll's "tick before commands enqueue" invariant). */
-            nt_devapi_managed_sim_tick();
-#endif
         }
         s_frame_fn();
 
@@ -107,10 +92,6 @@ void nt_app_run_managed(nt_app_frame_fn fn) {
             }
         }
     }
-
-#ifdef NT_DEVAPI_ENABLED
-    nt_devapi_set_managed_tick(false); /* release tick ownership on exit */
-#endif
 }
 
 void nt_app_quit(void) { nt_window_request_close(); }

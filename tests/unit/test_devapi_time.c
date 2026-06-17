@@ -25,10 +25,10 @@ void tearDown(void) { nt_devapi_shutdown(); }
 
 /* ---- helpers (clone of test_devapi_deferred.c cadence) ---- */
 
-/* One sim-advance under the managed-tick contract: tick the deferred queue once, then read the
-   ready slot. The managed loop calls nt_devapi_managed_sim_tick() exactly once per sim-advance. */
+/* One game-frame advance: bump g_nt_app.frame (what the managed loop does on a sim-advance), then
+   read any deferred slot whose game-frame deadline was reached. */
 static const char *advance_sim(void) {
-    nt_devapi_managed_sim_tick();
+    g_nt_app.frame++;
     return nt_devapi_poll_response();
 }
 
@@ -278,8 +278,8 @@ static void test_frame_wait_yields_after_n_sim_advances(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
 }
 
-/* D-11: PAUSE never advances the sim, so the managed loop never calls nt_devapi_managed_sim_tick().
-   A frame.wait submitted while paused NEVER yields, no matter how many idle loop iterations run. */
+/* PAUSE never advances g_nt_app.frame, so a frame.wait submitted while paused NEVER yields,
+   no matter how many idle loop iterations run. */
 static void test_frame_wait_never_yields_during_pause(void) {
     nt_app_pause();
     TEST_ASSERT_TRUE(g_nt_app.paused);
@@ -288,7 +288,7 @@ static void test_frame_wait_never_yields_during_pause(void) {
 
     /* Drive many idle loop iterations: paused -> no sim-advance -> NO tick -> never yields. */
     for (int i = 0; i < 100; i++) {
-        /* The paused managed loop runs the frame fn but does NOT call managed_sim_tick. */
+        /* The paused managed loop runs the frame fn but does NOT advance g_nt_app.frame. */
         TEST_ASSERT_NULL(nt_devapi_poll_response());
     }
 }

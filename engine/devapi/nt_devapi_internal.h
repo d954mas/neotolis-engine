@@ -59,29 +59,20 @@ void nt_devapi_resp_reset(void);
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
-    cJSON *id;       /* owned duplicate of request_id (number or string); NULL if absent. */
-    int frames_left; /* continuation: yields when it reaches 0. */
+    cJSON *id;             /* owned duplicate of request_id (number or string); NULL if absent. */
+    uint32_t target_frame; /* yields once g_nt_app.frame reaches this (wrap-safe compare). */
     bool in_use;
 } nt_devapi_deferred_slot;
 
-/* Mark the in-flight command as deferred: submit() returns NULL and the response is
-   yielded after `frames_left` poll_response() calls. Returns true so the handler returns
+/* Mark the in-flight command as deferred: submit() returns NULL and the response is yielded once
+   g_nt_app.frame has advanced `frames` game frames past submit. Returns true so the handler returns
    normally (the bool ABI is unchanged). Must be called from inside a handler dispatch. */
-bool nt_devapi_defer_current(int frames_left);
+bool nt_devapi_defer_current(int frames);
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */
 void nt_devapi_deferred_reset(void);
 
-/* Advance all in-flight deferred slots once per frame (decrement frames_left exactly once).
-   Call before draining with nt_devapi_poll_response, which only pops ready slots. */
-void nt_devapi_deferred_tick(void);
-
-/* Managed loop owns the deferred tick (one per sim-advance, not per loop iteration) so frame.wait
-   counts game frames, not idle pause/manual spins. net_poll skips its own tick when the flag is set. */
-void nt_devapi_set_managed_tick(bool on);
-void nt_devapi_managed_sim_tick(void);
-bool nt_devapi_managed_tick_active(void);
 // #endregion
 
 /* True between init and shutdown — lets submit enforce init-before-use. */

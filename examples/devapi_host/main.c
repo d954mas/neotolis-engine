@@ -62,7 +62,7 @@ static void frame(void) {
     /* Poll devapi at frame start, before input: a command only queues an input
        injection, nt_input_poll() then samples hardware, and a later apply step
        overlays the queued injection so it wins (one frame-start touch-point). */
-    nt_devapi_net_poll();
+    nt_devapi_update();
     nt_input_poll();
 
     /* Draw + the host's own swap go TOGETHER under the render flag — never skip-draw-but-swap

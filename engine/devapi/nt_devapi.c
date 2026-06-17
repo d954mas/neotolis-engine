@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 
@@ -43,10 +44,10 @@ static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
 static bool *s_out_deferred;
 static int s_defer_frames;
 
-bool nt_devapi_defer_current(int frames_left) {
+bool nt_devapi_defer_current(int frames) {
     NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
     *s_out_deferred = true;
-    s_defer_frames = frames_left;
+    s_defer_frames = frames;
     return true; /* handler returns normally; the bool path is unchanged. */
 }
 
@@ -58,7 +59,7 @@ void nt_devapi_deferred_reset(void) {
         }
         s_deferred[i].id = NULL;
         s_deferred[i].in_use = false;
-        s_deferred[i].frames_left = 0;
+        s_deferred[i].target_frame = 0;
     }
 }
 // #endregion
@@ -176,13 +177,13 @@ static cJSON s_deferred_marker;
 
 /* Enqueue a deferred command: store the owned duplicated id + continuation into a free
    slot. Returns true on success; false on overflow (caller emits a structured error). */
-static bool deferred_enqueue(const cJSON *req, int frames_left) {
+static bool deferred_enqueue(const cJSON *req, int frames) {
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (s_deferred[i].in_use) {
             continue;
         }
-        s_deferred[i].id = dup_request_id(req); /* owned; NULL if absent — fine. */
-        s_deferred[i].frames_left = frames_left;
+        s_deferred[i].id = dup_request_id(req);                         /* owned; NULL if absent — fine. */
+        s_deferred[i].target_frame = g_nt_app.frame + (uint32_t)frames; /* absolute game-frame deadline. */
         s_deferred[i].in_use = true;
         return true;
     }
@@ -324,35 +325,19 @@ const char *nt_devapi_submit(const char *line) {
     return out;
 }
 
-void nt_devapi_deferred_tick(void) {
-    NT_ASSERT(nt_devapi_initialized());
-    /* Advance time once per frame: decrement every in-flight slot exactly once.
-       Pure time-step — no yielding, no popping; poll_response reads the results. */
-    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
-        if (s_deferred[i].in_use) {
-            s_deferred[i].frames_left--;
-        }
-    }
-}
-
-/* When set, the managed loop owns the deferred tick (one per sim-advance) and net_poll skips
-   its own to prevent double-counting. */
-static bool s_managed_tick;
-
-void nt_devapi_set_managed_tick(bool on) { s_managed_tick = on; }
-bool nt_devapi_managed_tick_active(void) { return s_managed_tick; }
-
-void nt_devapi_managed_sim_tick(void) { nt_devapi_deferred_tick(); }
+/* A slot is ready once the game frame counter has reached its target. Wrap-safe: the subtraction
+   wraps together with g_nt_app.frame, so the slot stays pending until its frame deadline. */
+static bool slot_ready(const nt_devapi_deferred_slot *slot) { return (int32_t)(g_nt_app.frame - slot->target_frame) >= 0; }
 
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
-    /* Read results only: pop the FIRST in-flight slot already at frames_left <= 0. Never
-       mutates frames_left — nt_devapi_deferred_tick advances time once per frame. */
+    /* Pop the FIRST in-flight slot whose target game-frame has been reached. Reads g_nt_app.frame
+       (the game clock) — idempotent, so it is safe to call every tick / every loop iteration. */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (!s_deferred[i].in_use) {
             continue;
         }
-        if (s_deferred[i].frames_left > 0) {
+        if (!slot_ready(&s_deferred[i])) {
             continue;
         }
 
@@ -370,7 +355,7 @@ const char *nt_devapi_poll_response(void) {
         const char *out = resp_serialize(entry);
         cJSON_Delete(entry);
         s_deferred[i].in_use = false;
-        s_deferred[i].frames_left = 0;
+        s_deferred[i].target_frame = 0;
         return out;
     }
     return NULL; /* nothing ready this call. */

@@ -37,7 +37,7 @@ typedef socklen_t nt_socklen_t;
 
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi.h"
-#include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_tick — frame-advance for the deferred drain. */
+#include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_reset on client drop. */
 #include "devapi/nt_devapi_net.h"
 
 /* Single loopback client; reconnect allowed. */
@@ -272,15 +272,6 @@ void nt_devapi_net_poll(void) {
         return;
     }
 
-    /* Advance every in-flight deferred slot once per frame, BEFORE this frame's commands enqueue
-       new ones — otherwise a slot enqueued this frame would be ticked the same frame and resolve
-       one frame early (a 1-frame deferral would resolve in the poll it arrived in).
-       Skip when the managed loop owns the tick — it ticks once per sim-advance instead, so
-       frame.wait counts game frames, not idle pause/manual spins (no double-tick). */
-    if (!nt_devapi_managed_tick_active()) {
-        nt_devapi_deferred_tick();
-    }
-
     // #region recv (orderly close vs no-data)
     char tmp[4096];
     for (;;) {
@@ -354,7 +345,7 @@ void nt_devapi_net_poll(void) {
     }
     // #endregion
 
-    // #region deferred drain — emit every result that became ready (the per-frame tick ran at frame start)
+    // #region deferred drain — emit every result whose game-frame deadline (g_nt_app.frame) has passed
     const char *dr;
     while ((dr = nt_devapi_poll_response()) != NULL) {
         if (!send_line(dr)) {
@@ -365,6 +356,10 @@ void nt_devapi_net_poll(void) {
     // #endregion
 }
 // #endregion
+
+/* Per-tick game-facing update: for now just the TCP transport poll. Phase 70 will split the
+   transport poll (net/web) out of this core entry so both transports share it. */
+void nt_devapi_update(void) { nt_devapi_net_poll(); }
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
 /* Monotonic WALL clock: clock() measures CPU time (wrong for a wall-clock spin timeout). */
