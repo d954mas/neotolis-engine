@@ -148,6 +148,31 @@ static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint3
     nt_ui_end(s_fx.ctx);
 }
 
+/* One frame with three stacked fields (A, B, C). B's enabled state is a parameter so Tab-through-disabled
+ * can be exercised. All buffers are char[32]. */
+static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, uint32_t ib, char *b, bool b_enabled, uint32_t ic, char *c) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    CLAY({.id = CLAY_ID("root3"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+        CLAY({.id = CLAY_ID("col3"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ia, a, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ib, b, 32U, &s_props, &s_style, &s_field_decl, b_enabled, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ic, c, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* One frame with a single GROW-width field inside a fixed-width parent: the field has a real rendered
+ * width but its decl carries NO width, exercising the responsive-width (bbox-fallback) scroll path. */
+static void grow_field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    CLAY({.id = CLAY_ID("rootG"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(IN_W), CLAY_SIZING_FIXED(IN_H)}}}) {
+        const Clay_ElementDeclaration grow_decl = {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(IN_H)}}};
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &grow_decl, true, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 1: insert two Cyrillic codepoints char-by-char; 4 bytes + NUL, caret at 4. ---- */
 static void test_insert_cyrillic_codepoints(void) {
     char buf[32] = {0};
@@ -875,7 +900,7 @@ static void test_drag_abandoned_on_focus_loss(void) {
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
     uint32_t caret0 = 99U;
     uint8_t drag0 = 0U;
-    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret0, &drag0));
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret0, &drag0, NULL));
     TEST_ASSERT_EQUAL_UINT8(1U, drag0); /* drag armed by the press */
 
     /* Esc while still holding -> the field unfocuses (Esc handler runs after the drag block; the pointer
@@ -893,7 +918,7 @@ static void test_drag_abandoned_on_focus_loss(void) {
     (void)field_frame(&drag_far, id, buf, sizeof buf, true, NULL);
     uint32_t caret1 = 99U;
     uint8_t drag1 = 9U;
-    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret1, &drag1));
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret1, &drag1, NULL));
     TEST_ASSERT_EQUAL_UINT8(0U, drag1);       /* drag abandoned on focus loss */
     TEST_ASSERT_EQUAL_UINT32(caret0, caret1); /* caret did not follow the far-right drag */
 }
@@ -938,6 +963,62 @@ static void test_click_refocus_other_field(void) {
     two_field_frame(&press_b, id_a, a, id_b, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_a));
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id_b));
+}
+
+/* ---- Test 35: Tab skips a disabled field; focus lands on the next ENABLED field, not lost. ---- */
+static void test_tab_skips_disabled_field(void) {
+    char a[32] = {0};
+    char b[32] = {0};
+    char c[32] = {0};
+    const uint32_t ia = nt_ui_id("ta");
+    const uint32_t ib = nt_ui_id("tb");
+    const uint32_t ic = nt_ui_id("tc");
+    three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c); /* warm; middle field B disabled */
+
+    /* Click field A (top row) to focus it. */
+    const float ay = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    three_field_frame(&press, ia, a, ib, b, false, ic, c);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
+    three_field_frame(&rel, ia, a, ib, b, false, ic, c);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
+
+    /* Tab: B is disabled, so the seek must skip it and land on C (pre-fix the disabled B ate the seek
+     * and focus vanished). */
+    nt_input_poll();
+    nt_input_set_key(NT_KEY_TAB, true);
+    three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c);
+    nt_input_set_key(NT_KEY_TAB, false);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ia));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ib)); /* a disabled field never holds focus */
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));  /* seek skipped B and reached C */
+}
+
+/* ---- Test 36: a responsive (GROW) width field still scrolls to keep the caret visible. ---- */
+static void test_scroll_responsive_width(void) {
+    char buf[64];
+    strcpy(buf, "the quick brown fox jumps over the lazy dog"); /* ~430px @10px/glyph >> ~228px inner width */
+    const uint32_t id = nt_ui_id("gw");
+    grow_field_frame(&IDLE_PTR, id, buf, sizeof buf);
+    grow_field_frame(&IDLE_PTR, id, buf, sizeof buf); /* warm: the GROW field gets a measured bbox width */
+
+    /* Click to focus. */
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    grow_field_frame(&press, id, buf, sizeof buf);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    grow_field_frame(&rel, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+
+    /* Jump the caret to END: the long line must scroll right to keep the caret in view. With FIXED-only
+     * scroll (pre-fix) inner_w was 0 here and scroll_x stayed pinned at 0. */
+    nt_input_poll();
+    nt_input_set_key(NT_KEY_END, true);
+    grow_field_frame(&IDLE_PTR, id, buf, sizeof buf);
+    nt_input_set_key(NT_KEY_END, false);
+
+    float scroll_x = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_x));
+    TEST_ASSERT_TRUE_MESSAGE(scroll_x > 0.0F, "responsive-width field must scroll to keep the caret visible");
 }
 
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
@@ -1012,6 +1093,8 @@ int main(void) {
     RUN_TEST(test_drag_abandoned_on_focus_loss);
     RUN_TEST(test_max_length_byte_cap);
     RUN_TEST(test_click_refocus_other_field);
+    RUN_TEST(test_tab_skips_disabled_field);
+    RUN_TEST(test_scroll_responsive_width);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

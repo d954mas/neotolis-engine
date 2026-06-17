@@ -610,7 +610,7 @@ const char *nt_ui_input_placeholder_for(const char *buffer, const char *placehol
 }
 
 #ifdef NT_TEST_ACCESS
-bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_caret, uint8_t *out_drag) {
+bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_caret, uint8_t *out_drag, float *out_scroll_x) {
     const nt_ui_input_state_t *st = (const nt_ui_input_state_t *)nt_ui_state_find(ctx, input_state_id(id));
     if (st == NULL) {
         return false;
@@ -620,6 +620,9 @@ bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_car
     }
     if (out_drag != NULL) {
         *out_drag = st->drag;
+    }
+    if (out_scroll_x != NULL) {
+        *out_scroll_x = st->scroll_x;
     }
     return true;
 }
@@ -745,9 +748,10 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     }
     /* A pending Tab seek set by the previously-declared focused field: this field claims focus.
      * claimed_now suppresses this field's OWN Tab handling so the still-pressed Tab key does not
-     * immediately re-advance focus off the field that just received it. */
+     * immediately re-advance focus off the field that just received it. Only an ENABLED field claims:
+     * a disabled field must leave the seek intact so Tab skips it to the next enabled field. */
     bool claimed_now = false;
-    if (ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
+    if (enabled && ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
         claimed_now = true;
@@ -986,7 +990,15 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     }
 
     // #region keep caret visible (horizontal scroll)
-    const float inner_w = (decl != NULL && decl->layout.sizing.width.type == CLAY__SIZING_TYPE_FIXED) ? (decl->layout.sizing.width.size.minMax.min - (style->pad_x * 2.0F)) : 0.0F;
+    /* Inner width = the content box (field width minus pad_x on both sides). FIXED width is known this
+     * frame from decl; a GROW/responsive field has no decl width, so fall back to the previous frame's
+     * measured bbox (one-frame IM lag) instead of disabling scroll and letting long text escape the clip. */
+    float inner_w = 0.0F;
+    if (decl != NULL && decl->layout.sizing.width.type == CLAY__SIZING_TYPE_FIXED) {
+        inner_w = decl->layout.sizing.width.size.minMax.min - (style->pad_x * 2.0F);
+    } else if (bb.found) {
+        inner_w = bb.width - (style->pad_x * 2.0F);
+    }
     if (inner_w > 0.0F) {
         const float caret_px = caret_x_at(style, props->password, font, buffer, st->caret);
         /* Reserve the caret width on the right edge: the content clip is the inner box, so a caret at
