@@ -1,5 +1,5 @@
 add_executable(devapi_host main.c)
-target_link_libraries(devapi_host PRIVATE nt_core nt_app nt_input nt_window nt_devapi)
+target_link_libraries(devapi_host PRIVATE nt_core nt_app nt_input nt_window nt_log nt_devapi)
 if(WIN32)
     target_link_libraries(devapi_host PRIVATE ws2_32)
     # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).

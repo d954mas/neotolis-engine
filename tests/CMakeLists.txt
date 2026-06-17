@@ -373,7 +373,7 @@ if(NOT EMSCRIPTEN)
         # deferred-response mechanism: submit()->NULL on defer, K-1 NULL polls, K-th yields
         # the {ok,result,request_id} envelope, overflow rejected (ASan via sanitizer flags).
         add_executable(test_devapi_deferred unit/test_devapi_deferred.c)
-        target_link_libraries(test_devapi_deferred PRIVATE nt_devapi cjson unity)
+        target_link_libraries(test_devapi_deferred PRIVATE nt_devapi cjson nt_window_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_deferred PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
