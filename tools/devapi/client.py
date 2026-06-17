@@ -1,10 +1,8 @@
 """DevApiClient — the reusable harness surface.
 
 request / result / batch / wait_frames / step over a pluggable Transport.
-Responses are correlated by request_id through a pending-map, NEVER by
-arrival order — deferred results (and future pipelined batches) can interleave
-out of order on the same connection, so trusting "next line = my response" would
-mis-attribute a deferred result to the wrong call.
+Replies are correlated by request_id via a pending-map, never by arrival order
+(deferred / pipelined results interleave on one connection).
 
 Stdlib only (json + socket) — no pip deps. Python 3.8+.
 """
@@ -111,11 +109,11 @@ class DevApiClient:
                 self._pending[rid_obj] = obj
 
     def wait_frames(self, n: int) -> Dict[str, Any]:
-        """Surface-present stub. Returns the server's unknown_method envelope until frame.wait is implemented (NOT a silent no-op)."""
+        """Surface-present stub: sends frame.wait; the server returns its unknown_method envelope today, not a silent no-op."""
         return self.request("frame.wait", {"frames": n})
 
     def step(self) -> Dict[str, Any]:
-        """Surface-present stub. Returns the server's unknown_method envelope until time.step is implemented (NOT a silent no-op)."""
+        """Surface-present stub: sends time.step; the server returns its unknown_method envelope today, not a silent no-op."""
         return self.request("time.step")
 
     def close(self) -> None:

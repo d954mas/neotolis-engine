@@ -273,8 +273,8 @@ void nt_devapi_net_poll(void) {
     }
 
     /* Advance every in-flight deferred slot once per frame, BEFORE this frame's commands enqueue
-       new ones — so a command that defers N frames waits N real frames, not N-1 (a same-frame
-       tick of a just-enqueued slot would make frame.wait(1) resolve in the poll it arrived in). */
+       new ones — otherwise a slot enqueued this frame would be ticked the same frame and resolve
+       one frame early (a 1-frame deferral would resolve in the poll it arrived in). */
     nt_devapi_deferred_tick();
 
     // #region recv (orderly close vs no-data)

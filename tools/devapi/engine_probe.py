@@ -6,8 +6,6 @@ self-describing surface (endpoints / command.describe / features), drives the
 game-registered game.echo command end-to-end, and asserts correct request_id
 correlation. This proves the WHOLE native transport chain over a real socket.
 
-Input/UI probe coverage will extend this as further commands are registered.
-
 Usage: python tools/devapi/engine_probe.py [--port N]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
 Returns exit 0 if every assertion passes, exit 1 on any failure (connect /

@@ -5,9 +5,6 @@ native SocketTransport: a loopback TCP connection to the engine's devapi
 server, JSON-lines framed on '\\n', with a MANDATORY read timeout so a
 crashed / deferred-forever engine can never hang the bot or CI.
 
-A future PlaywrightTransport behind the same interface covers the web ccall
-bridge; the client never sees which wire it talks over.
-
 Stdlib only (socket) — no pip deps. Python 3.8+.
 """
 import socket
