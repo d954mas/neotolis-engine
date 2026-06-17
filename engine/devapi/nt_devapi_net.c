@@ -89,6 +89,9 @@ static void close_client(void) {
         s_client = NT_INVALID_SOCK;
     }
     s_recv_len = 0; /* drop any partial line — the next client starts clean. */
+    /* Drop the gone client's in-flight deferred results so a reconnecting client
+       can't receive them tagged with the old client's request_id. */
+    nt_devapi_deferred_reset();
 }
 
 static void set_nonblocking(nt_sock_t s) {
