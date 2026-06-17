@@ -121,6 +121,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_app COMMAND test_app)
 
+    # --- Managed loop (time-control) tests (L1: TIME-01/02/03/06 + D-11 sim-advance) ---
+    add_executable(test_app_managed unit/test_app_managed.c)
+    target_link_libraries(test_app_managed PRIVATE nt_app_stub nt_log_stub unity)
+    nt_set_warning_flags(test_app_managed)
+    nt_set_sanitizer_flags(test_app_managed)
+    set_target_properties(test_app_managed PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_app_managed COMMAND test_app_managed)
+
     # --- Window module tests ---
     add_executable(test_window unit/test_window.c)
     target_link_libraries(test_window PRIVATE nt_window_stub nt_log_stub unity)
