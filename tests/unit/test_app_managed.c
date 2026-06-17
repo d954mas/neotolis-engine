@@ -58,10 +58,13 @@ void test_managed_run_matches_raw(void) {
 
     nt_app_run_managed(record_frame_fn);
 
+    /* Every iteration advances the sim (frame++ each loop, like the raw loop). dt is the clamped
+       wall dt; on a fast machine the first iteration's wall dt can be ~0, so assert only the
+       upper bound (clamp) here — the > 0 path is covered by MANUAL's exact-dt tests. */
     TEST_ASSERT_EQUAL_UINT32(5, g_nt_app.frame);
     for (int i = 0; i < 5; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] >= 0.0F, "RUN dt must be non-negative");
         TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] <= 0.001F + 1e-6F, "RUN dt must be clamped to max_dt");
-        TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] > 0.0F, "RUN dt must advance the sim (dt > 0)");
     }
 }
 
@@ -126,20 +129,25 @@ void test_manual_reproducible_across_two_runs(void) {
     TEST_ASSERT_EQUAL_MEMORY(run_a, run_b, sizeof(run_a));
 }
 
-/* TIME-03: dt-scale multiplies the wall dt in RUN mode (scale=2 -> ~2x the clamp value).
-   Wall dt is non-deterministic, so use the clamp as a stable reference and a tolerance assert. */
+/* TIME-03: dt-scale multiplies the wall dt in RUN mode (dt = clamp(wall, max_dt) * scale).
+   Pace the loop via target_dt so each frame's wall dt reliably reaches the clamp, making the
+   scaled result deterministic: max_dt = 1ms, target_dt = 5ms -> wall dt clamps to 1ms ->
+   scale=2 -> dt == 2ms. Skip the first iteration (its wall dt is ~0, pre-pacing). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_scale_multiplies_wall_dt(void) {
-    g_nt_app.max_dt = 0.001F;
+    g_nt_app.max_dt = 0.001F;    /* clamp at 1ms */
+    g_nt_app.target_dt = 0.005F; /* pace each frame to ~5ms wall so wall dt always hits the clamp */
     g_nt_app.mode = NT_APP_MODE_RUN;
     nt_app_set_scale(2.0F);
-    s_advance_target = 5;
+    s_advance_target = 6;
 
     nt_app_run_managed(record_frame_fn);
 
-    for (int i = 0; i < 5; i++) {
-        /* dt = clamp(wall, max_dt) * scale; with a tiny max_dt the clamp dominates -> ~2*max_dt. */
-        TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] <= (0.001F * 2.0F) + 1e-6F, "scaled dt must respect 2*clamp ceiling");
-        TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] > 0.001F, "scale=2 must exceed the unscaled clamp");
+    /* Frames 2..N (index >= 1) are paced: wall dt >= target_dt > max_dt, so dt == max_dt*scale. */
+    const float scaled_clamp = 0.001F * 2.0F;
+    for (int i = 1; i < 6; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] <= scaled_clamp + 1e-6F, "scaled dt must respect scale*clamp ceiling");
+        TEST_ASSERT_TRUE_MESSAGE(s_dt_log[i] >= scaled_clamp - 1e-6F, "paced wall dt * scale must equal scale*clamp");
     }
 }
 
