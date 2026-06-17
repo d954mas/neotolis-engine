@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Safety auto-exit so a CI run can't hang forever if no client ever drives a quit.
+#define DEVAPI_HOST_MAX_FRAMES 100000u
+
 /* game-layer command: echo {msg} back as {msg}. Registered via the public
    nt_devapi_register path only — zero engine edits. Uses the public cJSON
    API for the result (devapi_add_* is internal to the devapi module). */
@@ -64,7 +67,7 @@ static void frame(void) {
 
     nt_window_swap_buffers();
 
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || g_nt_app.frame >= 100000) {
+    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || g_nt_app.frame >= DEVAPI_HOST_MAX_FRAMES) {
         nt_app_quit();
     }
 }
@@ -88,11 +91,20 @@ int main(void) {
     /* devapi wiring (game-layer consumer; no engine edits). */
     if (nt_devapi_init() != NT_OK) {
         printf("Failed to initialize devapi\n");
+        nt_input_shutdown();
+        nt_window_shutdown();
+        nt_engine_shutdown();
         return 1;
     }
     nt_result_t rr = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
-    NT_ASSERT(rr == NT_OK);
-    (void)rr;
+    if (rr != NT_OK) {
+        printf("[devapi_host] failed to register game.echo: error %d\n", rr);
+        nt_devapi_shutdown();
+        nt_input_shutdown();
+        nt_window_shutdown();
+        nt_engine_shutdown();
+        return 1;
+    }
 
     uint16_t port = resolve_port();
     if (!nt_devapi_net_start(port)) {
