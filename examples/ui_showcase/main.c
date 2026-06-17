@@ -711,12 +711,14 @@ static void init_styles(void) {
     s_input_sel_light.caret_blink_rate = 0.4F;
 
     /* Sprite background: a 9-slice panel frame instead of a flat rect; focus swaps the frame art (beige ->
-     * blue). bg_color stays 0 = untinted, so the sprite draws at its natural color. Dark text reads on the
-     * light frame. Refs were assigned above (s_panel_*_ref). */
+     * blue). bg_color/focused_bg_color MUST be 0 here: they tint the sprite, and inheriting input_base's
+     * dark fill would darken the light frame into unreadability. Both frames are light, so dark text reads. */
     s_input_art = input_base;
     s_input_art.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
     s_input_art.placeholder.color = (Clay_Color){90.0F, 80.0F, 70.0F, 255.0F};
     s_input_art.caret_color = 0xFF202020U;
+    s_input_art.bg_color = 0U;         /* untinted: show the beige frame's natural color */
+    s_input_art.focused_bg_color = 0U; /* untinted: show the blue frame's natural color */
     s_input_art.bg_art = s_panel_beige_ref;
     s_input_art.focused_bg_art = s_panel_blue_ref;
 
