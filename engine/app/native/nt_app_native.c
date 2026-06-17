@@ -13,38 +13,11 @@ static nt_app_frame_fn s_frame_fn;
 
 /* ---- API ---- */
 
-void nt_app_run(nt_app_frame_fn fn) {
-    s_frame_fn = fn;
-
-    double prev_time = nt_time_now();
-
-    while (!nt_window_should_close()) {
-        double now = nt_time_now();
-        float dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
-        prev_time = now;
-
-        g_nt_app.dt = dt;
-        g_nt_app.time += dt;
-        g_nt_app.frame++;
-        s_frame_fn();
-
-        /* Frame rate cap: single sleep + spin-wait */
-        if (g_nt_app.target_dt > 0.0F) {
-            double target = prev_time + (double)g_nt_app.target_dt;
-            double remaining = target - nt_time_now();
-            if (remaining > NT_SPIN_MARGIN) {
-                nt_time_sleep(remaining - NT_SPIN_MARGIN);
-            }
-            while (nt_time_now() < target) { /* spin */
-            }
-        }
-    }
-}
-
-/* Managed variant: owns the single g_nt_app.dt scalar (computed per mode); frame advances only
-   on a sim-advance. Raw nt_app_run is intentionally unchanged. */
+/* Single frame loop: dt is the one scalar, computed per mode. Default state (RUN, scale 1,
+   unpaused) is a plain wall-clock advance; pause/manual-idle freeze frame (it advances only on
+   a real sim-advance). Time control comes from the nt_app_* mutators (set via game code / devapi). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_app_run_managed(nt_app_frame_fn fn) {
+void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
 
     double prev_time = nt_time_now();

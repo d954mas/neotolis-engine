@@ -9,7 +9,7 @@
    standard (mode RUN = 0, paused = false). Only non-zero defaults are listed here. */
 nt_app_t g_nt_app = {.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
 
-/* ---- Time-control mutators (backend-agnostic; applied by nt_app_run_managed) ---- */
+/* ---- Time-control mutators (backend-agnostic; applied by nt_app_run) ---- */
 
 void nt_app_pause(void) { g_nt_app.paused = true; }
 void nt_app_resume(void) { g_nt_app.paused = false; }

@@ -9,42 +9,11 @@ static bool s_should_quit;
 
 #define NT_SPIN_MARGIN 0.002
 
-void nt_app_run(nt_app_frame_fn fn) {
-    s_frame_fn = fn;
-    s_should_quit = false;
-
-    double prev_time = nt_time_now();
-
-    while (!s_should_quit) {
-        double now = nt_time_now();
-        float dt = (float)(now - prev_time);
-        if (dt > g_nt_app.max_dt) {
-            dt = g_nt_app.max_dt;
-        }
-        prev_time = now;
-
-        g_nt_app.dt = dt;
-        g_nt_app.time += dt;
-        g_nt_app.frame++;
-        s_frame_fn();
-
-        /* Frame rate cap: single sleep + spin-wait */
-        if (g_nt_app.target_dt > 0.0F) {
-            double target = prev_time + (double)g_nt_app.target_dt;
-            double remaining = target - nt_time_now();
-            if (remaining > NT_SPIN_MARGIN) {
-                nt_time_sleep(remaining - NT_SPIN_MARGIN);
-            }
-            while (nt_time_now() < target) { /* spin */
-            }
-        }
-    }
-}
-
-/* Managed variant (window-free stub): owns the single g_nt_app.dt scalar (computed per mode),
-   feeding an exact step_dt for byte-identical runs. Raw nt_app_run is intentionally unchanged. */
+/* Single frame loop (window-free stub): dt computed per mode. Default (RUN, scale 1, unpaused) is a
+   plain wall-clock advance; MANUAL feeds an exact step_dt per queued step (byte-identical runs).
+   frame advances only on a sim-advance, so pause/manual-idle freeze it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_app_run_managed(nt_app_frame_fn fn) {
+void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
     s_should_quit = false;
 

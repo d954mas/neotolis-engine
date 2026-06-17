@@ -133,7 +133,7 @@ int main(void) {
         printf("[devapi_host] no client yet; per-frame accept continues\n");
     }
 
-    nt_app_run_managed(frame);
+    nt_app_run(frame);
 
     nt_devapi_net_stop();
     nt_devapi_shutdown();

@@ -34,14 +34,13 @@ extern nt_app_t g_nt_app;
 
 /* ---- Frame loop API ---- */
 
+/* Single frame loop owning the g_nt_app.dt scalar. Default (mode RUN, scale 1, unpaused) is a
+   plain wall-clock advance; the time-control mutators below switch it to pause / manual lockstep /
+   scaled time. The game keeps wiring poll/input/update/render inside fn. */
 void nt_app_run(nt_app_frame_fn fn);
 void nt_app_quit(void);
 
-/* ---- Managed loop + time control (opt-in; raw nt_app_run stays byte-identical) ---- */
-
-/* Opt-in loop that owns the single g_nt_app.dt scalar per mode. Same single-callback
-   signature as nt_app_run; the game keeps wiring poll/input/update/render inside fn. */
-void nt_app_run_managed(nt_app_frame_fn fn);
+/* ---- Time control (applied by nt_app_run; default state is a plain wall-clock loop) ---- */
 
 void nt_app_pause(void); /* RUN: dt -> 0, frame frozen, fn still runs */
 void nt_app_resume(void);

@@ -1,7 +1,7 @@
-/* L1 tests for the managed loop time-control API (TIME-01/02/03/06 + D-11 sim-advance).
-   Drives nt_app_run_managed via the window-free stub backend: records g_nt_app.dt per frame
-   and asserts the single-scalar chokepoint behaves per mode (RUN/PAUSE/MANUAL/scale) plus the
-   loop-agnostic render flag. Bit-exact 1/60 lockstep is the determinism contract (D-10/D-12). */
+/* L1 tests for the single frame loop's time control (pause/manual/scale/render + sim-advance).
+   Drives nt_app_run via the window-free stub backend: records g_nt_app.dt per frame and asserts
+   the single-scalar chokepoint behaves per mode (RUN/PAUSE/MANUAL/scale) plus the loop-agnostic
+   render flag. Bit-exact 1/60 lockstep is the determinism contract. */
 
 #include "app/nt_app.h"
 #include "unity.h"
@@ -56,7 +56,7 @@ void test_managed_run_matches_raw(void) {
     g_nt_app.mode = NT_APP_MODE_RUN;
     s_advance_target = 5;
 
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
 
     /* Every iteration advances the sim (frame++ each loop, like the raw loop). dt is the clamped
        wall dt; on a fast machine the first iteration's wall dt can be ~0, so assert only the
@@ -74,7 +74,7 @@ void test_pause_zeroes_dt_and_freezes_frame(void) {
     nt_app_pause();
     s_iter_target = 5; /* frame never advances under pause -> terminate by iteration count */
 
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
 
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_app.frame); /* frozen */
     TEST_ASSERT_TRUE_MESSAGE(s_frame_log_count >= 5, "frame fn must keep running under pause");
@@ -94,7 +94,7 @@ void test_manual_step_bit_exact_1_60(void) {
     nt_app_step(5);
     s_advance_target = 5;
 
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
 
     TEST_ASSERT_EQUAL_UINT32(5, g_nt_app.frame);
     for (int i = 0; i < 5; i++) {
@@ -114,7 +114,7 @@ void test_manual_reproducible_across_two_runs(void) {
     g_nt_app.step_dt = expected;
     nt_app_step(8);
     s_advance_target = 8;
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
     memcpy(run_a, s_dt_log, sizeof(run_a));
 
     /* Second run from the same defaults. */
@@ -123,7 +123,7 @@ void test_manual_reproducible_across_two_runs(void) {
     g_nt_app.step_dt = expected;
     nt_app_step(8);
     s_advance_target = 8;
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
     memcpy(run_b, s_dt_log, sizeof(run_b));
 
     TEST_ASSERT_EQUAL_MEMORY(run_a, run_b, sizeof(run_a));
@@ -141,7 +141,7 @@ void test_scale_multiplies_wall_dt(void) {
     nt_app_set_scale(2.0F);
     s_advance_target = 6;
 
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
 
     /* Frames 2..N (index >= 1) are paced: wall dt >= target_dt > max_dt, so dt == max_dt*scale. */
     const float scaled_clamp = 0.001F * 2.0F;
@@ -159,7 +159,7 @@ void test_manual_idle_freezes_frame(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL; /* no nt_app_step() -> pending_steps == 0 */
     s_iter_target = 5;
 
-    nt_app_run_managed(record_frame_fn);
+    nt_app_run(record_frame_fn);
 
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_app.frame); /* frozen: no sim-advance, no tick */
     TEST_ASSERT_TRUE_MESSAGE(s_frame_log_count >= 5, "frame fn must keep running in manual-idle");

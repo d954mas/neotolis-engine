@@ -14,6 +14,7 @@ static double s_prev_time_ms;
 
 /* ---- RAF callback ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
     (void)user_data;
 
@@ -28,12 +29,32 @@ static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
         }
     }
 
-    float dt = fminf((float)((time_ms - s_prev_time_ms) / 1000.0), g_nt_app.max_dt);
+    float wall_dt = fminf((float)((time_ms - s_prev_time_ms) / 1000.0), g_nt_app.max_dt);
     s_prev_time_ms = time_ms;
+
+    float dt = 0.0F;
+    bool sim_advanced = false;
+    switch (g_nt_app.mode) {
+    case NT_APP_MODE_RUN:
+        if (!g_nt_app.paused) {
+            dt = wall_dt * g_nt_app.scale; /* scale: observation only, not a determinism primitive */
+            sim_advanced = true;
+        }
+        break;
+    case NT_APP_MODE_MANUAL:
+        if (g_nt_app.pending_steps > 0) {
+            dt = g_nt_app.step_dt; /* exact step_dt: no wall clock, no max_dt clamp (lockstep determinism) */
+            g_nt_app.pending_steps--;
+            sim_advanced = true;
+        }
+        break;
+    }
 
     g_nt_app.dt = dt;
     g_nt_app.time += dt;
-    g_nt_app.frame++;
+    if (sim_advanced) {
+        g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter */
+    }
     s_frame_fn();
 
     return EM_TRUE;
@@ -44,12 +65,6 @@ static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
 void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
     emscripten_request_animation_frame_loop(nt_app_web_frame, NULL);
-}
-
-/* Not supported on web; the assert prevents a silent no-op. */
-void nt_app_run_managed(nt_app_frame_fn fn) {
-    (void)fn;
-    NT_ASSERT(0 && "nt_app_run_managed not supported on web");
 }
 
 void nt_app_quit(void) { NT_ASSERT(0 && "nt_app_quit not supported on web"); }
