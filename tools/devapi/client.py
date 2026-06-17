@@ -109,12 +109,51 @@ class DevApiClient:
                 self._pending[rid_obj] = obj
 
     def wait_frames(self, n: int) -> Dict[str, Any]:
-        """Surface-present stub: sends frame.wait; the server returns its unknown_method envelope today, not a silent no-op."""
+        """Block until `n` simulation frames have ADVANCED (not loop iterations).
+
+        Deferred command — uses request() so the correlation loop handles the yield;
+        PAUSE never advances the sim, so this fails fast at the cap (resume/step first).
+        """
         return self.request("frame.wait", {"frames": n})
 
-    def step(self) -> Dict[str, Any]:
-        """Surface-present stub: sends time.step; the server returns its unknown_method envelope today, not a silent no-op."""
-        return self.request("time.step")
+    def step(self, count: int = 1) -> Dict[str, Any]:
+        """Advance exactly `count` fixed-dt sim frames (lockstep); requires manual mode.
+
+        Maps to time.step{count}; deterministic — no wall clock, no max_dt clamp.
+        """
+        return self.result("time.step", {"count": count})
+
+    def pause(self) -> Dict[str, Any]:
+        """Zero the simulation dt; the frame callback keeps running (transport poll, bookkeeping)."""
+        return self.result("time.pause")
+
+    def resume(self) -> Dict[str, Any]:
+        """Clear the pause flag so the loop advances on wall time again (idempotent)."""
+        return self.result("time.resume")
+
+    def set_scale(self, scale: float) -> Dict[str, Any]:
+        """Multiply dt for slow-mo / fast-forward OBSERVATION only — not a determinism primitive."""
+        return self.result("time.set_scale", {"scale": scale})
+
+    def set_mode(self, mode: str) -> Dict[str, Any]:
+        """Switch the managed loop between 'run' and 'manual' (lockstep) modes."""
+        return self.result("time.set_mode", {"mode": mode})
+
+    def set_fps(self, fps: float) -> Dict[str, Any]:
+        """Cap the loop at `fps` frames/sec; fps==0 uncaps (needs vsync OFF on the host)."""
+        return self.result("time.set_fps", {"fps": fps})
+
+    def render_set_enabled(self, enabled: bool) -> Dict[str, Any]:
+        """Toggle the render pass; disabled => the host skips draw+swap (draw_calls -> 0)."""
+        return self.result("render.set_enabled", {"enabled": enabled})
+
+    def render_info(self) -> Dict[str, Any]:
+        """Read {enabled, draw_calls} — draw_calls is 0 while render is disabled (TIME-04)."""
+        return self.result("render.info")
+
+    def frame_current(self) -> Dict[str, Any]:
+        """Read the current {frame, time, dt} from the managed loop's g_nt_app state."""
+        return self.result("frame.current")
 
     def close(self) -> None:
         self._transport.close()
