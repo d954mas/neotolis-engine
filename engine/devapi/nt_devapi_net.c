@@ -160,7 +160,7 @@ bool nt_devapi_net_start(uint16_t port) {
         return false;
     }
 #else
-    signal(SIGPIPE, SIG_IGN); /* global fallback; MSG_NOSIGNAL/SO_NOSIGPIPE are the per-call guard. */
+    (void)signal(SIGPIPE, SIG_IGN); /* global fallback; MSG_NOSIGNAL/SO_NOSIGPIPE are the per-call guard. */
 #endif
 
     s_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -227,6 +227,7 @@ static void try_accept(void) {
     /* else EWOULDBLOCK == no pending connection — try again next frame. */
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_devapi_net_poll(void) {
     if (s_listen == NT_INVALID_SOCK) {
         return; /* not started / stopped. */
