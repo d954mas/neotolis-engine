@@ -10,6 +10,9 @@
 #include "unity.h"
 /* clang-format on */
 
+#include "core/nt_assert.h" /* NT_ASSERT_MODE for the death-test guard */
+#include "test_helpers/nt_assert_trap.h"
+
 /* Local heap copy — avoids the MSVC-deprecated POSIX strdup. */
 static char *heap_copy(const char *src) {
     size_t len = strlen(src) + 1U;
@@ -119,7 +122,7 @@ static void test_dup_method_rejected_first_preserved(void) {
     };
 
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&first, dummy_handler, NULL));
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_devapi_register(&second, dummy_handler, NULL));
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_devapi_register(&second, dummy_handler, NULL));
 
     /* Exactly one NEW slot added (the dup was rejected), and it is the original. */
     TEST_ASSERT_EQUAL_INT(s_base_cmds + 1, nt_devapi_registry_count());
@@ -129,11 +132,41 @@ static void test_dup_method_rejected_first_preserved(void) {
     TEST_ASSERT_EQUAL_STRING("the original", slot->summary);
 }
 
+/* ---- Death tests (NT_ASSERT_FULL only) ---- */
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+
+/* register before init is a caller bug (empty registry): the precondition asserts s_initialized. */
+static void test_register_before_init_asserts(void) {
+    nt_devapi_shutdown(); /* setUp init'd; drop back to uninitialized */
+    nt_devapi_command_desc desc = {
+        .method = "x",
+        .group = "g",
+        .summary = "s",
+        .params_shape = "{}",
+        .result_shape = "{}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    };
+    NT_TEST_EXPECT_ASSERT((void)nt_devapi_register(&desc, dummy_handler, NULL));
+}
+
+/* submit before init is a caller bug: nt_devapi_submit asserts initialized (the registry is empty). */
+static void test_submit_before_init_asserts(void) {
+    nt_devapi_shutdown();
+    NT_TEST_EXPECT_ASSERT((void)nt_devapi_submit("{\"method\":\"engine.info\"}"));
+}
+
+#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_double_init);
     RUN_TEST(test_register_seven_fields_round_trip);
     RUN_TEST(test_owned_copy_survives_source_free);
     RUN_TEST(test_dup_method_rejected_first_preserved);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_register_before_init_asserts);
+    RUN_TEST(test_submit_before_init_asserts);
+#endif
     return UNITY_END();
 }

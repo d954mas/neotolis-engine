@@ -119,6 +119,11 @@ const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len);
  * the placeholder only when empty AND unfocused, else NULL. Asserts the empty/placeholder branch
  * (which display string the compose path picks) without a GL capture. */
 const char *nt_ui_input_placeholder_for(const char *buffer, const char *placeholder, bool focused);
+
+/* Test probe: read the live caret byte offset + drag flag for `id`'s field state (post-frame, no
+ * alloc). Returns false if the field has no state slot yet. Asserts the focus-loss-abandons-drag
+ * path and caret math without a GL capture. Either out pointer may be NULL. */
+bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_caret, uint8_t *out_drag);
 #endif
 
 #endif /* NT_UI_INPUT_H */

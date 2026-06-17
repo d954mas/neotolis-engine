@@ -136,6 +136,18 @@ static bool key_frame(uint32_t id, char *buf, size_t cap, nt_key_t key) {
     return changed;
 }
 
+/* One frame with two stacked fields (A on top, B below). Both buffers are char[32]. Feeds the pointer. */
+static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint32_t id_b, char *b) {
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1);
+    CLAY({.id = CLAY_ID("root2"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+        CLAY({.id = CLAY_ID("col2"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_b, b, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 1: insert two Cyrillic codepoints char-by-char; 4 bytes + NUL, caret at 4. ---- */
 static void test_insert_cyrillic_codepoints(void) {
     char buf[32] = {0};
@@ -847,6 +859,87 @@ static void test_bg_art_focus_swap(void) {
     TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.polygon_region_idx, p->region_index); /* focused art, not idle */
 }
 
+/* ---- Test 32: a drag is abandoned when focus leaves the field mid-drag (no stale caret move). ---- */
+static void test_drag_abandoned_on_focus_loss(void) {
+    char buf[32];
+    strcpy(buf, "hello world");
+    const uint32_t id = nt_ui_id("f");
+    /* Warm the bbox with idle frames (not warmup_focus -- a second press at the same spot would land
+     * inside the double-click window and trip word-select, which clears the drag we want to arm). */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+
+    /* A single press at the left edge focuses the field and arms a drag; caret/anchor collapse there. */
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    uint32_t caret0 = 99U;
+    uint8_t drag0 = 0U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret0, &drag0));
+    TEST_ASSERT_EQUAL_UINT8(1U, drag0); /* drag armed by the press */
+
+    /* Esc while still holding -> the field unfocuses (Esc handler runs after the drag block; the pointer
+     * did not move this frame, so the caret is unchanged here). */
+    nt_input_poll();
+    nt_input_set_key(NT_KEY_ESCAPE, true);
+    nt_pointer_t hold = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
+    (void)field_frame(&hold, id, buf, sizeof buf, true, NULL);
+    nt_input_set_key(NT_KEY_ESCAPE, false);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+
+    /* Still held, drag the pointer far right while UNFOCUSED. The abandoned drag must NOT move the caret
+     * (pre-fix it would: the held-drag branch was not gated on focus). */
+    nt_pointer_t drag_far = make_pointer(IN_X + IN_W - PAD_X - 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
+    (void)field_frame(&drag_far, id, buf, sizeof buf, true, NULL);
+    uint32_t caret1 = 99U;
+    uint8_t drag1 = 9U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret1, &drag1));
+    TEST_ASSERT_EQUAL_UINT8(0U, drag1);       /* drag abandoned on focus loss */
+    TEST_ASSERT_EQUAL_UINT32(caret0, caret1); /* caret did not follow the far-right drag */
+}
+
+/* ---- Test 33: props->max_length caps content in BYTES, independently of buffer_size. ---- */
+static void test_max_length_byte_cap(void) {
+    char buf[32] = {0}; /* buffer_size-1 = 31 would otherwise allow far more */
+    const uint32_t id = nt_ui_id("f");
+    s_props.max_length = 4U; /* 4 = NUL-inclusive cap -> 3 content bytes */
+    warmup_focus(id, buf, sizeof buf);
+
+    /* Type 5 ASCII chars in one frame; only 3 fit under max_length (the 4th/5th drop, no partial). */
+    nt_input_buffer_char((uint32_t)'a');
+    nt_input_buffer_char((uint32_t)'b');
+    nt_input_buffer_char((uint32_t)'c');
+    nt_input_buffer_char((uint32_t)'d');
+    nt_input_buffer_char((uint32_t)'e');
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_EQUAL_STRING("abc", buf); /* capped by max_length, not by the 32-byte buffer */
+}
+
+/* ---- Test 34: clicking a different field while one is focused moves focus there (no Tab). ---- */
+static void test_click_refocus_other_field(void) {
+    char a[32] = {0};
+    char b[32] = {0};
+    const uint32_t id_a = nt_ui_id("ra");
+    const uint32_t id_b = nt_ui_id("rb");
+    two_field_frame(&IDLE_PTR, id_a, a, id_b, b); /* warm both bboxes */
+
+    /* Click field A (top row) -> A focused. */
+    const float ay = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t press_a = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    two_field_frame(&press_a, id_a, a, id_b, b);
+    nt_pointer_t rel_a = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
+    two_field_frame(&rel_a, id_a, a, id_b, b);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id_a));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_b));
+
+    /* Click field B (second row) WITHOUT Tab -> focus moves to B, A unfocuses. */
+    const float by = IN_Y + IN_H + (IN_H * 0.5F);
+    nt_pointer_t press_b = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
+    two_field_frame(&press_b, id_a, a, id_b, b);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_a));
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id_b));
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -916,6 +1009,9 @@ int main(void) {
     RUN_TEST(test_bg_art_emits_image);
     RUN_TEST(test_no_bg_art_no_image);
     RUN_TEST(test_bg_art_focus_swap);
+    RUN_TEST(test_drag_abandoned_on_focus_loss);
+    RUN_TEST(test_max_length_byte_cap);
+    RUN_TEST(test_click_refocus_other_field);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

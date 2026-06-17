@@ -67,9 +67,10 @@ nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_han
     NT_ASSERT(s_initialized && desc != NULL && handler != NULL && desc->method != NULL && desc->group != NULL && desc->summary != NULL && desc->params_shape != NULL && desc->result_shape != NULL &&
               desc->frame_behavior != NULL && desc->side_effects != NULL);
 
-    /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite. */
+    /* dup_method is a legitimate game-author error, not a bug: reject, don't overwrite. INVALID_ARG (not
+       INIT_FAILED) so a caller can tell "bad method arg" apart from "devapi double-init". */
     if (nt_devapi_registry_find(desc->method) != NULL) {
-        return NT_ERR_INIT_FAILED;
+        return NT_ERR_INVALID_ARG;
     }
 
     /* Table overflow is an invariant bug at this scale — assert. */

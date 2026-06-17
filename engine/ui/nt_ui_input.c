@@ -609,6 +609,22 @@ const char *nt_ui_input_placeholder_for(const char *buffer, const char *placehol
     return (empty && !focused && has_hint) ? placeholder : NULL;
 }
 
+#ifdef NT_TEST_ACCESS
+bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_caret, uint8_t *out_drag) {
+    const nt_ui_input_state_t *st = (const nt_ui_input_state_t *)nt_ui_state_find(ctx, input_state_id(id));
+    if (st == NULL) {
+        return false;
+    }
+    if (out_caret != NULL) {
+        *out_caret = st->caret;
+    }
+    if (out_drag != NULL) {
+        *out_drag = st->drag;
+    }
+    return true;
+}
+#endif
+
 static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
@@ -794,6 +810,12 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->blink = 0.0F;
     }
 
+    /* Drag only lives while THIS field holds focus. If focus moved off mid-drag (Esc unfocused it, or
+     * another field claimed it), abandon the drag so a stale flag can't keep moving the caret on an
+     * unfocused field. */
+    if (ctx->focused_input_id != id) {
+        st->drag = 0U;
+    }
     /* Held drag extends the selection: the anchor stays at the press point, the caret tracks x. */
     if (enabled && st->drag != 0U && in.pressed && bb.found) {
         const float local_x = (in.pos[0] - bb.x - style->pad_x) + st->scroll_x;

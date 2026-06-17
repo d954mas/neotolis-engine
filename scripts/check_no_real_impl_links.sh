@@ -9,8 +9,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Swappable real impl targets that engine modules must NEVER link directly.
-SWAPPABLE=(nt_log nt_input nt_http nt_gfx nt_window nt_app nt_fs nt_clipboard)
+# Swappable real impl targets that engine modules must NEVER link directly. Derived from the
+# nt_declare_interface(...) call sites (every interface module is swappable by definition) so a new
+# module is auto-covered without editing this gate. Empty = derivation broke -> fail loud, don't pass vacuously.
+mapfile -t SWAPPABLE < <(
+    find "$ROOT_DIR/engine" -name CMakeLists.txt -exec grep -hoE 'nt_declare_interface\([[:space:]]*[A-Za-z0-9_]+' {} + |
+        sed -E 's/.*nt_declare_interface\([[:space:]]*//' | sort -u
+)
+if [ "${#SWAPPABLE[@]}" -eq 0 ]; then
+    echo "check_no_real_impl_links: ERROR — found no nt_declare_interface() targets (derivation broken)" >&2
+    exit 1
+fi
 
 FAIL=0
 while IFS= read -r cmake; do

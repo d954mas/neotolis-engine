@@ -352,8 +352,10 @@ if(NOT EMSCRIPTEN)
         # registry register / dup-reject / owned-copy survival.
         # nt_core before nt_log_stub: nt_core references nt_log_write and nothing earlier does,
         # so on GNU ld (left-to-right) the log impl must trail nt_core or it is dropped.
-        add_executable(test_devapi_registry unit/test_devapi_registry.c)
+        add_executable(test_devapi_registry unit/test_devapi_registry.c unit/test_helpers/nt_assert_trap.c)
         target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson nt_window_stub nt_core nt_log_stub unity)
+        # unit/ on the include path so nt_assert_trap.c resolves "test_helpers/nt_assert_trap.h" (death tests).
+        target_include_directories(test_devapi_registry PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
         target_compile_definitions(test_devapi_registry PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
