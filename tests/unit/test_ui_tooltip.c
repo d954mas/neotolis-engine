@@ -3,9 +3,11 @@
  * the walker fixture + NT_TEST_ACCESS probes (no GL surface). UNITY_EXCLUDE_FLOAT: compare floats via
  * an eps helper.
  *
- * Hover model: nt_ui_query_interaction reports hovered from THIS-frame pointer vs PREV-frame bbox
- * (1-frame IM lag), so each probe declares the target one frame to bake its bbox, then drives the
- * pointer over it on the following frames. */
+ * Hover model: nt_ui_query_interaction reports hovered only for a widget in the front-most arbitration
+ * registry, which is populated by step_interaction (NOT query). A tooltip therefore attaches to an
+ * INTERACTIVE target that steps itself; the tooltip read stays idempotent (query) so it never adds a
+ * second mutating step on the target id (T-65-19). Arbitration reads the PREV-frame registry, so the
+ * target is stepped each frame and the cursor needs one warm frame before hover registers. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -31,9 +33,8 @@ static ui_walker_fixture_t s_fx;
 
 #define TGT_ID 0x709001U
 
-/* Target rect (top-left so the tooltip fits below). */
-#define TGT_X 100.0F
-#define TGT_Y 80.0F
+/* The target is a root child with no positioning, so Clay lays it out at the origin: bbox (0,0,W,H).
+ * The hover pointer must land inside that real rect, not at a fictional offset. */
 #define TGT_W 120.0F
 #define TGT_H 30.0F
 
@@ -67,20 +68,18 @@ static nt_ui_tooltip_style_t test_style(void) {
     return st;
 }
 
-/* One full frame: declare the target widget (so it carries a queryable bbox) + declare the tooltip
- * after it; returns whether the tooltip panel was declared this frame. */
+/* One full frame: declare the INTERACTIVE target (step_interaction registers it for arbitration +
+ * bakes its bbox) + declare the tooltip after it; returns whether the tooltip panel was declared. */
 static bool tooltip_frame(const nt_pointer_t *p, const nt_ui_tooltip_style_t *st) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1);
-    CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {}
+    CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
     const bool shown = nt_ui_tooltip(s_fx.ctx, TGT_ID, "hint text", st);
     nt_ui_end(s_fx.ctx);
     return shown;
 }
 
 /* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
-static void test_tooltip_abi_size(void) {
-    TEST_ASSERT_EQUAL_UINT(24U, (unsigned)sizeof(nt_ui_tooltip_style_t));
-}
+static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(24U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
 
 /* ---- Defaults are a valid (non-zero) style. ---- */
 static void test_tooltip_defaults_valid(void) {
@@ -95,8 +94,9 @@ static void test_tooltip_defaults_valid(void) {
 static void test_tooltip_delayed_reveal(void) {
     nt_ui_tooltip_style_t st = test_style();
 
-    /* Frame 1: pointer over the target, but no prev-frame bbox yet -> not hovered -> no accrual. */
-    nt_pointer_t over = pointer_at(TGT_X + TGT_W * 0.5F, TGT_Y + TGT_H * 0.5F);
+    /* Frame 1: pointer over the target, but the arbitration registry is empty (warm frame) -> not
+     * hovered yet -> no accrual, tooltip stays hidden. */
+    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
     bool shown = tooltip_frame(&over, &st);
     TEST_ASSERT_FALSE(shown);
 
@@ -121,7 +121,7 @@ static void test_tooltip_delayed_reveal(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_tooltip_hide_on_leave(void) {
     nt_ui_tooltip_style_t st = test_style();
-    nt_pointer_t over = pointer_at(TGT_X + TGT_W * 0.5F, TGT_Y + TGT_H * 0.5F);
+    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
 
     /* Warm + accrue past the delay until revealed. */
     tooltip_frame(&over, &st);
@@ -146,7 +146,7 @@ static void test_tooltip_hide_on_leave(void) {
  *      catcher, so base UI stays clickable. ---- */
 static void test_tooltip_declares_no_catcher(void) {
     nt_ui_tooltip_style_t st = test_style();
-    nt_pointer_t over = pointer_at(TGT_X + TGT_W * 0.5F, TGT_Y + TGT_H * 0.5F);
+    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
 
     tooltip_frame(&over, &st);
     bool shown = false;
@@ -176,8 +176,8 @@ static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, cons
 
 static void test_tooltip_no_double_mutation(void) {
     nt_ui_tooltip_style_t st = test_style();
-    const float cx = TGT_X + TGT_W * 0.5F;
-    const float cy = TGT_Y + TGT_H * 0.5F;
+    const float cx = TGT_W * 0.5F;
+    const float cy = TGT_H * 0.5F;
 
     /* Frame 1: hover only (bake bbox + warm registry). */
     nt_pointer_t f1 = pointer_at(cx, cy);
