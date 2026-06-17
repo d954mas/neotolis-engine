@@ -4,6 +4,7 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi_core.c
     nt_devapi_discovery.c
     nt_devapi_registry.c
+    nt_devapi_time.c
     nt_devapi.h
     nt_devapi_internal.h
     nt_devapi_stub.h
@@ -11,7 +12,11 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
 
 # cjson is PUBLIC: the nt_devapi_handler_fn typedef in the public header takes
 # cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface)
+# The time group's app/nt_app.h + stats/nt_stats.h resolve off the shared engine/ include
+# root (every module's PUBLIC root); nt_app_interface makes the app dependency explicit. The
+# nt_app_* / nt_stats_get_draw_calls symbols are resolved at the final-exe link (the consumer
+# links nt_app[_stub] + nt_stats / a stub) — nt_devapi stays a dev-only static lib with no app impl.
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface)
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
@@ -19,6 +24,7 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 # Per-group compile-time opt-in: handlers are wrapped in
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
+target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_time=1)
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 

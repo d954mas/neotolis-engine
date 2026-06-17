@@ -97,6 +97,12 @@ bool nt_devapi_group_is_first(int index);
 void nt_devapi_register_core(void);
 #endif
 
+/* Engine `time`/`render`/`frame` group registrar (per-group #ifdef). Defined in
+   nt_devapi_time.c, invoked from nt_devapi_init under the same compile gate. */
+#ifdef NT_DEVAPI_REGISTER_time
+void nt_devapi_register_time(void);
+#endif
+
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in
    nt_devapi_discovery.c, invoked from nt_devapi_init. */
 void nt_devapi_register_discovery(void);
