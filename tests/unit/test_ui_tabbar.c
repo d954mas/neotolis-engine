@@ -12,6 +12,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_label.h"
 #include "ui/nt_ui_state.h"
 #include "ui/nt_ui_tabbar.h"
 #include "unity.h"
@@ -63,6 +64,31 @@ static int tabbar_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tab
     return clicked;
 }
 
+/* The begin/end CORE driven directly: the game owns the per-tab content (a single label child here). */
+static int tabbar_core_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) {
+    static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+    int clicked = -1;
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(300)}}}) {
+        nt_ui_tabbar_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, st);
+        for (int i = 0; i < count; ++i) {
+            if (nt_ui_tab_begin(s_fx.ctx, i, i == *active)) {
+                *active = i;
+                clicked = i;
+            }
+            nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER(2), s_tabs[i], &lbl);
+            nt_ui_tab_end(s_fx.ctx);
+        }
+        nt_ui_tabbar_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return clicked;
+}
+
+static float tab_center_y(const nt_ui_tabbar_style_t *st, int i);
+
 /* ---- ABI sanity ---- */
 static void test_tabbar_abi_size(void) { TEST_ASSERT_EQUAL_UINT(144U, (unsigned)sizeof(nt_ui_tabbar_style_t)); }
 
@@ -76,6 +102,36 @@ static void test_tabbar_defaults_valid(void) {
     TEST_ASSERT_TRUE(st.slice9_scale > 0.0F);
     /* Atlas-free defaults: idle carries no art (flat-color fallback path). */
     TEST_ASSERT_EQUAL_UINT(0U, st.idle.bg.atlas.id);
+    /* accent_side defaults to LEFT (the current vertical-bar leading edge). */
+    TEST_ASSERT_EQUAL_UINT((unsigned)NT_UI_TABBAR_ACCENT_LEFT, st.accent_side);
+}
+
+/* ---- begin/end core: a click on tab i sets *active = i (parity with the convenience wrapper). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_tabbar_core_click_sets_active(void) {
+    nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
+    int active = 0;
+    const float x = 80.0F;
+    const float y2 = tab_center_y(&st, 2);
+
+    nt_pointer_t w = pointer_at(x, y2, false, false, false);
+    tabbar_core_frame(&w, 4, &active, &st);
+    nt_pointer_t pr = pointer_at(x, y2, true, true, false);
+    tabbar_core_frame(&pr, 4, &active, &st);
+    nt_pointer_t rl = pointer_at(x, y2, false, false, true);
+    const int clicked = tabbar_core_frame(&rl, 4, &active, &st);
+    TEST_ASSERT_EQUAL_INT(2, active);
+    TEST_ASSERT_EQUAL_INT(2, clicked);
+}
+
+/* ---- accent_side = NONE must not assert and still routes clicks (accent is purely visual). ---- */
+static void test_tabbar_accent_none_ok(void) {
+    nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
+    st.accent_side = (uint8_t)NT_UI_TABBAR_ACCENT_NONE;
+    int active = 0;
+    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    const int clicked = tabbar_core_frame(&idle, 4, &active, &st);
+    TEST_ASSERT_EQUAL_INT(-1, clicked);
 }
 
 /* Center of tab i for a vertical bar floated at (0,0): each tab is `tab_extent` tall, gap between. */
@@ -134,5 +190,7 @@ int main(void) {
     RUN_TEST(test_tabbar_defaults_valid);
     RUN_TEST(test_tabbar_click_sets_active);
     RUN_TEST(test_tabbar_no_click_returns_negative);
+    RUN_TEST(test_tabbar_core_click_sets_active);
+    RUN_TEST(test_tabbar_accent_none_ok);
     return UNITY_END();
 }

@@ -226,6 +226,22 @@ struct nt_ui_context {
         bool clicked;
     } pending_button;
 
+    /* Tab-bar begin/end core. The bar holds the per-call style ptr + layers + base_id so tab_begin can
+     * emit the per-state bg + accent without re-passing them; the tab sub-state carries the open tab's id
+     * (for tab_end's step_interaction) + its click result. Bars/tabs do not nest (asserted). */
+    struct {
+        const void *style; /* nt_ui_tabbar_style_t* (void to keep the internal header widget-agnostic) */
+        uint32_t base_id;
+        uint8_t fill_layer;
+        uint8_t label_layer;
+        bool active;
+    } pending_tabbar;
+    struct {
+        uint32_t id; /* the open tab's id (base_id + index) */
+        bool active; /* a tab element is open (between tab_begin/tab_end) */
+        bool clicked;
+    } pending_tab;
+
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;

@@ -21,8 +21,12 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_TABBAR_DEF;
 
 /* Layout direction of the bar. Vertical = a left-side nav list (the showcase look); horizontal = a
- * top tab strip. The accent bar sits on the leading edge (left for vertical, top for horizontal). */
+ * top tab strip. The accent bar's edge is configurable via style->accent_side (default LEFT). */
 typedef enum { NT_UI_TABBAR_VERTICAL = 0, NT_UI_TABBAR_HORIZONTAL } nt_ui_tabbar_dir_t;
+
+/* Which edge the active-tab accent bar grows on. NONE disables the accent entirely. Independent of dir
+ * so a horizontal strip can underline (BOTTOM) while a vertical nav marks the leading LEFT edge. */
+typedef enum { NT_UI_TABBAR_ACCENT_NONE = 0, NT_UI_TABBAR_ACCENT_LEFT, NT_UI_TABBAR_ACCENT_RIGHT, NT_UI_TABBAR_ACCENT_TOP, NT_UI_TABBAR_ACCENT_BOTTOM } nt_ui_tabbar_accent_t;
 
 /* One tab visual state (idle/hover/selected). bg is an atomic nt_atlas_region_ref_t:
  *   non-idle atlas.id==0 -> inherit the idle state's WHOLE ref (region 0 is a valid index, so it can't
@@ -57,12 +61,42 @@ typedef struct {
     uint16_t gap;                            /* px gap between tabs */
     uint16_t font_id;                        /* label font */
     uint8_t dir;                             /* nt_ui_tabbar_dir_t */
-    uint8_t _pad[3];                         /* layer comes from the call (data->layer), NOT the style */
+    uint8_t accent_side;                     /* nt_ui_tabbar_accent_t (NONE disables the accent) */
+    uint8_t _pad[2];                         /* layer comes from the call (data->layer), NOT the style */
 } nt_ui_tabbar_style_t;
-_Static_assert(sizeof(nt_ui_tabbar_style_t) == 144, "nt_ui_tabbar_style_t stable ABI (3x32 state + 4 u32 + 4 float + 6 u16 + 1 dir + 3 pad)");
+_Static_assert(sizeof(nt_ui_tabbar_style_t) == 144, "nt_ui_tabbar_style_t stable ABI (3x32 state + 4 u32 + 4 float + 6 u16 + 1 dir + 1 accent_side + 2 pad)");
 
 /* Valid baseline style (dark, vertical) that looks polished with flat colors and NO atlas art. */
 nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
+
+/* ---- begin/end core (button parity) ----
+ * The ENGINE owns the styled per-state bg sprite (eased scale/opacity), the accent bar, and the click
+ * interaction; the GAME owns each tab's content (icon + text, a different icon when selected, badges).
+ *
+ * Usage:
+ *   nt_ui_tabbar_begin(ctx, data, label_layer, base_id, style);
+ *   for (i ...) {
+ *       bool clicked = nt_ui_tab_begin(ctx, i, i == active);   // tab element is now OPEN
+ *       // declare content children here (nt_ui_image on the fill layer, nt_ui_label on label_layer)
+ *       nt_ui_tab_end(ctx);
+ *   }
+ *   nt_ui_tabbar_end(ctx);
+ *
+ * Layers: bar bg + tab fills/icons draw on data->layer; labels on label_layer (split batches fills-then-
+ * text). data may be NULL (fills fall to layer 0). style is mutated in place to memoize resolved refs. */
+void nt_ui_tabbar_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, nt_ui_tabbar_style_t *style);
+
+/* Opens ONE tab element (id = base_id + index): picks idle/hover/selected, runs one nt_ui_anim
+ * (scale/opacity + accent value_t), emits the per-state bg (slice9 when an atlas ref is set, flat fill
+ * otherwise) + the accent on style->accent_side, applies the eased xform, and leaves the element OPEN
+ * for the game's content children. Returns true the frame this tab was clicked. */
+bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active);
+
+/* Runs the open tab's step_interaction, closes the element. Pair with each nt_ui_tab_begin. */
+void nt_ui_tab_end(nt_ui_context_t *ctx);
+
+/* Closes the bar container opened by nt_ui_tabbar_begin. */
+void nt_ui_tabbar_end(nt_ui_context_t *ctx);
 
 /* Declare the tab-bar: a container holding `count` full-extent tabs. A click on tab i sets *active = i
  * (Model D). base_id salts each tab's id (base_id + i). The bar grows to fill its parent on the cross
