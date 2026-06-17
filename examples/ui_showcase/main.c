@@ -22,16 +22,20 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_checkbox.h"
+#include "ui/nt_ui_dropdown.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_menu.h"
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
+#include "ui/nt_ui_tabbar.h"
+#include "ui/nt_ui_tooltip.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -123,6 +127,12 @@ static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF
 
 /* Per-palette modal base; the palette pointer flip restyles the modal on hot-swap. */
 static nt_ui_modal_style_t s_modal_dark, s_modal_light;
+
+/* Phase-65 app-widgets: dropdown / tooltip / menu / tab-bar, per-palette dark/light. */
+static nt_ui_dropdown_style_t s_dropdown_dark, s_dropdown_light;
+static nt_ui_tooltip_style_t s_tooltip_dark, s_tooltip_light;
+static nt_ui_menu_style_t s_menu_dark, s_menu_light;
+static nt_ui_tabbar_style_t s_tabbar_dark, s_tabbar_light;
 // #endregion
 
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
@@ -140,6 +150,10 @@ typedef struct {
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
     nt_ui_input_style_t *input, *input_caret, *input_sel;
     const nt_ui_modal_style_t *modal;
+    const nt_ui_dropdown_style_t *dropdown;
+    const nt_ui_tooltip_style_t *tooltip;
+    const nt_ui_menu_style_t *menu;
+    const nt_ui_tabbar_style_t *tabbar;
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
     const char *name;
@@ -175,6 +189,10 @@ static ui_palette_t g_dark = {
     .input_caret = &s_input_caret_dark,
     .input_sel = &s_input_sel_dark,
     .modal = &s_modal_dark,
+    .dropdown = &s_dropdown_dark,
+    .tooltip = &s_tooltip_dark,
+    .menu = &s_menu_dark,
+    .tabbar = &s_tabbar_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
     .panel_alt = {40.0F, 45.0F, 56.0F, 255.0F},
@@ -213,6 +231,10 @@ static ui_palette_t g_light = {
     .input_caret = &s_input_caret_light,
     .input_sel = &s_input_sel_light,
     .modal = &s_modal_light,
+    .dropdown = &s_dropdown_light,
+    .tooltip = &s_tooltip_light,
+    .menu = &s_menu_light,
+    .tabbar = &s_tabbar_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
     .panel_alt = {232.0F, 235.0F, 243.0F, 255.0F},
@@ -262,6 +284,27 @@ typedef struct {
     int label_count; /* segmented control: 500 / 1500 / 3000 / 6000 */
 } stress_params_t;
 
+/* Events tab: hold-to-confirm + a double-click readout (all game-owned). */
+typedef struct {
+    uint32_t confirms;   /* hold-to-confirm fire count (long_pressed) */
+    uint32_t dbl_clicks; /* double-click readout */
+    float last_progress; /* hold_progress latched for the fill display */
+} events_params_t;
+
+/* Dropdown tab: game-owned selection + open flags (Model D). */
+typedef struct {
+    int fruit_sel; /* short list selection */
+    bool fruit_open;
+    int city_sel; /* long (scrolling) list selection */
+    bool city_open;
+} dropdown_params_t;
+
+/* Menu tab: the game-owned menu state (open flag + chosen-id sink + anchor). */
+typedef struct {
+    nt_ui_menu_state_t state;
+    uint32_t last_chosen; /* latched for the readout */
+} menu_params_t;
+
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
  * the engine state pool holds only caret/selection/scroll/blink, never the string. */
 typedef struct {
@@ -296,6 +339,10 @@ struct tab_state {
     stress_params_t stress;
     /* Input tab. */
     input_params_t input;
+    /* Interaction-events + app-widget tabs (Phase 65). */
+    events_params_t events;
+    dropdown_params_t dropdown;
+    menu_params_t menu;
 };
 
 static struct tab_state s_state = {
@@ -314,6 +361,9 @@ static struct tab_state s_state = {
                                                                                                                                                                                fade-out */
     .stress = {.label_count = 3000},
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
+    .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
+    .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false},
+    .menu = {.state = {0}, .last_chosen = 0},
 };
 // #endregion
 
@@ -353,6 +403,13 @@ static uint32_t s_id_theme_btn;
 static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
 static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art, s_id_input_disabled;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
+/* Phase-65 app-widget ids. */
+static uint32_t s_id_events_hold;                   /* hold-to-confirm button */
+static uint32_t s_id_events_dbl;                    /* double-click target */
+static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
+static uint32_t s_id_dd_fruit, s_id_dd_city;        /* dropdown triggers */
+static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
+static uint32_t s_id_menu;                          /* context menu (drives every level) */
 static bool s_ids_ready;
 // #endregion
 
@@ -413,6 +470,10 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_menu(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
@@ -433,6 +494,10 @@ static const showcase_entry_t g_tabs[] = {
     {"Scroll", "Four scroll variants: vertical AUTO_HIDE / ALWAYS bar / horizontal-only / both axes.", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
+    {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
+    {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
+    {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
+    {"Menu", "Right-click / long-press context menu with a nested submenu: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
 #define TAB_COUNT ((int)(sizeof g_tabs / sizeof g_tabs[0]))
@@ -732,6 +797,60 @@ static void init_styles(void) {
     s_modal_dark.backdrop_color = 0xFF000000U; /* black */
     s_modal_light = modal_base;
     s_modal_light.backdrop_color = 0xFF202830U; /* slate */
+
+    /* ---- Dropdown: dark uses the widget defaults; light recolors trigger/panel/rows. ---- */
+    s_dropdown_dark = nt_ui_dropdown_style_defaults();
+    s_dropdown_dark.layer = LAYER_BG;
+    s_dropdown_dark.row_height = 30U;
+    s_dropdown_dark.max_visible_rows = 6U; /* the long city list scrolls past this */
+    s_dropdown_light = s_dropdown_dark;
+    s_dropdown_light.trigger_bg = 0xFFF0F0F0U;
+    s_dropdown_light.trigger_text = 0xFF202830U;
+    s_dropdown_light.panel_bg = 0xFFFFFFFFU;
+    s_dropdown_light.row_text = 0xFF202830U;
+    s_dropdown_light.row_hover_bg = 0xFFDCE6F4U;
+    s_dropdown_light.row_selected_bg = 0xFFBED2F0U;
+
+    /* ---- Tooltip: a short reveal delay; light flips to a pale panel + dark text. ---- */
+    s_tooltip_dark = nt_ui_tooltip_style_defaults();
+    s_tooltip_dark.layer = LAYER_BG;
+    s_tooltip_dark.delay_secs = 0.5F;
+    s_tooltip_dark.font_size = 16.0F;
+    s_tooltip_light = s_tooltip_dark;
+    s_tooltip_light.panel_bg = 0xFFF4F4F4U;
+    s_tooltip_light.text_color = 0xFF202830U;
+
+    /* ---- Context menu: dark defaults; light recolors the panel + rows. ---- */
+    s_menu_dark = nt_ui_menu_style_defaults();
+    s_menu_dark.layer = LAYER_BG;
+    s_menu_dark.item_height = 30U;
+    s_menu_dark.font_size = 16.0F;
+    s_menu_dark.min_width = 200U;
+    s_menu_light = s_menu_dark;
+    s_menu_light.bg_color = 0xFFFFFFFFU;
+    s_menu_light.item_hover_color = 0xFFDCE6F4U;
+    s_menu_light.text_color = 0xFF202830U;
+    s_menu_light.text_disabled = 0xFFA0A4ACU;
+
+    /* ---- Tab-bar (dogfood): colors (0xAABBGGRR) match the old ad-hoc tab_row palette so the migrated
+     * nav keeps its accent + selected fill + hover lighten across the theme flip. ---- */
+    s_tabbar_dark = nt_ui_tabbar_style_defaults();
+    s_tabbar_dark.layer = LAYER_BG;
+    s_tabbar_dark.bar_bg = 0U;                 /* the surrounding card owns the bg; tabs sit on it */
+    s_tabbar_dark.tab_bg = 0xFF221A18U;        /* list_bg {24,26,34} */
+    s_tabbar_dark.tab_selected = 0xFF9E622EU;  /* list_sel {46,98,158} */
+    s_tabbar_dark.tab_hover = 0x22FFFFFFU;     /* ~13% white lighten, mirrors the old row hover */
+    s_tabbar_dark.accent = 0xFFE69C56U;        /* accent {86,156,230} */
+    s_tabbar_dark.text = 0xFFB6AAA5U;          /* caption {165,170,182} */
+    s_tabbar_dark.text_selected = 0xFFFCF7F5U; /* row_sel {245,247,252} */
+    s_tabbar_dark.font_size = 16.0F;
+    s_tabbar_light = s_tabbar_dark;
+    s_tabbar_light.tab_bg = 0xFFEBE3E0U;        /* list_bg {224,227,235} */
+    s_tabbar_light.tab_selected = 0xFFF0B68AU;  /* list_sel {138,182,240} */
+    s_tabbar_light.tab_hover = 0x18000000U;     /* slight darken on the light card */
+    s_tabbar_light.accent = 0xFFD67834U;        /* accent {52,120,214} */
+    s_tabbar_light.text = 0xFF685C5AU;          /* caption {90,92,104} */
+    s_tabbar_light.text_selected = 0xFF381C0CU; /* row_sel {12,28,56} */
 }
 // #endregion
 
@@ -1267,6 +1386,157 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     input_field(ctx, "Disabled (greyed, no focus)", s_id_input_disabled, st->input.disabled, sizeof st->input.disabled, &props_disabled, g_current->input, false);
 }
 
+/* Events tab: a hold-to-confirm button (nt_ui_events gesture cfg -> hold_progress fill + long_pressed
+ * fire) and a double-click target. All counters are game-owned (Model D); the engine owns only the
+ * gesture cell behind the button id. */
+static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[96];
+    /* Hold past this many seconds (without dragging off) confirms; the fill ramps over the same window. */
+    static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
+    static const nt_ui_events_cfg_t dbl_cfg = {.long_press_secs = 0.0F, .double_click = true};
+    static const Clay_ElementDeclaration bar_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(14)}}};
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Press and HOLD the button: the fill ramps to full over ~1.5s and confirms at the top.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Drag the cursor off the button mid-hold to RESET the fill (no confirm).", g_current->caption);
+
+    /* The button itself drives the gesture cell via its cfg (Plan 02 path); we read the latched result
+     * back idempotently after end() for the fill + the one-shot confirm. */
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_hold, g_current->btn_primary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+        true, &hold_cfg);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hold to confirm", g_current->body);
+    (void)nt_ui_button_end(ctx);
+
+    const nt_ui_events_t hold = nt_ui_query_events(ctx, s_id_events_hold);
+    st->events.last_progress = hold.hold_progress;
+    if (hold.long_pressed) {
+        st->events.confirms++;
+    }
+
+    /* Render the hold progress as a fill bar so the ramp is visible. */
+    nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_IMG, s_id_events_fill, st->events.last_progress, g_current->progress, &bar_decl);
+
+    /* A separate double-click target (a plain button) with a dbl-click readout. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Double-click the button below:", g_current->caption);
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_dbl, g_current->btn_secondary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+        true, &dbl_cfg);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Double-click me", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    if (nt_ui_query_events(ctx, s_id_events_dbl).double_clicked) {
+        st->events.dbl_clicks++;
+    }
+
+    (void)snprintf(buf, sizeof buf, "confirms: %u   double-clicks: %u   hold_progress: %.2f", st->events.confirms, st->events.dbl_clicks, (double)st->events.last_progress);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
+/* Dropdown tab: a short combobox + a long (scrolling) combobox to exercise the scroll path + the
+ * edge-flip-up near the bottom border. Game owns selection + open (Model D). */
+static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const char *const fruits[] = {"Apple", "Banana", "Cherry", "Date", "Elderberry"};
+    static const char *const cities[] = {"Amsterdam", "Berlin",  "Cairo", "Delhi",  "Edinburgh", "Florence", "Geneva", "Helsinki", "Istanbul", "Jakarta", "Kyoto",  "Lisbon",
+                                         "Madrid",    "Nairobi", "Oslo",  "Prague", "Quito",     "Rome",     "Seoul",  "Tokyo",    "Utrecht",  "Vienna",  "Warsaw", "Zurich"};
+    static const Clay_ElementDeclaration trigger_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(40)}}};
+    static const int fruit_count = (int)(sizeof fruits / sizeof fruits[0]);
+    static const int city_count = (int)(sizeof cities / sizeof cities[0]);
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick an item; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
+
+    /* Short list: fits without scrolling. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list)", g_current->caption);
+    (void)nt_ui_dropdown_trigger(ctx, s_id_dd_fruit, fruits, fruit_count, st->dropdown.fruit_sel, "Pick a fruit", g_current->dropdown, &trigger_decl, &st->dropdown.fruit_open);
+    (void)nt_ui_dropdown_list(ctx, s_id_dd_fruit, fruits, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
+
+    /* Long list: more than max_visible_rows -> the list wraps in a scroll container. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
+    (void)nt_ui_dropdown_trigger(ctx, s_id_dd_city, cities, city_count, st->dropdown.city_sel, "Pick a city", g_current->dropdown, &trigger_decl, &st->dropdown.city_open);
+    (void)nt_ui_dropdown_list(ctx, s_id_dd_city, cities, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
+
+    (void)snprintf(buf, sizeof buf, "fruit: %s", (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "(none)");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+    (void)snprintf(buf, sizeof buf, "city: %s", (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "(none)");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
+/* Tooltip tab: three hover targets, each with a timed reveal. The engine owns the hover-delay timer
+ * behind a salted id; the tooltip declares NO catcher so it never blocks the base UI. */
+static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
+    (void)st;
+    static const Clay_ElementDeclaration target_decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(220), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+        .cornerRadius = CLAY_CORNER_RADIUS(8)};
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover a target and wait ~0.5s for its tooltip; move away to hide. The tooltip never blocks clicks underneath.", g_current->caption);
+
+    /* The targets are plain buttons so they are still clickable (proving the tooltip has no catcher).
+     * The tooltip is declared AFTER each target so the target carries a queryable bbox this frame. */
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_a, g_current->btn_primary, &target_decl, true, NULL);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover me", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    (void)nt_ui_tooltip(ctx, s_id_tip_a, "A simple tooltip revealed after the hover delay.", g_current->tooltip);
+
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_b, g_current->btn_secondary, &target_decl, true, NULL);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "And me", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    (void)nt_ui_tooltip(ctx, s_id_tip_b, "Tooltips wrap to the style max_width so long content stays readable on one panel.", g_current->tooltip);
+
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true, NULL);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Bottom edge", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    (void)nt_ui_tooltip(ctx, s_id_tip_c, "Near the bottom border the tooltip flips ABOVE the target instead of below.", g_current->tooltip);
+}
+
+/* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
+ * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The item tree is static const
+ * (the menu never mutates it); the game owns the open flag + chosen-id sink (Model D). */
+static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    /* Nested submenu (the "More" parent's children) -> exercises the fly-out + aim triangle. */
+    static const nt_ui_menu_item_t more_items[] = {
+        {.label = "Duplicate", .submenu = NULL, .id = 201U, .submenu_count = 0U, .enabled = true},
+        {.label = "Move to...", .submenu = NULL, .id = 202U, .submenu_count = 0U, .enabled = true},
+        {.label = "Archive", .submenu = NULL, .id = 203U, .submenu_count = 0U, .enabled = false},
+    };
+    static const nt_ui_menu_item_t root_items[] = {
+        {.label = "Cut", .submenu = NULL, .id = 101U, .submenu_count = 0U, .enabled = true},
+        {.label = "Copy", .submenu = NULL, .id = 102U, .submenu_count = 0U, .enabled = true},
+        {.label = "Paste", .submenu = NULL, .id = 103U, .submenu_count = 0U, .enabled = true},
+        {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
+        {.label = "More", .submenu = more_items, .id = 0U, .submenu_count = (uint32_t)(sizeof more_items / sizeof more_items[0]), .enabled = true},
+        {.label = "Delete", .submenu = NULL, .id = 104U, .submenu_count = 0U, .enabled = true},
+    };
+    static const uint32_t root_count = (uint32_t)(sizeof root_items / sizeof root_items[0]);
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click (or long-press) the panel below to open the context menu. Hover 'More' to fly out the submenu.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Travel diagonally into the submenu (crossing a sibling) and it stays open; Esc closes the deepest level; arrows/Enter navigate.",
+                g_current->caption);
+
+    /* A target panel: right-click / long-press over it arms the menu at the cursor. The trigger reads
+     * the global right-click; the long-press path binds an events gesture to the menu id. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = g_current->panel_alt,
+          .cornerRadius = CLAY_CORNER_RADIUS(10),
+          .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click / long-press here", g_current->body);
+    }
+
+    (void)nt_ui_menu_open_trigger(ctx, s_id_menu, &st->menu.state, 0.5F);
+    nt_ui_menu(ctx, s_id_menu, root_items, root_count, &st->menu.state, g_current->menu);
+    if (st->menu.state.chosen_id != 0U) {
+        st->menu.last_chosen = st->menu.state.chosen_id;
+        st->menu.state.chosen_id = 0U; /* game reads + clears (Model D) */
+    }
+
+    (void)snprintf(buf, sizeof buf, "last chosen id: %u", st->menu.last_chosen);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
  * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1460,6 +1730,15 @@ static void ensure_ids(void) {
     s_id_input_art = nt_ui_id("showcase/input_art");
     s_id_input_disabled = nt_ui_id("showcase/input_disabled");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
+    s_id_events_hold = nt_ui_id("showcase/events_hold");
+    s_id_events_dbl = nt_ui_id("showcase/events_dbl");
+    s_id_events_fill = nt_ui_id("showcase/events_fill");
+    s_id_dd_fruit = nt_ui_id("showcase/dd_fruit");
+    s_id_dd_city = nt_ui_id("showcase/dd_city");
+    s_id_tip_a = nt_ui_id("showcase/tip_a");
+    s_id_tip_b = nt_ui_id("showcase/tip_b");
+    s_id_tip_c = nt_ui_id("showcase/tip_c");
+    s_id_menu = nt_ui_id("showcase/menu");
     s_ids_ready = true;
 }
 
@@ -1498,29 +1777,24 @@ static void declare_header(nt_ui_context_t *ctx) {
     }
 }
 
-/* One tab-list row: full-row click target (transparent list-row button so the row's CLAY bg shows
- * the selected/unselected state), a 3px left accent bar on the active row, hover/pressed lighten. */
-static void tab_row(nt_ui_context_t *ctx, int i, bool selected) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(38)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = selected ? g_current->list_sel : g_current->list_bg,
-          .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
-        /* 3px left accent bar on the active row (transparent spacer otherwise => stable layout). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(3), CLAY_SIZING_GROW(0)}}, .backgroundColor = selected ? g_current->accent : (Clay_Color){0}}) {}
-        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tab_btn_base + (uint32_t)i, g_current->listrow,
-                           &(Clay_ElementDeclaration){
-                               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 12, .right = 10}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-                               .cornerRadius = {0, 6, 0, 6}},
-                           true, NULL);
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), g_tabs[i].name, selected ? g_current->row_sel : g_current->caption);
-        if (nt_ui_button_end(ctx)) {
-            s_active_tab = i;
-        }
+/* The tab labels passed to nt_ui_tabbar: the registry names, gathered once (the registry is static). */
+static const char *s_tab_labels[TAB_COUNT];
+static bool s_tab_labels_ready;
+static void ensure_tab_labels(void) {
+    if (s_tab_labels_ready) {
+        return;
     }
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        s_tab_labels[i] = g_tabs[i].name;
+    }
+    s_tab_labels_ready = true;
 }
 
-/* Demo-selection panel (left, FIXED 240): one full-row click target per registry entry; clicking
- * selects the active tab. Styled as a card (bg + border + radius) consistent with the other panels. */
+/* Demo-selection panel (left, FIXED 240): the reusable nt_ui_tabbar dogfooded (D-65-09). The game owns
+ * s_active_tab (Model D); the widget draws the accent bar + selected fill + hover lighten and writes the
+ * active index on click. Styled as a card (bg + border + radius) consistent with the other panels. */
 static void declare_tab_list(nt_ui_context_t *ctx) {
+    ensure_tab_labels();
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(10),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1529,9 +1803,7 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
           .backgroundColor = g_current->list_bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        for (int i = 0; i < TAB_COUNT; ++i) {
-            tab_row(ctx, i, i == s_active_tab);
-        }
+        (void)nt_ui_tabbar(ctx, s_id_tab_btn_base, s_tab_labels, TAB_COUNT, &s_active_tab, g_current->tabbar);
     }
 }
 
