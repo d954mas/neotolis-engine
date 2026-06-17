@@ -1,4 +1,4 @@
-# nt_devapi -- self-describing command layer (dev-only, gated by NT_DEVAPI_ENABLED)
+# nt_devapi -- transport-agnostic, self-describing command core (dev-only, gated by NT_DEVAPI_ENABLED).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
     nt_devapi_core.c
@@ -9,22 +9,9 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi_stub.h
 )
 
-# Native-only TCP transport: the sole socket boundary. Web transport is Phase 70,
-# so nt_devapi_net.c is excluded from the Emscripten build.
-if(NOT EMSCRIPTEN)
-    target_sources(nt_devapi PRIVATE nt_devapi_net.c nt_devapi_net.h)
-endif()
-
 # cjson is PUBLIC: the nt_devapi_handler_fn typedef in the public header takes
 # cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
 target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface)
-
-# Winsock: nt_devapi_net.c uses WSAStartup/socket/closesocket on Windows. PUBLIC so any
-# executable/test linking nt_devapi inherits Winsock — a static lib's PRIVATE link does not
-# propagate, leaving consumers with unresolved WSA* symbols.
-if(WIN32)
-    target_link_libraries(nt_devapi PUBLIC ws2_32)
-endif()
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
@@ -34,3 +21,21 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
+
+# nt_devapi_net -- native loopback TCP transport, the sole socket boundary. Kept SEPARATE from the
+# core so a core-only consumer (tests, future non-transport tooling) pulls no socket code or ws2_32
+# ("use only what you need"). Native-only: excluded from the Emscripten/web build (a web ccall
+# transport would be a sibling target, not part of this one).
+if(NOT EMSCRIPTEN)
+    nt_add_module(nt_devapi_net LOG_DOMAIN "devapi_net"
+        nt_devapi_net.c
+        nt_devapi_net.h
+    )
+    # PUBLIC nt_devapi: the transport wraps the core dispatch and re-exposes NT_DEVAPI_ENABLED.
+    target_link_libraries(nt_devapi_net PUBLIC nt_devapi)
+    # Winsock: WSAStartup/socket/closesocket on Windows. PUBLIC so an executable linking
+    # nt_devapi_net inherits it (a static lib's PRIVATE link does not propagate).
+    if(WIN32)
+        target_link_libraries(nt_devapi_net PUBLIC ws2_32)
+    endif()
+endif()
