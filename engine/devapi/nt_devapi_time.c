@@ -38,8 +38,15 @@ static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
-/* D-10: L2 lockstep-crunch step command — advance exactly N fixed-dt sim frames; default 1. */
+/* D-10: L2 lockstep-crunch step command — advance exactly N fixed-dt sim frames; default 1.
+   Deferred: queues the advances AND holds the response until all N sim-advances complete, so the
+   caller observes frame already advanced by exactly count (the synchronous lockstep contract the
+   client step() helper promises). The managed loop drains one pending_step per iteration, each
+   firing one managed_sim_tick that decrements this slot → it resolves on the count-th advance.
+   Without this the response returned before the async drain finished, so a follow-up frame.current
+   read raced the queue and saw frame advanced by ~1 instead of count. */
 static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)result;
     (void)ud;
     int count = 1;
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(params, "count");
@@ -55,8 +62,7 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         return false;
     }
     nt_app_step(count);
-    devapi_add_number(result, "stepped", (double)count);
-    return true;
+    return nt_devapi_defer_current(count);
 }
 
 static bool cmd_time_set_scale(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -208,10 +214,10 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "time.step",
         .group = "time",
-        .summary = "MANUAL: advance exactly count fixed-dt sim frames (lockstep crunch)",
+        .summary = "MANUAL: advance exactly count fixed-dt sim frames (lockstep crunch); blocks until done",
         .params_shape = "{count?:number}",
-        .result_shape = "{stepped:number}",
-        .frame_behavior = "any",
+        .result_shape = "{deferred:bool}",
+        .frame_behavior = "deferred",
         .side_effects = "queues sim advances",
     },
     {

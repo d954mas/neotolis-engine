@@ -133,17 +133,38 @@ static void test_forwarding_to_nt_app(void) {
     float zero = 0.0F;
     TEST_ASSERT_EQUAL_MEMORY(&zero, &g_nt_app.target_dt, sizeof(float)); /* exactly uncapped */
     cJSON_Delete(root);
+    /* time.step forwarding/queueing is covered by test_step_deferred_resolves_after_count below
+       (it is now a DEFERRED command: submit() returns NULL, not an immediate ok envelope). */
+}
 
-    /* time.step in MANUAL queues advances on g_nt_app.pending_steps. */
+/* time.step is DEFERRED (lockstep contract): it queues advances on pending_steps immediately, but
+   holds the response until exactly `count` sim-advances have completed — so a follow-up read sees
+   frame advanced by count, not by however many drained before the read. (Unit harness ticks the
+   deferred queue directly via advance_sim(); the real managed loop also drains pending_steps.) */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_step_deferred_resolves_after_count(void) {
     (void)parse_ok(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"manual\"}}"));
-    root = parse_ok(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":3}}"));
-    TEST_ASSERT_EQUAL_INT(3, g_nt_app.pending_steps);
-    cJSON_Delete(root);
 
-    /* time.step default count = 1 when omitted. */
-    root = parse_ok(nt_devapi_submit("{\"method\":\"time.step\"}"));
-    TEST_ASSERT_EQUAL_INT(4, g_nt_app.pending_steps);
+    /* default count = 1 when omitted: queues 1, defers, resolves on the 1st sim-advance. */
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\"}"));
+    TEST_ASSERT_EQUAL_INT(1, g_nt_app.pending_steps); /* queued immediately */
+    TEST_ASSERT_NOT_NULL(advance_sim());              /* 1 advance resolves the default step's slot */
+
+    /* explicit count = 3: deferred response withheld until the 3rd sim-advance. */
+    g_nt_app.pending_steps = 0; /* isolate from the default-count check above */
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":21,\"params\":{\"count\":3}}"));
+    TEST_ASSERT_EQUAL_INT(3, g_nt_app.pending_steps);
+    for (int i = 0; i < 2; i++) {
+        TEST_ASSERT_NULL(advance_sim()); /* advances 1 and 2: still pending */
+    }
+    const char *resp = advance_sim(); /* 3rd advance yields {ok:true,result:{deferred:true},request_id:21} */
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "deferred")));
+    TEST_ASSERT_EQUAL_INT(21, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
     cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
 }
 
 /* ---- render.* (TIME-04 L2 / D-03) ---- */
@@ -263,6 +284,7 @@ int main(void) {
     RUN_TEST(test_discovery_lists_new_group);
     RUN_TEST(test_command_describe_time_step);
     RUN_TEST(test_forwarding_to_nt_app);
+    RUN_TEST(test_step_deferred_resolves_after_count);
     RUN_TEST(test_render_info_reflects_flag);
     RUN_TEST(test_frame_current_matches_app);
     RUN_TEST(test_bad_params_cases);

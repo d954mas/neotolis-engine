@@ -120,6 +120,8 @@ class DevApiClient:
         """Advance exactly `count` fixed-dt sim frames (lockstep); requires manual mode.
 
         Maps to time.step{count}; deterministic — no wall clock, no max_dt clamp.
+        Deferred: blocks until all `count` sim-advances have completed, so a follow-up
+        frame.current reads frame already advanced by exactly count (not the queue mid-drain).
         """
         return self.result("time.step", {"count": count})
 
