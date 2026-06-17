@@ -50,8 +50,8 @@ static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *e
         }
         count = c->valueint;
     }
-    if (count < 1) {
-        set_bad_params(err, "time.step: count must be >= 1");
+    if (count < 1 || count > NT_DEVAPI_STEP_MAX) {
+        set_bad_params(err, "time.step: count out of range [1, NT_DEVAPI_STEP_MAX]");
         return false;
     }
     nt_app_step(count);
@@ -111,7 +111,18 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
         set_bad_params(err, "time.set_fps: fps must be finite and >= 0");
         return false;
     }
-    g_nt_app.target_dt = (fps > 0.0) ? (1.0F / (float)fps) : 0.0F;
+    /* Compute the reciprocal in double, then validate the float-narrowed result: a finite-but-tiny
+       fps (e.g. 1e-50) overflows 1/fps to +inf in float, which would spin-wait the managed loop
+       forever. Reject any fps whose frame cap is not a finite, positive float. fps==0 = uncapped. */
+    float target_dt = 0.0F;
+    if (fps > 0.0) {
+        target_dt = (float)(1.0 / fps);
+        if (!isfinite(target_dt) || target_dt <= 0.0F) {
+            set_bad_params(err, "time.set_fps: fps out of representable frame-cap range");
+            return false;
+        }
+    }
+    g_nt_app.target_dt = target_dt;
     devapi_add_number(result, "fps", fps);
     return true;
 }

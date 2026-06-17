@@ -48,6 +48,14 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_FRAME_WAIT_MAX 4096
 #endif
 
+/* Upper bound for time.step{count} (lockstep crunch). Bot input must fail fast over this, never
+   queue an unbounded backlog — cJSON clamps huge JSON numbers to INT_MAX, so without a cap one
+   line could wedge the host for billions of frames. Generous for long deterministic crunches yet
+   far below INT_MAX, so nt_app_step's saturate guard is only a backstop. Override per build with -D. */
+#ifndef NT_DEVAPI_STEP_MAX
+#define NT_DEVAPI_STEP_MAX 1048576
+#endif
+
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {

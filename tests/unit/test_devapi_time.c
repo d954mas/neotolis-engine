@@ -199,6 +199,23 @@ static void test_frame_wait_over_cap_bad_params(void) {
     TEST_ASSERT_NULL(advance_sim());
 }
 
+/* CR-02: time.step{count} over the cap → bad_params, no backlog queued. cJSON clamps huge JSON
+   numbers to INT_MAX, so an uncapped count would wedge the host for billions of frames. */
+static void test_step_over_cap_bad_params(void) {
+    char line[96];
+    (void)snprintf(line, sizeof(line), "{\"method\":\"time.step\",\"params\":{\"count\":%lld}}", (long long)NT_DEVAPI_STEP_MAX + 1);
+    assert_bad_params(nt_devapi_submit(line));
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* rejected → nothing queued */
+}
+
+/* CR-01: a finite-but-tiny fps must fail fast, never store a +inf frame cap (which would spin-wait
+   the managed loop forever). target_dt must stay exactly its prior value (0 = uncapped from setUp). */
+static void test_set_fps_tiny_underflow_bad_params(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.set_fps\",\"params\":{\"fps\":1e-50}}"));
+    float zero = 0.0F;
+    TEST_ASSERT_EQUAL_MEMORY(&zero, &g_nt_app.target_dt, sizeof(float)); /* unchanged, not +inf */
+}
+
 /* ---- D-11: yield after exactly N sim-advances (the highest-value test) ---- */
 
 #define D11_WAIT_FRAMES 3
@@ -250,6 +267,8 @@ int main(void) {
     RUN_TEST(test_frame_current_matches_app);
     RUN_TEST(test_bad_params_cases);
     RUN_TEST(test_frame_wait_over_cap_bad_params);
+    RUN_TEST(test_step_over_cap_bad_params);
+    RUN_TEST(test_set_fps_tiny_underflow_bad_params);
     RUN_TEST(test_frame_wait_yields_after_n_sim_advances);
     RUN_TEST(test_frame_wait_never_yields_during_pause);
     return UNITY_END();

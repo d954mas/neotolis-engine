@@ -1,5 +1,7 @@
 #include "app/nt_app.h"
 
+#include <limits.h>
+
 #include "core/nt_assert.h"
 
 /* Single definition of global frame state -- shared by all platform backends.
@@ -17,7 +19,14 @@ void nt_app_set_step_dt(float step_dt) { g_nt_app.step_dt = step_dt; }
 
 void nt_app_step(int count) {
     NT_ASSERT(count >= 0); /* engine invariant: callers (L2 range-checks bot input) pass count >= 0 */
-    g_nt_app.pending_steps += count;
+    /* Saturate instead of overflowing: pending_steps is drained one per advance, so an absurd
+       backlog only delays — it must never invoke signed-overflow UB. pending_steps >= 0 and
+       count >= 0, so INT_MAX - pending_steps is a safe non-negative bound to test against. */
+    if (count > INT_MAX - g_nt_app.pending_steps) {
+        g_nt_app.pending_steps = INT_MAX;
+    } else {
+        g_nt_app.pending_steps += count;
+    }
 }
 
 void nt_app_set_render_enabled(bool enabled) { g_nt_app.render_enabled = enabled; }
