@@ -34,6 +34,35 @@ typedef struct nt_devapi_slot {
    shutdown so init->shutdown->init is leak-free. */
 void nt_devapi_resp_reset(void);
 
+// #region deferred queue
+/* Preallocated deferred-response queue cap (static, heap-free; overflow rejected fail-early).
+   Override per build with -DNT_DEVAPI_MAX_DEFERRED=N. */
+#ifndef NT_DEVAPI_MAX_DEFERRED
+#define NT_DEVAPI_MAX_DEFERRED 128
+#endif
+
+/* One pending deferred response. The slot owns the duplicated request_id and the
+   continuation state ONLY — never a pointer into the shared s_resp_buf. */
+typedef struct nt_devapi_deferred_slot {
+    cJSON *id;       /* owned duplicate of request_id (number or string); NULL if absent. */
+    int frames_left; /* continuation: yields when it reaches 0. */
+    bool in_use;
+} nt_devapi_deferred_slot;
+
+/* Mark the in-flight command as deferred: submit() returns NULL and the response is
+   yielded after `frames_left` poll_response() calls. Returns true so the handler returns
+   normally (the bool ABI is unchanged). Must be called from inside a handler dispatch. */
+bool nt_devapi_defer_current(int frames_left);
+
+/* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
+   nt_devapi_resp_reset so init->shutdown->init stays leak-free. */
+void nt_devapi_deferred_reset(void);
+
+/* Advance all in-flight deferred slots once per frame (decrement frames_left exactly once).
+   Call before draining with nt_devapi_poll_response, which only pops ready slots. */
+void nt_devapi_deferred_tick(void);
+// #endregion
+
 /* True between init and shutdown — lets submit enforce init-before-use. */
 bool nt_devapi_initialized(void);
 

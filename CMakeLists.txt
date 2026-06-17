@@ -108,6 +108,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/slice9_demo)
     add_subdirectory(examples/ui_3d_demo)
     add_subdirectory(examples/ui_showcase)
+    # devapi host links nt_devapi (+ nt_devapi_net.c) which exist only when the
+    # layer is enabled and only on native builds — gate on both.
+    if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)
+        add_subdirectory(examples/devapi_host)
+    endif()
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)

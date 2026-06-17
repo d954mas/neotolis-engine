@@ -28,7 +28,13 @@ void nt_devapi_shutdown(void);
 nt_result_t nt_devapi_register(const nt_devapi_command_desc *desc, nt_devapi_handler_fn handler, void *user_data);
 
 /* Submit one JSON request line → the JSON response line. The returned pointer is valid
-   only until the next submit — copy it before calling submit again. */
+   only until the next submit/poll_response — copy it before the next core call. Returns
+   NULL when the command deferred its response (drain it later via nt_devapi_poll_response). */
 const char *nt_devapi_submit(const char *line);
+
+/* Yield the next ready deferred response, or NULL if none is ready this call. The returned
+   pointer is valid only until the next submit/poll_response — copy it before the next core
+   call (it shares the same growing buffer as submit). Drain in a loop until it returns NULL. */
+const char *nt_devapi_poll_response(void);
 
 #endif /* NT_DEVAPI_H */
