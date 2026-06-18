@@ -819,41 +819,55 @@ static void init_styles(void) {
     s_modal_light = modal_base;
     s_modal_light.backdrop_color = 0xFF202830U; /* slate */
 
-    /* ---- Dropdown (dogfood): sprite-based game UI. The trigger rides the Kenney button_blue slice9
-     * (per-state tint: muted idle, lifted hover, dim pressed); the list panel rides panel_blue; the
-     * chevron sprite eases its open-rotation. Rows stay flat (transparent idle so the panel shows
-     * through, eased hover/selected fills) for legibility on the sprite panel. An icon gutter is opened
-     * (icon_size) so some rows show a bunny icon and the rest leave aligned empty space. Flat colors are
-     * retained as the atlas-free fallback. corner_radius is moot for IMAGE bg (baked into the sprite). ---- */
+    /* ---- Dropdown (dogfood): COHESIVE warm-panel family (mirrors the tab-bar cohesion fix). The trigger,
+     * the list panel, AND the rows all ride the SAME panel_brown slice9 so the widget reads as one family —
+     * NO clashing solid-blue button. States differentiate by tint only: muted idle -> lifted hover ->
+     * brightened pressed/selected, with a warm accent on the selected row. The chevron eases its open-
+     * rotation; an icon gutter aligns iconed + text-only rows. The long list shows a scrollbar (scroll_track
+     * / bar_thumb sprites). Flat colors stay as the atlas-free fallback. corner_radius is moot for IMAGE bg. ---- */
     s_dropdown_dark = nt_ui_dropdown_style_defaults();
     s_dropdown_dark.row_height = 30U;
     s_dropdown_dark.max_visible_rows = 6U; /* the long city list scrolls past this */
     s_dropdown_dark.icon_size = 22U;       /* leading icon gutter so iconed + text-only rows align */
     s_dropdown_dark.chevron = s_chevron_down_ref;
     s_dropdown_dark.chevron_tint = 0xFFE8F0FCU;
-    /* Trigger: same blue button sprite across states, differentiated by tint (cohesive family). */
-    s_dropdown_dark.trigger_idle.bg = btn_blue;
-    s_dropdown_dark.trigger_idle.bg_tint = 0xFFB6CDE6U; /* muted blue at rest */
+    s_dropdown_dark.slice9_scale = 1.0F;
+    /* Trigger: the panel sprite tinted per-state (muted idle -> lifted hover -> brightened pressed). */
+    s_dropdown_dark.trigger_idle.bg = s_panel_brown_ref;
+    s_dropdown_dark.trigger_idle.bg_tint = 0xFF8C8C8CU; /* muted neutral at rest */
     s_dropdown_dark.trigger_idle.fill = 0xFF3A3A3AU;    /* atlas-free fallback */
-    s_dropdown_dark.trigger_hover.bg = btn_blue;
-    s_dropdown_dark.trigger_hover.bg_tint = 0xFFE0EDFAU; /* lifted on hover */
+    s_dropdown_dark.trigger_hover.bg = s_panel_brown_ref;
+    s_dropdown_dark.trigger_hover.bg_tint = 0xFFB0AAA4U; /* lifted on hover */
     s_dropdown_dark.trigger_hover.fill = 0xFF464646U;
-    s_dropdown_dark.trigger_pressed.bg = btn_blue;
-    s_dropdown_dark.trigger_pressed.bg_tint = 0xFF8FA8C4U; /* dimmed while held */
+    s_dropdown_dark.trigger_pressed.bg = s_panel_brown_ref;
+    s_dropdown_dark.trigger_pressed.bg_tint = 0xFFD6CDC6U; /* brightened while held */
     s_dropdown_dark.trigger_pressed.fill = 0xFF2E2E2EU;
     s_dropdown_dark.trigger_pressed.scale = 0.98F;
-    /* List panel: panel_blue slice9 frame; rows stay flat over it. */
-    s_dropdown_dark.panel_bg = s_panel_blue_ref;
-    s_dropdown_dark.panel_tint = 0xFFFFFFFFU;
+    /* List panel: the same panel_brown slice9 frame; rows ride flat fills over it (transparent idle so the
+     * panel shows through), with a warm accent on the selected row — one cohesive family. */
+    s_dropdown_dark.panel_bg = s_panel_brown_ref;
+    s_dropdown_dark.panel_tint = 0xFFB0AAA4U;     /* lift the panel so rows read against it */
+    s_dropdown_dark.row_hover.fill = 0x40FFFFFFU; /* translucent white wash on hover */
+    s_dropdown_dark.row_pressed.fill = 0xFF4A3A34U;
+    s_dropdown_dark.row_selected.fill = 0xFF50B0E0U; /* warm gold accent, matches the tab-bar accent */
+    s_dropdown_dark.trigger_text = 0xFFFCF7F5U;
+    s_dropdown_dark.row_text = 0xFFFCF7F5U;
+    /* Scrollbar sprites so the long list shows a visible bar when it scrolls (FIX: was {0} -> no bar). */
+    s_dropdown_dark.scroll_track = scroll_track;
+    s_dropdown_dark.scroll_thumb = bar_thumb;
+    s_dropdown_dark.scroll_track_tint = 0xC0FFFFFFU;
+    s_dropdown_dark.scroll_thumb_tint = 0xFFFFFFFFU;
     s_dropdown_light = s_dropdown_dark;
-    s_dropdown_light.trigger_text = 0xFF202830U;
-    s_dropdown_light.row_text = 0xFF202830U;
+    s_dropdown_light.trigger_text = 0xFF381C0CU;
+    s_dropdown_light.row_text = 0xFF381C0CU;
     s_dropdown_light.chevron_tint = 0xFF24364CU;
-    s_dropdown_light.trigger_idle.bg_tint = 0xFFFFFFFFU; /* full blue on the pale theme */
-    s_dropdown_light.trigger_hover.bg_tint = 0xFFFFFFFFU;
-    s_dropdown_light.trigger_pressed.bg_tint = 0xFFCFE0F2U;
-    s_dropdown_light.row_hover.fill = 0xFFDCE6F4U;
-    s_dropdown_light.row_selected.fill = 0xFFBED2F0U;
+    s_dropdown_light.trigger_idle.bg_tint = 0xFFC4C4C4U; /* lighter neutral on the pale card */
+    s_dropdown_light.trigger_hover.bg_tint = 0xFFE0DAD4U;
+    s_dropdown_light.trigger_pressed.bg_tint = 0xFFFFFFFFU;
+    s_dropdown_light.panel_tint = 0xFFFFFFFFU;     /* full warm panel on the pale theme */
+    s_dropdown_light.row_hover.fill = 0x30000000U; /* translucent dark wash on hover */
+    s_dropdown_light.row_pressed.fill = 0xFFF0B68AU;
+    s_dropdown_light.row_selected.fill = 0xFF3C8CC8U; /* warm amber accent for the pale theme */
 
     /* ---- Tooltip: a short reveal delay; light flips to a pale panel + dark text. ---- */
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
@@ -1586,9 +1600,14 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)nt_ui_button_end(ctx);
     (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_b, "Tooltips wrap to the style max_width so long content stays readable on one panel.", g_current->tooltip);
 
-    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true, NULL);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Bottom edge", g_current->body);
-    (void)nt_ui_button_end(ctx);
+    /* Bottom-edge target: a tall block with a GROW spacer pushes this target to the bottom of the visible
+     * content area, so its tooltip has no room below and visibly flips ABOVE the target (edge-flip demo). */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(360)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_BOTTOM}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {} /* GROW spacer: pin the target to the bottom */
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true, NULL);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Bottom edge", g_current->body);
+        (void)nt_ui_button_end(ctx);
+    }
     (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_c, "Near the bottom border the tooltip flips ABOVE the target instead of below.", g_current->tooltip);
 }
 
