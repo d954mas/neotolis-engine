@@ -448,6 +448,52 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     devapi_add_number(result, "queued", (double)n);
     return true;
 }
+
+/* input.state: IMMEDIATE read (NOT deferred, NOT an enqueue) of the polled input state. Reads the
+   state nt_input_poll last produced — so before a sim-advance an enqueued inject is NOT yet visible
+   (the D-12 drain-race, now machine-observable over the socket). `key` -> {down,pressed,released}
+   for that key (unknown name -> bad_params, never assert on bot input, D-11). `pop_text:true`
+   DRAINS the char ring (consuming side effect) into a `codepoints` raw-codepoint number array. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)ud;
+    const cJSON *k = cJSON_GetObjectItemCaseSensitive(params, "key");
+    if (k != NULL) {
+        if (!cJSON_IsString(k) || k->valuestring == NULL) {
+            set_bad_params(err, "input.state: key must be a string");
+            return false;
+        }
+        nt_key_t key;
+        if (!nt_input_key_from_name(k->valuestring, &key)) {
+            set_bad_params(err, "input.state: unknown key name");
+            return false;
+        }
+        devapi_add_bool(result, "down", nt_input_key_is_down(key));
+        devapi_add_bool(result, "pressed", nt_input_key_is_pressed(key));
+        devapi_add_bool(result, "released", nt_input_key_is_released(key));
+    }
+    const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "pop_text");
+    if (pt != NULL) {
+        if (!cJSON_IsBool(pt)) {
+            set_bad_params(err, "input.state: pop_text must be a bool");
+            return false;
+        }
+        if (cJSON_IsTrue(pt)) {
+            cJSON *cps = cJSON_AddArrayToObject(result, "codepoints");
+            NT_ASSERT(cps != NULL); /* OOM traps fail-early (matches devapi_add_*). */
+            /* Cap the drain to the inject queue size so a flood can't spin the read forever. */
+            uint32_t cp;
+            for (uint32_t i = 0; i < (uint32_t)NT_INPUT_INJECT_QUEUE_MAX && nt_input_pop_char(&cp); i++) {
+                cJSON *num = cJSON_CreateNumber((double)cp);
+                NT_ASSERT(num != NULL);
+                cJSON_bool added = cJSON_AddItemToArray(cps, num);
+                NT_ASSERT(added);
+                (void)added;
+            }
+        }
+    }
+    return true;
+}
 // #endregion
 
 static const nt_devapi_command_desc k_input_cmds[] = {
@@ -532,10 +578,19 @@ static const nt_devapi_command_desc k_input_cmds[] = {
         .frame_behavior = "any",
         .side_effects = "enqueues synthetic typed codepoints",
     },
+    {
+        .method = "input.state",
+        .group = "input",
+        .summary = "IMMEDIATE read of polled input state (stale until a sim-advance polls the inject queue)",
+        .params_shape = "{key?:string, pop_text?:bool}",
+        .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
+        .frame_behavior = "any",
+        .side_effects = "pop_text:true DRAINS (consumes) the char ring",
+    },
 };
 
 static const nt_devapi_handler_fn k_input_handlers[] = {
-    cmd_input_key, cmd_input_pointer, cmd_input_move, cmd_input_click, cmd_input_wheel, cmd_input_gesture, cmd_input_button, cmd_input_set_player_enabled, cmd_input_text,
+    cmd_input_key, cmd_input_pointer, cmd_input_move, cmd_input_click, cmd_input_wheel, cmd_input_gesture, cmd_input_button, cmd_input_set_player_enabled, cmd_input_text, cmd_input_state,
 };
 _Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_handlers) / sizeof(k_input_handlers[0]), "input: descriptor/handler arrays must have equal length");
 

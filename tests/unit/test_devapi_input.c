@@ -10,6 +10,7 @@
 
 /* clang-format off */
 #include "devapi/nt_devapi_internal.h"
+#include "input/nt_input.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -152,6 +153,48 @@ static void test_input_text_bad_type_bad_params(void) { assert_bad_params(nt_dev
 
 static void test_input_set_player_enabled_bad_type_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":1}}")); }
 
+/* ---- input.state (the observation hook, INPUT-04/05/06 read-back) ---- */
+
+static void test_input_state_registers(void) { TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("input.state")); }
+
+static void test_input_state_describe(void) {
+    const char *resp = nt_devapi_submit("{\"method\":\"command.describe\",\"params\":{\"method\":\"input.state\"}}");
+    cJSON *root = parse_ok(resp);
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_EQUAL_STRING("input", cJSON_GetObjectItemCaseSensitive(result, "group")->valuestring);
+    cJSON_Delete(root);
+}
+
+/* No params -> ok with no key/text fields (read is valid with everything omitted). */
+static void test_input_state_empty_ok(void) {
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{}}"));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(result, "down"));
+    cJSON_Delete(root);
+}
+
+static void test_input_state_unknown_key_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"NOPE\"}}")); }
+
+static void test_input_state_bad_pop_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":1}}")); }
+
+/* L1+L2: inject A (offset 0) -> poll(new frame) drains it -> input.state{key:A} reads down==true. */
+static void test_input_state_observes_injected_key(void) {
+    nt_input_init();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"))); /* pre: not yet polled */
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "down")));
+    cJSON_Delete(root);
+
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}"))); /* enqueue down@0 */
+    nt_input_poll(1);                                                                                  /* new frame -> drain applies the inject */
+    root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"));
+    result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "down")));
+    cJSON_Delete(root);
+    nt_input_shutdown();
+}
+
 /* ---- command.describe ---- */
 
 static void test_input_describe(void) {
@@ -187,6 +230,12 @@ int main(void) {
     RUN_TEST(test_input_pointer_bad_type_bad_params);
     RUN_TEST(test_input_text_bad_type_bad_params);
     RUN_TEST(test_input_set_player_enabled_bad_type_bad_params);
+    RUN_TEST(test_input_state_registers);
+    RUN_TEST(test_input_state_describe);
+    RUN_TEST(test_input_state_empty_ok);
+    RUN_TEST(test_input_state_unknown_key_bad_params);
+    RUN_TEST(test_input_state_bad_pop_text_bad_params);
+    RUN_TEST(test_input_state_observes_injected_key);
     RUN_TEST(test_input_describe);
     return UNITY_END();
 }
