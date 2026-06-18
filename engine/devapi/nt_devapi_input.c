@@ -20,8 +20,7 @@
    g_nt_app.frame. Each entry carries a sim-advance countdown + the same event payload the L1
    immediate inject API takes. nt_devapi_input_update ticks this AFTER net_poll: on a real sim-advance
    it releases every due entry into nt_input's immediate buffer (via nt_input_inject_*) and decrements
-   survivors; on a frozen tick it releases nothing. This is essentially the OLD nt_input queue,
-   relocated to the layer that owns scheduling. */
+   survivors; on a frozen tick it releases nothing. */
 
 /* Bounded BSS schedule cap (-D overridable). */
 #ifndef NT_DEVAPI_INPUT_SCHED_MAX
@@ -121,7 +120,7 @@ static bool sched_wheel(float dx, float dy, uint16_t at_frame) {
     return true;
 }
 
-/* down@0 + up@hold (2 entries), the tap/click hold logic that used to live in nt_input. */
+/* down@0 + up@hold (2 entries): the tap/click hold primitive. */
 static bool sched_tap(nt_key_t key, uint16_t hold_frames) {
     sched_entry_t *e = sched_reserve(2);
     if (e == NULL) {
@@ -139,7 +138,7 @@ static bool sched_tap(nt_key_t key, uint16_t hold_frames) {
 }
 
 /* All n CHARs release in ONE advancing tick into the 32-slot char ring; reject n beyond the ring
-   so queued never lies about what lands (whole-or-nothing by codepoint count, F2). */
+   so queued never lies about what lands (whole-or-nothing by codepoint count). */
 static bool sched_text(const uint32_t *cps, uint32_t n) {
     if (cps == NULL || n == 0) {
         return false;
