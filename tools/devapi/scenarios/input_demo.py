@@ -175,7 +175,17 @@ def main(port: int) -> int:
         print(f"FAIL: transport error talking to 127.0.0.1:{port}: {exc}")
         return 1
     finally:
+        # Best-effort restore so an assertion failure mid-run can't leave the long-lived host
+        # MANUAL / paused / gated for the next session. Must not mask the original failure/exit
+        # code, so any restore error is swallowed.
         if transport is not None:
+            try:
+                client = DevApiClient(transport)
+                client.set_player_enabled(True)
+                client.set_mode("run")
+                client.resume()
+            except (DevApiResultError, ValueError, ConnectionError, TimeoutError, OSError):
+                pass
             transport.close()
 
 
