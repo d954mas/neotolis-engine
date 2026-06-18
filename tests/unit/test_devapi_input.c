@@ -254,6 +254,15 @@ static void test_input_gesture_frame_stride_fractional_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]],\"frame_stride\":1.5}}"));
 }
 
+/* A fractional button mask must NOT silently truncate to an int (symmetric with hold/id). */
+static void test_input_button_fractional_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2.5}}")); }
+
+static void test_input_click_button_fractional_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2,\"button\":1.9}}")); }
+
+static void test_input_pointer_buttons_fractional_bad_params(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":1,\"y\":2,\"buttons\":2.5}}"));
+}
+
 /* ---- WR-05: offline input.state{pop_text} drain coverage (no socket) ---- */
 
 static void test_input_state_pop_text_drains_codepoints(void) {
@@ -424,6 +433,9 @@ int main(void) {
     RUN_TEST(test_input_key_hold_fractional_bad_params);
     RUN_TEST(test_input_key_hold_negative_fractional_bad_params);
     RUN_TEST(test_input_gesture_frame_stride_fractional_bad_params);
+    RUN_TEST(test_input_button_fractional_bad_params);
+    RUN_TEST(test_input_click_button_fractional_bad_params);
+    RUN_TEST(test_input_pointer_buttons_fractional_bad_params);
     RUN_TEST(test_input_button_right_presses_right);
     RUN_TEST(test_input_button_move_branch_updates_mask);
     RUN_TEST(test_input_gesture_single_point_applied_once);

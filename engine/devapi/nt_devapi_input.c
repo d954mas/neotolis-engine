@@ -52,10 +52,12 @@ static bool parse_pointer_id(const cJSON *idj, const char *cmd, uint32_t *out, n
 }
 
 /* Validate a mouse-button mask against the advertised domain (bits {1,2,4} -> value in [0,7])
-   before narrowing; a negative/oversized value would silently set phantom bits. */
+   before narrowing; a negative/oversized value would silently set phantom bits. Reads valuedouble
+   + an integrality test so a fractional mask (e.g. 2.5) is REJECTED, not truncated -- symmetric
+   with parse_pointer_id / parse_frame_count. */
 static bool parse_button_mask(const cJSON *bj, const char *cmd, uint8_t *out, nt_devapi_error *err) {
-    int v = bj->valueint;
-    if (v < 0 || v > 7) {
+    double v = bj->valuedouble;
+    if (v < 0.0 || v > 7.0 || v != (double)(uint8_t)v) {
         set_bad_params(err, cmd);
         return false;
     }
