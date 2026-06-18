@@ -35,6 +35,7 @@ typedef socklen_t nt_socklen_t;
 #include <string.h>
 #include <time.h>
 
+#include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_reset on client drop. */
@@ -98,6 +99,11 @@ static void close_client(void) {
     /* Drop the gone client's in-flight deferred results so a reconnecting client
        can't receive them tagged with the old client's request_id. */
     nt_devapi_deferred_reset();
+    /* A dropped client must not leave the loop frozen: in MANUAL/paused g_nt_app.frame stops
+       advancing and a host's frame-count auto-exit never fires. Return to plain RUN. */
+    g_nt_app.mode = NT_APP_MODE_RUN;
+    g_nt_app.paused = false;
+    g_nt_app.pending_steps = 0;
 }
 
 static void set_nonblocking(nt_sock_t s) {

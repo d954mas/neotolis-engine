@@ -284,7 +284,7 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "frame.wait",
         .group = "frame",
-        .summary = "defer the response until frames sim-advances elapse (PAUSE never advances -> never resolves)",
+        .summary = "defer the response until frames sim-advances elapse (frames=0 resolves on the next drain; PAUSE never advances -> never resolves)",
         .params_shape = "{frames?:number}",
         .result_shape = "{deferred:bool}",
         .frame_behavior = "deferred",

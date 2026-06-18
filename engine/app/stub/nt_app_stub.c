@@ -54,8 +54,9 @@ void nt_app_run(nt_app_frame_fn fn) {
         }
         s_frame_fn();
 
-        /* Frame rate cap: single sleep + spin-wait (verbatim from nt_app_run) */
-        if (g_nt_app.target_dt > 0.0F) {
+        /* Frame-rate cap (wall-time pacing): single sleep + spin-wait. Skipped while a MANUAL
+           crunch is draining so lockstep runs full speed, not throttled to target_dt. */
+        if (g_nt_app.target_dt > 0.0F && !(g_nt_app.mode == NT_APP_MODE_MANUAL && g_nt_app.pending_steps > 0)) {
             double target = prev_time + (double)g_nt_app.target_dt;
             double remaining = target - nt_time_now();
             if (remaining > NT_SPIN_MARGIN) {

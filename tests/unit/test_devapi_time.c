@@ -219,6 +219,19 @@ static void test_frame_wait_over_cap_bad_params(void) {
     TEST_ASSERT_NULL(advance_sim());
 }
 
+/* frame.wait{frames:0}: target == current frame, so it resolves on the very next drain with no
+   sim-advance (the immediate-ack form), distinct from the over-cap rejection above. */
+static void test_frame_wait_zero_resolves_immediately(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":5,\"params\":{\"frames\":0}}"));
+    const char *resp = nt_devapi_poll_response(); /* ready immediately, no g_nt_app.frame advance */
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+}
+
 /* time.step{count} over the cap → bad_params, no backlog queued. cJSON clamps huge JSON
    numbers to INT_MAX, so an uncapped count would wedge the host for billions of frames. */
 static void test_step_over_cap_bad_params(void) {
@@ -302,6 +315,7 @@ int main(void) {
     RUN_TEST(test_frame_current_matches_app);
     RUN_TEST(test_bad_params_cases);
     RUN_TEST(test_frame_wait_over_cap_bad_params);
+    RUN_TEST(test_frame_wait_zero_resolves_immediately);
     RUN_TEST(test_step_over_cap_bad_params);
     RUN_TEST(test_set_fps_tiny_underflow_bad_params);
     RUN_TEST(test_step_requires_manual_mode);
