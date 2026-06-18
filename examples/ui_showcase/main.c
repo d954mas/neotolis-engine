@@ -1647,11 +1647,15 @@ static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st) {
             if (nt_ui_tab_begin(ctx, i, on)) {
                 st->tabs_demo_active = i; /* Model D */
             }
-            /* Game-owned content: a 24px icon (checkmark when selected, bunny otherwise) + the label. */
-            nt_atlas_region_ref_t *icon = on ? &s_tabs_icon_sel_ref : &s_tabs_icon_idle_ref;
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), icon, &g_panel_img_style, NULL); }
+            /* Game-owned content: the tab keeps its OWN icon always (swapping it to a checkmark loses the
+             * tab's identity); the selected tab ADDS a trailing checkmark badge instead. */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_tabs_icon_idle_ref, &g_panel_img_style, NULL); }
             const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = on ? g_current->row_sel->color : g_current->caption->color};
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &lbl);
+            if (on) {
+                /* Selected badge: a small checkmark trailing the label (added, not replacing the icon). */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_tabs_icon_sel_ref, &g_panel_img_style, NULL); }
+            }
             nt_ui_tab_end(ctx);
         }
         nt_ui_tabbar_end(ctx);
