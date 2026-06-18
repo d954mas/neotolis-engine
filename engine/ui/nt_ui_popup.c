@@ -207,10 +207,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * at t=0 first (no-flash), then the real call eases up. Gated on the non-evicting tween-state, NOT
      * the anim slot — an evicted slot must NOT re-seed (that flickers the eased open under churn). The
      * anim-slot-absent check still guards the very first ever touch (state cell fresh, slot truly new). */
-    if (open && !was_present_prev && popup_anim_slot_absent(ctx, id)) {
+    if (open && style->ease_speed > 0.0F && !was_present_prev && popup_anim_slot_absent(ctx, id)) {
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;
-        (void)nt_ui_anim(ctx, id, &seed, 0.0F, 0.0F);
+        nt_ui_anim_seed(ctx, id, &seed); /* WRITE the pool slot at t=0; the eased call below ramps from it */
 #ifdef NT_TEST_ACCESS
         s_entrance_seed_count++;
 #endif

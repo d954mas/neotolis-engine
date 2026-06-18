@@ -328,15 +328,15 @@ static void test_dropdown_eased_open_no_flicker(void) {
     }
 }
 
-/* Frame that ALSO declares a swarm of animated dummy widgets so the 64-slot anim table churns and
- * collides with the popup's slot window — mimics a busy showcase frame. */
+/* Frame that ALSO declares a swarm of animated dummy widgets so the anim table churns and collides with
+ * the popup's slot window — mimics a busy showcase frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dropdown_frame_busy(const nt_pointer_t *p, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, int n_dummy) {
     nt_mem_scratch_reset();
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
-    /* Swarm declared BEFORE the dropdown (real frame order: many widgets precede it). Each dummy eases a
-     * slot; the ids sweep the whole 64-slot table so the popup's probe window is already full when the
-     * popup touches it — forcing the popup to evict a slot to host itself (the busy-frame condition). */
+    /* Swarm declared BEFORE the dropdown (real frame order: many widgets precede it). Each dummy EASES a
+     * slot (value_speed > 0, so it takes a real slot); the ids sweep the whole table so the popup's probe
+     * window is already full when the popup touches it — forcing it to evict a slot (busy-frame condition). */
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = 1.0F};
     for (int d = 0; d < n_dummy; ++d) {
         (void)nt_ui_anim(s_fx.ctx, 0x90000001U + (uint32_t)d, &tgt, 0.0F, 14.0F);
@@ -363,10 +363,10 @@ static void test_dropdown_eased_open_no_reseed_under_churn(void) {
 
     nt_ui_popup_test_entrance_seed_reset();
     nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    /* Heavy churn every frame across a long open: 70 dummies thrash the 64-slot anim table so the popup's
-     * slot is repeatedly evicted. The seed must NOT re-fire per frame. */
+    /* Heavy churn every frame across a long open: dummies > NT_UI_ANIM_SLOTS thrash the anim table so the
+     * popup's slot is repeatedly evicted. The seed must NOT re-fire per frame. */
     for (int f = 0; f < 30; ++f) {
-        dropdown_frame_busy(&idle, s_short, 3, &selected, &open, &st, 70);
+        dropdown_frame_busy(&idle, s_short, 3, &selected, &open, &st, NT_UI_ANIM_SLOTS + 32);
     }
     const uint32_t seeds = nt_ui_popup_test_entrance_seed_count();
     TEST_ASSERT_TRUE_MESSAGE(seeds <= 1U, "entrance t=0 re-seed must fire at most once per open-edge (not per churned frame)");

@@ -5,22 +5,41 @@
 #include "core/nt_assert.h"
 #include "ui/nt_ui_internal.h"
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *t, float state_speed, float value_speed) {
-    NT_ASSERT(ctx != NULL && "nt_ui_anim: ctx must be non-NULL");
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat fail-early assert chain, not control flow
+static void anim_assert_target(const nt_ui_anim_target_t *t) {
     NT_ASSERT(t != NULL && "nt_ui_anim: target must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_anim: id 0 is the no-widget sentinel");
-    NT_ASSERT(isfinite(state_speed) && state_speed >= 0.0F && "nt_ui_anim: state_speed must be finite >= 0");
-    NT_ASSERT(isfinite(value_speed) && value_speed >= 0.0F && "nt_ui_anim: value_speed must be finite >= 0");
     NT_ASSERT(isfinite(t->scale_x) && t->scale_x > 0.0F && isfinite(t->scale_y) && t->scale_y > 0.0F && isfinite(t->scale_z) && t->scale_z > 0.0F && "nt_ui_anim: target.scale_xyz must be finite > 0");
     NT_ASSERT(isfinite(t->off_x) && isfinite(t->off_y) && isfinite(t->off_z) && "nt_ui_anim: target.offset_xyz must be finite");
     NT_ASSERT(isfinite(t->rot_x) && isfinite(t->rot_y) && isfinite(t->rot_z) && "nt_ui_anim: target.rotation_xyz must be finite");
     NT_ASSERT(isfinite(t->opacity) && t->opacity >= 0.0F && t->opacity <= 1.0F && "nt_ui_anim: target.opacity must be finite in [0,1]");
     NT_ASSERT(isfinite(t->tint_t) && t->tint_t >= 0.0F && t->tint_t <= 1.0F && "nt_ui_anim: target.tint_t must be finite in [0,1]");
     NT_ASSERT(isfinite(t->value_t) && t->value_t >= 0.0F && t->value_t <= 1.0F && "nt_ui_anim: target.value_t must be finite in [0,1]");
-    // #region slot-map + lerp
-    /* Probe-exhaust evicts the STALEST slot in the window (oldest last_touch), not blindly
-     * the tail — a tail-evict bleeds a slot that WAS touched this frame between widgets. */
+}
+
+/* Snap every field to target + (re)claim the cell for id. Shared by the no-slot fast path, the
+ * first-touch (no-flash) path, and nt_ui_anim_seed. */
+static void anim_snap_to(nt_ui_anim_interaction_t *a, uint32_t id, const nt_ui_anim_target_t *t, uint16_t tick) {
+    a->id = id;
+    a->valid = true;
+    a->last_touch = tick;
+    a->scale_x = t->scale_x;
+    a->scale_y = t->scale_y;
+    a->scale_z = t->scale_z;
+    a->off_x = t->off_x;
+    a->off_y = t->off_y;
+    a->off_z = t->off_z;
+    a->rot_x = t->rot_x;
+    a->rot_y = t->rot_y;
+    a->rot_z = t->rot_z;
+    a->opacity = t->opacity;
+    a->tint_t = t->tint_t;
+    a->value_t = t->value_t;
+}
+
+/* Probe the open-addressed table for id; on probe-exhaust evict the STALEST slot in the window (oldest
+ * last_touch), not blindly the tail — a tail-evict bleeds a slot that WAS touched this frame between
+ * widgets. Stamps last_touch and returns the slot (matching id, empty, or evicted). */
+static nt_ui_anim_interaction_t *anim_slot(nt_ui_context_t *ctx, uint32_t id) {
     const uint16_t tick = (uint16_t)ctx->current_generation;
     const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
     nt_ui_anim_interaction_t *a = NULL;
@@ -45,23 +64,41 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
         a = stalest;
     }
     a->last_touch = tick;
-    const bool fresh = (!a->valid) || (a->id != id);
-    if (fresh) {
+    return a;
+}
+
+const nt_ui_anim_interaction_t *nt_ui_anim_seed(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *t) {
+    NT_ASSERT(ctx != NULL && "nt_ui_anim_seed: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_anim_seed: id 0 is the no-widget sentinel");
+    anim_assert_target(t);
+    nt_ui_anim_interaction_t *a = anim_slot(ctx, id);
+    anim_snap_to(a, id, t, (uint16_t)ctx->current_generation);
+    return a;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *t, float state_speed, float value_speed) {
+    NT_ASSERT(ctx != NULL && "nt_ui_anim: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_anim: id 0 is the no-widget sentinel");
+    NT_ASSERT(isfinite(state_speed) && state_speed >= 0.0F && "nt_ui_anim: state_speed must be finite >= 0");
+    NT_ASSERT(isfinite(value_speed) && value_speed >= 0.0F && "nt_ui_anim: value_speed must be finite >= 0");
+    anim_assert_target(t);
+
+    const uint16_t tick = (uint16_t)ctx->current_generation;
+
+    /* No-slot fast path: both speeds 0 => pure snap, nothing to retain across frames. Fill a per-ctx
+     * scratch and return it (valid only until the next nt_ui_anim call) so the many non-animating widgets
+     * never consume an anim-pool slot — the pool stays free for the few that actually tween. */
+    if (state_speed == 0.0F && value_speed == 0.0F) {
+        anim_snap_to(&ctx->anim_snap, id, t, tick);
+        return &ctx->anim_snap;
+    }
+
+    // #region slot-map + lerp
+    nt_ui_anim_interaction_t *a = anim_slot(ctx, id);
+    if (!a->valid || a->id != id) {
         /* First-touch / replace-on-collision: snap cur=target, no flash. */
-        a->id = id;
-        a->valid = true;
-        a->scale_x = t->scale_x;
-        a->scale_y = t->scale_y;
-        a->scale_z = t->scale_z;
-        a->off_x = t->off_x;
-        a->off_y = t->off_y;
-        a->off_z = t->off_z;
-        a->rot_x = t->rot_x;
-        a->rot_y = t->rot_y;
-        a->rot_z = t->rot_z;
-        a->opacity = t->opacity;
-        a->tint_t = t->tint_t;
-        a->value_t = t->value_t;
+        anim_snap_to(a, id, t, tick);
         return a;
     }
     // #region ease state fields (state_speed)

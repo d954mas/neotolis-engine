@@ -310,6 +310,7 @@ struct nt_ui_context {
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];
+    nt_ui_anim_interaction_t anim_snap; /* nt_ui_anim no-slot fast path (both speeds 0): snapped target, consumes no pool slot */
     /* Monotonic; nonzero delta across frames means raise NT_UI_ANIM_SLOTS. */
     uint32_t anim_collision_count;
 
