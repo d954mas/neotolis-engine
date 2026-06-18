@@ -1,6 +1,6 @@
-/* Proof of the deferred yield path under the tick/drain contract: submit()->NULL on defer,
-   advancing one frame = tick THEN poll; the K-th frame yields {ok,result,request_id} with the
-   original id. Covers number/string/absent ids, multi-slot ordering, and overflow rejection. */
+/* Proof of the deferred yield path: submit()->NULL on defer, advancing the game frame
+   (g_nt_app.frame) then polling; the K-th frame yields {ok,result,request_id} with the original
+   id. Covers number/string/absent ids, multi-slot ordering, and overflow rejection. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -8,6 +8,7 @@
 #include <string.h>
 
 /* clang-format off */
+#include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
 #include "unity.h"
 /* clang-format on */
@@ -42,15 +43,16 @@ static void register_defer(void) {
 }
 
 void setUp(void) {
+    g_nt_app.frame = 0; /* deferred targets are g_nt_app.frame + N — start each test at a known frame. */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     register_defer();
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
 
-/* One frame under the new contract: advance all slots once, then read the ready ones. */
+/* One game frame: advance the frame counter, then read any slot whose deadline was reached. */
 static const char *advance_frame(void) {
-    nt_devapi_deferred_tick();
+    g_nt_app.frame++;
     return nt_devapi_poll_response();
 }
 
@@ -121,7 +123,7 @@ static void test_multi_slot_distinct_frames(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":2,\"params\":{\"frames\":3}}"));
 
     /* Frame 1: only id=1 (frames=1) is ready; id=2 (frames=3) must NOT pop. */
-    nt_devapi_deferred_tick();
+    g_nt_app.frame++;
     const char *r1 = nt_devapi_poll_response();
     TEST_ASSERT_NOT_NULL(r1);
     cJSON *root1 = cJSON_Parse(r1);
@@ -129,11 +131,11 @@ static void test_multi_slot_distinct_frames(void) {
     cJSON_Delete(root1);
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* id=2 still pending, not popped early */
 
-    /* Frame 2: id=2 now at frames_left=1, not ready. */
+    /* Frame 2: id=2's target (frame 3) not yet reached. */
     TEST_ASSERT_NULL(advance_frame());
 
-    /* Frame 3: id=2 reaches 0 and pops. */
-    nt_devapi_deferred_tick();
+    /* Frame 3: id=2 reaches its target and pops. */
+    g_nt_app.frame++;
     const char *r2 = nt_devapi_poll_response();
     TEST_ASSERT_NOT_NULL(r2);
     cJSON *root2 = cJSON_Parse(r2);
@@ -185,7 +187,7 @@ static void test_overflow_rejected_structured(void) {
 
     /* An earlier in-flight slot is intact: advance one frame and assert nothing pops yet. */
     /* The first enqueued (request_id 0) has frames=1000; the overflow rejection touched no slot. */
-    TEST_ASSERT_NULL(advance_frame()); /* ticks all live slots once; none ready (>=999 left) */
+    TEST_ASSERT_NULL(advance_frame()); /* frame=1; the live slot targets frame 1000, nothing pops yet */
 }
 
 int main(void) {

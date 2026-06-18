@@ -68,10 +68,15 @@ class SocketTransport(Transport):
         self._sock.sendall((line + "\n").encode("utf-8"))
 
     def recv_line(self) -> str:
-        # On read-timeout expiry readline raises socket.timeout/TimeoutError — let it
-        # propagate; the client re-raises naming the pending request_id.
         # Bound the read so a desynced stream can never grow memory without limit.
-        line = self._f.readline(1_048_576)
+        try:
+            line = self._f.readline(1_048_576)
+        except (socket.timeout, TimeoutError) as exc:
+            # On py3.8 socket.timeout is NOT a TimeoutError subclass; normalize so callers catch
+            # one type. A mid-read timeout also leaves the buffered reader in an undefined state,
+            # so invalidate the transport — a retry must fail fast, not read corrupted framing.
+            self.close()
+            raise TimeoutError(str(exc) or "read timed out") from exc
         if line == "":
             # Orderly disconnect: recv returned b"" (mirrors the server-side close path). Fail fast, never hang.
             raise ConnectionError("server closed the connection")

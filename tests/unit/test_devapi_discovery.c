@@ -180,6 +180,7 @@ static void test_command_describe_message_distinguishes_absent_vs_nonstring(void
 
 /* ---- features ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_features_lists_active_groups(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"features\"}");
     cJSON *root = cJSON_Parse(resp);
@@ -189,10 +190,14 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_TRUE(array_has_string(groups, "core"));
     TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
+    /* This binary also compiles the time group into nt_devapi (NT_DEVAPI_REGISTER_time=1). */
+    TEST_ASSERT_TRUE(array_has_string(groups, "time"));
+    TEST_ASSERT_TRUE(array_has_string(groups, "render"));
+    TEST_ASSERT_TRUE(array_has_string(groups, "frame"));
     /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
-    /* groups are distinct: 3 core + 3 discovery commands collapse to one entry each. */
-    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(groups));
+    /* groups are distinct: each group's commands collapse to one entry. */
+    TEST_ASSERT_EQUAL_INT(6, cJSON_GetArraySize(groups));
     cJSON_Delete(root);
 }
 

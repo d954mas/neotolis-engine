@@ -24,6 +24,10 @@ class DevApiClient:
     in a pending-map for a later request that owns that id.
     """
 
+    # Cap the unclaimed-reply stash: a server that never lets ids be claimed (framing desync)
+    # must fail fast, not grow memory without bound.
+    _MAX_PENDING = 256
+
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
         self._next_id = 1
@@ -34,6 +38,14 @@ class DevApiClient:
         rid = self._next_id
         self._next_id += 1
         return rid
+
+    def _stash(self, obj_id: Any, obj: Dict[str, Any]) -> None:
+        """Hold an out-of-order reply for a later request. A None id can't be claimed -> dropped."""
+        if obj_id is None:
+            return
+        if obj_id not in self._pending and len(self._pending) >= self._MAX_PENDING:
+            raise ConnectionError("pending reply map overflow — server replies not being claimed (framing desync)")
+        self._pending[obj_id] = obj
 
     def _recv_until(self, rid: Any) -> Dict[str, Any]:
         """Return the response whose request_id == rid, stashing others by id."""
@@ -54,9 +66,7 @@ class DevApiClient:
             if obj_id == rid:
                 return obj
             # A reply for a different request (deferred/pipelined) — stash and keep reading.
-            # Never key on None: an unidentified reply can't be claimed by any request.
-            if obj_id is not None:
-                self._pending[obj_id] = obj
+            self._stash(obj_id, obj)
 
     def request(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Send one command, block until its correlated reply arrives, return the raw envelope."""
@@ -104,17 +114,79 @@ class DevApiClient:
             if isinstance(obj, list):
                 return obj
             # A non-array line is an out-of-order single reply — stash by its id.
-            rid_obj = obj.get("request_id")
-            if rid_obj is not None:
-                self._pending[rid_obj] = obj
+            self._stash(obj.get("request_id"), obj)
+            # If every batch id arrived as an individual reply, the server isn't framing batches
+            # as arrays — fail instead of blocking forever waiting for an array that won't come.
+            if all(i in self._pending for i in ids):
+                raise ConnectionError("batch: server returned individual envelopes, not an array")
 
     def wait_frames(self, n: int) -> Dict[str, Any]:
-        """Surface-present stub: sends frame.wait; the server returns its unknown_method envelope today, not a silent no-op."""
-        return self.request("frame.wait", {"frames": n})
+        """Block until `n` simulation frames have ADVANCED (not loop iterations).
 
-    def step(self) -> Dict[str, Any]:
-        """Surface-present stub: sends time.step; the server returns its unknown_method envelope today, not a silent no-op."""
-        return self.request("time.step")
+        Deferred — the correlation loop handles the yield. Uses result() so a server
+        rejection (frame.wait is RUN-only: manual/paused return bad_params) raises
+        DevApiResultError instead of silently returning an {ok:false} envelope.
+        """
+        return self.result("frame.wait", {"frames": n})
+
+    def time_wait(self, seconds: float) -> Dict[str, Any]:
+        """Block until `seconds` of GAME time elapse (not wall, not frames).
+
+        Deferred, RUN-only: game time advances on the variable RUN dt, so a fixed frame
+        count can't express it (that's the point). Rejected in manual/paused/scale==0 where
+        time is frozen (raises DevApiResultError). Wall duration is ~seconds/scale.
+        """
+        return self.result("time.wait", {"seconds": seconds})
+
+    def step(self, count: int = 1) -> Dict[str, Any]:
+        """Advance exactly `count` fixed-dt sim frames (lockstep); requires manual mode.
+
+        Maps to time.step{count}; deterministic — no wall clock, no max_dt clamp.
+        Deferred: blocks until all `count` sim-advances have completed, so a follow-up
+        frame.current reads frame already advanced by exactly count (not the queue mid-drain).
+        """
+        return self.result("time.step", {"count": count})
+
+    def step_seconds(self, seconds: float) -> Dict[str, Any]:
+        """Advance the MANUAL sim by `seconds` of game time = ceil(seconds/step_dt) fixed-dt frames.
+
+        Sugar over time.step{seconds} for time-authored mechanics (cooldowns, durations). Linear
+        and deterministic in MANUAL since step_dt is fixed. Requires manual mode (raises
+        DevApiResultError in RUN). Deferred; blocks until the steps drain.
+        """
+        return self.result("time.step", {"seconds": seconds})
+
+    def pause(self) -> Dict[str, Any]:
+        """Zero the simulation dt; the frame callback keeps running (transport poll, bookkeeping)."""
+        return self.result("time.pause")
+
+    def resume(self) -> Dict[str, Any]:
+        """Clear the pause flag so the loop advances on wall time again (idempotent)."""
+        return self.result("time.resume")
+
+    def set_scale(self, scale: float) -> Dict[str, Any]:
+        """Multiply dt for slow-mo / fast-forward OBSERVATION only — not a determinism primitive."""
+        return self.result("time.set_scale", {"scale": scale})
+
+    def set_mode(self, mode: str) -> Dict[str, Any]:
+        """Switch the managed loop between 'run' and 'manual' (lockstep) modes."""
+        return self.result("time.set_mode", {"mode": mode})
+
+    def set_fps(self, fps: float) -> Dict[str, Any]:
+        """Cap the loop at `fps` frames/sec; fps==0 uncaps (needs vsync OFF on the host)."""
+        return self.result("time.set_fps", {"fps": fps})
+
+    def render_set_enabled(self, enabled: bool) -> Dict[str, Any]:
+        """Toggle the render pass; disabled => the host skips draw+swap (draw_calls -> 0)."""
+        return self.result("render.set_enabled", {"enabled": enabled})
+
+    def render_info(self) -> Dict[str, Any]:
+        """Read {enabled, draw_calls} — draw_calls is 0 while render is disabled."""
+        return self.result("render.info")
+
+    def frame_current(self) -> Dict[str, Any]:
+        """Read the current {frame, time, dt} from the managed loop's g_nt_app state."""
+        return self.result("frame.current")
 
     def close(self) -> None:
         self._transport.close()

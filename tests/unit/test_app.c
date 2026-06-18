@@ -2,6 +2,7 @@
 #include "unity.h"
 
 #include <math.h>
+#include <string.h>
 
 /* Helper: float approximately equal (avoids UNITY_EXCLUDE_FLOAT issue) */
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
@@ -32,11 +33,13 @@ void setUp(void) {
     for (int i = 0; i < 64; i++) {
         s_recorded_dts[i] = -1.0F;
     }
-    /* Reset g_nt_app to defaults before each test */
-    g_nt_app.dt = 0.0F;
-    g_nt_app.time = 0.0F;
+    /* Reset g_nt_app to construction defaults before each test (full reset: the single loop is
+       mode-aware, so a stale mode/paused/scale from a prior test would skew this one). */
+    memset(&g_nt_app, 0, sizeof(g_nt_app));
     g_nt_app.max_dt = 0.1F;
-    g_nt_app.frame = 0;
+    g_nt_app.scale = 1.0F;
+    g_nt_app.step_dt = 1.0F / 60.0F;
+    g_nt_app.render_enabled = true;
 }
 
 void tearDown(void) { /* Called after each test */ }
@@ -70,7 +73,7 @@ void test_app_dt_clamped(void) {
 void test_app_time_accumulates(void) {
     s_target_frames = 5;
     nt_app_run(frame_fn_quit_after_n);
-    TEST_ASSERT_TRUE_MESSAGE(g_nt_app.time >= 0.0F, "time should accumulate (non-negative)");
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_app.time >= 0.0, "time should accumulate (non-negative)");
 }
 
 /* 5. Frame counter matches expected count */

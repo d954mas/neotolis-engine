@@ -41,26 +41,51 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_MAX_DEFERRED 128
 #endif
 
+/* Upper bound for frame.wait{frames}, sized to the default 5s client read-timeout: at 60fps a
+   256-frame RUN wait is ~4.3s, under the timeout (a bigger ceiling rejects nothing the client
+   could wait for anyway). Not the slot-count cap. Override per build with -D. */
+#ifndef NT_DEVAPI_FRAME_WAIT_MAX
+#define NT_DEVAPI_FRAME_WAIT_MAX 256
+#endif
+
+/* Upper bound for time.step{count}: a fail-fast ceiling + sane batch size, NOT a UB/overflow guard
+   (cJSON clamps to INT_MAX, nt_app_step saturates). Crunch runs uncapped, so 2^20 is ~a second of
+   fast frames; heavier per-frame work wants smaller batches or a raised client timeout. -D to override. */
+#ifndef NT_DEVAPI_STEP_MAX
+#define NT_DEVAPI_STEP_MAX 1048576
+#endif
+
+/* Upper bound for time.wait{seconds} (game-time deadline), sized to the default 5s read-timeout:
+   at scale 1 a wait runs at wall rate, so >5s never resolves before the client gives up. 4s leaves
+   margin; longer waits need scale>1 or a raised client timeout. Override per build with -D. */
+#ifndef NT_DEVAPI_TIME_WAIT_MAX_SECONDS
+#define NT_DEVAPI_TIME_WAIT_MAX_SECONDS 4.0
+#endif
+
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
-    cJSON *id;       /* owned duplicate of request_id (number or string); NULL if absent. */
-    int frames_left; /* continuation: yields when it reaches 0. */
+    cJSON *id;             /* owned duplicate of request_id (number or string); NULL if absent. */
+    double target_time;    /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
+    uint32_t target_frame; /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
+    bool by_time;          /* selects which deadline field slot_ready compares. */
     bool in_use;
 } nt_devapi_deferred_slot;
 
-/* Mark the in-flight command as deferred: submit() returns NULL and the response is
-   yielded after `frames_left` poll_response() calls. Returns true so the handler returns
+/* Mark the in-flight command as deferred: submit() returns NULL and the response is yielded once
+   g_nt_app.frame has advanced `frames` game frames past submit. Returns true so the handler returns
    normally (the bool ABI is unchanged). Must be called from inside a handler dispatch. */
-bool nt_devapi_defer_current(int frames_left);
+bool nt_devapi_defer_current(int frames);
+
+/* Like nt_devapi_defer_current but on a GAME-TIME deadline: yields once g_nt_app.time has advanced
+   `seconds` past submit. For time.wait (RUN, where dt is variable so a frame count can't be
+   precomputed). Must be called from inside a handler dispatch. */
+bool nt_devapi_defer_current_time(double seconds);
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */
 void nt_devapi_deferred_reset(void);
 
-/* Advance all in-flight deferred slots once per frame (decrement frames_left exactly once).
-   Call before draining with nt_devapi_poll_response, which only pops ready slots. */
-void nt_devapi_deferred_tick(void);
 // #endregion
 
 /* True between init and shutdown — lets submit enforce init-before-use. */
@@ -79,6 +104,12 @@ bool nt_devapi_group_is_first(int index);
    nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_REGISTER_core
 void nt_devapi_register_core(void);
+#endif
+
+/* Engine `time`/`render`/`frame` group registrar (per-group #ifdef). Defined in
+   nt_devapi_time.c, invoked from nt_devapi_init under the same compile gate. */
+#ifdef NT_DEVAPI_REGISTER_time
+void nt_devapi_register_time(void);
 #endif
 
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in

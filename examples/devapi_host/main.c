@@ -10,9 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Safety auto-exit so a CI run can't hang forever if no client ever drives a quit.
-#define DEVAPI_HOST_MAX_FRAMES 100000u
-
 /* game-layer command: echo {msg} back as {msg}. Registered via the public
    nt_devapi_register path only — zero engine edits. Uses the public cJSON
    API for the result (devapi_add_* is internal to the devapi module). */
@@ -62,12 +59,19 @@ static void frame(void) {
     /* Poll devapi at frame start, before input: a command only queues an input
        injection, nt_input_poll() then samples hardware, and a later apply step
        overlays the queued injection so it wins (one frame-start touch-point). */
-    nt_devapi_net_poll();
+    nt_devapi_update();
     nt_input_poll();
 
-    nt_window_swap_buffers();
+    /* Draw + swap go TOGETHER under the render flag — never skip-draw-but-swap (that would present a
+       stale buffer). Render off => draw_calls stays 0. */
+    if (nt_app_render_enabled()) {
+        /* placeholder: real draw / nt_ui_walk goes here */
+        nt_window_swap_buffers();
+    }
 
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || g_nt_app.frame >= DEVAPI_HOST_MAX_FRAMES) {
+    /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
+       timeouts catch a hung host). A frame-count cap would also kill long stability sims. */
+    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 }
@@ -86,6 +90,8 @@ int main(void) {
     g_nt_window.width = 800;
     g_nt_window.height = 600;
     nt_window_init();
+    /* vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
+    nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 
     /* devapi wiring (game-layer consumer; no engine edits). */
