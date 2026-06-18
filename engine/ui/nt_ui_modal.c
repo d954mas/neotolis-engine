@@ -22,10 +22,6 @@ const nt_ui_widget_def_t NT_UI_MODAL_DEF = {
     ._reserved = 0U,
 };
 
-/* Below this eased t the modal's alpha rounds to 0 (8-bit) — treat as fully closed (matches the
- * popup-core epsilon so visible/fully_closed agree between the two). */
-#define NT_UI_MODAL_EPSILON (1.0F / 256.0F)
-
 /* Build-time sanity net on the DEFAULT stride; the configured per-ctx value is validated at runtime
  * in nt_ui_create_context. Per-depth z-band: panel_z = stride*(depth+1), backdrop one below. */
 _Static_assert(NT_UI_MODAL_ZBAND_STRIDE *(NT_UI_MODAL_MAX_DEPTH) <= INT16_MAX, "modal z-band exceeds int16 zIndex");

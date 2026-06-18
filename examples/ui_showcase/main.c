@@ -128,7 +128,7 @@ static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF
 /* Per-palette modal base; the palette pointer flip restyles the modal on hot-swap. */
 static nt_ui_modal_style_t s_modal_dark, s_modal_light;
 
-/* Phase-65 app-widgets: dropdown / tooltip / menu / tab-bar, per-palette dark/light. */
+/* App-widget styles: dropdown / tooltip / menu / tab-bar, per-palette dark/light. */
 static nt_ui_dropdown_style_t s_dropdown_dark, s_dropdown_light;
 static nt_ui_tooltip_style_t s_tooltip_dark, s_tooltip_light;
 static nt_ui_menu_style_t s_menu_dark, s_menu_light;
@@ -412,7 +412,7 @@ static uint32_t s_id_theme_btn;
 static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
 static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art, s_id_input_disabled;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
-/* Phase-65 app-widget ids. */
+/* App-widget ids. */
 static uint32_t s_id_events_hold;                   /* hold-to-confirm button */
 static uint32_t s_id_events_dbl;                    /* double-click target */
 static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
@@ -1533,8 +1533,8 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Press and HOLD the button: the fill ramps to full over ~1.5s and confirms at the top.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Drag the cursor off the button mid-hold to RESET the fill (no confirm).", g_current->caption);
 
-    /* The button itself drives the gesture cell via its cfg (Plan 02 path); we read the latched result
-     * back idempotently after end() for the fill + the one-shot confirm. */
+    /* The button itself drives the gesture cell via its cfg; we read the latched result back
+     * idempotently after end() for the fill + the one-shot confirm. */
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_hold, g_current->btn_primary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},

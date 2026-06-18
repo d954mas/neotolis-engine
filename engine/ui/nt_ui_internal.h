@@ -236,9 +236,8 @@ struct nt_ui_context {
         bool active;
     } pending_tabbar;
     struct {
-        uint32_t id; /* the open tab's id (base_id + index) */
+        uint32_t id; /* the open tab's id (mixed hash of base_id+index; see tabbar_tab_id, NOT additive) */
         bool active; /* a tab element is open (between tab_begin/tab_end) */
-        bool clicked;
     } pending_tab;
 
     /* nt_ui_walk asserts each is non-zero at entry. */

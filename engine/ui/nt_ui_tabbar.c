@@ -245,7 +245,6 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
     /* Click is harvested in tab_end (one mutating step per id); the tab element stays OPEN for content. */
     ctx->pending_tab.id = tab_id;
     ctx->pending_tab.active = true;
-    ctx->pending_tab.clicked = false;
     return in.clicked;
 }
 
@@ -255,7 +254,7 @@ void nt_ui_tab_end(nt_ui_context_t *ctx) {
 
     const uint32_t tab_id = ctx->pending_tab.id;
     nt_ui_clay_priv_close_element();
-    ctx->pending_tab.clicked = nt_ui_step_interaction(ctx, tab_id).clicked;
+    (void)nt_ui_step_interaction(ctx, tab_id); /* the canonical mutating step (registers the tab + advances capture) */
     ctx->pending_tab.active = false;
 }
 

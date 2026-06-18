@@ -267,8 +267,8 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     TEST_ASSERT_TRUE_MESSAGE(track_len > 0.0F, "showcase scrollbar track must have non-zero length");
     TEST_ASSERT_TRUE_MESSAGE(thumb_len > 0.0F, "showcase scrollbar thumb must have non-zero length");
     TEST_ASSERT_TRUE_MESSAGE(opacity > 0.0F, "ALWAYS-visible showcase scrollbar must be opaque");
-    /* ROOT of BUG2: the bar must draw on the dropdown's CONTENT layer (1 here), not hardcoded 0 — else
-     * an opaque panel on layer 1 sorts OVER the bar and hides it (visible "no scrollbar"). */
+    /* The bar must draw on the dropdown's CONTENT layer (1 here), not hardcoded 0 — else an opaque panel
+     * on layer 1 sorts OVER the bar and hides it (visible "no scrollbar"). */
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_scroll_test_last_bar_layer(1), "scrollbar must draw on the container content layer, not buried under the panel");
 }
 

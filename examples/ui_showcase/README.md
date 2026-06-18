@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (14 entries)
+## Tabs (15 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -27,8 +27,8 @@ lighten and writes the index on click).
    offset transform driven by a properties panel; the click counter proves the
    transform-aware (inverse-affine) hit-test still clicks while it is rotated,
    scaled, and offset.
-4. **Images & Slice9** - panels at 300x100 / 600x100 / 600x400 (corners stay
-   crisp) + a live insets/size properties panel.
+4. **Images & Slice9** - slice9 panels at several sizes (corners stay crisp) +
+   a live insets/size properties panel.
 5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle.
 6. **Sliders & Progress** - float + int sliders + a progress bar with a live
    value / auto-animate properties panel.
@@ -46,7 +46,10 @@ lighten and writes the index on click).
     never block clicks on the targets underneath).
 13. **Menu** - a right-click / long-press **context menu** with a nested **submenu**:
     mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-14. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+14. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+    tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
+    list, which uses the one-call `labels[]` wrapper with a LEFT accent).
+15. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -88,7 +91,7 @@ Per-field behavior:
 
 ## Interaction-events controls (Events / Dropdown / Tooltip / Menu tabs)
 
-These tabs wire the Phase-65 interaction events + app-widgets. All widget state is
+These tabs wire the interaction events + app-widgets. All widget state is
 **game-owned** (Model D); the engine owns only the gesture / hover-delay / popup cells.
 
 | Input | Action |
@@ -133,12 +136,12 @@ frame.
 - **Slice9**: per-side insets L/R/T/B + target W/H drive a live
   `NT_UI_IMAGE_SLICE9_OVERRIDE` emit.
 - **Progress**: a value slider + an auto-animate toggle.
-- **Stress**: a segmented label count (50 / 100 / 200 / 400) driving the loop.
+- **Stress**: a segmented label count (500 / 1500 / 3000 / 6000) driving the loop.
 
 ## Slug measurement protocol (Stress tab)
 
 Open the **Stress** tab and read the **frame `gpu_ms`** overlay. Pick a label
-count with the panel (50 / 100 / 200 / 400) and watch the frame `gpu_ms` and the
+count with the panel (500 / 1500 / 3000 / 6000) and watch the frame `gpu_ms` and the
 live `ui_draw_calls` readout respond.
 
 **GL-timer latency:** `gpu_ms` comes from an asynchronous `GL_TIME_ELAPSED`

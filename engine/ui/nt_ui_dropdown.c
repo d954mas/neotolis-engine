@@ -349,7 +349,9 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
             nt_ui_scroll_style_t sst = style->list_scroll;
             /* scroll owns .id/.clip/.userData; the decl supplies only sizing/look. IMAGE panel art can't
              * round, so drop cornerRadius when art is present (rounding is baked into the sprite). */
-            Clay_ElementDeclaration scroll_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(view_h)}, .padding = CLAY_PADDING_ALL(style->pad)}};
+            /* Width FIT(min=panel_w) matches the non-scroll branch so long labels don't clip; height stays
+             * fixed at view_h (the vertical scroll viewport). */
+            Clay_ElementDeclaration scroll_decl = {.layout = {.sizing = {CLAY_SIZING_FIT(.min = panel_w), CLAY_SIZING_FIXED(view_h)}, .padding = CLAY_PADDING_ALL(style->pad)}};
             if (panel_art) {
                 nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
                 NT_ASSERT(p != NULL && "nt_ui_dropdown: scratch alloc failed (panel payload)");

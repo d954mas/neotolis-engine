@@ -537,7 +537,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     // #endregion
 
     // #region seed-and-dfs
-    /* Each tree root's seed = identity (root 0) or tree_baked[parentId-resolved index]. */
+    /* Each tree root's seed = identity (the parentId==0 document root) or tree_baked[parentId-resolved index]. */
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         const int32_t root_idx = ctx->tree_root_for_elem[elem_idx];
         if (root_idx < 0) {
