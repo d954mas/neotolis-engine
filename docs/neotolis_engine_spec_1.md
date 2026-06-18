@@ -2577,7 +2577,7 @@ A bot drives input through the devapi `input.*` command group, which is a thin L
 | `input.key` | `{key, down?, hold?}` | `{ok}` | inject a key edge (`down` default true), or with `hold` a tap = down@0 + up@hold |
 | `input.pointer` | `{action, id, x?, y?, type?, buttons?}` | `{queued}` | the pointer primitive: action `down`/`move`/`up` on a given id (default mouse type) |
 | `input.move` | `{x, y, id?, type?}` | `{queued}` | sugar: pointer move on the default mouse slot |
-| `input.click` | `{x, y, button?, id?}` | `{queued}` | sugar: pointer down + up (2 entries) carrying a button mask |
+| `input.click` | `{x, y, button?, id?, hold?}` | `{queued}` | sugar: pointer down@0 + up@`hold` (2 entries) carrying a button mask; `hold` default 1 frame (a realistic 1-frame-held click), `hold=0` = same-frame instant click |
 | `input.wheel` | `{dx?, dy?}` | `{ok}` | mouse-slot wheel delta |
 | `input.gesture` | `{id, type?, points:[[x,y]], frame_stride?}` | `{queued}` | sugar: down@0 + a move per subsequent point (`frame_stride` apart) + up; NO C interpolation — the bot supplies the path samples |
 | `input.button` | `{buttons, id?}` | `{ok}` | set the mouse-button mask `{1,2,4}` on the given id |

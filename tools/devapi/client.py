@@ -232,14 +232,27 @@ class DevApiClient:
         return self.result("input.move", params)
 
     def click(
-        self, x: float, y: float, button: Optional[int] = None, id: Optional[int] = None
+        self,
+        x: float,
+        y: float,
+        button: Optional[int] = None,
+        id: Optional[int] = None,
+        hold: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Inject a pointer down+up (2 atomic entries) on the mouse slot."""
+        """Inject a pointer down+up (2 atomic entries) on the mouse slot.
+
+        Default is a 1-frame hold (down@0 + up@1) — a realistic click held across one frame.
+        Pass hold=0 for an instant same-frame click (down+up collapsed into one frame). `hold`
+        is omitted from the request when None so the host-side default of 1 is the single
+        source of truth.
+        """
         params: Dict[str, Any] = {"x": x, "y": y}
         if button is not None:
             params["button"] = button
         if id is not None:
             params["id"] = id
+        if hold is not None:
+            params["hold"] = hold
         return self.result("input.click", params)
 
     def pointer(

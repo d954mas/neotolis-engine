@@ -185,6 +185,34 @@ void test_inject_gesture_ordered(void) {
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
 }
 
+/* ---- input.click contract: down@0 + up@hold (default hold=1 holds one frame, hold=0 same-frame) ---- */
+
+/* Default click (hold=1): DOWN lands frame N pressed+down, UP lands frame N+1 -> button genuinely
+   held across one frame, then released. Mirrors what cmd_input_click enqueues (down@0, up@1). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_inject_click_default_hold_holds_one_frame(void) {
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 6.0F, 1.0F, NT_POINTER_MOUSE, 1U, 0));
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 6.0F, 0.0F, NT_POINTER_MOUSE, 0, 1U));
+    nt_input_poll(1U); /* down@0 applies; up frames_remaining 1->0 (no apply yet, frame advanced once) */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    nt_input_poll(2U); /* up==0 applies -> released this frame, no longer down */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
+/* hold=0 click: DOWN and UP both land in one poll -> pressed && released same frame, ends not-down.
+   Pins the explicit instant-click case (the old same-frame default). */
+void test_inject_click_hold_zero_same_frame(void) {
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 6.0F, 1.0F, NT_POINTER_MOUSE, 1U, 0));
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, 5.0F, 6.0F, 0.0F, NT_POINTER_MOUSE, 0, 0));
+    nt_input_poll(1U); /* down@0 + up@0 both apply this poll */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
 /* ---- INPUT-03: whole-or-nothing overflow rejection ---- */
 
 void test_overflow_rejects_whole(void) {
@@ -259,6 +287,8 @@ int main(void) {
     RUN_TEST(test_inject_button_mask_maps_right_and_middle);
     RUN_TEST(test_inject_reserved_id);
     RUN_TEST(test_inject_gesture_ordered);
+    RUN_TEST(test_inject_click_default_hold_holds_one_frame);
+    RUN_TEST(test_inject_click_hold_zero_same_frame);
     RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_key_from_name);
     RUN_TEST(test_poll_countdown_freezes_on_same_frame);

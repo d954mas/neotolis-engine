@@ -221,7 +221,9 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* sugar = pointer down + up (2 entries) on the default mouse slot with the given button mask. */
+/* sugar = pointer down@0 + up@hold (2 entries) on the default mouse slot with the given button mask.
+   hold defaults to 1: a realistic 1-frame-held click (down@0 + up@1) — symmetric with input.key tap.
+   hold=0 collapses both edges into one frame (instant same-frame click, what real hardware can't do). */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
@@ -252,6 +254,17 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
             return false;
         }
     }
+    uint16_t hold = 1U; /* default: 1-frame-held click (down@0 + up@1) */
+    const cJSON *hj = cJSON_GetObjectItemCaseSensitive(params, "hold");
+    if (hj != NULL) {
+        if (!cJSON_IsNumber(hj)) {
+            set_bad_params(err, "input.click: hold must be a number");
+            return false;
+        }
+        if (!parse_frame_count(hj, "input.click: hold must be an integer in [0, 65535]", &hold, err)) {
+            return false;
+        }
+    }
     float x = (float)xj->valuedouble;
     float y = (float)yj->valuedouble;
     /* Whole-or-nothing: preflight both entries so a near-full queue can never accept the
@@ -260,12 +273,12 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
         set_bad_params(err, "input.click: inject queue overflow");
         return false;
     }
-    /* down carries the button mask, up releases. Enqueue down then up so the click is ordered. */
+    /* down@0 carries the button mask, up@hold releases. Enqueue down then up so the click is ordered. */
     if (!nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0)) {
         set_bad_params(err, "input.click: inject queue overflow");
         return false;
     }
-    if (!nt_input_inject_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0)) {
+    if (!nt_input_inject_pointer(NT_INJECT_POINTER_UP, id, x, y, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold)) {
         set_bad_params(err, "input.click: inject queue overflow");
         return false;
     }
@@ -610,8 +623,8 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.click",
         .group = "input",
-        .summary = "sugar: pointer down + up (2 entries) on the mouse slot with the given button mask",
-        .params_shape = "{x:number, y:number, button?:number, id?:number}",
+        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse slot; hold default 1 frame, 0 = same-frame",
+        .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
         .side_effects = "enqueues a synthetic pointer down+up",
