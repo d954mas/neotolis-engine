@@ -30,6 +30,39 @@ static bool s_player_enabled = true;
 static uint32_t s_last_poll_frame;
 static bool s_have_last_frame;
 
+/* ---- Synthetic inject queue (bounded BSS; frame-scheduled) ---- */
+
+typedef struct {
+    uint16_t frames_remaining; /* sim-advance countdown; 0 = apply this poll (D-05) */
+    uint8_t kind;              /* nt_inject_kind_t */
+    union {
+        struct {
+            uint8_t key; /* nt_key_t fits in u8 (COUNT=69) */
+            bool down;
+        } key;
+        struct {
+            uint32_t id;
+            float x, y, pressure;
+            uint8_t type;
+            uint8_t buttons_mask;
+        } pointer; /* down / move */
+        struct {
+            uint32_t id;
+        } pointer_up;
+        struct {
+            float dx, dy;
+        } wheel;
+        struct {
+            uint32_t cp;
+        } chr;
+    } u;
+} nt_inject_event_t;
+
+static nt_inject_event_t s_inject_queue[NT_INPUT_INJECT_QUEUE_MAX];
+static uint32_t s_inject_count;
+
+static void inject_drain(bool advanced);
+
 /* ---- Internal pointer helpers ---- */
 
 static nt_pointer_t *find_pointer_by_id(uint32_t id) {
@@ -84,6 +117,7 @@ void nt_input_init(void) {
     s_char_tail = 0;
     s_last_poll_frame = 0;
     s_have_last_frame = false;
+    s_inject_count = 0;
     s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
     nt_input_platform_init();
 }
@@ -121,11 +155,10 @@ void nt_input_poll(uint32_t frame) {
     nt_input_platform_poll();
 
     /* Relative frame countdown: only a NEW sim-advance frame ticks the inject queue,
-       so PAUSE / MANUAL-idle (same frame re-polled) freeze it. Inject-drain insertion
-       point (Plan 03 calls inject_drain(advanced) here, same post-clear window as the
-       native char drain, D-01/Q6). */
+       so PAUSE / MANUAL-idle (same frame re-polled) freeze it. Inject drains in the same
+       post-clear window as the native char drain (D-01/Q6). */
     bool advanced = !s_have_last_frame || (frame != s_last_poll_frame);
-    (void)advanced; /* Plan 03 wires inject_drain(advanced); kept to land the seam now. */
+    inject_drain(advanced);
     s_last_poll_frame = frame;
     s_have_last_frame = true;
 }
@@ -135,6 +168,7 @@ void nt_input_shutdown(void) {
     memset(&g_nt_input, 0, sizeof(g_nt_input));
     s_char_head = 0;
     s_char_tail = 0;
+    s_inject_count = 0;
 }
 
 /* ---- Key query functions ---- */
@@ -163,6 +197,31 @@ bool nt_input_key_is_released(nt_key_t key) {
 bool nt_input_any_key_pressed(void) {
     for (int i = 0; i < NT_KEY_COUNT; i++) {
         if (s_keys_pressed[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* ---- string -> nt_key_t name table ---- */
+
+/* Indexed by nt_key_t; each string = the enum identifier minus the NT_KEY_ prefix. The
+   _Static_assert is the drift guard: adding an enum value without a name breaks the build. */
+static const char *const k_key_names[NT_KEY_COUNT] = {
+    "A",        "B",          "C",          "D",           "E",     "F",     "G",      "H",   "I",         "J",      "K",      "L",     "M",     "N",       "O",         "P",  "Q",  "R",
+    "S",        "T",          "U",          "V",           "W",     "X",     "Y",      "Z",   "0",         "1",      "2",      "3",     "4",     "5",       "6",         "7",  "8",  "9",
+    "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT", "SPACE", "ENTER", "ESCAPE", "TAB", "BACKSPACE", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT",    "RALT",      "F1", "F2", "F3",
+    "F4",       "F5",         "F6",         "F7",          "F8",    "F9",    "F10",    "F11", "F12",       "DELETE", "INSERT", "HOME",  "END",   "PAGE_UP", "PAGE_DOWN",
+};
+_Static_assert(sizeof(k_key_names) / sizeof(k_key_names[0]) == NT_KEY_COUNT, "key-name table must match nt_key_t");
+
+bool nt_input_key_from_name(const char *name, nt_key_t *out) {
+    if (name == NULL || out == NULL) {
+        return false;
+    }
+    for (int i = 0; i < NT_KEY_COUNT; i++) {
+        if (strcmp(name, k_key_names[i]) == 0) {
+            *out = (nt_key_t)i;
             return true;
         }
     }
@@ -389,4 +448,135 @@ void nt_input_set_player_enabled(bool enabled) {
         nt_input_clear_all_pointers();
     }
     s_player_enabled = enabled;
+}
+
+/* ---- Synthetic input injection ---- */
+
+/* Whole-or-nothing reserve: a command needing N entries either gets all N or none (D-06,
+   mirrors deferred_enqueue reject-whole) -- a partial enqueue would leave a stuck key-down
+   or a drag with no release. Returns the first reserved slot, or NULL on overflow. */
+static nt_inject_event_t *inject_reserve(uint32_t n) {
+    if (n > NT_INPUT_INJECT_QUEUE_MAX - s_inject_count) {
+        return NULL; /* would overflow -- reject the whole command, write nothing */
+    }
+    nt_inject_event_t *first = &s_inject_queue[s_inject_count];
+    s_inject_count += n;
+    return first;
+}
+
+bool nt_input_inject_key(nt_key_t key, bool down, uint16_t at_frame) {
+    nt_inject_event_t *e = inject_reserve(1);
+    if (e == NULL) {
+        return false;
+    }
+    e->frames_remaining = at_frame;
+    e->kind = NT_INJECT_KEY;
+    e->u.key.key = (uint8_t)key;
+    e->u.key.down = down;
+    return true;
+}
+
+bool nt_input_inject_key_tap(nt_key_t key, uint16_t hold_frames) {
+    nt_inject_event_t *e = inject_reserve(2); /* atomic down@0 + up@hold */
+    if (e == NULL) {
+        return false;
+    }
+    e[0].frames_remaining = 0;
+    e[0].kind = NT_INJECT_KEY;
+    e[0].u.key.key = (uint8_t)key;
+    e[0].u.key.down = true;
+    e[1].frames_remaining = hold_frames;
+    e[1].kind = NT_INJECT_KEY;
+    e[1].u.key.key = (uint8_t)key;
+    e[1].u.key.down = false;
+    return true;
+}
+
+bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+    nt_inject_event_t *e = inject_reserve(1);
+    if (e == NULL) {
+        return false;
+    }
+    e->frames_remaining = at_frame;
+    e->kind = (uint8_t)kind;
+    if (kind == NT_INJECT_POINTER_UP) {
+        e->u.pointer_up.id = id;
+    } else {
+        e->u.pointer.id = id;
+        e->u.pointer.x = x;
+        e->u.pointer.y = y;
+        e->u.pointer.pressure = pressure;
+        e->u.pointer.type = type;
+        e->u.pointer.buttons_mask = buttons_mask;
+    }
+    return true;
+}
+
+bool nt_input_inject_wheel(float dx, float dy, uint16_t at_frame) {
+    nt_inject_event_t *e = inject_reserve(1);
+    if (e == NULL) {
+        return false;
+    }
+    e->frames_remaining = at_frame;
+    e->kind = NT_INJECT_WHEEL;
+    e->u.wheel.dx = dx;
+    e->u.wheel.dy = dy;
+    return true;
+}
+
+bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
+    if (cps == NULL || n == 0) {
+        return false;
+    }
+    nt_inject_event_t *e = inject_reserve(n); /* whole-or-nothing by codepoint count */
+    if (e == NULL) {
+        return false;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        e[i].frames_remaining = 0;
+        e[i].kind = NT_INJECT_CHAR;
+        e[i].u.chr.cp = cps[i];
+    }
+    return true;
+}
+
+static void inject_apply_one(const nt_inject_event_t *e) {
+    /* Apply through the *_apply cores so inject always flows past the player gate (D-03). */
+    switch ((nt_inject_kind_t)e->kind) {
+    case NT_INJECT_KEY:
+        nt_input_set_key_apply((nt_key_t)e->u.key.key, e->u.key.down);
+        break;
+    case NT_INJECT_POINTER_DOWN:
+        nt_input_pointer_down_apply(e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
+        break;
+    case NT_INJECT_POINTER_MOVE:
+        nt_input_pointer_move_apply(e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
+        break;
+    case NT_INJECT_POINTER_UP:
+        nt_input_pointer_up_apply(e->u.pointer_up.id);
+        break;
+    case NT_INJECT_WHEEL:
+        nt_input_wheel_apply(e->u.wheel.dx, e->u.wheel.dy);
+        break;
+    case NT_INJECT_CHAR:
+        nt_input_buffer_char_apply(e->u.chr.cp);
+        break;
+    }
+}
+
+/* Apply every entry whose countdown hit 0 (in enqueue order = cross-command FIFO), compacting
+   them out; survivors decrement by 1 only on a real sim-advance (advanced). */
+static void inject_drain(bool advanced) {
+    uint32_t out = 0;
+    for (uint32_t i = 0; i < s_inject_count; i++) {
+        if (s_inject_queue[i].frames_remaining == 0) {
+            inject_apply_one(&s_inject_queue[i]);
+            continue; /* applied -- drop it (compact) */
+        }
+        if (advanced) {
+            s_inject_queue[i].frames_remaining--;
+        }
+        s_inject_queue[out++] = s_inject_queue[i];
+    }
+    s_inject_count = out;
 }

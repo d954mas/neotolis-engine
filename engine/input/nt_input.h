@@ -156,6 +156,31 @@ bool nt_input_pop_char(uint32_t *out_codepoint);
    No-op on native/stub. Apply it when a field gains focus. */
 void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
+/* ---- Synthetic input injection (INPUT-01/02/03) ---- */
+
+/* Event kinds in the frame-scheduled inject queue. */
+typedef enum {
+    NT_INJECT_KEY = 0,      /* key down/up */
+    NT_INJECT_POINTER_DOWN, /* pointer slot create/press */
+    NT_INJECT_POINTER_MOVE, /* pointer move */
+    NT_INJECT_POINTER_UP,   /* pointer release + deactivate-pending */
+    NT_INJECT_WHEEL,        /* mouse slot only */
+    NT_INJECT_CHAR,         /* codepoint into the char ring */
+} nt_inject_kind_t;
+
+/* Bounded BSS inject queue cap (-D overridable, like NT_DEVAPI_MAX_DEFERRED). */
+#ifndef NT_INPUT_INJECT_QUEUE_MAX
+#define NT_INPUT_INJECT_QUEUE_MAX 256
+#endif
+
+/* Convenience single-pointer id: a HIGH reserved value so it never collides with a real
+   mouse (id=0) or a small browser pointerId. Explicit bot ids are used verbatim. */
+#define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000u
+
+/* Map a key name ("A","SPACE","ARROW_UP","F1" -- the enum identifier minus NT_KEY_) to its
+   nt_key_t. Returns false (out untouched) on unknown. */
+bool nt_input_key_from_name(const char *name, nt_key_t *out);
+
 /* ---- Mouse convenience helpers ---- */
 
 bool nt_input_mouse_is_down(nt_button_t button);
