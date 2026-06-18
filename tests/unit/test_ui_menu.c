@@ -1,4 +1,4 @@
-/* Context-menu + recursive submenu tests (WGT-04/05). Task 1 (prototype-first) covers the novel
+/* Context-menu + recursive submenu tests. Covers the
  * algorithm in isolation — the mouse-aim triangle hover-intent keeps an open submenu open along a
  * diagonal that crosses sibling items, the off-triangle dwell switches after AIM_FALLBACK, the
  * per-level edge-flip mirrors the aim corners near all 4 borders, depth-salted state cells never
@@ -154,7 +154,7 @@ static void test_menu_aim_switch_after_fallback(void) {
     TEST_ASSERT_TRUE(frames_to_switch >= 7 && frames_to_switch <= 9);
 }
 
-/* ---- Stuck-state regression (Wave 0b): with a STABLE apex, vertical travel along the parent panel
+/* ---- Stuck-state regression: with a STABLE apex, vertical travel along the parent panel
  *      toward a sibling LEAVES the narrow corridor, so the dwell races AIM_FALLBACK and a switch is
  *      allowed. The old per-frame apex made the wedge near-degenerate-huge and trapped this move. ---- */
 static void test_menu_hover_switch_to_sibling_releases(void) {
@@ -225,15 +225,15 @@ static void test_menu_malformed_tree_asserts(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* Build a tree nested deeper than NT_UI_MENU_MAX_DEPTH at compile time is awkward; the depth-cap death
- * test is exercised in Task 2 against the live recursive declare. Task 1 proves the cap constant exists
+/* Building a tree deeper than NT_UI_MENU_MAX_DEPTH at compile time is awkward; the depth-cap death
+ * test runs against the live recursive declare below. This proves the cap constant exists
  * and the popup-core's own depth assert (shared) fires past its cap. */
 static void test_menu_max_depth_constant(void) {
     TEST_ASSERT_TRUE(NT_UI_MENU_MAX_DEPTH >= 1);
     TEST_ASSERT_TRUE(NT_UI_MENU_MAX_DEPTH <= NT_UI_MODAL_MAX_DEPTH);
 }
 
-/* ============================ Task 2: full menu UI ============================ */
+/* ============================ full menu UI ============================ */
 
 /* A 3-level tree: File > (New, Open > (Project, File2), Quit). Static so submenu pointers stay valid. */
 static const nt_ui_menu_item_t s_open_sub[] = {
@@ -284,7 +284,7 @@ static void test_menu_smoke_open_and_closed(void) {
 }
 
 /* ---- Keyboard-nav reaches a nested leaf: Down focuses File, Right opens its submenu, Down to Open,
- *      Right opens the grandchild, Down to File2, Enter activates id 102 (Model D). ---- */
+ *      Right opens the grandchild, Down to File2, Enter activates id 102. ---- */
 static void test_menu_kbd_nav_activates_nested_leaf(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
@@ -346,7 +346,7 @@ static void menu_mouse_press(float px, float py) {
 }
 
 /* ---- Outside-click dismiss: a left-click far outside every open panel closes the whole chain
- *      (menu-owned dismiss; catchers were removed in Wave 0c). ---- */
+ *      (menu-owned dismiss; no light-dismiss catchers). ---- */
 static void test_menu_outside_click_dismisses_chain(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
@@ -382,7 +382,7 @@ static void test_menu_inside_click_keeps_open(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "a click inside an open panel must NOT dismiss the chain");
 }
 
-/* ---- Switch root branch via keyboard while a submenu is open (Wave 0b stuck-state guard): open the
+/* ---- Switch root branch via keyboard while a submenu is open (stuck-state guard): open the
  *      File submenu, then Left collapses back to root, Down moves to another root parent (Tools), Right
  *      opens ITS submenu. The user is never locked into the first open branch. ---- */
 static const nt_ui_menu_item_t s_tools_sub[] = {
@@ -439,9 +439,9 @@ static void menu_frame2_at(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, fl
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Occlusion-trap regression (Wave 0c, the REAL root cause): with a submenu open, the ANCESTOR
- *      (root) sibling row is still HITTABLE by the mouse. Before Wave 0c the submenu's full-viewport
- *      light-dismiss catcher sat at a higher z than the root panel and occluded it, so the root row
+/* ---- Occlusion-trap regression: with a submenu open, the ANCESTOR
+ *      (root) sibling row is still HITTABLE by the mouse. A submenu full-viewport
+ *      light-dismiss catcher above the root panel would occlude it, so the root row
  *      never reported hovered and the user was trapped in the deepest level. ---- */
 static void test_menu_root_row_hittable_while_submenu_open(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -469,7 +469,7 @@ static void test_menu_root_row_hittable_while_submenu_open(void) {
 }
 
 /* ---- Click an ancestor root parent while a submenu is open: the click reaches the root row (no
- *      catcher occlusion) and switches the open branch to it (Wave 0c behavior #3). ---- */
+ *      catcher occlusion) and switches the open branch to it. ---- */
 static void test_menu_click_root_parent_switches_branch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
@@ -538,7 +538,7 @@ static void test_menu_depth_cap_asserts(void) {
     TEST_ASSERT_TRUE_MESSAGE(tripped, "self-referential submenu must trip the depth-cap NT_ASSERT");
 }
 
-/* ============================ Wave 2.5: sprites / icons / separator / occluder ============================ */
+/* ============================ sprites / icons / separator / occluder ============================ */
 
 /* A tree with an icon gutter + a separator + a parent (arrow marker) for the visual-parity probes. The
  * icon ref carries a non-zero atlas.id so the gutter draws an image cell (no real atlas binds in the

@@ -1,5 +1,5 @@
-/* Reusable tab-bar tests (WGT-02). Driven through the walker fixture (no GL surface). A click on tab i
- * sets the game-owned int* active to i; clicking another tab updates it (Model D). */
+/* Reusable tab-bar tests. Driven through the walker fixture (no GL surface). A click on tab i
+ * sets the game-owned int* active to i; clicking another tab updates it. */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -129,7 +129,7 @@ static void two_tabbars_with_content_frame(const ui_walker_fixture_t *fx, const 
     nt_ui_end(fx->ctx);
 }
 
-/* ---- Regression (Phase 65 gap-fix): two tab-bars + per-tab icon/label content in one frame must NOT
+/* ---- Regression: two tab-bars + per-tab icon/label content in one frame must NOT
  * trip Clay's DUPLICATE_ID. nt_ui_end runs the Clay layout headlessly; a duplicate id would route
  * through nt_ui_clay_error_cb -> NT_ASSERT (the trap). A clean return == no duplicate. ---- */
 static void test_tabbar_two_bars_with_content_no_duplicate_id(void) {

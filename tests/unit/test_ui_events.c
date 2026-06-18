@@ -1,12 +1,12 @@
-/* nt_ui_events — the single canonical mutating interaction step (D-65-02). EVT-01/02/03.
+/* nt_ui_events — the single canonical mutating interaction step.
  *
  * Mirrors test_nt_ui_interaction's dt-driven frame idiom: drive ctx->frame_dt via the
  * nt_ui_begin dt arg, step across frames, assert latched edges/timers.
  *
  * Coverage:
- *   EVT-01  capture parity: nt_ui_events(cfg=NULL) == nt_ui_step_interaction for the same sequence.
- *   EVT-02  zero-alloc gate: cfg==NULL grows nt_ui_state_used_slots by zero.
- *   EVT-03  hold_progress ramp 0..1, one-shot long_pressed, drag-cancel reset, query idempotence. */
+ *   capture parity: nt_ui_events(cfg=NULL) == nt_ui_step_interaction for the same sequence.
+ *   zero-alloc gate: cfg==NULL grows nt_ui_state_used_slots by zero.
+ *   hold_progress ramp 0..1, one-shot long_pressed, drag-cancel reset, query idempotence. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -74,7 +74,7 @@ static void warm_btn_frame(const nt_pointer_t *p) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- EVT-01: capture parity — nt_ui_events(cfg=NULL) matches step_interaction edges ---- */
+/* ---- capture parity — nt_ui_events(cfg=NULL) matches step_interaction edges ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_events_capture_parity_with_step_interaction(void) {
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
@@ -125,7 +125,7 @@ static void test_events_held_is_pressed_and_hovered(void) {
     TEST_ASSERT_TRUE(float_near(e3.drag_dx, far_x - BTN_CX, 0.01F));
 }
 
-/* ---- EVT-02: zero-alloc gate — cfg==NULL must NOT touch the state pool ---- */
+/* ---- zero-alloc gate — cfg==NULL must NOT touch the state pool ---- */
 static void test_events_cfg_null_zero_alloc(void) {
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
     warm_btn_frame(&f1);
@@ -169,7 +169,7 @@ static void test_events_gesture_cfg_allocs_one_cell(void) {
     TEST_ASSERT_EQUAL_UINT32(before + 1U, nt_ui_state_used_slots(s_fx.ctx));
 }
 
-/* ---- EVT-03: hold_progress rises linearly to 1.0, long_pressed fires once at the top ---- */
+/* ---- hold_progress rises linearly to 1.0, long_pressed fires once at the top ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_events_hold_progress_ramp_and_one_shot_long_press(void) {
     const float lp = 1.0F; /* long-press at 1.0s */
@@ -208,7 +208,7 @@ static void test_events_hold_progress_ramp_and_one_shot_long_press(void) {
     TEST_ASSERT_TRUE(float_near(e4.hold_progress, 1.0F, 0.001F));
 }
 
-/* ---- EVT-03: drag past move_radius_px mid-hold resets hold_progress and suppresses long_pressed ---- */
+/* ---- drag past move_radius_px mid-hold resets hold_progress and suppresses long_pressed ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_events_drag_cancel_resets_progress(void) {
     const float lp = 1.0F;
@@ -239,7 +239,7 @@ static void test_events_drag_cancel_resets_progress(void) {
     TEST_ASSERT_TRUE(float_near(e_after.hold_progress, 0.0F, 0.001F));
 }
 
-/* ---- EVT-03: query_events is idempotent — N calls identical, no capture/timer/pool advance ---- */
+/* ---- query_events is idempotent — N calls identical, no capture/timer/pool advance ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_query_events_idempotent(void) {
     const nt_ui_events_cfg_t cfg = {.long_press_secs = 1.0F, .double_click = true};

@@ -1,4 +1,4 @@
-/* Popup-core tests (POP-01/03) — present-only catcher guard, trigger-anchor edge-flip near all 4
+/* Popup-core tests — present-only catcher guard, trigger-anchor edge-flip near all 4
  * borders (asymmetric data per AGENTS.md), outside-click dismiss raising close_requested, and the
  * one-bool wrapper clearing the game's open. Driven through the walker fixture + NT_TEST_ACCESS probes
  * (no GL surface). UNITY_EXCLUDE_FLOAT: compare floats via an eps helper. */

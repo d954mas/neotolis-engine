@@ -1,7 +1,7 @@
-/* Dropdown / combobox tests (WGT-01). Driven through the walker fixture + NT_TEST_ACCESS probes (no GL
+/* Dropdown / combobox tests. Driven through the walker fixture + NT_TEST_ACCESS probes (no GL
  * surface). Covers: a row click writes the game-owned int* selected and closes the list; a long list
  * scrolls via the nt_ui_scroll wrapper without leaking a scroll-container state-pool slot across N
- * open/close cycles (Pitfall 7 / T-65-14); the list edge-flips ABOVE near the bottom border. */
+ * open/close cycles; the list edge-flips ABOVE near the bottom border. */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -130,7 +130,7 @@ static void test_dropdown_trigger_toggles_open(void) {
     TEST_ASSERT_TRUE(open);
 }
 
-/* ---- A row click writes *selected and closes the list (Model D). ---- */
+/* ---- A row click writes *selected and closes the list. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_row_select_sets_int_and_closes(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
@@ -272,10 +272,10 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_scroll_test_last_bar_layer(1), "scrollbar must draw on the container content layer, not buried under the panel");
 }
 
-/* ---- ROOT of the Wave-2.9 BUG: the dropdown list is a popup-nested scroll, so its bar must float at a
+/* ---- The dropdown list is a popup-nested scroll, so its bar must float at a
  *      Clay zIndex ABOVE the popup panel band (stride*depth) — else the (settled-opaque) panel sorts over
- *      the bar globally and the bar is only seen through the translucent open/close tween. The Wave-2.8
- *      content-LAYER fix is necessary but not sufficient (layer orders intra-segment; Clay zIndex orders
+ *      the bar globally and the bar is only seen through the translucent open/close tween. The
+ *      content-LAYER ordering is necessary but not sufficient (layer orders intra-segment; Clay zIndex orders
  *      floating roots globally). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
@@ -299,7 +299,7 @@ static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
 }
 
 /* ---- Eased open is STABLE: with open_ease_speed > 0, opening the list then running idle frames with
- *      NO input must NOT oscillate *open (the Wave-2.7 flicker repro). The trigger sits under the
+ *      NO input must NOT oscillate *open (flicker repro). The trigger sits under the
  *      full-viewport catcher when open; a frame with no click must never raise a dismiss-close. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_eased_open_no_flicker(void) {

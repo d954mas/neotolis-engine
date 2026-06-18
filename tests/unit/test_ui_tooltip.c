@@ -1,12 +1,12 @@
-/* Tooltip tests (WGT-03) — engine-owned hover-delay reveal via popup-core WITHOUT a catcher
- * (D-65-08 exception) and WITHOUT a second mutating step on the target id (T-65-19). Driven through
+/* Tooltip tests — engine-owned hover-delay reveal via popup-core WITHOUT a catcher
+ * and WITHOUT a second mutating step on the target id. Driven through
  * the walker fixture + NT_TEST_ACCESS probes (no GL surface). UNITY_EXCLUDE_FLOAT: compare floats via
  * an eps helper.
  *
  * Hover model: nt_ui_query_interaction reports hovered only for a widget in the front-most arbitration
  * registry, which is populated by step_interaction (NOT query). A tooltip therefore attaches to an
  * INTERACTIVE target that steps itself; the tooltip read stays idempotent (query) so it never adds a
- * second mutating step on the target id (T-65-19). Arbitration reads the PREV-frame registry, so the
+ * second mutating step on the target id. Arbitration reads the PREV-frame registry, so the
  * target is stepped each frame and the cursor needs one warm frame before hover registers. */
 
 #include <math.h>
@@ -163,7 +163,7 @@ static void test_tooltip_hide_on_leave(void) {
     TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
 }
 
-/* ---- No catcher (D-65-08): even while the tooltip is shown, popup-core declares NO light-dismiss
+/* ---- No catcher: even while the tooltip is shown, popup-core declares NO light-dismiss
  *      catcher, so base UI stays clickable. ---- */
 static void test_tooltip_declares_no_catcher(void) {
     nt_ui_tooltip_style_t st = test_style();

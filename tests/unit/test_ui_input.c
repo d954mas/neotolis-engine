@@ -514,7 +514,7 @@ static void test_double_click_word_select(void) {
     TEST_ASSERT_EQUAL_STRING(" bar", buf);
 }
 
-/* ---- EVT-04 regression: word-select fires via the field's single nt_ui_events step (cfg.double_click),
+/* ---- word-select fires via the field's single nt_ui_events step (cfg.double_click),
  *      not a separate gesture detector. A double-click in "foo bar" lands the caret at the word end. ---- */
 static void test_word_select_fires_via_events(void) {
     char buf[32];
