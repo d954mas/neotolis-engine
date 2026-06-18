@@ -240,7 +240,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
-    if (present) {
+    /* Only a catcher-bearing popup gates base UI, so only it claims present/top-id. A catcher-less popup
+     * (e.g. a tooltip, flags=0) is visible but must NOT make nt_ui_modal_active() true nor steal the
+     * top-id dismiss slot from a coexisting dropdown. */
+    if (want_catcher) {
         ctx->modal_present_cur = true;
         if (ctx->active_modal_depth >= ctx->modal_max_depth_cur) {
             ctx->modal_max_depth_cur = ctx->active_modal_depth;
