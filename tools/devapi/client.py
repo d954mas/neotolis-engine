@@ -293,6 +293,21 @@ class DevApiClient:
         """Decode a UTF-8 string -> codepoints and enqueue them into the char ring."""
         return self.result("input.text", {"text": s})
 
+    def state(self, key: Optional[str] = None, pop_text: bool = False) -> Dict[str, Any]:
+        """IMMEDIATE read of polled input state — the observation hook.
+
+        Returns the result dict (a READ, unlike the fire-and-forget wrappers above). With `key`,
+        result carries {down,pressed,released} for that key; the state is STALE until a sim-advance
+        polls the inject queue (the D-12 drain-race). With `pop_text=True`, result carries
+        `codepoints` (a raw-codepoint number array) and DRAINS the char ring as a side effect.
+        """
+        params: Dict[str, Any] = {}
+        if key is not None:
+            params["key"] = key
+        if pop_text:
+            params["pop_text"] = True
+        return self.result("input.state", params)
+
     # #endregion
 
     def close(self) -> None:

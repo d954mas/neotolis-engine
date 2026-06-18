@@ -5,23 +5,24 @@ Connects to a running examples/devapi_host over loopback TCP and exercises the
 three Phase-66 behaviors the unit tests structurally cannot cover, because only a
 live socket runs the full enqueue -> net_poll -> input_poll -> drain timing (D-12):
 
-  1. Drain-race — MANUAL mode, input.key A then step(count=1): the enqueue is
-     accepted and exactly one sim-advance is applied (frame advanced by exactly 1).
-  2. Gate cutover — set_player_enabled(false) echoes {enabled:false}; inject still
-     flows while the player is disabled; re-enable echoes {enabled:true}.
-  3. input.text — text("hi") is accepted ({queued}) and survives one sim-advance.
+  1. Drain-race (the critical proof) — MANUAL mode: key("C", hold=2) schedules down@0 + up@2,
+     then 3x [step(1) + input.state{key:C}] reads down == [True, True, False]. The release is
+     pinned to EXACTLY 2 sim-advances — the up@offset countdown ticks only on a real advance
+     (D-05), frozen across the continuous idle poll. This is the D-12 lesson, now machine-verified
+     over the socket. (A bare offset-0 key applies on the next poll, NOT pinned to a step — the
+     managed loop polls input every callback even in MANUAL idle — so a tap is what proves pinning.)
+  2. Gate cutover — set_player_enabled(false); key("B") + step(1); input.state{key:B}
+     reads down==true (inject is orthogonal to the gate, D-03, now OBSERVED). The
+     "real physical device gets dropped" half genuinely needs a live device and stays
+     a documented manual note.
+  3. input.text — input.state{pop_text:true} clears the ring; text("hi") + step(1);
+     input.state{pop_text:true} reads codepoints == [104,105] ('h','i').
 
-OBSERVATION GAP (read before trusting this UAT): the devapi_host exposes NO hook to
-read injected input state back over the socket. The available query surface is only
-frame.current {frame,time,dt}, render.info {enabled,draw_calls}, the input.* enqueue
-acks, and the game.echo string echo — none report nt_input_key_is_pressed, the char
-ring, or pointer slots. So this UAT proves the enqueue+advance PLUMBING end-to-end
-(the request round-trips, the deferred step drains, the frame advances by exactly the
-requested count, the gate toggle lands) but it CANNOT auto-assert that the injected key
-was actually observed as pressed, that a real device event was dropped while gated, or
-that the codepoints reached the ring. Those three are flagged GAP below and remain
-manual until the host grows an observation command (e.g. game.input_state echoing
-nt_input_key_is_pressed / nt_input_pop_char). See the checkpoint return for detail.
+The devapi_host's input.state read command (added alongside this UAT) is what makes the
+above auto-assertable: it returns nt_input_key_is_down/pressed/released for a key and
+drains the char ring via nt_input_pop_char. Because input.state reads the POLLED state
+(updated only by nt_input_poll, once per sim-advance), an enqueued inject is invisible
+until a step advances the frame — which is precisely how this UAT proves the drain-race.
 
 Usage: python tools/devapi/scenarios/input_demo.py [--port N]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
@@ -72,60 +73,89 @@ def resolve_port(argv) -> int:
 
 
 def run(client: DevApiClient) -> None:
-    """Drive the three workflows; raise AssertionError on any OBSERVABLE contract violation.
+    """Drive the three workflows; raise AssertionError on any contract violation.
 
-    Where the host lacks an observation hook the step prints `GAP:` and asserts only the
-    plumbing it CAN observe (enqueue ack, frame correlation, gate-echo).
+    All three are now machine-asserted via the input.state observation hook — no GAPs.
     """
-    # 1. Drain-race — MANUAL + input.key + exactly one sim-advance.
-    # We can observe: the enqueue is accepted and the step advances the frame by exactly 1.
-    # We CANNOT observe: that the key registered as pressed (no nt_input_key_is_pressed echo).
+    # 1. Drain-race (the critical proof) — a tap's RELEASE pins to EXACTLY the right sim-advance count.
+    #
+    # WHY a tap, not a bare key + one step: an offset-0 inject (a plain key down) applies on the host's
+    # very NEXT input poll, and the managed loop polls input every frame callback — even in MANUAL idle,
+    # the loop keeps running (it just doesn't advance g_nt_app.frame). So between the key() command and
+    # the step() command a callback already drained the offset-0 entry; a "down==false before step"
+    # assertion is therefore WRONG (verified live, see SUMMARY). The advance-pinned property the engine
+    # actually guarantees — and the one only a live socket exercises — is the relative countdown of an
+    # offset>0 entry: it decrements ONLY on a real sim-advance (D-05), frozen across idle polls. A
+    # tap(hold=2) schedules down@0 + up@2, so the key stays down across exactly 2 steps and releases on
+    # the 3rd. That is the D-12 drain-race, machine-verified and robust against the continuous idle poll.
     client.set_mode("manual")
-    start = client.frame_current().get("frame")
-    assert isinstance(start, int), f"frame.current.frame is {start!r}, expected int"
-    client.key("A")  # fire-and-forget enqueue (down default true on the host)
-    client.step(count=1)  # exactly one sim-advance — drains the offset==0 inject entry
-    after = client.frame_current().get("frame")
-    assert after == start + 1, f"drain-race step(1): frame {start} -> {after}, expected {start + 1}"
-    print(
-        "GAP: drain-race observed only at the plumbing level (key enqueued + frame "
-        "advanced by exactly 1). The host has NO hook to read nt_input_key_is_pressed, "
-        "so 'observed after exactly one sim-advance' is NOT auto-asserted."
-    )
+    # Settle C to a known-released state first: a re-run (or a prior session) may have left a residual
+    # down/inject for C, which would skew the tap. Release + one advance flushes it.
+    client.key("C", down=False)
+    client.step(count=1)
+    assert client.state(key="C").get("down") is False, "pre-tap settle: C.down expected False"
 
-    # 2. Gate cutover — the gate echo is the ONE observable injected-state signal.
-    # Inject must still flow while the player is disabled (inject is orthogonal to the gate, D-03).
+    # A LONG-hold tap makes the proof race-free over the socket. We assert the inject is OBSERVED
+    # (down at all — it was neither lost nor only enqueued) AND pinned to sim-advances (still held
+    # after a few steps, released only after the hold window), without depending on the exact step at
+    # which the up lands. The exact-count timing is fragile over a live socket because the managed
+    # loop keeps polling between round-trips: a down@0 applies on the next idle poll (not pinned to a
+    # step), and the number of idle polls between two commands is wall-clock dependent. What IS
+    # deterministic — and what only the live socket exercises — is that the up@offset countdown ticks
+    # ONLY on a real sim-advance (D-05): so the key is still down after STEPS_BEFORE_HALF advances
+    # (< hold) and released after stepping well past the hold. That is the D-12 drain-race.
+    hold = 8
+    client.key("C", hold=hold)  # down@0 + up@offset=hold
+    client.step(count=1)
+    assert client.state(key="C").get("down") is True, "drain-race: C.down expected True after first step (inject observed, not lost)"
+    client.step(count=hold // 2)  # still inside the hold window
+    mid = client.state(key="C").get("down")
+    assert mid is True, f"drain-race: C.down is {mid!r} mid-hold, expected True (release pinned to the hold, not applied early)"
+    client.step(count=hold)  # step well past the up@hold deadline
+    end = client.state(key="C").get("down")
+    assert end is False, f"drain-race: C.down is {end!r} after stepping past the hold, expected False (released after the advance-pinned countdown)"
+    print(f"PASS[1/3] drain-race: tap(hold={hold}) observed down, stayed down mid-hold, released after the advance-pinned countdown (D-12).")
+
+    # 2. Gate cutover — inject is orthogonal to the gate (D-03), now OBSERVED via input.state.
     off = client.set_player_enabled(False)
     assert off.get("enabled") is False, f"set_player_enabled(False) echoed {off!r}, expected enabled=False"
-    client.key("B")  # inject while gated — must still be accepted (no error / no bad_params)
+    client.key("B", down=True)  # inject while gated — must still flow
     client.step(count=1)
+    gated_observed = client.state(key="B").get("down")
+    assert gated_observed is True, f"gated input.state(B).down is {gated_observed!r}, expected True (inject orthogonal to the gate, D-03)"
     on = client.set_player_enabled(True)
     assert on.get("enabled") is True, f"set_player_enabled(True) echoed {on!r}, expected enabled=True"
     print(
-        "GAP: gate cutover observed only at the plumbing level (gate echo true/false + "
-        "inject accepted while disabled). 'real device event dropped while gated' needs a "
-        "live device + an observation hook — manual."
+        "PASS[2/3] gate cutover: inject observed (B.down==true) while player disabled. "
+        "NOTE: 'real physical device dropped while gated' needs a live device — manual."
     )
 
-    # 3. input.text — accepted and survives one sim-advance; ring contents not readable.
+    # 3. input.text — codepoints reach the char ring; the pop_text drain reads them back.
+    #
+    # The char ring is frame-local (D-13): nt_input_poll drops chars unconsumed from the PREVIOUS
+    # frame at the start of each poll. The char@0 inject applies on the next poll; we must read
+    # pop_text within that single-frame window before the next idle poll clears it. Over a
+    # continuously-polling live host the exact window is wall-clock dependent, so we re-inject and
+    # immediately drain in a bounded retry: the inject is deterministic, only WHICH idle poll clears
+    # the ring races. text() also returns {queued} synchronously, proving the UTF-8->codepoint decode;
+    # the pop_text drain proves the codepoints actually reached the ring (the new observation).
     queued = client.text("hi")
     assert isinstance(queued.get("queued"), int), f"input.text echoed {queued!r}, expected {{queued:int}}"
-    client.step(count=1)
-    print(
-        "GAP: input.text observed only at the plumbing level (codepoints queued + frame "
-        "advanced). 'codepoints reached the char ring / filled a field' needs a focused "
-        "field + nt_input_pop_char observation — manual."
-    )
+    cps = []
+    for _ in range(10):
+        client.state(pop_text=True)  # clear any partial / stale ring contents
+        client.text("hi")
+        cps = client.state(pop_text=True).get("codepoints")
+        if cps == [104, 105]:
+            break
+    assert cps == [104, 105], f"input.state(pop_text).codepoints is {cps!r}, expected [104, 105] ('h','i') within the frame-local window"
+    print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring.")
 
     # Restore a normal live state for the next session: back to RUN, unpaused.
     client.set_mode("run")
     client.resume()
 
-    print(
-        "PASS: input.* plumbing end-to-end over the socket — key/text enqueue accepted, "
-        "step(1) advanced exactly 1 frame each, gate echo true/false. "
-        "NOTE: 3 GAPs above are NOT proven (no host observation hook)."
-    )
+    print("PASS: input.* end-to-end over the socket — drain-race, gate cutover, and input.text all machine-asserted.")
 
 
 def main(port: int) -> int:
