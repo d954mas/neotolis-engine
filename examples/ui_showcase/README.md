@@ -40,12 +40,17 @@ lighten and writes the index on click).
 10. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
     `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
-11. **Dropdown** - a combobox on popup-core: a short list + a long scrolling list
-    (more than `max_visible_rows`) that flips up near the window bottom.
+11. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+    a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
+    that flips up near the window bottom, and a custom swatch-trigger combo
+    (`nt_ui_combo_preview_begin`/`end`).
 12. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-13. **Menu** - a right-click / long-press **context menu** with a nested **submenu**:
-    mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
+13. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+    `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
+    rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
+    nested **submenu**, and a custom `activatable=false` row whose inner button owns
+    the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
 14. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
@@ -99,7 +104,8 @@ These tabs wire the interaction events + app-widgets. All widget state is
 | **Events** — press and HOLD the button | the fill bar ramps 0→1 over ~1.5s (`hold_progress`) and confirms at the top (`long_pressed`) |
 | **Events** — drag off the button mid-hold | resets the fill (no confirm) — release-outside / move past the drag radius cancels |
 | **Events** — double-click the second button | increments the double-click readout |
-| **Dropdown** — click a trigger | toggles the list open; click a row to select (writes the game-owned index) |
+| **Dropdown** — click a trigger | toggles the list open; click a row to select (the game writes its own index) |
+| **Dropdown** — the swatch trigger | a custom-content trigger (swatch + label) via `combo_preview_begin`/`end` |
 | **Dropdown** — scroll the long "city" list | wheel / drag the scroll wrapper; opening near the window bottom flips the list ABOVE the trigger |
 | **Tooltip** — hover a target ~0.5s | the tooltip reveals; it hides the instant the cursor leaves and never blocks the click underneath |
 | **Menu** — right-click / long-press the panel | opens the **context menu** at the cursor |

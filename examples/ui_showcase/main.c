@@ -302,6 +302,8 @@ typedef struct {
     bool fruit_open;
     int city_sel; /* long (scrolling) list selection */
     bool city_open;
+    int color_sel; /* custom swatch-trigger combo selection (D-236-04) */
+    bool color_open;
 } dropdown_params_t;
 
 /* Menu tab: two independent game-owned menus to show the optional target binding — a GLOBAL menu
@@ -310,6 +312,7 @@ typedef struct {
     nt_ui_menu_state_t global_state; /* target_id == 0: arms on a right-click anywhere */
     nt_ui_menu_state_t zone_state;   /* target_id == panel: arms only over the bound panel */
     uint32_t last_chosen;            /* latched for the readout (either menu) */
+    bool show_grid;                  /* checkmark-toggle row state (global menu) */
 } menu_params_t;
 
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
@@ -371,8 +374,8 @@ static struct tab_state s_state = {
     .stress = {.label_count = 3000},
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
-    .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false},
-    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = 0},
+    .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
+    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = 0, .show_grid = false},
 };
 // #endregion
 
@@ -416,11 +419,12 @@ static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + inde
 static uint32_t s_id_events_hold;                   /* hold-to-confirm button */
 static uint32_t s_id_events_dbl;                    /* double-click target */
 static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
-static uint32_t s_id_dd_fruit, s_id_dd_city;        /* dropdown triggers */
+static uint32_t s_id_dd_fruit, s_id_dd_city, s_id_dd_color; /* combo triggers (color = custom swatch) */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
 static uint32_t s_id_menu_global;                   /* global context menu (right-click anywhere) */
 static uint32_t s_id_menu_zone;                     /* zone context menu (bound to a panel) */
 static uint32_t s_id_menu_panel;                    /* the zone panel the zone menu binds to (opens only over it) */
+static uint32_t s_id_menu_opacity_btn;              /* inner button on the zone menu's activatable=false custom row */
 static uint32_t s_id_tabs_demo_base;                /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -1569,40 +1573,85 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
-/* Dropdown tab: a short combobox + a long (scrolling) combobox to exercise the scroll path + the
- * edge-flip-up near the bottom border. Game owns selection + open (Model D). */
+/* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to
+ * exercise the scroll path + edge-flip-up near the bottom border, and a custom-trigger / custom-row combo
+ * (preview_begin/end + selectable_begin/end, D-236-04). The game feeds rows per-call and owns selection +
+ * open (Model D): a selectable's clicked return is where the game writes *selected; the combo clears *open. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — three combos' row loops, not deep nesting
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const char *const fruits[] = {"Apple", "Banana", "Cherry", "Date", "Elderberry"};
     static const char *const cities[] = {"Amsterdam", "Berlin",  "Cairo", "Delhi",  "Edinburgh", "Florence", "Geneva", "Helsinki", "Istanbul", "Jakarta", "Kyoto",  "Lisbon",
                                          "Madrid",    "Nairobi", "Oslo",  "Prague", "Quito",     "Rome",     "Seoul",  "Tokyo",    "Utrecht",  "Vienna",  "Warsaw", "Zurich"};
-    static const Clay_ElementDeclaration trigger_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(40)}}};
     static const int fruit_count = (int)(sizeof fruits / sizeof fruits[0]);
     static const int city_count = (int)(sizeof cities / sizeof cities[0]);
 
-    /* Per-row icons: a parallel array (same length as labels). An unset ref ({0}, atlas.id==0) leaves an
-     * ALIGNED EMPTY gutter so the text still lines up (OS-menu icon-column behavior). Some fruits get a
-     * bunny icon, the rest stay empty -- proving the gutter holds alignment either way. */
-    const nt_atlas_region_ref_t fruit_icons[] = {s_icon_bunny_ref, {0}, s_icon_bunny_ref, {0}, {0}};
+    /* Some fruit rows carry a leading icon, the rest leave the gutter aligned-empty (OS-menu icon column). */
+    static const bool fruit_iconed[] = {true, false, true, false, false};
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick an item; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick a row; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
 
-    /* Short list: fits without scrolling. Iconed gutter (some rows iconed, some aligned-empty). */
+    /* Short list: fits without scrolling. The selected label is the trigger preview; a couple of rows show
+     * the icon gutter (a custom-content selectable carries the inline icon). */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
-    (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_count, st->dropdown.fruit_sel, "Pick a fruit", g_current->dropdown, &trigger_decl,
-                                 &st->dropdown.fruit_open);
-    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_icons, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
+    const char *fruit_preview = (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "Pick a fruit";
+    if (nt_ui_combo_begin(ctx, s_id_dd_fruit, fruit_preview, g_current->dropdown, &st->dropdown.fruit_open)) {
+        for (int i = 0; i < fruit_count; ++i) {
+            if (fruit_iconed[i]) {
+                /* Custom-content row: the game owns the inline icon + label inside the open selectable. */
+                if (nt_ui_combo_selectable_begin(ctx, (uint32_t)i, i == st->dropdown.fruit_sel)) {
+                    st->dropdown.fruit_sel = i; /* game writes *selected (Model D) */
+                }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(18), CLAY_SIZING_FIXED(18)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), fruits[i], g_current->body);
+                nt_ui_combo_selectable_end(ctx);
+            } else if (nt_ui_combo_selectable(ctx, (uint32_t)i, fruits[i], i == st->dropdown.fruit_sel)) {
+                st->dropdown.fruit_sel = i;
+            }
+        }
+        nt_ui_combo_end(ctx);
+    }
 
-    /* Long list: more than max_visible_rows -> the list wraps in a scroll container. NULL icons -> every
-     * row reserves an aligned-empty gutter (no per-row icon). */
+    /* Long list: more than max_visible_rows -> the body wraps in a scroll container; opening near the window
+     * bottom flips the list ABOVE the trigger. Plain selectables (no icon gutter). */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
-    (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, city_count, st->dropdown.city_sel, "Pick a city", g_current->dropdown, &trigger_decl,
-                                 &st->dropdown.city_open);
-    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, NULL, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
+    const char *city_preview = (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "Pick a city";
+    if (nt_ui_combo_begin(ctx, s_id_dd_city, city_preview, g_current->dropdown, &st->dropdown.city_open)) {
+        for (int i = 0; i < city_count; ++i) {
+            if (nt_ui_combo_selectable(ctx, (uint32_t)i, cities[i], i == st->dropdown.city_sel)) {
+                st->dropdown.city_sel = i;
+            }
+        }
+        nt_ui_combo_end(ctx);
+    }
+
+    /* Custom-trigger combo (D-236-04): a swatch + label preview instead of the plain string trigger. The
+     * trigger content lives between preview_begin/end; the list body is plain selectables. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Color (custom swatch trigger)", g_current->caption);
+    static const char *const colors[] = {"Crimson", "Emerald", "Azure", "Amber"};
+    static const Clay_Color swatches[] = {{208, 48, 48, 255}, {48, 176, 80, 255}, {48, 128, 208, 255}, {224, 192, 48, 255}}; /* RGBA */
+    static const int color_count = (int)(sizeof colors / sizeof colors[0]);
+    nt_ui_combo_preview_begin(ctx, s_id_dd_color, g_current->dropdown, &st->dropdown.color_open);
+    {
+        const int sel = st->dropdown.color_sel;
+        const Clay_Color sw = (sel >= 0 && sel < color_count) ? swatches[sel] : (Clay_Color){128, 128, 128, 255};
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}}, .backgroundColor = sw, .cornerRadius = CLAY_CORNER_RADIUS(3)}) {}
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), (sel >= 0 && sel < color_count) ? colors[sel] : "Pick a color", g_current->body);
+    }
+    if (nt_ui_combo_preview_end(ctx)) {
+        for (int i = 0; i < color_count; ++i) {
+            if (nt_ui_combo_selectable(ctx, (uint32_t)i, colors[i], i == st->dropdown.color_sel)) {
+                st->dropdown.color_sel = i;
+            }
+        }
+        nt_ui_combo_end(ctx);
+    }
 
     (void)snprintf(buf, sizeof buf, "fruit: %s", (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "(none)");
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
     (void)snprintf(buf, sizeof buf, "city: %s", (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "(none)");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+    (void)snprintf(buf, sizeof buf, "color: %s", (st->dropdown.color_sel >= 0) ? colors[st->dropdown.color_sel] : "(none)");
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
@@ -1641,51 +1690,122 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_c, "Near the bottom border the tooltip flips ABOVE the target instead of below.", g_current->tooltip);
 }
 
+/* Stable sibling keys for the immediate menu rows (unique among siblings; the scope stack disambiguates
+ * depth so a submenu may reuse a value). */
+enum {
+    MK_NEW = 1,
+    MK_RECENT,
+    MK_PREFS,
+    MK_TOGGLE_GRID,
+    MK_QUIT,
+    MK_RECENT_A,
+    MK_RECENT_B,
+    MK_RECENT_CLEAR,
+    MK_EDIT,
+    MK_DUP,
+    MK_MOVE,
+    MK_DELETE,
+    MK_CUSTOM_OPACITY,
+    MK_MOVE_FRONT,
+    MK_MOVE_BACK,
+    MK_MOVE_GROUP,
+};
+
+/* GLOBAL menu (app actions): a rich New row (icon + Ctrl+N shortcut), an "Open recent" submenu, a
+ * separator, a checkmark toggle, a disabled-via-custom row, and Quit. Built in CODE every frame. */
+static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
+    nt_ui_menu_begin(ctx, s_id_menu_global, &st->menu.global_state, g_current->menu);
+    nt_ui_menu_item_opts_t newo = nt_ui_menu_item_opts_defaults();
+    newo.icon = s_icon_bunny_ref;
+    newo.shortcut = "Ctrl+N";
+    if (nt_ui_menu_item_ex(ctx, MK_NEW, "New", newo)) {
+        st->menu.last_chosen = 101U;
+    }
+    if (nt_ui_menu_submenu_begin(ctx, MK_RECENT, "Open recent")) {
+        if (nt_ui_menu_item(ctx, MK_RECENT_A, "level_01.ntpack")) {
+            st->menu.last_chosen = 211U;
+        }
+        if (nt_ui_menu_item(ctx, MK_RECENT_B, "ui_showcase.ntpack")) {
+            st->menu.last_chosen = 212U;
+        }
+        nt_ui_menu_item_opts_t clr = nt_ui_menu_item_opts_defaults();
+        clr.enabled = false; /* disabled item: greyed, not selectable */
+        (void)nt_ui_menu_item_ex(ctx, MK_RECENT_CLEAR, "(clear list)", clr);
+        nt_ui_menu_submenu_end(ctx);
+    }
+    nt_ui_menu_separator(ctx);
+    /* Checkmark toggle row: `selected` draws the checkmark; clicking flips the game-owned bool. */
+    nt_ui_menu_item_opts_t grid = nt_ui_menu_item_opts_defaults();
+    grid.selected = st->menu.show_grid;
+    if (nt_ui_menu_item_ex(ctx, MK_TOGGLE_GRID, "Show grid", grid)) {
+        st->menu.show_grid = !st->menu.show_grid;
+        st->menu.last_chosen = 107U;
+    }
+    if (nt_ui_menu_item(ctx, MK_PREFS, "Preferences")) {
+        st->menu.last_chosen = 102U;
+    }
+    if (nt_ui_menu_item(ctx, MK_QUIT, "Quit")) {
+        st->menu.last_chosen = 103U;
+    }
+    nt_ui_menu_end(ctx);
+}
+
+/* ZONE menu (panel actions): distinct rows + a "Move to" submenu so the bound menu is unmistakable, plus a
+ * custom activatable=false row whose inner control owns the click while the row only highlights. */
+static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
+    nt_ui_menu_begin(ctx, s_id_menu_zone, &st->menu.zone_state, g_current->menu);
+    nt_ui_menu_item_opts_t edit = nt_ui_menu_item_opts_defaults();
+    edit.icon = s_icon_bunny_ref;
+    if (nt_ui_menu_item_ex(ctx, MK_EDIT, "Edit panel", edit)) {
+        st->menu.last_chosen = 104U;
+    }
+    if (nt_ui_menu_item(ctx, MK_DUP, "Duplicate")) {
+        st->menu.last_chosen = 105U;
+    }
+    nt_ui_menu_separator(ctx);
+    nt_ui_menu_item_opts_t move = nt_ui_menu_item_opts_defaults();
+    move.icon = s_icon_bunny_ref;
+    /* submenu_begin ignores opts (label-only); the icon hint is just to mirror the rich global menu. */
+    (void)move;
+    if (nt_ui_menu_submenu_begin(ctx, MK_MOVE, "Move to")) {
+        if (nt_ui_menu_item(ctx, MK_MOVE_FRONT, "Front")) {
+            st->menu.last_chosen = 221U;
+        }
+        if (nt_ui_menu_item(ctx, MK_MOVE_BACK, "Back")) {
+            st->menu.last_chosen = 222U;
+        }
+        nt_ui_menu_item_opts_t grp = nt_ui_menu_item_opts_defaults();
+        grp.enabled = false;
+        (void)nt_ui_menu_item_ex(ctx, MK_MOVE_GROUP, "Group", grp);
+        nt_ui_menu_submenu_end(ctx);
+    }
+    /* Custom-content row (activatable=false, §7 opt-out): the inner button owns the click; the row only
+     * highlights on hover. The game reads the inner button's own interaction. */
+    nt_ui_menu_item_opts_t op = nt_ui_menu_item_opts_defaults();
+    op.activatable = false;
+    (void)nt_ui_menu_item_begin(ctx, MK_CUSTOM_OPACITY, op);
+    {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opacity", g_current->body);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_menu_opacity_btn, g_current->btn_secondary, NULL, true, NULL);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "reset", g_current->body);
+        if (nt_ui_button_end(ctx)) {
+            st->menu.last_chosen = 108U;
+        }
+    }
+    nt_ui_menu_item_end(ctx);
+    if (nt_ui_menu_item(ctx, MK_DELETE, "Delete")) {
+        st->menu.last_chosen = 106U;
+    }
+    nt_ui_menu_end(ctx);
+}
+
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
- * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The item tree is static const
- * (the menu never mutates it); the game owns the open flag + chosen-id sink (Model D). */
+ * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The immediate API builds the tree in
+ * CODE every frame (no static items[]); the game owns the open flag + chosen-id sink (Model D). The
+ * nt_ui_menu_open_trigger arming (D-236-05) is KEPT 1:1. */
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    /* GLOBAL menu tree: app-themed. "Open recent" is the fly-out submenu. Distinct content from the zone
-     * menu so a user instantly sees WHICH menu opened (global = app actions). */
-    static nt_ui_menu_item_t global_recent_items[] = {
-        {.label = "level_01.ntpack", .submenu = NULL, .id = 211U, .submenu_count = 0U, .enabled = true},
-        {.label = "ui_showcase.ntpack", .submenu = NULL, .id = 212U, .submenu_count = 0U, .enabled = true},
-        {.label = "(clear list)", .submenu = NULL, .id = 213U, .submenu_count = 0U, .enabled = false},
-    };
-    static nt_ui_menu_item_t global_items[] = {
-        {.label = "New", .submenu = NULL, .id = 101U, .submenu_count = 0U, .enabled = true},
-        {.label = "Open recent", .submenu = global_recent_items, .id = 0U, .submenu_count = (uint32_t)(sizeof global_recent_items / sizeof global_recent_items[0]), .enabled = true},
-        {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
-        {.label = "Preferences", .submenu = NULL, .id = 102U, .submenu_count = 0U, .enabled = true},
-        {.label = "Quit", .submenu = NULL, .id = 103U, .submenu_count = 0U, .enabled = true},
-    };
-    static const uint32_t global_count = (uint32_t)(sizeof global_items / sizeof global_items[0]);
-
-    /* ZONE menu tree: panel/element-themed. "Move to" is the fly-out submenu. Clearly different first row +
-     * submenu than the global menu so the bound (panel) menu is unmistakable on screen. */
-    static nt_ui_menu_item_t zone_move_items[] = {
-        {.label = "Front", .submenu = NULL, .id = 221U, .submenu_count = 0U, .enabled = true},
-        {.label = "Back", .submenu = NULL, .id = 222U, .submenu_count = 0U, .enabled = true},
-        {.label = "Group", .submenu = NULL, .id = 223U, .submenu_count = 0U, .enabled = false},
-    };
-    static nt_ui_menu_item_t zone_items[] = {
-        {.label = "Edit panel", .submenu = NULL, .id = 104U, .submenu_count = 0U, .enabled = true},
-        {.label = "Duplicate", .submenu = NULL, .id = 105U, .submenu_count = 0U, .enabled = true},
-        {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
-        {.label = "Move to", .submenu = zone_move_items, .id = 0U, .submenu_count = (uint32_t)(sizeof zone_move_items / sizeof zone_move_items[0]), .enabled = true},
-        {.label = "Delete", .submenu = NULL, .id = 106U, .submenu_count = 0U, .enabled = true},
-    };
-    static const uint32_t zone_count = (uint32_t)(sizeof zone_items / sizeof zone_items[0]);
-
-    /* Icons late-bound (atlas binds after these statics): a couple of rows per tree get the bunny, the rest
-     * leave an aligned-empty gutter (OS-menu column). The menu never mutates the tree. */
-    global_items[0].icon = s_icon_bunny_ref;
-    global_items[1].icon = s_icon_bunny_ref;
-    global_recent_items[0].icon = s_icon_bunny_ref;
-    zone_items[0].icon = s_icon_bunny_ref;
-    zone_items[3].icon = s_icon_bunny_ref;
-    zone_move_items[0].icon = s_icon_bunny_ref;
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
                 "Right-click the panel -> ZONE menu (Edit panel / Duplicate / Move to...); right-click anywhere else -> GLOBAL menu (New / Open recent... / Quit). Click outside / Esc closes.",
@@ -1723,18 +1843,15 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
         st->menu.zone_state.open = false;
     }
 
-    /* Render both menus (independent state + ids); arming is gated so at most one is open. */
-    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, global_items, global_count, &st->menu.global_state, g_current->menu);
-    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, zone_items, zone_count, &st->menu.zone_state, g_current->menu);
+    /* Render both menus (independent state + ids); arming is gated so at most one is open. Each tree is
+     * built in CODE; rows latch their own game-id into last_chosen on click (replacing the chosen_id sink). */
+    render_menu_global(ctx, st);
+    render_menu_zone(ctx, st);
 
-    if (st->menu.global_state.chosen_id != 0U) {
-        st->menu.last_chosen = st->menu.global_state.chosen_id;
-        st->menu.global_state.chosen_id = 0U; /* game reads + clears (Model D) */
-    }
-    if (st->menu.zone_state.chosen_id != 0U) {
-        st->menu.last_chosen = st->menu.zone_state.chosen_id;
-        st->menu.zone_state.chosen_id = 0U;
-    }
+    /* Drain the engine's chosen_id latch (immediate item_ex/item also sets it on activation): the rows above
+     * already wrote last_chosen, so just clear it (Model D: game reads + clears). */
+    st->menu.global_state.chosen_id = 0U;
+    st->menu.zone_state.chosen_id = 0U;
 
     (void)snprintf(buf, sizeof buf, "last chosen id: %u", st->menu.last_chosen);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
@@ -1979,12 +2096,14 @@ static void ensure_ids(void) {
     s_id_events_fill = nt_ui_id("showcase/events_fill");
     s_id_dd_fruit = nt_ui_id("showcase/dd_fruit");
     s_id_dd_city = nt_ui_id("showcase/dd_city");
+    s_id_dd_color = nt_ui_id("showcase/dd_color");
     s_id_tip_a = nt_ui_id("showcase/tip_a");
     s_id_tip_b = nt_ui_id("showcase/tip_b");
     s_id_tip_c = nt_ui_id("showcase/tip_c");
     s_id_menu_global = nt_ui_id("showcase/menu_global");
     s_id_menu_zone = nt_ui_id("showcase/menu_zone");
     s_id_menu_panel = nt_ui_id("showcase/menu_panel");
+    s_id_menu_opacity_btn = nt_ui_id("showcase/menu_opacity_btn");
     s_ids_ready = true;
 }
 
