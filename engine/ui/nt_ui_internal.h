@@ -153,6 +153,15 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
+/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
+ * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
+#ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
+#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.50F
+#endif
+#ifndef NT_UI_GESTURE_MOVE_RADIUS_PX
+#define NT_UI_GESTURE_MOVE_RADIUS_PX 16.0F
+#endif
+
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -217,6 +226,21 @@ struct nt_ui_context {
         bool clicked;
     } pending_button;
 
+    /* Tab-bar begin/end core. The bar holds the per-call style ptr + layers + base_id so tab_begin can
+     * emit the per-state bg + accent without re-passing them; the tab sub-state carries the open tab's id
+     * (for tab_end's step_interaction) + its click result. Bars/tabs do not nest (asserted). */
+    struct {
+        const void *style; /* nt_ui_tabbar_style_t* (void to keep the internal header widget-agnostic) */
+        uint32_t base_id;
+        uint8_t fill_layer;
+        uint8_t label_layer;
+        bool active;
+    } pending_tabbar;
+    struct {
+        uint32_t id; /* the open tab's id (mixed hash of base_id+index; see tabbar_tab_id, NOT additive) */
+        bool active; /* a tab element is open (between tab_begin/tab_end) */
+    } pending_tab;
+
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;
@@ -243,6 +267,7 @@ struct nt_ui_context {
     nt_ui_interactive_t *interactive_cur;
 
     uint32_t current_generation;
+    uint32_t frame_counter; /* ++ each nt_ui_begin; STABLE for the whole begin->end->post-end-query window (current_generation bumps mid-end, so it can't gate post-end reads) */
     uint32_t interactive_prev_count;
     uint32_t interactive_cur_count;
 
@@ -270,6 +295,10 @@ struct nt_ui_context {
      * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
     bool view_proj_set;
     float element_depth_bias_ndc;
+    /* App-wide gesture constants (nt_ui_events). Set in create_context to the #define defaults,
+     * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
+    float gesture_dbl_window_secs;
+    float gesture_move_radius_px;
     float view_proj[16];
     float inv_view_proj[16];
 #if NT_UI_DEBUG_TOOLS
@@ -281,6 +310,7 @@ struct nt_ui_context {
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];
+    nt_ui_anim_interaction_t anim_snap; /* nt_ui_anim no-slot fast path (both speeds 0): snapped target, consumes no pool slot */
     /* Monotonic; nonzero delta across frames means raise NT_UI_ANIM_SLOTS. */
     uint32_t anim_collision_count;
 

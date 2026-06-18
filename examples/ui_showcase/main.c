@@ -22,16 +22,20 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_checkbox.h"
+#include "ui/nt_ui_dropdown.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_menu.h"
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
+#include "ui/nt_ui_tabbar.h"
+#include "ui/nt_ui_tooltip.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -123,6 +127,14 @@ static const nt_ui_image_style_t g_panel_img_style = {.color_packed = 0xFFFFFFFF
 
 /* Per-palette modal base; the palette pointer flip restyles the modal on hot-swap. */
 static nt_ui_modal_style_t s_modal_dark, s_modal_light;
+
+/* App-widget styles: dropdown / tooltip / menu / tab-bar, per-palette dark/light. */
+static nt_ui_dropdown_style_t s_dropdown_dark, s_dropdown_light;
+static nt_ui_tooltip_style_t s_tooltip_dark, s_tooltip_light;
+static nt_ui_menu_style_t s_menu_dark, s_menu_light;
+static nt_ui_tabbar_style_t s_tabbar_dark, s_tabbar_light;
+/* Begin/end-core demo strip: horizontal, flat-color, BOTTOM accent (distinct from the vertical nav's LEFT). */
+static nt_ui_tabbar_style_t s_tabs_demo_dark, s_tabs_demo_light;
 // #endregion
 
 // #region ui_palette_t (per-widget style pointers; pointer flip is the whole hot-swap)
@@ -140,6 +152,11 @@ typedef struct {
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
     nt_ui_input_style_t *input, *input_caret, *input_sel;
     const nt_ui_modal_style_t *modal;
+    nt_ui_dropdown_style_t *dropdown; /* non-const: nt_ui_dropdown memoizes atlas-ref resolves into the style */
+    nt_ui_tooltip_style_t *tooltip;   /* non-const: nt_ui_tooltip memoizes atlas-ref resolves into the style */
+    nt_ui_menu_style_t *menu;         /* non-const: nt_ui_menu memoizes atlas-ref resolves into the style */
+    nt_ui_tabbar_style_t *tabbar;     /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
+    nt_ui_tabbar_style_t *tabs_demo;  /* begin/end-core demo strip (horizontal, BOTTOM accent) */
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
     const char *name;
@@ -175,6 +192,11 @@ static ui_palette_t g_dark = {
     .input_caret = &s_input_caret_dark,
     .input_sel = &s_input_sel_dark,
     .modal = &s_modal_dark,
+    .dropdown = &s_dropdown_dark,
+    .tooltip = &s_tooltip_dark,
+    .menu = &s_menu_dark,
+    .tabbar = &s_tabbar_dark,
+    .tabs_demo = &s_tabs_demo_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
     .panel = {30.0F, 34.0F, 42.0F, 255.0F},
     .panel_alt = {40.0F, 45.0F, 56.0F, 255.0F},
@@ -213,6 +235,11 @@ static ui_palette_t g_light = {
     .input_caret = &s_input_caret_light,
     .input_sel = &s_input_sel_light,
     .modal = &s_modal_light,
+    .dropdown = &s_dropdown_light,
+    .tooltip = &s_tooltip_light,
+    .menu = &s_menu_light,
+    .tabbar = &s_tabbar_light,
+    .tabs_demo = &s_tabs_demo_light,
     .bg = {238.0F, 240.0F, 246.0F, 255.0F},
     .panel = {255.0F, 255.0F, 255.0F, 255.0F},
     .panel_alt = {232.0F, 235.0F, 243.0F, 255.0F},
@@ -262,6 +289,29 @@ typedef struct {
     int label_count; /* segmented control: 500 / 1500 / 3000 / 6000 */
 } stress_params_t;
 
+/* Events tab: hold-to-confirm + a double-click readout (all game-owned). */
+typedef struct {
+    uint32_t confirms;   /* hold-to-confirm fire count (long_pressed) */
+    uint32_t dbl_clicks; /* double-click readout */
+    float last_progress; /* hold_progress latched for the fill display */
+} events_params_t;
+
+/* Dropdown tab: game-owned selection + open flags (Model D). */
+typedef struct {
+    int fruit_sel; /* short list selection */
+    bool fruit_open;
+    int city_sel; /* long (scrolling) list selection */
+    bool city_open;
+} dropdown_params_t;
+
+/* Menu tab: two independent game-owned menus to show the optional target binding — a GLOBAL menu
+ * (right-click anywhere in the tab) and a ZONE menu bound to a panel (right-click only over it). */
+typedef struct {
+    nt_ui_menu_state_t global_state; /* target_id == 0: arms on a right-click anywhere */
+    nt_ui_menu_state_t zone_state;   /* target_id == panel: arms only over the bound panel */
+    uint32_t last_chosen;            /* latched for the readout (either menu) */
+} menu_params_t;
+
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
  * the engine state pool holds only caret/selection/scroll/blink, never the string. */
 typedef struct {
@@ -296,6 +346,12 @@ struct tab_state {
     stress_params_t stress;
     /* Input tab. */
     input_params_t input;
+    /* Interaction-events + app-widget tabs. */
+    events_params_t events;
+    dropdown_params_t dropdown;
+    menu_params_t menu;
+    /* Tabs tab: the begin/end-core demo strip's game-owned active index (Model D). */
+    int tabs_demo_active;
 };
 
 static struct tab_state s_state = {
@@ -314,6 +370,9 @@ static struct tab_state s_state = {
                                                                                                                                                                                fade-out */
     .stress = {.label_count = 3000},
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
+    .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
+    .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false},
+    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = 0},
 };
 // #endregion
 
@@ -353,6 +412,16 @@ static uint32_t s_id_theme_btn;
 static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_input_cyrillic;
 static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art, s_id_input_disabled;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
+/* App-widget ids. */
+static uint32_t s_id_events_hold;                   /* hold-to-confirm button */
+static uint32_t s_id_events_dbl;                    /* double-click target */
+static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
+static uint32_t s_id_dd_fruit, s_id_dd_city;        /* dropdown triggers */
+static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
+static uint32_t s_id_menu_global;                   /* global context menu (right-click anywhere) */
+static uint32_t s_id_menu_zone;                     /* zone context menu (bound to a panel) */
+static uint32_t s_id_menu_panel;                    /* the zone panel the zone menu binds to (opens only over it) */
+static uint32_t s_id_tabs_demo_base;                /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
 
@@ -391,6 +460,15 @@ static nt_atlas_region_ref_t s_panel_blue_ref;
 static nt_atlas_region_ref_t s_panel_brown_ref;
 /* Icon-button art (Kenney bunny); untinted so it shows its natural color. */
 static nt_atlas_region_ref_t s_icon_bunny_ref;
+/* Dropdown chevron affordance (down triangle; tintable). */
+static nt_atlas_region_ref_t s_chevron_down_ref;
+/* Menu submenu marker (right-pointing arrow; tintable). */
+static nt_atlas_region_ref_t s_arrow_right_ref;
+/* Tooltip caret/arrow (up-pointing triangle; the tooltip flips it per popup side; tintable). */
+static nt_atlas_region_ref_t s_caret_ref;
+/* Tabs-demo icons: bunny on idle/hover, checkmark on the selected tab (game-owned content swap). */
+static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
+static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
 
 static int s_active_tab;
 // #endregion
@@ -413,6 +491,11 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_menu(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void props_progress(nt_ui_context_t *ctx, tab_state_t *st);
@@ -433,6 +516,11 @@ static const showcase_entry_t g_tabs[] = {
     {"Scroll", "Four scroll variants: vertical AUTO_HIDE / ALWAYS bar / horizontal-only / both axes.", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
+    {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
+    {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
+    {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
+    {"Menu", "Two context menus (global + zone-bound) with nested submenus: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
+    {"Tabs", "Tab-bar begin/end core: icon+text tabs with a distinct selected-tab icon; BOTTOM accent.", "examples/ui_showcase/main.c:render_tabs", render_tabs, NULL},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
 #define TAB_COUNT ((int)(sizeof g_tabs / sizeof g_tabs[0]))
@@ -462,6 +550,11 @@ static void init_styles(void) {
     s_panel_blue_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE.value);
     s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN.value);
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
+    s_chevron_down_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHEVRON_DOWN.value);
+    s_arrow_right_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ARROW_RIGHT.value);
+    s_caret_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CARET.value);
+    s_tabs_icon_idle_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
+    s_tabs_icon_sel_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK.value);
 
     /* Flat buttons: no atlas art (idle.bg.atlas.id stays 0); solid bg via per-state bg_tint. */
     nt_ui_button_style_t flat_primary = {
@@ -732,6 +825,164 @@ static void init_styles(void) {
     s_modal_dark.backdrop_color = 0xFF000000U; /* black */
     s_modal_light = modal_base;
     s_modal_light.backdrop_color = 0xFF202830U; /* slate */
+
+    /* ---- Dropdown (dogfood): COHESIVE warm-panel family (mirrors the tab-bar cohesion fix). The trigger,
+     * the list panel, AND the rows all ride the SAME panel_brown slice9 so the widget reads as one family —
+     * NO clashing solid-blue button. States differentiate by tint only: muted idle -> lifted hover ->
+     * brightened pressed/selected, with a warm accent on the selected row. The chevron eases its open-
+     * rotation; an icon gutter aligns iconed + text-only rows. The long list shows a scrollbar (scroll_track
+     * / bar_thumb sprites). Flat colors stay as the atlas-free fallback. corner_radius is moot for IMAGE bg. ---- */
+    s_dropdown_dark = nt_ui_dropdown_style_defaults();
+    s_dropdown_dark.row_height = 30U;
+    s_dropdown_dark.max_visible_rows = 6U; /* the long city list scrolls past this */
+    s_dropdown_dark.icon_size = 22U;       /* leading icon gutter so iconed + text-only rows align */
+    s_dropdown_dark.chevron = s_chevron_down_ref;
+    s_dropdown_dark.chevron_tint = 0xFFE8F0FCU;
+    s_dropdown_dark.slice9_scale = 1.0F;
+    /* Trigger: the panel sprite tinted per-state (muted idle -> lifted hover -> brightened pressed). */
+    s_dropdown_dark.trigger_idle.bg = s_panel_brown_ref;
+    s_dropdown_dark.trigger_idle.bg_tint = 0xFF8C8C8CU; /* muted neutral at rest */
+    s_dropdown_dark.trigger_idle.fill = 0xFF3A3A3AU;    /* atlas-free fallback */
+    s_dropdown_dark.trigger_hover.bg = s_panel_brown_ref;
+    s_dropdown_dark.trigger_hover.bg_tint = 0xFFB0AAA4U; /* lifted on hover */
+    s_dropdown_dark.trigger_hover.fill = 0xFF464646U;
+    s_dropdown_dark.trigger_pressed.bg = s_panel_brown_ref;
+    s_dropdown_dark.trigger_pressed.bg_tint = 0xFFD6CDC6U; /* brightened while held */
+    s_dropdown_dark.trigger_pressed.fill = 0xFF2E2E2EU;
+    s_dropdown_dark.trigger_pressed.scale = 0.98F;
+    /* List panel: the same panel_brown slice9 frame; rows ride flat fills over it (transparent idle so the
+     * panel shows through), with a warm accent on the selected row — one cohesive family. */
+    s_dropdown_dark.panel_bg = s_panel_brown_ref;
+    s_dropdown_dark.panel_tint = 0xFFB0AAA4U;     /* lift the panel so rows read against it */
+    s_dropdown_dark.row_hover.fill = 0x40FFFFFFU; /* translucent white wash on hover */
+    s_dropdown_dark.row_pressed.fill = 0xFF4A3A34U;
+    s_dropdown_dark.row_selected.fill = 0xFF50B0E0U; /* warm gold accent, matches the tab-bar accent */
+    s_dropdown_dark.trigger_text = 0xFFFCF7F5U;
+    s_dropdown_dark.row_text = 0xFFFCF7F5U;
+    /* Game owns the list scroll feel + bar via the embedded list_scroll style; wire the bar sprites so the
+     * long list shows a visible bar when it scrolls. */
+    s_dropdown_dark.list_scroll = nt_ui_scroll_style_defaults();
+    s_dropdown_dark.list_scroll.track_ref = scroll_track;
+    s_dropdown_dark.list_scroll.thumb_ref = bar_thumb;
+    s_dropdown_dark.list_scroll.track_tint = 0xC0FFFFFFU;
+    s_dropdown_dark.list_scroll.thumb_tint = 0xFFFFFFFFU;
+    s_dropdown_dark.open_ease_speed = 14.0F; /* demo the new open-tween knob: the list eases open */
+    s_dropdown_light = s_dropdown_dark;
+    s_dropdown_light.trigger_text = 0xFF381C0CU;
+    s_dropdown_light.row_text = 0xFF381C0CU;
+    s_dropdown_light.chevron_tint = 0xFF24364CU;
+    s_dropdown_light.trigger_idle.bg_tint = 0xFFC4C4C4U; /* lighter neutral on the pale card */
+    s_dropdown_light.trigger_hover.bg_tint = 0xFFE0DAD4U;
+    s_dropdown_light.trigger_pressed.bg_tint = 0xFFFFFFFFU;
+    s_dropdown_light.panel_tint = 0xFFFFFFFFU;     /* full warm panel on the pale theme */
+    s_dropdown_light.row_hover.fill = 0x30000000U; /* translucent dark wash on hover */
+    s_dropdown_light.row_pressed.fill = 0xFFF0B68AU;
+    s_dropdown_light.row_selected.fill = 0xFF3C8CC8U; /* warm amber accent for the pale theme */
+
+    /* ---- Tooltip: a short reveal delay; dark uses the panel_blue slice9 frame + a caret pointing at the
+     * target (flips ABOVE near the bottom border) + a soft drop-shadow. Light flips to a pale flat panel +
+     * dark text, keeping the caret + a thin border + a subtle shadow. ---- */
+    s_tooltip_dark = nt_ui_tooltip_style_defaults();
+    s_tooltip_dark.delay_secs = 0.5F;
+    s_tooltip_dark.font_size = 16.0F;
+    s_tooltip_dark.open_ease_speed = 14.0F; /* demo the new open-tween knob: the tooltip eases open */
+    s_tooltip_dark.panel_art = s_panel_blue_ref;
+    s_tooltip_dark.panel_tint = 0xFFFFFFFFU;
+    s_tooltip_dark.caret = s_caret_ref;
+    s_tooltip_dark.caret_tint = 0xFFCFE2FAU; /* pale blue caret matching the panel_blue frame */
+    s_tooltip_dark.caret_size = 14U;
+    s_tooltip_dark.shadow_color = 0x60000000U; /* translucent black drop-shadow */
+    s_tooltip_dark.shadow_offset_px = 4;
+    s_tooltip_light = s_tooltip_dark;
+    s_tooltip_light.panel_art = (nt_atlas_region_ref_t){0}; /* flat pale panel on the light theme (no art) */
+    s_tooltip_light.panel_bg = 0xFFF4F4F4U;
+    s_tooltip_light.text_color = 0xFF202830U;
+    s_tooltip_light.caret_tint = 0xFFF4F4F4U;   /* caret matches the pale panel */
+    s_tooltip_light.border_color = 0xFFB8C2CCU; /* thin cool-grey border around the pale panel */
+    s_tooltip_light.border_px = 1U;
+    s_tooltip_light.shadow_color = 0x30000000U; /* lighter shadow on the pale theme */
+
+    /* ---- Context menu (dogfood): panel_blue slice9 frame + arrow_right submenu marker + an icon gutter
+     * (bunny on some rows, aligned-empty on the rest). Rows keep the eased flat hover highlight over the
+     * sprite panel for legibility. Flat bg_color + ">" text marker remain the atlas-free fallback. ---- */
+    s_menu_dark = nt_ui_menu_style_defaults();
+    s_menu_dark.item_height = 30U;
+    s_menu_dark.font_size = 16.0F;
+    s_menu_dark.min_width = 200U;
+    s_menu_dark.icon_size = 22U; /* leading gutter so iconed + text-only rows align */
+    s_menu_dark.panel_bg = s_panel_blue_ref;
+    s_menu_dark.panel_tint = 0xFFFFFFFFU;
+    s_menu_dark.arrow = s_arrow_right_ref;
+    s_menu_dark.arrow_tint = 0xFFE8F0FCU;
+    s_menu_dark.text_disabled = 0xFF6E7682U; /* muted slate: legible on the LIGHT slice9 panel (default grey blends in) */
+    s_menu_light = s_menu_dark;
+    s_menu_light.bg_color = 0xFFFFFFFFU;
+    s_menu_light.item_hover_color = 0xFFDCE6F4U;
+    s_menu_light.text_color = 0xFF202830U;
+    s_menu_light.arrow_tint = 0xFF24364CU;
+
+    /* ---- Tab-bar (dogfood): sprite-based game UI. Each state draws a Kenney slice9 button sprite
+     * tinted per-state (idle muted neutral, hover lightened, selected full blue) so the nav eases
+     * between real slice9 art, not flat rects. corner_radius=0: an IMAGE bg can't round (asserts).
+     * fill stays set as the atlas-free fallback. ---- */
+    s_tabbar_dark = nt_ui_tabbar_style_defaults();
+    s_tabbar_dark.bar_bg = 0U;        /* the surrounding card owns the bg; tabs sit on it */
+    s_tabbar_dark.corner_radius = 0U; /* IMAGE bg: rounding is baked into the sprite, not Clay */
+    s_tabbar_dark.tab_extent = 40U;   /* a touch taller so the 16px slice9 caps read */
+    s_tabbar_dark.idle.bg = s_panel_brown_ref;
+    s_tabbar_dark.idle.bg_tint = 0xFF6E6E6EU; /* muted neutral so unselected tabs recede */
+    s_tabbar_dark.idle.fill = 0xFF221A18U;    /* atlas-free fallback: list_bg {24,26,34} */
+    /* All states share the idle panel sprite so hover/selected stay in-family — differentiate by tint
+     * (lighter on hover, brighter on selected) + the accent bar, not a different sprite. */
+    s_tabbar_dark.hover.bg = s_panel_brown_ref;
+    s_tabbar_dark.hover.bg_tint = 0xFF8C8C8CU; /* same panel, lifted neutral on hover */
+    s_tabbar_dark.hover.fill = 0xFF332826U;    /* fallback */
+    s_tabbar_dark.selected.bg = s_panel_brown_ref;
+    s_tabbar_dark.selected.bg_tint = 0xFFD6CDC6U; /* same panel, brightened so the active tab reads */
+    s_tabbar_dark.selected.fill = 0xFF4A3A34U;    /* fallback: list_sel */
+    s_tabbar_dark.selected.scale = 1.04F;         /* gentle pop on the active tab */
+    s_tabbar_dark.accent = 0xFF50B0E0U;           /* warm gold {224,176,80} — harmonizes with the brown panel */
+    s_tabbar_dark.text = 0xFFB6AAA5U;             /* caption {165,170,182} */
+    s_tabbar_dark.text_selected = 0xFFFCF7F5U;    /* row_sel {245,247,252} */
+    s_tabbar_dark.font_size = 16.0F;
+    s_tabbar_light = s_tabbar_dark;
+    s_tabbar_light.idle.bg_tint = 0xFFB0B0B0U;     /* lighter neutral on the pale card */
+    s_tabbar_light.idle.fill = 0xFFEBE3E0U;        /* fallback: list_bg {224,227,235} */
+    s_tabbar_light.hover.bg_tint = 0xFFC4C4C4U;    /* same panel, gentle lift on the pale card */
+    s_tabbar_light.hover.fill = 0xFFDDD3D0U;       /* fallback */
+    s_tabbar_light.selected.bg_tint = 0xFFFFFFFFU; /* full warm panel on the active tab */
+    s_tabbar_light.selected.fill = 0xFFF0B68AU;    /* fallback: list_sel */
+    s_tabbar_light.accent = 0xFF3C8CC8U;           /* warm amber accent for the pale theme */
+    /* Idle nav labels must read on the tan brown-panel tab fill: the prior mid-grey ({90,92,104}) was too
+     * close in luminance to the medium-tan tint -> unreadable. Use a dark warm slate so idle labels have
+     * strong contrast; selected stays the darker navy so the active tab still differentiates. */
+    s_tabbar_light.text = 0xFF2E2620U;          /* dark warm slate {32,38,46} -- strong contrast on tan */
+    s_tabbar_light.text_selected = 0xFF381C0CU; /* row_sel {12,28,56} */
+
+    /* ---- Tabs demo strip (begin/end core): horizontal, flat-color, BOTTOM accent. The game owns each
+     * tab's content (icon + text, and a brighter icon when selected) -- the style only carries the bar
+     * bg / per-state fill / accent. accent_side differs from the nav's LEFT to show it's configurable. ---- */
+    s_tabs_demo_dark = nt_ui_tabbar_style_defaults();
+    s_tabs_demo_dark.dir = NT_UI_TABBAR_HORIZONTAL;
+    s_tabs_demo_dark.accent_side = NT_UI_TABBAR_ACCENT_BOTTOM;
+    s_tabs_demo_dark.bar_bg = 0xFF221A18U; /* card list_bg */
+    s_tabs_demo_dark.tab_extent = 132U;    /* width (horizontal): room for icon + label */
+    s_tabs_demo_dark.corner_radius = 8U;
+    s_tabs_demo_dark.idle.fill = 0U; /* transparent: the bar bg shows through */
+    s_tabs_demo_dark.hover.fill = 0xFF332826U;
+    s_tabs_demo_dark.selected.fill = 0xFF4A3A34U; /* list_sel */
+    s_tabs_demo_dark.selected.scale = 1.04F;
+    s_tabs_demo_dark.accent = 0xFF50B0E0U; /* warm gold */
+    s_tabs_demo_dark.text = 0xFFB6AAA5U;
+    s_tabs_demo_dark.text_selected = 0xFFFCF7F5U;
+    s_tabs_demo_dark.font_size = 16.0F;
+    s_tabs_demo_light = s_tabs_demo_dark;
+    s_tabs_demo_light.bar_bg = 0xFFEBE3E0U; /* pale card list_bg */
+    s_tabs_demo_light.hover.fill = 0xFFDDD3D0U;
+    s_tabs_demo_light.selected.fill = 0xFFF0B68AU; /* list_sel */
+    s_tabs_demo_light.accent = 0xFF3C8CC8U;
+    s_tabs_demo_light.text = 0xFF685C5AU;
+    s_tabs_demo_light.text_selected = 0xFF381C0CU;
 }
 // #endregion
 
@@ -763,7 +1014,7 @@ static void button_cell(nt_ui_context_t *ctx, uint32_t id, nt_ui_button_style_t 
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, style,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = rounded ? CLAY_CORNER_RADIUS(8) : CLAY_CORNER_RADIUS(0)},
-        enabled);
+        enabled, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     (void)nt_ui_button_end(ctx);
 }
@@ -815,7 +1066,7 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
                 &(Clay_ElementDeclaration){
                     .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childGap = 14, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                     .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                true);
+                true, NULL);
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(48), CLAY_SIZING_FIXED(48)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", g_current->body);
             (void)nt_ui_button_end(ctx);
@@ -848,7 +1099,7 @@ static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(96)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true);
+                               true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click me", g_current->body);
             if (nt_ui_button_end(ctx)) {
                 st->btn_xform.clicks++;
@@ -1115,7 +1366,7 @@ static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_button_begin(
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/btn_xform_reset"), g_current->btn_secondary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(44)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-        true);
+        true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reset", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->btn_xform.rotation_deg = 20.0F;
@@ -1145,11 +1396,13 @@ static nt_ui_modal_anim_t modal_param_anim(int type, int edge, float scale_start
 
 /* A labelled action button inside a modal body. */
 static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text) {
-    nt_ui_button_begin(
-        ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
-        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true);
+    /* FIT width (min 140) so the longest label ("Show nested") fits; 16px side padding gives breathing room. */
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, g_current->btn_primary,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIT(.min = 140), CLAY_SIZING_FIXED(56)},
+                                                             .padding = {.left = 16, .right = 16, .top = 8, .bottom = 8},
+                                                             .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                                  .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                       true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), text, g_current->body);
     return nt_ui_button_end(ctx);
 }
@@ -1164,7 +1417,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_modal_show_btn, g_current->btn_primary,
         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-        true);
+        true, NULL);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
         st->confirm_open = true;
@@ -1267,6 +1520,266 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
     input_field(ctx, "Disabled (greyed, no focus)", s_id_input_disabled, st->input.disabled, sizeof st->input.disabled, &props_disabled, g_current->input, false);
 }
 
+/* Events tab: a hold-to-confirm button (nt_ui_events gesture cfg -> hold_progress fill + long_pressed
+ * fire) and a double-click target. All counters are game-owned (Model D); the engine owns only the
+ * gesture cell behind the button id. */
+static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[96];
+    /* Hold past this many seconds (without dragging off) confirms; the fill ramps over the same window. */
+    static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
+    static const nt_ui_events_cfg_t dbl_cfg = {.long_press_secs = 0.0F, .double_click = true};
+    static const Clay_ElementDeclaration bar_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(14)}}};
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Press and HOLD the button: the fill ramps to full over ~1.5s and confirms at the top.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Drag the cursor off the button mid-hold to RESET the fill (no confirm).", g_current->caption);
+
+    /* The button itself drives the gesture cell via its cfg; we read the latched result back
+     * idempotently after end() for the fill + the one-shot confirm. */
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_hold, g_current->btn_primary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+        true, &hold_cfg);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hold to confirm", g_current->body);
+    (void)nt_ui_button_end(ctx);
+
+    const nt_ui_events_t hold = nt_ui_query_events(ctx, s_id_events_hold);
+    st->events.last_progress = hold.hold_progress;
+    if (hold.long_pressed) {
+        st->events.confirms++;
+    }
+
+    /* Render the hold progress as a fill bar so the ramp is visible. */
+    nt_ui_progress(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_IMG, s_id_events_fill, st->events.last_progress, g_current->progress, &bar_decl);
+
+    /* A separate double-click target (a plain button) with a dbl-click readout. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Double-click the button below:", g_current->caption);
+    nt_ui_button_begin(
+        ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_events_dbl, g_current->btn_secondary,
+        &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+        true, &dbl_cfg);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Double-click me", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    if (nt_ui_query_events(ctx, s_id_events_dbl).double_clicked) {
+        st->events.dbl_clicks++;
+    }
+
+    (void)snprintf(buf, sizeof buf, "confirms: %u   double-clicks: %u   hold_progress: %.2f", st->events.confirms, st->events.dbl_clicks, (double)st->events.last_progress);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
+/* Dropdown tab: a short combobox + a long (scrolling) combobox to exercise the scroll path + the
+ * edge-flip-up near the bottom border. Game owns selection + open (Model D). */
+static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    static const char *const fruits[] = {"Apple", "Banana", "Cherry", "Date", "Elderberry"};
+    static const char *const cities[] = {"Amsterdam", "Berlin",  "Cairo", "Delhi",  "Edinburgh", "Florence", "Geneva", "Helsinki", "Istanbul", "Jakarta", "Kyoto",  "Lisbon",
+                                         "Madrid",    "Nairobi", "Oslo",  "Prague", "Quito",     "Rome",     "Seoul",  "Tokyo",    "Utrecht",  "Vienna",  "Warsaw", "Zurich"};
+    static const Clay_ElementDeclaration trigger_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(40)}}};
+    static const int fruit_count = (int)(sizeof fruits / sizeof fruits[0]);
+    static const int city_count = (int)(sizeof cities / sizeof cities[0]);
+
+    /* Per-row icons: a parallel array (same length as labels). An unset ref ({0}, atlas.id==0) leaves an
+     * ALIGNED EMPTY gutter so the text still lines up (OS-menu icon-column behavior). Some fruits get a
+     * bunny icon, the rest stay empty -- proving the gutter holds alignment either way. */
+    const nt_atlas_region_ref_t fruit_icons[] = {s_icon_bunny_ref, {0}, s_icon_bunny_ref, {0}, {0}};
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick an item; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
+
+    /* Short list: fits without scrolling. Iconed gutter (some rows iconed, some aligned-empty). */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
+    (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_count, st->dropdown.fruit_sel, "Pick a fruit", g_current->dropdown, &trigger_decl,
+                                 &st->dropdown.fruit_open);
+    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, fruits, fruit_icons, fruit_count, &st->dropdown.fruit_sel, g_current->dropdown, &st->dropdown.fruit_open);
+
+    /* Long list: more than max_visible_rows -> the list wraps in a scroll container. NULL icons -> every
+     * row reserves an aligned-empty gutter (no per-row icon). */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
+    (void)nt_ui_dropdown_trigger(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, city_count, st->dropdown.city_sel, "Pick a city", g_current->dropdown, &trigger_decl,
+                                 &st->dropdown.city_open);
+    (void)nt_ui_dropdown_list(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, cities, NULL, city_count, &st->dropdown.city_sel, g_current->dropdown, &st->dropdown.city_open);
+
+    (void)snprintf(buf, sizeof buf, "fruit: %s", (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "(none)");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+    (void)snprintf(buf, sizeof buf, "city: %s", (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "(none)");
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
+/* Tooltip tab: three hover targets, each with a timed reveal. The engine owns the hover-delay timer
+ * behind a salted id; the tooltip declares NO catcher so it never blocks the base UI. */
+static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
+    (void)st;
+    static const Clay_ElementDeclaration target_decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(220), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+        .cornerRadius = CLAY_CORNER_RADIUS(8)};
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover a target and wait ~0.5s for its tooltip; move away to hide. The tooltip never blocks clicks underneath.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "The panel is a slice9 frame with a caret pointing at the target + a drop-shadow; near the bottom border the caret flips to the panel's bottom edge.", g_current->caption);
+
+    /* The targets are plain buttons so they are still clickable (proving the tooltip has no catcher).
+     * The tooltip is declared AFTER each target so the target carries a queryable bbox this frame. */
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_a, g_current->btn_primary, &target_decl, true, NULL);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover me", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_a, "A simple tooltip revealed after the hover delay.", g_current->tooltip);
+
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_b, g_current->btn_secondary, &target_decl, true, NULL);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "And me", g_current->body);
+    (void)nt_ui_button_end(ctx);
+    (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_b, "Tooltips wrap to the style max_width so long content stays readable on one panel.", g_current->tooltip);
+
+    /* Bottom-edge target: a tall block with a GROW spacer pushes this target to the bottom of the visible
+     * content area, so its tooltip has no room below and visibly flips ABOVE the target (edge-flip demo). */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(360)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_BOTTOM}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {} /* GROW spacer: pin the target to the bottom */
+        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tip_c, g_current->btn_primary, &target_decl, true, NULL);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Bottom edge", g_current->body);
+        (void)nt_ui_button_end(ctx);
+    }
+    (void)nt_ui_tooltip(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tip_c, "Near the bottom border the tooltip flips ABOVE the target instead of below.", g_current->tooltip);
+}
+
+/* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
+ * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The item tree is static const
+ * (the menu never mutates it); the game owns the open flag + chosen-id sink (Model D). */
+static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[64];
+    /* GLOBAL menu tree: app-themed. "Open recent" is the fly-out submenu. Distinct content from the zone
+     * menu so a user instantly sees WHICH menu opened (global = app actions). */
+    static nt_ui_menu_item_t global_recent_items[] = {
+        {.label = "level_01.ntpack", .submenu = NULL, .id = 211U, .submenu_count = 0U, .enabled = true},
+        {.label = "ui_showcase.ntpack", .submenu = NULL, .id = 212U, .submenu_count = 0U, .enabled = true},
+        {.label = "(clear list)", .submenu = NULL, .id = 213U, .submenu_count = 0U, .enabled = false},
+    };
+    static nt_ui_menu_item_t global_items[] = {
+        {.label = "New", .submenu = NULL, .id = 101U, .submenu_count = 0U, .enabled = true},
+        {.label = "Open recent", .submenu = global_recent_items, .id = 0U, .submenu_count = (uint32_t)(sizeof global_recent_items / sizeof global_recent_items[0]), .enabled = true},
+        {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
+        {.label = "Preferences", .submenu = NULL, .id = 102U, .submenu_count = 0U, .enabled = true},
+        {.label = "Quit", .submenu = NULL, .id = 103U, .submenu_count = 0U, .enabled = true},
+    };
+    static const uint32_t global_count = (uint32_t)(sizeof global_items / sizeof global_items[0]);
+
+    /* ZONE menu tree: panel/element-themed. "Move to" is the fly-out submenu. Clearly different first row +
+     * submenu than the global menu so the bound (panel) menu is unmistakable on screen. */
+    static nt_ui_menu_item_t zone_move_items[] = {
+        {.label = "Front", .submenu = NULL, .id = 221U, .submenu_count = 0U, .enabled = true},
+        {.label = "Back", .submenu = NULL, .id = 222U, .submenu_count = 0U, .enabled = true},
+        {.label = "Group", .submenu = NULL, .id = 223U, .submenu_count = 0U, .enabled = false},
+    };
+    static nt_ui_menu_item_t zone_items[] = {
+        {.label = "Edit panel", .submenu = NULL, .id = 104U, .submenu_count = 0U, .enabled = true},
+        {.label = "Duplicate", .submenu = NULL, .id = 105U, .submenu_count = 0U, .enabled = true},
+        {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
+        {.label = "Move to", .submenu = zone_move_items, .id = 0U, .submenu_count = (uint32_t)(sizeof zone_move_items / sizeof zone_move_items[0]), .enabled = true},
+        {.label = "Delete", .submenu = NULL, .id = 106U, .submenu_count = 0U, .enabled = true},
+    };
+    static const uint32_t zone_count = (uint32_t)(sizeof zone_items / sizeof zone_items[0]);
+
+    /* Icons late-bound (atlas binds after these statics): a couple of rows per tree get the bunny, the rest
+     * leave an aligned-empty gutter (OS-menu column). The menu never mutates the tree. */
+    global_items[0].icon = s_icon_bunny_ref;
+    global_items[1].icon = s_icon_bunny_ref;
+    global_recent_items[0].icon = s_icon_bunny_ref;
+    zone_items[0].icon = s_icon_bunny_ref;
+    zone_items[3].icon = s_icon_bunny_ref;
+    zone_move_items[0].icon = s_icon_bunny_ref;
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "Right-click the panel -> ZONE menu (Edit panel / Duplicate / Move to...); right-click anywhere else -> GLOBAL menu (New / Open recent... / Quit). Click outside / Esc closes.",
+                g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opening one closes the other. Hover the submenu row to fly it out; arrows/Enter navigate.", g_current->caption);
+
+    /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
+     * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
+     * trigger does only idempotent reads and binds the right-click to the panel via a bbox geometry hit-test
+     * (so a right-click over the panel RE-opens the menu at the cursor through its own occluder). */
+    CLAY({.id = (Clay_ElementId){.id = s_id_menu_panel},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+          .backgroundColor = g_current->panel_alt,
+          .cornerRadius = CLAY_CORNER_RADIUS(10),
+          .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Zone menu: right-click the panel = (re)open here", g_current->body);
+    }
+    static const nt_ui_events_cfg_t menu_cfg = {.long_press_secs = 0.5F, .double_click = false};
+    const nt_ui_events_t zone_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);
+
+    /* Mutually exclusive arming: a right-click over the zone panel must arm ONLY the zone menu, anywhere
+     * else ONLY the global. Same cursor + bbox snapshot the trigger reads (prev-frame bbox vs this-frame
+     * pointer), so over_zone matches the zone trigger's own geometry hit-test. */
+    const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
+    const bool over_zone = zone_bb.found && zone_ev.pos[0] >= zone_bb.x && zone_ev.pos[0] <= zone_bb.x + zone_bb.width && zone_ev.pos[1] >= zone_bb.y && zone_ev.pos[1] <= zone_bb.y + zone_bb.height;
+
+    const bool zone_armed = nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, zone_ev.long_pressed, &st->menu.zone_state);
+    /* Global only when NOT over the zone, so a right-click on the panel never also arms the global. */
+    const bool global_armed = !over_zone && nt_ui_menu_open_trigger(ctx, s_id_menu_global, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_state);
+
+    /* Opening one forces the other closed (open_trigger returns true only on the arming frame). */
+    if (zone_armed) {
+        st->menu.global_state.open = false;
+    } else if (global_armed) {
+        st->menu.zone_state.open = false;
+    }
+
+    /* Render both menus (independent state + ids); arming is gated so at most one is open. */
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, global_items, global_count, &st->menu.global_state, g_current->menu);
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, zone_items, zone_count, &st->menu.zone_state, g_current->menu);
+
+    if (st->menu.global_state.chosen_id != 0U) {
+        st->menu.last_chosen = st->menu.global_state.chosen_id;
+        st->menu.global_state.chosen_id = 0U; /* game reads + clears (Model D) */
+    }
+    if (st->menu.zone_state.chosen_id != 0U) {
+        st->menu.last_chosen = st->menu.zone_state.chosen_id;
+        st->menu.zone_state.chosen_id = 0U;
+    }
+
+    (void)snprintf(buf, sizeof buf, "last chosen id: %u", st->menu.last_chosen);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
+/* Tabs tab: the nt_ui_tabbar begin/end CORE dogfooded. The engine owns each tab's styled per-state bg
+ * (eased) + the BOTTOM accent + the click; the GAME owns the content -- an icon + a label, with a
+ * DIFFERENT icon on the selected tab (branch on `on`). Contrast the LEFT nav, which uses the one-call
+ * labels[] convenience wrapper. The strip's accent_side (BOTTOM) differs from the nav's (LEFT). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — the tab loop + per-tab content, not real nesting
+static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st) {
+    static const char *const names[] = {"Home", "Search", "Profile", "Settings"};
+    static const int count = (int)(sizeof names / sizeof names[0]);
+    nt_ui_tabbar_style_t *style = g_current->tabs_demo;
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "Begin/end core: the GAME composes each tab (icon + text); the selected tab swaps in a different icon. The engine owns the bg, the BOTTOM accent, and the click.", g_current->caption);
+
+    /* Wrap the strip so it sizes to content height instead of growing to fill the scroll. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(72)}}}) {
+        nt_ui_tabbar_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tabs_demo_base, style);
+        for (int i = 0; i < count; ++i) {
+            const bool on = (i == st->tabs_demo_active);
+            if (nt_ui_tab_begin(ctx, i, on)) {
+                st->tabs_demo_active = i; /* Model D */
+            }
+            /* Game-owned content: the tab keeps its OWN icon always (swapping it to a checkmark loses the
+             * tab's identity); the selected tab ADDS a trailing checkmark badge instead. */
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_tabs_icon_idle_ref, &g_panel_img_style, NULL); }
+            const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = on ? g_current->row_sel->color : g_current->caption->color};
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &lbl);
+            if (on) {
+                /* Selected badge: a small checkmark trailing the label (added, not replacing the icon). */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_tabs_icon_sel_ref, &g_panel_img_style, NULL); }
+            }
+            nt_ui_tab_end(ctx);
+        }
+        nt_ui_tabbar_end(ctx);
+    }
+
+    char buf[64];
+    (void)snprintf(buf, sizeof buf, "selected: %s", names[st->tabs_demo_active]);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
 /* N labels @14pt + a frame gpu_ms readout. No nested ui_text GPU segment: the host frame loop owns
  * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1318,7 +1831,7 @@ static void modal_seg_select(nt_ui_context_t *ctx, const char *title, uint32_t b
                 &(Clay_ElementDeclaration){
                     .layout = {.sizing = {CLAY_SIZING_FIXED((float)btn_w), CLAY_SIZING_FIXED(36)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                     .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                true);
+                true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[i], &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 *value = i;
@@ -1383,7 +1896,7 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
                                &(Clay_ElementDeclaration){
                                    .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                    .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                               true);
+                               true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, &g_seg_label);
             if (nt_ui_button_end(ctx)) {
                 st->stress.label_count = counts[i];
@@ -1460,6 +1973,18 @@ static void ensure_ids(void) {
     s_id_input_art = nt_ui_id("showcase/input_art");
     s_id_input_disabled = nt_ui_id("showcase/input_disabled");
     s_id_tab_btn_base = nt_ui_id("showcase/tab_btn");
+    s_id_tabs_demo_base = nt_ui_id("showcase/tabs_demo");
+    s_id_events_hold = nt_ui_id("showcase/events_hold");
+    s_id_events_dbl = nt_ui_id("showcase/events_dbl");
+    s_id_events_fill = nt_ui_id("showcase/events_fill");
+    s_id_dd_fruit = nt_ui_id("showcase/dd_fruit");
+    s_id_dd_city = nt_ui_id("showcase/dd_city");
+    s_id_tip_a = nt_ui_id("showcase/tip_a");
+    s_id_tip_b = nt_ui_id("showcase/tip_b");
+    s_id_tip_c = nt_ui_id("showcase/tip_c");
+    s_id_menu_global = nt_ui_id("showcase/menu_global");
+    s_id_menu_zone = nt_ui_id("showcase/menu_zone");
+    s_id_menu_panel = nt_ui_id("showcase/menu_panel");
     s_ids_ready = true;
 }
 
@@ -1477,7 +2002,7 @@ static void declare_header(nt_ui_context_t *ctx) {
                            &(Clay_ElementDeclaration){
                                .layout = {.sizing = {CLAY_SIZING_FIXED(150), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(4), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                                .cornerRadius = CLAY_CORNER_RADIUS(8)},
-                           true);
+                           true, NULL);
         (void)snprintf(buf, sizeof buf, "Theme: %s", g_current->name);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
         if (nt_ui_button_end(ctx)) {
@@ -1498,29 +2023,24 @@ static void declare_header(nt_ui_context_t *ctx) {
     }
 }
 
-/* One tab-list row: full-row click target (transparent list-row button so the row's CLAY bg shows
- * the selected/unselected state), a 3px left accent bar on the active row, hover/pressed lighten. */
-static void tab_row(nt_ui_context_t *ctx, int i, bool selected) {
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(38)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-          .backgroundColor = selected ? g_current->list_sel : g_current->list_bg,
-          .cornerRadius = CLAY_CORNER_RADIUS(6)}) {
-        /* 3px left accent bar on the active row (transparent spacer otherwise => stable layout). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(3), CLAY_SIZING_GROW(0)}}, .backgroundColor = selected ? g_current->accent : (Clay_Color){0}}) {}
-        nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_tab_btn_base + (uint32_t)i, g_current->listrow,
-                           &(Clay_ElementDeclaration){
-                               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 12, .right = 10}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-                               .cornerRadius = {0, 6, 0, 6}},
-                           true);
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), g_tabs[i].name, selected ? g_current->row_sel : g_current->caption);
-        if (nt_ui_button_end(ctx)) {
-            s_active_tab = i;
-        }
+/* The tab labels passed to nt_ui_tabbar: the registry names, gathered once (the registry is static). */
+static const char *s_tab_labels[TAB_COUNT];
+static bool s_tab_labels_ready;
+static void ensure_tab_labels(void) {
+    if (s_tab_labels_ready) {
+        return;
     }
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        s_tab_labels[i] = g_tabs[i].name;
+    }
+    s_tab_labels_ready = true;
 }
 
-/* Demo-selection panel (left, FIXED 240): one full-row click target per registry entry; clicking
- * selects the active tab. Styled as a card (bg + border + radius) consistent with the other panels. */
+/* Demo-selection panel (left, FIXED 240): the reusable nt_ui_tabbar dogfooded. The game owns
+ * s_active_tab (Model D); the widget draws the accent bar + selected fill + hover lighten and writes the
+ * active index on click. Styled as a card (bg + border + radius) consistent with the other panels. */
 static void declare_tab_list(nt_ui_context_t *ctx) {
+    ensure_tab_labels();
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_GROW(0)},
                      .padding = CLAY_PADDING_ALL(10),
                      .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1529,9 +2049,8 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
           .backgroundColor = g_current->list_bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        for (int i = 0; i < TAB_COUNT; ++i) {
-            tab_row(ctx, i, i == s_active_tab);
-        }
+        /* Text-only nav (icons NULL): the left rail stays clean/cohesive. icon_size stays 0 so no gutter. */
+        (void)nt_ui_tabbar(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tab_btn_base, s_tab_labels, NULL, TAB_COUNT, &s_active_tab, g_current->tabbar);
     }
 }
 
@@ -1753,12 +2272,12 @@ static void frame(void) {
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         {
-            /* Bottom-left overlay: nt_debug_overlay_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
-             * y-up text space, so anchor high enough (~5 line-heights) that the last line stays on
-             * screen and clear of the header's theme button at the top. */
+            /* Bottom-RIGHT overlay: nt_debug_overlay_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
+             * y-up text space. Anchor near the right edge (reserve ~170px for the widest line) and
+             * ~92px up so the last line stays on screen — keeps the HUD clear of the left nav tabs. */
             mat4 stats_model;
             glm_mat4_identity(stats_model);
-            glm_translate(stats_model, (vec3){10.0F, 92.0F, 0.0F});
+            glm_translate(stats_model, (vec3){scale.logical_w - 170.0F, 92.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
             nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();

@@ -9,7 +9,7 @@
 #include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "resource/nt_resource.h"
-#include "ui/nt_ui.h" /* nt_ui_element_data_t */
+#include "ui/nt_ui.h" /* nt_ui_element_data_t, nt_ui_events_cfg_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -39,11 +39,15 @@ _Static_assert(sizeof(nt_ui_button_style_t) == 176, "nt_ui_button_style_t stable
 /* enabled=false short-circuits interaction and forces the disabled visual.
  * Engine OWNS .id/.image/.backgroundColor/.userData on the Clay decl.
  * style->idle.bg.atlas.id == 0 = text-only button (no background IMAGE emitted);
- * other states inherit idle when their bg.atlas.id == 0. */
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
+ * other states inherit idle when their bg.atlas.id == 0.
+ * cfg is a BEHAVIORAL arg (NOT in the visual style): NULL = plain click (zero gesture alloc);
+ * non-NULL forwards into the button's single events step so the GAME can harvest long-press /
+ * double-click via nt_ui_query_events(ctx, id) AFTER the call. The button itself returns only clicked. */
+void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled,
+                        const nt_ui_events_cfg_t *cfg);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
 
-/* Content-less button (slice9 bg only). Returns clicked. Same args as begin. */
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
+/* Content-less button (slice9 bg only). Returns clicked. Same args as begin (cfg NULL = plain click). */
+bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, const nt_ui_events_cfg_t *cfg);
 
 #endif /* NT_UI_BUTTON_H */

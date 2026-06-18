@@ -27,6 +27,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_state.h"
 #include "unity.h"
 #include "utf8/nt_utf8.h"
 
@@ -439,42 +440,6 @@ static void test_unfocused_ignores_chars(void) {
     TEST_ASSERT_EQUAL_STRING("", buf);
 }
 
-/* ---- Test 10: the generic dblclick/longpress primitive reports edges. ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_dblclick_longpress_primitive(void) {
-    const uint32_t gid = nt_ui_id("gesture");
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-
-    /* First press: no double-click yet. */
-    nt_ui_click_gesture_t g = nt_ui_dblclick_longpress(s_fx.ctx, gid, true, false, true, 10.0F, 10.0F, 0.30F, 0.50F, 6.0F);
-    TEST_ASSERT_FALSE(g.double_clicked);
-    /* Release (result discarded; just clears the live-press state). */
-    (void)nt_ui_dblclick_longpress(s_fx.ctx, gid, false, true, false, 10.0F, 10.0F, 0.30F, 0.50F, 6.0F);
-    /* Second press within the window + radius -> double-click. */
-    g = nt_ui_dblclick_longpress(s_fx.ctx, gid, true, false, true, 11.0F, 11.0F, 0.30F, 0.50F, 6.0F);
-    TEST_ASSERT_TRUE(g.double_clicked);
-    nt_ui_end(s_fx.ctx);
-
-    /* Long-press: a held press whose accumulated dt crosses the threshold fires once. */
-    const uint32_t lid = nt_ui_id("longpress");
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1);
-    g = nt_ui_dblclick_longpress(s_fx.ctx, lid, true, false, true, 50.0F, 50.0F, 0.30F, 0.50F, 6.0F);
-    TEST_ASSERT_FALSE(g.long_pressed);
-    nt_ui_end(s_fx.ctx);
-
-    bool fired = false;
-    for (int i = 0; i < 60; ++i) { /* advance the clock via 0.1s dt steps */
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.1F, &IDLE_PTR, 1);
-        g = nt_ui_dblclick_longpress(s_fx.ctx, lid, false, false, true, 50.0F, 50.0F, 0.30F, 0.50F, 6.0F);
-        nt_ui_end(s_fx.ctx);
-        if (g.long_pressed) {
-            fired = true;
-            break;
-        }
-    }
-    TEST_ASSERT_TRUE(fired);
-}
-
 /* Hold/release a modifier across a key-frame: many selection ops need Shift or Ctrl DOWN while
  * the action key fires its press edge. Sets both keys, runs one field frame, then clears. */
 static void chord_frame(uint32_t id, char *buf, size_t cap, nt_key_t mod, nt_key_t key) {
@@ -552,6 +517,49 @@ static void test_double_click_word_select(void) {
     /* Backspace now deletes the selected word "foo" (the leading space stays). */
     (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE);
     TEST_ASSERT_EQUAL_STRING(" bar", buf);
+}
+
+/* ---- word-select fires via the field's single nt_ui_events step (cfg.double_click),
+ *      not a separate gesture detector. A double-click in "foo bar" lands the caret at the word end. ---- */
+static void test_word_select_fires_via_events(void) {
+    char buf[32];
+    strcpy(buf, "foo bar");
+    const uint32_t id = nt_ui_id("f");
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL); /* warm the bbox */
+
+    const float click_x = IN_X + PAD_X + (GLYPH_W * 1.0F); /* over the 'o' of foo */
+    nt_pointer_t p1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&p1, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t r1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
+    (void)field_frame(&r1, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t p2 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&p2, id, buf, sizeof buf, true, NULL);
+
+    /* The events double_clicked drove word-select: the caret sits at the end of "foo" (byte 3). */
+    uint32_t caret = 99U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3U, caret, "double-click via events must select the whole word 'foo' (caret at byte 3)");
+}
+
+/* ---- The field runs exactly ONE mutating interaction step on its id: a press-release cycle does not
+ *      double-count capture or leak a duplicate gesture cell (the state-pool slot count is stable
+ *      across repeated identical press-release frames once warmed). ---- */
+static void test_field_press_release_no_double_count(void) {
+    char buf[32];
+    strcpy(buf, "abc");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf); /* establishes the state + gesture cells once */
+
+    const uint32_t after_warm = nt_ui_state_used_slots(s_fx.ctx);
+
+    /* A fresh press-release cycle must not grow the pool (one events step => one gesture cell, reused). */
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    (void)field_frame(&rel, id, buf, sizeof buf, true, NULL);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(after_warm, nt_ui_state_used_slots(s_fx.ctx), "a press-release must not grow the state pool (no double-count / duplicate gesture cell)");
 }
 
 /* ---- Test 16: Ctrl+C copies the selection; Ctrl+V pastes it (round-trip via the fake clipboard). ---- */
@@ -1149,11 +1157,12 @@ int main(void) {
     RUN_TEST(test_focus_dropped_when_disabled);
     RUN_TEST(test_submit_and_change);
     RUN_TEST(test_unfocused_ignores_chars);
-    RUN_TEST(test_dblclick_longpress_primitive);
     RUN_TEST(test_shift_select_and_collapse);
     RUN_TEST(test_shift_select_cyrillic);
     RUN_TEST(test_ctrl_a_select_all);
     RUN_TEST(test_double_click_word_select);
+    RUN_TEST(test_word_select_fires_via_events);
+    RUN_TEST(test_field_press_release_no_double_count);
     RUN_TEST(test_clipboard_copy_paste_roundtrip);
     RUN_TEST(test_clipboard_cut);
     RUN_TEST(test_clipboard_cut_unavailable_noop);

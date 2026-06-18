@@ -60,8 +60,19 @@ set(NT_UI_SOURCES
     nt_ui_state.h
     nt_ui_scroll.c
     nt_ui_scroll.h
+    nt_ui_popup.c
+    nt_ui_popup.h
+    nt_ui_popup_internal.h
     nt_ui_modal.c
     nt_ui_modal.h
+    nt_ui_menu.c
+    nt_ui_menu.h
+    nt_ui_dropdown.c
+    nt_ui_dropdown.h
+    nt_ui_tabbar.c
+    nt_ui_tabbar.h
+    nt_ui_tooltip.c
+    nt_ui_tooltip.h
     nt_ui_button.c
     nt_ui_button.h
     nt_ui_checkbox.c

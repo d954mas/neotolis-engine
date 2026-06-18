@@ -69,24 +69,9 @@ typedef struct {
     float repeat_t;      /* seconds until the held repeat_key fires again (initial delay, then rate) */
     uint16_t repeat_key; /* the nt_key_t currently auto-repeating (0 = none) */
     uint8_t drag;        /* 1 while a press is dragging to extend the selection */
-    uint8_t _pad[1];
 } nt_ui_input_state_t;
 
-/* Double-click + long-press cell; generic, keyed by the gesture's widget id. */
-#define NT_UI_INPUT_GESTURE_SALT 0x10D7C002U
-typedef struct {
-    float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
-    float origin_x, origin_y;
-    float clock;        /* monotonic accumulator fed by ctx->frame_dt */
-    float press_clock;  /* clock value at the live press (for long-press timing) */
-    uint8_t has_prev;   /* 1 once a first press has been seen (clock==0 is a valid time) */
-    uint8_t press_live; /* 1 while a press is held without firing long-press yet */
-    uint8_t long_fired; /* 1 once long-press fired for the current hold (one-shot) */
-    uint8_t _pad[1];
-} nt_ui_input_gesture_t;
-
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
-static inline uint32_t input_gesture_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_GESTURE_SALT); }
 
 // #region utf8 helpers
 
@@ -243,57 +228,6 @@ bool nt_ui_filter_url(uint32_t cp) {
 
 /* Default allow when props->allow == NULL: any printable (drop C0/C1 control + DEL). */
 static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && !(cp >= 0x80U && cp <= 0x9FU); }
-
-// #endregion
-
-// #region double-click + long-press primitive
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_click_gesture_t nt_ui_dblclick_longpress(nt_ui_context_t *ctx, uint32_t id, bool pressed_now, bool released_now, bool held, float pos_x, float pos_y, float dbl_window_secs,
-                                               float long_press_secs, float move_radius_px) {
-    NT_ASSERT(ctx != NULL && "nt_ui_dblclick_longpress: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_dblclick_longpress: id must be non-zero");
-    nt_ui_input_gesture_t *g = (nt_ui_input_gesture_t *)nt_ui_state(ctx, input_gesture_id(id), (uint32_t)sizeof(nt_ui_input_gesture_t), NT_UI_STATE_TAG('i', 'g', 's', 't'));
-    g->clock += ctx->frame_dt; /* monotonic; dt may be 0 in headless tests (caller drives time via dt) */
-    nt_ui_click_gesture_t out = {false, false};
-
-    if (pressed_now) {
-        const float dx = pos_x - g->origin_x;
-        const float dy = pos_y - g->origin_y;
-        const bool in_radius = (dx * dx + dy * dy) <= (move_radius_px * move_radius_px);
-        const bool in_window = (g->has_prev != 0U) && ((g->clock - g->last_press_time) <= dbl_window_secs);
-        if (in_window && in_radius) {
-            out.double_clicked = true;
-            g->has_prev = 0U; /* consume so a triple-press isn't two double-clicks */
-        } else {
-            g->last_press_time = g->clock;
-            g->has_prev = 1U;
-        }
-        g->origin_x = pos_x;
-        g->origin_y = pos_y;
-        g->press_clock = g->clock;
-        g->press_live = 1U;
-        g->long_fired = 0U;
-    }
-
-    if (held && g->press_live != 0U && g->long_fired == 0U && long_press_secs > 0.0F) {
-        const float dx = pos_x - g->origin_x;
-        const float dy = pos_y - g->origin_y;
-        const bool moved = (dx * dx + dy * dy) > (move_radius_px * move_radius_px);
-        if (moved) {
-            g->press_live = 0U; /* a drag cancels the long-press candidate */
-        } else if ((g->clock - g->press_clock) >= long_press_secs) {
-            out.long_pressed = true;
-            g->long_fired = 1U; /* one-shot per hold */
-        }
-    }
-
-    if (released_now) {
-        g->press_live = 0U;
-        g->long_fired = 0U;
-    }
-    return out;
-}
 
 // #endregion
 
@@ -785,21 +719,6 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     // #endregion
 
     // #region interaction + focus capture
-    nt_ui_interaction_t in;
-    if (enabled) {
-        in = nt_ui_step_interaction(ctx, id);
-    } else {
-        in = (nt_ui_interaction_t){0};
-        nt_ui_block_pointer(ctx, id, NULL);
-        nt_ui_debug_record_disabled_zone(ctx, id, NULL);
-        /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
-         * a still-declared disabled field would hold focus forever (any_focused stuck true). Drop it
-         * the frame it's declared disabled. */
-        if (ctx->focused_input_id == id) {
-            ctx->focused_input_id = 0U;
-        }
-    }
-
     nt_ui_input_state_t *st = (nt_ui_input_state_t *)nt_ui_state(ctx, input_state_id(id), (uint32_t)sizeof(nt_ui_input_state_t), NT_UI_STATE_TAG('i', 'n', 'p', 't'));
     /* Contract: the game must not rewrite a FOCUSED field's buffer CONTENT mid-edit. Only length
      * changes are clamped here; a content rewrite that lands the caret mid-codepoint is undefined. */
@@ -810,14 +729,38 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->anchor = cur_len; /* keep the selection anchor in-bounds too */
     }
 
+    /* ONE mutating interaction step (the canonical-step contract): the events step with double_click
+     * opt-in. Word-select reads double_clicked off this single result — no separate call. long_press is
+     * not wanted here (<=0 disables it + hold_progress, keeping the gesture cell dbl-only). The app-wide
+     * dbl window + move radius come from the context (nt_ui_set_gesture_constants), not hard-coded. */
+    static const nt_ui_events_cfg_t s_field_gesture_cfg = {.long_press_secs = 0.0F, .double_click = true};
+    nt_ui_events_t in;
+    if (enabled) {
+        in = nt_ui_events(ctx, id, &s_field_gesture_cfg);
+    } else {
+        in = (nt_ui_events_t){0};
+        nt_ui_block_pointer(ctx, id, NULL);
+        nt_ui_debug_record_disabled_zone(ctx, id, NULL);
+        /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
+         * a still-declared disabled field would hold focus forever (any_focused stuck true). Drop it
+         * the frame it's declared disabled. */
+        if (ctx->focused_input_id == id) {
+            ctx->focused_input_id = 0U;
+        }
+    }
+    /* The real press-began edge (one-shot, survives a same-frame press+release — `pressed` does not, so a
+     * sub-frame tap would otherwise never focus the field / place the caret). */
+    const bool pressed_now = in.pressed_now;
+
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
-    if (enabled && in.pressed_now) {
+    if (enabled && pressed_now) {
         const bool was_focused = (ctx->focused_input_id == id);
         ctx->focused_input_id = id;
         st->blink = 0.0F;
         if (bb.found) {
-            const float local_x = (in.press_pos[0] - bb.x - style->pad_x) + st->scroll_x;
+            /* On the press frame pos == press point (the pointer has not moved yet). */
+            const float local_x = (in.pos[0] - bb.x - style->pad_x) + st->scroll_x;
             st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         }
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
@@ -827,9 +770,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         }
     }
 
-    /* Generic dbl-click / long-press edges; double-click select-word rides this. */
-    const nt_ui_click_gesture_t gesture = nt_ui_dblclick_longpress(ctx, id, enabled && in.pressed_now, enabled && in.released_now, enabled && in.pressed, in.pos[0], in.pos[1], 0.30F, 0.50F, 6.0F);
-    if (enabled && gesture.double_clicked) {
+    /* Double-click select-word rides the same single events step (cfg.double_click). */
+    if (enabled && in.double_clicked) {
         uint32_t ws = 0U;
         uint32_t we = 0U;
         word_bounds(buffer, cur_len, st->caret, &ws, &we);
@@ -851,7 +793,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         st->blink = 0.0F;
     }
-    if (in.released_now) {
+    if (in.released) {
         st->drag = 0U;
     }
 

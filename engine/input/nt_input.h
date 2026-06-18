@@ -112,7 +112,9 @@ typedef struct {
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
                                 normalizes; trackpads deliver fractional notches). Consumers scale
                                 by px-per-notch, not here. */
-    float wheel_dy;          /* Vertical wheel delta in notches (see wheel_dx). */
+    float wheel_dy;          /* Vertical wheel delta in notches (see wheel_dx). Sign: positive ==
+                                content scrolls down, matching DOM WheelEvent.deltaY (web is canonical;
+                                the native GLFW edge negates yoffset to agree). */
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */

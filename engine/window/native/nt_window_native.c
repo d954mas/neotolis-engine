@@ -139,9 +139,9 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
 
 static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     (void)window;
-    /* GLFW yoffset is already ±1.0 per wheel notch — pass through as the notch unit
-     * (nt_input contract: 1.0 == one detent; consumers scale by px-per-notch). */
-    nt_input_buffer_wheel((float)xoffset, (float)yoffset);
+    /* GLFW yoffset is ±1.0 per notch with OPPOSITE Y sign to the DOM (GLFW: up=+, DOM deltaY: down=+).
+     * Web is canonical, so negate yoffset to match. X already agrees (right=+ on both). */
+    nt_input_buffer_wheel((float)xoffset, -(float)yoffset);
 }
 
 static void glfw_focus_callback(GLFWwindow *window, int focused) {
