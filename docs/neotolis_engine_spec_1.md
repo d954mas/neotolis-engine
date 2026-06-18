@@ -2564,6 +2564,35 @@ Game-elapsed time `g_nt_app.time` (a `double` — the sum of applied `dt`s, kept
 
 The L1 mutators **assert** their invariants (finite/non-negative scale, positive `step_dt`, valid mode) — callers are trusted game code; untrusted bot input is range-checked at the devapi L2 layer and returns `bad_params`, never an assert.
 
+## 24.7 Input automation (devapi `input.*` + player gate)
+
+A bot drives input through the devapi `input.*` command group, which is a thin L2 veneer over an L1 engine capability (`nt_input_inject_*` + the player gate). The design rule is **bot-indistinguishable-from-human**: injected events flow through the same input-apply cores a real device hits, so the query API (`nt_input_key_is_*`, `nt_input_mouse_is_*`, `nt_input_pop_char`) cannot tell synthetic input from physical. Compiled out with the rest of devapi when `NT_DEVAPI_ENABLED` is OFF.
+
+**Range-checked, never asserts.** Every `input.*` command validates its params and returns `bad_params` on any out-of-domain value (unknown key name, out-of-range pointer id, a button mask outside `[0,7]` or non-integral, malformed/invalid UTF-8, a frame count outside `[0,65535]`). The L1 inject API itself never asserts — it is driven by untrusted L2 — so bad bot input is always a structured error, never a crash.
+
+**The command group** (all `frame_behavior: any`, all fire-and-forget unless noted):
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `input.key` | `{key, down?, hold?}` | `{ok}` | inject a key edge (`down` default true), or with `hold` a tap = down@0 + up@hold |
+| `input.pointer` | `{action, id, x?, y?, type?, buttons?}` | `{queued}` | the pointer primitive: action `down`/`move`/`up` on a given id (default mouse type) |
+| `input.move` | `{x, y, id?, type?}` | `{queued}` | sugar: pointer move on the default mouse slot |
+| `input.click` | `{x, y, button?, id?}` | `{queued}` | sugar: pointer down + up (2 entries) carrying a button mask |
+| `input.wheel` | `{dx?, dy?}` | `{ok}` | mouse-slot wheel delta |
+| `input.gesture` | `{id, type?, points:[[x,y]], frame_stride?}` | `{queued}` | sugar: down@0 + a move per subsequent point (`frame_stride` apart) + up; NO C interpolation — the bot supplies the path samples |
+| `input.button` | `{buttons, id?}` | `{ok}` | set the mouse-button mask `{1,2,4}` on the given id |
+| `input.set_player_enabled` | `{enabled}` | `{enabled}` | toggle the player gate (see below) |
+| `input.text` | `{text}` | `{queued}` | decode a UTF-8 string → codepoints and enqueue them into the char ring |
+| `input.state` | `{key?, pop_text?}` | `{down?, pressed?, released?, codepoints?}` | **READ** (not an enqueue) of the polled input state — see below |
+
+**The L1 player gate.** `nt_input_set_player_enabled(bool)` gates **real device** events at the apply seam: while disabled, the public real-input wrappers (`nt_input_set_key`, `nt_input_pointer_*`, `nt_input_wheel`, `nt_input_buffer_char`) early-return, so a physical device is suppressed — but injected events still flow, because inject calls the `*_apply` cores directly past the gate. The bot is therefore indistinguishable from a human to the query API while the real player is locked out. The **ON→OFF edge releases held real input** so nothing sticks down across a focus-lost-style cutover: held keys raise their release edge, and held pointer buttons raise their release edge with **deferred deactivation** — the slot stays active one more poll so the release edge is readable via the public mouse query, then deactivates on the next poll (the same lifecycle as a normal pointer-up).
+
+**The synthetic inject queue** is bounded, static BSS (`NT_INPUT_INJECT_QUEUE_MAX`, `-D` overridable). A command reserves its entries **whole-or-nothing**: a multi-event command (click = 2, gesture = npoints+1, a UTF-8 string = one entry per codepoint) either enqueues every entry or none, so a near-full queue can never leave a stuck pointer-down or a key with no release; overflow → `bad_params`. Each entry carries a relative frame countdown that **ticks only on a real sim-advance** (frozen across pause / manual-idle re-polls). Entries apply inside `nt_input_poll`, after the platform poll, through the same `*_apply` cores (gate-bypassing): every entry whose countdown reached 0 drains this poll, survivors decrement by one only when the frame actually advanced.
+
+**`input.state` is a DEV-ONLY observation read.** It returns the input state `nt_input_poll` last produced — so before a sim-advance an enqueued inject is **not yet visible** (the drain-race, now machine-observable over the socket). With `key`, it returns `{down,pressed,released}` for that key (unknown name → `bad_params`). With `pop_text:true` it is a **CONSUMING read** — it drains the char ring into a `codepoints` raw-codepoint array as a side effect.
+
+**`nt_input_poll(uint32_t frame)` contract.** The caller supplies the frame number (the `g_nt_app.frame` sim-advance counter), passed **down** so the input module never includes `app/nt_app.h`. The inject queue drains **inside** `nt_input_poll`, after the platform poll, and the relative countdown advances only when the supplied `frame` differs from the previous poll's — so PAUSE / MANUAL-idle (the same frame re-polled) freeze the queue.
+
 ---
 
 # 25. Engine/Game Boundary
