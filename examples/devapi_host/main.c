@@ -62,17 +62,15 @@ static void frame(void) {
     nt_devapi_update();
     nt_input_poll();
 
-    /* Draw + the host's own swap go TOGETHER under the render flag — never skip-draw-but-swap
-       (that would present a stale buffer). Render off => draw_calls stays 0. This host has no
-       real draw yet; the placeholder marks where draw would issue before the swap. */
+    /* Draw + swap go TOGETHER under the render flag — never skip-draw-but-swap (that would present a
+       stale buffer). Render off => draw_calls stays 0. */
     if (nt_app_render_enabled()) {
         /* placeholder: real draw / nt_ui_walk goes here */
         nt_window_swap_buffers();
     }
 
-    /* Lifecycle is the driver's job: ESC for an interactive run, otherwise the bot/harness owns
-       quit (it kills this subprocess when its test ends, and its own socket timeouts catch a hung
-       host). No frame-count self-destruct — it would also kill long stability sims. */
+    /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
+       timeouts catch a hung host). A frame-count cap would also kill long stability sims. */
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }

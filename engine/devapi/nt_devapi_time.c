@@ -163,10 +163,8 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
     return true;
 }
 
-/* time.wait{seconds}: defer until game time advances `seconds`. RUN-only + reject pause/scale==0 —
-   game time only flows under RUN with scale>0; in MANUAL it advances per time.step, in pause/scale==0
-   it is frozen, so a passive wait could never resolve and would block the caller. Deadline is GAME
-   TIME (not a frame count), which is the point: RUN's variable dt can't be precomputed as frames. */
+/* RUN + scale>0 only: in MANUAL/pause/scale==0 game time is frozen, so a passive wait could never
+   resolve. Deadline is GAME time, not a frame count — RUN's variable dt can't be precomputed as frames. */
 static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
