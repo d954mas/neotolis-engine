@@ -58,7 +58,7 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
 
 /* ---- ABI sanity ---- */
 static void test_dropdown_abi_size(void) {
-    TEST_ASSERT_EQUAL_UINT(352U, (unsigned)sizeof(nt_ui_dropdown_style_t));
+    TEST_ASSERT_EQUAL_UINT(400U, (unsigned)sizeof(nt_ui_dropdown_style_t));
     TEST_ASSERT_EQUAL_UINT(32U, (unsigned)sizeof(nt_ui_dd_state_t));
 }
 
@@ -72,6 +72,11 @@ static void test_dropdown_defaults_valid(void) {
     TEST_ASSERT_TRUE(st.slice9_scale > 0.0F);
     TEST_ASSERT_TRUE(st.state_speed >= 0.0F);
     TEST_ASSERT_TRUE(st.value_speed >= 0.0F);
+    TEST_ASSERT_TRUE(st.open_ease_speed == 0.0F); /* plumbed knob; default snaps (0) -> preserves snap-open */
+    /* Embedded list scroll = atlas-free scroll defaults (game wires bar sprites). */
+    TEST_ASSERT_EQUAL_UINT(0U, st.list_scroll.track_ref.atlas.id);
+    TEST_ASSERT_EQUAL_UINT(0U, st.list_scroll.thumb_ref.atlas.id);
+    TEST_ASSERT_TRUE(st.list_scroll.scroll_y);
     /* Atlas-free baseline: per-state bgs carry no art (flat fallback path). */
     TEST_ASSERT_EQUAL_UINT(0U, st.trigger_idle.bg.atlas.id);
     TEST_ASSERT_EQUAL_UINT(0U, st.row_idle.bg.atlas.id);
@@ -195,9 +200,9 @@ static void test_dropdown_long_list_scroll_no_leak(void) {
 static void test_dropdown_long_list_shows_scrollbar(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.max_visible_rows = 4; /* 12 rows > 4 -> the list scrolls */
-    /* Wire bar sprites exactly as the showcase does; non-zero refs let scroll draw the bar. */
-    st.scroll_track = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
-    st.scroll_thumb = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+    /* Wire bar sprites exactly as the showcase does (via the embedded list_scroll); non-zero refs let scroll draw the bar. */
+    st.list_scroll.track_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
+    st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
 
     int selected = 0;
     bool open = true;

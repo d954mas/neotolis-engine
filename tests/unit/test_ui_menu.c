@@ -53,7 +53,7 @@ static void fx_begin(float dt) {
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
 static void test_menu_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT((unsigned)((2 * sizeof(void *)) + 32), (unsigned)sizeof(nt_ui_menu_item_t));
-    TEST_ASSERT_EQUAL_UINT(88U, (unsigned)sizeof(nt_ui_menu_style_t));
+    TEST_ASSERT_EQUAL_UINT(96U, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT(16U, (unsigned)sizeof(nt_ui_menu_state_t));
 }
 
@@ -61,6 +61,7 @@ static void test_menu_defaults_valid(void) {
     nt_ui_menu_style_t st = nt_ui_menu_style_defaults();
     TEST_ASSERT_TRUE(st.item_height > 0U);
     TEST_ASSERT_TRUE(st.min_width > 0U);
+    TEST_ASSERT_TRUE(st.open_ease_speed == 0.0F); /* plumbed knob; default snaps (0) */
 }
 
 /* ---- Pure point_in_tri: inside, outside, on an edge. ---- */

@@ -852,11 +852,14 @@ static void init_styles(void) {
     s_dropdown_dark.row_selected.fill = 0xFF50B0E0U; /* warm gold accent, matches the tab-bar accent */
     s_dropdown_dark.trigger_text = 0xFFFCF7F5U;
     s_dropdown_dark.row_text = 0xFFFCF7F5U;
-    /* Scrollbar sprites so the long list shows a visible bar when it scrolls (FIX: was {0} -> no bar). */
-    s_dropdown_dark.scroll_track = scroll_track;
-    s_dropdown_dark.scroll_thumb = bar_thumb;
-    s_dropdown_dark.scroll_track_tint = 0xC0FFFFFFU;
-    s_dropdown_dark.scroll_thumb_tint = 0xFFFFFFFFU;
+    /* Game owns the list scroll feel + bar via the embedded list_scroll style; wire the bar sprites so the
+     * long list shows a visible bar when it scrolls. */
+    s_dropdown_dark.list_scroll = nt_ui_scroll_style_defaults();
+    s_dropdown_dark.list_scroll.track_ref = scroll_track;
+    s_dropdown_dark.list_scroll.thumb_ref = bar_thumb;
+    s_dropdown_dark.list_scroll.track_tint = 0xC0FFFFFFU;
+    s_dropdown_dark.list_scroll.thumb_tint = 0xFFFFFFFFU;
+    s_dropdown_dark.open_ease_speed = 14.0F; /* demo the new open-tween knob: the list eases open */
     s_dropdown_light = s_dropdown_dark;
     s_dropdown_light.trigger_text = 0xFF381C0CU;
     s_dropdown_light.row_text = 0xFF381C0CU;
@@ -873,6 +876,7 @@ static void init_styles(void) {
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
     s_tooltip_dark.delay_secs = 0.5F;
     s_tooltip_dark.font_size = 16.0F;
+    s_tooltip_dark.open_ease_speed = 14.0F; /* demo the new open-tween knob: the tooltip eases open */
     s_tooltip_light = s_tooltip_dark;
     s_tooltip_light.panel_bg = 0xFFF4F4F4U;
     s_tooltip_light.text_color = 0xFF202830U;

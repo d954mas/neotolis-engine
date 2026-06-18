@@ -79,13 +79,14 @@ static bool tooltip_frame(const nt_pointer_t *p, const nt_ui_tooltip_style_t *st
 }
 
 /* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
-static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(24U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
+static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(28U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
 
 /* ---- Defaults are a valid (non-zero) style. ---- */
 static void test_tooltip_defaults_valid(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     TEST_ASSERT_TRUE(st.delay_secs >= 0.0F);
     TEST_ASSERT_TRUE(st.font_size > 0.0F);
+    TEST_ASSERT_TRUE(st.open_ease_speed == 0.0F); /* plumbed knob; default snaps (0) */
 }
 
 /* ---- Delayed reveal: the tooltip is NOT declared before delay_secs of accumulated hover and IS
