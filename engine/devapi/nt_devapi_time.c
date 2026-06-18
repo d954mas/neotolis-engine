@@ -5,7 +5,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
-#include "stats/nt_stats.h"
+#include "graphics/nt_gfx.h"
 
 /* time/render/frame command group. Bot input is range/type-checked → bad_params; never assert
    on untrusted input (invariants assert, untrusted input returns a structured error).
@@ -160,7 +160,7 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
     (void)err;
     (void)ud;
     devapi_add_bool(result, "enabled", nt_app_render_enabled());
-    devapi_add_number(result, "draw_calls", (double)nt_stats_get_draw_calls());
+    devapi_add_number(result, "draw_calls", (double)nt_gfx_get_frame_draw_calls());
     return true;
 }
 // #endregion

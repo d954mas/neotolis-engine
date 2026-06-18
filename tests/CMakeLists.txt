@@ -363,7 +363,7 @@ if(NOT EMSCRIPTEN)
         # nt_core before nt_log_stub: nt_core references nt_log_write and nothing earlier does,
         # so on GNU ld (left-to-right) the log impl must trail nt_core or it is dropped.
         add_executable(test_devapi_registry unit/test_devapi_registry.c unit/test_helpers/nt_assert_trap.c)
-        target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
         # unit/ on the include path so nt_assert_trap.c resolves "test_helpers/nt_assert_trap.h" (death tests).
         target_include_directories(test_devapi_registry PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
         target_compile_definitions(test_devapi_registry PRIVATE
@@ -374,7 +374,7 @@ if(NOT EMSCRIPTEN)
         # submit() envelope, request_id echo, unknown-method, batch order +
         # continue-on-error, pointer lifetime (ASan via sanitizer flags).
         add_executable(test_devapi_envelope unit/test_devapi_envelope.c)
-        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_envelope PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -383,7 +383,7 @@ if(NOT EMSCRIPTEN)
         # deferred-response mechanism: submit()->NULL on defer, K-1 NULL polls, K-th yields
         # the {ok,result,request_id} envelope, overflow rejected (ASan via sanitizer flags).
         add_executable(test_devapi_deferred unit/test_devapi_deferred.c)
-        target_link_libraries(test_devapi_deferred PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_deferred PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_deferred PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -392,7 +392,7 @@ if(NOT EMSCRIPTEN)
         # core command group via submit(). engine.info.version comes from nt_core, so the
         # test asserts it against nt_engine_version_string() directly.
         add_executable(test_devapi_core unit/test_devapi_core.c)
-        target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_core PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -401,7 +401,7 @@ if(NOT EMSCRIPTEN)
         # discovery group (endpoints / command.describe / features) + the
         # zero-engine-edits game-layer registration path.
         add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
-        target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_discovery PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_discovery PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
         )
@@ -409,10 +409,10 @@ if(NOT EMSCRIPTEN)
 
         # L2 time/render/frame group via submit(): discovery + forwarding to nt_app L1 +
         # bad_params + render.info + frame.current + the D-11 yield-after-N-sim-advances test.
-        # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_stats_stub
-        # (nt_stats_get_draw_calls -> 0 for render.info, no nt_gfx/font/material chain).
+        # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_gfx_stub
+        # (nt_gfx_get_frame_draw_calls -> 0 for render.info; the light gfx stub, no font/material chain).
         add_executable(test_devapi_time unit/test_devapi_time.c)
-        target_link_libraries(test_devapi_time PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_stats_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_time PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_time PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1 NT_DEVAPI_REGISTER_time=1
         )

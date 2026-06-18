@@ -12,11 +12,11 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
 
 # cjson is PUBLIC: the nt_devapi_handler_fn typedef in the public header takes
 # cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
-# nt_app_interface + nt_stats_interface make the time group's app/stats header deps explicit (same
-# pattern as nt_log). The nt_app_* / nt_stats_get_draw_calls symbols still resolve at the final-exe
-# link (the consumer links nt_app[_stub] + nt_stats / a stub) — nt_devapi stays a dev-only static
-# lib with no app/stats impl.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_stats_interface)
+# nt_app_interface + nt_gfx_interface make the time group's app/gfx header deps explicit (same
+# pattern as nt_log). render.info reads draw_calls from its source (nt_gfx), not the nt_stats overlay.
+# The nt_app_* / nt_gfx_get_frame_draw_calls symbols resolve at the final-exe link (the consumer
+# links nt_app[_stub] + nt_gfx[_stub]) — nt_devapi stays a dev-only static lib with no impl.
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_gfx_interface)
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)

@@ -1,9 +1,8 @@
 add_executable(devapi_host main.c)
-# nt_stats_stub resolves render.info's nt_stats_get_draw_calls. This host issues no real
-# draw (placeholder frame), so draw_calls is genuinely 0 — the stub is correct here and
-# avoids pulling the full nt_stats/nt_gfx/font/material chain. A host with a real renderer
-# would link nt_stats instead.
-target_link_libraries(devapi_host PRIVATE nt_core nt_app nt_input nt_window nt_log nt_devapi_net nt_stats_stub)
+# nt_gfx_stub resolves render.info's nt_gfx_get_frame_draw_calls (the source of draw_calls). This
+# host issues no real draw (placeholder frame), so draw_calls is genuinely 0 — the stub is correct
+# here. A host with a real renderer would link nt_gfx instead.
+target_link_libraries(devapi_host PRIVATE nt_core nt_app nt_input nt_window nt_log nt_devapi_net nt_gfx_stub)
 if(WIN32)
     # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link); nt_devapi (core) pulls it via nt_devapi_net.
     # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).
