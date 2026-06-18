@@ -150,6 +150,12 @@ bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
 
+/* UTF-32 typed-char ring capacity (power-of-2). One frame's typing fits; drop-when-full. Exposed
+   so the devapi layer can reject a text batch that could never land whole (F2). */
+#ifndef NT_INPUT_CHAR_RING
+#define NT_INPUT_CHAR_RING 32
+#endif
+
 /* Drain one typed UTF-32 codepoint (FIFO). Returns false and leaves *out
    untouched when the char ring is empty. Fed by the platform char source. */
 bool nt_input_pop_char(uint32_t *out_codepoint);
@@ -160,7 +166,7 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* ---- Synthetic input injection ---- */
 
-/* Event kinds in the frame-scheduled inject queue. */
+/* Event kinds applied through the immediate inject buffer (drained every poll). */
 typedef enum {
     NT_INJECT_KEY = 0,      /* key down/up */
     NT_INJECT_POINTER_DOWN, /* pointer slot create/press */
@@ -170,7 +176,7 @@ typedef enum {
     NT_INJECT_CHAR,         /* codepoint into the char ring */
 } nt_inject_kind_t;
 
-/* Bounded BSS inject queue cap (-D overridable, like NT_DEVAPI_MAX_DEFERRED). */
+/* Bounded BSS immediate inject buffer cap (-D overridable, like NT_DEVAPI_MAX_DEFERRED). */
 #ifndef NT_INPUT_INJECT_QUEUE_MAX
 #define NT_INPUT_INJECT_QUEUE_MAX 256
 #endif
@@ -193,12 +199,11 @@ bool nt_input_mouse_is_released(nt_button_t button);
 
 void nt_input_init(void);
 
-/* Poll input state. Drains buffered events from nt_window_poll() and updates
-   input state. Call once per frame AFTER nt_window_poll(). `frame` is the
-   g_nt_app.frame sim-advance counter, passed DOWN: nt_input never includes
-   app/nt_app.h (the relative inject countdown advances only when frame changes,
-   so PAUSE/MANUAL-idle freeze it). */
-void nt_input_poll(uint32_t frame);
+/* Poll input state. Drains buffered events from nt_window_poll() and updates input state, then
+   applies the WHOLE immediate inject buffer (FIFO). Call once per frame AFTER nt_window_poll().
+   Pure apply: no frame, no schedule -- the devapi layer owns scheduling and releases due events
+   into the immediate buffer before this poll, so nt_input never includes app/nt_app.h. */
+void nt_input_poll(void);
 
 void nt_input_shutdown(void);
 

@@ -19,20 +19,20 @@ void nt_input_clear_all_pointers(void);
    real input. Inject calls the *_apply cores directly so it always flows. */
 void nt_input_set_player_enabled(bool enabled);
 
-/* Synthetic input injection (L1 engine capability; L2 devapi group drives it untrusted).
-   Each returns true when the whole command is enqueued, false on overflow (whole-or-nothing:
-   on false NO entry is written). Scheduled entries apply in nt_input_poll: every entry whose
-   countdown reached 0 drains this poll (via the *_apply cores, bypassing the gate), the rest
-   decrement only on a real sim-advance. NEVER asserts -- the same API is driven by untrusted L2. */
-bool nt_input_inject_key(nt_key_t key, bool down, uint16_t at_frame);
-bool nt_input_inject_key_tap(nt_key_t key, uint16_t hold_frames);
-bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame);
-bool nt_input_inject_wheel(float dx, float dy, uint16_t at_frame);
+/* Synthetic input injection (L1 engine capability; L2 devapi group drives it untrusted). IMMEDIATE
+   only: each call stages into the inject buffer, drained whole in the next nt_input_poll (via the
+   *_apply cores, bypassing the player gate). Scheduling (frame offsets, hold, gesture stride) lives
+   in the devapi layer, which releases due events here on a sim-advance. Each returns true when the
+   whole command is staged, false on overflow (whole-or-nothing: on false NO entry is written).
+   NEVER asserts -- the same API is driven by untrusted L2. */
+bool nt_input_inject_key(nt_key_t key, bool down);
+bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
+bool nt_input_inject_wheel(float dx, float dy);
 bool nt_input_inject_text(const uint32_t *cps, uint32_t n);
 
-/* Capacity preflight for an L2 compound command (click=2, gesture=npoints+2) so the whole
-   multi-event command is whole-or-nothing: the L2 TU cannot see the static count, so it probes
-   here BEFORE the first enqueue. true == the next n entries are guaranteed to fit. */
+/* Capacity preflight for a compound release (e.g. all CHARs of one input.text) so it is
+   whole-or-nothing: probe BEFORE the first stage. true == the next n entries are guaranteed
+   to fit the immediate buffer. */
 bool nt_input_inject_can_reserve(uint32_t n);
 
 /* Event buffering — native backend queues events here during glfwPollEvents(),

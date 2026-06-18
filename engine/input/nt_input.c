@@ -14,7 +14,8 @@ static bool s_keys_released[NT_KEY_COUNT];
 
 /* ---- UTF-32 char ring (typed text, fed by platform char sources) ---- */
 
-#define NT_INPUT_CHAR_RING 32 /* power-of-2: one frame's typing < 32 */
+/* NT_INPUT_CHAR_RING (power-of-2: one frame's typing < 32) is defined in nt_input.h so the devapi
+   layer can reject an over-capacity text batch. */
 
 static uint32_t s_char_ring[NT_INPUT_CHAR_RING];
 static uint32_t s_char_head; /* next write slot */
@@ -25,16 +26,10 @@ static uint32_t s_char_tail; /* next read slot */
 /* Gate at the apply seam: covers native drain + web direct apply. */
 static bool s_player_enabled = true;
 
-/* ---- Frame-countdown seam (relative; advances only when frame changes) ---- */
-
-static uint32_t s_last_poll_frame;
-static bool s_have_last_frame;
-
-/* ---- Synthetic inject queue (bounded BSS; frame-scheduled) ---- */
+/* ---- Synthetic immediate inject buffer (bounded BSS; drained whole every poll) ---- */
 
 typedef struct {
-    uint16_t frames_remaining; /* sim-advance countdown; 0 = apply this poll */
-    uint8_t kind;              /* nt_inject_kind_t */
+    uint8_t kind; /* nt_inject_kind_t */
     union {
         struct {
             uint8_t key; /* nt_key_t fits in u8 (COUNT=69) */
@@ -58,10 +53,10 @@ typedef struct {
     } u;
 } nt_inject_event_t;
 
-static nt_inject_event_t s_inject_queue[NT_INPUT_INJECT_QUEUE_MAX];
+static nt_inject_event_t s_inject_buffer[NT_INPUT_INJECT_QUEUE_MAX];
 static uint32_t s_inject_count;
 
-static void inject_drain(bool advanced);
+static void inject_drain(void);
 
 /* ---- Internal pointer helpers ---- */
 
@@ -115,14 +110,12 @@ void nt_input_init(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
-    s_last_poll_frame = 0;
-    s_have_last_frame = false;
     s_inject_count = 0;
     s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
     nt_input_platform_init();
 }
 
-void nt_input_poll(uint32_t frame) {
+void nt_input_poll(void) {
     /* Deactivate pointers that had pointer_up last frame */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         if (g_nt_input.pointers[i].deactivate_pending) {
@@ -154,13 +147,10 @@ void nt_input_poll(uint32_t frame) {
        which set edge flags immediately) */
     nt_input_platform_poll();
 
-    /* Relative frame countdown: only a NEW sim-advance frame ticks the inject queue,
-       so PAUSE / MANUAL-idle (same frame re-polled) freeze it. Inject drains in the same
-       post-clear window as the native char drain. */
-    bool advanced = !s_have_last_frame || (frame != s_last_poll_frame);
-    inject_drain(advanced);
-    s_last_poll_frame = frame;
-    s_have_last_frame = true;
+    /* Apply the whole immediate inject buffer in the same post-clear window as the native char
+       drain, so an injected rising edge survives to this frame's update. The devapi layer staged
+       only the due events (it owns the schedule + sim-advance gating). */
+    inject_drain();
 }
 
 void nt_input_shutdown(void) {
@@ -173,8 +163,6 @@ void nt_input_shutdown(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
-    s_last_poll_frame = 0;
-    s_have_last_frame = false;
     s_inject_count = 0;
     s_player_enabled = true;
 }
@@ -463,53 +451,35 @@ void nt_input_set_player_enabled(bool enabled) {
 /* ---- Synthetic input injection ---- */
 
 /* Whole-or-nothing reserve: a command needing N entries either gets all N or none -- a partial
-   enqueue would leave a stuck key-down or a drag with no release. Returns the first reserved
+   stage would leave a stuck key-down or a drag with no release. Returns the first reserved
    slot, or NULL on overflow. */
 static nt_inject_event_t *inject_reserve(uint32_t n) {
     if (n > NT_INPUT_INJECT_QUEUE_MAX - s_inject_count) {
         return NULL; /* would overflow -- reject the whole command, write nothing */
     }
-    nt_inject_event_t *first = &s_inject_queue[s_inject_count];
+    nt_inject_event_t *first = &s_inject_buffer[s_inject_count];
     s_inject_count += n;
     return first;
 }
 
 bool nt_input_inject_can_reserve(uint32_t n) { return n <= NT_INPUT_INJECT_QUEUE_MAX - s_inject_count; /* mirrors inject_reserve's capacity test */ }
 
-bool nt_input_inject_key(nt_key_t key, bool down, uint16_t at_frame) {
+bool nt_input_inject_key(nt_key_t key, bool down) {
     nt_inject_event_t *e = inject_reserve(1);
     if (e == NULL) {
         return false;
     }
-    e->frames_remaining = at_frame;
     e->kind = NT_INJECT_KEY;
     e->u.key.key = (uint8_t)key;
     e->u.key.down = down;
     return true;
 }
 
-bool nt_input_inject_key_tap(nt_key_t key, uint16_t hold_frames) {
-    nt_inject_event_t *e = inject_reserve(2); /* atomic down@0 + up@hold */
-    if (e == NULL) {
-        return false;
-    }
-    e[0].frames_remaining = 0;
-    e[0].kind = NT_INJECT_KEY;
-    e[0].u.key.key = (uint8_t)key;
-    e[0].u.key.down = true;
-    e[1].frames_remaining = hold_frames;
-    e[1].kind = NT_INJECT_KEY;
-    e[1].u.key.key = (uint8_t)key;
-    e[1].u.key.down = false;
-    return true;
-}
-
-bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_inject_event_t *e = inject_reserve(1);
     if (e == NULL) {
         return false;
     }
-    e->frames_remaining = at_frame;
     e->kind = (uint8_t)kind;
     if (kind == NT_INJECT_POINTER_UP) {
         e->u.pointer_up.id = id;
@@ -524,12 +494,11 @@ bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float 
     return true;
 }
 
-bool nt_input_inject_wheel(float dx, float dy, uint16_t at_frame) {
+bool nt_input_inject_wheel(float dx, float dy) {
     nt_inject_event_t *e = inject_reserve(1);
     if (e == NULL) {
         return false;
     }
-    e->frames_remaining = at_frame;
     e->kind = NT_INJECT_WHEEL;
     e->u.wheel.dx = dx;
     e->u.wheel.dy = dy;
@@ -540,9 +509,9 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
     if (cps == NULL || n == 0) {
         return false;
     }
-    /* Every CHAR event is scheduled at frames_remaining=0, so all n drain in a SINGLE poll into
-       the 32-slot char ring; nt_input_buffer_char_apply drops once full. Reject n beyond the ring
-       so queued never lies about what lands (whole-or-nothing by codepoint count). */
+    /* All n CHARs drain in this SINGLE poll into the 32-slot char ring; nt_input_buffer_char_apply
+       drops once full. Reject n beyond the ring so the caller never lies about what lands
+       (whole-or-nothing by codepoint count). */
     if (n > NT_INPUT_CHAR_RING) {
         return false;
     }
@@ -551,7 +520,6 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
         return false;
     }
     for (uint32_t i = 0; i < n; i++) {
-        e[i].frames_remaining = 0;
         e[i].kind = NT_INJECT_CHAR;
         e[i].u.chr.cp = cps[i];
     }
@@ -583,19 +551,11 @@ static void inject_apply_one(const nt_inject_event_t *e) {
     }
 }
 
-/* Apply every entry whose countdown hit 0 (in enqueue order = cross-command FIFO), compacting
-   them out; survivors decrement by 1 only on a real sim-advance (advanced). */
-static void inject_drain(bool advanced) {
-    uint32_t out = 0;
+/* Apply the whole immediate buffer in stage order (FIFO), then empty it. The devapi layer staged
+   only the events due this poll, so there is nothing to defer here. */
+static void inject_drain(void) {
     for (uint32_t i = 0; i < s_inject_count; i++) {
-        if (s_inject_queue[i].frames_remaining == 0) {
-            inject_apply_one(&s_inject_queue[i]);
-            continue; /* applied -- drop it (compact) */
-        }
-        if (advanced) {
-            s_inject_queue[i].frames_remaining--;
-        }
-        s_inject_queue[out++] = s_inject_queue[i];
+        inject_apply_one(&s_inject_buffer[i]);
     }
-    s_inject_count = out;
+    s_inject_count = 0;
 }
