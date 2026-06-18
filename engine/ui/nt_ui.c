@@ -2522,6 +2522,7 @@ static nt_ui_events_t events_from_interaction(const nt_ui_interaction_t *in) {
     e.released = in->released_now;
     e.held = in->pressed && in->hovered;
     e.clicked = in->clicked;
+    e.pressed_now = in->pressed_now;
     e.double_clicked = false;
     e.long_pressed = false;
     e.hold_progress = 0.0F;

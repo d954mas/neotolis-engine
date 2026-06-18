@@ -390,6 +390,7 @@ typedef struct {
     bool released;          /* released this frame (even off-widget = cancel) */
     bool held;              /* pressed && hovered (down AND over the widget) */
     bool clicked;           /* released OVER the widget -> one-shot */
+    bool pressed_now;       /* press began this frame -> one-shot (survives a same-frame release; pressed does not) */
     bool double_clicked;    /* gesture: 2nd press within the dbl window+radius (cfg->double_click) */
     bool long_pressed;      /* gesture: held past long_press_secs without moving -> one-shot per hold */
     float hold_progress;    /* gesture: linear 0..1 toward long_press_secs while held && hovered; 0 otherwise */
@@ -397,7 +398,7 @@ typedef struct {
     float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
 } nt_ui_events_t;
-_Static_assert(sizeof(nt_ui_events_t) == 32, "nt_ui_events_t stable ABI (7 bool + 1 pad + 5 float + 1 u32)");
+_Static_assert(sizeof(nt_ui_events_t) == 32, "nt_ui_events_t stable ABI (8 bool + 5 float + 1 u32)");
 
 /* Per-widget gesture knobs. long_press_secs <= 0 disables BOTH long-press AND hold_progress;
  * double_click is opt-in. The app-wide dbl window + move radius live on the context
@@ -420,8 +421,10 @@ nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_event
 nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, const int16_t pad_lrtb[4]);
 
 /* Idempotent read: same result N times per frame, advancing NOTHING (no capture commit, no gesture
- * timer). Reads the latched gesture cell if one exists (else gesture fields stay zero). Safe outside
- * begin/end. Mirror of nt_ui_query_interaction for the consolidated result. */
+ * timer). Reads the latched gesture cell if one exists (else gesture fields stay zero). Safe to call
+ * after the first nt_ui_begin. Mirror of nt_ui_query_interaction for the consolidated result.
+ * NOTE: the base edges are computed UNPADDED — for a widget stepped via nt_ui_events_padded the
+ * hovered/clicked here won't include hit padding (the latched gesture fields are unaffected). */
 nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id);
 
 /* App-wide gesture constants: the double-click window (secs) and the move radius (px) past

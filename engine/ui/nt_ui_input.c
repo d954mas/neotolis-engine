@@ -69,7 +69,6 @@ typedef struct {
     float repeat_t;      /* seconds until the held repeat_key fires again (initial delay, then rate) */
     uint16_t repeat_key; /* the nt_key_t currently auto-repeating (0 = none) */
     uint8_t drag;        /* 1 while a press is dragging to extend the selection */
-    uint8_t was_pressed; /* events.pressed last frame; rising edge = a fresh press (replaces in.pressed_now) */
 } nt_ui_input_state_t;
 
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
@@ -749,10 +748,9 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
             ctx->focused_input_id = 0U;
         }
     }
-    /* The events result drops the per-frame press EDGE; derive it from the rising edge of pressed (which
-     * stays true for the whole hold, even dragging off, so this fires exactly once per real press). */
-    const bool pressed_now = in.pressed && (st->was_pressed == 0U);
-    st->was_pressed = in.pressed ? 1U : 0U;
+    /* The real press-began edge (one-shot, survives a same-frame press+release — `pressed` does not, so a
+     * sub-frame tap would otherwise never focus the field / place the caret). */
+    const bool pressed_now = in.pressed_now;
 
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
