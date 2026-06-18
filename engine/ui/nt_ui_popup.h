@@ -1,7 +1,7 @@
 #ifndef NT_UI_POPUP_H
 #define NT_UI_POPUP_H
 
-/* Popup-core: the shared floating-overlay primitive (POP-01). One panel floating element + a
+/* Popup-core: the shared floating-overlay primitive. One panel floating element + a
  * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
  * per-depth z-band stack + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
  * the core only RAISES close_requested (outside-click on the catcher) and never closes itself.
@@ -75,7 +75,7 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open);
 void nt_ui_popup_end(nt_ui_context_t *ctx);
 
-/* High-level scoped form (POP-03): the game stores ONE bool. Returns "declare the body THIS frame?" —
+/* High-level scoped form: the game stores ONE bool. Returns "declare the body THIS frame?" —
  * true while open OR still animating closed. On an outside-click close it clears *p_open; once fully
  * closed it balances the stack itself (no nt_ui_popup_end in that branch):
  *

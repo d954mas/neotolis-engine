@@ -160,7 +160,7 @@ bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *da
                             nt_ui_dropdown_style_t *style, const Clay_ElementDeclaration *decl, bool *open) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_dropdown_trigger: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(id != 0U && labels != NULL && style != NULL && open != NULL && "nt_ui_dropdown_trigger: id non-zero, pointers non-NULL");
-    NT_ASSERT(count >= 0 && selected >= -1 && selected < count && "nt_ui_dropdown_trigger: selected in [-1,count)"); /* T-65-15 */
+    NT_ASSERT(count >= 0 && selected >= -1 && selected < count && "nt_ui_dropdown_trigger: selected in [-1,count)");
     assert_style_valid(style);
 
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fill + chevron on data->layer, label on label_layer */
@@ -293,7 +293,7 @@ static bool dropdown_declare_rows(nt_ui_context_t *ctx, uint8_t fill_layer, uint
                                   nt_ui_dropdown_style_t *style, bool *open) {
     bool made = false;
     for (int i = 0; i < count; ++i) {
-        NT_ASSERT(labels[i] != NULL && "nt_ui_dropdown: label entry must be non-NULL"); /* T-65-16 */
+        NT_ASSERT(labels[i] != NULL && "nt_ui_dropdown: label entry must be non-NULL");
         const nt_atlas_region_ref_t *icon = (icons != NULL) ? &icons[i] : NULL;
         if (dropdown_declare_row(ctx, fill_layer, label_layer, dropdown_row_id(id, i), dropdown_row_label_id(id, i), labels[i], icon, i == *selected, style)) {
             *selected = i;
@@ -309,7 +309,7 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
                          int *selected, nt_ui_dropdown_style_t *style, bool *open) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_dropdown_list: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(id != 0U && labels != NULL && selected != NULL && style != NULL && open != NULL && "nt_ui_dropdown_list: id non-zero, pointers non-NULL");
-    NT_ASSERT(count >= 0 && *selected >= -1 && *selected < count && "nt_ui_dropdown_list: selected in [-1,count)"); /* T-65-15 */
+    NT_ASSERT(count >= 0 && *selected >= -1 && *selected < count && "nt_ui_dropdown_list: selected in [-1,count)");
     assert_style_valid(style);
 
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* panel + row fills + icons on data->layer, row text on label_layer */
@@ -341,7 +341,8 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
         const bool scrolls = (style->max_visible_rows > 0U) && (count > (int)style->max_visible_rows);
         const float panel_w = (float)style->min_width;
         if (scrolls) {
-            /* Long list: wrap the rows in nt_ui_scroll (GC'd cell) — NEVER a raw Clay .clip (Pitfall 7). */
+            /* Long list: wrap the rows in nt_ui_scroll (GC'd cell) — NEVER a raw Clay .clip (a raw .clip
+             * leaks a scroll-container pool slot). */
             const float view_h = ((float)style->max_visible_rows * (float)style->row_height) + (2.0F * (float)style->pad);
             /* Game fully owns the list's scroll feel + bar via the embedded list_scroll style (copy); the
              * dropdown still builds the scroll DECL itself (FIXED panel_w x view_h, padding, panel art bg). */

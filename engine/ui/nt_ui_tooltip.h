@@ -1,15 +1,15 @@
 #ifndef NT_UI_TOOLTIP_H
 #define NT_UI_TOOLTIP_H
 
-/* Tooltip (WGT-03) built ON popup-core (Plan 03) WITHOUT a light-dismiss catcher (D-65-08 exception:
- * hover-driven, no close_requested path) so it never gates base UI. The engine tracks the hover-delay
- * in a state-pool cell keyed by a SALTED tooltip id (D-65-09: NOT a game bool) — the game just declares
- * the target_id + content + delay. The cell accumulates hover seconds (ctx->frame_dt) while the cursor
- * is over the target and resets to 0 on leave; the floating panel is declared at the target's anchor
- * only once the accumulated hover reaches style->delay_secs.
+/* Tooltip built ON popup-core WITHOUT a light-dismiss catcher: hover-driven with no close_requested
+ * path, so it never gates base UI. The engine tracks the hover-delay in a state-pool cell keyed by a
+ * SALTED tooltip id (engine-owned, not a game bool) — the game just declares the target_id + content +
+ * delay. The cell accumulates hover seconds (ctx->frame_dt) while the cursor is over the target and
+ * resets to 0 on leave; the floating panel is declared at the target's anchor only once the accumulated
+ * hover reaches style->delay_secs.
  *
  * The target's hover is read via nt_ui_query_interaction (IDEMPOTENT) on a salted id so the tooltip
- * never becomes a second mutating interaction step on the underlying widget (T-65-19). */
+ * never becomes a second mutating interaction step on the underlying widget. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -34,7 +34,7 @@ typedef struct {
     uint32_t caret_tint;             /* caret sprite tint 0xAABBGGRR */
     uint32_t border_color;           /* thin panel border 0xAABBGGRR (0 = no border) */
     uint32_t shadow_color;           /* drop-shadow rect 0xAABBGGRR, usually translucent (0 = no shadow) */
-    float delay_secs;                /* accumulated hover before reveal; asserted finite && >= 0 (T-65-17) */
+    float delay_secs;                /* accumulated hover before reveal; asserted finite && >= 0 */
     float font_size;                 /* px; asserted > 0 */
     float open_ease_speed;           /* popup open/close tween speed (0 = snap; game opts into a tween) */
     float slice9_scale;              /* multiplies the panel region's baked slice9 borders; > 0 */

@@ -21,7 +21,7 @@ const nt_ui_widget_def_t NT_UI_TOOLTIP_DEF = {
 
 /* Sibling cell ids derived from the target id: the hover-delay timer + the popup panel each need a
  * stable non-aliasing id. Sparse high-bit salts (never a real low id), distinct from the target so the
- * timer cell never aliases the target's own state (T-65-19). */
+ * timer cell never aliases the target's own state. */
 #define NT_UI_TOOLTIP_TIMER_SALT 0x70900000U
 #define NT_UI_TOOLTIP_POPUP_SALT 0x70910000U
 #define NT_UI_TOOLTIP_PANEL_SALT 0x70920000U
@@ -30,7 +30,7 @@ static inline uint32_t tooltip_timer_id(uint32_t id) { return nt_ui_derived_id(i
 static inline uint32_t tooltip_popup_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_TOOLTIP_POPUP_SALT); }
 static inline uint32_t tooltip_panel_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_TOOLTIP_PANEL_SALT); }
 
-/* The engine-owned hover-delay cell (D-65-09: NOT a game bool). Zeroed on create -> hover starts at 0. */
+/* The engine-owned hover-delay cell (not a game bool). Zeroed on create -> hover starts at 0. */
 typedef struct {
     float hover; /* accumulated seconds the cursor has been over the target */
 } nt_ui_tooltip_cell_t;
@@ -125,7 +125,7 @@ static void tooltip_declare_caret(nt_ui_context_t *ctx, uint8_t fill_layer, nt_u
 bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t target_id, const char *content, nt_ui_tooltip_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_tooltip: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(target_id != 0U && content != NULL && style != NULL && "nt_ui_tooltip: target_id non-zero, pointers non-NULL");
-    NT_ASSERT(isfinite(style->delay_secs) && style->delay_secs >= 0.0F && "nt_ui_tooltip: delay_secs finite && >= 0"); /* T-65-17 */
+    NT_ASSERT(isfinite(style->delay_secs) && style->delay_secs >= 0.0F && "nt_ui_tooltip: delay_secs finite && >= 0");
     NT_ASSERT(style->font_size > 0.0F && "nt_ui_tooltip: font_size > 0");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_tooltip: slice9_scale must be finite > 0");
 
@@ -141,8 +141,8 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     /* Engine-tracked hover-delay timer in the state pool. */
     nt_ui_tooltip_cell_t *c = nt_ui_state(ctx, tooltip_timer_id(target_id), sizeof *c, NT_UI_STATE_TAG('t', 'i', 'p', ' '));
 
-    /* IDEMPOTENT read of the target's hover — must NOT become a second mutating step on the target id
-     * (T-65-19). The game's own step_interaction stays the sole capture mutator. */
+    /* IDEMPOTENT read of the target's hover — must NOT become a second mutating step on the target id.
+     * The game's own step_interaction stays the sole capture mutator. */
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, target_id);
     if (in.hovered) {
         c->hover += ctx->frame_dt;
@@ -164,7 +164,7 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
-    pst.flags = 0U;                          /* widget-owned (D-65-08): NO light-dismiss catcher — hover-driven, never gates base UI */
+    pst.flags = 0U;                          /* no light-dismiss catcher: hover-driven, must not gate base UI */
     pst.layer = fill_layer;                  /* widget-owned: the popup panel sits on the fill layer */
 
     /* Resolve the panel slice9 once: art-or-flat decides whether the panel can round (IMAGE bg can't). */

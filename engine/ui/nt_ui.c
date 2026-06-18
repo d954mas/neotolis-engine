@@ -2534,7 +2534,7 @@ static nt_ui_events_t events_from_interaction(const nt_ui_interaction_t *in) {
 static inline bool events_want_gesture(const nt_ui_events_cfg_t *cfg) { return cfg != NULL && (cfg->double_click || cfg->long_press_secs > 0.0F); }
 
 /* The mutating gesture step: advance the cell clock + dbl/long machine, fill the gesture fields.
- * `e` already carries the base edges. Double-click + one-shot long-press machine (D-65-02). */
+ * `e` already carries the base edges. Double-click + one-shot long-press machine. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, bool pressed_now, bool released_now, nt_ui_events_t *e) {
     const float dbl_window = ctx->gesture_dbl_window_secs;
@@ -2583,7 +2583,7 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
     }
 
     /* Linear hold_progress: only while the press candidate is live AND over the widget. press_live==0
-     * (drag-cancel / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1] (T-65-02). */
+     * (drag-cancel / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
     if (g->press_live != 0U && e->held && long_press_secs > 0.0F) {
         e->hold_progress = nt_ui_clampf((g->clock - g->press_clock) / long_press_secs, 0.0F, 1.0F);
     }
@@ -2604,7 +2604,7 @@ nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_u
     const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, id, pad_lrtb);
     nt_ui_events_t e = events_from_interaction(&in);
 
-    /* Zero-alloc gate (EVT-02 / D-65-03): the gesture cell is created ONLY when requested. */
+    /* Zero-alloc gate: the gesture cell is created ONLY when requested. */
     if (events_want_gesture(cfg)) {
         events_step_gesture(ctx, id, cfg, in.pressed_now, in.released_now, &e);
     }

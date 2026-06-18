@@ -306,8 +306,8 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
                  nt_ui_tabbar_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_tabbar: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(base_id != 0U && labels != NULL && active != NULL && style != NULL && "nt_ui_tabbar: base_id non-zero, pointers non-NULL");
-    NT_ASSERT(count >= 0 && "nt_ui_tabbar: count must be >= 0");                                         /* T-65-15 */
-    NT_ASSERT(*active >= -1 && (count == 0 || *active < count) && "nt_ui_tabbar: active in [-1,count)"); /* T-65-15 */
+    NT_ASSERT(count >= 0 && "nt_ui_tabbar: count must be >= 0");
+    NT_ASSERT(*active >= -1 && (count == 0 || *active < count) && "nt_ui_tabbar: active in [-1,count)");
 
     int clicked = -1;
     /* Convenience wrapper built ON the begin/end core: an optional leading icon gutter + a label child per
@@ -315,10 +315,10 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* icons on data->layer, labels on label_layer */
     nt_ui_tabbar_begin(ctx, data, label_layer, base_id, style);
     for (int i = 0; i < count; ++i) {
-        NT_ASSERT(labels[i] != NULL && "nt_ui_tabbar: label entry must be non-NULL"); /* T-65-16 */
+        NT_ASSERT(labels[i] != NULL && "nt_ui_tabbar: label entry must be non-NULL");
         const bool on = (i == *active);
         if (nt_ui_tab_begin(ctx, i, on)) {
-            *active = i; /* Model D: latch the game-owned active index */
+            *active = i; /* latch the game-owned active index */
             clicked = i;
         }
         const nt_atlas_region_ref_t *icon = (icons != NULL) ? &icons[i] : NULL;

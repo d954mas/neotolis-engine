@@ -153,8 +153,7 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
-/* App-wide gesture defaults (D-65-04). Match the hard-coded 0.30F / 6.0F the text-field gesture used
- * before consolidation. Per-ctx, settable via nt_ui_set_gesture_constants. */
+/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. */
 #ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
 #define NT_UI_GESTURE_DBL_WINDOW_SECS 0.30F
 #endif

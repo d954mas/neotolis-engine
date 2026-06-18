@@ -1,9 +1,9 @@
 #ifndef NT_UI_TABBAR_H
 #define NT_UI_TABBAR_H
 
-/* Reusable tab-bar (WGT-02). A column (or row) of full-width click targets; the active tab carries an
- * accent bar + a selected fill, hovered tabs lighten and ease. A click sets the game-owned `int *active`
- * (Model D — the widget never owns the index). No popup, no gesture cell: a tab is a plain click.
+/* Reusable tab-bar. A column (or row) of full-width click targets; the active tab carries an accent bar
+ * + a selected fill, hovered tabs lighten and ease. A click sets the game-owned `int *active` — the
+ * widget never owns the index. No popup, no gesture cell: a tab is a plain click.
  *
  * Customizable game UI (button/checkbox parity): each tab visual is a per-state model (idle/hover/
  * selected) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat fallback color — atlas-free still
@@ -99,8 +99,8 @@ void nt_ui_tab_end(nt_ui_context_t *ctx);
 /* Closes the bar container opened by nt_ui_tabbar_begin. */
 void nt_ui_tabbar_end(nt_ui_context_t *ctx);
 
-/* Declare the tab-bar: a container holding `count` full-extent tabs. A click on tab i sets *active = i
- * (Model D). base_id salts each tab's id via a mixed hash. The bar grows to fill its parent on the cross
+/* Declare the tab-bar: a container holding `count` full-extent tabs. A click on tab i sets *active = i.
+ * base_id salts each tab's id via a mixed hash. The bar grows to fill its parent on the cross
  * axis. ctx/labels/active/style non-NULL; count >= 0; *active in [0,count) when count > 0 (or -1 = none).
  * Returns the index clicked this frame, or -1 if no tab was clicked.
  *

@@ -1,14 +1,14 @@
 #ifndef NT_UI_DROPDOWN_H
 #define NT_UI_DROPDOWN_H
 
-/* Dropdown / combobox (WGT-01) built ON popup-core (Plan 03) + the Phase-59 scroll wrapper. A trigger
- * button shows the current selection; clicking it toggles a game-owned `bool open`. The open list is a
- * popup-core floating anchored to the trigger's bottom-left with edge-flip up near the bottom border;
- * its rows are plain rects + labels. A row click writes the row index into the game-owned `int *selected`
- * and raises close. A long list is wrapped in nt_ui_scroll_begin/end (NOT a raw Clay .clip, which leaks
- * a scroll-container pool slot -> type=7 crash, Pitfall 7).
+/* Dropdown / combobox built ON popup-core + the scroll wrapper. A trigger button shows the current
+ * selection; clicking it toggles a game-owned `bool open`. The open list is a popup-core floating
+ * anchored to the trigger's bottom-left with edge-flip up near the bottom border; its rows are plain
+ * rects + labels. A row click writes the row index into the game-owned `int *selected` and raises close.
+ * A long list is wrapped in nt_ui_scroll_begin/end, NOT a raw Clay .clip — a raw .clip leaks a
+ * scroll-container pool slot (type=7 crash).
  *
- * Model D: the GAME owns `int *selected` and `bool *open`; the widget only signals.
+ * The GAME owns `int *selected` and `bool *open`; the widget only signals.
  *
  * Customizable game UI (button/checkbox/tabbar parity): the trigger + rows are per-state visual models
  * (idle/hover/pressed, + selected for rows) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat

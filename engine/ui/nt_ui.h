@@ -380,7 +380,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* Consolidated interaction result (D-65-02): the base capture edges PLUS the cfg-gated gesture cell.
+/* Consolidated interaction result: the base capture edges PLUS the cfg-gated gesture cell.
  * hovered/pressed/released/clicked/held + pos/drag/pointer_id mirror nt_ui_interaction_t; the gesture
  * fields (double_clicked / long_pressed / hold_progress) stay zero unless nt_ui_events got a cfg that
  * requests them. hold_progress is a linear 0..1 ramp toward long_press_secs while held && hovered. */
@@ -399,7 +399,7 @@ typedef struct {
 } nt_ui_events_t;
 _Static_assert(sizeof(nt_ui_events_t) == 32, "nt_ui_events_t stable ABI (7 bool + 1 pad + 5 float + 1 u32)");
 
-/* Per-widget gesture knobs (D-65-04). long_press_secs <= 0 disables BOTH long-press AND hold_progress;
+/* Per-widget gesture knobs. long_press_secs <= 0 disables BOTH long-press AND hold_progress;
  * double_click is opt-in. The app-wide dbl window + move radius live on the context
  * (nt_ui_set_gesture_constants), not here. cfg==NULL on nt_ui_events = base path only, zero gesture
  * alloc. */
@@ -409,7 +409,7 @@ typedef struct {
 } nt_ui_events_cfg_t;
 _Static_assert(sizeof(nt_ui_events_cfg_t) == 8, "nt_ui_events_cfg_t stable ABI (1 float + 1 bool + 3 pad)");
 
-/* MUTATING — the single canonical interaction step (D-65-02). Call ONCE per widget per frame from the
+/* MUTATING — the single canonical interaction step. Call ONCE per widget per frame from the
  * widget's begin, in place of nt_ui_step_interaction. Runs the base capture/edge machine; when cfg
  * requests a gesture (cfg != NULL && (cfg->double_click || cfg->long_press_secs > 0)) it also advances
  * the per-id gesture cell. cfg==NULL grows the state pool by zero. Returns the full result directly. */
@@ -424,7 +424,7 @@ nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_u
  * begin/end. Mirror of nt_ui_query_interaction for the consolidated result. */
 nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id);
 
-/* App-wide gesture constants (D-65-04): the double-click window (secs) and the move radius (px) past
+/* App-wide gesture constants: the double-click window (secs) and the move radius (px) past
  * which a hold is treated as a drag (cancels long-press / resets hold_progress). Asserts each is finite
  * and >= 0 (fail-early, no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px);
