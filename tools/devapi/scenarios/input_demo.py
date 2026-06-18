@@ -11,12 +11,13 @@ full enqueue -> net_poll -> input_poll -> drain timing:
   2. Gate cutover — set_player_enabled(false) then inject a key: input.state still observes
      it down, proving inject is orthogonal to the gate. (The "real physical device dropped
      while gated" half needs a live device and stays a manual note.)
-  3. input.text — text("hi") drains into the char ring; input.state{pop_text:true} reads
-     codepoints == [104,105] ('h','i').
+  3. input.text — text("hi") + one sim-advance drains into the char ring; input.state{pop_text:true}
+     reads codepoints == [104,105] ('h','i').
 
-input.state reads the POLLED state (updated only by nt_input_poll, once per sim-advance),
-so an enqueued inject is invisible until a step advances the frame — which is what lets this
-UAT machine-assert the drain-race over the socket.
+Scheduling lives in the devapi layer (nt_input is a pure apply layer): an enqueued inject releases
+into nt_input's immediate buffer ONLY on a real sim-advance, then nt_input_poll applies it. So an
+enqueued inject is invisible until a step advances the frame — which is exactly what lets this UAT
+machine-assert the drain-race (offset>0 release pinned to advances) over the socket.
 
 Usage: python tools/devapi/scenarios/input_demo.py [--port N]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
@@ -70,11 +71,10 @@ def run(client: DevApiClient) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation."""
     # 1. Drain-race — a tap's RELEASE pins to the sim-advance count, not wall-clock.
     #
-    # A bare offset-0 key applies on the host's next input poll, and the managed loop polls input
-    # every frame callback even in MANUAL idle, so it can drain before any step() round-trip. The
-    # advance-pinned property only a live socket exercises is the relative countdown of an offset>0
-    # entry: it decrements ONLY on a real sim-advance, frozen across idle polls. A tap(hold=N)
-    # schedules down@0 + up@N, so the key stays down across the hold window and releases past it.
+    # Both edges of a tap release through the devapi schedule on sim-advances: down@0 releases on the
+    # first advance, up@N decrements only on real advances (frozen across MANUAL-idle / paused ticks).
+    # A tap(hold=N) schedules down@0 + up@N, so the key stays down across the hold window and releases
+    # only after stepping past it — the advance-pinned property only a live socket exercises.
     client.set_mode("manual")
     # Settle C to a known-released state first: a re-run (or a prior session) may have left a residual
     # down/inject for C, which would skew the tap. Release + one advance flushes it.
@@ -115,24 +115,27 @@ def run(client: DevApiClient) -> None:
 
     # 3. input.text — codepoints reach the char ring; the pop_text drain reads them back.
     #
-    # The char ring is frame-local: nt_input_poll drops chars unconsumed from the previous frame at
-    # the start of every poll, including idle polls. The host polls input on every managed-loop
-    # iteration, so a char@0 inject drains into the ring on the next poll and the following idle poll
-    # clears it again — the pop_text read is only observable in that single inter-poll window. The
-    # inject itself is deterministic; only which idle poll clears the ring races, so retry below
-    # catches the one-frame window. text() also returns {queued} synchronously (proving the
-    # UTF-8->codepoint decode); the pop_text drain proves the codepoints actually reached the ring.
+    # Post-refactor semantics: scheduling lives in devapi and an offset-0 inject releases into
+    # nt_input's immediate buffer ONLY on a real sim-advance (a frozen MANUAL-idle / paused tick
+    # releases nothing — this is the cleaner replacement for the old per-poll drain). So a text()
+    # inject is invisible until a step() advances the frame; that advance both releases the chars
+    # AND drains them into the char ring in the same poll. The ring stays frame-local: the NEXT
+    # idle poll clears it, so the pop_text read is observable only in the inter-poll window right
+    # after the advancing step. Still in MANUAL from test 1, so we drive the advance explicitly.
+    # text() also returns {queued} synchronously (proving the UTF-8->codepoint decode); the
+    # pop_text drain proves the codepoints actually reached the ring after the advance.
     queued = client.text("hi")
     assert isinstance(queued.get("queued"), int), f"input.text echoed {queued!r}, expected {{queued:int}}"
     cps = []
-    for _ in range(50):  # generous budget: each iter is one inject+drain attempt against the 1-frame window
+    for _ in range(50):  # generous budget against the 1-frame ring window; each iter is one advancing inject+drain
         client.state(pop_text=True)  # clear any partial / stale ring contents
-        client.text("hi")
+        client.text("hi")            # enqueue char@0 into the devapi schedule
+        client.step(count=1)         # advance once: release the chars into the buffer + drain into the ring this poll
         cps = client.state(pop_text=True).get("codepoints")
         if cps == [104, 105]:
             break
-    assert cps == [104, 105], f"input.state(pop_text).codepoints is {cps!r}, expected [104, 105] ('h','i') within the frame-local window"
-    print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring.")
+    assert cps == [104, 105], f"input.state(pop_text).codepoints is {cps!r}, expected [104, 105] ('h','i') after an advancing step"
+    print("PASS[3/3] input.text: codepoints == [104, 105] drained from the char ring after a sim-advance.")
 
     # Restore a normal live state for the next session: back to RUN, unpaused.
     client.set_mode("run")
