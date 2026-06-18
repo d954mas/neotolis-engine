@@ -52,8 +52,8 @@ static void fx_begin(float dt) {
 
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
 static void test_menu_abi_sizes(void) {
-    TEST_ASSERT_EQUAL_UINT((unsigned)((2 * sizeof(void *)) + 16), (unsigned)sizeof(nt_ui_menu_item_t));
-    TEST_ASSERT_EQUAL_UINT(32U, (unsigned)sizeof(nt_ui_menu_style_t));
+    TEST_ASSERT_EQUAL_UINT((unsigned)((2 * sizeof(void *)) + 32), (unsigned)sizeof(nt_ui_menu_item_t));
+    TEST_ASSERT_EQUAL_UINT(88U, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT(16U, (unsigned)sizeof(nt_ui_menu_state_t));
 }
 
@@ -537,6 +537,117 @@ static void test_menu_depth_cap_asserts(void) {
     TEST_ASSERT_TRUE_MESSAGE(tripped, "self-referential submenu must trip the depth-cap NT_ASSERT");
 }
 
+/* ============================ Wave 2.5: sprites / icons / separator / occluder ============================ */
+
+/* A tree with an icon gutter + a separator + a parent (arrow marker) for the visual-parity probes. The
+ * icon ref carries a non-zero atlas.id so the gutter draws an image cell (no real atlas binds in the
+ * fixture, so the image resolve no-ops, but the gutter cell itself still lays out + the label aligns). */
+static const nt_ui_menu_item_t s_sub25[] = {
+    {.label = "ChildA", .id = 501U, .enabled = true},
+};
+static nt_ui_menu_item_t s_root25[] = {
+    {.label = "Iconed", .id = 401U, .enabled = true},                                        /* icon set at runtime */
+    {.label = NULL, .enabled = false},                                                       /* separator */
+    {.label = "Plain", .id = 402U, .enabled = true},                                         /* no icon -> aligned-empty gutter */
+    {.label = "Parent", .submenu = s_sub25, .submenu_count = 1U, .id = 0U, .enabled = true}, /* arrow marker */
+};
+static void menu_frame25(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    nt_pointer_t p = {0};
+    p.x = px;
+    p.y = py;
+    p.active = true;
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root25, 4U, st, style);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Icon gutter: with icon_size > 0 the iconed AND non-iconed rows both reserve the leading gutter, so
+ *      their labels start at the SAME x (aligned empty space on the iconless row). ---- */
+static void test_menu_icon_gutter_aligns_labels(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    style.icon_size = 20U;
+    s_root25[0].icon = (nt_atlas_region_ref_t){.atlas = {.id = 1U}, .region = NT_ATLAS_INVALID_REGION};
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    menu_frame25(&st, &style, 0.0F, 0.0F); /* lay out so the gutter cell bbox exists next frame */
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t g0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_icon_id(MENU_A, 0U, 0U));
+    const nt_ui_bbox_t g2 = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_icon_id(MENU_A, 0U, 2U));
+    TEST_ASSERT_TRUE_MESSAGE(g0.found, "iconed row gutter cell must lay out");
+    TEST_ASSERT_TRUE_MESSAGE(g2.found, "non-iconed row must STILL reserve an aligned-empty gutter");
+    TEST_ASSERT_TRUE_MESSAGE(float_near(g0.x, g2.x, 0.5F), "both gutters must align (icon-column model)");
+    TEST_ASSERT_TRUE_MESSAGE(float_near(g0.width, (float)style.icon_size, 0.5F), "gutter width == icon_size");
+}
+
+/* ---- icon_size == 0: no gutter at all (the cell is not declared). ---- */
+static void test_menu_icon_gutter_absent_when_zero(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    style.icon_size = 0U;
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t g0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_icon_id(MENU_A, 0U, 0U));
+    TEST_ASSERT_FALSE_MESSAGE(g0.found, "icon_size 0 must declare no gutter cell");
+}
+
+/* ---- Separator is non-interactive: a NULL-label item has NO row id (its bbox is never registered) and
+ *      keyboard Down skips it (focus jumps Iconed(0) -> Plain(2), never landing on the separator). ---- */
+static void test_menu_separator_non_interactive(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    /* the separator (index 1) never registers a row id -> its bbox is not found */
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t sep = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_row_id(MENU_A, 0U, 1U));
+    TEST_ASSERT_FALSE_MESSAGE(sep.found, "a separator must not register an interactive row id");
+
+    /* Down focuses item 0 (Iconed), a second Down must SKIP the separator and land on item 2 (Plain). */
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    /* settle + activate the focused item: it must be Plain (402), proving the separator was skipped. */
+    menu_key(NT_KEY_ENTER);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(402U, st.chosen_id, "Down must skip the separator (focus Iconed->Plain)");
+}
+
+/* ---- Submenu marker cell: a parent row declares the marker cell (arrow sprite or ">" fallback) with a
+ *      stable fmix id; a leaf row never does. ---- */
+static void test_menu_arrow_marker_on_parent_only(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+    /* set an arrow ref so the IMAGE marker cell (which carries the fmix id) is declared on the parent */
+    style.arrow = (nt_atlas_region_ref_t){.atlas = {.id = 1U}, .region = 0U};
+    style.arrow_size = 12U;
+
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t parent_arrow = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_arrow_id(MENU_A, 0U, 3U)); /* Parent */
+    const nt_ui_bbox_t leaf_arrow = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_arrow_id(MENU_A, 0U, 0U));   /* Iconed leaf */
+    TEST_ASSERT_TRUE_MESSAGE(parent_arrow.found, "a parent row must declare the submenu marker cell");
+    TEST_ASSERT_FALSE_MESSAGE(leaf_arrow.found, "a leaf row must NOT declare a submenu marker");
+}
+
+/* ---- Single root occluder: while the menu is open ONE full-viewport occluder lays out under the stack;
+ *      a closed menu declares none (present-only). ---- */
+static void test_menu_root_occluder_present_while_open(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t occ = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_occluder_id(MENU_A));
+    TEST_ASSERT_TRUE_MESSAGE(occ.found, "open menu must declare a root occluder");
+    TEST_ASSERT_TRUE_MESSAGE(float_near(occ.width, VIEW_W, 1.0F) && float_near(occ.height, VIEW_H, 1.0F), "occluder must be full-viewport");
+
+    st.open = false;
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    menu_frame25(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t occ2 = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_occluder_id(MENU_A));
+    TEST_ASSERT_FALSE_MESSAGE(occ2.found, "closed menu must declare no occluder (present-only)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_menu_abi_sizes);
@@ -558,5 +669,10 @@ int main(void) {
     RUN_TEST(test_menu_outside_click_dismisses_chain);
     RUN_TEST(test_menu_inside_click_keeps_open);
     RUN_TEST(test_menu_depth_cap_asserts);
+    RUN_TEST(test_menu_icon_gutter_aligns_labels);
+    RUN_TEST(test_menu_icon_gutter_absent_when_zero);
+    RUN_TEST(test_menu_separator_non_interactive);
+    RUN_TEST(test_menu_arrow_marker_on_parent_only);
+    RUN_TEST(test_menu_root_occluder_present_while_open);
     return UNITY_END();
 }

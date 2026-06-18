@@ -7,6 +7,8 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
+#include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
@@ -61,7 +63,7 @@ _Static_assert(sizeof(nt_ui_menu_runtime_t) <= NT_UI_STATE_PAYLOAD_MAX, "menu ru
 /* Kind tags folded into the id hash so a level/panel/row/catcher at one (depth,index) never collides
  * with another. nt_ui_derived_id (XOR) cannot be used to compose depth+index because additive salts
  * with a shared stride XOR-cancel across (depth,index) pairs (e.g. (d=1,i=2) aliased (d=2,i=1)). */
-enum { NT_UI_MENU_KIND_LEVEL = 1, NT_UI_MENU_KIND_PANEL = 2, NT_UI_MENU_KIND_ROW = 3, NT_UI_MENU_KIND_RUNTIME = 4 };
+enum { NT_UI_MENU_KIND_LEVEL = 1, NT_UI_MENU_KIND_PANEL = 2, NT_UI_MENU_KIND_ROW = 3, NT_UI_MENU_KIND_RUNTIME = 4, NT_UI_MENU_KIND_OCCLUDER = 5, NT_UI_MENU_KIND_ARROW = 6, NT_UI_MENU_KIND_ICON = 7 };
 
 /* fmix-style 32-bit hash combining menu_id + kind + depth + index. Non-XOR-symmetric, so distinct
  * (kind,depth,index) tuples never alias. Folds 0 to 1 (id 0 is the empty-slot sentinel). */
@@ -80,6 +82,11 @@ static inline uint32_t menu_runtime_id(uint32_t menu_id) { return menu_hash_id(m
 static inline uint32_t menu_level_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_LEVEL, depth, 0U); }
 static inline uint32_t menu_panel_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_PANEL, depth, 0U); }
 static inline uint32_t menu_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ROW, depth, item_idx); }
+static inline uint32_t menu_occluder_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_OCCLUDER, 0U, 0U); }
+/* Per-row sub-element ids (arrow marker / icon cell): fmix-derived so consecutive rows' children never
+ * collide (Clay anonymous-child ids are additive; explicit fmix ids dodge the DUPLICATE_ID crash). */
+static inline uint32_t menu_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ARROW, depth, item_idx); }
+static inline uint32_t menu_icon_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ICON, depth, item_idx); }
 
 // #region pure hover-intent algorithm (no GL, unit-tested)
 /* Barycentric sign test: a point is inside the triangle iff all three edge cross-products share a sign
@@ -146,16 +153,26 @@ static bool menu_hover_intent(nt_ui_menu_hover_t *c, float mouse_x, float mouse_
 // #endregion
 
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
+    /* Polished flat baseline (no atlas art: panel_bg/arrow refs stay 0 -> flat bg + ">" text marker),
+     * but wire-ready — set panel_bg/arrow and the icon gutter opens. */
     return (nt_ui_menu_style_t){
         .bg_color = 0xF02A2A2AU,
         .item_hover_color = 0xFF4A6A8AU,
         .text_color = 0xFFEEEEEEU,
         .text_disabled = 0xFF888888U,
+        .panel_tint = 0xFFFFFFFFU,
+        .arrow_tint = 0xFFC8C8C8U,
+        .separator_color = 0xFF505050U,
         .font_size = 16.0F,
+        .slice9_scale = 1.0F,
+        .state_speed = 16.0F,
         .item_height = 26U,
         .min_width = 160U,
         .pad = 6U,
         .font_id = 0U,
+        .icon_size = 0U,        /* no icon gutter by default (text-only) */
+        .arrow_size = 14U,      /* used only when the arrow ref is set */
+        .separator_height = 2U, /* NULL-label divider thickness */
     };
 }
 
@@ -235,18 +252,91 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t id, nt_ui_menu_state
 // #region menu UI declaration (recursive popup-core fly-outs)
 /* Declared-but-not-defined yet: the recursion is mutual (a level declares its open child level). */
 static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth,
-                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen,
-                               bool *out_close_chain);
+                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen, bool *out_close_chain);
 
-/* One item row: a fixed-height rect with a label, plus a ">" affordance for a parent. Returns the
- * interaction so the caller drives hover/click. The row id is registered so its bbox is queryable. */
-static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, const nt_ui_menu_item_t *it, bool focused,
-                                            const nt_ui_menu_style_t *style) {
+/* A NULL-label item renders as a thin, non-interactive divider (no row id, no hover/click/nav). A short
+ * muted rect, indented by the panel pad so it reads as a group separator. */
+static void menu_declare_separator(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_ui_menu_style_t *style) {
+    const float h = (style->separator_height > 0U) ? (float)style->separator_height : 1.0F;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.left = style->pad, .right = style->pad}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(h)}},
+              .backgroundColor = nt_ui_unpack_abgr(style->separator_color),
+              .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
+    }
+}
+
+/* Draw the resolved per-item icon image filling the gutter cell (no-op if the ref is unset/unresolved).
+ * Split out so the gutter cell stays a flat declaration (cognitive-complexity). */
+static void menu_draw_icon_image(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_atlas_region_ref_t *icon) {
+    if (icon == NULL || icon->atlas.id == 0U) {
+        return;
+    }
+    nt_atlas_region_ref_t ic = *icon; /* per-item ref (not style-owned): resolve by-value, never memoize */
+    nt_atlas_resolve_ref(&ic);
+    if (ic.region == NT_ATLAS_INVALID_REGION) {
+        return;
+    }
+    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+    NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (icon payload)");
+    *p = (nt_ui_image_payload_t){.atlas = ic.atlas, .region_index = ic.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .image = (Clay_ImageElementConfig){.imageData = p}, .userData = NT_UI_CLAY_DATA(fill_layer)}) {}
+}
+
+/* The leading icon gutter (unified icon model): reserve icon_size px so labels stay aligned across iconed
+ * and non-iconed rows; draw the per-item icon if set, else leave the gutter empty. icon_size==0 -> no
+ * gutter. */
+static void menu_declare_icon(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t icon_id, const nt_atlas_region_ref_t *icon, const nt_ui_menu_style_t *style) {
+    if (style->icon_size == 0U) {
+        return;
+    }
+    const float gut = (float)style->icon_size;
+    CLAY({.id = (Clay_ElementId){.id = icon_id}, .layout = {.sizing = {CLAY_SIZING_FIXED(gut), CLAY_SIZING_FIXED(gut)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        menu_draw_icon_image(ctx, fill_layer, icon);
+    }
+}
+
+/* The submenu marker on a parent row: the arrow sprite (tinted, right-aligned) when a ref is set, else
+ * the ">" text fallback. The arrow cell carries an explicit fmix id so consecutive parent rows' markers
+ * never collide (Clay anonymous-child ids are additive). */
+static void menu_declare_marker(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t arrow_id, const nt_ui_label_style_t *lbl, nt_ui_menu_style_t *style) {
+    nt_atlas_resolve_ref(&style->arrow);
+    const bool has_art = (style->arrow.atlas.id != 0U && style->arrow.region != NT_ATLAS_INVALID_REGION);
+    if (has_art) {
+        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (arrow payload)");
+        *p = (nt_ui_image_payload_t){.atlas = style->arrow.atlas, .region_index = style->arrow.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
+        const float sz = (style->arrow_size > 0U) ? (float)style->arrow_size : (float)style->item_height * 0.5F;
+        CLAY({.id = (Clay_ElementId){.id = arrow_id},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
+              .image = (Clay_ImageElementConfig){.imageData = p},
+              .backgroundColor = nt_ui_unpack_tint(style->arrow_tint),
+              .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
+    } else {
+        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), ">", lbl);
+    }
+}
+
+/* One item row: a fixed-height rect with an optional icon gutter, a label, and a submenu marker for a
+ * parent. The hover/focus highlight EASES in via nt_ui_anim (value_t -> hover alpha) — purely visual on
+ * the row bg, the 0c open/keep/switch state machine is untouched. Returns the interaction so the caller
+ * drives hover/click. The row id is registered so its bbox is queryable. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon gutter + eased hover + marker branch, not deep nesting
+static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, uint8_t depth, uint32_t item_idx, const nt_ui_menu_item_t *it,
+                                            bool focused, nt_ui_menu_style_t *style) {
+    const uint32_t row_id = menu_row_id(menu_id, depth, item_idx);
     const bool is_parent = it->submenu != NULL;
     const nt_ui_interaction_t in = it->enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
     const bool highlit = it->enabled && (in.hovered || focused);
-    const uint32_t row_bg = highlit ? style->item_hover_color : 0U;
-    Clay_Color bg = (row_bg != 0U) ? nt_ui_unpack_abgr(row_bg) : (Clay_Color){0};
+
+    /* Eased highlight: value_t rides 0..1 toward highlit; the hover fill alpha tracks it so the row bg
+     * fades in/out instead of an instant swap. state_speed==0 snaps. */
+    const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
+    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
+    Clay_Color bg = {0};
+    if (style->item_hover_color != 0U) {
+        bg = nt_ui_unpack_abgr(style->item_hover_color);
+        bg.a = bg.a * a->value_t;
+    }
     const uint32_t txt = it->enabled ? style->text_color : style->text_disabled;
     const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(txt)};
     CLAY({
@@ -258,10 +348,11 @@ static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint8_t fill_l
         .backgroundColor = bg,
         .userData = (void *)nt_ui_make_element_data(fill_layer, NULL),
     }) {
+        menu_declare_icon(ctx, fill_layer, menu_icon_id(menu_id, depth, item_idx), &it->icon, style);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), it->label != NULL ? it->label : "", &lbl);
         if (is_parent) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-            nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), ">", &lbl);
+            menu_declare_marker(ctx, fill_layer, label_layer, menu_arrow_id(menu_id, depth, item_idx), &lbl, style);
         }
     }
     /* Register the row's interaction (step) so capture/hover edges advance once per frame. */
@@ -290,12 +381,28 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
  * the focused parent's submenu (no-op on a leaf); Enter activates a focused leaf OR opens a focused
  * parent; Left/Esc close the level. Mutates rt->focus/open_path. Returns true if the level should
  * close (Left/Esc). */
+/* Step focus by +1/-1, skipping separators (NULL-label, non-interactive). Wraps; stops after a full
+ * loop if the level is all-separators (defensive). step is +1 (Down) or -1 (Up). */
+static int16_t menu_focus_step(const nt_ui_menu_item_t *items, uint32_t count, int16_t f, int step) {
+    for (uint32_t k = 0; k < count; ++k) {
+        if (step > 0) {
+            f = (int16_t)((f + 1) % (int)count);
+        } else {
+            f = (int16_t)((f <= 0) ? (int)count - 1 : f - 1);
+        }
+        if (items[f].label != NULL) {
+            break;
+        }
+    }
+    return f;
+}
+
 static bool menu_keyboard_nav(const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, nt_ui_menu_runtime_t *rt, uint32_t *out_chosen) {
     int16_t f = rt->focus[depth];
     if (nt_input_key_is_pressed(NT_KEY_ARROW_DOWN)) {
-        f = (int16_t)((f + 1) % (int)count);
+        f = menu_focus_step(items, count, f, +1);
     } else if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
-        f = (int16_t)((f <= 0) ? (int)count - 1 : f - 1);
+        f = menu_focus_step(items, count, f, -1);
     }
     rt->focus[depth] = f;
     if (f >= 0 && (uint32_t)f < count) {
@@ -320,20 +427,40 @@ static bool menu_keyboard_nav(const nt_ui_menu_item_t *items, uint32_t count, ui
 /* Declare the panel + item rows. Updates focus on hover, latches a leaf click into *out_chosen and a
  * parent click into the returned open_idx, and reports a hovered "switch request" (parent to open OR a
  * leaf when a sibling submenu is open) in *out_hovered. Returns the open child index after clicks. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — panel slice9 branch + separator branch + row loop, not deep nesting
 static int16_t menu_declare_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth,
-                                  nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, int16_t open_idx, int16_t *out_hovered, uint32_t *out_chosen) {
+                                  nt_ui_menu_runtime_t *rt, nt_ui_menu_style_t *style, int16_t open_idx, int16_t *out_hovered, uint32_t *out_chosen) {
     int16_t hovered = -1;
-    CLAY({.id = (Clay_ElementId){.id = menu_panel_id(menu_id, depth)},
-          .layout = {.sizing = {.width = CLAY_SIZING_FIT(.min = (float)style->min_width), .height = CLAY_SIZING_FIT(0)},
-                     .padding = CLAY_PADDING_ALL(style->pad),
-                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                     .childGap = 2},
-          .backgroundColor = nt_ui_unpack_abgr(style->bg_color),
-          .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
+    /* Resolve the panel slice9 once (memoize): art-or-flat. IMAGE bg can't round (drop cornerRadius —
+     * the menu was never rounded, so just pick the bg branch); flat falls back to bg_color. */
+    nt_atlas_resolve_ref(&style->panel_bg);
+    const bool panel_art = (style->panel_bg.atlas.id != 0U && style->panel_bg.region != NT_ATLAS_INVALID_REGION);
+    Clay_ElementDeclaration panel = {.id = (Clay_ElementId){.id = menu_panel_id(menu_id, depth)},
+                                     .layout = {.sizing = {.width = CLAY_SIZING_FIT(.min = (float)style->min_width), .height = CLAY_SIZING_FIT(0)},
+                                                .padding = CLAY_PADDING_ALL(style->pad),
+                                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                                .childGap = 2},
+                                     .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)};
+    if (panel_art) {
+        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (panel payload)");
+        *p = (nt_ui_image_payload_t){.atlas = style->panel_bg.atlas, .region_index = style->panel_bg.region, .slice9_scale = style->slice9_scale};
+        panel.image = (Clay_ImageElementConfig){.imageData = p};
+        panel.backgroundColor = nt_ui_unpack_tint(style->panel_tint);
+    } else {
+        panel.backgroundColor = nt_ui_unpack_abgr(style->bg_color);
+    }
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(panel);
+    {
         for (uint32_t i = 0; i < count; ++i) {
             const nt_ui_menu_item_t *it = &items[i];
+            if (it->label == NULL) {
+                menu_declare_separator(ctx, fill_layer, style); /* NULL label = non-interactive divider */
+                continue;
+            }
             const bool focused = (rt->focus[depth] == (int16_t)i);
-            const nt_ui_interaction_t in = menu_declare_row(ctx, fill_layer, label_layer, menu_row_id(menu_id, depth, i), it, focused, style);
+            const nt_ui_interaction_t in = menu_declare_row(ctx, fill_layer, label_layer, menu_id, depth, i, it, focused, style);
             if (!it->enabled) {
                 continue;
             }
@@ -352,6 +479,7 @@ static int16_t menu_declare_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint
             }
         }
     }
+    nt_ui_clay_priv_close_element();
     *out_hovered = hovered;
     return open_idx;
 }
@@ -409,8 +537,7 @@ static int16_t menu_commit_and_nav(const nt_ui_menu_item_t *items, uint32_t coun
 
 // NOLINTNEXTLINE(misc-no-recursion): bounded recursion — depth capped by NT_UI_MENU_MAX_DEPTH (asserted before each push, T-65-10)
 static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth,
-                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, const nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen,
-                               bool *out_close_chain) {
+                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen, bool *out_close_chain) {
     NT_ASSERT(depth < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
     menu_assert_items(items, count);
 
@@ -459,9 +586,29 @@ static bool menu_cursor_over_any_panel(const nt_ui_context_t *ctx, uint32_t menu
     return false;
 }
 
+/* ONE root-level full-viewport occluder UNDER the whole menu stack: sits just below the root panel
+ * z-band (above base UI) so it absorbs the dismiss click (it wins topmost-z over base UI, the click
+ * can't fall through) and block_pointers base UI while the menu is open. NOT a per-level catcher (those
+ * sit ABOVE ancestor panels and trapped the user — the 0c bug); this single one is always under the
+ * stack, so every open level's panel + rows stay hittable above it. */
+static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t menu_id) {
+    const uint32_t occ_id = menu_occluder_id(menu_id);
+    const int16_t occ_z = (int16_t)(ctx->modal_zband_stride - 1); /* just below the root panel band (stride*1) */
+    const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
+    const nt_ui_element_data_t *occ_data = nt_ui_make_element_data_xform(fill_layer, NULL, &id_xf, 1.0F);
+    CLAY({.id = (Clay_ElementId){.id = occ_id},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = occ_z},
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+          .userData = (void *)occ_data}) {}
+    /* Inert gate: wins next-frame topmost-z over base UI so the dismiss click is absorbed (never leaks
+     * through) and base UI is non-interactive while the menu is open. The menu-owned outside-click
+     * dismiss (global press + !over-any-panel) remains the dismiss source. */
+    nt_ui_block_pointer(ctx, occ_id, NULL);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (same pattern as nt_ui_modal_begin)
 void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st,
-                const nt_ui_menu_style_t *style) {
+                nt_ui_menu_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu: call between nt_ui_begin/end");
     NT_ASSERT(id != 0U && st != NULL && style != NULL && "nt_ui_menu: id non-zero, st + style non-NULL");
@@ -477,6 +624,9 @@ void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t 
     float mx = 0.0F;
     float my = 0.0F;
     menu_mouse_pos(ctx, &mx, &my);
+
+    /* Single root occluder under the whole stack (absorbs dismiss + gates base UI). */
+    menu_declare_occluder(ctx, fill_layer, id);
 
     const nt_ui_popup_anchor_t root_anchor = {.x = st->anchor_x, .y = st->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
     uint32_t chosen = 0U;
@@ -521,4 +671,7 @@ float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id,
 
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth) { return menu_panel_id(menu_id, depth); }
 uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_row_id(menu_id, depth, item_idx); }
+uint32_t nt_ui_menu_test_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_arrow_id(menu_id, depth, item_idx); }
+uint32_t nt_ui_menu_test_icon_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_icon_id(menu_id, depth, item_idx); }
+uint32_t nt_ui_menu_test_occluder_id(uint32_t menu_id) { return menu_occluder_id(menu_id); }
 #endif
