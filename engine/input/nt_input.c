@@ -20,6 +20,16 @@ static uint32_t s_char_ring[NT_INPUT_CHAR_RING];
 static uint32_t s_char_head; /* next write slot */
 static uint32_t s_char_tail; /* next read slot */
 
+/* ---- Player gate ---- */
+
+/* Gate at the apply seam: covers native drain + web direct apply. */
+static bool s_player_enabled = true;
+
+/* ---- Frame-countdown seam (relative; advances only when frame changes) ---- */
+
+static uint32_t s_last_poll_frame;
+static bool s_have_last_frame;
+
 /* ---- Internal pointer helpers ---- */
 
 static nt_pointer_t *find_pointer_by_id(uint32_t id) {
@@ -72,10 +82,13 @@ void nt_input_init(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
+    s_last_poll_frame = 0;
+    s_have_last_frame = false;
+    s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
     nt_input_platform_init();
 }
 
-void nt_input_poll(void) {
+void nt_input_poll(uint32_t frame) {
     /* Deactivate pointers that had pointer_up last frame */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         if (g_nt_input.pointers[i].deactivate_pending) {
@@ -106,6 +119,15 @@ void nt_input_poll(void) {
     /* Platform backend delivers events (calls set_key, pointer_down/move/up,
        which set edge flags immediately) */
     nt_input_platform_poll();
+
+    /* Relative frame countdown: only a NEW sim-advance frame ticks the inject queue,
+       so PAUSE / MANUAL-idle (same frame re-polled) freeze it. Inject-drain insertion
+       point (Plan 03 calls inject_drain(advanced) here, same post-clear window as the
+       native char drain, D-01/Q6). */
+    bool advanced = !s_have_last_frame || (frame != s_last_poll_frame);
+    (void)advanced; /* Plan 03 wires inject_drain(advanced); kept to land the seam now. */
+    s_last_poll_frame = frame;
+    s_have_last_frame = true;
 }
 
 void nt_input_shutdown(void) {
@@ -202,7 +224,7 @@ bool nt_input_mouse_is_released(nt_button_t button) {
 
 /* ---- Internal helpers (called by platform backends) ---- */
 
-void nt_input_set_key(nt_key_t key, bool down) {
+static void nt_input_set_key_apply(nt_key_t key, bool down) {
     if (key >= NT_KEY_COUNT) {
         return;
     }
@@ -215,7 +237,14 @@ void nt_input_set_key(nt_key_t key, bool down) {
     s_keys_current[key] = down;
 }
 
-void nt_input_buffer_char(uint32_t cp) {
+void nt_input_set_key(nt_key_t key, bool down) {
+    if (!s_player_enabled) {
+        return;
+    }
+    nt_input_set_key_apply(key, down);
+}
+
+static void nt_input_buffer_char_apply(uint32_t cp) {
     /* Drop when full so unread chars are never clobbered. */
     if (s_char_head - s_char_tail >= NT_INPUT_CHAR_RING) {
         return;
@@ -224,7 +253,14 @@ void nt_input_buffer_char(uint32_t cp) {
     s_char_head++;
 }
 
-void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+void nt_input_buffer_char(uint32_t cp) {
+    if (!s_player_enabled) {
+        return;
+    }
+    nt_input_buffer_char_apply(cp);
+}
+
+static void nt_input_pointer_down_apply(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     bool fresh = (ptr == NULL);
     if (fresh) {
@@ -245,7 +281,14 @@ void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_
     apply_buttons_mask(ptr, buttons_mask);
 }
 
-void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+    if (!s_player_enabled) {
+        return;
+    }
+    nt_input_pointer_down_apply(id, x, y, pressure, type, buttons_mask);
+}
+
+static void nt_input_pointer_move_apply(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     bool fresh = (ptr == NULL) || ptr->deactivate_pending;
     if (ptr == NULL) {
@@ -270,7 +313,14 @@ void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_
     apply_buttons_mask(ptr, buttons_mask);
 }
 
-void nt_input_pointer_up(uint32_t id) {
+void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+    if (!s_player_enabled) {
+        return;
+    }
+    nt_input_pointer_move_apply(id, x, y, pressure, type, buttons_mask);
+}
+
+static void nt_input_pointer_up_apply(uint32_t id) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     if (ptr == NULL) {
         return; /* Unknown pointer */
@@ -284,13 +334,27 @@ void nt_input_pointer_up(uint32_t id) {
     ptr->deactivate_pending = true;
 }
 
-void nt_input_wheel(float dx, float dy) {
+void nt_input_pointer_up(uint32_t id) {
+    if (!s_player_enabled) {
+        return;
+    }
+    nt_input_pointer_up_apply(id);
+}
+
+static void nt_input_wheel_apply(float dx, float dy) {
     nt_pointer_t *mouse = find_mouse_pointer();
     if (mouse == NULL) {
         return; /* No mouse slot yet — wheel before first move is lost */
     }
     mouse->wheel_dx += dx;
     mouse->wheel_dy += dy;
+}
+
+void nt_input_wheel(float dx, float dy) {
+    if (!s_player_enabled) {
+        return;
+    }
+    nt_input_wheel_apply(dx, dy);
 }
 
 void nt_input_clear_all_keys(void) {
@@ -316,4 +380,13 @@ void nt_input_clear_all_pointers(void) {
         g_nt_input.pointers[i].active = false;
         g_nt_input.pointers[i].deactivate_pending = false;
     }
+}
+
+void nt_input_set_player_enabled(bool enabled) {
+    /* ON->OFF edge: release held real input so no key/button sticks down (focus-lost reuse). */
+    if (s_player_enabled && !enabled) {
+        nt_input_clear_all_keys();
+        nt_input_clear_all_pointers();
+    }
+    s_player_enabled = enabled;
 }

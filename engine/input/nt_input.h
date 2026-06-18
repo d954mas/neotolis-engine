@@ -167,8 +167,11 @@ bool nt_input_mouse_is_released(nt_button_t button);
 void nt_input_init(void);
 
 /* Poll input state. Drains buffered events from nt_window_poll() and updates
-   input state. Call once per frame AFTER nt_window_poll(). */
-void nt_input_poll(void);
+   input state. Call once per frame AFTER nt_window_poll(). `frame` is the
+   g_nt_app.frame sim-advance counter, passed DOWN: nt_input never includes
+   app/nt_app.h (the relative inject countdown advances only when frame changes,
+   so PAUSE/MANUAL-idle freeze it). */
+void nt_input_poll(uint32_t frame);
 
 void nt_input_shutdown(void);
 

@@ -14,6 +14,11 @@ void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);
 void nt_input_clear_all_pointers(void);
 
+/* Player gate (L2 devapi seam + test). When disabled, the public real-apply wrappers
+   (set_key, pointer_*, wheel, buffer_char) early-return; the ON->OFF edge releases held
+   real input. Inject (Plan 03) calls the *_apply cores directly so it always flows. */
+void nt_input_set_player_enabled(bool enabled);
+
 /* Event buffering — native backend queues events here during glfwPollEvents(),
    nt_input_platform_poll() drains them with current DPR. */
 
