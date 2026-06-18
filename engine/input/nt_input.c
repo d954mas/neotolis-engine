@@ -28,6 +28,12 @@ static bool s_player_enabled = true;
 
 /* ---- Synthetic immediate inject buffer (bounded BSS; drained whole every poll) ---- */
 
+/* The whole inject pipeline (buffer, nt_input_inject_*, per-poll drain) exists ONLY to serve the
+   devapi layer. NT_INPUT_INJECT_ENABLED is wired ON by CMake when devapi is in the build (or for
+   tests, which drive the L1 inject API directly) and OFF for a pure release-without-devapi build,
+   so production binaries carry none of this ("tiny size — every byte counts"). */
+#if NT_INPUT_INJECT_ENABLED
+
 typedef struct {
     uint8_t kind; /* nt_inject_kind_t */
     union {
@@ -57,6 +63,8 @@ static nt_inject_event_t s_inject_buffer[NT_INPUT_INJECT_QUEUE_MAX];
 static uint32_t s_inject_count;
 
 static void inject_drain(void);
+
+#endif /* NT_INPUT_INJECT_ENABLED */
 
 /* ---- Internal pointer helpers ---- */
 
@@ -110,7 +118,9 @@ void nt_input_init(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
+#if NT_INPUT_INJECT_ENABLED
     s_inject_count = 0;
+#endif
     s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
     nt_input_platform_init();
 }
@@ -147,10 +157,12 @@ void nt_input_poll(void) {
        which set edge flags immediately) */
     nt_input_platform_poll();
 
+#if NT_INPUT_INJECT_ENABLED
     /* Apply the whole immediate inject buffer in the same post-clear window as the native char
        drain, so an injected rising edge survives to this frame's update. The devapi layer staged
        only the due events (it owns the schedule + sim-advance gating). */
     inject_drain();
+#endif
 }
 
 void nt_input_shutdown(void) {
@@ -163,7 +175,9 @@ void nt_input_shutdown(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
+#if NT_INPUT_INJECT_ENABLED
     s_inject_count = 0;
+#endif
     s_player_enabled = true;
 }
 
@@ -450,6 +464,8 @@ void nt_input_set_player_enabled(bool enabled) {
 
 /* ---- Synthetic input injection ---- */
 
+#if NT_INPUT_INJECT_ENABLED
+
 /* Whole-or-nothing reserve: a command needing N entries either gets all N or none -- a partial
    stage would leave a stuck key-down or a drag with no release. Returns the first reserved
    slot, or NULL on overflow. */
@@ -461,8 +477,6 @@ static nt_inject_event_t *inject_reserve(uint32_t n) {
     s_inject_count += n;
     return first;
 }
-
-bool nt_input_inject_can_reserve(uint32_t n) { return n <= NT_INPUT_INJECT_QUEUE_MAX - s_inject_count; /* mirrors inject_reserve's capacity test */ }
 
 bool nt_input_inject_key(nt_key_t key, bool down) {
     nt_inject_event_t *e = inject_reserve(1);
@@ -559,3 +573,5 @@ static void inject_drain(void) {
     }
     s_inject_count = 0;
 }
+
+#endif /* NT_INPUT_INJECT_ENABLED */

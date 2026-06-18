@@ -89,6 +89,15 @@ if(NOT EMSCRIPTEN)
     target_compile_options(glfw PRIVATE -U_DLL)
 endif()
 
+# Tests are built only at top level (see the matching guard below). The input layer reads this to
+# keep its synthetic-input inject pipeline (NT_INPUT_INJECT_ENABLED) compiled in for the test
+# targets even when devapi is OFF — tests drive the L1 inject API directly. Set BEFORE the engine
+# subdir so engine/input/CMakeLists.txt sees it (a subdir cannot test CMAKE_CURRENT_SOURCE_DIR for
+# "is top level"). A subdirectory consumer of the engine leaves it unset -> lean build.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(NT_BUILDING_TESTS ON)
+endif()
+
 # Core libraries (always available)
 add_subdirectory(shared)
 add_subdirectory(engine)

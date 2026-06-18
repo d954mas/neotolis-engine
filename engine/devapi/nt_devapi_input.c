@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "app/nt_app.h" /* g_nt_app.frame — the advance clock the schedule ticks on. */
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 #include "input/nt_input.h"
@@ -9,16 +10,16 @@
    range/type-checked -> bad_params; never assert on untrusted input (invariants assert, untrusted
    input returns a structured error). Fire-and-forget: validate -> enqueue -> immediate ok (or an
    immediate overflow/bad_params); NO defer (defer lives only in frame.wait/time.step).
-   Compiles out entirely when NT_DEVAPI_REGISTER_input is absent. */
-
-#ifdef NT_DEVAPI_REGISTER_input
+   The command handlers + registrar compile out when NT_DEVAPI_REGISTER_input is absent; the
+   schedule + tick + advance clock below are ALWAYS compiled so the transport TU can call
+   nt_devapi_input_update unconditionally (ticking an empty schedule is a no-op). */
 
 // #region devapi input schedule
 /* The frame schedule lives here, NOT in nt_input: nt_input is a pure apply layer (every poll it
    drains its immediate inject buffer), and the devtool is the only side that legitimately knows
    g_nt_app.frame. Each entry carries a sim-advance countdown + the same event payload the L1
-   immediate inject API takes. nt_devapi_update ticks this AFTER net_poll: on a real sim-advance it
-   releases every due entry into nt_input's immediate buffer (via nt_input_inject_*) and decrements
+   immediate inject API takes. nt_devapi_input_update ticks this AFTER net_poll: on a real sim-advance
+   it releases every due entry into nt_input's immediate buffer (via nt_input_inject_*) and decrements
    survivors; on a frozen tick it releases nothing. This is essentially the OLD nt_input queue,
    relocated to the layer that owns scheduling. */
 
@@ -26,6 +27,13 @@
 #ifndef NT_DEVAPI_INPUT_SCHED_MAX
 #define NT_DEVAPI_INPUT_SCHED_MAX 256
 #endif
+
+/* A single advancing tick releases EVERY due entry (up to SCHED_MAX) into nt_input's immediate
+   inject buffer, which holds NT_INPUT_INJECT_QUEUE_MAX. The two caps are independent -D-overridable
+   macros; this links them so a full schedule's release can never exceed the buffer. With this held,
+   a failed release in sched_release_one is an engine invariant violation, not bot overflow — so it
+   asserts there rather than silently dropping a UP whose DOWN already landed. */
+_Static_assert(NT_DEVAPI_INPUT_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "schedule must never release more than the immediate buffer can hold");
 
 typedef struct {
     uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
@@ -57,7 +65,7 @@ static sched_entry_t s_sched[NT_DEVAPI_INPUT_SCHED_MAX];
 static uint32_t s_sched_count;
 
 /* Whole-or-nothing reserve mirrors the old L1 inject_reserve: a multi-event command gets all N
-   slots or none, so a near-full schedule can never accept a DOWN and reject its UP (CR-01). */
+   slots or none, so a near-full schedule can never accept a DOWN and reject its UP. */
 static sched_entry_t *sched_reserve(uint32_t n) {
     if (n > NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count) {
         return NULL;
@@ -151,48 +159,70 @@ static bool sched_text(const uint32_t *cps, uint32_t n) {
     return true;
 }
 
-/* Release one due entry into nt_input's immediate inject buffer (applied in the next poll). */
-static void sched_release_one(const sched_entry_t *e) {
+/* Release one due entry into nt_input's immediate inject buffer (applied in the next poll). Returns
+   the L1 inject result: capacity was preflighted at enqueue and the _Static_assert above guarantees
+   a full schedule fits the immediate buffer, so false here is an engine invariant violation (the
+   caller asserts it) — never a silently dropped synthetic event. */
+static bool sched_release_one(const sched_entry_t *e) {
     switch ((nt_inject_kind_t)e->kind) {
     case NT_INJECT_KEY:
-        nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
-        break;
+        return nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
     case NT_INJECT_POINTER_DOWN:
     case NT_INJECT_POINTER_MOVE:
-        nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
-        break;
+        return nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
     case NT_INJECT_POINTER_UP:
-        nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
-        break;
+        return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
     case NT_INJECT_WHEEL:
-        nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
-        break;
+        return nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
     case NT_INJECT_CHAR: {
         uint32_t cp = e->u.chr.cp;
-        nt_input_inject_text(&cp, 1U);
-        break;
+        return nt_input_inject_text(&cp, 1U);
     }
     }
+    return false; /* unreachable: kind is always one of the above. */
 }
 
-void nt_devapi_input_tick(bool advanced) {
-    /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim
-       advances, so an injected edge can't be missed by a stalled update. */
-    if (!advanced) {
-        return;
-    }
+/* Release every due entry in schedule-array order (which is enqueue order — release order ==
+   enqueue order is what preserves the bot's cross-command + within-command event ordering through
+   the two-hop schedule->buffer path). Survivors decrement their countdown and compact down. */
+static void sched_tick(void) {
     uint32_t out = 0;
     for (uint32_t i = 0; i < s_sched_count; i++) {
         if (s_sched[i].frames_remaining == 0) {
-            sched_release_one(&s_sched[i]); /* due -> release, drop (compact) */
+            bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
+            NT_ASSERT(ok);                            /* buffer >= schedule by _Static_assert; a drop is a build bug. */
+            (void)ok;
             continue;
         }
         s_sched[i].frames_remaining--;
-        s_sched[out++] = s_sched[i];
+        s_sched[out++] = s_sched[i]; /* survivor: decrement + compact down. */
     }
     s_sched_count = out;
 }
+
+/* Advance clock: a real sim-advance is g_nt_app.frame changing vs the last update. Seeded against
+   the current frame in nt_devapi_input_reset, so the FIRST update after a reset compares against
+   the true starting frame and only fires on a genuine change (a host that starts paused does not
+   get a spurious forced-advance on its first tick). */
+static uint32_t s_last_frame;
+
+void nt_devapi_input_update(void) {
+    bool advanced = (g_nt_app.frame != s_last_frame);
+    s_last_frame = g_nt_app.frame;
+    /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim
+       advances, so an injected edge can't be missed by a stalled update. */
+    if (advanced) {
+        sched_tick();
+    }
+}
+
+void nt_devapi_input_reset(void) {
+    s_sched_count = 0;
+    s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
+}
 // #endregion
+
+#ifdef NT_DEVAPI_REGISTER_input
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
@@ -872,7 +902,7 @@ static const nt_devapi_handler_fn k_input_handlers[] = {
 _Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_handlers) / sizeof(k_input_handlers[0]), "input: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_input(void) {
-    s_sched_count = 0; /* fresh schedule each init->register (symmetric with nt_input_init's buffer reset) */
+    nt_devapi_input_reset(); /* fresh schedule + seeded advance clock each init->register. */
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
        compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
     int n = (int)(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]));

@@ -99,6 +99,10 @@ static void close_client(void) {
     /* Drop the gone client's in-flight deferred results so a reconnecting client
        can't receive them tagged with the old client's request_id. */
     nt_devapi_deferred_reset();
+    /* Symmetric with the deferred reset: drop the gone client's pending synthetic input so a
+       reconnecting client can't inherit a mid-drag pointer or a held key it never issued. The
+       immediate buffer self-clears (drained whole each poll), so only the schedule needs reset. */
+    nt_devapi_input_reset();
     /* A dropped client must not leave the loop frozen: in MANUAL/paused g_nt_app.frame stops
        advancing and a host's frame-count auto-exit never fires. Return to plain RUN. */
     g_nt_app.mode = NT_APP_MODE_RUN;
@@ -370,21 +374,15 @@ void nt_devapi_net_poll(void) {
 // #endregion
 
 /* TODO(transport-split): this is the game-facing per-tick entry but lives in the TCP module and only
-   drives net_poll. When a second transport (web) lands, move it to the core and poll every registered
-   transport so both share the frame-keyed deferred drain. Single transport today -> kept here (YAGNI). */
+   drives net_poll. When a second transport (web) lands, move the transport poll to the core and poll
+   every registered transport so both share the frame-keyed deferred drain. The advance clock + input
+   schedule tick already moved to nt_devapi_input.c (it owns g_nt_app); only the transport poll itself
+   remains misplaced. Single transport today -> kept here (YAGNI). */
 void nt_devapi_update(void) {
     nt_devapi_net_poll(); /* handlers enqueue into the input schedule first */
-#ifdef NT_DEVAPI_REGISTER_input
-    /* Then tick the devapi-side input schedule. A real sim-advance is g_nt_app.frame changing vs the
-       last update; on a frozen tick (pause / manual-idle) nothing is released, so synthetic input
-       holds while the game is paused (real device input still flows through nt_input_poll). */
-    static uint32_t s_last_frame;
-    static bool s_have_last_frame;
-    bool advanced = !s_have_last_frame || (g_nt_app.frame != s_last_frame);
-    nt_devapi_input_tick(advanced);
-    s_last_frame = g_nt_app.frame;
-    s_have_last_frame = true;
-#endif
+    /* Then tick it: advance-gated release of due entries into nt_input. Always present (declared in
+       nt_devapi_internal.h); an empty schedule (input group compiled out) is a harmless no-op. */
+    nt_devapi_input_update();
 }
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)

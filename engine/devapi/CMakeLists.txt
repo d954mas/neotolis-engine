@@ -25,15 +25,22 @@ target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 
+# The input group drives the L1 inject pipeline, so nt_input's inject machinery must be compiled in.
+# nt_devapi links nt_input via the header-only interface (the impl resolves at the final-exe link),
+# so the PUBLIC define on nt_input does NOT reach nt_devapi's own TUs — set it here too (PUBLIC so it
+# matches the value the exe's nt_input carries; devapi is only built when enabled, hence always 1).
+target_compile_definitions(nt_devapi PUBLIC NT_INPUT_INJECT_ENABLED=1)
+
 # Per-group compile-time opt-in: handlers are wrapped in
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_time=1)
-# input is PUBLIC: the per-tick transport entry nt_devapi_update (in the SEPARATE nt_devapi_net TU)
-# must ticks the input schedule under the same gate, so the group define has to reach that TU and
-# every consumer that drives the per-tick path. The other groups are pure init-time registrars
-# (no per-tick hook) so they stay PRIVATE.
-target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_REGISTER_input=1)
+# input stays PRIVATE like the other groups: the per-tick transport entry nt_devapi_update (in the
+# SEPARATE nt_devapi_net TU) calls nt_devapi_input_update unconditionally — that symbol is declared
+# always in nt_devapi_internal.h and defined always in nt_devapi_input.c (the schedule + tick live
+# outside the group gate), so the net TU links it without seeing NT_DEVAPI_REGISTER_input. Only the
+# input.* command handlers + registrar are gated, and only nt_devapi's own TUs need the define.
+target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_input=1)
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 

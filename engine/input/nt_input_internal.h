@@ -24,16 +24,14 @@ void nt_input_set_player_enabled(bool enabled);
    *_apply cores, bypassing the player gate). Scheduling (frame offsets, hold, gesture stride) lives
    in the devapi layer, which releases due events here on a sim-advance. Each returns true when the
    whole command is staged, false on overflow (whole-or-nothing: on false NO entry is written).
-   NEVER asserts -- the same API is driven by untrusted L2. */
+   NEVER asserts -- the same API is driven by untrusted L2. Compiled only when NT_INPUT_INJECT_ENABLED
+   (devapi in the build, or tests); a pure release build drops the buffer + these symbols entirely. */
+#if NT_INPUT_INJECT_ENABLED
 bool nt_input_inject_key(nt_key_t key, bool down);
 bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
 bool nt_input_inject_wheel(float dx, float dy);
 bool nt_input_inject_text(const uint32_t *cps, uint32_t n);
-
-/* Capacity preflight for a compound release (e.g. all CHARs of one input.text) so it is
-   whole-or-nothing: probe BEFORE the first stage. true == the next n entries are guaranteed
-   to fit the immediate buffer. */
-bool nt_input_inject_can_reserve(uint32_t n);
+#endif
 
 /* Event buffering — native backend queues events here during glfwPollEvents(),
    nt_input_platform_poll() drains them with current DPR. */

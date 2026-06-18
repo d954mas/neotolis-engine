@@ -151,7 +151,7 @@ bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
 
 /* UTF-32 typed-char ring capacity (power-of-2). One frame's typing fits; drop-when-full. Exposed
-   so the devapi layer can reject a text batch that could never land whole (F2). */
+   so the devapi layer can reject a text batch that could never land whole. */
 #ifndef NT_INPUT_CHAR_RING
 #define NT_INPUT_CHAR_RING 32
 #endif
@@ -165,6 +165,15 @@ bool nt_input_pop_char(uint32_t *out_codepoint);
 void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* ---- Synthetic input injection ---- */
+
+/* Capability gate for the whole inject pipeline (immediate buffer + nt_input_inject_* + per-poll
+   drain). The sole driver is the devapi layer, so CMake defines this =1 when devapi is in the build
+   and for the test targets (which exercise the L1 inject API directly); a pure release build leaves
+   it 0 so nt_input carries no inject buffer or symbols. Default 0 so a consumer that forgets to wire
+   it gets the lean build, not a link error. */
+#ifndef NT_INPUT_INJECT_ENABLED
+#define NT_INPUT_INJECT_ENABLED 0
+#endif
 
 /* Event kinds applied through the immediate inject buffer (drained every poll). */
 typedef enum {

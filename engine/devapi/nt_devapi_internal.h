@@ -116,14 +116,22 @@ void nt_devapi_register_time(void);
    invoked from nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_REGISTER_input
 void nt_devapi_register_input(void);
-
-/* Tick the devapi-side input schedule once per nt_devapi_update, AFTER net_poll (so this tick's
-   handler enqueues are seen). `advanced` is true only on a real sim-advance (g_nt_app.frame
-   changed vs the last update): on advance, release every due entry into nt_input's immediate
-   inject buffer and decrement survivors; on a frozen tick (pause / manual-idle) release nothing.
-   The schedule lives in nt_devapi_input.c, which legitimately knows g_nt_app. */
-void nt_devapi_input_tick(bool advanced);
 #endif
+
+/* Per-tick input-schedule driver. Declared ALWAYS (not behind NT_DEVAPI_REGISTER_input) so the
+   separate transport TU (nt_devapi_net.c) can call it unconditionally without seeing the group
+   gate — nt_devapi_input.c is always compiled into nt_devapi, so the symbol always links.
+   Owns the advance clock: reads g_nt_app.frame, detects a real sim-advance vs the last update,
+   and on advance releases every due schedule entry into nt_input's immediate inject buffer
+   (decrementing survivors); on a frozen tick (pause / manual-idle) releases nothing. Ticking an
+   empty schedule (group compiled out) is a harmless no-op. Call once per nt_devapi_update AFTER
+   net_poll so this tick's handler enqueues are seen. */
+void nt_devapi_input_update(void);
+
+/* Reset the input schedule (drop all pending entries) and re-seed the advance clock against the
+   current g_nt_app.frame. Called on client disconnect so a gone client's queued synthetic input
+   can't release into a reconnecting client's session, and from tests for order-independence. */
+void nt_devapi_input_reset(void);
 
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in
    nt_devapi_discovery.c, invoked from nt_devapi_init. */
