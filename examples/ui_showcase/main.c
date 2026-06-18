@@ -154,7 +154,7 @@ typedef struct {
     const nt_ui_modal_style_t *modal;
     nt_ui_dropdown_style_t *dropdown; /* non-const: nt_ui_dropdown memoizes atlas-ref resolves into the style */
     const nt_ui_tooltip_style_t *tooltip;
-    const nt_ui_menu_style_t *menu;
+    nt_ui_menu_style_t *menu;        /* non-const: nt_ui_menu memoizes atlas-ref resolves into the style */
     nt_ui_tabbar_style_t *tabbar;    /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
     nt_ui_tabbar_style_t *tabs_demo; /* begin/end-core demo strip (horizontal, BOTTOM accent) */
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
@@ -458,6 +458,8 @@ static nt_atlas_region_ref_t s_panel_brown_ref;
 static nt_atlas_region_ref_t s_icon_bunny_ref;
 /* Dropdown chevron affordance (down triangle; tintable). */
 static nt_atlas_region_ref_t s_chevron_down_ref;
+/* Menu submenu marker (right-pointing arrow; tintable). */
+static nt_atlas_region_ref_t s_arrow_right_ref;
 /* Tabs-demo icons: bunny on idle/hover, checkmark on the selected tab (game-owned content swap). */
 static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
 static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
@@ -543,6 +545,7 @@ static void init_styles(void) {
     s_panel_brown_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN.value);
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
     s_chevron_down_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHEVRON_DOWN.value);
+    s_arrow_right_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ARROW_RIGHT.value);
     s_tabs_icon_idle_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
     s_tabs_icon_sel_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK.value);
 
@@ -860,16 +863,24 @@ static void init_styles(void) {
     s_tooltip_light.panel_bg = 0xFFF4F4F4U;
     s_tooltip_light.text_color = 0xFF202830U;
 
-    /* ---- Context menu: dark defaults; light recolors the panel + rows. ---- */
+    /* ---- Context menu (dogfood): panel_blue slice9 frame + arrow_right submenu marker + an icon gutter
+     * (bunny on some rows, aligned-empty on the rest). Rows keep the eased flat hover highlight over the
+     * sprite panel for legibility. Flat bg_color + ">" text marker remain the atlas-free fallback. ---- */
     s_menu_dark = nt_ui_menu_style_defaults();
     s_menu_dark.item_height = 30U;
     s_menu_dark.font_size = 16.0F;
     s_menu_dark.min_width = 200U;
+    s_menu_dark.icon_size = 22U; /* leading gutter so iconed + text-only rows align */
+    s_menu_dark.panel_bg = s_panel_blue_ref;
+    s_menu_dark.panel_tint = 0xFFFFFFFFU;
+    s_menu_dark.arrow = s_arrow_right_ref;
+    s_menu_dark.arrow_tint = 0xFFE8F0FCU;
     s_menu_light = s_menu_dark;
     s_menu_light.bg_color = 0xFFFFFFFFU;
     s_menu_light.item_hover_color = 0xFFDCE6F4U;
     s_menu_light.text_color = 0xFF202830U;
     s_menu_light.text_disabled = 0xFFA0A4ACU;
+    s_menu_light.arrow_tint = 0xFF24364CU;
 
     /* ---- Tab-bar (dogfood): sprite-based game UI. Each state draws a Kenney slice9 button sprite
      * tinted per-state (idle muted neutral, hover lightened, selected full blue) so the nav eases
@@ -1587,12 +1598,14 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     /* Nested submenu (the "More" parent's children) -> exercises the fly-out + aim triangle. */
-    static const nt_ui_menu_item_t more_items[] = {
+    static nt_ui_menu_item_t more_items[] = {
         {.label = "Duplicate", .submenu = NULL, .id = 201U, .submenu_count = 0U, .enabled = true},
         {.label = "Move to...", .submenu = NULL, .id = 202U, .submenu_count = 0U, .enabled = true},
         {.label = "Archive", .submenu = NULL, .id = 203U, .submenu_count = 0U, .enabled = false},
     };
-    static const nt_ui_menu_item_t root_items[] = {
+    /* Non-const: the bunny icon ref is late-bound (set after the atlas binds), so it's assigned at runtime
+     * below. The menu never mutates the tree. Mixed iconed + non-iconed rows show the aligned gutter. */
+    static nt_ui_menu_item_t root_items[] = {
         {.label = "Cut", .submenu = NULL, .id = 101U, .submenu_count = 0U, .enabled = true},
         {.label = "Copy", .submenu = NULL, .id = 102U, .submenu_count = 0U, .enabled = true},
         {.label = "Paste", .submenu = NULL, .id = 103U, .submenu_count = 0U, .enabled = true},
@@ -1601,6 +1614,10 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
         {.label = "Delete", .submenu = NULL, .id = 104U, .submenu_count = 0U, .enabled = true},
     };
     static const uint32_t root_count = (uint32_t)(sizeof root_items / sizeof root_items[0]);
+    /* Icons: Cut + More get the bunny; Copy/Paste/Delete leave an aligned-empty gutter (OS-menu column). */
+    root_items[0].icon = s_icon_bunny_ref;
+    root_items[4].icon = s_icon_bunny_ref;
+    more_items[0].icon = s_icon_bunny_ref;
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click (or long-press) the panel below to open the context menu. Hover 'More' to fly out the submenu.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Travel diagonally into the submenu (crossing a sibling) and it stays open; Esc closes the deepest level; arrows/Enter navigate.",
