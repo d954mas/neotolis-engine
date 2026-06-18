@@ -133,16 +133,22 @@ def run(client: DevApiClient) -> None:
     # 3. input.text — codepoints reach the char ring; the pop_text drain reads them back.
     #
     # The char ring is frame-local (D-13): nt_input_poll drops chars unconsumed from the PREVIOUS
-    # frame at the start of each poll. The char@0 inject applies on the next poll; we must read
-    # pop_text within that single-frame window before the next idle poll clears it. Over a
-    # continuously-polling live host the exact window is wall-clock dependent, so we re-inject and
-    # immediately drain in a bounded retry: the inject is deterministic, only WHICH idle poll clears
-    # the ring races. text() also returns {queued} synchronously, proving the UTF-8->codepoint decode;
-    # the pop_text drain proves the codepoints actually reached the ring (the new observation).
+    # frame at the START of every poll, INCLUDING idle polls. The host's frame callback runs
+    # nt_devapi_update() then nt_input_poll() on EVERY managed-loop iteration (even in MANUAL idle,
+    # where g_nt_app.frame does not advance — verified in engine/app/native/nt_app_native.c). So a
+    # char@0 inject drains into the ring on the next poll (idle or step), and the FOLLOWING idle poll
+    # clears it again. The pop_text read is only observable in that single inter-poll window. There is
+    # no socket-level primitive to land a command in a specific inter-poll gap, so this read inherently
+    # races the host's continuous idle polling — a step() between text() and the read does NOT make it
+    # deterministic (it only adds another clearing poll). The retry below catches the one-frame window:
+    # the INJECT is deterministic; only WHICH idle poll clears the ring races. See the 66-05 SUMMARY
+    # "Issues Encountered #3" for the engine-timing rationale. text() also returns {queued}
+    # synchronously, proving the UTF-8->codepoint decode; the pop_text drain proves the codepoints
+    # actually reached the ring (the observation the unit tests structurally cannot make).
     queued = client.text("hi")
     assert isinstance(queued.get("queued"), int), f"input.text echoed {queued!r}, expected {{queued:int}}"
     cps = []
-    for _ in range(10):
+    for _ in range(50):  # generous budget: each iter is one inject+drain attempt against the 1-frame window
         client.state(pop_text=True)  # clear any partial / stale ring contents
         client.text("hi")
         cps = client.state(pop_text=True).get("codepoints")
