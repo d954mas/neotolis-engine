@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
     (void)printf("  Atlas region '_white': 1x1\n");
 
     /* App-widget icon affordances (white, tintable): dropdown chevron, submenu arrow, tooltip caret.
-     * Saved PNGs (tools/gen_icons.c regenerates them); builder premultiplies like every other sprite. */
+     * Prebaked PNGs in raw/; builder premultiplies like every other sprite. */
     opts = nt_atlas_sprite_opts_defaults();
     opts.name = "chevron_down";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/chevron_down.png", &opts);
