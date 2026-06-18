@@ -2547,6 +2547,21 @@ Recommended stats: frame time, fixed step count, draw call count, batch count, l
 
 **cJSON dependency.** devapi parses/serializes with vendored cJSON, exposed as a standalone reusable `cjson` static-lib target (not an engine module, `EXCLUDE_FROM_ALL`). cJSON is usable by games independently of devapi; only targets that link it pull it in.
 
+## 24.6 Time & render control (`nt_app`)
+
+`nt_app_run(fn)` is a **single, flag-aware frame loop** that owns the one `g_nt_app.dt` scalar. Its default state — mode `RUN`, `scale` 1, unpaused — is a plain wall-clock advance (`dt` = clamped wall delta, `frame++` every iteration), so a game that never touches the controls runs exactly as a minimal loop would. The game still wires poll/input/update/render inside `fn`; the engine gives building blocks, not a pipeline.
+
+Time control is a set of flags in `g_nt_app`, set via the `nt_app_*` mutators (and exposed to a bot through the devapi `time.*`/`render.*` commands):
+
+- **mode** `RUN` / `MANUAL`. RUN advances on wall time; MANUAL advances one fixed-`step_dt` step per queued `nt_app_step`, with no wall clock and no `max_dt` clamp — the byte-reproducible lockstep contract.
+- **paused** (RUN only): `dt` = 0 and `frame` frozen while `fn` keeps running.
+- **scale** (RUN only): multiplies `dt` for slow-mo / fast-forward **observation** — explicitly not a determinism primitive (reproducible fast runs use MANUAL lockstep).
+- **render_enabled**: a loop-agnostic gate the game reads to skip its draw + present together.
+
+`g_nt_app.frame` is a **simulation-advance counter**: it increments only on a real advance, so pause and manual-idle freeze it. Deferred devapi responses (`frame.wait`, `time.step`) are keyed to it — a wait resolves once `frame` reaches its submit-time deadline (`frame + N`), so it counts game frames, not transport polls, and never resolves while the sim is frozen. `frame.wait` is therefore RUN-only (rejected in manual/paused); in MANUAL a bot uses `time.step{count}`, which advances and blocks until done.
+
+The L1 mutators **assert** their invariants (finite/non-negative scale, positive `step_dt`, valid mode) — callers are trusted game code; untrusted bot input is range-checked at the devapi L2 layer and returns `bad_params`, never an assert.
+
 ---
 
 # 25. Engine/Game Boundary

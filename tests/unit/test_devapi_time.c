@@ -290,19 +290,19 @@ static void test_frame_wait_yields_after_n_sim_advances(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
 }
 
-/* PAUSE never advances g_nt_app.frame, so a frame.wait submitted while paused NEVER yields,
-   no matter how many idle loop iterations run. */
-static void test_frame_wait_never_yields_during_pause(void) {
+/* frame.wait is RUN-only: under PAUSE (frame frozen) and in MANUAL (frame advances only on
+   time.step) a wait could never resolve, so it is rejected fail-fast instead of registering a
+   slot that would block the caller. */
+static void test_frame_wait_rejected_when_not_running(void) {
     nt_app_pause();
-    TEST_ASSERT_TRUE(g_nt_app.paused);
+    assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":3}}"));
+    nt_app_resume();
 
-    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"frame.wait\",\"request_id\":9,\"params\":{\"frames\":3}}"));
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"frame.wait\",\"params\":{\"frames\":3}}"));
 
-    /* Drive many idle loop iterations: paused -> no sim-advance -> NO tick -> never yields. */
-    for (int i = 0; i < 100; i++) {
-        /* The paused loop runs the frame fn but does NOT advance g_nt_app.frame. */
-        TEST_ASSERT_NULL(nt_devapi_poll_response());
-    }
+    /* Neither rejected wait registered a slot: a sim-advance pops nothing. */
+    TEST_ASSERT_NULL(advance_sim());
 }
 
 int main(void) {
@@ -321,6 +321,6 @@ int main(void) {
     RUN_TEST(test_step_requires_manual_mode);
     RUN_TEST(test_set_scale_huge_bad_params);
     RUN_TEST(test_frame_wait_yields_after_n_sim_advances);
-    RUN_TEST(test_frame_wait_never_yields_during_pause);
+    RUN_TEST(test_frame_wait_rejected_when_not_running);
     return UNITY_END();
 }

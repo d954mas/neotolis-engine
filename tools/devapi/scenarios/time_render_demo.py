@@ -2,16 +2,16 @@
 """DevAPI time/render demo — the example bot-driven workflow.
 
 Connects to a running examples/devapi_host over loopback TCP and drives the
-Phase-65 time/render/frame command group through three workflows, in order:
+time/render/frame command group through three workflows, in order:
 
   1. pause -> step -> observe — pause the sim, switch to manual (lockstep) mode,
      step exactly 5 fixed-dt frames, and assert frame advanced by exactly 5.
   2. lockstep crunch — manual mode + render OFF + fps 0 (uncapped) + step(count=N):
      advance a few hundred deterministic frames as fast as the host can run them,
-     assert frame advanced by exactly N (D-10: reproducible fast runs use lockstep
-     crunch, NOT dt-scale which is observation-only D-13).
-  3. render-off fast test — assert render.info reports {enabled:false, draw_calls:0}
-     (TIME-04), then restore: render ON + resume.
+     assert frame advanced by exactly N (reproducible fast runs use lockstep crunch,
+     not dt-scale which is observation-only).
+  3. render-off fast test — assert render.info reports {enabled:false, draw_calls:0},
+     then restore: render ON + resume.
 
 Usage: python tools/devapi/scenarios/time_render_demo.py [--port N]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.

@@ -177,11 +177,16 @@ static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_erro
     return true;
 }
 
-/* Range-check then ride the bounded deferred queue. PAUSE never advances the sim, so a wait
-   during pause never resolves; over-cap fails fast (never spins). */
+/* frame.wait passively waits for autonomous RUN frames. In MANUAL the bot must time.step; in
+   PAUSE there is nothing to wait for — reject fail-fast instead of registering a slot that can
+   never resolve and would block the caller. Over-cap also fails fast (never spins). */
 static bool cmd_frame_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
+    if (g_nt_app.mode == NT_APP_MODE_MANUAL || g_nt_app.paused) {
+        set_bad_params(err, "frame.wait: only valid in running mode (use time.step in manual; resume if paused)");
+        return false;
+    }
     int frames = 1;
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "frames");
     if (f != NULL) {
@@ -284,7 +289,7 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "frame.wait",
         .group = "frame",
-        .summary = "defer the response until frames sim-advances elapse (frames=0 resolves on the next drain; PAUSE never advances -> never resolves)",
+        .summary = "RUN-only: defer until frames sim-advances elapse (frames=0 resolves on the next drain); rejected in manual/paused (use time.step in manual)",
         .params_shape = "{frames?:number}",
         .result_shape = "{deferred:bool}",
         .frame_behavior = "deferred",

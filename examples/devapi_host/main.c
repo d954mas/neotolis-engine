@@ -10,9 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Safety auto-exit so a CI run can't hang forever if no client ever drives a quit.
-#define DEVAPI_HOST_MAX_FRAMES 100000u
-
 /* game-layer command: echo {msg} back as {msg}. Registered via the public
    nt_devapi_register path only — zero engine edits. Uses the public cJSON
    API for the result (devapi_add_* is internal to the devapi module). */
@@ -73,7 +70,10 @@ static void frame(void) {
         nt_window_swap_buffers();
     }
 
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || g_nt_app.frame >= DEVAPI_HOST_MAX_FRAMES) {
+    /* Lifecycle is the driver's job: ESC for an interactive run, otherwise the bot/harness owns
+       quit (it kills this subprocess when its test ends, and its own socket timeouts catch a hung
+       host). No frame-count self-destruct — it would also kill long stability sims. */
+    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 }

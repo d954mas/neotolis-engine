@@ -49,8 +49,8 @@ void setUp(void) {
 
 void tearDown(void) { /* per-test cleanup not required */ }
 
-/* TIME-06: RUN mode advances exactly like the raw loop — frame++ each iteration, dt = clamped
-   wall dt (here bounded by a tiny max_dt so every recorded dt is the clamp value, deterministic). */
+/* RUN mode: frame++ each iteration, dt = clamped wall dt (here bounded by a tiny max_dt so every
+   recorded dt is the clamp value, deterministic). */
 void test_managed_run_matches_raw(void) {
     g_nt_app.max_dt = 0.001F;
     g_nt_app.mode = NT_APP_MODE_RUN;
@@ -68,7 +68,7 @@ void test_managed_run_matches_raw(void) {
     }
 }
 
-/* TIME-01: PAUSE zeroes dt and freezes frame while the frame fn keeps being called. */
+/* PAUSE zeroes dt and freezes frame while the frame fn keeps being called. */
 void test_pause_zeroes_dt_and_freezes_frame(void) {
     g_nt_app.mode = NT_APP_MODE_RUN;
     nt_app_pause();
@@ -85,7 +85,7 @@ void test_pause_zeroes_dt_and_freezes_frame(void) {
     }
 }
 
-/* TIME-02: MANUAL mode feeds a bit-exact 1/60 dt for each pending step; frame == N. */
+/* MANUAL mode feeds a bit-exact 1/60 dt for each pending step; frame == N. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_manual_step_bit_exact_1_60(void) {
     const float expected = 1.0F / 60.0F;
@@ -103,7 +103,7 @@ void test_manual_step_bit_exact_1_60(void) {
     }
 }
 
-/* TIME-02 reproducibility: the same step sequence yields a byte-identical dt array twice. */
+/* Reproducibility: the same step sequence yields a byte-identical dt array twice. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_manual_reproducible_across_two_runs(void) {
     const float expected = 1.0F / 60.0F;
@@ -129,7 +129,7 @@ void test_manual_reproducible_across_two_runs(void) {
     TEST_ASSERT_EQUAL_MEMORY(run_a, run_b, sizeof(run_a));
 }
 
-/* TIME-03: dt-scale multiplies the wall dt in RUN mode (dt = clamp(wall, max_dt) * scale).
+/* dt-scale multiplies the wall dt in RUN mode (dt = clamp(wall, max_dt) * scale).
    Pace the loop via target_dt so each frame's wall dt reliably reaches the clamp, making the
    scaled result deterministic: max_dt = 1ms, target_dt = 5ms -> wall dt clamps to 1ms ->
    scale=2 -> dt == 2ms. Skip the first iteration (its wall dt is ~0, pre-pacing). */
@@ -151,10 +151,9 @@ void test_scale_multiplies_wall_dt(void) {
     }
 }
 
-/* D-11 sim-advance proxy: MANUAL with no pending steps never advances the frame (so the deferred
-   tick — driven by sim-advance in managed mode — would never fire during manual-idle). The full
-   L1+L2 "yield after N sim-advances, never during pause/idle" test lands in Plan 02's
-   test_devapi_time.c, where the deferred queue + submit() are linked. */
+/* MANUAL with no pending steps never advances the frame, so a deferred wait keyed on the frame
+   never resolves during manual-idle. The full L1+L2 "yield after N sim-advances, never during
+   pause/idle" coverage lives in test_devapi_time.c, where the deferred queue + submit() link. */
 void test_manual_idle_freezes_frame(void) {
     g_nt_app.mode = NT_APP_MODE_MANUAL; /* no nt_app_step() -> pending_steps == 0 */
     s_iter_target = 5;
@@ -165,7 +164,7 @@ void test_manual_idle_freezes_frame(void) {
     TEST_ASSERT_TRUE_MESSAGE(s_frame_log_count >= 5, "frame fn must keep running in manual-idle");
 }
 
-/* TIME-04 (L1 half): render flag defaults true and toggles; loop-agnostic engine state. */
+/* Render flag defaults true and toggles; loop-agnostic engine state. */
 void test_render_flag_default_true_and_toggles(void) {
     TEST_ASSERT_TRUE(nt_app_render_enabled());
     nt_app_set_render_enabled(false);
