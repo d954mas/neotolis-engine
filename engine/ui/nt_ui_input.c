@@ -730,8 +730,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->anchor = cur_len; /* keep the selection anchor in-bounds too */
     }
 
-    /* ONE mutating interaction step (D-65-06): the events step with double_click opt-in. Word-select
-     * reads double_clicked off this single result — no separate dblclick_longpress call. long_press is
+    /* ONE mutating interaction step (the canonical-step contract): the events step with double_click
+     * opt-in. Word-select reads double_clicked off this single result — no separate call. long_press is
      * not wanted here (<=0 disables it + hold_progress, keeping the gesture cell dbl-only). The app-wide
      * dbl window + move radius come from the context (nt_ui_set_gesture_constants), not hard-coded. */
     static const nt_ui_events_cfg_t s_field_gesture_cfg = {.long_press_secs = 0.0F, .double_click = true};

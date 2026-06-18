@@ -59,7 +59,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Disabled skips hit-test but still records a zone so the overlay can show why. The ONE mutating
      * interaction step is nt_ui_events: forwards the optional behavioral cfg into the gesture cell so
      * the GAME can read long-press / double-click via nt_ui_query_events. cfg==NULL = zero gesture alloc.
-     * No second events/step call on this id (D-65-06: one mutating step per id). */
+     * No second events/step call on this id: one mutating step per id (the canonical-step contract). */
     nt_ui_events_t in;
     if (enabled) {
         in = nt_ui_events_padded(ctx, id, cfg, style->hit_padding_lrtb);
