@@ -17,25 +17,9 @@
 extern "C" {
 #endif
 
-/* ============================ #236 immediate-mode RED forward decls ============================ */
-/* Wave-0 scaffold: these begin/end + combo symbols + their probes are DEFINED by Plans 02-04. Declaring
- * them here lets test_ui_menu.c / test_ui_dropdown.c COMPILE (drive the new API surface) and link-FAIL
- * on the missing definitions — the RED signal. Once the engine headers declare these, the duplicate
- * compatible prototypes are harmless; this block is deleted when Plan 02-04 land the real decls. */
-
-/* Menu immediate begin/end + nt_ui_menu_item_opts_t now live in ui/nt_ui_menu.h (Plan 02 landed them);
- * the menu RED forward-decl block was removed once the real decls shipped. */
-
-/* Combo (dropdown) immediate begin/selectable/end (DESIGN §3). */
-bool nt_ui_combo_begin(nt_ui_context_t *ctx, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool *open);
-bool nt_ui_combo_preview_begin(nt_ui_context_t *ctx, uint32_t id, nt_ui_dropdown_style_t *style, bool *open);
-void nt_ui_combo_preview_end(nt_ui_context_t *ctx);
-bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected);
-bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
-void nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
-void nt_ui_combo_end(nt_ui_context_t *ctx);
-
-/* nt_ui_menu_test_item_id / _focus_item_id now live in ui/nt_ui_menu.h under NT_TEST_ACCESS (Plan 02). */
+/* #236 immediate-mode menu + combo begin/end decls + their probes now live in the canonical engine
+ * headers: menu in ui/nt_ui_menu.h (Plan 02), combo in ui/nt_ui_dropdown.h (Plan 04). The Wave-0 RED
+ * forward-decl block was removed once each plan landed the real decls (a duplicate here would conflict). */
 
 /* Bit-mask of walker setters fixture_init calls; uint32_t so `ALL & ~MASK`
  * is well-defined (an enum type would trip EnumCastOutOfRange). */

@@ -101,6 +101,43 @@ bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *da
 bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, const nt_atlas_region_ref_t *icons, int count,
                          int *selected, nt_ui_dropdown_style_t *style, bool *open);
 
+/* ---- Immediate combo API (begin/selectable/end) — mirrors the menu core (DESIGN §3, D-236-04). ----
+ * The GAME owns `int *selected` (writes it on a selectable's clicked return) + `bool *open`; the combo
+ * only signals + clears *open on a row click (Model-D). Combos do NOT nest (asserted). All combo fills
+ * draw on a fixed content layer (1) so the popup-nested scrollbar floats above the panel band; text rides
+ * the same layer. Row + label ids are fmix-derived over (combo id, key, row_idx) — never additive. */
+
+/* Trigger + list root: emits the trigger button (showing `preview`, the game-fed current-selection
+ * label) and, while *open (or still tweening closed), opens the popup list for the frame. A click on
+ * the trigger toggles *open. Returns "declare the selectables this frame?" — true while the list body
+ * should be built. Call combo_selectable rows between this and nt_ui_combo_end. id non-zero; preview may
+ * be NULL (empty trigger text); style/open non-NULL. */
+bool nt_ui_combo_begin(nt_ui_context_t *ctx, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool *open);
+
+/* Custom-trigger escape hatch: leaves the TRIGGER element OPEN so the game declares arbitrary content
+ * (swatch+text, icon+label) inside, between preview_begin and preview_end. preview_end closes the trigger,
+ * does its one step_interaction (toggling *open on a click), THEN opens the list and returns "declare the
+ * selectables this frame?" (true while the list body should be built). Usage:
+ *   nt_ui_combo_preview_begin(ctx, id, &style, &open);
+ *   ... game trigger content ...
+ *   if (nt_ui_combo_preview_end(ctx)) { ...selectables...; nt_ui_combo_end(ctx); } */
+void nt_ui_combo_preview_begin(nt_ui_context_t *ctx, uint32_t id, nt_ui_dropdown_style_t *style, bool *open);
+bool nt_ui_combo_preview_end(nt_ui_context_t *ctx);
+
+/* One list row: a per-state rect + label (row_selected look when `selected`). Returns true on the frame
+ * it was clicked — the GAME writes its own *selected; the combo clears *open. `key` need only be unique
+ * among sibling rows (the combo derives the pool id via mix(id,key,row_idx)). */
+bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected);
+
+/* Custom-content row: opens the row element OPEN for the game's children (icon+label, badges). _end
+ * closes it + does the row's one step_interaction. _begin returns the row's prev-frame clicked (the game
+ * writes *selected); the combo clears *open on the click in _end. `selected` drives the per-state look. */
+bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
+void nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
+
+/* Close the list body (the scroll wrapper or the plain panel) + balance the popup. Pairs combo_begin. */
+void nt_ui_combo_end(nt_ui_context_t *ctx);
+
 #ifdef NT_TEST_ACCESS
 /* The popup side chosen for the list on the last nt_ui_dropdown_list call (edge-flip probe). */
 uint8_t nt_ui_dropdown_test_last_side(void);
