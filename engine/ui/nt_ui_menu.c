@@ -416,7 +416,12 @@ static bool menu_keyboard_nav(const nt_ui_menu_item_t *items, uint32_t count, ui
                 if (depth + 1U > rt->active_depth) {
                     rt->active_depth = (uint8_t)(depth + 1U);
                 }
-                rt->focus[depth + 1U] = 0;
+                /* Reset the new level's focus, but guard the index: at the depth cap (depth+1 ==
+                 * NT_UI_MENU_MAX_DEPTH) the deepening still proceeds so the recursion's fail-early cap
+                 * assert fires (T-65-10) — we just must not OOB-write focus[MAX_DEPTH] before it. */
+                if (depth + 1U < NT_UI_MENU_MAX_DEPTH) {
+                    rt->focus[depth + 1U] = 0;
+                }
             } else if (it->submenu == NULL && activate_key) {
                 *out_chosen = it->id; /* Right on a leaf is a no-op; only Enter activates */
             }
