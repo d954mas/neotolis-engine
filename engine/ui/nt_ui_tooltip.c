@@ -157,7 +157,9 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
         c->hover = 0.0F;
     }
 
-    const bool open = (c->hover >= style->delay_secs);
+    /* Gate on hover: delay_secs==0 is legal (instant tooltip), but `0 >= 0` would then read open every
+     * frame even with the cursor away (hover resets to 0). */
+    const bool open = in.hovered && (c->hover >= style->delay_secs);
 
     /* Anchor below the target; popup-core edge-flips ABOVE near the bottom border. */
     nt_ui_popup_anchor_t anc = {.prefer_side = NT_UI_POPUP_BELOW};
