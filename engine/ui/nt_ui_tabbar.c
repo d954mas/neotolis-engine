@@ -49,6 +49,18 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void) {
     };
 }
 
+/* fmix-style hash folding base_id + tab index into one widely-spread id. Additive `base + index` makes
+ * sibling tab ids CONSECUTIVE; Clay's anon-child hash (HashNumber starts seed+offset) then aliases child
+ * k+1 of tab N with child k of tab N+1 -> DUPLICATE_ID once a tab holds >=2 children. A mixed hash spreads
+ * seeds far apart so child-index spaces never overlap. (Same reason nt_ui_menu dropped additive salts.) */
+static inline uint32_t tabbar_tab_id(uint32_t base_id, uint32_t index) {
+    uint32_t h = base_id * 0x9E3779B1U;
+    h = (h ^ ((index + 1U) * 0x85EBCA6BU));
+    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
+    h = h ^ (h >> 16);
+    return (h != 0U) ? h : 1U; /* 0 = "no widget" sentinel */
+}
+
 /* Fail early on out-of-range state values — a silent "almost works" would otherwise leak. */
 static void assert_state_valid(const nt_ui_tab_state_t *st) {
     NT_ASSERT(isfinite(st->scale) && st->scale > 0.0F && "nt_ui_tabbar: state.scale must be finite > 0");
@@ -76,7 +88,7 @@ void nt_ui_tabbar_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const bool horizontal = (style->dir == NT_UI_TABBAR_HORIZONTAL);
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fills on data->layer, text on label_layer (batch split) */
 
-    /* The container has no explicit id (base_id is reserved for the tabs: base_id + i). */
+    /* The container has no explicit id (base_id salts each tab id via tabbar_tab_id). */
     const Clay_ElementDeclaration bar = {
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
                    .padding = CLAY_PADDING_ALL(style->pad),
@@ -139,7 +151,7 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
     const uint8_t fill_layer = ctx->pending_tabbar.fill_layer;
     const uint8_t label_layer = ctx->pending_tabbar.label_layer;
     (void)label_layer; /* the game owns labels now; kept so the wrapper can read it via the pending state */
-    const uint32_t tab_id = ctx->pending_tabbar.base_id + (uint32_t)index;
+    const uint32_t tab_id = tabbar_tab_id(ctx->pending_tabbar.base_id, (uint32_t)index);
     const bool horizontal = (style->dir == NT_UI_TABBAR_HORIZONTAL);
 
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, tab_id);
@@ -197,19 +209,22 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
                    .padding = pad,
                    .childGap = style->pad,
                    .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-        .cornerRadius = CLAY_CORNER_RADIUS((float)style->corner_radius),
         .border = {.color = accent_col, .width = bw},
         .userData = (void *)tab_data,
     };
     if (has_art) {
-        /* slice9 atlas bg: tint multiplies the art; no flat backgroundColor (the IMAGE carries it). */
+        /* slice9 atlas bg: tint multiplies the art; no flat backgroundColor (the IMAGE carries it). Clay
+         * rejects IMAGE + cornerRadius, so an IMAGE tab is NOT rounded here — rounding is baked into the
+         * sprite's slice9 corners. (Setting both trips Clay's contract assert.) */
         nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
         NT_ASSERT(p != NULL && "nt_ui_tabbar: scratch alloc failed (image_payload)");
         *p = (nt_ui_image_payload_t){.atlas = bg.atlas, .region_index = bg.region, .slice9_scale = style->slice9_scale};
         decl.image = (Clay_ImageElementConfig){.imageData = p};
         decl.backgroundColor = nt_ui_unpack_tint(st->bg_tint);
     } else {
+        /* Flat fill (no IMAGE present) rounds via Clay. */
         decl.backgroundColor = (st->fill != 0U) ? nt_ui_unpack_abgr(st->fill) : (Clay_Color){0};
+        decl.cornerRadius = CLAY_CORNER_RADIUS((float)style->corner_radius);
     }
 
     nt_ui_clay_priv_open_element();

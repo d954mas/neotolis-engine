@@ -11,6 +11,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_state.h"
@@ -88,6 +89,49 @@ static int tabbar_core_frame(const nt_pointer_t *p, int count, int *active, nt_u
 }
 
 static float tab_center_y(const nt_ui_tabbar_style_t *st, int i);
+
+/* Mirrors examples/ui_showcase render_tabs: TWO tab-bars in one frame -- a nav via the labels[] wrapper
+ * plus a begin/end demo whose tabs each hold an icon (image) + a label, with the SAME icon ref repeated
+ * across tabs. Reproduces the DUPLICATE_ID (Clay type=4) regression headlessly (no GL). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void two_tabbars_with_content_frame(const ui_walker_fixture_t *fx, const nt_pointer_t *p) {
+    static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+    static const nt_ui_image_style_t img = {.color_packed = 0xFFFFFFFFU, .slice9_scale = 1.0F};
+    /* One shared icon ref reused on every demo tab -- the showcase repeats the bunny icon across tabs. */
+    nt_atlas_region_ref_t icon = nt_atlas_ref_idx(fx->atlas.handle, 0, fx->atlas.white_region_idx);
+
+    nt_ui_tabbar_style_t nav_st = nt_ui_tabbar_style_defaults();
+    nt_ui_tabbar_style_t demo_st = nt_ui_tabbar_style_defaults();
+    int nav_active = 0;
+    int demo_active = 1;
+
+    nt_ui_begin(fx->ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
+        /* Nav: the labels[] convenience wrapper, base = TAB_BASE. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_GROW(0)}}}) { (void)nt_ui_tabbar(fx->ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, 4, &nav_active, &nav_st); }
+        /* Demo: the begin/end core, a DIFFERENT base; each tab holds an icon + a label. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(72)}}}) {
+            nt_ui_tabbar_begin(fx->ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE + 0x100U, &demo_st);
+            for (int i = 0; i < 4; ++i) {
+                (void)nt_ui_tab_begin(fx->ctx, i, i == demo_active);
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}}) { nt_ui_image(fx->ctx, NT_UI_DATA_LAYER(1), &icon, &img, NULL); }
+                nt_ui_label(fx->ctx, NT_UI_DATA_LAYER(2), s_tabs[i], &lbl);
+                nt_ui_tab_end(fx->ctx);
+            }
+            nt_ui_tabbar_end(fx->ctx);
+        }
+    }
+    nt_ui_end(fx->ctx);
+}
+
+/* ---- Regression (Phase 65 gap-fix): two tab-bars + per-tab icon/label content in one frame must NOT
+ * trip Clay's DUPLICATE_ID. nt_ui_end runs the Clay layout headlessly; a duplicate id would route
+ * through nt_ui_clay_error_cb -> NT_ASSERT (the trap). A clean return == no duplicate. ---- */
+static void test_tabbar_two_bars_with_content_no_duplicate_id(void) {
+    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    two_tabbars_with_content_frame(&s_fx, &idle);
+    TEST_PASS();
+}
 
 /* ---- ABI sanity ---- */
 static void test_tabbar_abi_size(void) { TEST_ASSERT_EQUAL_UINT(144U, (unsigned)sizeof(nt_ui_tabbar_style_t)); }
@@ -192,5 +236,6 @@ int main(void) {
     RUN_TEST(test_tabbar_no_click_returns_negative);
     RUN_TEST(test_tabbar_core_click_sets_active);
     RUN_TEST(test_tabbar_accent_none_ok);
+    RUN_TEST(test_tabbar_two_bars_with_content_no_duplicate_id);
     return UNITY_END();
 }

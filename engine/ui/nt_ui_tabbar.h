@@ -86,7 +86,8 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
  * text). data may be NULL (fills fall to layer 0). style is mutated in place to memoize resolved refs. */
 void nt_ui_tabbar_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, nt_ui_tabbar_style_t *style);
 
-/* Opens ONE tab element (id = base_id + index): picks idle/hover/selected, runs one nt_ui_anim
+/* Opens ONE tab element (id = mixed hash of base_id + index, collision-proof vs Clay anon child ids):
+ * picks idle/hover/selected, runs one nt_ui_anim
  * (scale/opacity + accent value_t), emits the per-state bg (slice9 when an atlas ref is set, flat fill
  * otherwise) + the accent on style->accent_side, applies the eased xform, and leaves the element OPEN
  * for the game's content children. Returns true the frame this tab was clicked. */
@@ -99,7 +100,7 @@ void nt_ui_tab_end(nt_ui_context_t *ctx);
 void nt_ui_tabbar_end(nt_ui_context_t *ctx);
 
 /* Declare the tab-bar: a container holding `count` full-extent tabs. A click on tab i sets *active = i
- * (Model D). base_id salts each tab's id (base_id + i). The bar grows to fill its parent on the cross
+ * (Model D). base_id salts each tab's id via a mixed hash. The bar grows to fill its parent on the cross
  * axis. ctx/labels/active/style non-NULL; count >= 0; *active in [0,count) when count > 0 (or -1 = none).
  * Returns the index clicked this frame, or -1 if no tab was clicked.
  *
