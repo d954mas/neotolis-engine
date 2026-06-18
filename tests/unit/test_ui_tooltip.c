@@ -14,8 +14,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "atlas/nt_atlas.h"
 #include "clay.h"
 #include "input/nt_input_internal.h"
+#include "sprite_comp/nt_sprite_comp.h" /* NT_SPRITE_FLAG_FLIP_Y */
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -68,25 +70,43 @@ static nt_ui_tooltip_style_t test_style(void) {
     return st;
 }
 
+/* Floats the target at the given y (a fixed bbox); the bottom-pinned case overflows downward so the
+ * popup edge-flips ABOVE (caret-flip). x stays 0 so the centered tooltip stays in the viewport. */
+#define TGT_BOTTOM_Y 560.0F
+
 /* One full frame: declare the INTERACTIVE target (step_interaction registers it for arbitration +
  * bakes its bbox) + declare the tooltip after it; returns whether the tooltip panel was declared. */
-static bool tooltip_frame(const nt_pointer_t *p, const nt_ui_tooltip_style_t *st) {
+static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, bool at_bottom) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1);
-    CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+    if (at_bottom) {
+        /* Float the target near the bottom border (mirrors the dropdown edge-flip fixture). */
+        CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = TGT_BOTTOM_Y}}}) {
+            CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+        }
+    } else {
+        CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+    }
     const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
     nt_ui_end(s_fx.ctx);
     return shown;
 }
 
-/* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
-static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(28U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
+static bool tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) { return tooltip_frame_at(p, st, false); }
 
-/* ---- Defaults are a valid (non-zero) style. ---- */
+/* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
+static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(88U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
+
+/* ---- Defaults are a valid (non-zero) style; the flat baseline declares no art/caret/border/shadow. ---- */
 static void test_tooltip_defaults_valid(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     TEST_ASSERT_TRUE(st.delay_secs >= 0.0F);
     TEST_ASSERT_TRUE(st.font_size > 0.0F);
-    TEST_ASSERT_TRUE(st.open_ease_speed == 0.0F); /* plumbed knob; default snaps (0) */
+    TEST_ASSERT_TRUE(st.open_ease_speed == 0.0F);      /* plumbed knob; default snaps (0) */
+    TEST_ASSERT_TRUE(st.slice9_scale > 0.0F);          /* never trips the slice9 walker assert */
+    TEST_ASSERT_EQUAL_UINT(0U, st.panel_art.atlas.id); /* flat fallback by default (no art) */
+    TEST_ASSERT_EQUAL_UINT(0U, st.caret.atlas.id);
+    TEST_ASSERT_EQUAL_UINT(0U, st.border_color);
+    TEST_ASSERT_EQUAL_UINT(0U, st.shadow_color);
 }
 
 /* ---- Delayed reveal: the tooltip is NOT declared before delay_secs of accumulated hover and IS
@@ -164,7 +184,7 @@ static void test_tooltip_declares_no_catcher(void) {
 /* ---- No double-mutation: the tooltip reads the target via an IDEMPOTENT query, so the game's own
  *      mutating step_interaction on the SAME target id sees an unperturbed capture machine. A press on
  *      the target still produces pressed_now/clicked exactly as if the tooltip were not present. ---- */
-static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, const nt_ui_tooltip_style_t *st) {
+static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
@@ -198,6 +218,76 @@ static void test_tooltip_no_double_mutation(void) {
     TEST_ASSERT_TRUE(in3.clicked);
 }
 
+/* A caret ref pre-resolved to the fixture atlas's white region (index 0) so the tooltip actually
+ * declares the caret (atlas.id != 0 && region != INVALID). */
+static nt_ui_tooltip_style_t caret_style(void) {
+    nt_ui_tooltip_style_t st = test_style();
+    st.caret = nt_atlas_ref_idx(s_fx.atlas.handle, 0U, s_fx.atlas.white_region_idx);
+    st.caret_size = 14U;
+    return st;
+}
+
+/* Accrue hover past the delay at the given target placement; once revealed, run a few MORE frames so the
+ * popup's prev-frame bbox feeds the edge-flip (frame 1 measures, frame 2 flips) before the probes read. */
+static void reveal_at(nt_pointer_t *over, nt_ui_tooltip_style_t *st, bool at_bottom) {
+    tooltip_frame_at(over, st, at_bottom); /* warm frame */
+    bool shown = false;
+    for (int i = 0; i < 64; ++i) {
+        if (tooltip_frame_at(over, st, at_bottom)) {
+            shown = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(shown, "tooltip never revealed");
+    for (int i = 0; i < 3; ++i) {
+        tooltip_frame_at(over, st, at_bottom); /* settle: popup bbox -> edge-flip side */
+    }
+}
+
+/* ---- Caret flips with the popup side: a top-placed target -> popup BELOW -> caret on the panel TOP edge
+ *      pointing UP (no flip); a bottom-pinned target -> edge-flip ABOVE -> caret on the panel BOTTOM edge
+ *      pointing DOWN (FLIP_Y). The side that drives the flip is read from the popup result probe. ---- */
+static void test_tooltip_caret_flips_with_side(void) {
+    /* BELOW: target at the top, room beneath -> caret points up, no flip. */
+    nt_ui_tooltip_style_t below = caret_style();
+    nt_pointer_t over_top = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    reveal_at(&over_top, &below, false);
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_BELOW, nt_ui_tooltip_test_last_side());
+    TEST_ASSERT_TRUE(nt_ui_tooltip_test_last_caret_present());
+    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_tooltip_test_last_caret_flip()); /* up: art's native direction */
+
+    /* ABOVE: target pinned to the bottom border -> edge-flip ABOVE -> caret points down (FLIP_Y). The
+     * pointer must land on the bottom-pinned target rect (its top is near the bottom of the viewport). */
+    nt_ui_tooltip_style_t above = caret_style();
+    nt_pointer_t over_bottom = pointer_at(TGT_W * 0.5F, TGT_BOTTOM_Y + (TGT_H * 0.5F));
+    reveal_at(&over_bottom, &above, true);
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_ABOVE, nt_ui_tooltip_test_last_side());
+    TEST_ASSERT_TRUE(nt_ui_tooltip_test_last_caret_present());
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_SPRITE_FLAG_FLIP_Y, nt_ui_tooltip_test_last_caret_flip());
+}
+
+/* ---- Panel art path drops cornerRadius (IMAGE bg can't round, same rule as dropdown/menu/tabbar): with
+ *      a resolvable panel_art ref the panel uses art and applies NO cornerRadius even when corner_radius
+ *      is set; the flat fallback (no art) keeps its rounded rect. ---- */
+static void test_tooltip_panel_art_no_corner_radius(void) {
+    /* Art path: cornerRadius must be 0 regardless of style->corner_radius. */
+    nt_ui_tooltip_style_t art = test_style();
+    art.panel_art = nt_atlas_ref_idx(s_fx.atlas.handle, 0U, s_fx.atlas.white_region_idx);
+    art.corner_radius = 8U; /* set but MUST be ignored under art */
+    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    reveal_at(&over, &art, false);
+    TEST_ASSERT_TRUE(nt_ui_tooltip_test_last_panel_art());
+    TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_last_panel_corner_radius(), 0.0F, 0.0001F));
+
+    /* Flat fallback (no art): the rounded rect is kept. */
+    nt_ui_tooltip_style_t flat = test_style();
+    flat.corner_radius = 8U;
+    nt_pointer_t over2 = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    reveal_at(&over2, &flat, false);
+    TEST_ASSERT_FALSE(nt_ui_tooltip_test_last_panel_art());
+    TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_last_panel_corner_radius(), 8.0F, 0.0001F));
+}
+
 /* ---- The timer cell uses a SALTED id distinct from the target id (no aliasing of the target's own
  *      state). ---- */
 static void test_tooltip_timer_id_salted(void) {
@@ -213,6 +303,8 @@ int main(void) {
     RUN_TEST(test_tooltip_hide_on_leave);
     RUN_TEST(test_tooltip_declares_no_catcher);
     RUN_TEST(test_tooltip_no_double_mutation);
+    RUN_TEST(test_tooltip_caret_flips_with_side);
+    RUN_TEST(test_tooltip_panel_art_no_corner_radius);
     RUN_TEST(test_tooltip_timer_id_salted);
     return UNITY_END();
 }
