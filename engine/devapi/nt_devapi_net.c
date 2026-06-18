@@ -35,9 +35,10 @@ typedef socklen_t nt_socklen_t;
 #include <string.h>
 #include <time.h>
 
+#include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi.h"
-#include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_tick — frame-advance for the deferred drain. */
+#include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_reset on client drop. */
 #include "devapi/nt_devapi_net.h"
 
 /* Single loopback client; reconnect allowed. */
@@ -98,6 +99,11 @@ static void close_client(void) {
     /* Drop the gone client's in-flight deferred results so a reconnecting client
        can't receive them tagged with the old client's request_id. */
     nt_devapi_deferred_reset();
+    /* A dropped client must not leave the loop frozen: in MANUAL/paused g_nt_app.frame stops
+       advancing and a host's frame-count auto-exit never fires. Return to plain RUN. */
+    g_nt_app.mode = NT_APP_MODE_RUN;
+    g_nt_app.paused = false;
+    g_nt_app.pending_steps = 0;
 }
 
 static void set_nonblocking(nt_sock_t s) {
@@ -272,11 +278,6 @@ void nt_devapi_net_poll(void) {
         return;
     }
 
-    /* Advance every in-flight deferred slot once per frame, BEFORE this frame's commands enqueue
-       new ones — otherwise a slot enqueued this frame would be ticked the same frame and resolve
-       one frame early (a 1-frame deferral would resolve in the poll it arrived in). */
-    nt_devapi_deferred_tick();
-
     // #region recv (orderly close vs no-data)
     char tmp[4096];
     for (;;) {
@@ -287,6 +288,12 @@ void nt_devapi_net_poll(void) {
 #endif
         if (n > 0) {
             recv_append(tmp, (size_t)n);
+            /* Bound peak growth within one poll: stop reading once past the cap so a hostile flood
+               can't balloon the buffer before the post-dispatch cap check. Complete lines are still
+               dispatched below; a too-long unterminated remainder then drops the client. */
+            if (s_recv_len > NT_DEVAPI_NET_MAX_LINE) {
+                break;
+            }
             continue;
         }
         if (n == 0) {
@@ -350,7 +357,7 @@ void nt_devapi_net_poll(void) {
     }
     // #endregion
 
-    // #region deferred drain — emit every result that became ready (the per-frame tick ran at frame start)
+    // #region deferred drain — emit every result whose game-frame deadline (g_nt_app.frame) has passed
     const char *dr;
     while ((dr = nt_devapi_poll_response()) != NULL) {
         if (!send_line(dr)) {
@@ -361,6 +368,11 @@ void nt_devapi_net_poll(void) {
     // #endregion
 }
 // #endregion
+
+/* TODO(transport-split): this is the game-facing per-tick entry but lives in the TCP module and only
+   drives net_poll. When a second transport (web) lands, move it to the core and poll every registered
+   transport so both share the frame-keyed deferred drain. Single transport today -> kept here (YAGNI). */
+void nt_devapi_update(void) { nt_devapi_net_poll(); }
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
 /* Monotonic WALL clock: clock() measures CPU time (wrong for a wall-clock spin timeout). */

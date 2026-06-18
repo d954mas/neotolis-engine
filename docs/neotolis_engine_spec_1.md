@@ -2539,13 +2539,30 @@ Recommended stats: frame time, fixed step count, draw call count, batch count, l
 
 `nt_devapi` is an **optional, dev-only** self-describing command surface for engine introspection and automation (probing, testing, external tooling). It is gated by `NT_DEVAPI_ENABLED` (OFF by default); the `engine/devapi` subdirectory is excluded at the CMake level when off, so a release binary contains zero devapi code or symbols. A CI "zero-delta" check asserts a devapi-OFF WASM has no `nt_devapi_*` symbols. devapi is the one sanctioned exception to the runtime's no-parser rule — it is dev-only and compiled out of release.
 
-**Transport-agnostic core.** The dispatch core is `submit(line) -> response line`: one JSON request line in, one JSON response line out, with no platform/socket/transport code. A command may also **defer** its response: `submit` returns `NULL`, and the result is delivered later by `nt_devapi_poll_response()` once the host has advanced the frame counter with `nt_devapi_deferred_tick()` (one tick per frame). Real transports (loopback TCP, web `ccall`) are separate, opt-in, and added by later phases.
+**Transport-agnostic core.** The dispatch core is `submit(line) -> response line`: one JSON request line in, one JSON response line out, with no platform/socket/transport code. A command may also **defer** its response: `submit` returns `NULL`, the command records a deadline of `g_nt_app.frame + N` game frames at submit time, and the result is delivered later by `nt_devapi_poll_response()` once `g_nt_app.frame` has reached that deadline. The host drains ready responses each tick (via `nt_devapi_update()`); because readiness is a comparison against the game frame counter, it counts real simulation advances, not poll calls — a paused game never advances its frame, so a wait never resolves. Real transports (loopback TCP, web `ccall`) are separate, opt-in, and added by later phases.
 
 **Self-describing registry.** Commands are registered once into a fixed-size table, each with a 7-field descriptor (`method`, `group`, `summary`, `params_shape`, `result_shape`, `frame_behavior`, `side_effects`). The discovery commands (`endpoints`, `command.describe`, `features`) expose the whole surface so a client reads it without source. A game registers `group="game"` commands through the public API with zero engine edits. `features` lists the distinct `group` values across all registered commands — which groups exist depends on which commands are compiled in (engine) or registered at runtime (game).
 
 **Envelope.** Each request returns `{ok:true,result}` or `{ok:false,error:{code,message}}`, echoes `request_id` unchanged, and a JSON-array line runs as an ordered batch with continue-on-error. A **deferred** command emits no synchronous envelope — its `{ok,result,request_id}` envelope arrives later via `nt_devapi_poll_response()`; a deferred command is **not** allowed inside a batch (it is rejected with an error entry, since a batch is one ordered response array). A future phase may define a batch-deferred protocol.
 
 **cJSON dependency.** devapi parses/serializes with vendored cJSON, exposed as a standalone reusable `cjson` static-lib target (not an engine module, `EXCLUDE_FROM_ALL`). cJSON is usable by games independently of devapi; only targets that link it pull it in.
+
+## 24.6 Time & render control (`nt_app`)
+
+`nt_app_run(fn)` is a **single, flag-aware frame loop** that owns the one `g_nt_app.dt` scalar. Its default state — mode `RUN`, `scale` 1, unpaused — is a plain wall-clock advance (`dt` = clamped wall delta, `frame++` every iteration), so a game that never touches the controls runs exactly as a minimal loop would. The game still wires poll/input/update/render inside `fn`; the engine gives building blocks, not a pipeline.
+
+Time control is a set of flags in `g_nt_app`, set via the `nt_app_*` mutators (and exposed to a bot through the devapi `time.*`/`render.*` commands):
+
+- **mode** `RUN` / `MANUAL`. RUN advances on wall time; MANUAL advances one fixed-`step_dt` step per queued `nt_app_step`, with no wall clock and no `max_dt` clamp — the byte-reproducible lockstep contract.
+- **paused** (RUN only): `dt` = 0 and `frame` frozen while `fn` keeps running.
+- **scale** (RUN only): multiplies `dt` for slow-mo / fast-forward **observation** — explicitly not a determinism primitive (reproducible fast runs use MANUAL lockstep).
+- **render_enabled**: a loop-agnostic gate the game reads to skip its draw + present together.
+
+`g_nt_app.frame` is a **simulation-advance counter**: it increments only on a real advance, so pause and manual-idle freeze it. Deferred devapi responses (`frame.wait`, `time.step`) are keyed to it — a wait resolves once `frame` reaches its submit-time deadline (`frame + N`), so it counts game frames, not transport polls, and never resolves while the sim is frozen. `frame.wait` is therefore RUN-only (rejected in manual/paused); in MANUAL a bot uses `time.step{count}`, which advances and blocks until done.
+
+Game-elapsed time `g_nt_app.time` (a `double` — the sum of applied `dt`s, kept double so long deterministic runs don't lose seconds-resolution to float accumulation) is the **second clock**. `time.wait{seconds?}` defers on a game-time deadline (`time + seconds`, default 0 = resolve on the next drain) rather than a frame count — the right tool in RUN, where the variable `dt` (and `scale`) make a frame count meaningless, and where time-authored mechanics (cooldowns, durations) live. Because game time only flows under RUN with `scale > 0`, `time.wait` is rejected in manual/paused/scale-0 (where it could never resolve). In MANUAL the two clocks are **linear** (`time = frames × step_dt`), so `time.step` accepts either `{count}` frames or `{seconds}` (= `ceil(seconds / step_dt)` frames) — convenience for the same time-authored logic in lockstep.
+
+The L1 mutators **assert** their invariants (finite/non-negative scale, positive `step_dt`, valid mode) — callers are trusted game code; untrusted bot input is range-checked at the devapi L2 layer and returns `bad_params`, never an assert.
 
 ---
 

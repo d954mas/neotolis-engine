@@ -1,5 +1,11 @@
 add_executable(devapi_host main.c)
-target_link_libraries(devapi_host PRIVATE nt_core nt_app nt_input nt_window nt_log nt_devapi_net)
+# nt_gfx_stub resolves render.info's nt_gfx_get_frame_draw_calls (the source of draw_calls). This
+# host issues no real draw (placeholder frame), so draw_calls is genuinely 0 — the stub is correct
+# here. A host with a real renderer would link nt_gfx instead.
+# GNU ld is single-pass: nt_devapi (references nt_gfx_get_frame_draw_calls for render.info) must
+# precede nt_gfx_stub (which defines it), else ld drops the stub object before seeing the reference.
+# nt_devapi is already pulled transitively by nt_devapi_net; listing it explicitly here pins the order.
+target_link_libraries(devapi_host PRIVATE nt_core nt_app nt_input nt_window nt_log nt_devapi_net nt_devapi nt_gfx_stub)
 if(WIN32)
     # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link); nt_devapi (core) pulls it via nt_devapi_net.
     # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).

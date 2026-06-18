@@ -45,6 +45,9 @@ nt_result_t nt_devapi_init(void) {
 #ifdef NT_DEVAPI_REGISTER_core
     nt_devapi_register_core();
 #endif
+#ifdef NT_DEVAPI_REGISTER_time
+    nt_devapi_register_time();
+#endif
 
     /* Discovery is always-on when devapi is built. */
     nt_devapi_register_discovery();

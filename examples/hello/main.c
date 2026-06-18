@@ -34,7 +34,7 @@ static void frame(void) {
 
     /* Log every 60 frames */
     if (g_nt_app.frame % 60 == 0) {
-        printf("[frame %u] dt=%.6f time=%.3f physics=%d\n", g_nt_app.frame, (double)dt, (double)g_nt_app.time, s_physics_ticks);
+        printf("[frame %u] dt=%.6f time=%.3f physics=%d\n", g_nt_app.frame, (double)dt, g_nt_app.time, s_physics_ticks);
     }
 
     nt_window_swap_buffers();
