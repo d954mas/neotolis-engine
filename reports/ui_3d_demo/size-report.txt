@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: 8a8202f
+# Commit: b394bf4
 
 ## WASM Section Sizes
 
@@ -13,10 +13,10 @@ Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                 149 B
-Code              918238 B
-Data              241766 B
+Code              918519 B
+Data              241788 B
 ---------------- ----------
-TOTAL            1161989 B
+TOTAL            1162292 B
 
 ## Top 30 Functions by Size
 

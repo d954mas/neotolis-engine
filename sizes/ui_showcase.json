@@ -150,5 +150,43 @@
       "raw": 1199843,
       "gzip": 454867
     }
+  },
+  {
+    "commit": "b394bf4",
+    "date": "2026-06-18T15:50:11Z",
+    "files": {
+      "index.html": {
+        "raw": 2557,
+        "gzip": 1285
+      },
+      "index_simd.wasm": {
+        "raw": 1206824,
+        "gzip": 458626
+      },
+      "index.wasm": {
+        "raw": 1102557,
+        "gzip": 441563
+      },
+      "index_simd.js": {
+        "raw": 21964,
+        "gzip": 8717
+      },
+      "index.js": {
+        "raw": 21964,
+        "gzip": 8712
+      }
+    },
+    "engine": {
+      "raw": 1231345,
+      "gzip": 468628
+    },
+    "resources": {
+      "raw": 0,
+      "gzip": 0
+    },
+    "total": {
+      "raw": 1231345,
+      "gzip": 468628
+    }
   }
 ]

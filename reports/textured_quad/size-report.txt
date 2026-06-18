@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 8a8202f
+# Commit: b394bf4
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                 158 B
-Code              603106 B
-Data              232773 B
-Custom             36500 B
+Code              603268 B
+Data              232795 B
+Custom             36522 B
 ---------------- ----------
-TOTAL             874107 B
+TOTAL             874313 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             874107 B
  4528 B   basist::astc_6x6_hdr::assign_weights_4(basist::vec3F const*, float const*, unsigned char*, int, int, int, int, int, int, long long, bool, basist::astc_6x6_hdr::fast_bc6h_params const&)
 
 Total functions: 350
-Total code size: 602498 B
+Total code size: 602660 B
 
 ## Per-Module Contributions
 
@@ -63,7 +63,7 @@ Total code size: 602498 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1442 B
+libnt_app.a                 2418 B
 libnt_core.a                2422 B
 libnt_drawable_comp.a       4214 B
 libnt_entity.a              3076 B
@@ -84,10 +84,10 @@ libnt_time.a                 868 B
 libnt_transform_comp.a      4696 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            328636 B
+TOTAL (linked)            329612 B
 
 Not linked to textured_quad:
-libnt_app_stub.a            1428 B
+libnt_app_stub.a            2370 B
 libnt_atlas.a               6894 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_clipboard.a           6578 B
@@ -106,12 +106,12 @@ libnt_sprite_comp.a         8892 B
 libnt_sprite_renderer.a   444554 B
 libnt_stats.a               5634 B
 libnt_text_renderer.a    1236522 B
-libnt_ui.a                506456 B
+libnt_ui.a                542358 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 
 
 ## Data Segments Summary
 
-Segments: 235
-Total data size: 231040 B
+Segments: 237
+Total data size: 231048 B
