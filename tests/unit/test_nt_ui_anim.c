@@ -313,6 +313,34 @@ static void test_anim_seed_primes_entrance_ease(void) {
     TEST_ASSERT_TRUE_MESSAGE(r->value_t > 0.0F && r->value_t < 1.0F, "seed must prime the slot so the eased open ramps from 0, not snaps to 1");
 }
 
+/* ---- A both-zero (snap) call leaves NO retained slot: a later eased call on the same id first-touches
+ *      (snaps to its new target) instead of easing from a remembered value. ---- */
+static void test_anim_snap_leaves_no_retained_slot(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    const uint32_t id = 0x5A5AU;
+    nt_ui_anim_target_t a = {.scale_x = 2.0F, .scale_y = 2.0F, .scale_z = 1.0F, .opacity = 1.0F};
+    (void)nt_ui_anim(s_fx.ctx, id, &a, 0.0F, 0.0F); /* snap -> scratch, no slot created */
+    /* Eased call with a DIFFERENT target: had the snap retained a slot at 2.0 this would ease FROM 2.0
+     * toward 1.0 (an in-between value); with no slot it first-touches and snaps straight to 1.0. */
+    nt_ui_anim_target_t b = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &b, 10.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(float_near(r->scale_x, 1.0F, 1e-6F), "snap leaves no slot: the eased call must first-touch (snap to target), not ease from 2.0");
+}
+
+/* ---- both-zero on an EXISTING eased slot returns the scratch and leaves that slot untouched (not
+ *      refreshed/updated — it ages out). Documents the speed->0 release edge. ---- */
+static void test_anim_both_zero_on_existing_slot_returns_scratch(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    const uint32_t id = 0x6B6BU;
+    nt_ui_anim_target_t x = {.scale_x = 3.0F, .scale_y = 3.0F, .scale_z = 1.0F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *slot = nt_ui_anim_seed(s_fx.ctx, id, &x); /* real slot at 3.0 */
+    nt_ui_anim_target_t y = {.scale_x = 0.7F, .scale_y = 0.7F, .scale_z = 1.0F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, id, &y, 0.0F, 0.0F); /* both-zero -> scratch */
+    TEST_ASSERT_TRUE_MESSAGE(r != slot, "both-zero must return the scratch, not the existing pool slot");
+    TEST_ASSERT_TRUE(float_near(r->scale_x, 0.7F, 1e-6F)); /* scratch carries the new snap target */
+    TEST_ASSERT_TRUE_MESSAGE(float_near(slot->scale_x, 3.0F, 1e-6F), "the existing slot must be left untouched by a both-zero call");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_anim_instant_when_speed_zero);
@@ -323,6 +351,8 @@ int main(void) {
     RUN_TEST(test_anim_eviction_spares_fresh_slot);
     RUN_TEST(test_anim_snap_consumes_no_slot);
     RUN_TEST(test_anim_seed_primes_entrance_ease);
+    RUN_TEST(test_anim_snap_leaves_no_retained_slot);
+    RUN_TEST(test_anim_both_zero_on_existing_slot_returns_scratch);
     RUN_TEST(test_anim_rot_y_eases_to_target);
     RUN_TEST(test_anim_z_axis_fields_snap);
     RUN_TEST(test_anim_value_t_eases_when_value_speed_positive);

@@ -206,7 +206,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     /* Entrance must ease from 0: on a real closed->open EDGE (not present last frame), seed a fresh slot
      * at t=0 first (no-flash), then the real call eases up. Gated on the non-evicting tween-state, NOT
      * the anim slot — an evicted slot must NOT re-seed (that flickers the eased open under churn). The
-     * anim-slot-absent check still guards the very first ever touch (state cell fresh, slot truly new). */
+     * anim-slot-absent check still guards the very first ever touch (state cell fresh, slot truly new).
+     * NOTE: gated on was_present_prev, so flipping ease_speed mid-open (theme hot-swap) won't re-animate
+     * an already-open popup — only a closed->open edge seeds. */
     if (open && style->ease_speed > 0.0F && !was_present_prev && popup_anim_slot_absent(ctx, id)) {
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;

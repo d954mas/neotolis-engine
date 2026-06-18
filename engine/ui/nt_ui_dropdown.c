@@ -178,6 +178,8 @@ bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *da
     /* ONE anim call: scale/opacity at state_speed + the chevron open-rotation (value_t -> 1 when open)
      * at value_speed. The eased state transform rides the trigger's own data->layer xform channel. */
     const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity, .value_t = *open ? 1.0F : 0.0F};
+    /* `a` may alias the shared ctx->anim_snap (no-slot fast path): read every field below BEFORE any other
+     * nt_ui_anim call. The nested label/chevron emitted further down must NOT call nt_ui_anim. */
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, style->value_speed);
     const nt_ui_transform_t trig_t = {.scale_x = a->scale_x, .scale_y = a->scale_y, .scale_z = 1.0F};
     const nt_ui_element_data_t *trig_data = nt_ui_make_element_data_xform(fill_layer, NULL, &trig_t, a->opacity);
