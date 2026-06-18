@@ -210,7 +210,7 @@ class DevApiClient:
             self.time_wait(seg)  # result() raises on bad_params (manual/paused/scale==0)
             remaining -= seg
 
-    # #region input.* wrappers — fire-and-forget inject (D-12). result() just confirms ok / raises.
+    # #region input.* wrappers — fire-and-forget inject. result() just confirms ok / raises.
     def key(self, name: str, down: Optional[bool] = None, hold: Optional[float] = None) -> Dict[str, Any]:
         """Inject a key edge (down default true on the host) OR a tap (hold frames -> down@0 + up@hold)."""
         params: Dict[str, Any] = {"key": name}
@@ -302,7 +302,7 @@ class DevApiClient:
 
         Returns the result dict (a READ, unlike the fire-and-forget wrappers above). With `key`,
         result carries {down,pressed,released} for that key; the state is STALE until a sim-advance
-        polls the inject queue (the D-12 drain-race). With `pop_text=True`, result carries
+        polls the inject queue (the drain-race). With `pop_text=True`, result carries
         `codepoints` (a raw-codepoint number array) and DRAINS the char ring as a side effect.
         """
         params: Dict[str, Any] = {}

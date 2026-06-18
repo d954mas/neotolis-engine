@@ -41,7 +41,7 @@ void nt_debug_overlay_frame_end(void);
 
 /* ---- User counters ---- */
 
-/* Set or update a user counter by name. Linear-scan on flat array (Open Q5).
+/* Set or update a user counter by name. Linear-scan on flat array.
  * Name is hashed once per call (xxh64-ish via nt_hash64_str). Capacity is
  * configured at init; runtime cap-overflow trips NT_ASSERT (configuration bug,
  * raise capacity). */
@@ -51,7 +51,7 @@ void nt_debug_overlay_count(const char *name, uint64_t value);
 
 float nt_debug_overlay_get_fps(void);           /* rolling avg over fps_window frames; 0.0F until ring filled */
 float nt_debug_overlay_get_cpu_ms(void);        /* last frame */
-float nt_debug_overlay_get_gpu_ms(void);        /* -1.0F when extension absent / disjoint (Pitfall 5) */
+float nt_debug_overlay_get_gpu_ms(void);        /* -1.0F when extension absent / disjoint */
 uint32_t nt_debug_overlay_get_draw_calls(void); /* last frame, from nt_gfx_get_frame_draw_calls */
 
 /* ---- Format multi-line stats string ----
@@ -62,10 +62,9 @@ uint32_t nt_debug_overlay_get_draw_calls(void); /* last frame, from nt_gfx_get_f
 uint32_t nt_debug_overlay_format_lines(char *buf, uint32_t size);
 
 /* ---- Convenience: format + draw via nt_text_renderer ----
- * Pitfall 9 (Issue 2 fix): explicitly calls nt_text_renderer_set_material AND
- * nt_text_renderer_set_font before draw to defeat the change-detection
- * early-out so the overlay always binds correctly regardless of prior frame
- * state. */
+ * Explicitly calls nt_text_renderer_set_material AND nt_text_renderer_set_font
+ * before draw to defeat the change-detection early-out so the overlay always
+ * binds correctly regardless of prior frame state. */
 void nt_debug_overlay_draw(nt_material_t material, nt_font_t font, const float model[16], float size, const float color[4]);
 
 // #region test_access

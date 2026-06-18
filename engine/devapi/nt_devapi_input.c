@@ -8,7 +8,7 @@
 /* input.* command group: a thin L2 veneer over the L1 inject API (nt_input_inject_*). Bot input is
    range/type-checked -> bad_params; never assert on untrusted input (invariants assert, untrusted
    input returns a structured error). Fire-and-forget: validate -> enqueue -> immediate ok (or an
-   immediate overflow/bad_params); NO defer (defer lives only in frame.wait/time.step, D-12).
+   immediate overflow/bad_params); NO defer (defer lives only in frame.wait/time.step).
    Compiles out entirely when NT_DEVAPI_REGISTER_input is absent. */
 
 #ifdef NT_DEVAPI_REGISTER_input
@@ -124,7 +124,7 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
     return true;
 }
 
-/* The pointer primitive (D-10): action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
+/* The pointer primitive: action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
 static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "action");
@@ -254,7 +254,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     }
     float x = (float)xj->valuedouble;
     float y = (float)yj->valuedouble;
-    /* Whole-or-nothing (D-06): preflight both entries so a near-full queue can never accept the
+    /* Whole-or-nothing: preflight both entries so a near-full queue can never accept the
        DOWN and reject the UP, leaving a stuck synthetic pointer-down. */
     if (!nt_input_inject_can_reserve(2U)) {
         set_bad_params(err, "input.click: inject queue overflow");
@@ -302,7 +302,7 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
 }
 
 /* sugar: down@0 + a move per point (each on its own frame_offset using frame_stride, default 1) + up.
-   NO C interpolation (D-10) — the bot supplies the path samples. Per-entry overflow -> bad_params. */
+   NO C interpolation — the bot supplies the path samples. Per-entry overflow -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -355,16 +355,16 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
             return false;
         }
     }
-    /* Frame-offset arithmetic guard: (npoints-1)*stride must fit in the uint16 countdown (T-66-04).
+    /* Frame-offset arithmetic guard: (npoints-1)*stride must fit in the uint16 countdown.
        Compute in a wider type so the multiplication itself can't overflow int (untrusted npoints). */
     int64_t last_offset = (int64_t)(npoints - 1) * (int64_t)stride;
     if (last_offset > UINT16_MAX) {
         set_bad_params(err, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
         return false;
     }
-    /* Whole-or-nothing (D-06): reserve DOWN + (npoints-1) moves + UP = npoints+1 up front so a
+    /* Whole-or-nothing: reserve DOWN + (npoints-1) moves + UP = npoints+1 up front so a
        mid-sequence overflow can't leave a stuck pointer-down. DOWN@0 already carries point[0], so
-       point[0] gets NO redundant same-frame MOVE (F6); moves cover points[1..n-1] only. */
+       point[0] gets NO redundant same-frame MOVE; moves cover points[1..n-1] only. */
     if (!nt_input_inject_can_reserve((uint32_t)npoints + 1U)) {
         set_bad_params(err, "input.gesture: inject queue overflow");
         return false;
@@ -382,7 +382,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     cJSON_ArrayForEach(p, points) {
         if (idx == 0) {
             idx++;
-            continue; /* DOWN already applied point[0] @0 -- skip the redundant same-frame MOVE (F6). */
+            continue; /* DOWN already applied point[0] @0 -- skip the redundant same-frame MOVE. */
         }
         float mx = (float)cJSON_GetArrayItem(p, 0)->valuedouble;
         float my = (float)cJSON_GetArrayItem(p, 1)->valuedouble;
@@ -461,7 +461,7 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
 /* input.text: walk the UTF-8 string into a local codepoint buffer (decode 1-4 byte sequences;
    a malformed byte OR an invalid scalar -> bad_params, never assert), then nt_input_inject_text.
    All codepoints drain in ONE poll into the 32-slot char ring, so nt_input_inject_text rejects
-   n > NT_INPUT_CHAR_RING -> bad_params; queued never overstates what lands (F2/D-13/INPUT-06). */
+   n > NT_INPUT_CHAR_RING -> bad_params; queued never overstates what lands. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -505,7 +505,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         }
         /* Reject structurally-valid-but-invalid scalars: an overlong encoding (below the minimum
            for its byte-length), a UTF-16 surrogate, or a value above U+10FFFF. A real keyboard
-           never produces these; per D-11 reject untrusted input -> bad_params (never assert). */
+           never produces these; reject untrusted input -> bad_params (never assert). */
         static const uint32_t k_min_cp[4] = {0x0U, 0x80U, 0x800U, 0x10000U};
         if (cp < k_min_cp[extra] || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
             set_bad_params(err, "input.text: invalid UTF-8");
@@ -519,7 +519,7 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         n++;
     }
     /* Empty text is valid UTF-8 -> a no-op queued:0 (the advertised {queued:number} contract
-       represents 0), not a hard error mid-script (F5). */
+       represents 0), not a hard error mid-script. */
     if (n == 0) {
         devapi_add_number(result, "queued", 0.0);
         return true;
@@ -534,8 +534,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
 
 /* input.state: IMMEDIATE read (NOT deferred, NOT an enqueue) of the polled input state. Reads the
    state nt_input_poll last produced — so before a sim-advance an enqueued inject is NOT yet visible
-   (the D-12 drain-race, now machine-observable over the socket). `key` -> {down,pressed,released}
-   for that key (unknown name -> bad_params, never assert on bot input, D-11). `pop_text:true`
+   (the drain-race, now machine-observable over the socket). `key` -> {down,pressed,released}
+   for that key (unknown name -> bad_params, never assert on bot input). `pop_text:true`
    DRAINS the char ring (consuming side effect) into a `codepoints` raw-codepoint number array. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {

@@ -33,7 +33,7 @@ static bool s_have_last_frame;
 /* ---- Synthetic inject queue (bounded BSS; frame-scheduled) ---- */
 
 typedef struct {
-    uint16_t frames_remaining; /* sim-advance countdown; 0 = apply this poll (D-05) */
+    uint16_t frames_remaining; /* sim-advance countdown; 0 = apply this poll */
     uint8_t kind;              /* nt_inject_kind_t */
     union {
         struct {
@@ -156,7 +156,7 @@ void nt_input_poll(uint32_t frame) {
 
     /* Relative frame countdown: only a NEW sim-advance frame ticks the inject queue,
        so PAUSE / MANUAL-idle (same frame re-polled) freeze it. Inject drains in the same
-       post-clear window as the native char drain (D-01/Q6). */
+       post-clear window as the native char drain. */
     bool advanced = !s_have_last_frame || (frame != s_last_poll_frame);
     inject_drain(advanced);
     s_last_poll_frame = frame;
@@ -462,9 +462,9 @@ void nt_input_set_player_enabled(bool enabled) {
 
 /* ---- Synthetic input injection ---- */
 
-/* Whole-or-nothing reserve: a command needing N entries either gets all N or none (D-06,
-   mirrors deferred_enqueue reject-whole) -- a partial enqueue would leave a stuck key-down
-   or a drag with no release. Returns the first reserved slot, or NULL on overflow. */
+/* Whole-or-nothing reserve: a command needing N entries either gets all N or none -- a partial
+   enqueue would leave a stuck key-down or a drag with no release. Returns the first reserved
+   slot, or NULL on overflow. */
 static nt_inject_event_t *inject_reserve(uint32_t n) {
     if (n > NT_INPUT_INJECT_QUEUE_MAX - s_inject_count) {
         return NULL; /* would overflow -- reject the whole command, write nothing */
@@ -542,7 +542,7 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
     }
     /* Every CHAR event is scheduled at frames_remaining=0, so all n drain in a SINGLE poll into
        the 32-slot char ring; nt_input_buffer_char_apply drops once full. Reject n beyond the ring
-       so queued never lies about what lands (F2, whole-or-nothing consistent with D-06). */
+       so queued never lies about what lands (whole-or-nothing by codepoint count). */
     if (n > NT_INPUT_CHAR_RING) {
         return false;
     }
@@ -559,7 +559,8 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
 }
 
 static void inject_apply_one(const nt_inject_event_t *e) {
-    /* Apply through the *_apply cores so inject always flows past the player gate (D-03). */
+    /* Apply through the *_apply cores so inject always flows past the player gate: injected input
+       is indistinguishable from human to the query API. */
     switch ((nt_inject_kind_t)e->kind) {
     case NT_INJECT_KEY:
         nt_input_set_key_apply((nt_key_t)e->u.key.key, e->u.key.down);

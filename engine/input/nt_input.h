@@ -156,7 +156,7 @@ bool nt_input_pop_char(uint32_t *out_codepoint);
    No-op on native/stub. Apply it when a field gains focus. */
 void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
-/* ---- Synthetic input injection (INPUT-01/02/03) ---- */
+/* ---- Synthetic input injection ---- */
 
 /* Event kinds in the frame-scheduled inject queue. */
 typedef enum {
