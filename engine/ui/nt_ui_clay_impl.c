@@ -537,20 +537,23 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     // #endregion
 
     // #region seed-and-dfs
-    /* Each tree root's seed = identity (root 0) or tree_baked[parentId-resolved index]. */
+    /* Each tree root's seed = identity (the parentId==0 document root) or tree_baked[parentId-resolved index]. */
     for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
         const int32_t root_idx = ctx->tree_root_for_elem[elem_idx];
         if (root_idx < 0) {
             continue;
         }
+        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx);
         /* Effective Clay zIndex is uniform per tree root (Clay tags every command of a root with it). */
-        const int16_t root_zindex = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx)->zIndex;
+        const int16_t root_zindex = root->zIndex;
 
         nt_ui_baked_xform_t seed;
-        if (root_idx == 0) {
+        /* The document root (Clay__RootContainer) is the only tree root with parentId 0. Identify it by
+         * that, NOT by array index 0: Clay sorts tree roots by zIndex, so a negative-zIndex floating child
+         * (e.g. a tooltip drop-shadow) sorts ahead of the document root and shifts it off index 0. */
+        if (root->parentId == 0U) {
             seed = identity;
         } else {
-            Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx);
             Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
             if (p_item == &Clay_LayoutElementHashMapItem_DEFAULT) {
                 NT_ASSERT(false && "build_tree: floating root's parentId not in hashmap (Clay error path)");

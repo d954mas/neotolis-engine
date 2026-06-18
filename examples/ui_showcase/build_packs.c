@@ -212,6 +212,19 @@ int main(int argc, char *argv[]) {
     nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
 
+    /* App-widget icon affordances (white, tintable): dropdown chevron, submenu arrow, tooltip caret.
+     * Prebaked PNGs in raw/; builder premultiplies like every other sprite. */
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "chevron_down";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/chevron_down.png", &opts);
+
+    opts.name = "arrow_right";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/arrow_right.png", &opts);
+
+    opts.name = "caret";
+    nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/caret.png", &opts);
+    (void)printf("  Atlas icons (tintable): chevron_down 16x16, arrow_right 12x12, caret 14x10\n");
+
     nt_builder_end_atlas(ctx);
     // #endregion
 

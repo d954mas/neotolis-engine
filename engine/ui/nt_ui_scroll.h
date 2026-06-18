@@ -110,6 +110,12 @@ uint32_t nt_ui_scroll_test_last_scroll_id(void);
 uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void);
 void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity);
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis);
+/* The draw layer the last-emitted bar used (per axis); must match the container's content layer so the
+ * bar isn't buried under higher-layer content. */
+uint8_t nt_ui_scroll_test_last_bar_layer(int axis);
+/* The Clay floating zIndex the last-emitted bar used (per axis). Inside a popup/modal it must sit ABOVE
+ * the popup panel band (stride*depth) so the bar isn't occluded by the panel; 0 for standalone scroll. */
+int16_t nt_ui_scroll_test_last_bar_zindex(int axis);
 /* Count of scroll_begin gathers that consumed a wheel since the last reset; lets a multi-container
  * test detect a wheel reaching more than one container in a single frame (the broadcast bug). */
 uint32_t nt_ui_scroll_test_wheel_recipients(void);

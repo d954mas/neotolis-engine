@@ -402,6 +402,18 @@ static void test_scrollbar_always_shows(void) {
     TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
 }
 
+/* ---- A standalone scroll (NOT inside a popup) floats its bar at zIndex 0: nothing floats above it,
+ *      so the popup-band lift must NOT kick in (active_modal_depth == 0). ---- */
+static void test_scrollbar_standalone_zindex_zero(void) {
+    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_pointer_t p = {0};
+    p.active = true;
+    scrollbar_frame(&p, &style, 1000.0F); /* overflow */
+    scrollbar_frame(&p, &style, 1000.0F);
+    TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_scroll_test_last_bar_zindex(1), "standalone scroll bar must float at zIndex 0");
+}
+
 /* ---- Test 12: thumb length is proportional to container/content (clamped to min). ---- */
 static void test_scrollbar_thumb_size_ratio(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
@@ -2046,6 +2058,7 @@ int main(void) {
     RUN_TEST(test_scroll_capture_tap_no_steal);
     RUN_TEST(test_scrollbar_auto_only_on_overflow);
     RUN_TEST(test_scrollbar_always_shows);
+    RUN_TEST(test_scrollbar_standalone_zindex_zero);
     RUN_TEST(test_scrollbar_thumb_size_ratio);
     RUN_TEST(test_scrollbar_thumb_pos_clay_sign);
     RUN_TEST(test_scrollbar_track_click_scroll_to);

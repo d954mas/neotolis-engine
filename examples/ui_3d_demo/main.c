@@ -535,7 +535,7 @@ static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], i
     }
     for (int i = 0; i < TPICK_COUNT; ++i) {
         nt_ui_button_style_t *style = (i == sel) ? &s_btn_active : &s_btn_idle;
-        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true);
+        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true, NULL);
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), (i == TPICK_A) ? "A" : "B", &s_btn_label_style);
         if (nt_ui_button_end(s_ctx)) {
             clicked = i;
@@ -621,7 +621,7 @@ static void declare_panels(void) {
             }
             for (int i = 0; i < SHAPE_COUNT; ++i) {
                 nt_ui_button_style_t *style = (i == s_shape_kind) ? &s_btn_active : &s_btn_idle;
-                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_shape_btn[i], style, &s_btn_decl, true);
+                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_shape_btn[i], style, &s_btn_decl, true, NULL);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), s_shape_labels[i], &s_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
                     s_shape_kind = i;
@@ -645,7 +645,7 @@ static void declare_panels(void) {
             }
             for (int i = 0; i < SPEED_COUNT; ++i) {
                 nt_ui_button_style_t *style = (i == s_speed_kind) ? &s_btn_active : &s_btn_idle;
-                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_speed_btn[i], style, &s_btn_decl, true);
+                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_speed_btn[i], style, &s_btn_decl, true, NULL);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), s_speed_labels[i], &s_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
                     s_speed_kind = i;

@@ -9,7 +9,7 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 #ifndef NT_UI_ANIM_SLOTS
-#define NT_UI_ANIM_SLOTS 64 /* power-of-2 for the slot mask; ~56 B/slot post-value_t extension */
+#define NT_UI_ANIM_SLOTS 512 /* power-of-2 for the slot mask; ~56 B/slot -> ~28 KB pool. Only eased widgets (a speed > 0) take a slot. */
 #endif
 _Static_assert((NT_UI_ANIM_SLOTS & (NT_UI_ANIM_SLOTS - 1)) == 0, "NT_UI_ANIM_SLOTS must be power-of-2 (slot = id & (N-1))");
 
@@ -46,7 +46,20 @@ typedef struct {
 } nt_ui_anim_target_t;
 
 /* state_speed eases the 11 transform/opacity/tint fields; value_speed eases value_t
- * independently (either 0 → instant snap). Returns the post-ease slot. */
+ * independently (either 0 → instant snap). Returns the post-ease slot.
+ * NO-SLOT FAST PATH: when BOTH speeds are 0 there is nothing to carry across frames, so the result is a
+ * pure snap to target returned in a per-ctx scratch — no anim-pool slot is consumed (a screen full of
+ * non-animating widgets leaves the pool free for the few that actually tween). The pointer is valid only
+ * until the next nt_ui_anim call; read it before calling again (every widget does).
+ * EDGE: flipping a live id's speed from >0 to 0 (e.g. an `in.pressed ? 0 : speed` pattern) takes the
+ * fast path and RELEASES the id's slot (it ages out); resuming speed>0 re-acquires fresh and snaps once
+ * (no flash, just no continuity of the in-flight ease across the 0-speed frames). */
 const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *target, float state_speed, float value_speed);
+
+/* Seed (snap-create) the eased slot to `target` instantly, consuming/creating a real pool slot. Primes
+ * an entrance ease from a start state (e.g. a popup opening from value_t=0) so a following eased
+ * nt_ui_anim call ramps FROM the seed — unlike the no-slot snap fast path above, which writes no slot.
+ * Returns the seeded slot. */
+const nt_ui_anim_interaction_t *nt_ui_anim_seed(nt_ui_context_t *ctx, uint32_t id, const nt_ui_anim_target_t *target);
 
 #endif /* NT_UI_ANIM_H */

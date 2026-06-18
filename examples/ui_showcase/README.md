@@ -13,7 +13,11 @@ The stage is wrapped in a scroll container (exercises the scissor stack). A tab
 that sets a `props_fn` also renders a focused live properties panel beside its
 content; all other tabs render no panel.
 
-## Tabs (10 entries)
+The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the game
+owns the active-tab index; the widget draws the accent bar + selected fill + hover
+lighten and writes the index on click).
+
+## Tabs (15 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -23,8 +27,8 @@ content; all other tabs render no panel.
    offset transform driven by a properties panel; the click counter proves the
    transform-aware (inverse-affine) hit-test still clicks while it is rotated,
    scaled, and offset.
-4. **Images & Slice9** - panels at 300x100 / 600x100 / 600x400 (corners stay
-   crisp) + a live insets/size properties panel.
+4. **Images & Slice9** - slice9 panels at several sizes (corners stay crisp) +
+   a live insets/size properties panel.
 5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle.
 6. **Sliders & Progress** - float + int sliders + a progress bar with a live
    value / auto-animate properties panel.
@@ -33,7 +37,19 @@ content; all other tabs render no panel.
 8. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
 9. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
    (`nt_ui_input_text`); see the **Input controls** table below.
-10. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+10. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
+    `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
+    double-click target with a readout; see the **Interaction-events controls** below.
+11. **Dropdown** - a combobox on popup-core: a short list + a long scrolling list
+    (more than `max_visible_rows`) that flips up near the window bottom.
+12. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+    never block clicks on the targets underneath).
+13. **Menu** - a right-click / long-press **context menu** with a nested **submenu**:
+    mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
+14. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+    tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
+    list, which uses the one-call `labels[]` wrapper with a LEFT accent).
+15. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -73,6 +89,34 @@ Per-field behavior:
   the buffer is untouched); web gets `type=password`.
 - **Cyrillic** — pre-filled with a Cyrillic string to exercise multi-byte UTF-8 edit + measure + render.
 
+## Interaction-events controls (Events / Dropdown / Tooltip / Menu tabs)
+
+These tabs wire the interaction events + app-widgets. All widget state is
+**game-owned** (Model D); the engine owns only the gesture / hover-delay / popup cells.
+
+| Input | Action |
+|-------|--------|
+| **Events** — press and HOLD the button | the fill bar ramps 0→1 over ~1.5s (`hold_progress`) and confirms at the top (`long_pressed`) |
+| **Events** — drag off the button mid-hold | resets the fill (no confirm) — release-outside / move past the drag radius cancels |
+| **Events** — double-click the second button | increments the double-click readout |
+| **Dropdown** — click a trigger | toggles the list open; click a row to select (writes the game-owned index) |
+| **Dropdown** — scroll the long "city" list | wheel / drag the scroll wrapper; opening near the window bottom flips the list ABOVE the trigger |
+| **Tooltip** — hover a target ~0.5s | the tooltip reveals; it hides the instant the cursor leaves and never blocks the click underneath |
+| **Menu** — right-click / long-press the panel | opens the **context menu** at the cursor |
+| **Menu** — hover "More", travel diagonally into the submenu | the **submenu stays open** while the cursor aims at it, even crossing a sibling (mouse-aim triangle) |
+| **Menu** — open near the right / bottom border | per-level **edge-flip** keeps each level on screen |
+| **Menu** — Esc / click outside / arrows + Enter | Esc closes the deepest level; outside-click dismisses the whole chain; arrows navigate, Enter activates a leaf / opens a parent |
+
+## Visual-QA protocol
+
+The GL surface is **not reliably headless-capturable** here, so the interaction +
+visual behavior of these tabs is verified by the **user's eyes** at the BLOCKING
+visual-QA gate — there is no automated screenshot regression for them. Build + run
+the native showcase (see **Build & run** below), then walk the Events / Dropdown /
+Tooltip / Menu tabs and the dogfooded tab list per the table above, and confirm the
+Dark/Light (**T**) toggle restyles every new tab. Confirm no regressions on the
+pre-existing tabs (Buttons, Modals, etc.).
+
 ## Theme hot-swap
 
 The whole hot-swap is a single `g_current` pointer flip over a game-owned
@@ -92,12 +136,12 @@ frame.
 - **Slice9**: per-side insets L/R/T/B + target W/H drive a live
   `NT_UI_IMAGE_SLICE9_OVERRIDE` emit.
 - **Progress**: a value slider + an auto-animate toggle.
-- **Stress**: a segmented label count (50 / 100 / 200 / 400) driving the loop.
+- **Stress**: a segmented label count (500 / 1500 / 3000 / 6000) driving the loop.
 
 ## Slug measurement protocol (Stress tab)
 
 Open the **Stress** tab and read the **frame `gpu_ms`** overlay. Pick a label
-count with the panel (50 / 100 / 200 / 400) and watch the frame `gpu_ms` and the
+count with the panel (500 / 1500 / 3000 / 6000) and watch the frame `gpu_ms` and the
 live `ui_draw_calls` readout respond.
 
 **GL-timer latency:** `gpu_ms` comes from an asynchronous `GL_TIME_ELAPSED`
