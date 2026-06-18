@@ -6,6 +6,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "font/nt_font.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
@@ -18,7 +19,6 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_checkbox.h"
@@ -1273,7 +1273,7 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = {200.0F, 210.0F, 220.0F, 255.0F}};
 
-    const float gpu_ms = nt_stats_get_gpu_ms();
+    const float gpu_ms = nt_debug_overlay_get_gpu_ms();
     if (gpu_ms < 0.0F) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "frame gpu: n/a (timer extension absent)", g_current->caption);
     } else {
@@ -1391,7 +1391,7 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
         }
     }
 
-    const float gpu_ms = nt_stats_get_gpu_ms();
+    const float gpu_ms = nt_debug_overlay_get_gpu_ms();
     if (gpu_ms < 0.0F) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "frame gpu: n/a", g_current->caption);
     } else {
@@ -1484,7 +1484,7 @@ static void declare_header(nt_ui_context_t *ctx) {
             g_current = (g_current == &g_dark) ? &g_light : &g_dark;
         }
 
-        const float gpu_ms = nt_stats_get_gpu_ms();
+        const float gpu_ms = nt_debug_overlay_get_gpu_ms();
         if (gpu_ms < 0.0F) {
             (void)snprintf(buf, sizeof buf, "draw calls: %u   gpu: n/a", nt_ui_get_last_walk_draw_calls(ctx));
         } else {
@@ -1595,7 +1595,7 @@ static void declare_props_panel(nt_ui_context_t *ctx) {
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_stats_frame_begin();
+    nt_debug_overlay_frame_begin();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -1753,14 +1753,14 @@ static void frame(void) {
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         {
-            /* Bottom-left overlay: nt_stats_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
+            /* Bottom-left overlay: nt_debug_overlay_draw emits 4 lines (FPS/CPU/GPU/Draws) descending in
              * y-up text space, so anchor high enough (~5 line-heights) that the last line stays on
              * screen and clear of the header's theme button at the top. */
             mat4 stats_model;
             glm_mat4_identity(stats_model);
             glm_translate(stats_model, (vec3){10.0F, 92.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
-            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
+            nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();
         }
     }
@@ -1768,7 +1768,7 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_segment();
     nt_gfx_end_frame();
-    nt_stats_frame_end();
+    nt_debug_overlay_frame_end();
 
     nt_window_swap_buffers();
 }
@@ -1884,8 +1884,8 @@ int main(int argc, char *argv[]) {
 
     nt_resource_set_activate_time_budget(0);
 
-    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
-    nt_stats_init(&stats_desc);
+    nt_debug_overlay_desc_t stats_desc = nt_debug_overlay_desc_defaults();
+    nt_debug_overlay_init(&stats_desc);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
@@ -1905,7 +1905,7 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_shutdown();
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

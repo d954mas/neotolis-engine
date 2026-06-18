@@ -112,7 +112,7 @@ segment, so an *isolated* `ui_text` segment is impossible. The Stress tab is
 therefore a **text-only** tab and surfaces the **frame** `gpu_ms` as the honest
 Slug-cost proxy — not a nested per-widget timing.
 
-**WebGL2 note:** `nt_stats_get_gpu_ms()` returns `-1.0` when the
+**WebGL2 note:** `nt_debug_overlay_get_gpu_ms()` returns `-1.0` when the
 `EXT_disjoint_timer_query` extension is absent (common on WebGL2). The overlay
 guards `< 0` and shows `gpu: n/a` instead of garbage.
 

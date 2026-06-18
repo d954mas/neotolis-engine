@@ -13,7 +13,7 @@ if(NOT EMSCRIPTEN)
     add_compile_definitions(NT_TEST_ACCESS)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
-        nt_resource nt_sprite_renderer nt_mesh_renderer nt_stats
+        nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_mem_scratch
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
@@ -494,14 +494,14 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_element_data)
 
-    # --- Stats module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
-    add_executable(test_stats unit/test_stats.c)
-    target_link_libraries(test_stats PRIVATE
-        nt_stats nt_text_renderer nt_font nt_material nt_resource
+    # --- Debug overlay module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
+    add_executable(test_debug_overlay unit/test_debug_overlay.c)
+    target_link_libraries(test_debug_overlay PRIVATE
+        nt_debug_overlay nt_text_renderer nt_font nt_material nt_resource
         nt_gfx_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
     )
-    target_compile_definitions(test_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
-    nt_setup_test_target(test_stats)
+    target_compile_definitions(test_debug_overlay PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_debug_overlay)
 
     # --- nt_ui module + walker tests ---
     # Stub gfx backend + Unity. Death-tests use the shared
@@ -538,11 +538,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_sprite_renderer_emit_region)
 
     # Shared list of libs every nt_ui test binary links against. Stub gfx
-    # backend; nt_stats included for walker tests that record draw_calls /
+    # backend; nt_debug_overlay included for walker tests that record draw_calls /
     # element_count via the public getter forwards.
     set(_nt_ui_test_libs
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core
+        nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay nt_gfx_stub nt_core
         nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 

@@ -12,7 +12,7 @@
 #include "material/nt_material.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -41,7 +41,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 /* clang-format on */
 
 /* ---- Unity setUp / tearDown ----
- * nt_gfx is needed because nt_stats reads nt_gfx_get_frame_draw_calls.
+ * nt_gfx is needed because nt_debug_overlay reads nt_gfx_get_frame_draw_calls.
  * No font/material/resource init required for data-only tests; the Pitfall 9
  * draw test passes nt_material_t{0} + nt_font_t{0}, the text_renderer counts
  * the call entry regardless. */
@@ -60,12 +60,12 @@ void tearDown(void) {
 /* ---- Test 1: init + shutdown round-trip ---- */
 
 static void test_stats_init_shutdown(void) {
-    nt_stats_desc_t desc = nt_stats_desc_defaults();
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_stats_init(&desc));
-    nt_stats_shutdown();
+    nt_debug_overlay_desc_t desc = nt_debug_overlay_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_debug_overlay_init(&desc));
+    nt_debug_overlay_shutdown();
     /* Re-init must succeed (asserts not initialized first) */
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_stats_init(NULL));
-    nt_stats_shutdown();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_debug_overlay_init(NULL));
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 2: rolling FPS avg over fps_window=60 frames (DEMO-05) ---- */
@@ -81,78 +81,78 @@ static void assert_float_within(float tolerance, float expected, float actual, c
 }
 
 static void test_stats_fps_rolling_avg(void) {
-    nt_stats_desc_t desc = nt_stats_desc_defaults();
+    nt_debug_overlay_desc_t desc = nt_debug_overlay_desc_defaults();
     desc.fps_window = 60;
-    nt_stats_init(&desc);
+    nt_debug_overlay_init(&desc);
 
     /* Drive 60 frames at 16.67 ms (= 60 fps) via test injection */
     for (int i = 0; i < 60; i++) {
-        nt_stats_test_inject_frame(1.0F / 60.0F);
+        nt_debug_overlay_test_inject_frame(1.0F / 60.0F);
     }
-    float fps = nt_stats_get_fps();
+    float fps = nt_debug_overlay_get_fps();
     assert_float_within(0.5F, 60.0F, fps, "fps avg should be ~60 after 60 frames at 60 fps");
 
     /* Drive another 60 frames at 33.33 ms (= 30 fps); window fully replaces */
     for (int i = 0; i < 60; i++) {
-        nt_stats_test_inject_frame(1.0F / 30.0F);
+        nt_debug_overlay_test_inject_frame(1.0F / 30.0F);
     }
-    fps = nt_stats_get_fps();
+    fps = nt_debug_overlay_get_fps();
     assert_float_within(0.5F, 30.0F, fps, "fps avg should be ~30 after window fully replaced with 30 fps frames");
 
     /* Discrete window — NOT instantaneous: half-replace ring with new dt
      * (30 frames at 60 fps after 30 frames at 30 fps still in ring) → avg
      * lands between 30 and 60. */
     for (int i = 0; i < 30; i++) {
-        nt_stats_test_inject_frame(1.0F / 60.0F);
+        nt_debug_overlay_test_inject_frame(1.0F / 60.0F);
     }
-    fps = nt_stats_get_fps();
+    fps = nt_debug_overlay_get_fps();
     TEST_ASSERT_TRUE_MESSAGE(fps > 30.0F && fps < 60.0F, "FPS should reflect window of mixed rates (proves NOT instantaneous)");
 
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 3: user counters set/update + readable in format (DEMO-04) ---- */
 
 static void test_stats_user_counters(void) {
-    nt_stats_init(NULL);
+    nt_debug_overlay_init(NULL);
 
-    nt_stats_count("bunnies", 1000);
-    nt_stats_count("bunnies", 2000);    /* update */
-    nt_stats_count("atlas_quality", 1); /* second counter */
+    nt_debug_overlay_count("bunnies", 1000);
+    nt_debug_overlay_count("bunnies", 2000);    /* update */
+    nt_debug_overlay_count("atlas_quality", 1); /* second counter */
 
     char buf[512];
-    uint32_t n = nt_stats_format_lines(buf, sizeof(buf));
+    uint32_t n = nt_debug_overlay_format_lines(buf, sizeof(buf));
     TEST_ASSERT_TRUE(n > 0);
     TEST_ASSERT_NOT_NULL(strstr(buf, "bunnies: 2000"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "atlas_quality: 1"));
     TEST_ASSERT_NULL_MESSAGE(strstr(buf, "bunnies: 1000"), "old value must be overwritten");
 
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 4: user-counter capacity overflow asserts ---- */
 
 static void test_stats_user_counter_overflow_assert(void) {
-    nt_stats_desc_t desc = nt_stats_desc_defaults();
+    nt_debug_overlay_desc_t desc = nt_debug_overlay_desc_defaults();
     desc.user_counter_capacity = 2;
-    nt_stats_init(&desc);
+    nt_debug_overlay_init(&desc);
 
-    nt_stats_count("a", 1);
-    nt_stats_count("b", 2);
+    nt_debug_overlay_count("a", 1);
+    nt_debug_overlay_count("b", 2);
     /* Adding a third distinct name must trip NT_ASSERT */
-    EXPECT_ASSERT(nt_stats_count("c", 3));
+    EXPECT_ASSERT(nt_debug_overlay_count("c", 3));
 
     /* Need to shutdown manually because EXPECT_ASSERT longjmps past it */
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 5: format_lines schema (DEMO-04) ---- */
 
 static void test_stats_format_lines_schema(void) {
-    nt_stats_init(NULL);
+    nt_debug_overlay_init(NULL);
 
     char buf[512];
-    uint32_t n = nt_stats_format_lines(buf, sizeof(buf));
+    uint32_t n = nt_debug_overlay_format_lines(buf, sizeof(buf));
     TEST_ASSERT_TRUE(n > 0);
     TEST_ASSERT_NOT_NULL(strstr(buf, "FPS:"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "CPU:"));
@@ -160,7 +160,7 @@ static void test_stats_format_lines_schema(void) {
     TEST_ASSERT_NOT_NULL(strstr(buf, "GPU: N/A"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "Draws:"));
 
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 6: throughput-log periodicity (DEMO-06)
@@ -173,8 +173,8 @@ static void test_stats_format_lines_schema(void) {
 /* ---- Test 7: draw call count from nt_gfx (DEMO-04) ---- */
 
 static void test_stats_draw_calls_from_gfx(void) {
-    nt_stats_desc_t desc = nt_stats_desc_defaults();
-    nt_stats_init(&desc);
+    nt_debug_overlay_desc_t desc = nt_debug_overlay_desc_defaults();
+    nt_debug_overlay_init(&desc);
 
     /* Mirror test_gfx_frame_draw_calls setup: minimal pipeline so the four
      * draw entry points pass their NT_ASSERT(bound_pipeline != 0) gate. */
@@ -199,28 +199,28 @@ static void test_stats_draw_calls_from_gfx(void) {
     /* nt_gfx_get_frame_draw_calls reports 5 */
     TEST_ASSERT_EQUAL_UINT32(5U, nt_gfx_get_frame_draw_calls());
 
-    nt_stats_frame_begin();
-    nt_stats_frame_end();
-    TEST_ASSERT_EQUAL_UINT32(5U, nt_stats_get_draw_calls());
+    nt_debug_overlay_frame_begin();
+    nt_debug_overlay_frame_end();
+    TEST_ASSERT_EQUAL_UINT32(5U, nt_debug_overlay_get_draw_calls());
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 8: Pitfall 9 / Issue 2 — explicit set_material AND set_font calls
  *
- * nt_stats_draw must call BOTH setters every time even when the material/font
+ * nt_debug_overlay_draw must call BOTH setters every time even when the material/font
  * id matches the previous frame, defeating the change-detection early-out in
  * nt_text_renderer. We verify by counting entries (not state changes) into
  * each setter via test-only counters.
  */
 
 static void test_stats_draw_pitfall9_explicit_set_calls(void) {
-    nt_stats_init(NULL);
+    nt_debug_overlay_init(NULL);
 
     nt_text_renderer_test_reset_call_counters();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_material_calls());
@@ -236,16 +236,16 @@ static void test_stats_draw_pitfall9_explicit_set_calls(void) {
     /* set_material now fail-fast asserts on invalid handle BEFORE the
      * same-handle early-return, so {0} mat trips the assert in
      * set_material (counter incremented first), and set_font is never
-     * reached. The counter delta still proves nt_stats_draw doesn't cache. */
-    EXPECT_ASSERT(nt_stats_draw(mat, font, identity, 16.0F, white));
+     * reached. The counter delta still proves nt_debug_overlay_draw doesn't cache. */
+    EXPECT_ASSERT(nt_debug_overlay_draw(mat, font, identity, 16.0F, white));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
 
-    EXPECT_ASSERT(nt_stats_draw(mat, font, identity, 16.0F, white));
+    EXPECT_ASSERT(nt_debug_overlay_draw(mat, font, identity, 16.0F, white));
     TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
 
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
 }
 
 /* ---- main ---- */

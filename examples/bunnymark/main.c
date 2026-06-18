@@ -19,6 +19,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "font/nt_font.h"
@@ -35,7 +36,6 @@
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
-#include "stats/nt_stats.h"
 #include "time/nt_time.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
@@ -244,7 +244,7 @@ static void spawn_n_defold(uint32_t n) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_stats_frame_begin();
+    nt_debug_overlay_frame_begin();
     nt_window_poll();
     nt_input_poll();
 
@@ -369,7 +369,7 @@ static void frame(void) {
     bool can_render = s_atlas_resolved && mat_info && mat_info->ready && s_bunny_count > 0;
 
     nt_gfx_begin_frame();
-    /* nt_stats reads frame total via segment named "frame" by convention. */
+    /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
     nt_gfx_begin_segment("frame");
 
     if (g_nt_gfx.context_restored) {
@@ -433,7 +433,7 @@ static void frame(void) {
         const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 
         char overlay[768];
-        uint32_t written = nt_stats_format_lines(overlay, sizeof(overlay));
+        uint32_t written = nt_debug_overlay_format_lines(overlay, sizeof(overlay));
         if (written < sizeof(overlay)) {
             (void)snprintf(overlay + written, sizeof(overlay) - written,
                            "\nControls:\n"
@@ -460,22 +460,23 @@ static void frame(void) {
     nt_gfx_end_segment();
     nt_gfx_end_frame();
 
-    nt_stats_count("bunnies", (uint64_t)s_bunny_count);
-    nt_stats_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
-    nt_stats_frame_end();
+    nt_debug_overlay_count("bunnies", (uint64_t)s_bunny_count);
+    nt_debug_overlay_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
+    nt_debug_overlay_frame_end();
 
-    /* Throughput log — bunnymark owns its own format. nt_stats provides
+    /* Throughput log — bunnymark owns its own format. nt_debug_overlay provides
      * generic accessors; demo-specific fields (bunny count, atlas quality)
      * come from local state. */
     static uint32_t s_log_frame_counter;
     if ((++s_log_frame_counter % 60U) == 0U) {
-        const float gpu_ms = nt_stats_get_gpu_ms();
+        const float gpu_ms = nt_debug_overlay_get_gpu_ms();
         const char *atlas_str = s_hd_active ? "HD" : "SD";
         if (gpu_ms < 0.0F) {
-            nt_log_info("fps=%.1f cpu=%.2fms gpu=N/A draws=%u bunnies=%u atlas=%s", (double)nt_stats_get_fps(), (double)nt_stats_get_cpu_ms(), nt_stats_get_draw_calls(), s_bunny_count, atlas_str);
-        } else {
-            nt_log_info("fps=%.1f cpu=%.2fms gpu=%.2fms draws=%u bunnies=%u atlas=%s", (double)nt_stats_get_fps(), (double)nt_stats_get_cpu_ms(), (double)gpu_ms, nt_stats_get_draw_calls(),
+            nt_log_info("fps=%.1f cpu=%.2fms gpu=N/A draws=%u bunnies=%u atlas=%s", (double)nt_debug_overlay_get_fps(), (double)nt_debug_overlay_get_cpu_ms(), nt_debug_overlay_get_draw_calls(),
                         s_bunny_count, atlas_str);
+        } else {
+            nt_log_info("fps=%.1f cpu=%.2fms gpu=%.2fms draws=%u bunnies=%u atlas=%s", (double)nt_debug_overlay_get_fps(), (double)nt_debug_overlay_get_cpu_ms(), (double)gpu_ms,
+                        nt_debug_overlay_get_draw_calls(), s_bunny_count, atlas_str);
         }
     }
 
@@ -532,8 +533,8 @@ int main(void) {
 
     /* Console throughput log every 60 frames (FPS, CPU/GPU ms, draws, bunnies,
      * atlas quality) plus on-screen stats/controls overlay. */
-    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
-    nt_stats_init(&stats_desc);
+    nt_debug_overlay_desc_t stats_desc = nt_debug_overlay_desc_defaults();
+    nt_debug_overlay_init(&stats_desc);
 
     /* Frame rate cap removed: native engine loop runs uncapped (target_dt=0.0F).
      * dt-scaled physics already produces the same trajectories at any FPS. */
@@ -624,7 +625,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
     nt_text_renderer_shutdown();
     nt_font_destroy(s_overlay_font);
     nt_font_shutdown();

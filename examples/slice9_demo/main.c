@@ -10,6 +10,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "font/nt_font.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
@@ -22,7 +23,6 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_inspector.h"
@@ -293,7 +293,7 @@ static void declare_nested_panels(void) {
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_stats_frame_begin();
+    nt_debug_overlay_frame_begin();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -370,7 +370,7 @@ static void frame(void) {
     uniforms.near_far[1] = 1.0F;
 
     nt_gfx_begin_frame();
-    /* nt_stats reads frame total via segment named "frame" by convention. */
+    /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
     nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -437,15 +437,15 @@ static void frame(void) {
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         // #region metrics bridge
-        nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
-        nt_stats_count("ui_commands", (uint64_t)nt_ui_get_last_walk_command_count(s_ctx));
-        nt_stats_count("ui_rect_cmds", (uint64_t)nt_ui_get_last_walk_rect_command_count(s_ctx));
-        nt_stats_count("ui_image_cmds", (uint64_t)nt_ui_get_last_walk_image_command_count(s_ctx));
-        nt_stats_count("ui_text_cmds", (uint64_t)nt_ui_get_last_walk_text_command_count(s_ctx));
-        nt_stats_count("ui_border_cmds", (uint64_t)nt_ui_get_last_walk_border_command_count(s_ctx));
-        nt_stats_count("ui_scissor_cmds", (uint64_t)nt_ui_get_last_walk_scissor_command_count(s_ctx));
-        nt_stats_count("ui_layout_us", (uint64_t)(nt_ui_get_last_layout_ms(s_ctx) * 1000.0F));
-        nt_stats_count("ui_walk_us", (uint64_t)(nt_ui_get_last_walk_ms(s_ctx) * 1000.0F));
+        nt_debug_overlay_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
+        nt_debug_overlay_count("ui_commands", (uint64_t)nt_ui_get_last_walk_command_count(s_ctx));
+        nt_debug_overlay_count("ui_rect_cmds", (uint64_t)nt_ui_get_last_walk_rect_command_count(s_ctx));
+        nt_debug_overlay_count("ui_image_cmds", (uint64_t)nt_ui_get_last_walk_image_command_count(s_ctx));
+        nt_debug_overlay_count("ui_text_cmds", (uint64_t)nt_ui_get_last_walk_text_command_count(s_ctx));
+        nt_debug_overlay_count("ui_border_cmds", (uint64_t)nt_ui_get_last_walk_border_command_count(s_ctx));
+        nt_debug_overlay_count("ui_scissor_cmds", (uint64_t)nt_ui_get_last_walk_scissor_command_count(s_ctx));
+        nt_debug_overlay_count("ui_layout_us", (uint64_t)(nt_ui_get_last_layout_ms(s_ctx) * 1000.0F));
+        nt_debug_overlay_count("ui_walk_us", (uint64_t)(nt_ui_get_last_walk_ms(s_ctx) * 1000.0F));
         // #endregion
 
         // #region stats overlay
@@ -454,8 +454,8 @@ static void frame(void) {
             glm_mat4_identity(stats_model);
             glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
-            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
-            /* nt_stats_draw only stages text; flush before end_pass so the
+            nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
+            /* nt_debug_overlay_draw only stages text; flush before end_pass so the
              * overlay lands in THIS frame, not the next walk's flush. */
             nt_text_renderer_flush();
         }
@@ -465,7 +465,7 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_segment();
     nt_gfx_end_frame();
-    nt_stats_frame_end();
+    nt_debug_overlay_frame_end();
 
     nt_window_swap_buffers();
 }
@@ -579,8 +579,8 @@ int main(int argc, char *argv[]) {
 
     nt_resource_set_activate_time_budget(0);
 
-    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
-    nt_stats_init(&stats_desc);
+    nt_debug_overlay_desc_t stats_desc = nt_debug_overlay_desc_defaults();
+    nt_debug_overlay_init(&stats_desc);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
@@ -600,7 +600,7 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_shutdown();
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

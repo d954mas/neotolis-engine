@@ -16,7 +16,7 @@
  *   R               reset player + shape rotation
  *   1 / 2 / 3       shape (cube / sphere / capsule)
  *   4 / 5 / 6 / 7   speed (stop / slow / medium / fast)
- *   F1              toggle debug overlay (player pose + nt_stats)
+ *   F1              toggle debug overlay (player pose + nt_debug_overlay)
  *   F2              UI inspector (sidebar; see issue #197 for 3D ctx limits)
  *   Esc             quit (native) */
 
@@ -26,6 +26,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "font/nt_font.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
@@ -41,7 +42,6 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
 #include "time/nt_time.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
@@ -706,7 +706,7 @@ static void draw_hud(float fb_w, float fb_h) {
     const float right_x = fb_w - 360.0F;
     float ry = fb_h - HUD_SIZE - 6.0F;
     char fps_line[64];
-    (void)snprintf(fps_line, sizeof fps_line, "fps: %5.1f   cpu: %.2f ms", (double)nt_stats_get_fps(), (double)nt_stats_get_cpu_ms());
+    (void)snprintf(fps_line, sizeof fps_line, "fps: %5.1f   cpu: %.2f ms", (double)nt_debug_overlay_get_fps(), (double)nt_debug_overlay_get_cpu_ms());
     draw_hud_block(fps_line, right_x, ry, HUD_SIZE, white);
     ry -= HUD_SIZE + 2.0F;
 
@@ -721,7 +721,7 @@ static void draw_hud(float fb_w, float fb_h) {
     draw_hud_block(pick_line, right_x, ry, HUD_SIZE, white);
 
     if (s_debug_overlay) {
-        /* Anchor the debug block ABOVE the bottom; nt_stats is ~6 lines so allow ~110 px. */
+        /* Anchor the debug block ABOVE the bottom; nt_debug_overlay is ~6 lines so allow ~110 px. */
         const float dbg_y_top = 130.0F;
         char dbg[256];
         const float yaw_deg = s_player_yaw * 57.29578F;
@@ -733,7 +733,7 @@ static void draw_hud(float fb_w, float fb_h) {
         glm_mat4_identity(stats_model);
         glm_translate(stats_model, (vec3){left_x, dbg_y_top - HUD_SIZE - 6.0F, 0.0F});
         const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
-        nt_stats_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
+        nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
     }
 
     nt_text_renderer_flush();
@@ -743,7 +743,7 @@ static void draw_hud(float fb_w, float fb_h) {
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_stats_frame_begin();
+    nt_debug_overlay_frame_begin();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -933,7 +933,7 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_segment();
     nt_gfx_end_frame();
-    nt_stats_frame_end();
+    nt_debug_overlay_frame_end();
     nt_window_swap_buffers();
 }
 // #endregion
@@ -1093,8 +1093,8 @@ int main(int argc, char *argv[]) {
     });
 
     nt_resource_set_activate_time_budget(0);
-    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
-    nt_stats_init(&stats_desc);
+    nt_debug_overlay_desc_t stats_desc = nt_debug_overlay_desc_defaults();
+    nt_debug_overlay_init(&stats_desc);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
@@ -1118,7 +1118,7 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_inspector_sprite_material);
     nt_material_destroy(s_inspector_text_material);
     nt_material_shutdown();
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();

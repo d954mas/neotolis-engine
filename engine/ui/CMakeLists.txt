@@ -108,10 +108,10 @@ target_compile_definitions(nt_ui PRIVATE
 # PUBLIC: types referenced in nt_ui.h (handles + pointer state struct).
 # PRIVATE: walker implementation deps (renderer + gfx + atlas).
 #
-# nt_stats is intentionally NOT a dependency. Per-walk metrics are
+# nt_debug_overlay is intentionally NOT a dependency. Per-walk metrics are
 # exposed via nt_ui_get_last_walk_* getters; apps that want them in the
-# debug overlay forward into nt_stats themselves. Direction-of-deps
-# matches nt_gfx <- nt_stats: observability pulls from rendering, never
+# debug overlay forward into nt_debug_overlay themselves. Direction-of-deps
+# matches nt_gfx <- nt_debug_overlay: observability pulls from rendering, never
 # the reverse.
 target_link_libraries(nt_ui
     PUBLIC

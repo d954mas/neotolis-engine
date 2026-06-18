@@ -59,7 +59,7 @@ uint32_t nt_text_renderer_test_glyph_count(void);
 const void *nt_text_renderer_test_vertices(void);
 bool nt_text_renderer_test_initialized(void);
 /* Count every entry into the setter (not only state changes) — lets tests
- * prove nt_stats_draw calls them unconditionally each frame. */
+ * prove nt_debug_overlay_draw calls them unconditionally each frame. */
 uint32_t nt_text_renderer_test_set_material_calls(void);
 uint32_t nt_text_renderer_test_set_font_calls(void);
 void nt_text_renderer_test_reset_call_counters(void);
