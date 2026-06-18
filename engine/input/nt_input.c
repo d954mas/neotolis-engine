@@ -165,10 +165,18 @@ void nt_input_poll(uint32_t frame) {
 
 void nt_input_shutdown(void) {
     nt_input_platform_shutdown();
+    /* Symmetric with nt_input_init: leave NO observable state (stale key edges or a disabled
+       gate) for a consumer that queries after shutdown or relies on it to drop a bot gate. */
     memset(&g_nt_input, 0, sizeof(g_nt_input));
+    memset(s_keys_current, 0, sizeof(s_keys_current));
+    memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
+    memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
+    s_last_poll_frame = 0;
+    s_have_last_frame = false;
     s_inject_count = 0;
+    s_player_enabled = true;
 }
 
 /* ---- Key query functions ---- */
@@ -463,6 +471,8 @@ static nt_inject_event_t *inject_reserve(uint32_t n) {
     s_inject_count += n;
     return first;
 }
+
+bool nt_input_inject_can_reserve(uint32_t n) { return n <= NT_INPUT_INJECT_QUEUE_MAX - s_inject_count; /* mirrors inject_reserve's capacity test */ }
 
 bool nt_input_inject_key(nt_key_t key, bool down, uint16_t at_frame) {
     nt_inject_event_t *e = inject_reserve(1);

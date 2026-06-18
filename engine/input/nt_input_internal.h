@@ -30,6 +30,11 @@ bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float 
 bool nt_input_inject_wheel(float dx, float dy, uint16_t at_frame);
 bool nt_input_inject_text(const uint32_t *cps, uint32_t n);
 
+/* Capacity preflight for an L2 compound command (click=2, gesture=npoints+2) so the whole
+   multi-event command is whole-or-nothing (D-06): the L2 TU cannot see the static count, so it
+   probes here BEFORE the first enqueue. true == the next n entries are guaranteed to fit. */
+bool nt_input_inject_can_reserve(uint32_t n);
+
 /* Event buffering — native backend queues events here during glfwPollEvents(),
    nt_input_platform_poll() drains them with current DPR. */
 

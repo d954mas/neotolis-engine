@@ -39,6 +39,30 @@ static bool pointer_type_from_name(const cJSON *t, uint8_t *out) {
     return true;
 }
 
+/* Range-check a bot-supplied pointer id before narrowing: a negative or out-of-range double cast
+   to uint32_t is UB. Rejects non-integral too. `cmd` names the command for the error message. */
+static bool parse_pointer_id(const cJSON *idj, const char *cmd, uint32_t *out, nt_devapi_error *err) {
+    double v = idj->valuedouble;
+    if (v < 0.0 || v > (double)UINT32_MAX || v != (double)(uint32_t)v) {
+        set_bad_params(err, cmd);
+        return false;
+    }
+    *out = (uint32_t)v;
+    return true;
+}
+
+/* Validate a mouse-button mask against the advertised domain (bits {1,2,4} -> value in [0,7])
+   before narrowing; a negative/oversized value would silently set phantom bits. */
+static bool parse_button_mask(const cJSON *bj, const char *cmd, uint8_t *out, nt_devapi_error *err) {
+    int v = bj->valueint;
+    if (v < 0 || v > 7) {
+        set_bad_params(err, cmd);
+        return false;
+    }
+    *out = (uint8_t)v;
+    return true;
+}
+
 // #region input.*
 static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -110,7 +134,10 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
         set_bad_params(err, "input.pointer: id must be a number");
         return false;
     }
-    uint32_t id = (uint32_t)idj->valuedouble;
+    uint32_t id;
+    if (!parse_pointer_id(idj, "input.pointer: id out of range", &id, err)) {
+        return false;
+    }
     float x = 0.0F;
     float y = 0.0F;
     if (kind != NT_INJECT_POINTER_UP) {
@@ -135,7 +162,9 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
             set_bad_params(err, "input.pointer: buttons must be a number");
             return false;
         }
-        buttons = (uint8_t)bj->valueint;
+        if (!parse_button_mask(bj, "input.pointer: buttons out of range [0,7]", &buttons, err)) {
+            return false;
+        }
     }
     if (!nt_input_inject_pointer(kind, id, x, y, 1.0F, type, buttons, 0)) {
         set_bad_params(err, "input.pointer: inject queue overflow");
@@ -161,7 +190,9 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
             set_bad_params(err, "input.move: id must be a number");
             return false;
         }
-        id = (uint32_t)idj->valuedouble;
+        if (!parse_pointer_id(idj, "input.move: id out of range", &id, err)) {
+            return false;
+        }
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
@@ -192,7 +223,9 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
             set_bad_params(err, "input.click: id must be a number");
             return false;
         }
-        id = (uint32_t)idj->valuedouble;
+        if (!parse_pointer_id(idj, "input.click: id out of range", &id, err)) {
+            return false;
+        }
     }
     uint8_t buttons = 1U; /* default left */
     const cJSON *bj = cJSON_GetObjectItemCaseSensitive(params, "button");
@@ -201,10 +234,18 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
             set_bad_params(err, "input.click: button must be a number mask");
             return false;
         }
-        buttons = (uint8_t)bj->valueint;
+        if (!parse_button_mask(bj, "input.click: button out of range [0,7]", &buttons, err)) {
+            return false;
+        }
     }
     float x = (float)xj->valuedouble;
     float y = (float)yj->valuedouble;
+    /* Whole-or-nothing (D-06): preflight both entries so a near-full queue can never accept the
+       DOWN and reject the UP, leaving a stuck synthetic pointer-down. */
+    if (!nt_input_inject_can_reserve(2U)) {
+        set_bad_params(err, "input.click: inject queue overflow");
+        return false;
+    }
     /* down carries the button mask, up releases. Enqueue down then up so the click is ordered. */
     if (!nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0)) {
         set_bad_params(err, "input.click: inject queue overflow");
@@ -256,7 +297,10 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         set_bad_params(err, "input.gesture: id must be a number");
         return false;
     }
-    uint32_t id = (uint32_t)idj->valuedouble;
+    uint32_t id;
+    if (!parse_pointer_id(idj, "input.gesture: id out of range", &id, err)) {
+        return false;
+    }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
         set_bad_params(err, "input.gesture: type must be 'mouse', 'touch' or 'pen'");
@@ -300,10 +344,17 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
             return false;
         }
     }
-    /* Frame-offset arithmetic guard: (npoints-1)*stride must fit in the uint16 countdown (T-66-04). */
-    int last_offset = (npoints - 1) * (int)stride;
+    /* Frame-offset arithmetic guard: (npoints-1)*stride must fit in the uint16 countdown (T-66-04).
+       Compute in a wider type so the multiplication itself can't overflow int (untrusted npoints). */
+    int64_t last_offset = (int64_t)(npoints - 1) * (int64_t)stride;
     if (last_offset > UINT16_MAX) {
         set_bad_params(err, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
+        return false;
+    }
+    /* Whole-or-nothing (D-06): reserve DOWN + npoints moves + UP up front so a mid-sequence overflow
+       can't leave a stuck pointer-down. This also bounds npoints to <= QUEUE_MAX-2 (caps the span). */
+    if (!nt_input_inject_can_reserve((uint32_t)npoints + 2U)) {
+        set_bad_params(err, "input.gesture: inject queue overflow");
         return false;
     }
     /* down@0 carrying first point, move per point at its frame offset, up after the last move. */
@@ -344,7 +395,10 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
         set_bad_params(err, "input.button: buttons must be a number mask");
         return false;
     }
-    uint8_t buttons = (uint8_t)bj->valueint;
+    uint8_t buttons;
+    if (!parse_button_mask(bj, "input.button: buttons out of range [0,7]", &buttons, err)) {
+        return false;
+    }
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
@@ -352,7 +406,9 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
             set_bad_params(err, "input.button: id must be a number");
             return false;
         }
-        id = (uint32_t)idj->valuedouble;
+        if (!parse_pointer_id(idj, "input.button: id out of range", &id, err)) {
+            return false;
+        }
     }
     /* A move at the current slot position carrying the new button mask (apply_buttons_mask edges). */
     nt_pointer_t *ptr = NULL;

@@ -11,6 +11,7 @@
 /* clang-format off */
 #include "devapi/nt_devapi_internal.h"
 #include "input/nt_input.h"
+#include "input/nt_input_internal.h" /* inject API: fill the queue to probe L2 whole-or-nothing */
 #include "unity.h"
 /* clang-format on */
 
@@ -153,6 +154,81 @@ static void test_input_text_bad_type_bad_params(void) { assert_bad_params(nt_dev
 
 static void test_input_set_player_enabled_bad_type_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":1}}")); }
 
+/* ---- WR-02: out-of-domain numeric bot input -> bad_params (never silently coerced) ---- */
+
+static void test_input_pointer_negative_id_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":-1,\"x\":1,\"y\":2}}")); }
+
+static void test_input_click_negative_id_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2,\"id\":-5}}")); }
+
+static void test_input_pointer_buttons_out_of_range_bad_params(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":1,\"y\":2,\"buttons\":8}}"));
+}
+
+static void test_input_click_button_out_of_range_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2,\"button\":8}}")); }
+
+static void test_input_button_out_of_range_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":256}}")); }
+
+/* ---- CR-01/WR-05: multi-event sugar is whole-or-nothing on a near-full inject queue ---- */
+
+/* Fill the inject queue to leave exactly `free` slots, using future-scheduled keys (offset 1000)
+   so a poll cannot drain them. Starts from a clean queue via nt_input_init. */
+static void fill_inject_queue_leaving(uint32_t free) {
+    nt_input_init();
+    for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - free; i++) {
+        TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true, 1000));
+    }
+}
+
+/* A click needs 2 entries; with only 1 free it must reject WHOLE and enqueue nothing (no orphan DOWN).
+   Proof of "nothing enqueued": after the reject, exactly 1 free slot must remain — one 1-entry inject
+   then succeeds and a second overflows (same idiom as the L1 test_overflow_rejects_whole). */
+static void test_input_click_near_full_atomic(void) {
+    fill_inject_queue_leaving(1U);
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":6}}"));
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true, 1000));  /* the 1 free slot survived */
+    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_C, true, 1000)); /* now full -> proves click wrote nothing */
+    nt_input_shutdown();
+}
+
+/* A 2-point gesture needs 4 entries (down + 2 moves + up); with only 3 free it rejects whole. */
+static void test_input_gesture_near_full_atomic(void) {
+    fill_inject_queue_leaving(3U);
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}"));
+    /* 3 free slots must remain intact: three 1-entry injects succeed, the fourth overflows. */
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true, 1000));
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_C, true, 1000));
+    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_D, true, 1000));
+    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_E, true, 1000));
+    nt_input_shutdown();
+}
+
+/* ---- WR-05: input.text malformed-UTF-8 reject paths ---- */
+
+/* Raw 0xFF byte (NOT a \u escape, which would produce valid UTF-8) -> malformed lead byte. cJSON
+   copies high bytes between quotes verbatim, so the handler's decoder is what rejects it. */
+static void test_input_text_bad_lead_byte_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xff\"}}")); }
+
+/* A 2-byte lead (0xC0) with no continuation byte -> truncated sequence -> bad_params. */
+static void test_input_text_truncated_continuation_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xc0\"}}")); }
+
+/* ---- WR-05: offline input.state{pop_text} drain coverage (no socket) ---- */
+
+static void test_input_state_pop_text_drains_codepoints(void) {
+    nt_input_init();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));    /* enqueue char@0 'h','i' */
+    nt_input_poll(1);                                                                                        /* new frame -> drain into the ring */
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    cJSON *cps = cJSON_GetObjectItemCaseSensitive(result, "codepoints");
+    TEST_ASSERT_TRUE(cJSON_IsArray(cps));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(cps));
+    TEST_ASSERT_EQUAL_INT(104, cJSON_GetArrayItem(cps, 0)->valueint);
+    TEST_ASSERT_EQUAL_INT(105, cJSON_GetArrayItem(cps, 1)->valueint);
+    cJSON_Delete(root);
+    nt_input_shutdown();
+}
+
 /* ---- input.state (the observation hook, INPUT-04/05/06 read-back) ---- */
 
 static void test_input_state_registers(void) { TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("input.state")); }
@@ -230,6 +306,16 @@ int main(void) {
     RUN_TEST(test_input_pointer_bad_type_bad_params);
     RUN_TEST(test_input_text_bad_type_bad_params);
     RUN_TEST(test_input_set_player_enabled_bad_type_bad_params);
+    RUN_TEST(test_input_pointer_negative_id_bad_params);
+    RUN_TEST(test_input_click_negative_id_bad_params);
+    RUN_TEST(test_input_pointer_buttons_out_of_range_bad_params);
+    RUN_TEST(test_input_click_button_out_of_range_bad_params);
+    RUN_TEST(test_input_button_out_of_range_bad_params);
+    RUN_TEST(test_input_click_near_full_atomic);
+    RUN_TEST(test_input_gesture_near_full_atomic);
+    RUN_TEST(test_input_text_bad_lead_byte_bad_params);
+    RUN_TEST(test_input_text_truncated_continuation_bad_params);
+    RUN_TEST(test_input_state_pop_text_drains_codepoints);
     RUN_TEST(test_input_state_registers);
     RUN_TEST(test_input_state_describe);
     RUN_TEST(test_input_state_empty_ok);
