@@ -1,14 +1,13 @@
 #ifndef NT_UI_MENU_H
 #define NT_UI_MENU_H
 
-/* Context-menu + recursive submenus (WGT-04/05) built ON popup-core. Each menu level is a popup-core
- * floating (z-band per depth); a parent item carrying a `submenu` pointer opens its child as a nested
- * popup fly-out. The novel piece is the mouse-aim triangle (CITED: Amazon mega-dropdown / Dear ImGui
- * BeginMenuEx): while the cursor travels diagonally toward an open submenu it stays open even when the
- * path crosses sibling items (Pitfall 3 — never collapse on raw hover-loss). Per-level edge-flip,
+/* Context-menu + recursive submenus built ON popup-core. Each menu level is a popup-core floating
+ * (z-band per depth); a parent item carrying a `submenu` pointer opens its child as a nested popup
+ * fly-out. The mouse-aim triangle keeps an open submenu open while the cursor travels diagonally toward
+ * it even when the path crosses sibling items (never collapse on raw hover-loss). Per-level edge-flip,
  * nested dismiss from the deepest level up, and keyboard-nav across levels round it out.
  *
- * Model D: the GAME owns the open `bool` and the chosen-item id sink; the menu only signals. */
+ * The GAME owns the open `bool` and the chosen-item id sink; the menu only signals. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,20 +19,19 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 
-/* Tuning (A1 — tuning-only, final values settle at the visual-QA gate). AIM_FALLBACK is how long the
- * cursor may sit OFF the aim triangle before the hovered sibling wins; OPEN_DELAY gates the submenu
- * open so a quick pass-over does not flash every child. */
+/* AIM_FALLBACK is how long the cursor may sit OFF the aim triangle before the hovered sibling wins;
+ * OPEN_DELAY gates the submenu open so a quick pass-over does not flash every child. */
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 #define NT_UI_MENU_OPEN_DELAY_SECS 0.20F
 
-/* Submenu nesting cap. T-65-10: a runaway tree (cyclic submenu pointer, pathological depth) would
- * exhaust the popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). */
+/* Submenu nesting cap: a runaway tree (cyclic submenu pointer, pathological depth) would exhaust the
+ * popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). */
 #define NT_UI_MENU_MAX_DEPTH 8
 
 /* One menu item. Recursion is via `submenu` (NULL = leaf). The game builds a static const tree; the
  * menu never mutates it. ABI guarded portably (two pointers + 32B of ref/scalars/pad) so the guard
  * holds on both 64-bit native and 32-bit wasm. `icon` is an OPTIONAL leading-gutter sprite (atlas.id==0
- * = no icon -> aligned empty space when style->icon_size > 0; unified icon model, mirrors dropdown). */
+ * = no icon -> aligned empty space when style->icon_size > 0; unified icon model). */
 typedef struct nt_ui_menu_item nt_ui_menu_item_t;
 struct nt_ui_menu_item {
     const char *label;                /* non-NULL when this slot is a real item (NULL = separator) */
@@ -80,8 +78,9 @@ _Static_assert(sizeof(nt_ui_menu_style_t) == 96, "nt_ui_menu_style_t stable ABI 
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
 /* Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
- * game directly); the menu clears it on dismiss. `chosen_id` latches the activated leaf id (0 = none
- * yet) — the game reads + clears it. anchor_x/y is the screen-space open point (the cursor at open). */
+ * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly
+ * (the menu resets its runtime chain on the closed frame). `chosen_id` latches the activated leaf id
+ * (0 = none yet) — the game reads + clears it. anchor_x/y is the screen-space open point (cursor at open). */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     uint32_t chosen_id;       /* latched activated leaf id; 0 = none. Game reads + clears. */
@@ -90,21 +89,23 @@ typedef struct {
 } nt_ui_menu_state_t;
 _Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI (2 float + 1 u32 + 1 bool + 3 pad)");
 
-/* Open trigger: arms the menu at the cursor when the bound widget area was right-clicked OR long-pressed
- * this frame. `id` is the menu's stable id (drives every level's salted state). Returns true if it armed
- * this frame (so the caller can stop other handling). long_press_secs <= 0 disables the long-press path
- * (right-click only). Reads NT_BUTTON_RIGHT for the desktop trigger and an events long-press gesture for
- * touch (Plan 01). */
-bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t id, nt_ui_menu_state_t *st, float long_press_secs);
+/* Open trigger: arms the menu at the cursor on a right-click OR long-press this frame. `menu_id` is the
+ * menu's stable id (drives every level's salted state). `target_id` optionally binds the trigger to a
+ * widget: 0 = arm anywhere (any right-click); non-zero = arm only when the pointer is over that widget's
+ * arbitrated front-most hover (respects z-order). long_press_secs <= 0 disables the long-press path
+ * (right-click only); when set, the long-press gesture is arbitrated on target_id (or menu_id if unbound).
+ * Returns true if it armed this frame (so the caller can stop other handling). */
+bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, nt_ui_menu_state_t *st, float long_press_secs);
 
 /* Declare the menu: renders the root as a popup-core floating at the anchor and recursively declares
  * each open submenu as a nested popup-core fly-out, driven by the mouse-aim hover-intent. Esc /
  * outside-click dismisses the deepest open level up the chain; keyboard arrows navigate. On a leaf
- * activate it latches st->chosen_id and dismisses the whole chain (Model D). id/items/st/style non-NULL;
+ * activate it latches st->chosen_id and dismisses the whole chain. id/items/st/style non-NULL;
  * NT_ASSERT on a malformed tree (NULL label with a submenu count, depth past the cap). A NULL-label item
  * is a non-interactive separator (a thin divider, skipped by hover/click/keyboard-nav).
  * A SINGLE root-level full-viewport occluder sits under the whole menu stack: it absorbs the dismiss
- * click and gates base UI while the menu is open (NO per-level catchers — those caused the 0c trap).
+ * click and gates base UI while the menu is open. NO per-level catchers: a per-level catcher sits ABOVE
+ * ancestor panels and would trap the user in the deepest level.
  * style is mutated in place to memoize resolved atlas refs (panel_bg / arrow).
  * Layers: every level's panel + row fills + icons + arrow draw on data->layer (also the popup panel
  * layer), item text on label_layer (split to batch). data may be NULL (fills fall to layer 0). */
@@ -112,7 +113,7 @@ void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t 
                 nt_ui_menu_style_t *style);
 
 #ifdef NT_TEST_ACCESS
-/* Pure barycentric point-in-triangle (CITED RESEARCH §submenu). No GL, no ctx — directly unit-tested. */
+/* Pure barycentric point-in-triangle. No GL, no ctx — directly unit-tested. */
 bool nt_ui_menu_test_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy);
 
 /* The aim-triangle corners for a submenu rect on a given side (RIGHT => near edge is the submenu LEFT;
@@ -129,7 +130,7 @@ bool nt_ui_menu_test_hover_intent(nt_ui_context_t *ctx, uint32_t menu_id, uint8_
 float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
 
 /* Resolve a level's panel id / a row id so tests can query their prev-frame bbox via nt_ui_get_bbox
- * and drive the snapshot pointer at real row geometry (Wave 0c occlusion-trap regression). */
+ * and drive the snapshot pointer at real row geometry. */
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth);
 uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx);
 

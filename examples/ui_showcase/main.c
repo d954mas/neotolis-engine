@@ -417,6 +417,7 @@ static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
 static uint32_t s_id_dd_fruit, s_id_dd_city;        /* dropdown triggers */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
 static uint32_t s_id_menu;                          /* context menu (drives every level) */
+static uint32_t s_id_menu_panel;                    /* the panel the menu trigger binds to (opens only over it) */
 static uint32_t s_id_tabs_demo_base;                /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -1668,16 +1669,18 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Travel diagonally into the submenu (crossing a sibling) and it stays open; Esc closes the deepest level; arrows/Enter navigate.",
                 g_current->caption);
 
-    /* A target panel: right-click / long-press over it arms the menu at the cursor. The trigger reads
-     * the global right-click; the long-press path binds an events gesture to the menu id. */
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+    /* A target panel: the menu binds to its id, so a right-click / long-press arms the menu ONLY over
+     * this panel (not anywhere on the tab). The long-press gesture is arbitrated on the same panel id. */
+    CLAY({.id = (Clay_ElementId){.id = s_id_menu_panel},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = g_current->panel_alt,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click / long-press here", g_current->body);
     }
+    nt_ui_block_pointer(ctx, s_id_menu_panel, NULL); /* register the panel id so the trigger can hover-test it */
 
-    (void)nt_ui_menu_open_trigger(ctx, s_id_menu, &st->menu.state, 0.5F);
+    (void)nt_ui_menu_open_trigger(ctx, s_id_menu, s_id_menu_panel, &st->menu.state, 0.5F);
     nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu, root_items, root_count, &st->menu.state, g_current->menu);
     if (st->menu.state.chosen_id != 0U) {
         st->menu.last_chosen = st->menu.state.chosen_id;
@@ -1931,6 +1934,7 @@ static void ensure_ids(void) {
     s_id_tip_b = nt_ui_id("showcase/tip_b");
     s_id_tip_c = nt_ui_id("showcase/tip_c");
     s_id_menu = nt_ui_id("showcase/menu");
+    s_id_menu_panel = nt_ui_id("showcase/menu_panel");
     s_ids_ready = true;
 }
 

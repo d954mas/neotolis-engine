@@ -649,6 +649,99 @@ static void test_menu_root_occluder_present_while_open(void) {
     TEST_ASSERT_FALSE_MESSAGE(occ2.found, "closed menu must declare no occluder (present-only)");
 }
 
+/* ============================ open_trigger binding + reopen reset ============================ */
+
+#define TARGET_ID 0x7A19E7U /* the bound widget the trigger hover-tests */
+
+/* Drive a clean GLOBAL right-button press edge at (px,py): the trigger reads nt_input_mouse_is_pressed
+ * (global), the hover gate reads the per-frame snapshot pointer separately. */
+static void menu_right_press(float px, float py) {
+    nt_input_poll();
+    nt_input_clear_all_pointers();
+    nt_input_pointer_down(0U, px, py, 1.0F, NT_POINTER_MOUSE, 2U); /* mask 2 = NT_BUTTON_RIGHT */
+}
+
+/* One frame: declare a fixed target panel (registered for hover via block_pointer), run open_trigger
+ * bound to it, then declare the menu. The snapshot pointer at (px,py) drives the hover gate. */
+static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uint32_t target_id, float px, float py) {
+    nt_pointer_t p = {0};
+    p.x = px;
+    p.y = py;
+    p.active = true;
+    if (nt_input_mouse_is_pressed(NT_BUTTON_RIGHT)) {
+        p.buttons[NT_BUTTON_RIGHT].is_down = true;
+        p.buttons[NT_BUTTON_RIGHT].is_pressed = true;
+    }
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    /* Target panel at (200,150) 160x120 so the hover-test has a concrete bbox. */
+    CLAY({.id = (Clay_ElementId){.id = TARGET_ID}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {200.0F, 150.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(120)}}}) {
+    }
+    nt_ui_block_pointer(s_fx.ctx, TARGET_ID, NULL);
+    (void)nt_ui_menu_open_trigger(s_fx.ctx, MENU_A, target_id, st, 0.0F);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root, 2U, st, style);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Unbound (target_id == 0): a right-click ANYWHERE arms the menu (preserves the global trigger). ---- */
+static void test_menu_open_trigger_unbound_arms_anywhere(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    nt_input_clear_all_keys();
+    menu_right_press(20.0F, 20.0F); /* far from the target panel */
+    trigger_frame(&st, &style, 0U, 20.0F, 20.0F);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "unbound trigger must arm on a right-click anywhere");
+}
+
+/* ---- Bound (target_id != 0): a right-click OFF the target does NOT arm; ON the target DOES. ---- */
+static void test_menu_open_trigger_bound_requires_target_hover(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+
+    /* Settle one frame so the target panel is registered for next-frame hover arbitration. */
+    nt_input_clear_all_keys();
+    nt_input_clear_all_pointers();
+    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F);
+    TEST_ASSERT_FALSE(st.open);
+
+    /* Right-click far OFF the target -> bound trigger must NOT arm. */
+    menu_right_press(20.0F, 20.0F);
+    trigger_frame(&st, &style, TARGET_ID, 20.0F, 20.0F);
+    TEST_ASSERT_FALSE_MESSAGE(st.open, "bound trigger must not arm when the pointer is off the target");
+
+    /* Right-click ON the target center (200..360, 150..270) -> arms. */
+    menu_right_press(280.0F, 210.0F);
+    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "bound trigger must arm when the pointer is over the target");
+}
+
+/* ---- Reopen reset: open -> descend into a submenu -> st->open=false (closed frame) -> st->open=true
+ *      must start with a clean chain (no stale open_path/focus from the prior session). ---- */
+static void test_menu_reopen_after_external_close_is_clean(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    /* Open the File submenu (depth 1) via keyboard. */
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_frame(&st, &style, 0.0F, 0.0F);
+    menu_key(NT_KEY_ARROW_RIGHT);
+    menu_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE(st.open);
+    /* The depth-1 submenu panel must be live now. */
+    nt_input_clear_all_keys();
+    menu_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U)).found, "submenu must be open before the external close");
+
+    /* Game closes the menu directly (not via the helper / internal dismiss), skip a frame. */
+    st.open = false;
+    menu_frame(&st, &style, 0.0F, 0.0F); /* closed frame resets the runtime chain */
+
+    /* Direct reopen: the prior submenu must NOT still be open. */
+    st.open = true;
+    menu_frame(&st, &style, 0.0F, 0.0F); /* settle */
+    menu_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U)).found, "a direct reopen must start with no stale submenu open");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_menu_abi_sizes);
@@ -675,5 +768,8 @@ int main(void) {
     RUN_TEST(test_menu_separator_non_interactive);
     RUN_TEST(test_menu_arrow_marker_on_parent_only);
     RUN_TEST(test_menu_root_occluder_present_while_open);
+    RUN_TEST(test_menu_open_trigger_unbound_arms_anywhere);
+    RUN_TEST(test_menu_open_trigger_bound_requires_target_hover);
+    RUN_TEST(test_menu_reopen_after_external_close_is_clean);
     return UNITY_END();
 }
