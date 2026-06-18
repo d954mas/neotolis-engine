@@ -200,6 +200,10 @@ class DevApiClient:
         """
         if total < 0:
             raise ValueError("total must be >= 0")
+        # chunk <= 0 would never decrement remaining (infinite loop); chunk > 4.0 exceeds the engine
+        # cap (NT_DEVAPI_TIME_WAIT_MAX_SECONDS) so every segment raises. Bound it to (0, 4.0].
+        if not 0 < chunk <= 4.0:
+            raise ValueError("chunk must be in (0, 4.0]")
         remaining = total
         while remaining > 0:
             seg = chunk if remaining > chunk else remaining
