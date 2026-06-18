@@ -89,13 +89,15 @@ typedef struct {
 } nt_ui_menu_state_t;
 _Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI (2 float + 1 u32 + 1 bool + 3 pad)");
 
-/* Open trigger: arms the menu at the cursor on a right-click OR long-press this frame. `menu_id` is the
- * menu's stable id (drives every level's salted state). `target_id` optionally binds the trigger to a
- * widget: 0 = arm anywhere (any right-click); non-zero = arm only when the pointer is over that widget's
- * arbitrated front-most hover (respects z-order). long_press_secs <= 0 disables the long-press path
- * (right-click only); when set, the long-press gesture is arbitrated on target_id (or menu_id if unbound).
- * Returns true if it armed this frame (so the caller can stop other handling). */
-bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, nt_ui_menu_state_t *st, float long_press_secs);
+/* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
+ * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
+ * widget; nt_ui_events is the one canonical mutating step per widget per frame). `menu_id` is the menu's
+ * stable id (drives every level's salted state). `target_id` optionally binds the right-click to a widget:
+ * 0 = arm anywhere (any right-click); non-zero = arm only over that widget's arbitrated front-most hover
+ * (respects z-order, via idempotent nt_ui_query_interaction). `long_pressed` is the touch trigger: the
+ * caller passes the long_pressed flag from ITS target widget's own nt_ui_events gesture step (this helper
+ * owns no gesture timing). Returns true if it armed this frame (so the caller can stop other handling). */
+bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st);
 
 /* Declare the menu: renders the root as a popup-core floating at the anchor and recursively declares
  * each open submenu as a nested popup-core fly-out, driven by the mouse-aim hover-intent. Esc /

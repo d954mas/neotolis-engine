@@ -224,27 +224,18 @@ static void menu_mouse_pos(const nt_ui_context_t *ctx, float *mx, float *my) {
     }
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (arm + two optional gates)
-bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, nt_ui_menu_state_t *st, float long_press_secs) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (arm gate)
+bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu_open_trigger: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_open_trigger: call between nt_ui_begin/end");
     NT_ASSERT(menu_id != 0U && st != NULL && "nt_ui_menu_open_trigger: menu_id non-zero, st non-NULL");
 
-    /* Right-click is the desktop trigger; a long-press (events gesture) is the touch trigger. When bound
-     * (target_id != 0) the right-click only arms over the arbitrated front-most hover of that widget, so
-     * the menu opens only over its zone and respects z-order; target_id == 0 arms a right-click anywhere. */
-    bool armed = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
-    if (armed && target_id != 0U) {
-        armed = nt_ui_query_interaction(ctx, target_id).hovered;
-    }
-    /* Long-press needs a concrete widget to arbitrate the gesture on; drive it on target_id when bound,
-     * else fall back to the menu's own id so the unbound (anywhere) trigger still works on touch. */
-    if (!armed && long_press_secs > 0.0F) {
-        const uint32_t gesture_id = (target_id != 0U) ? target_id : menu_id;
-        const nt_ui_events_cfg_t cfg = {.long_press_secs = long_press_secs, .double_click = false};
-        const nt_ui_events_t ev = nt_ui_events(ctx, gesture_id, &cfg);
-        armed = ev.long_pressed;
-    }
+    /* Idempotent reads only — no mutating step here (nt_ui_events is the caller's one canonical step per
+     * widget). Right-click is the desktop trigger: bound (target_id != 0) it arms only over the arbitrated
+     * front-most hover of that widget (respects z-order), target_id == 0 arms anywhere. long_pressed is the
+     * touch trigger, supplied by the caller from its target widget's own events gesture step. */
+    const bool right_armed = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT) && (target_id == 0U || nt_ui_query_interaction(ctx, target_id).hovered);
+    const bool armed = right_armed || long_pressed;
     if (armed) {
         float mx = 0.0F;
         float my = 0.0F;

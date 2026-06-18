@@ -662,8 +662,9 @@ static void menu_right_press(float px, float py) {
 }
 
 /* One frame: declare a fixed target panel (registered for hover via block_pointer), run open_trigger
- * bound to it, then declare the menu. The snapshot pointer at (px,py) drives the hover gate. */
-static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uint32_t target_id, float px, float py) {
+ * bound to it, then declare the menu. The snapshot pointer at (px,py) drives the hover gate. long_pressed
+ * is the caller-supplied touch trigger (the helper does no mutating gesture step of its own). */
+static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uint32_t target_id, float px, float py, bool long_pressed) {
     nt_pointer_t p = {0};
     p.x = px;
     p.y = py;
@@ -677,7 +678,7 @@ static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uin
     CLAY({.id = (Clay_ElementId){.id = TARGET_ID}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {200.0F, 150.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(120)}}}) {
     }
     nt_ui_block_pointer(s_fx.ctx, TARGET_ID, NULL);
-    (void)nt_ui_menu_open_trigger(s_fx.ctx, MENU_A, target_id, st, 0.0F);
+    (void)nt_ui_menu_open_trigger(s_fx.ctx, MENU_A, target_id, long_pressed, st);
     nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root, 2U, st, style);
     nt_ui_end(s_fx.ctx);
 }
@@ -688,8 +689,21 @@ static void test_menu_open_trigger_unbound_arms_anywhere(void) {
     nt_ui_menu_state_t st = {0};
     nt_input_clear_all_keys();
     menu_right_press(20.0F, 20.0F); /* far from the target panel */
-    trigger_frame(&st, &style, 0U, 20.0F, 20.0F);
+    trigger_frame(&st, &style, 0U, 20.0F, 20.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "unbound trigger must arm on a right-click anywhere");
+}
+
+/* ---- Caller-supplied long-press arms the trigger: the helper does NO mutating gesture step itself; the
+ *      caller passes long_pressed from ITS widget's events step. A right-click absent + long_pressed=true
+ *      must arm (and bind to the menu anchor at the cursor). ---- */
+static void test_menu_open_trigger_long_press_passed_in_arms(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    nt_input_clear_all_keys();
+    nt_input_clear_all_pointers(); /* no right-click this frame; arming comes solely from long_pressed */
+    trigger_frame(&st, &style, 0U, 40.0F, 40.0F, true);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "caller-supplied long_pressed must arm the trigger");
+    TEST_ASSERT_TRUE_MESSAGE(float_near(st.anchor_x, 40.0F, 0.5F) && float_near(st.anchor_y, 40.0F, 0.5F), "long-press arms the menu at the cursor");
 }
 
 /* ---- Bound (target_id != 0): a right-click OFF the target does NOT arm; ON the target DOES. ---- */
@@ -700,17 +714,17 @@ static void test_menu_open_trigger_bound_requires_target_hover(void) {
     /* Settle one frame so the target panel is registered for next-frame hover arbitration. */
     nt_input_clear_all_keys();
     nt_input_clear_all_pointers();
-    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F);
+    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F, false);
     TEST_ASSERT_FALSE(st.open);
 
     /* Right-click far OFF the target -> bound trigger must NOT arm. */
     menu_right_press(20.0F, 20.0F);
-    trigger_frame(&st, &style, TARGET_ID, 20.0F, 20.0F);
+    trigger_frame(&st, &style, TARGET_ID, 20.0F, 20.0F, false);
     TEST_ASSERT_FALSE_MESSAGE(st.open, "bound trigger must not arm when the pointer is off the target");
 
     /* Right-click ON the target center (200..360, 150..270) -> arms. */
     menu_right_press(280.0F, 210.0F);
-    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F);
+    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "bound trigger must arm when the pointer is over the target");
 }
 
@@ -769,6 +783,7 @@ int main(void) {
     RUN_TEST(test_menu_arrow_marker_on_parent_only);
     RUN_TEST(test_menu_root_occluder_present_while_open);
     RUN_TEST(test_menu_open_trigger_unbound_arms_anywhere);
+    RUN_TEST(test_menu_open_trigger_long_press_passed_in_arms);
     RUN_TEST(test_menu_open_trigger_bound_requires_target_hover);
     RUN_TEST(test_menu_reopen_after_external_close_is_clean);
     return UNITY_END();

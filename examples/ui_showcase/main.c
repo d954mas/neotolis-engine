@@ -344,7 +344,7 @@ struct tab_state {
     stress_params_t stress;
     /* Input tab. */
     input_params_t input;
-    /* Interaction-events + app-widget tabs (Phase 65). */
+    /* Interaction-events + app-widget tabs. */
     events_params_t events;
     dropdown_params_t dropdown;
     menu_params_t menu;
@@ -1678,9 +1678,12 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click / long-press here", g_current->body);
     }
-    nt_ui_block_pointer(ctx, s_id_menu_panel, NULL); /* register the panel id so the trigger can hover-test it */
+    /* The game owns the panel's single canonical events step (long-press gesture for touch); the trigger
+     * does only idempotent reads. Right-click binds to the same id via the trigger's query_interaction. */
+    static const nt_ui_events_cfg_t menu_cfg = {.long_press_secs = 0.5F, .double_click = false};
+    const nt_ui_events_t menu_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);
 
-    (void)nt_ui_menu_open_trigger(ctx, s_id_menu, s_id_menu_panel, &st->menu.state, 0.5F);
+    (void)nt_ui_menu_open_trigger(ctx, s_id_menu, s_id_menu_panel, menu_ev.long_pressed, &st->menu.state);
     nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu, root_items, root_count, &st->menu.state, g_current->menu);
     if (st->menu.state.chosen_id != 0U) {
         st->menu.last_chosen = st->menu.state.chosen_id;
@@ -1986,7 +1989,7 @@ static void ensure_tab_labels(void) {
     s_tab_labels_ready = true;
 }
 
-/* Demo-selection panel (left, FIXED 240): the reusable nt_ui_tabbar dogfooded (D-65-09). The game owns
+/* Demo-selection panel (left, FIXED 240): the reusable nt_ui_tabbar dogfooded. The game owns
  * s_active_tab (Model D); the widget draws the accent bar + selected fill + hover lighten and writes the
  * active index on click. Styled as a card (bg + border + radius) consistent with the other panels. */
 static void declare_tab_list(nt_ui_context_t *ctx) {
