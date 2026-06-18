@@ -199,14 +199,9 @@ static void test_input_button_out_of_range_bad_params(void) { assert_bad_params(
 
 /* ---- CR-01/WR-05: multi-event sugar is whole-or-nothing on a near-full SCHEDULE ---- */
 
-/* Fill the devapi schedule to leave exactly `free` slots, using future-scheduled keys (hold 1000)
-   so an advancing tick cannot drain them within the test. input.key{hold} stages down@0 + up@1000;
-   one slot per call would be ideal but a tap is 2 entries — instead fill via input.pointer down with
-   a far-future offset is not exposed, so use input.key with no hold (1 entry) WITHOUT advancing, so
-   nothing is released. Starts from a clean schedule via nt_devapi_init in setUp. */
+/* Each input.key (no hold) stages exactly 1 schedule entry; we never advance(), so none drain.
+   Leaves the schedule with `free` slots to probe whole-or-nothing reservation. */
 static void fill_schedule_leaving(uint32_t free) {
-    /* SCHED_MAX mirrors the L1 buffer cap (256). Each input.key (no hold) stages exactly 1 entry; we
-       never advance, so none drain. */
     for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - free; i++) {
         cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     }
@@ -306,8 +301,12 @@ static void test_sched_offset0_applies_on_advance(void) {
 
 /* A frozen tick releases NOTHING: an enqueued down@0 stays unscheduled while the frame is unchanged
    (pause / manual-idle), then lands on the next real advance. This is the new pause-freeze semantic
-   (replaces the old frames_remaining-on-pause freeze inside nt_input). */
+   (replaces the old frames_remaining-on-pause freeze inside nt_input).
+   Order-independent: nt_devapi_input_reset re-seeds the advance clock against the current
+   g_nt_app.frame, so the first tick_no_advance below can never see a spurious forced-advance no
+   matter which test ran first (a prior advancing test left s_last_frame elsewhere). */
 static void test_sched_pause_freeze(void) {
+    nt_devapi_input_reset(); /* seed the clock to the current frame so a frozen tick stays frozen. */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     tick_no_advance(); /* frame frozen -> schedule releases nothing */
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
@@ -364,6 +363,51 @@ static void test_sched_gesture_ordered_across_frames(void) {
     advance(); /* move@2 -> x=20; up@2 also due this tick (last_offset=2) -> release */
     TEST_ASSERT_TRUE(slot->x >= 19.999F && slot->x <= 20.001F);
     TEST_ASSERT_TRUE(slot->buttons[NT_BUTTON_LEFT].is_released);
+}
+
+/* input.move on the default mouse slot applies its position on the next advancing tick (by value,
+   not just queued count) — exercises sched_release_one's NT_INJECT_POINTER_MOVE branch at L2. */
+static void test_sched_move_applies_on_advance(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":12,\"y\":34}}")));
+    advance();
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= 11.999F && slot->x <= 12.001F);
+    TEST_ASSERT_TRUE(slot->y >= 33.999F && slot->y <= 34.001F);
+}
+
+/* input.wheel lands on the mouse slot after an advance: a move creates the slot, the wheel delta
+   accumulates onto it — exercises sched_release_one's NT_INJECT_WHEEL branch at L2 by value. */
+static void test_sched_wheel_applies_on_advance(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":5,\"y\":5}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":3}}")));
+    advance(); /* move creates the mouse slot, wheel accumulates on it (same advancing tick). */
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->wheel_dy >= 2.999F && slot->wheel_dy <= 3.001F);
+}
+
+/* input.click hold=0 (same-frame instant click): down@0 + up@0 both release on one advancing tick,
+   so the button is pressed AND released this frame, ending not-down. Exercises the sched up@0 path. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_click_hold_zero_same_frame(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":6,\"hold\":0}}")));
+    advance(); /* down@0 + up@0 both due this tick */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
 /* ---- WR-05: offline input.state{pop_text} drain coverage (no socket) ---- */
@@ -532,6 +576,9 @@ int main(void) {
     RUN_TEST(test_sched_hold_releases_after_n_advances);
     RUN_TEST(test_sched_click_default_hold);
     RUN_TEST(test_sched_gesture_ordered_across_frames);
+    RUN_TEST(test_sched_move_applies_on_advance);
+    RUN_TEST(test_sched_wheel_applies_on_advance);
+    RUN_TEST(test_sched_click_hold_zero_same_frame);
     RUN_TEST(test_input_button_right_presses_right);
     RUN_TEST(test_input_button_move_branch_updates_mask);
     RUN_TEST(test_input_gesture_single_point_applied_once);

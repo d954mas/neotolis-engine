@@ -56,7 +56,7 @@ static uint16_t resolve_port(void) {
 
 static void frame(void) {
     nt_window_poll();
-    /* Order matters (D-01): nt_devapi_update first runs net_poll (a command may enqueue into the
+    /* Order matters: nt_devapi_update first runs net_poll (a command may enqueue into the
        devapi input schedule), then ticks that schedule and — only on a real sim-advance — releases
        due events into nt_input's immediate inject buffer. nt_input_poll next samples hardware AND
        applies that whole buffer post-edge-clear, so an injected rising edge survives to this frame's
