@@ -24,6 +24,18 @@ const nt_ui_widget_def_t NT_UI_POPUP_DEF = {
 #define NT_UI_POPUP_CATCHER_SALT 0x500CA7C0U
 static inline uint32_t popup_catcher_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_CATCHER_SALT); }
 
+/* The tween-state cell id (salted off the popup id) lives in the NON-evicting nt_ui_state pool, unlike
+ * the eviction-prone anim slot. It records whether the popup was present last frame so the entrance
+ * re-seed (t=0) fires ONLY on a real closed->open edge — never when a busy frame evicts the anim slot
+ * (which would re-seed every frame and flicker the eased open). */
+#define NT_UI_POPUP_TWEEN_SALT 0x500B7E00U
+static inline uint32_t popup_tween_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_TWEEN_SALT); }
+
+/* Persisted across frames in the state pool (zeroed on create -> was_present starts false). */
+typedef struct {
+    uint8_t was_present; /* 1 if the popup declared its panel last frame (open or still tweening closed) */
+} nt_ui_popup_tween_state_t;
+
 /* Below this eased t the popup's alpha rounds to 0 (8-bit) — treat as fully closed. */
 #define NT_UI_POPUP_EPSILON (1.0F / 256.0F)
 
@@ -44,6 +56,7 @@ static uint16_t s_last_panel_zband;
 static uint16_t s_last_catcher_zband;
 static uint8_t s_last_side;
 static bool s_last_catcher_present;
+static uint32_t s_entrance_seed_count; /* # of entrance t=0 re-seeds; must fire once per open-edge, not per frame */
 #endif
 
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void) {
@@ -168,6 +181,13 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     const int16_t catcher_z = (int16_t)(panel_z - 1);
     const uint32_t catcher_id = popup_catcher_id(id);
     // #endregion
+    // #region tween-state (non-evicting): was the popup present last frame?
+    /* Eviction-proof open-edge memory: the anim slot can be evicted by a busy frame, so we must NOT use
+     * "anim slot absent" to mean "first open" — that re-seeds t=0 every churned frame (flicker). */
+    nt_ui_popup_tween_state_t *tw = (nt_ui_popup_tween_state_t *)nt_ui_state(ctx, popup_tween_id(id), (uint32_t)sizeof *tw, NT_UI_STATE_TAG('p', 'o', 'p', 't'));
+    NT_ASSERT(tw != NULL && "nt_ui_popup_begin: tween-state pool returned NULL");
+    const bool was_present_prev = tw->was_present != 0U;
+    // #endregion
     // #region one anim call (value_t eases t toward open?1:0)
     nt_ui_anim_target_t tgt = {
         .scale_x = 1.0F,
@@ -183,11 +203,17 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
         .tint_t = 0.0F,
         .value_t = open ? 1.0F : 0.0F,
     };
-    /* Entrance must ease from 0: seed a fresh slot at t=0 first (no-flash), then the real call eases up. */
-    if (open && popup_anim_slot_absent(ctx, id)) {
+    /* Entrance must ease from 0: on a real closed->open EDGE (not present last frame), seed a fresh slot
+     * at t=0 first (no-flash), then the real call eases up. Gated on the non-evicting tween-state, NOT
+     * the anim slot — an evicted slot must NOT re-seed (that flickers the eased open under churn). The
+     * anim-slot-absent check still guards the very first ever touch (state cell fresh, slot truly new). */
+    if (open && !was_present_prev && popup_anim_slot_absent(ctx, id)) {
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;
         (void)nt_ui_anim(ctx, id, &seed, 0.0F, 0.0F);
+#ifdef NT_TEST_ACCESS
+        s_entrance_seed_count++;
+#endif
     }
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t;
@@ -211,6 +237,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * whole viewport every frame the helper runs, making base UI unclickable (present-only guard). The
      * catcher carries the dismiss source and/or the visible backdrop and/or an inert input gate. */
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
+    tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     if (present) {
@@ -328,6 +355,8 @@ uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx) {
 }
 uint8_t nt_ui_popup_test_last_side(void) { return s_last_side; }
 bool nt_ui_popup_test_last_catcher_present(void) { return s_last_catcher_present; }
+uint32_t nt_ui_popup_test_entrance_seed_count(void) { return s_entrance_seed_count; }
+void nt_ui_popup_test_entrance_seed_reset(void) { s_entrance_seed_count = 0U; }
 float nt_ui_popup_test_tween(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_test_tween: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_popup_test_tween: id must be non-zero");

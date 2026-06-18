@@ -241,6 +241,7 @@ static float s_last_bar_thumb_len[2] = {0.0F};     /* per-axis thumb length */
 static float s_last_bar_thumb_off[2] = {0.0F};     /* per-axis thumb offset along the track */
 static float s_last_bar_track_len[2] = {0.0F};     /* per-axis track length */
 static float s_last_bar_opacity[2] = {0.0F, 0.0F}; /* per-axis eased fade opacity */
+static uint8_t s_last_bar_layer[2] = {0U, 0U};     /* per-axis draw layer of the emitted bar */
 static uint32_t s_wheel_recipients = 0U;           /* # of scroll_begin gathers that consumed a wheel since reset (broadcast pin) */
 #endif
 // #endregion
@@ -728,7 +729,7 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
  * ONE nt_ui_anim call on the bar's derived id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2],
-                                const nt_scroll_bbox_t *cbb) {
+                                const nt_scroll_bbox_t *cbb, uint8_t bar_layer) {
     const float clen = container[axis];
     const float ccontent = content[axis];
     if (clen <= 0.0F) {
@@ -772,12 +773,17 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     s_last_bar_thumb_off[axis] = thumb_off;
     s_last_bar_track_len[axis] = track_len;
     s_last_bar_opacity[axis] = opacity;
+    s_last_bar_layer[axis] = bar_layer;
 #endif
     if (opacity < NT_UI_SCROLLBAR_FADE_EPS) {
         return; /* fully faded — nothing to draw (the id stays registered for next-frame hover) */
     }
 
-    const uint8_t layer = 0U;
+    /* Bar draws on the container's own layer (NOT hardcoded 0): a scroll whose content sits on a higher
+     * layer (e.g. a dropdown list on the IMAGE layer over an opaque panel) would otherwise emit its bar
+     * on layer 0, sorted UNDER the panel and invisible. Floating still draws over siblings of the SAME
+     * layer; matching the content layer keeps the bar above the panel fill. */
+    const uint8_t layer = bar_layer;
     const float thickness = style->bar_thickness;
     /* Track spans the full axis on the trailing edge; thumb is offset along the axis. */
     Clay_ElementDeclaration track_decl;
@@ -844,12 +850,12 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
 
 /* Emits enabled-axis scrollbars as floating children of the open scroll container. */
 static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2],
-                           const nt_scroll_bbox_t *cbb) {
+                           const nt_scroll_bbox_t *cbb, uint8_t bar_layer) {
     if (style->scroll_x) {
-        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container, cbb);
+        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container, cbb, bar_layer);
     }
     if (style->scroll_y) {
-        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container, cbb);
+        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container, cbb, bar_layer);
     }
 }
 
@@ -923,8 +929,10 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     nt_ui_widget_register(ctx, id, &NT_UI_SCROLL_DEF, NULL);
 
     /* Scrollbars float over the container edges (escape the clip, no layout cost). They
-     * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. */
-    scrollbar_emit(ctx, id, style, s, content, container, &cbb);
+     * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. The bar draws on
+     * the container's own layer so it isn't buried under higher-layer content (e.g. a dropdown panel). */
+    const uint8_t bar_layer = (data != NULL) ? data->layer : 0U;
+    scrollbar_emit(ctx, id, style, s, content, container, &cbb, bar_layer);
 
 #ifdef NT_TEST_ACCESS
     s_last_child_offset[0] = s->pos[0];
@@ -1039,6 +1047,10 @@ void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thum
     }
 }
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis) { return scrollbar_id(scroll_id, axis); }
+uint8_t nt_ui_scroll_test_last_bar_layer(int axis) {
+    NT_ASSERT(axis == 0 || axis == 1);
+    return s_last_bar_layer[axis];
+}
 uint32_t nt_ui_scroll_test_wheel_recipients(void) { return s_wheel_recipients; }
 void nt_ui_scroll_test_wheel_recipients_reset(void) { s_wheel_recipients = 0U; }
 #endif

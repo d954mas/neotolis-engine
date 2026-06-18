@@ -93,6 +93,8 @@ uint8_t nt_ui_popup_test_stack_depth(const nt_ui_context_t *ctx);      /* live a
 uint8_t nt_ui_popup_test_last_side(void);                              /* nt_ui_popup_side_t chosen last begin */
 bool nt_ui_popup_test_last_catcher_present(void);                      /* did the last begin declare a catcher? */
 float nt_ui_popup_test_tween(const nt_ui_context_t *ctx, uint32_t id); /* eased t in the anim slot */
+uint32_t nt_ui_popup_test_entrance_seed_count(void);                   /* cumulative entrance t=0 re-seeds (once per open-edge) */
+void nt_ui_popup_test_entrance_seed_reset(void);                       /* zero the entrance-seed counter */
 #endif
 
 #endif /* NT_UI_POPUP_H */

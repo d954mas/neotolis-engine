@@ -14,6 +14,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_dropdown.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_popup.h"
@@ -228,6 +229,153 @@ static void test_dropdown_long_list_shows_scrollbar(void) {
     TEST_ASSERT_TRUE_MESSAGE(opacity > 0.0F, "ALWAYS-visible scrollbar must be opaque");
 }
 
+/* ---- Showcase-fidelity scrollbar: replicate the City dropdown EXACTLY (panel_art slice9 bg, icon
+ *      gutter, eased open, ALWAYS bar via embedded list_scroll) and assert the y-bar still emits with
+ *      real geometry. Catches a regression where the IMAGE scroll container or the open tween suppresses
+ *      the bar even though the simpler test passes. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.max_visible_rows = 6;
+    st.row_height = 30U;
+    st.icon_size = 22U;
+    st.open_ease_speed = 14.0F; /* eased open, like the showcase */
+    /* IMAGE panel + bar sprites, exactly mirroring s_dropdown_dark. */
+    st.panel_bg = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x200U);
+    st.panel_tint = 0xFFB0AAA4U;
+    st.list_scroll = nt_ui_scroll_style_defaults();
+    st.list_scroll.track_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
+    st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+    st.list_scroll.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
+
+    int selected = 0;
+    bool open = true;
+
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    /* Several frames: let the eased open settle so the scroll container's prev-frame dims are solid. */
+    for (int f = 0; f < 6; ++f) {
+        dropdown_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+    }
+
+    TEST_ASSERT_EQUAL_UINT(nt_ui_dropdown_test_scroll_id(DD_A), nt_ui_scroll_test_last_scroll_id());
+    TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "showcase-fidelity long list must emit a vertical scrollbar");
+    float thumb_len = 0.0F;
+    float thumb_off = 0.0F;
+    float track_len = 0.0F;
+    float opacity = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &thumb_off, &track_len, &opacity);
+    TEST_ASSERT_TRUE_MESSAGE(track_len > 0.0F, "showcase scrollbar track must have non-zero length");
+    TEST_ASSERT_TRUE_MESSAGE(thumb_len > 0.0F, "showcase scrollbar thumb must have non-zero length");
+    TEST_ASSERT_TRUE_MESSAGE(opacity > 0.0F, "ALWAYS-visible showcase scrollbar must be opaque");
+    /* ROOT of BUG2: the bar must draw on the dropdown's CONTENT layer (1 here), not hardcoded 0 — else
+     * an opaque panel on layer 1 sorts OVER the bar and hides it (visible "no scrollbar"). */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_scroll_test_last_bar_layer(1), "scrollbar must draw on the container content layer, not buried under the panel");
+}
+
+/* ---- Eased open is STABLE: with open_ease_speed > 0, opening the list then running idle frames with
+ *      NO input must NOT oscillate *open (the Wave-2.7 flicker repro). The trigger sits under the
+ *      full-viewport catcher when open; a frame with no click must never raise a dismiss-close. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_eased_open_no_flicker(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.open_ease_speed = 14.0F; /* the showcase Fruit dropdown's eased-open knob */
+    int selected = -1;
+    bool open = false;
+
+    /* Warm frame so the trigger bbox is baked. */
+    nt_pointer_t f1 = pointer_at(40.0F, 40.0F, false, false, false);
+    dropdown_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+
+    /* Click the trigger: press then release inside -> *open = true. */
+    nt_pointer_t pr = pointer_at(40.0F, 40.0F, true, true, false);
+    dropdown_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t rl = pointer_at(40.0F, 40.0F, false, false, true);
+    dropdown_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(open, "trigger click must open the list");
+
+    /* Several idle frames with NO button activity: *open must stay true and the popup stay present.
+     * A flicker shows up here as *open dropping to false (catcher dismiss) on some frame. */
+    nt_pointer_t idle = pointer_at(40.0F, 40.0F, false, false, false);
+    for (int f = 0; f < 12; ++f) {
+        dropdown_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+        TEST_ASSERT_TRUE_MESSAGE(open, "eased-open list must stay open across idle frames (no flicker)");
+    }
+}
+
+/* Frame that ALSO declares a swarm of animated dummy widgets so the 64-slot anim table churns and
+ * collides with the popup's slot window — mimics a busy showcase frame. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void dropdown_frame_busy(const nt_pointer_t *p, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, int n_dummy) {
+    nt_mem_scratch_reset();
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    /* Swarm declared BEFORE the dropdown (real frame order: many widgets precede it). Each dummy eases a
+     * slot; the ids sweep the whole 64-slot table so the popup's probe window is already full when the
+     * popup touches it — forcing the popup to evict a slot to host itself (the busy-frame condition). */
+    const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = 1.0F};
+    for (int d = 0; d < n_dummy; ++d) {
+        (void)nt_ui_anim(s_fx.ctx, 0x90000001U + (uint32_t)d, &tgt, 0.0F, 14.0F);
+    }
+    CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
+        (void)nt_ui_dropdown_trigger(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, count, *selected, "Select...", st,
+                                     &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(32)}}}, open);
+    }
+    (void)nt_ui_dropdown_list(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, DD_A, labels, NULL, count, selected, st, open);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Eviction-induced flicker (ROOT): a busy frame can evict the popup's anim slot. The OLD code
+ *      keyed the entrance t=0 re-seed off "anim slot absent", so an evicted-then-missing slot re-seeded
+ *      EVERY churned frame -> the eased open never climbed (continuous fade-from-0 flicker). The fix
+ *      gates the seed on a NON-evicting tween-state edge, so for ONE continuous open the entrance seed
+ *      fires AT MOST ONCE regardless of anim-table churn. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_eased_open_no_reseed_under_churn(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.open_ease_speed = 14.0F;
+    int selected = -1;
+    bool open = true; /* one continuous open the whole test */
+
+    nt_ui_popup_test_entrance_seed_reset();
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    /* Heavy churn every frame across a long open: 70 dummies thrash the 64-slot anim table so the popup's
+     * slot is repeatedly evicted. The seed must NOT re-fire per frame. */
+    for (int f = 0; f < 30; ++f) {
+        dropdown_frame_busy(&idle, s_short, 3, &selected, &open, &st, 70);
+    }
+    const uint32_t seeds = nt_ui_popup_test_entrance_seed_count();
+    TEST_ASSERT_TRUE_MESSAGE(seeds <= 1U, "entrance t=0 re-seed must fire at most once per open-edge (not per churned frame)");
+}
+
+/* ---- Re-click the trigger WHILE the eased-open list is still tweening: the trigger toggles open->false
+ *      once, and a SINGLE click must not bounce it back open (catcher dismiss + trigger toggle fighting
+ *      over the same click during the open tween). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_eased_reclick_closes_once(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.open_ease_speed = 14.0F;
+    int selected = -1;
+    bool open = true; /* already open, mid-tween from the first frame */
+
+    /* Warm frames: let the trigger bbox + popup bbox bake while the tween rises. */
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    dropdown_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    dropdown_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+
+    /* Click ON the trigger (press+release) to close. The catcher (topmost) sees the same click as an
+     * outside-the-panel dismiss; the trigger sees it as a toggle. Both must resolve to a SINGLE close. */
+    nt_pointer_t pr = pointer_at(40.0F, 40.0F, true, true, false);
+    dropdown_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t rl = pointer_at(40.0F, 40.0F, false, false, true);
+    dropdown_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    TEST_ASSERT_FALSE_MESSAGE(open, "a single trigger re-click must close the list (and stay closed)");
+
+    /* Idle frames: it must STAY closed (no bounce-reopen from a fighting click). */
+    for (int f = 0; f < 6; ++f) {
+        dropdown_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+        TEST_ASSERT_FALSE_MESSAGE(open, "closed list must stay closed (no reopen flicker)");
+    }
+}
+
 /* ---- Edge-flip: a trigger near the bottom border opens its list ABOVE (popup-core side probe). ---- */
 static void test_dropdown_edge_flip_up_near_bottom(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
@@ -303,6 +451,10 @@ int main(void) {
     RUN_TEST(test_dropdown_row_select_sets_int_and_closes);
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
     RUN_TEST(test_dropdown_long_list_shows_scrollbar);
+    RUN_TEST(test_dropdown_long_list_scrollbar_showcase_fidelity);
+    RUN_TEST(test_dropdown_eased_open_no_flicker);
+    RUN_TEST(test_dropdown_eased_open_no_reseed_under_churn);
+    RUN_TEST(test_dropdown_eased_reclick_closes_once);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);
     RUN_TEST(test_dropdown_null_icon_aligns);
