@@ -1,3 +1,4 @@
+#include <math.h>
 #include <string.h>
 
 #include "app/nt_app.h" /* g_nt_app.frame — the advance clock the schedule ticks on. */
@@ -288,6 +289,25 @@ static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, n
     return true;
 }
 
+/* A bot float coordinate/delta (pointer x/y, wheel dx/dy, pressure): require a number whose double
+   AND float-narrowed form are finite. cJSON stores raw strtod doubles, so a huge finite double (e.g.
+   1e309 -> inf, or a finite value past FLT_MAX) would narrow to inf and poison hit-tests / deltas.
+   Mirrors time.set_scale's double + float-narrow isfinite check; never asserts on bot input. */
+static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_devapi_error *err) {
+    if (!cJSON_IsNumber(nj)) {
+        set_bad_params(err, cmd);
+        return false;
+    }
+    double v = nj->valuedouble;
+    float fv = (float)v;
+    if (!isfinite(v) || !isfinite(fv)) {
+        set_bad_params(err, cmd);
+        return false;
+    }
+    *out = fv;
+    return true;
+}
+
 // #region input.*
 static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -367,12 +387,9 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     if (kind != NT_INJECT_POINTER_UP) {
         const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
         const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
-        if (!cJSON_IsNumber(xj) || !cJSON_IsNumber(yj)) {
-            set_bad_params(err, "input.pointer: x and y must be numbers for down/move");
+        if (!parse_finite_coord(xj, "input.pointer: x must be a finite number for down/move", &x, err) || !parse_finite_coord(yj, "input.pointer: y must be a finite number for down/move", &y, err)) {
             return false;
         }
-        x = (float)xj->valuedouble;
-        y = (float)yj->valuedouble;
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
@@ -403,8 +420,9 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     (void)ud;
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
-    if (!cJSON_IsNumber(xj) || !cJSON_IsNumber(yj)) {
-        set_bad_params(err, "input.move: x and y must be numbers");
+    float x;
+    float y;
+    if (!parse_finite_coord(xj, "input.move: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.move: y must be a finite number", &y, err)) {
         return false;
     }
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
@@ -423,7 +441,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
         set_bad_params(err, "input.move: type must be 'mouse', 'touch' or 'pen'");
         return false;
     }
-    if (!sched_pointer(NT_INJECT_POINTER_MOVE, id, (float)xj->valuedouble, (float)yj->valuedouble, 1.0F, type, 0, 0)) {
+    if (!sched_pointer(NT_INJECT_POINTER_MOVE, id, x, y, 1.0F, type, 0, 0)) {
         set_bad_params(err, "input.move: inject schedule overflow");
         return false;
     }
@@ -438,8 +456,9 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     (void)ud;
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
     const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
-    if (!cJSON_IsNumber(xj) || !cJSON_IsNumber(yj)) {
-        set_bad_params(err, "input.click: x and y must be numbers");
+    float x;
+    float y;
+    if (!parse_finite_coord(xj, "input.click: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.click: y must be a finite number", &y, err)) {
         return false;
     }
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
@@ -475,8 +494,6 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
             return false;
         }
     }
-    float x = (float)xj->valuedouble;
-    float y = (float)yj->valuedouble;
     /* Whole-or-nothing: preflight both entries so a near-full schedule can never accept the
        DOWN and reject the UP, leaving a stuck synthetic pointer-down. */
     if (!sched_can_reserve(2U)) {
@@ -502,19 +519,11 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
     float dy = 0.0F;
     const cJSON *dxj = cJSON_GetObjectItemCaseSensitive(params, "dx");
     const cJSON *dyj = cJSON_GetObjectItemCaseSensitive(params, "dy");
-    if (dxj != NULL) {
-        if (!cJSON_IsNumber(dxj)) {
-            set_bad_params(err, "input.wheel: dx must be a number");
-            return false;
-        }
-        dx = (float)dxj->valuedouble;
+    if (dxj != NULL && !parse_finite_coord(dxj, "input.wheel: dx must be a finite number", &dx, err)) {
+        return false;
     }
-    if (dyj != NULL) {
-        if (!cJSON_IsNumber(dyj)) {
-            set_bad_params(err, "input.wheel: dy must be a number");
-            return false;
-        }
-        dy = (float)dyj->valuedouble;
+    if (dyj != NULL && !parse_finite_coord(dyj, "input.wheel: dy must be a finite number", &dy, err)) {
+        return false;
     }
     if (!sched_wheel(dx, dy, 0)) {
         set_bad_params(err, "input.wheel: inject schedule overflow");
@@ -564,17 +573,17 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
             return false;
         }
     }
-    /* Validate every point up front so a malformed point rejects the whole gesture before any enqueue. */
+    /* Validate every point up front (incl. finiteness) so a malformed point rejects the whole gesture
+       before any enqueue — extraction below then trusts the values are finite. */
     const cJSON *p = NULL;
     cJSON_ArrayForEach(p, points) {
         if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) != 2) {
             set_bad_params(err, "input.gesture: each point must be [x,y]");
             return false;
         }
-        const cJSON *px = cJSON_GetArrayItem(p, 0);
-        const cJSON *py = cJSON_GetArrayItem(p, 1);
-        if (!cJSON_IsNumber(px) || !cJSON_IsNumber(py)) {
-            set_bad_params(err, "input.gesture: point coords must be numbers");
+        float tmp;
+        if (!parse_finite_coord(cJSON_GetArrayItem(p, 0), "input.gesture: point x must be a finite number", &tmp, err) ||
+            !parse_finite_coord(cJSON_GetArrayItem(p, 1), "input.gesture: point y must be a finite number", &tmp, err)) {
             return false;
         }
     }

@@ -288,6 +288,28 @@ static void test_input_pointer_buttons_fractional_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":1,\"y\":2,\"buttons\":2.5}}"));
 }
 
+/* ---- non-finite coordinate / wheel-delta bot input -> bad_params (never stored as inf/nan) ---- */
+
+/* 1e309 overflows strtod to +inf as a double -> rejected before narrowing. JSON has no NaN literal
+   and cJSON's number scanner only consumes [0-9eE+-.] (a bare `nan` token fails the whole parse, not
+   a number we could store), so the second non-finite vector is a FINITE double past FLT_MAX (1e300):
+   isfinite(double) passes but isfinite((float)v) fails -> the float-narrow guard rejects it. */
+static void test_input_move_inf_x_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":1e309,\"y\":0}}")); }
+
+static void test_input_move_overfloat_y_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":0,\"y\":1e300}}")); }
+
+static void test_input_click_inf_x_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1e309,\"y\":0}}")); }
+
+static void test_input_pointer_inf_y_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":0,\"y\":1e309}}")); }
+
+static void test_input_pointer_overfloat_x_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"move\",\"id\":0,\"x\":1e300,\"y\":0}}")); }
+
+static void test_input_gesture_inf_point_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[1e309,5]]}}")); }
+
+static void test_input_wheel_inf_dx_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dx\":1e309}}")); }
+
+static void test_input_wheel_overfloat_dy_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":1e300}}")); }
+
 /* ---- scheduling: offset-0 applies on the next advancing update ---- */
 
 /* input.key down@0 -> not visible until a sim-advance ticks the schedule + polls. */
@@ -571,6 +593,14 @@ int main(void) {
     RUN_TEST(test_input_button_fractional_bad_params);
     RUN_TEST(test_input_click_button_fractional_bad_params);
     RUN_TEST(test_input_pointer_buttons_fractional_bad_params);
+    RUN_TEST(test_input_move_inf_x_bad_params);
+    RUN_TEST(test_input_move_overfloat_y_bad_params);
+    RUN_TEST(test_input_click_inf_x_bad_params);
+    RUN_TEST(test_input_pointer_inf_y_bad_params);
+    RUN_TEST(test_input_pointer_overfloat_x_bad_params);
+    RUN_TEST(test_input_gesture_inf_point_bad_params);
+    RUN_TEST(test_input_wheel_inf_dx_bad_params);
+    RUN_TEST(test_input_wheel_overfloat_dy_bad_params);
     RUN_TEST(test_sched_offset0_applies_on_advance);
     RUN_TEST(test_sched_pause_freeze);
     RUN_TEST(test_sched_hold_releases_after_n_advances);
