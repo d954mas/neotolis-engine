@@ -1646,30 +1646,51 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
  * (the menu never mutates it); the game owns the open flag + chosen-id sink (Model D). */
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    /* Nested submenu (the "More" parent's children) -> exercises the fly-out + aim triangle. */
-    static nt_ui_menu_item_t more_items[] = {
-        {.label = "Duplicate", .submenu = NULL, .id = 201U, .submenu_count = 0U, .enabled = true},
-        {.label = "Move to...", .submenu = NULL, .id = 202U, .submenu_count = 0U, .enabled = true},
-        {.label = "Archive", .submenu = NULL, .id = 203U, .submenu_count = 0U, .enabled = false},
+    /* GLOBAL menu tree: app-themed. "Open recent" is the fly-out submenu. Distinct content from the zone
+     * menu so a user instantly sees WHICH menu opened (global = app actions). */
+    static nt_ui_menu_item_t global_recent_items[] = {
+        {.label = "level_01.ntpack", .submenu = NULL, .id = 211U, .submenu_count = 0U, .enabled = true},
+        {.label = "ui_showcase.ntpack", .submenu = NULL, .id = 212U, .submenu_count = 0U, .enabled = true},
+        {.label = "(clear list)", .submenu = NULL, .id = 213U, .submenu_count = 0U, .enabled = false},
     };
-    /* Non-const: the bunny icon ref is late-bound (set after the atlas binds), so it's assigned at runtime
-     * below. The menu never mutates the tree. Mixed iconed + non-iconed rows show the aligned gutter. */
-    static nt_ui_menu_item_t root_items[] = {
-        {.label = "Cut", .submenu = NULL, .id = 101U, .submenu_count = 0U, .enabled = true},
-        {.label = "Copy", .submenu = NULL, .id = 102U, .submenu_count = 0U, .enabled = true},
-        {.label = "Paste", .submenu = NULL, .id = 103U, .submenu_count = 0U, .enabled = true},
+    static nt_ui_menu_item_t global_items[] = {
+        {.label = "New", .submenu = NULL, .id = 101U, .submenu_count = 0U, .enabled = true},
+        {.label = "Open recent", .submenu = global_recent_items, .id = 0U, .submenu_count = (uint32_t)(sizeof global_recent_items / sizeof global_recent_items[0]), .enabled = true},
         {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
-        {.label = "More", .submenu = more_items, .id = 0U, .submenu_count = (uint32_t)(sizeof more_items / sizeof more_items[0]), .enabled = true},
-        {.label = "Delete", .submenu = NULL, .id = 104U, .submenu_count = 0U, .enabled = true},
+        {.label = "Preferences", .submenu = NULL, .id = 102U, .submenu_count = 0U, .enabled = true},
+        {.label = "Quit", .submenu = NULL, .id = 103U, .submenu_count = 0U, .enabled = true},
     };
-    static const uint32_t root_count = (uint32_t)(sizeof root_items / sizeof root_items[0]);
-    /* Icons: Cut + More get the bunny; Copy/Paste/Delete leave an aligned-empty gutter (OS-menu column). */
-    root_items[0].icon = s_icon_bunny_ref;
-    root_items[4].icon = s_icon_bunny_ref;
-    more_items[0].icon = s_icon_bunny_ref;
+    static const uint32_t global_count = (uint32_t)(sizeof global_items / sizeof global_items[0]);
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click the panel -> menu bound to it; right-click anywhere else -> global menu; click outside / Esc closes.", g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opening one closes the other. Hover 'More' to fly out the submenu; arrows/Enter navigate.", g_current->caption);
+    /* ZONE menu tree: panel/element-themed. "Move to" is the fly-out submenu. Clearly different first row +
+     * submenu than the global menu so the bound (panel) menu is unmistakable on screen. */
+    static nt_ui_menu_item_t zone_move_items[] = {
+        {.label = "Front", .submenu = NULL, .id = 221U, .submenu_count = 0U, .enabled = true},
+        {.label = "Back", .submenu = NULL, .id = 222U, .submenu_count = 0U, .enabled = true},
+        {.label = "Group", .submenu = NULL, .id = 223U, .submenu_count = 0U, .enabled = false},
+    };
+    static nt_ui_menu_item_t zone_items[] = {
+        {.label = "Edit panel", .submenu = NULL, .id = 104U, .submenu_count = 0U, .enabled = true},
+        {.label = "Duplicate", .submenu = NULL, .id = 105U, .submenu_count = 0U, .enabled = true},
+        {.label = NULL, .submenu = NULL, .id = 0U, .submenu_count = 0U, .enabled = false}, /* separator */
+        {.label = "Move to", .submenu = zone_move_items, .id = 0U, .submenu_count = (uint32_t)(sizeof zone_move_items / sizeof zone_move_items[0]), .enabled = true},
+        {.label = "Delete", .submenu = NULL, .id = 106U, .submenu_count = 0U, .enabled = true},
+    };
+    static const uint32_t zone_count = (uint32_t)(sizeof zone_items / sizeof zone_items[0]);
+
+    /* Icons late-bound (atlas binds after these statics): a couple of rows per tree get the bunny, the rest
+     * leave an aligned-empty gutter (OS-menu column). The menu never mutates the tree. */
+    global_items[0].icon = s_icon_bunny_ref;
+    global_items[1].icon = s_icon_bunny_ref;
+    global_recent_items[0].icon = s_icon_bunny_ref;
+    zone_items[0].icon = s_icon_bunny_ref;
+    zone_items[3].icon = s_icon_bunny_ref;
+    zone_move_items[0].icon = s_icon_bunny_ref;
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "Right-click the panel -> ZONE menu (Edit panel / Duplicate / Move to...); right-click anywhere else -> GLOBAL menu (New / Open recent... / Quit). Click outside / Esc closes.",
+                g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opening one closes the other. Hover the submenu row to fly it out; arrows/Enter navigate.", g_current->caption);
 
     /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
      * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
@@ -1703,8 +1724,8 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 
     /* Render both menus (independent state + ids); arming is gated so at most one is open. */
-    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, root_items, root_count, &st->menu.global_state, g_current->menu);
-    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, root_items, root_count, &st->menu.zone_state, g_current->menu);
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, global_items, global_count, &st->menu.global_state, g_current->menu);
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, zone_items, zone_count, &st->menu.zone_state, g_current->menu);
 
     if (st->menu.global_state.chosen_id != 0U) {
         st->menu.last_chosen = st->menu.global_state.chosen_id;
