@@ -64,6 +64,8 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void) {
         .trigger_text = 0xFFE8E8E8U,
         .row_text = 0xFFE0E0E0U,
         .chevron_tint = 0xFFC8C8C8U,
+        .scroll_track_tint = 0xFFFFFFFFU, /* no tint; scroll_track/scroll_thumb refs stay {0} (atlas-free baseline) */
+        .scroll_thumb_tint = 0xFFFFFFFFU,
         .font_size = 14.0F,
         .slice9_scale = 1.0F,
         .state_speed = 16.0F,
@@ -342,6 +344,13 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
             /* Long list: wrap the rows in nt_ui_scroll (GC'd cell) — NEVER a raw Clay .clip (Pitfall 7). */
             const float view_h = ((float)style->max_visible_rows * (float)style->row_height) + (2.0F * (float)style->pad);
             nt_ui_scroll_style_t sst = nt_ui_scroll_style_defaults();
+            /* Wire the dropdown's bar sprites so the list shows a visible scrollbar; scroll skips drawing
+             * a bar when track_ref/thumb_ref are {0} (the defaults), so without this the list scrolls but
+             * shows nothing. {0} refs here keep the atlas-free baseline (still no bar). */
+            sst.track_ref = style->scroll_track;
+            sst.thumb_ref = style->scroll_thumb;
+            sst.track_tint = style->scroll_track_tint;
+            sst.thumb_tint = style->scroll_thumb_tint;
             /* scroll owns .id/.clip/.userData; the decl supplies only sizing/look. IMAGE panel art can't
              * round, so drop cornerRadius when art is present (rounding is baked into the sprite). */
             Clay_ElementDeclaration scroll_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(view_h)}, .padding = CLAY_PADDING_ALL(style->pad)}};

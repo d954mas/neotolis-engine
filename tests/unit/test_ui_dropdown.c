@@ -17,6 +17,7 @@
 #include "ui/nt_ui_dropdown.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_popup.h"
+#include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 
@@ -57,7 +58,7 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
 
 /* ---- ABI sanity ---- */
 static void test_dropdown_abi_size(void) {
-    TEST_ASSERT_EQUAL_UINT(312U, (unsigned)sizeof(nt_ui_dropdown_style_t));
+    TEST_ASSERT_EQUAL_UINT(352U, (unsigned)sizeof(nt_ui_dropdown_style_t));
     TEST_ASSERT_EQUAL_UINT(32U, (unsigned)sizeof(nt_ui_dd_state_t));
 }
 
@@ -188,6 +189,40 @@ static void test_dropdown_long_list_scroll_no_leak(void) {
     }
 }
 
+/* ---- Long list with bar sprites wired shows a visible scrollbar: the y-bar emits with non-zero
+ *      geometry + opacity (FIX: defaults leave scroll refs {0} so scroll draws no bar). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_long_list_shows_scrollbar(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.max_visible_rows = 4; /* 12 rows > 4 -> the list scrolls */
+    /* Wire bar sprites exactly as the showcase does; non-zero refs let scroll draw the bar. */
+    st.scroll_track = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
+    st.scroll_thumb = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+
+    int selected = 0;
+    bool open = true;
+
+    /* Two warm frames: the scroll container's bar reads prev-frame solved dims (1-frame lag), so the bar
+     * geometry is only valid from the 2nd frame on. */
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    dropdown_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+    dropdown_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+
+    /* The last scroll container declared this frame was the dropdown's list wrapper. */
+    TEST_ASSERT_EQUAL_UINT(nt_ui_dropdown_test_scroll_id(DD_A), nt_ui_scroll_test_last_scroll_id());
+    /* The vertical bar emitted (bit1 = y). */
+    TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "dropdown long list must emit a vertical scrollbar");
+    /* Non-zero geometry + visible opacity -> a real bar is drawn, not skipped. */
+    float thumb_len = 0.0F;
+    float thumb_off = 0.0F;
+    float track_len = 0.0F;
+    float opacity = 0.0F;
+    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &thumb_off, &track_len, &opacity);
+    TEST_ASSERT_TRUE_MESSAGE(track_len > 0.0F, "scrollbar track must have non-zero length");
+    TEST_ASSERT_TRUE_MESSAGE(thumb_len > 0.0F, "scrollbar thumb must have non-zero length");
+    TEST_ASSERT_TRUE_MESSAGE(opacity > 0.0F, "ALWAYS-visible scrollbar must be opaque");
+}
+
 /* ---- Edge-flip: a trigger near the bottom border opens its list ABOVE (popup-core side probe). ---- */
 static void test_dropdown_edge_flip_up_near_bottom(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
@@ -262,6 +297,7 @@ int main(void) {
     RUN_TEST(test_dropdown_trigger_toggles_open);
     RUN_TEST(test_dropdown_row_select_sets_int_and_closes);
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
+    RUN_TEST(test_dropdown_long_list_shows_scrollbar);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);
     RUN_TEST(test_dropdown_null_icon_aligns);

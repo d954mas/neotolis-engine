@@ -51,11 +51,13 @@ typedef struct {
     nt_ui_dd_state_t row_idle, row_hover, row_pressed, row_selected; /* row per-state look */
     nt_atlas_region_ref_t panel_bg;                                  /* optional list-panel slice9 art; atlas.id==0 = flat panel_fill */
     nt_atlas_region_ref_t chevron;                                   /* optional trigger affordance sprite (drawn at the right edge) */
+    nt_atlas_region_ref_t scroll_track, scroll_thumb;                /* optional scrollbar sprites for the long-list scroll wrapper; {0} = no visible bar */
     uint32_t panel_fill;                                             /* flat panel fallback color 0xAABBGGRR (0 = transparent) */
     uint32_t panel_tint;                                             /* multiplies the panel slice9 art; 0xFFFFFFFF = no tint */
     uint32_t trigger_text;                                           /* trigger label color */
     uint32_t row_text;                                               /* enabled row text color */
     uint32_t chevron_tint;                                           /* chevron sprite tint 0xAABBGGRR */
+    uint32_t scroll_track_tint, scroll_thumb_tint;                   /* scrollbar sprite tints 0xAABBGGRR (0xFFFFFFFF = no tint) */
     float font_size;                                                 /* px; asserted > 0 */
     float slice9_scale;                                              /* multiplies the atlas region's baked slice9 borders; > 0 */
     float state_speed;                                               /* eases hover/press/selected scale+opacity (0 = instant) */
@@ -69,7 +71,7 @@ typedef struct {
     uint16_t chevron_size;                                           /* px chevron sprite box (0 = no chevron even if a ref is set) */
     uint16_t panel_corner_radius;                                    /* px panel rounding (flat fallback only; IMAGE bg can't round) */
 } nt_ui_dropdown_style_t;
-_Static_assert(sizeof(nt_ui_dropdown_style_t) == 312, "nt_ui_dropdown_style_t stable ABI (7x32 state + 2x16 ref + 5 u32 + 4 float + 8 u16 + 4 tail pad)");
+_Static_assert(sizeof(nt_ui_dropdown_style_t) == 352, "nt_ui_dropdown_style_t stable ABI (7x32 state + 4x16 ref + 7 u32 + 4 float + 8 u16 + 4 tail pad)");
 
 /* Valid baseline style (dark) that looks polished with flat colors and NO atlas art (wire refs to opt in). */
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
