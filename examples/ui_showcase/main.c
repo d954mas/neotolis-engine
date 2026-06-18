@@ -914,11 +914,11 @@ static void init_styles(void) {
     s_menu_dark.panel_tint = 0xFFFFFFFFU;
     s_menu_dark.arrow = s_arrow_right_ref;
     s_menu_dark.arrow_tint = 0xFFE8F0FCU;
+    s_menu_dark.text_disabled = 0xFF6E7682U; /* muted slate: legible on the LIGHT slice9 panel (default grey blends in) */
     s_menu_light = s_menu_dark;
     s_menu_light.bg_color = 0xFFFFFFFFU;
     s_menu_light.item_hover_color = 0xFFDCE6F4U;
     s_menu_light.text_color = 0xFF202830U;
-    s_menu_light.text_disabled = 0xFFA0A4ACU;
     s_menu_light.arrow_tint = 0xFF24364CU;
 
     /* ---- Tab-bar (dogfood): sprite-based game UI. Each state draws a Kenney slice9 button sprite
