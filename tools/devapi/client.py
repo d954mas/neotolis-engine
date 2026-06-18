@@ -24,6 +24,10 @@ class DevApiClient:
     in a pending-map for a later request that owns that id.
     """
 
+    # Cap the unclaimed-reply stash: a server that never lets ids be claimed (framing desync)
+    # must fail fast, not grow memory without bound.
+    _MAX_PENDING = 256
+
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
         self._next_id = 1
@@ -34,6 +38,14 @@ class DevApiClient:
         rid = self._next_id
         self._next_id += 1
         return rid
+
+    def _stash(self, obj_id: Any, obj: Dict[str, Any]) -> None:
+        """Hold an out-of-order reply for a later request. A None id can't be claimed -> dropped."""
+        if obj_id is None:
+            return
+        if obj_id not in self._pending and len(self._pending) >= self._MAX_PENDING:
+            raise ConnectionError("pending reply map overflow — server replies not being claimed (framing desync)")
+        self._pending[obj_id] = obj
 
     def _recv_until(self, rid: Any) -> Dict[str, Any]:
         """Return the response whose request_id == rid, stashing others by id."""
@@ -54,9 +66,7 @@ class DevApiClient:
             if obj_id == rid:
                 return obj
             # A reply for a different request (deferred/pipelined) — stash and keep reading.
-            # Never key on None: an unidentified reply can't be claimed by any request.
-            if obj_id is not None:
-                self._pending[obj_id] = obj
+            self._stash(obj_id, obj)
 
     def request(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Send one command, block until its correlated reply arrives, return the raw envelope."""
@@ -104,17 +114,20 @@ class DevApiClient:
             if isinstance(obj, list):
                 return obj
             # A non-array line is an out-of-order single reply — stash by its id.
-            rid_obj = obj.get("request_id")
-            if rid_obj is not None:
-                self._pending[rid_obj] = obj
+            self._stash(obj.get("request_id"), obj)
+            # If every batch id arrived as an individual reply, the server isn't framing batches
+            # as arrays — fail instead of blocking forever waiting for an array that won't come.
+            if all(i in self._pending for i in ids):
+                raise ConnectionError("batch: server returned individual envelopes, not an array")
 
     def wait_frames(self, n: int) -> Dict[str, Any]:
         """Block until `n` simulation frames have ADVANCED (not loop iterations).
 
-        Deferred command — uses request() so the correlation loop handles the yield;
-        PAUSE never advances the sim, so this fails fast at the cap (resume/step first).
+        Deferred — the correlation loop handles the yield. Uses result() so a server
+        rejection (frame.wait is RUN-only: manual/paused return bad_params) raises
+        DevApiResultError instead of silently returning an {ok:false} envelope.
         """
-        return self.request("frame.wait", {"frames": n})
+        return self.result("frame.wait", {"frames": n})
 
     def step(self, count: int = 1) -> Dict[str, Any]:
         """Advance exactly `count` fixed-dt sim frames (lockstep); requires manual mode.

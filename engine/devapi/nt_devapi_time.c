@@ -172,7 +172,7 @@ static bool cmd_frame_current(const cJSON *params, cJSON *result, nt_devapi_erro
     (void)err;
     (void)ud;
     devapi_add_number(result, "frame", (double)g_nt_app.frame);
-    devapi_add_number(result, "time", (double)g_nt_app.time);
+    devapi_add_number(result, "time", g_nt_app.time);
     devapi_add_number(result, "dt", (double)g_nt_app.dt);
     return true;
 }

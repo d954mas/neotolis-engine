@@ -187,7 +187,7 @@ static void test_overflow_rejected_structured(void) {
 
     /* An earlier in-flight slot is intact: advance one frame and assert nothing pops yet. */
     /* The first enqueued (request_id 0) has frames=1000; the overflow rejection touched no slot. */
-    TEST_ASSERT_NULL(advance_frame()); /* ticks all live slots once; none ready (>=999 left) */
+    TEST_ASSERT_NULL(advance_frame()); /* frame=1; the live slot targets frame 1000, nothing pops yet */
 }
 
 int main(void) {

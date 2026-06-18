@@ -73,7 +73,7 @@ void test_app_dt_clamped(void) {
 void test_app_time_accumulates(void) {
     s_target_frames = 5;
     nt_app_run(frame_fn_quit_after_n);
-    TEST_ASSERT_TRUE_MESSAGE(g_nt_app.time >= 0.0F, "time should accumulate (non-negative)");
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_app.time >= 0.0, "time should accumulate (non-negative)");
 }
 
 /* 5. Frame counter matches expected count */

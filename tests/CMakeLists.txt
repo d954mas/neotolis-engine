@@ -121,9 +121,10 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_app COMMAND test_app)
 
-    # --- Managed loop (time-control) tests (L1: TIME-01/02/03/06 + D-11 sim-advance) ---
-    add_executable(test_app_managed unit/test_app_managed.c)
+    # --- Managed loop (time-control) tests (L1: pause/manual/scale loop + sim-advance counter) ---
+    add_executable(test_app_managed unit/test_app_managed.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_app_managed PRIVATE nt_app_stub nt_log_stub unity)
+    target_include_directories(test_app_managed PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_app_managed)
     nt_set_sanitizer_flags(test_app_managed)
     set_target_properties(test_app_managed PROPERTIES
@@ -408,7 +409,7 @@ if(NOT EMSCRIPTEN)
         nt_setup_test_target(test_devapi_discovery)
 
         # L2 time/render/frame group via submit(): discovery + forwarding to nt_app L1 +
-        # bad_params + render.info + frame.current + the D-11 yield-after-N-sim-advances test.
+        # bad_params + render.info + frame.current + yield-after-N-sim-advances + end-to-end step drain.
         # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_gfx_stub
         # (nt_gfx_get_frame_draw_calls -> 0 for render.info; the light gfx stub, no font/material chain).
         add_executable(test_devapi_time unit/test_devapi_time.c)

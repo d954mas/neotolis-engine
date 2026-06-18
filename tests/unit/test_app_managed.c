@@ -4,6 +4,8 @@
    render flag. Bit-exact 1/60 lockstep is the determinism contract. */
 
 #include "app/nt_app.h"
+#include "core/nt_assert.h" /* NT_ASSERT_MODE for the death-test guard */
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
 #include <math.h>
@@ -173,6 +175,20 @@ void test_render_flag_default_true_and_toggles(void) {
     TEST_ASSERT_TRUE(nt_app_render_enabled());
 }
 
+/* ---- Death tests: L1 mutators assert their invariants on bad game-code input (NT_ASSERT_FULL only).
+   L2 range-checks bot input to bad_params; these prove the L1 backstop fires if a trusted caller
+   passes a poison value directly. ---- */
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+void test_set_scale_negative_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_set_scale(-1.0F)); }
+void test_set_scale_nan_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_set_scale(NAN)); }
+void test_set_step_dt_zero_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_set_step_dt(0.0F)); }
+void test_set_mode_invalid_asserts(void) {
+    /* deliberately out-of-range enum to trip the L1 whitelist assert. */
+    NT_TEST_EXPECT_ASSERT(nt_app_set_mode((nt_app_mode_t)99)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+}
+void test_step_negative_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_app_step(-1)); }
+#endif
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_managed_run_matches_raw);
@@ -182,5 +198,12 @@ int main(void) {
     RUN_TEST(test_scale_multiplies_wall_dt);
     RUN_TEST(test_manual_idle_freezes_frame);
     RUN_TEST(test_render_flag_default_true_and_toggles);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_set_scale_negative_asserts);
+    RUN_TEST(test_set_scale_nan_asserts);
+    RUN_TEST(test_set_step_dt_zero_asserts);
+    RUN_TEST(test_set_mode_invalid_asserts);
+    RUN_TEST(test_step_negative_asserts);
+#endif
     return UNITY_END();
 }

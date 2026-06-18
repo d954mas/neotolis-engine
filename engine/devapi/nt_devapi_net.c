@@ -288,6 +288,12 @@ void nt_devapi_net_poll(void) {
 #endif
         if (n > 0) {
             recv_append(tmp, (size_t)n);
+            /* Bound peak growth within one poll: stop reading once past the cap so a hostile flood
+               can't balloon the buffer before the post-dispatch cap check. Complete lines are still
+               dispatched below; a too-long unterminated remainder then drops the client. */
+            if (s_recv_len > NT_DEVAPI_NET_MAX_LINE) {
+                break;
+            }
             continue;
         }
         if (n == 0) {

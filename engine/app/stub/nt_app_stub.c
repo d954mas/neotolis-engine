@@ -48,7 +48,7 @@ void nt_app_run(nt_app_frame_fn fn) {
         // #endregion
 
         g_nt_app.dt = dt;
-        g_nt_app.time += dt;
+        g_nt_app.time += (double)dt;
         if (sim_advanced) {
             g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter */
         }

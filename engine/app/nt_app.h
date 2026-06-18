@@ -16,10 +16,10 @@ typedef enum nt_app_mode_t {
 
 typedef struct nt_app_t {
     float dt;        /* Clamped delta time (seconds) */
-    float time;      /* Elapsed time since loop start (seconds) */
+    double time;     /* Elapsed seconds; double so long deterministic runs don't lose resolution to float accumulation */
     float max_dt;    /* Clamp threshold (seconds), default 0.1f */
     float target_dt; /* Frame rate cap (seconds), 0 = uncapped */
-    uint32_t frame;  /* Sim-advance counter (frozen on pause/manual-idle) */
+    uint32_t frame;  /* Sim-advance counter (frozen on pause/manual-idle); uint32 wrap is intentional — devapi deadlines use modular compare, bounded < 2^31 */
 
     /* Managed-loop time control (read/written via the nt_app_* mutators below). */
     bool paused;         /* RUN-mode pause: dt = 0, frame frozen */

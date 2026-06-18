@@ -53,7 +53,7 @@ static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
     }
 
     g_nt_app.dt = dt;
-    g_nt_app.time += dt;
+    g_nt_app.time += (double)dt;
     if (sim_advanced) {
         g_nt_app.frame++; /* PAUSE / MANUAL-idle freeze the counter */
     }

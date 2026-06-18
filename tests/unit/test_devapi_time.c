@@ -176,7 +176,7 @@ static void test_render_info_reflects_flag(void) {
     root = parse_ok(nt_devapi_submit("{\"method\":\"render.info\"}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "enabled")));
-    /* no draw happened in this headless test -> draw_calls == 0 (nt_stats_stub). */
+    /* no draw happened in this headless test -> draw_calls == 0 (nt_gfx_stub returns 0). */
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItemCaseSensitive(result, "draw_calls")->valueint);
     cJSON_Delete(root);
 }
@@ -186,7 +186,7 @@ static void test_render_info_reflects_flag(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_frame_current_matches_app(void) {
     g_nt_app.frame = 42;
-    g_nt_app.time = 1.5F;
+    g_nt_app.time = 1.5;
     g_nt_app.dt = 1.0F / 60.0F;
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"frame.current\"}"));
@@ -305,6 +305,54 @@ static void test_frame_wait_rejected_when_not_running(void) {
     TEST_ASSERT_NULL(advance_sim());
 }
 
+/* ---- end-to-end: the REAL nt_app_run(MANUAL) loop drains time.step ---- */
+/* The deferred-resolve tests above hand-bump g_nt_app.frame via advance_sim(). This drives the
+   actual loop so the loop itself drains pending_steps and advances the frame — the integration
+   that the live one-step-per-poll bug slipped through. */
+#define E2E_STEP_COUNT 5
+#define E2E_ITER_CAP 64 /* safety net: a drain bug must FAIL the test, never hang it */
+
+static const char *s_e2e_resp; /* deferred reply captured in-loop (dispatch-core buffer; parse before next call) */
+static int s_e2e_iters;
+static uint32_t s_e2e_start_frame;
+
+static void e2e_frame_fn(void) {
+    if (s_e2e_iters == 0) {
+        /* submit from inside the live loop: queues pending_steps + defers, target = frame + count. */
+        s_e2e_start_frame = g_nt_app.frame;
+        TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":31,\"params\":{\"count\":5}}"));
+    }
+    s_e2e_iters++;
+    const char *r = nt_devapi_poll_response(); /* the host drains the deferred queue each tick */
+    if (r != NULL) {
+        s_e2e_resp = r;
+        nt_app_quit();
+        return;
+    }
+    if (s_e2e_iters >= E2E_ITER_CAP) {
+        nt_app_quit(); /* drain bug → bail so asserts fail, not an infinite loop */
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_step_drains_through_real_loop(void) {
+    s_e2e_resp = NULL;
+    s_e2e_iters = 0;
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+
+    nt_app_run(e2e_frame_fn);
+
+    /* The loop (not the test) advanced the frame by exactly count, and fully drained the backlog. */
+    TEST_ASSERT_EQUAL_UINT32(s_e2e_start_frame + E2E_STEP_COUNT, g_nt_app.frame);
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps);
+    TEST_ASSERT_NOT_NULL(s_e2e_resp); /* resolved before the iter cap */
+    cJSON *root = cJSON_Parse(s_e2e_resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_EQUAL_INT(31, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* nothing left queued */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_discovery_lists_new_group);
@@ -322,5 +370,6 @@ int main(void) {
     RUN_TEST(test_set_scale_huge_bad_params);
     RUN_TEST(test_frame_wait_yields_after_n_sim_advances);
     RUN_TEST(test_frame_wait_rejected_when_not_running);
+    RUN_TEST(test_step_drains_through_real_loop);
     return UNITY_END();
 }
