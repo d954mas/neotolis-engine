@@ -5,6 +5,7 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi_discovery.c
     nt_devapi_registry.c
     nt_devapi_time.c
+    nt_devapi_input.c
     nt_devapi.h
     nt_devapi_internal.h
     nt_devapi_stub.h
@@ -16,7 +17,10 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
 # pattern as nt_log). render.info reads draw_calls from its source (nt_gfx), not the nt_debug_overlay overlay.
 # The nt_app_* / nt_gfx_get_frame_draw_calls symbols resolve at the final-exe link (the consumer
 # links nt_app[_stub] + nt_gfx[_stub]) — nt_devapi stays a dev-only static lib with no impl.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_gfx_interface)
+# nt_input_interface adds the input group's L1 inject deps the same way: the nt_input_inject_* /
+# nt_input_set_player_enabled / nt_input_key_from_name symbols resolve at the final-exe link (the
+# consumer links nt_input[_stub]). Order is kept consistent for GNU ld single-pass.
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_gfx_interface nt_input_interface)
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
@@ -25,6 +29,7 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_time=1)
+target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_input=1)
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 

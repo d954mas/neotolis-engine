@@ -190,14 +190,16 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_TRUE(array_has_string(groups, "core"));
     TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
-    /* This binary also compiles the time group into nt_devapi (NT_DEVAPI_REGISTER_time=1). */
+    /* This binary also compiles the time + input groups into nt_devapi (the nt_devapi lib is built
+       with NT_DEVAPI_REGISTER_time=1 and NT_DEVAPI_REGISTER_input=1, so init registers them all). */
     TEST_ASSERT_TRUE(array_has_string(groups, "time"));
     TEST_ASSERT_TRUE(array_has_string(groups, "render"));
     TEST_ASSERT_TRUE(array_has_string(groups, "frame"));
+    TEST_ASSERT_TRUE(array_has_string(groups, "input"));
     /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
     /* groups are distinct: each group's commands collapse to one entry. */
-    TEST_ASSERT_EQUAL_INT(6, cJSON_GetArraySize(groups));
+    TEST_ASSERT_EQUAL_INT(7, cJSON_GetArraySize(groups));
     cJSON_Delete(root);
 }
 

@@ -112,6 +112,12 @@ void nt_devapi_register_core(void);
 void nt_devapi_register_time(void);
 #endif
 
+/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c,
+   invoked from nt_devapi_init under the same compile gate. */
+#ifdef NT_DEVAPI_REGISTER_input
+void nt_devapi_register_input(void);
+#endif
+
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in
    nt_devapi_discovery.c, invoked from nt_devapi_init. */
 void nt_devapi_register_discovery(void);
