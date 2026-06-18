@@ -246,7 +246,7 @@ static void spawn_n_defold(uint32_t n) {
 static void frame(void) {
     nt_debug_overlay_frame_begin();
     nt_window_poll();
-    nt_input_poll();
+    nt_input_poll(g_nt_app.frame);
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {

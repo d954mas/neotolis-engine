@@ -68,8 +68,13 @@ static void init_style(void) {
     memset(&s_props, 0, sizeof s_props); /* zero-init = plain text field (no filter/mask, default keyboard) */
 }
 
+/* Monotonic frame source: the edge-clear polls only need a fresh frame each call. */
+static uint32_t s_test_frame;
+static uint32_t next_test_frame(void) { return ++s_test_frame; }
+
 void setUp(void) {
     nt_test_assert_install();
+    s_test_frame = 0;
     nt_input_init(); /* clean key + char-ring state per test */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000); /* tofu advance = size/2 */
@@ -129,8 +134,8 @@ static void warmup_focus(uint32_t id, char *buf, size_t cap) {
 
 /* Press a physical key exactly one frame, with the field focused + idle pointer. */
 static bool key_frame(uint32_t id, char *buf, size_t cap, nt_key_t key) {
-    nt_input_poll();             /* clear last frame's edge flags */
-    nt_input_set_key(key, true); /* fresh press edge this frame */
+    nt_input_poll(next_test_frame()); /* clear last frame's edge flags */
+    nt_input_set_key(key, true);      /* fresh press edge this frame */
     const bool changed = field_frame(&IDLE_PTR, id, buf, cap, true, NULL);
     nt_input_set_key(key, false); /* release so the next set_key is a fresh edge */
     return changed;
@@ -323,7 +328,7 @@ static void test_focus_tab_esc(void) {
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_b));
 
     /* Tab: focus moves to field B. */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_TAB, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
@@ -351,7 +356,7 @@ static void test_focus_tab_esc(void) {
     TEST_ASSERT_EQUAL_STRING("q", b);
 
     /* Esc: unfocus B. */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_ESCAPE, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
@@ -415,7 +420,7 @@ static void test_submit_and_change(void) {
     TEST_ASSERT_FALSE(no_change);
 
     /* Enter raises submit. */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_ENTER, true);
     bool submitted = false;
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, &submitted);
@@ -473,7 +478,7 @@ static void test_dblclick_longpress_primitive(void) {
 /* Hold/release a modifier across a key-frame: many selection ops need Shift or Ctrl DOWN while
  * the action key fires its press edge. Sets both keys, runs one field frame, then clears. */
 static void chord_frame(uint32_t id, char *buf, size_t cap, nt_key_t mod, nt_key_t key) {
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(mod, true);
     nt_input_set_key(key, true);
     (void)field_frame(&IDLE_PTR, id, buf, cap, true, NULL);
@@ -955,7 +960,7 @@ static void test_drag_abandoned_on_focus_loss(void) {
 
     /* Esc while still holding -> the field unfocuses (Esc handler runs after the drag block; the pointer
      * did not move this frame, so the caret is unchanged here). */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_ESCAPE, true);
     nt_pointer_t hold = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&hold, id, buf, sizeof buf, true, NULL);
@@ -1035,7 +1040,7 @@ static void test_tab_skips_disabled_field(void) {
 
     /* Tab: B is disabled, so the seek must skip it and land on C (pre-fix the disabled B ate the seek
      * and focus vanished). */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_TAB, true);
     three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c);
     nt_input_set_key(NT_KEY_TAB, false);
@@ -1061,7 +1066,7 @@ static void test_scroll_responsive_width(void) {
 
     /* Jump the caret to END: the long line must scroll right to keep the caret in view. With FIXED-only
      * scroll (pre-fix) inner_w was 0 here and scroll_x stayed pinned at 0. */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_END, true);
     grow_field_frame(&IDLE_PTR, id, buf, sizeof buf);
     nt_input_set_key(NT_KEY_END, false);

@@ -56,11 +56,12 @@ static uint16_t resolve_port(void) {
 
 static void frame(void) {
     nt_window_poll();
-    /* Poll devapi at frame start, before input: a command only queues an input
-       injection, nt_input_poll() then samples hardware, and a later apply step
-       overlays the queued injection so it wins (one frame-start touch-point). */
+    /* Poll devapi at frame start, before input: a command may queue an input injection,
+       then nt_input_poll(frame) samples hardware AND drains the inject queue transparently
+       in the same edge-detection pass (D-01). Pass the sim-advance frame so the relative
+       inject countdown only ticks on a new frame. */
     nt_devapi_update();
-    nt_input_poll();
+    nt_input_poll(g_nt_app.frame);
 
     /* Draw + swap go TOGETHER under the render flag — never skip-draw-but-swap (that would present a
        stale buffer). Render off => draw_calls stays 0. */

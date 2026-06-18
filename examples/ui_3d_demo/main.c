@@ -745,7 +745,7 @@ static void draw_hud(float fb_w, float fb_h) {
 static void frame(void) {
     nt_debug_overlay_frame_begin();
     nt_window_poll();
-    nt_input_poll();
+    nt_input_poll(g_nt_app.frame);
     nt_mem_scratch_reset();
 
     const float dt = g_nt_app.dt;

@@ -3,7 +3,14 @@
 
 static bool float_near(float a, float b, float eps) { return (a - b) <= eps && (b - a) <= eps; }
 
-void setUp(void) { nt_input_init(); }
+/* Monotonic frame source: the edge-clear tests only need a fresh frame each poll. */
+static uint32_t s_test_frame;
+static uint32_t next_test_frame(void) { return ++s_test_frame; }
+
+void setUp(void) {
+    s_test_frame = 0;
+    nt_input_init();
+}
 
 void tearDown(void) { nt_input_shutdown(); }
 
@@ -23,7 +30,7 @@ void test_key_pressed_edge(void) {
 
 void test_key_released_edge(void) {
     nt_input_set_key(NT_KEY_S, true);
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_set_key(NT_KEY_S, false);
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_S));
 }
@@ -31,7 +38,7 @@ void test_key_released_edge(void) {
 void test_key_pressed_clears_next_frame(void) {
     nt_input_set_key(NT_KEY_D, true);
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_D));
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_D));
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_D));
 }
@@ -45,7 +52,7 @@ void test_any_key_pressed(void) {
 void test_clear_all_keys_sets_released(void) {
     nt_input_set_key(NT_KEY_W, true);
     nt_input_set_key(NT_KEY_A, true);
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_clear_all_keys();
     TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_W));
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_W));
@@ -76,13 +83,13 @@ void test_pointer_slot_dealloc(void) {
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
     /* Next poll deactivates */
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
 }
 
 void test_pointer_delta(void) {
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_pointer_move(1, 120.0F, 230.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[0].dx, 1e-3F));
     TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[0].dy, 1e-3F));
@@ -95,7 +102,7 @@ void test_pointer_button_pressed(void) {
 
 void test_pointer_button_released(void) {
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    nt_input_poll();
+    nt_input_poll(next_test_frame());
     nt_input_pointer_up(1);
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
 }

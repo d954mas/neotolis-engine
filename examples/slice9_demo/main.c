@@ -295,7 +295,7 @@ static void declare_nested_panels(void) {
 static void frame(void) {
     nt_debug_overlay_frame_begin();
     nt_window_poll();
-    nt_input_poll();
+    nt_input_poll(g_nt_app.frame);
     nt_mem_scratch_reset();
 
 #ifndef NT_PLATFORM_WEB

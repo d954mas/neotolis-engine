@@ -469,7 +469,7 @@ static void draw_shapes(void) {
 
 static void frame(void) {
     nt_window_poll();
-    nt_input_poll();
+    nt_input_poll(g_nt_app.frame);
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
 
