@@ -153,10 +153,10 @@ typedef struct {
     nt_ui_input_style_t *input, *input_caret, *input_sel;
     const nt_ui_modal_style_t *modal;
     nt_ui_dropdown_style_t *dropdown; /* non-const: nt_ui_dropdown memoizes atlas-ref resolves into the style */
-    const nt_ui_tooltip_style_t *tooltip;
-    nt_ui_menu_style_t *menu;        /* non-const: nt_ui_menu memoizes atlas-ref resolves into the style */
-    nt_ui_tabbar_style_t *tabbar;    /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
-    nt_ui_tabbar_style_t *tabs_demo; /* begin/end-core demo strip (horizontal, BOTTOM accent) */
+    nt_ui_tooltip_style_t *tooltip;   /* non-const: nt_ui_tooltip memoizes atlas-ref resolves into the style */
+    nt_ui_menu_style_t *menu;         /* non-const: nt_ui_menu memoizes atlas-ref resolves into the style */
+    nt_ui_tabbar_style_t *tabbar;     /* non-const: nt_ui_tabbar memoizes atlas-ref resolves into the style */
+    nt_ui_tabbar_style_t *tabs_demo;  /* begin/end-core demo strip (horizontal, BOTTOM accent) */
     /* panel_alt: a distinct shade for the props control card so it reads apart from the stage panel. */
     Clay_Color bg, panel, panel_alt, list_bg, list_sel, accent, border;
     const char *name;
@@ -460,6 +460,8 @@ static nt_atlas_region_ref_t s_icon_bunny_ref;
 static nt_atlas_region_ref_t s_chevron_down_ref;
 /* Menu submenu marker (right-pointing arrow; tintable). */
 static nt_atlas_region_ref_t s_arrow_right_ref;
+/* Tooltip caret/arrow (up-pointing triangle; the tooltip flips it per popup side; tintable). */
+static nt_atlas_region_ref_t s_caret_ref;
 /* Tabs-demo icons: bunny on idle/hover, checkmark on the selected tab (game-owned content swap). */
 static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
 static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
@@ -546,6 +548,7 @@ static void init_styles(void) {
     s_icon_bunny_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
     s_chevron_down_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHEVRON_DOWN.value);
     s_arrow_right_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ARROW_RIGHT.value);
+    s_caret_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CARET.value);
     s_tabs_icon_idle_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY.value);
     s_tabs_icon_sel_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK.value);
 
@@ -872,14 +875,28 @@ static void init_styles(void) {
     s_dropdown_light.row_pressed.fill = 0xFFF0B68AU;
     s_dropdown_light.row_selected.fill = 0xFF3C8CC8U; /* warm amber accent for the pale theme */
 
-    /* ---- Tooltip: a short reveal delay; light flips to a pale panel + dark text. ---- */
+    /* ---- Tooltip: a short reveal delay; dark uses the panel_blue slice9 frame + a caret pointing at the
+     * target (flips ABOVE near the bottom border) + a soft drop-shadow. Light flips to a pale flat panel +
+     * dark text, keeping the caret + a thin border + a subtle shadow. ---- */
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
     s_tooltip_dark.delay_secs = 0.5F;
     s_tooltip_dark.font_size = 16.0F;
     s_tooltip_dark.open_ease_speed = 14.0F; /* demo the new open-tween knob: the tooltip eases open */
+    s_tooltip_dark.panel_art = s_panel_blue_ref;
+    s_tooltip_dark.panel_tint = 0xFFFFFFFFU;
+    s_tooltip_dark.caret = s_caret_ref;
+    s_tooltip_dark.caret_tint = 0xFFCFE2FAU; /* pale blue caret matching the panel_blue frame */
+    s_tooltip_dark.caret_size = 14U;
+    s_tooltip_dark.shadow_color = 0x60000000U; /* translucent black drop-shadow */
+    s_tooltip_dark.shadow_offset_px = 4;
     s_tooltip_light = s_tooltip_dark;
+    s_tooltip_light.panel_art = (nt_atlas_region_ref_t){0}; /* flat pale panel on the light theme (no art) */
     s_tooltip_light.panel_bg = 0xFFF4F4F4U;
     s_tooltip_light.text_color = 0xFF202830U;
+    s_tooltip_light.caret_tint = 0xFFF4F4F4U;   /* caret matches the pale panel */
+    s_tooltip_light.border_color = 0xFFB8C2CCU; /* thin cool-grey border around the pale panel */
+    s_tooltip_light.border_px = 1U;
+    s_tooltip_light.shadow_color = 0x30000000U; /* lighter shadow on the pale theme */
 
     /* ---- Context menu (dogfood): panel_blue slice9 frame + arrow_right submenu marker + an icon gutter
      * (bunny on some rows, aligned-empty on the rest). Rows keep the eased flat hover highlight over the
@@ -1594,6 +1611,8 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
         .cornerRadius = CLAY_CORNER_RADIUS(8)};
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover a target and wait ~0.5s for its tooltip; move away to hide. The tooltip never blocks clicks underneath.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "The panel is a slice9 frame with a caret pointing at the target + a drop-shadow; near the bottom border the caret flips to the panel's bottom edge.", g_current->caption);
 
     /* The targets are plain buttons so they are still clickable (proving the tooltip has no catcher).
      * The tooltip is declared AFTER each target so the target carries a queryable bbox this frame. */
