@@ -29,7 +29,11 @@ target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_time=1)
-target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_input=1)
+# input is PUBLIC: the per-tick transport entry nt_devapi_update (in the SEPARATE nt_devapi_net TU)
+# must ticks the input schedule under the same gate, so the group define has to reach that TU and
+# every consumer that drives the per-tick path. The other groups are pure init-time registrars
+# (no per-tick hook) so they stay PRIVATE.
+target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_REGISTER_input=1)
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 

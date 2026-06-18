@@ -116,6 +116,13 @@ void nt_devapi_register_time(void);
    invoked from nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_REGISTER_input
 void nt_devapi_register_input(void);
+
+/* Tick the devapi-side input schedule once per nt_devapi_update, AFTER net_poll (so this tick's
+   handler enqueues are seen). `advanced` is true only on a real sim-advance (g_nt_app.frame
+   changed vs the last update): on advance, release every due entry into nt_input's immediate
+   inject buffer and decrement survivors; on a frozen tick (pause / manual-idle) release nothing.
+   The schedule lives in nt_devapi_input.c, which legitimately knows g_nt_app. */
+void nt_devapi_input_tick(bool advanced);
 #endif
 
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in

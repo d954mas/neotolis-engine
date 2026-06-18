@@ -372,7 +372,20 @@ void nt_devapi_net_poll(void) {
 /* TODO(transport-split): this is the game-facing per-tick entry but lives in the TCP module and only
    drives net_poll. When a second transport (web) lands, move it to the core and poll every registered
    transport so both share the frame-keyed deferred drain. Single transport today -> kept here (YAGNI). */
-void nt_devapi_update(void) { nt_devapi_net_poll(); }
+void nt_devapi_update(void) {
+    nt_devapi_net_poll(); /* handlers enqueue into the input schedule first */
+#ifdef NT_DEVAPI_REGISTER_input
+    /* Then tick the devapi-side input schedule. A real sim-advance is g_nt_app.frame changing vs the
+       last update; on a frozen tick (pause / manual-idle) nothing is released, so synthetic input
+       holds while the game is paused (real device input still flows through nt_input_poll). */
+    static uint32_t s_last_frame;
+    static bool s_have_last_frame;
+    bool advanced = !s_have_last_frame || (g_nt_app.frame != s_last_frame);
+    nt_devapi_input_tick(advanced);
+    s_last_frame = g_nt_app.frame;
+    s_have_last_frame = true;
+#endif
+}
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
 /* Monotonic WALL clock: clock() measures CPU time (wrong for a wall-clock spin timeout). */
