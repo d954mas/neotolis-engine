@@ -33,10 +33,9 @@ static ui_walker_fixture_t s_fx;
 
 #define MENU_A 0x4E5001U
 
-/* Grown style ABI lands in Plan 03 (shortcut-text color + checkmark ref/tint/size). Asserting
- * sizeof (not a stale literal) keeps the marker honest; the literal is updated in Plan 03 once the
- * fields land. TODO(plan-03): bump EXPECTED_MENU_STYLE_ABI to the recomputed grown byte count. */
-#define EXPECTED_MENU_STYLE_ABI 96U
+/* Grown style ABI (Plan 03): + shortcut_text color + checkmark ref/tint/size. 3 ref + 9 u32 + 4 float +
+ * 8 u16 + 4 tail pad = 120. Mirrors the _Static_assert in nt_ui_menu.h (both must agree). */
+#define EXPECTED_MENU_STYLE_ABI 120U
 
 /* Sibling item keys for the immediate driver (unique among siblings; scope stack disambiguates depth). */
 #define KEY_FILE 1U
@@ -76,6 +75,7 @@ static void fx_begin(float dt) {
 static void test_menu_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT((unsigned)((2 * sizeof(void *)) + 32), (unsigned)sizeof(nt_ui_menu_item_t));
     TEST_ASSERT_EQUAL_UINT(EXPECTED_MENU_STYLE_ABI, (unsigned)sizeof(nt_ui_menu_style_t));
+    TEST_ASSERT_EQUAL_UINT((unsigned)(16U + ((((sizeof(void *) + 4U) + 7U) / 8U) * 8U)), (unsigned)sizeof(nt_ui_menu_item_opts_t));
     TEST_ASSERT_EQUAL_UINT(16U, (unsigned)sizeof(nt_ui_menu_state_t));
 }
 

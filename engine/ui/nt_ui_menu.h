@@ -50,45 +50,54 @@ _Static_assert(sizeof(nt_ui_menu_item_t) == 2 * sizeof(void *) + 32, "nt_ui_menu
  * fallback; rows reserve a leading icon gutter (icon_size). layer comes from the call (data->layer),
  * NOT the style — mirrors checkbox/dropdown. */
 typedef struct {
-    nt_atlas_region_ref_t panel_bg; /* optional panel slice9 art; atlas.id==0 = flat bg_color */
-    nt_atlas_region_ref_t arrow;    /* optional submenu marker sprite; atlas.id==0 = ">" text fallback */
-    uint32_t bg_color;              /* flat panel background fallback */
-    uint32_t item_hover_color;      /* hovered/focused row highlight (eased in) */
-    uint32_t text_color;            /* enabled item text */
-    uint32_t text_disabled;         /* disabled item text */
-    uint32_t panel_tint;            /* multiplies the panel slice9 art; 0xFFFFFFFF = no tint */
-    uint32_t arrow_tint;            /* multiplies the arrow sprite; 0xFFFFFFFF = no tint */
-    uint32_t separator_color;       /* NULL-label separator divider color */
-    float font_size;                /* px; asserted > 0 */
-    float slice9_scale;             /* multiplies the panel art's baked slice9 borders; > 0 */
-    float state_speed;              /* eases the row hover/focus highlight (0 = instant) */
-    float open_ease_speed;          /* popup open/close tween speed (0 = snap; game opts into a tween) */
-    uint16_t item_height;           /* px row height */
-    uint16_t min_width;             /* px panel min width */
-    uint16_t pad;                   /* px inner padding */
-    uint16_t font_id;               /* label font */
-    uint16_t icon_size;             /* px leading icon gutter (0 = no gutter / text-only rows) */
-    uint16_t arrow_size;            /* px submenu marker sprite box (used only when arrow ref is set) */
-    uint16_t separator_height;      /* px NULL-label separator divider thickness */
-    uint8_t _pad[6];
+    nt_atlas_region_ref_t panel_bg;  /* optional panel slice9 art; atlas.id==0 = flat bg_color */
+    nt_atlas_region_ref_t arrow;     /* optional submenu marker sprite; atlas.id==0 = ">" text fallback */
+    nt_atlas_region_ref_t checkmark; /* optional selected-item checkmark sprite; atlas.id==0 = "✓" text fallback */
+    uint32_t bg_color;               /* flat panel background fallback */
+    uint32_t item_hover_color;       /* hovered/focused row highlight (eased in) */
+    uint32_t text_color;             /* enabled item text */
+    uint32_t text_disabled;          /* disabled item text */
+    uint32_t shortcut_text;          /* right-aligned shortcut-column text color */
+    uint32_t panel_tint;             /* multiplies the panel slice9 art; 0xFFFFFFFF = no tint */
+    uint32_t arrow_tint;             /* multiplies the arrow sprite; 0xFFFFFFFF = no tint */
+    uint32_t check_tint;             /* multiplies the checkmark sprite; 0xFFFFFFFF = no tint */
+    uint32_t separator_color;        /* NULL-label separator divider color */
+    float font_size;                 /* px; asserted > 0 */
+    float slice9_scale;              /* multiplies the panel art's baked slice9 borders; > 0 */
+    float state_speed;               /* eases the row hover/focus highlight (0 = instant) */
+    float open_ease_speed;           /* popup open/close tween speed (0 = snap; game opts into a tween) */
+    uint16_t item_height;            /* px row height */
+    uint16_t min_width;              /* px panel min width */
+    uint16_t pad;                    /* px inner padding */
+    uint16_t font_id;                /* label font */
+    uint16_t icon_size;              /* px leading icon gutter (0 = no gutter / text-only rows) */
+    uint16_t arrow_size;             /* px submenu marker sprite box (used only when arrow ref is set) */
+    uint16_t check_size;             /* px checkmark sprite box (used only when the checkmark ref is set) */
+    uint16_t separator_height;       /* px NULL-label separator divider thickness */
 } nt_ui_menu_style_t;
-_Static_assert(sizeof(nt_ui_menu_style_t) == 96, "nt_ui_menu_style_t stable ABI (2 ref + 7 u32 + 4 float + 7 u16 + 6 pad)");
+_Static_assert(sizeof(nt_ui_menu_style_t) == 120, "nt_ui_menu_style_t stable ABI (3 ref + 9 u32 + 4 float + 8 u16 + 4 tail pad)");
 
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
-/* Immediate-item options (D-236-03): the full OS-menu row field set. `enabled` defaults false under a
- * {0} init, so callers set it explicitly (nt_ui_menu_item supplies enabled=true). `activatable` defaults
- * true for a plain row; the §7 opt-out (activatable=false) lets an interactive child own the click in
- * nt_ui_menu_item_begin. `icon` is the leading-gutter sprite (atlas.id==0 = aligned empty gutter). */
+/* Immediate-item options (D-236-03): the full OS-menu row field set. `icon` is the leading-gutter sprite
+ * (atlas.id==0 = aligned empty gutter). A {0} init reads enabled=false + activatable=false — wrong for a
+ * normal row, so prefer nt_ui_menu_item_opts_defaults() (enabled+activatable true) and opt OUT, not IN. */
 typedef struct {
     nt_atlas_region_ref_t icon; /* optional leading-gutter sprite (atlas.id==0 = aligned empty gutter) */
-    const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); Plan 03 renders it */
+    const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
     bool enabled;               /* greyed + non-selectable when false */
-    bool selected;              /* checkmark (toggle/radio menu items); Plan 03 renders it */
+    bool selected;              /* checkmark (toggle/radio menu items) */
     bool activatable;           /* false = an interactive child owns the click (§7 opt-out, item_begin only) */
     uint8_t _pad[1];
 } nt_ui_menu_item_opts_t;
+/* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
+ * multiple of the 8-byte ref alignment; express portably as 16 + the (ptr+4) cell rounded up to 8. */
+_Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 3 bool + pad, 8-aligned)");
+
+/* Safe baseline: a normal enabled, activatable row (no icon/shortcut/check). Callers opt OUT (clear
+ * enabled/activatable), never IN — a zeroed opts would otherwise silently disable + de-activate the row. */
+static inline nt_ui_menu_item_opts_t nt_ui_menu_item_opts_defaults(void) { return (nt_ui_menu_item_opts_t){.enabled = true, .activatable = true}; }
 
 /* Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
  * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly

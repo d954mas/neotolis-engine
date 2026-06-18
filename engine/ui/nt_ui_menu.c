@@ -174,8 +174,10 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
         .item_hover_color = 0xFF4A6A8AU,
         .text_color = 0xFFEEEEEEU,
         .text_disabled = 0xFF888888U,
+        .shortcut_text = 0xFF999999U, /* muted vs text_color so the shortcut column reads as secondary */
         .panel_tint = 0xFFFFFFFFU,
         .arrow_tint = 0xFFC8C8C8U,
+        .check_tint = 0xFFFFFFFFU, /* no tint; checkmark ref stays 0 -> "✓" text fallback */
         .separator_color = 0xFF505050U,
         .font_size = 16.0F,
         .slice9_scale = 1.0F,
@@ -187,6 +189,7 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
         .font_id = 0U,
         .icon_size = 0U,        /* no icon gutter by default (text-only) */
         .arrow_size = 14U,      /* used only when the arrow ref is set */
+        .check_size = 14U,      /* used only when the checkmark ref is set (mirror arrow_size) */
         .separator_height = 2U, /* NULL-label divider thickness */
     };
 }
