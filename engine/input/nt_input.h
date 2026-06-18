@@ -175,7 +175,7 @@ typedef enum {
 
 /* Convenience single-pointer id: a HIGH reserved value so it never collides with a real
    mouse (id=0) or a small browser pointerId. Explicit bot ids are used verbatim. */
-#define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000u
+#define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000U
 
 /* Map a key name ("A","SPACE","ARROW_UP","F1" -- the enum identifier minus NT_KEY_) to its
    nt_key_t. Returns false (out untouched) on unknown. */
