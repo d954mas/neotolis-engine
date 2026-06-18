@@ -108,7 +108,7 @@ void nt_ui_tabbar_end(nt_ui_context_t *ctx);
  * each tab reserves a leading gutter of icon_size px so labels stay aligned; the icon is drawn if its ref
  * is set, else the gutter is left empty (OS-menu icon-column behavior). NULL `icons` with icon_size > 0
  * still reserves an aligned-empty gutter on every tab. icon_size==0 -> no gutter at all (pure text). This
- * mirrors nt_ui_dropdown_list's icons[] one-function model; the begin/end core stays the fully-custom path.
+ * is the icons[] one-function convenience model; the begin/end core stays the fully-custom path.
  *
  * Layers: the bar bg + tab fills + icons draw on data->layer; the tab labels on label_layer -- pass them
  * split (fills on the img layer, text on the text layer) to batch fills-then-text in one segment. data may

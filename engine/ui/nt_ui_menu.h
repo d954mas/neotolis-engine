@@ -28,22 +28,6 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
  * popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). */
 #define NT_UI_MENU_MAX_DEPTH 8
 
-/* One menu item. Recursion is via `submenu` (NULL = leaf). The game builds a static const tree; the
- * menu never mutates it. ABI guarded portably (two pointers + 32B of ref/scalars/pad) so the guard
- * holds on both 64-bit native and 32-bit wasm. `icon` is an OPTIONAL leading-gutter sprite (atlas.id==0
- * = no icon -> aligned empty space when style->icon_size > 0; unified icon model). */
-typedef struct nt_ui_menu_item nt_ui_menu_item_t;
-struct nt_ui_menu_item {
-    const char *label;                /* non-NULL when this slot is a real item (NULL = separator) */
-    const nt_ui_menu_item_t *submenu; /* child level (NULL = leaf / separator) */
-    nt_atlas_region_ref_t icon;       /* optional leading icon (atlas.id==0 = aligned empty gutter) */
-    uint32_t id;                      /* game-chosen selection id reported on activate (leaf only) */
-    uint32_t submenu_count;           /* number of items in `submenu` (0 = leaf) */
-    bool enabled;                     /* disabled item: greyed, not selectable, opens no submenu */
-    uint8_t _pad[7];
-};
-_Static_assert(sizeof(nt_ui_menu_item_t) == 2 * sizeof(void *) + 32, "nt_ui_menu_item_t stable ABI (2 ptr + 16 ref + 2 u32 + 1 bool + 7 pad)");
-
 /* Visual knobs. Colors are 0xAABBGGRR. Item rows are plain rects + labels (no button widget) so the
  * hover-intent owns the open/keep/switch decision. The panel is an OPTIONAL slice9 sprite (panel_bg
  * ref) with a flat bg_color fallback; the submenu marker is an OPTIONAL arrow sprite with a ">" text
@@ -137,21 +121,6 @@ void nt_ui_menu_end(nt_ui_context_t *ctx);
  * caller passes the long_pressed flag from ITS target widget's own nt_ui_events gesture step (this helper
  * owns no gesture timing). Returns true if it armed this frame (so the caller can stop other handling). */
 bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st);
-
-/* Declare the menu: renders the root as a popup-core floating at the anchor and recursively declares
- * each open submenu as a nested popup-core fly-out, driven by the mouse-aim hover-intent. Esc /
- * outside-click dismisses the deepest open level up the chain; keyboard arrows navigate. On a leaf
- * activate it latches st->chosen_id and dismisses the whole chain. id/items/st/style non-NULL;
- * NT_ASSERT on a malformed tree (NULL label with a submenu count, depth past the cap). A NULL-label item
- * is a non-interactive separator (a thin divider, skipped by hover/click/keyboard-nav).
- * A SINGLE root-level full-viewport occluder sits under the whole menu stack: it absorbs the dismiss
- * click and gates base UI while the menu is open. NO per-level catchers: a per-level catcher sits ABOVE
- * ancestor panels and would trap the user in the deepest level.
- * style is mutated in place to memoize resolved atlas refs (panel_bg / arrow).
- * Layers: every level's panel + row fills + icons + arrow draw on data->layer (also the popup panel
- * layer), item text on label_layer (split to batch). data may be NULL (fills fall to layer 0). */
-void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st,
-                nt_ui_menu_style_t *style);
 
 #ifdef NT_TEST_ACCESS
 /* Pure barycentric point-in-triangle. No GL, no ctx — directly unit-tested. */

@@ -77,30 +77,6 @@ _Static_assert(sizeof(nt_ui_dropdown_style_t) == 400, "nt_ui_dropdown_style_t st
 /* Valid baseline style (dark) that looks polished with flat colors and NO atlas art (wire refs to opt in). */
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
 
-/* Trigger button: shows the label of the current *selected (or `placeholder` when out of range / -1)
- * and toggles *open on click. Declared like any other widget inside the layout. id/labels/selected/
- * open/style non-NULL; count >= 0; *selected in [-1,count). Returns true on the frame it toggled.
- * Layers: the trigger fill + chevron draw on data->layer, its label on label_layer (split to batch).
- * data may be NULL (fill falls to layer 0). style is mutated in place to memoize resolved refs. */
-bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int selected, const char *placeholder,
-                            nt_ui_dropdown_style_t *style, const Clay_ElementDeclaration *decl, bool *open);
-
-/* The open list: a popup-core floating anchored to the trigger's bbox (queried by `id`) with edge-flip
- * up near the bottom border. Rows are per-state rects; a row click sets *selected and clears *open. A
- * list taller than style->max_visible_rows is wrapped in nt_ui_scroll (GC'd; no clip leak). Call every
- * frame AFTER the trigger; it self-balances when fully closed (no end needed by the caller). id/labels/
- * selected/open/style non-NULL; *selected in [-1,count). Returns true if a selection was made this frame.
- *
- * `icons` is an OPTIONAL parallel array (length `count`, or NULL = text-only). When style->icon_size > 0
- * each row reserves a leading gutter of icon_size px so text stays aligned; the icon is drawn if its ref
- * is set, else the gutter is left empty (OS-menu icon-column behavior). NULL `icons` with icon_size > 0
- * still reserves an aligned-empty gutter on every row.
- *
- * Layers: the panel + row fills + icons draw on data->layer (also the popup panel layer), row text on
- * label_layer (split to batch). data may be NULL (fills fall to layer 0). style is mutated in place. */
-bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, const nt_atlas_region_ref_t *icons, int count,
-                         int *selected, nt_ui_dropdown_style_t *style, bool *open);
-
 /* ---- Immediate combo API (begin/selectable/end) — mirrors the menu core (DESIGN §3, D-236-04). ----
  * The GAME owns `int *selected` (writes it on a selectable's clicked return) + `bool *open`; the combo
  * only signals + clears *open on a row click (Model-D). Combos do NOT nest (asserted). All combo fills
@@ -139,7 +115,7 @@ void nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
 void nt_ui_combo_end(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
-/* The popup side chosen for the list on the last nt_ui_dropdown_list call (edge-flip probe). */
+/* The popup side chosen for the combo list on its last open (edge-flip probe). */
 uint8_t nt_ui_dropdown_test_last_side(void);
 /* The scroll id the list used for its long-list wrapper (0 if the list did not scroll). */
 uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id);

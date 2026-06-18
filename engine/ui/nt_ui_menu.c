@@ -206,21 +206,6 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
     };
 }
 
-/* Validate one item (fail-early): a submenu ptr and its count must agree, and a parent item (one with a
- * submenu) must carry a label. */
-static void menu_assert_item(const nt_ui_menu_item_t *it) {
-    NT_ASSERT((it->submenu == NULL) == (it->submenu_count == 0U) && "menu item: submenu ptr and count must agree");
-    NT_ASSERT((it->submenu == NULL || it->label != NULL) && "menu item: a parent item must have a label");
-}
-
-/* Validate one level's item array. */
-static void menu_assert_items(const nt_ui_menu_item_t *items, uint32_t count) {
-    NT_ASSERT(items != NULL || count == 0U);
-    for (uint32_t i = 0; i < count; ++i) {
-        menu_assert_item(&items[i]);
-    }
-}
-
 /* Reset the open chain + focus to "nothing open". A fresh (zeroed) cell would otherwise read
  * open_path[0]==0 as "item 0's submenu is open", auto-flying-out the first parent. */
 static void menu_runtime_reset(nt_ui_menu_runtime_t *rt) {
@@ -291,11 +276,7 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
     return armed;
 }
 
-// #region menu UI declaration (recursive popup-core fly-outs)
-/* Declared-but-not-defined yet: the recursion is mutual (a level declares its open child level). */
-static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth,
-                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen, bool *out_close_chain);
-
+// #region menu UI declaration (shared row/marker/panel helpers fed by the immediate path)
 /* A NULL-label item renders as a thin, non-interactive divider (no row id, no hover/click/nav). A short
  * muted rect, indented by the panel pad so it reads as a group separator. */
 static void menu_declare_separator(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_ui_menu_style_t *style) {
@@ -388,52 +369,6 @@ static void menu_declare_shortcut(nt_ui_context_t *ctx, uint8_t label_layer, uin
     CLAY({.id = (Clay_ElementId){.id = shortcut_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) { nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), shortcut, &sc); }
 }
 
-/* One item row: a fixed-height rect with an optional icon gutter, a label, and a submenu marker for a
- * parent. The hover/focus highlight EASES in via nt_ui_anim (value_t -> hover alpha) — purely visual on
- * the row bg, the open/keep/switch state machine is untouched. Returns the interaction so the caller
- * drives hover/click. The row id is registered so its bbox is queryable. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon gutter + eased hover + marker branch, not deep nesting
-static nt_ui_interaction_t menu_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, uint8_t depth, uint32_t item_idx, const nt_ui_menu_item_t *it,
-                                            bool focused, nt_ui_menu_style_t *style) {
-    const uint32_t row_id = menu_row_id(menu_id, depth, item_idx);
-    const bool is_parent = it->submenu != NULL;
-    const nt_ui_interaction_t in = it->enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
-    const bool highlit = it->enabled && (in.hovered || focused);
-
-    /* Eased highlight: value_t rides 0..1 toward highlit; the hover fill alpha tracks it so the row bg
-     * fades in/out instead of an instant swap. state_speed==0 snaps. */
-    const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
-    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
-    Clay_Color bg = {0};
-    if (style->item_hover_color != 0U) {
-        bg = nt_ui_unpack_abgr(style->item_hover_color);
-        bg.a = bg.a * a->value_t;
-    }
-    const uint32_t txt = it->enabled ? style->text_color : style->text_disabled;
-    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(txt)};
-    CLAY({
-        .id = (Clay_ElementId){.id = row_id},
-        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)style->item_height)},
-                   .padding = {.left = style->pad, .right = style->pad},
-                   .childGap = style->pad,
-                   .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
-        .backgroundColor = bg,
-        .userData = (void *)nt_ui_make_element_data(fill_layer, NULL),
-    }) {
-        menu_declare_icon(ctx, fill_layer, menu_icon_id(menu_id, depth, item_idx), &it->icon, style);
-        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), it->label != NULL ? it->label : "", &lbl);
-        if (is_parent) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-            menu_declare_marker(ctx, fill_layer, label_layer, menu_arrow_id(menu_id, depth, item_idx), &lbl, style);
-        }
-    }
-    /* Register the row's interaction (step) so capture/hover edges advance once per frame. */
-    if (it->enabled) {
-        (void)nt_ui_step_interaction(ctx, row_id);
-    }
-    return in;
-}
-
 /* Resolve the anchor rect for a parent item's submenu = the item row's bbox; the submenu defaults to
  * RIGHT of the row and edge-flips per level via popup-core. found==false (first frame) falls back to the
  * supplied row screen estimate. */
@@ -449,214 +384,6 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
     return a;
 }
 
-/* Keyboard-nav for the deepest open level: Up/Down move focus within the level; Right opens the focused
- * parent's submenu (no-op on a leaf); Enter activates a focused leaf OR opens a focused
- * parent; Left/Esc close the level. Mutates rt->focus/open_path. Returns true if the level should
- * close (Left/Esc). */
-/* Step focus by +1/-1, skipping separators (NULL-label, non-interactive). Wraps; stops after a full
- * loop if the level is all-separators (defensive). step is +1 (Down) or -1 (Up). */
-static int16_t menu_focus_step(const nt_ui_menu_item_t *items, uint32_t count, int16_t f, int step) {
-    for (uint32_t k = 0; k < count; ++k) {
-        if (step > 0) {
-            f = (int16_t)((f + 1) % (int)count);
-        } else {
-            f = (int16_t)((f <= 0) ? (int)count - 1 : f - 1);
-        }
-        if (items[f].label != NULL) {
-            break;
-        }
-    }
-    return f;
-}
-
-static bool menu_keyboard_nav(const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, nt_ui_menu_runtime_t *rt, uint32_t *out_chosen) {
-    int16_t f = rt->focus[depth];
-    if (nt_input_key_is_pressed(NT_KEY_ARROW_DOWN)) {
-        f = menu_focus_step(items, count, f, +1);
-    } else if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
-        f = menu_focus_step(items, count, f, -1);
-    }
-    rt->focus[depth] = f;
-    if (f >= 0 && (uint32_t)f < count) {
-        const nt_ui_menu_item_t *it = &items[f];
-        const bool open_key = nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER);
-        const bool activate_key = nt_input_key_is_pressed(NT_KEY_ENTER);
-        /* label!=NULL also excludes separators: focus can land on one only when a level is all-separators
-         * (focus_step exhausts), and a malformed separator (enabled, no submenu) must never activate. */
-        if (it->enabled && it->label != NULL) {
-            if (it->submenu != NULL && open_key) {
-                rt->open_path[depth] = f;
-                if (depth + 1U > rt->active_depth) {
-                    rt->active_depth = (uint8_t)(depth + 1U);
-                }
-                /* Reset the new level's focus, but guard the index: at the depth cap (depth+1 ==
-                 * NT_UI_MENU_MAX_DEPTH) the deepening still proceeds so the recursion's fail-early cap
-                 * assert fires — we just must not OOB-write focus[MAX_DEPTH] before it. */
-                if (depth + 1U < NT_UI_MENU_MAX_DEPTH) {
-                    rt->focus[depth + 1U] = 0;
-                }
-            } else if (it->submenu == NULL && activate_key) {
-                *out_chosen = it->id; /* Right on a leaf is a no-op; only Enter activates */
-            }
-        }
-    }
-    return nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) || nt_input_key_is_pressed(NT_KEY_ESCAPE);
-}
-
-/* Declare the panel + item rows. Updates focus on hover, latches a leaf click into *out_chosen and a
- * parent click into the returned open_idx, and reports a hovered "switch request" (parent to open OR a
- * leaf when a sibling submenu is open) in *out_hovered. Returns the open child index after clicks. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — panel slice9 branch + separator branch + row loop, not deep nesting
-static int16_t menu_declare_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth,
-                                  nt_ui_menu_runtime_t *rt, nt_ui_menu_style_t *style, int16_t open_idx, int16_t *out_hovered, uint32_t *out_chosen) {
-    int16_t hovered = -1;
-    /* Resolve the panel slice9 once (memoize): art-or-flat. IMAGE bg can't round (drop cornerRadius —
-     * the menu was never rounded, so just pick the bg branch); flat falls back to bg_color. */
-    nt_atlas_resolve_ref(&style->panel_bg);
-    const bool panel_art = (style->panel_bg.atlas.id != 0U && style->panel_bg.region != NT_ATLAS_INVALID_REGION);
-    Clay_ElementDeclaration panel = {.id = (Clay_ElementId){.id = menu_panel_id(menu_id, depth)},
-                                     .layout = {.sizing = {.width = CLAY_SIZING_FIT(.min = (float)style->min_width), .height = CLAY_SIZING_FIT(0)},
-                                                .padding = CLAY_PADDING_ALL(style->pad),
-                                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                                                .childGap = 2},
-                                     .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)};
-    if (panel_art) {
-        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (panel payload)");
-        *p = (nt_ui_image_payload_t){.atlas = style->panel_bg.atlas, .region_index = style->panel_bg.region, .slice9_scale = style->slice9_scale};
-        panel.image = (Clay_ImageElementConfig){.imageData = p};
-        panel.backgroundColor = nt_ui_unpack_tint(style->panel_tint);
-    } else {
-        panel.backgroundColor = nt_ui_unpack_abgr(style->bg_color);
-    }
-    nt_ui_clay_priv_open_element();
-    nt_ui_clay_priv_configure_open_element(panel);
-    {
-        for (uint32_t i = 0; i < count; ++i) {
-            const nt_ui_menu_item_t *it = &items[i];
-            if (it->label == NULL) {
-                menu_declare_separator(ctx, fill_layer, style); /* NULL label = non-interactive divider */
-                continue;
-            }
-            const bool focused = (rt->focus[depth] == (int16_t)i);
-            const nt_ui_interaction_t in = menu_declare_row(ctx, fill_layer, label_layer, menu_id, depth, i, it, focused, style);
-            if (!it->enabled) {
-                continue;
-            }
-            if (in.hovered) {
-                rt->focus[depth] = (int16_t)i;              /* hover moves keyboard focus too */
-                if (it->submenu != NULL || open_idx >= 0) { /* parent open OR leaf-closes-sibling */
-                    hovered = (int16_t)i;
-                }
-            }
-            if (in.clicked) {
-                if (it->submenu != NULL) {
-                    open_idx = (int16_t)i;
-                } else {
-                    *out_chosen = it->id; /* latch the activated leaf id; the game reads + clears it */
-                }
-            }
-        }
-    }
-    nt_ui_clay_priv_close_element();
-    *out_hovered = hovered;
-    return open_idx;
-}
-
-/* Aim-gated mouse switch: a sibling switch request only replaces the open child once the cursor is no
- * longer aiming at (nor parked over) the currently-open child. Returns the new open child. */
-static int16_t menu_resolve_hover_switch(nt_ui_context_t *ctx, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, int16_t open_idx, int16_t hovered, float mx, float my,
-                                         uint8_t cur_side, float dt) {
-    if (hovered < 0 || hovered == open_idx) {
-        return open_idx;
-    }
-    bool may_switch = true;
-    if (open_idx >= 0 && (uint32_t)open_idx < count && items[open_idx].submenu != NULL) {
-        const nt_ui_bbox_t cbb = nt_ui_get_bbox(ctx, menu_level_id(menu_id, (uint8_t)(depth + 1U)));
-        if (cbb.found) {
-            nt_ui_menu_hover_t *hc = nt_ui_state(ctx, menu_hover_id(menu_id, (uint8_t)(depth + 1U)), sizeof *hc, NT_UI_MENU_TAG);
-            may_switch = !menu_hover_intent(hc, mx, my, cbb.x, cbb.y, cbb.width, cbb.height, cur_side, dt);
-        }
-    }
-    if (!may_switch) {
-        return open_idx;
-    }
-    if (items[hovered].submenu != NULL) {
-        return hovered;
-    }
-    return -1; /* leaf hover collapses the open child */
-}
-
-/* Commit the resolved open child into the runtime cell + maintain active_depth, then run keyboard-nav
- * for the deepest-at-frame-start level (which may open/close a level or activate a leaf). Returns the
- * final open child index after nav. */
-static int16_t menu_commit_and_nav(const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth, nt_ui_menu_runtime_t *rt, int16_t open_idx, uint32_t *out_chosen,
-                                   bool *out_close_chain) {
-    rt->open_path[depth] = open_idx;
-    if (open_idx >= 0) {
-        if (depth + 1U > rt->active_depth) {
-            rt->active_depth = (uint8_t)(depth + 1U);
-        }
-    } else if (rt->active_depth > depth) {
-        rt->active_depth = depth; /* this level no longer has an open child */
-    }
-    if (depth != nav_depth) {
-        return open_idx;
-    }
-    if (menu_keyboard_nav(items, count, depth, rt, out_chosen)) {
-        if (depth == 0U) {
-            *out_close_chain = true;
-        } else {
-            rt->open_path[depth - 1U] = -1; /* collapse this level back into the parent */
-            rt->active_depth = (uint8_t)(depth - 1U);
-        }
-    }
-    return rt->open_path[depth];
-}
-
-// NOLINTNEXTLINE(misc-no-recursion): bounded recursion — depth capped by NT_UI_MENU_MAX_DEPTH (asserted before each push)
-static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t menu_id, const nt_ui_menu_item_t *items, uint32_t count, uint8_t depth, uint8_t nav_depth,
-                               const nt_ui_popup_anchor_t *anchor, nt_ui_menu_runtime_t *rt, nt_ui_menu_style_t *style, float mx, float my, float dt, uint32_t *out_chosen, bool *out_close_chain) {
-    NT_ASSERT(depth < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
-    menu_assert_items(items, count);
-
-    nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
-    pst.layer = fill_layer;                  /* widget-owned: each level's popup panel sits on the fill layer */
-    /* Clear light-dismiss so popup-core emits NO catcher per level: a submenu's full-viewport catcher
-     * sits at a HIGHER z than ancestor panels (catcher_z(d+1) > panel_z(d)) and would occlude them,
-     * trapping the user in the deepest level (hover/click never reach ancestors). The menu owns its own
-     * outside-click dismiss in nt_ui_menu against all open panels instead. */
-    pst.flags &= (uint8_t)~NT_UI_POPUP_LIGHT_DISMISS;
-    const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, menu_level_id(menu_id, depth), &pst, anchor, true);
-
-    /* The currently-open child (authoritative across frames); mouse hover may switch it, gated below. */
-    int16_t hovered = -1;
-    const int16_t prev_open = rt->open_path[depth]; /* detect an open-child switch to re-prime the aim corridor */
-    int16_t open_idx = menu_declare_panel(ctx, fill_layer, label_layer, menu_id, items, count, depth, rt, style, rt->open_path[depth], &hovered, out_chosen);
-    open_idx = menu_resolve_hover_switch(ctx, menu_id, items, count, depth, open_idx, hovered, mx, my, r.side, dt);
-    open_idx = menu_commit_and_nav(items, count, depth, nav_depth, rt, open_idx, out_chosen, out_close_chain);
-    /* The open child changed (switch / open / close / reopen): its fly-out at depth+1 now targets a
-     * different rect, so clear the stale mouse-aim apex+timer — menu_hover_intent re-primes next frame
-     * against the new panel. Without this the 2nd+ submenu at a depth reuses the prior child's corridor. */
-    if (open_idx != prev_open) {
-        nt_ui_state_clear(ctx, menu_hover_id(menu_id, (uint8_t)(depth + 1U)));
-    }
-
-    /* Recurse into the open submenu (if any). The open_path is authoritative — keyboard-opened menus
-     * stay open regardless of cursor position; the hover-intent above only governs MOUSE sibling
-     * switching, never a blanket collapse (a menu closes on click-away / Esc / sibling-open). */
-    if (open_idx >= 0 && (uint32_t)open_idx < count && items[open_idx].submenu != NULL) {
-        /* Assert BEFORE the push — a parent opening past the cap is a runaway tree, fail-early with no
-         * fallback rather than silently truncating the chain. */
-        NT_ASSERT((depth + 1U) < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
-        const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(ctx, menu_row_id(menu_id, depth, (uint32_t)open_idx));
-        menu_declare_level(ctx, fill_layer, label_layer, menu_id, items[open_idx].submenu, items[open_idx].submenu_count, (uint8_t)(depth + 1U), nav_depth, &sub_anchor, rt, style, mx, my, dt,
-                           out_chosen, out_close_chain);
-    }
-
-    nt_ui_popup_end(ctx);
-}
 // #endregion
 
 /* True when the cursor is inside ANY open level's panel rect (depths 0..active_depth). A click inside
@@ -692,56 +419,6 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
     nt_ui_block_pointer(ctx, occ_id, NULL);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (same pattern as nt_ui_modal_begin)
-void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const nt_ui_menu_item_t *items, uint32_t count, nt_ui_menu_state_t *st,
-                nt_ui_menu_style_t *style) {
-    NT_ASSERT(ctx != NULL && "nt_ui_menu: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu: call between nt_ui_begin/end");
-    NT_ASSERT(id != 0U && st != NULL && style != NULL && "nt_ui_menu: id non-zero, st + style non-NULL");
-    NT_ASSERT(style->font_size > 0.0F && "nt_ui_menu: style->font_size must be > 0");
-    menu_assert_items(items, count);
-
-    if (!st->open) {
-        /* Present-only: a closed menu declares nothing so base UI stays clickable. Reset the runtime cell
-         * so a later direct st->open = true reopen starts with a clean chain (no leaked open_path/focus).
-         * Resetting an already-clean cell is a no-op, so this never fights the open helper's own reset. */
-        menu_runtime_reset(menu_runtime(ctx, id));
-        return;
-    }
-
-    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* panel + row fills on data->layer, item text on label_layer */
-    nt_ui_menu_runtime_t *rt = menu_runtime(ctx, id);
-    float mx = 0.0F;
-    float my = 0.0F;
-    menu_mouse_pos(ctx, &mx, &my);
-
-    /* Single root occluder under the whole stack (absorbs dismiss + gates base UI). */
-    menu_declare_occluder(ctx, fill_layer, id);
-
-    const nt_ui_popup_anchor_t root_anchor = {.x = st->anchor_x, .y = st->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    uint32_t chosen = 0U;
-    bool close_chain = false;
-    menu_declare_level(ctx, fill_layer, label_layer, id, items, count, 0U, rt->active_depth, &root_anchor, rt, style, mx, my, ctx->frame_dt, &chosen, &close_chain);
-
-    /* Menu-owned outside-click dismiss: a LEFT or RIGHT press this frame OUTSIDE every open panel closes
-     * the whole chain. A press inside a panel is a row interaction (handled by the rows), never a dismiss.
-     * The opening frame is skipped: right-click is also the open trigger, so the very click that armed the
-     * menu must not self-close it (a later right-click outside does close). */
-    const bool outside_press = nt_input_mouse_is_pressed(NT_BUTTON_LEFT) || nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
-    if (outside_press && !menu_cursor_over_any_panel(ctx, id, rt, mx, my) && ctx->frame_counter != rt->opened_frame) {
-        close_chain = true;
-    }
-
-    if (chosen != 0U) {
-        st->chosen_id = chosen; /* latch the activated leaf id; the game reads + clears it */
-        close_chain = true;
-    }
-    if (close_chain) {
-        st->open = false;
-        menu_runtime_reset(rt);
-    }
-}
-
 // #region immediate-mode menu (begin/item/submenu/separator/end)
 /* The immediate API discovers the tree DURING the frame (begin/item/submenu_begin..end/menu_end) instead
  * of recursing over an items[] array. It FEEDS the KEPT runtime cell (open_path/focus/active_depth/
@@ -764,8 +441,8 @@ static void menu_record_append(nt_ui_context_t *ctx, uint8_t depth, uint32_t id,
 }
 
 /* Declare one immediate row (icon gutter + label + optional submenu marker) carrying the scope-stack id,
- * register + record it, move keyboard focus on hover. Mirrors menu_declare_row but driven by opts, not a
- * menu_item_t. Leaves the row CLOSED (single-shot rows); item_begin opens its own custom-content element.
+ * register + record it, move keyboard focus on hover. Driven by opts (the immediate row codepath).
+ * Leaves the row CLOSED (single-shot rows); item_begin opens its own custom-content element.
  * The row interaction is returned; the caller does the ONE step_interaction (so item_begin can defer it
  * to item_end). Returns the row id via *out_id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon + eased hover + marker branch, not deep nesting
