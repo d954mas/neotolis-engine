@@ -1669,7 +1669,8 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     more_items[0].icon = s_icon_bunny_ref;
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Two menus show the optional target binding: right-click ANYWHERE = global menu; right-click the panel below = zone menu.", g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click outside / right-click outside / Esc closes. Hover 'More' to fly out the submenu; arrows/Enter navigate.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click the panel = (re)open here; click outside / Esc = close. Hover 'More' to fly out the submenu; arrows/Enter navigate.",
+                g_current->caption);
 
     /* GLOBAL menu: target_id == 0 -> a right-click (or long-press) ANYWHERE in the tab arms it at the
      * cursor. No bound widget, so no per-widget events step is needed for the touch trigger. */
@@ -1677,13 +1678,14 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
      * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
-     * trigger does only idempotent reads and binds the right-click to the same id via query_interaction. */
+     * trigger does only idempotent reads and binds the right-click to the panel via a bbox geometry hit-test
+     * (so a right-click over the panel RE-opens the menu at the cursor through its own occluder). */
     CLAY({.id = (Clay_ElementId){.id = s_id_menu_panel},
           .layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = g_current->panel_alt,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Zone menu: right-click / long-press here", g_current->body);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Zone menu: right-click the panel = (re)open here", g_current->body);
     }
     static const nt_ui_events_cfg_t menu_cfg = {.long_press_secs = 0.5F, .double_click = false};
     const nt_ui_events_t zone_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);

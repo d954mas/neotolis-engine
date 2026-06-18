@@ -774,6 +774,66 @@ static void test_menu_open_trigger_bound_requires_target_hover(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "bound trigger must arm when the pointer is over the target");
 }
 
+/* ---- Bound reopen through the occluder: while the zone menu is ALREADY open (its root occluder sits
+ *      above the target), a right-click OVER the target bbox must RE-arm (geometry hit-test, not arbitrated
+ *      hover) and move the anchor to the new cursor + reset the chain. A right-click OUTSIDE the bbox must
+ *      NOT re-arm (so the outside dismiss closes instead). This is the core occluder-independence fix. ---- */
+static void test_menu_open_trigger_bound_reopens_through_occluder(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    /* Start already-open at an anchor INSIDE the target panel (200..360, 150..270). */
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 210.0F, .anchor_y = 160.0F};
+
+    /* Settle two frames so both the target panel AND the menu's occluder lay out (the occluder now sits
+     * above the target — arbitrated hover of the target would read false). */
+    nt_input_clear_all_keys();
+    nt_input_clear_all_pointers();
+    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F, false);
+    trigger_frame(&st, &style, TARGET_ID, 280.0F, 210.0F, false);
+    TEST_ASSERT_TRUE(st.open);
+
+    /* Right-click at a DIFFERENT point still inside the target bbox -> geometry hit-test re-arms (through
+     * the occluder) and moves the anchor there. */
+    menu_right_press(330.0F, 250.0F);
+    trigger_frame(&st, &style, TARGET_ID, 330.0F, 250.0F, false);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "right-click over the target re-arms the open menu through its occluder");
+    TEST_ASSERT_TRUE_MESSAGE(float_near(st.anchor_x, 330.0F, 0.5F) && float_near(st.anchor_y, 250.0F, 0.5F), "reopen moves the anchor to the new cursor");
+
+    /* Right-click OUTSIDE the target bbox -> NOT re-armed; the menu-owned outside dismiss closes the chain. */
+    menu_right_press(20.0F, 20.0F);
+    trigger_frame(&st, &style, TARGET_ID, 20.0F, 20.0F, false);
+    TEST_ASSERT_FALSE_MESSAGE(st.open, "right-click outside the target does not re-arm -> outside dismiss closes");
+}
+
+/* ---- Bound reopen resets the chain: with a submenu open over the zone, a right-click over the target
+ *      re-arms and resets the runtime chain (no stale open submenu after the reopen). ---- */
+static void test_menu_open_trigger_bound_reopen_resets_chain(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 210.0F, .anchor_y = 160.0F};
+
+    /* Open File's submenu (depth 1) via keyboard so the chain has a deep open level. Drive the keyboard
+     * with the pointer parked OFF the menu (0,0) so row hover never fights the kbd open path. */
+    nt_input_clear_all_pointers();
+    trigger_frame(&st, &style, TARGET_ID, 0.0F, 0.0F, false); /* settle: lay out the root so kbd-nav has a level */
+    menu_key(NT_KEY_ARROW_DOWN);
+    trigger_frame(&st, &style, TARGET_ID, 0.0F, 0.0F, false);
+    menu_key(NT_KEY_ARROW_RIGHT);
+    trigger_frame(&st, &style, TARGET_ID, 0.0F, 0.0F, false);
+    nt_input_clear_all_keys();
+    trigger_frame(&st, &style, TARGET_ID, 0.0F, 0.0F, false);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U)).found, "submenu must be open before the reopen");
+
+    /* Right-click over the target -> re-arms (open_trigger resets the chain via menu_runtime_reset). */
+    menu_right_press(330.0F, 250.0F);
+    trigger_frame(&st, &style, TARGET_ID, 330.0F, 250.0F, false);
+    TEST_ASSERT_TRUE(st.open);
+
+    /* After the reopen the prior submenu must NOT still be open (chain reset). */
+    nt_input_clear_all_pointers();
+    trigger_frame(&st, &style, TARGET_ID, 330.0F, 250.0F, false);
+    trigger_frame(&st, &style, TARGET_ID, 330.0F, 250.0F, false);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U)).found, "reopen must reset the chain (no stale submenu)");
+}
+
 /* ---- Reopen reset: open -> descend into a submenu -> st->open=false (closed frame) -> st->open=true
  *      must start with a clean chain (no stale open_path/focus from the prior session). ---- */
 static void test_menu_reopen_after_external_close_is_clean(void) {
@@ -833,6 +893,8 @@ int main(void) {
     RUN_TEST(test_menu_opening_right_click_does_not_self_close);
     RUN_TEST(test_menu_open_trigger_long_press_passed_in_arms);
     RUN_TEST(test_menu_open_trigger_bound_requires_target_hover);
+    RUN_TEST(test_menu_open_trigger_bound_reopens_through_occluder);
+    RUN_TEST(test_menu_open_trigger_bound_reopen_resets_chain);
     RUN_TEST(test_menu_reopen_after_external_close_is_clean);
     return UNITY_END();
 }

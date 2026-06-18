@@ -93,8 +93,9 @@ _Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI 
  * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
  * widget; nt_ui_events is the one canonical mutating step per widget per frame). `menu_id` is the menu's
  * stable id (drives every level's salted state). `target_id` optionally binds the right-click to a widget:
- * 0 = arm anywhere (any right-click); non-zero = arm only over that widget's arbitrated front-most hover
- * (respects z-order, via idempotent nt_ui_query_interaction). `long_pressed` is the touch trigger: the
+ * 0 = arm anywhere (any right-click); non-zero = arm over that widget's bbox via a GEOMETRY hit-test (NOT
+ * arbitrated hover, so a right-click RE-opens the menu through its own occluder; does not respect z-order).
+ * `long_pressed` is the touch trigger: the
  * caller passes the long_pressed flag from ITS target widget's own nt_ui_events gesture step (this helper
  * owns no gesture timing). Returns true if it armed this frame (so the caller can stop other handling). */
 bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st);

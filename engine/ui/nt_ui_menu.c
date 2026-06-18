@@ -233,10 +233,20 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
     NT_ASSERT(menu_id != 0U && st != NULL && "nt_ui_menu_open_trigger: menu_id non-zero, st non-NULL");
 
     /* Idempotent reads only — no mutating step here (nt_ui_events is the caller's one canonical step per
-     * widget). Right-click is the desktop trigger: bound (target_id != 0) it arms only over the arbitrated
-     * front-most hover of that widget (respects z-order), target_id == 0 arms anywhere. long_pressed is the
-     * touch trigger, supplied by the caller from its target widget's own events gesture step. */
-    const bool right_armed = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT) && (target_id == 0U || nt_ui_query_interaction(ctx, target_id).hovered);
+     * widget). Right-click is the desktop trigger: bound (target_id != 0) it arms over the target; target_id
+     * == 0 arms anywhere. long_pressed is the touch trigger, supplied by the caller from its target widget's
+     * own events gesture step. */
+    bool right_armed = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    if (right_armed && target_id != 0U) {
+        /* Geometry hit-test (not arbitrated hover) so a right-click RE-opens the menu through its own root
+         * occluder: once open, the occluder sits above the target so the arbitrated hover is always false.
+         * Trade-off: the trigger no longer respects front-most z-order (acceptable for a context-menu target). */
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, target_id);
+        float mx = 0.0F;
+        float my = 0.0F;
+        menu_mouse_pos(ctx, &mx, &my);
+        right_armed = bb.found && mx >= bb.x && mx <= bb.x + bb.width && my >= bb.y && my <= bb.y + bb.height;
+    }
     const bool armed = right_armed || long_pressed;
     if (armed) {
         float mx = 0.0F;
