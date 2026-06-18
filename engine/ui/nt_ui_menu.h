@@ -142,6 +142,11 @@ uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_i
 uint32_t nt_ui_menu_test_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx);
 uint32_t nt_ui_menu_test_icon_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx);
 uint32_t nt_ui_menu_test_occluder_id(uint32_t menu_id);
+
+/* Scope-stack id derivation probe: mix(scope_id, key, idx) — drives the sibling/scope distinctness test. */
+uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key, uint32_t idx);
+/* Prev-frame frame-record focus probe: the recorded item id at rt->focus[depth] (1-frame latency). */
+uint32_t nt_ui_menu_test_focus_item_id(uint32_t menu_id, uint8_t depth);
 #endif
 
 #endif /* NT_UI_MENU_H */

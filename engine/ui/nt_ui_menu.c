@@ -79,6 +79,19 @@ static inline uint32_t menu_hash_id(uint32_t menu_id, uint32_t kind, uint32_t de
     return (h != 0U) ? h : 1U;
 }
 
+/* Scope-stack item id: fmix-fold scope_id + key + running_idx (NOT XOR, NOT base+index — same reason as
+ * the warning above). submenu_begin pushes THIS id as the child scope, so a key need only be unique among
+ * siblings (D-236-02). Folds 0 to 1 (the no-widget sentinel). */
+static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key, uint32_t running_idx) {
+    uint32_t h = scope_id * 0x9E3779B1U;
+    h = (h ^ ((key + 1U) * 0x85EBCA6BU));
+    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
+    h = (h ^ ((running_idx + 1U) * 0x27D4EB2FU));
+    h = (h ^ (h >> 15)) * 0x165667B1U;
+    h = h ^ (h >> 16);
+    return (h != 0U) ? h : 1U;
+}
+
 static inline uint32_t menu_runtime_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_RUNTIME, 0U, 0U); }
 static inline uint32_t menu_level_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_LEVEL, depth, 0U); }
 static inline uint32_t menu_panel_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_PANEL, depth, 0U); }
@@ -703,6 +716,7 @@ float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id,
     return (c != NULL) ? c->switch_timer : 0.0F;
 }
 
+uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key, uint32_t idx) { return menu_item_id(scope_id, key, idx); }
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth) { return menu_panel_id(menu_id, depth); }
 uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_row_id(menu_id, depth, item_idx); }
 uint32_t nt_ui_menu_test_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_arrow_id(menu_id, depth, item_idx); }

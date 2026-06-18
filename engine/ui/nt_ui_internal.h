@@ -13,6 +13,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
+#include "ui/nt_ui_menu.h" /* NT_UI_MENU_MAX_DEPTH + nt_ui_menu_state_t for the immediate menu depth stack */
 #include "ui/nt_ui_state.h"
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
@@ -153,6 +154,21 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
+/* Per-level immediate-menu nav frame-record cap: a small cap keeps the per-level nav record in BSS
+ * (no heap in hot path). Items past this in one level trip a fail-early assert. */
+#ifndef NT_UI_MENU_MAX_ITEMS_PER_LEVEL
+#define NT_UI_MENU_MAX_ITEMS_PER_LEVEL 64
+#endif
+
+/* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates the PREVIOUS
+ * frame's per-level slice (D-236-06, 1-frame latency). Separators are never recorded (skipped by nav). */
+typedef struct {
+    uint32_t id;     /* the row's derived scope-stack id */
+    uint16_t idx;    /* the row's running layout index at its level */
+    uint8_t enabled; /* 0 = disabled: nav skips it */
+    uint8_t has_sub; /* 1 = parent (submenu) row */
+} nt_ui_menu_record_t;
+
 /* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
  * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
 #ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
@@ -241,6 +257,32 @@ struct nt_ui_context {
         bool active; /* a tab element is open (between tab_begin/tab_end) */
     } pending_tab;
 
+    /* Immediate-menu begin/end DEPTH stack (menus nest where tabs don't). The scope stack derives each
+     * row's id via mix(scope_id[depth], key, item_idx[depth]); a submenu pushes its own row id as the
+     * child scope (ImGui PushID), so keys need only be unique among siblings. `st`/`menu_id`/layers are
+     * stashed at begin so the per-call item/submenu functions need not re-pass them. `chosen` accumulates
+     * a leaf activation this frame (menu_end latches it into st->chosen_id). `record_gen` toggles the
+     * double-buffered frame_record so menu_end navs the PREVIOUS frame's slice (D-236-06). */
+    struct {
+        const void *style; /* nt_ui_menu_style_t* (void to keep the internal header widget-agnostic) */
+        nt_ui_menu_state_t *st;
+        uint32_t menu_id;
+        uint32_t scope_id[NT_UI_MENU_MAX_DEPTH];    /* mix base per level; level 0 = menu_id */
+        uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];    /* per-level running layout index (separators advance it) */
+        uint32_t chosen;                            /* leaf id activated this frame (0 = none) */
+        int16_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* running idx of a row whose submenu a click opens this frame (-1 none) */
+        uint8_t fill_layer;
+        uint8_t label_layer;
+        uint8_t depth;
+        uint8_t record_gen; /* 0/1: which frame_record buffer this frame writes; menu_end reads the other */
+        bool active;
+    } pending_menu;
+    struct {
+        uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
+        bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
+        bool active;      /* a custom-content row element is open (between item_begin/item_end) */
+    } pending_menu_item;
+
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;
@@ -317,6 +359,12 @@ struct nt_ui_context {
     /* Generic per-id retained-state pool. Arena auto-sizes via sizeof(struct nt_ui_context);
      * create_context's memset zero-inits it (same as anim[]). */
     nt_ui_state_cell_t state_pool[NT_UI_STATE_SLOTS];
+
+    /* Immediate-menu per-level nav frame record, double-buffered (one byte record_gen toggle, no
+     * per-frame memcpy): this frame writes [record_gen], menu_end navs the PREVIOUS frame [!record_gen]
+     * for a strict 1-frame latency (D-236-06). frame_record_count is the live per-level count this frame. */
+    nt_ui_menu_record_t frame_record[2][NT_UI_MENU_MAX_DEPTH][NT_UI_MENU_MAX_ITEMS_PER_LEVEL];
+    uint16_t frame_record_count[2][NT_UI_MENU_MAX_DEPTH];
 
 #if NT_UI_DEBUG_TOOLS
     /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.
