@@ -21,6 +21,11 @@ const nt_ui_widget_def_t NT_UI_MENU_DEF = {
     ._reserved = 0U,
 };
 
+#ifdef NT_TEST_ACCESS
+/* Mouse-aim hover-intent corridor: only the NT_TEST_ACCESS probes drive it now (the immediate menu opens a
+ * submenu on a parent-row CLICK, not on a hover-aim corridor — see nt_ui_menu_submenu_begin). Kept compiled
+ * in test builds so the corridor algorithm stays unit-tested; the wiring into the immediate fly-out is a
+ * pending decision (Plan 05 flags it for visual QA). */
 /* Depth-salted hover-intent cell id: each open submenu level gets a distinct state cell so level N's
  * prev-mouse / switch-timer never aliases level N+1's. */
 #define NT_UI_MENU_HOVER_SALT 0x4E550000U
@@ -43,6 +48,7 @@ typedef struct {
     bool primed; /* false on a fresh cell -> apex not yet meaningful (latch it this frame, keep open) */
     uint8_t _pad[3];
 } nt_ui_menu_hover_t;
+#endif
 
 /* Per-menu retained runtime cell (keyed by the menu id). open_path[d] is the index of the item whose
  * submenu is open at level d (-1 = none open at that level); focus[d] is the keyboard-focused item at
@@ -105,8 +111,12 @@ static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key, uint32_t ru
 static inline uint32_t menu_runtime_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_RUNTIME, 0U, 0U); }
 static inline uint32_t menu_level_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_LEVEL, depth, 0U); }
 static inline uint32_t menu_panel_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_PANEL, depth, 0U); }
-static inline uint32_t menu_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ROW, depth, item_idx); }
 static inline uint32_t menu_occluder_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_OCCLUDER, 0U, 0U); }
+#ifdef NT_TEST_ACCESS
+/* Data-form row id (KIND_ROW): the immediate path keys rows by the scope-stack menu_item_id instead; only
+ * the nt_ui_menu_test_row_id probe still reproduces this id. */
+static inline uint32_t menu_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ROW, depth, item_idx); }
+#endif
 /* Per-row sub-element ids (arrow marker / icon cell): fmix-derived so consecutive rows' children never
  * collide (Clay anonymous-child ids are additive; explicit fmix ids dodge the DUPLICATE_ID crash). */
 static inline uint32_t menu_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ARROW, depth, item_idx); }
@@ -114,7 +124,8 @@ static inline uint32_t menu_icon_id(uint32_t menu_id, uint8_t depth, uint32_t it
 static inline uint32_t menu_shortcut_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_SHORTCUT, depth, item_idx); }
 static inline uint32_t menu_check_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_CHECK, depth, item_idx); }
 
-// #region pure hover-intent algorithm (no GL, unit-tested)
+#ifdef NT_TEST_ACCESS
+// #region pure hover-intent algorithm (no GL, unit-tested; only the test probes drive it — see above)
 /* Barycentric sign test: a point is inside the triangle iff all three edge cross-products share a sign
  * (or are zero). */
 static bool menu_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy) {
@@ -177,6 +188,7 @@ static bool menu_hover_intent(nt_ui_menu_hover_t *c, float mouse_x, float mouse_
     return keep;
 }
 // #endregion
+#endif /* NT_TEST_ACCESS */
 
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
     /* Polished flat baseline (no atlas art: panel_bg/arrow refs stay 0 -> flat bg + ">" text marker),

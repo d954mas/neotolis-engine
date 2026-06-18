@@ -70,10 +70,9 @@ static void fx_begin(float dt) {
 }
 
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. The style line
- *      tracks the GROWN size symbolically via EXPECTED_MENU_STYLE_ABI (Plan 03 sets the final value).
- *      The item ABI line is KEPT for now; Plan 04 deletes it when the data form goes away. ---- */
+ *      tracks the GROWN size symbolically via EXPECTED_MENU_STYLE_ABI. The data-form item struct's ABI
+ *      line was dropped with the data form (Plan 05); only the immediate-API ABIs remain. ---- */
 static void test_menu_abi_sizes(void) {
-    TEST_ASSERT_EQUAL_UINT((unsigned)((2 * sizeof(void *)) + 32), (unsigned)sizeof(nt_ui_menu_item_t));
     TEST_ASSERT_EQUAL_UINT(EXPECTED_MENU_STYLE_ABI, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT((unsigned)(16U + ((((sizeof(void *) + 4U) + 7U) / 8U) * 8U)), (unsigned)sizeof(nt_ui_menu_item_opts_t));
     TEST_ASSERT_EQUAL_UINT(16U, (unsigned)sizeof(nt_ui_menu_state_t));

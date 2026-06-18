@@ -416,16 +416,16 @@ static uint32_t s_id_input_plain, s_id_input_numeric, s_id_input_password, s_id_
 static uint32_t s_id_input_caret, s_id_input_sel, s_id_input_art, s_id_input_disabled;
 static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + index */
 /* App-widget ids. */
-static uint32_t s_id_events_hold;                   /* hold-to-confirm button */
-static uint32_t s_id_events_dbl;                    /* double-click target */
-static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
+static uint32_t s_id_events_hold;                           /* hold-to-confirm button */
+static uint32_t s_id_events_dbl;                            /* double-click target */
+static uint32_t s_id_events_fill;                           /* hold_progress fill bar */
 static uint32_t s_id_dd_fruit, s_id_dd_city, s_id_dd_color; /* combo triggers (color = custom swatch) */
-static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
-static uint32_t s_id_menu_global;                   /* global context menu (right-click anywhere) */
-static uint32_t s_id_menu_zone;                     /* zone context menu (bound to a panel) */
-static uint32_t s_id_menu_panel;                    /* the zone panel the zone menu binds to (opens only over it) */
-static uint32_t s_id_menu_opacity_btn;              /* inner button on the zone menu's activatable=false custom row */
-static uint32_t s_id_tabs_demo_base;                /* begin/end-core demo strip: tabs salt from this + index */
+static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets */
+static uint32_t s_id_menu_global;                           /* global context menu (right-click anywhere) */
+static uint32_t s_id_menu_zone;                             /* zone context menu (bound to a panel) */
+static uint32_t s_id_menu_panel;                            /* the zone panel the zone menu binds to (opens only over it) */
+static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's activatable=false custom row */
+static uint32_t s_id_tabs_demo_base;                        /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
 
