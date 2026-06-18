@@ -37,23 +37,46 @@ static bool cmd_time_resume(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
-/* Lockstep-crunch step (default 1). Deferred: the response is held until all count sim-advances
-   complete, so the caller observes frame already advanced by exactly count, not mid-drain. */
+/* Lockstep-crunch step. Count in frames (default 1) OR seconds (sugar: ceil(seconds/step_dt) frames
+   — game-time and frames are linear in MANUAL since step_dt is fixed). Deferred: the response is
+   held until all sim-advances complete, so the caller observes frame advanced by exactly count. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_time_step(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;
     (void)ud;
-    int count = 1;
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(params, "count");
-    if (c != NULL) {
+    const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "seconds");
+    if (c != NULL && s != NULL) {
+        set_bad_params(err, "time.step: count and seconds are mutually exclusive");
+        return false;
+    }
+    int count = 1;
+    if (s != NULL) {
+        if (!cJSON_IsNumber(s)) {
+            set_bad_params(err, "time.step: seconds must be a number");
+            return false;
+        }
+        double seconds = s->valuedouble;
+        if (!isfinite(seconds) || seconds <= 0.0) {
+            set_bad_params(err, "time.step: seconds must be finite and > 0");
+            return false;
+        }
+        double steps = ceil(seconds / (double)g_nt_app.step_dt); /* step_dt > 0 (L1 invariant). */
+        if (steps > (double)NT_DEVAPI_STEP_MAX) {
+            set_bad_params(err, "time.step: seconds too large (exceeds NT_DEVAPI_STEP_MAX frames)");
+            return false;
+        }
+        count = (int)steps; /* >= 1 (ceil of a positive) and <= STEP_MAX, so the cast is safe. */
+    } else if (c != NULL) {
         if (!cJSON_IsNumber(c)) {
             set_bad_params(err, "time.step: count must be a number");
             return false;
         }
         count = c->valueint;
-    }
-    if (count < 1 || count > NT_DEVAPI_STEP_MAX) {
-        set_bad_params(err, "time.step: count out of range [1, NT_DEVAPI_STEP_MAX]");
-        return false;
+        if (count < 1 || count > NT_DEVAPI_STEP_MAX) {
+            set_bad_params(err, "time.step: count out of range [1, NT_DEVAPI_STEP_MAX]");
+            return false;
+        }
     }
     /* Only MANUAL drains pending_steps; queued into RUN they never drain, and under RUN+pause the
        deferred reply could never resolve → the caller would block until its socket timeout. */
@@ -138,6 +161,33 @@ static bool cmd_time_set_fps(const cJSON *params, cJSON *result, nt_devapi_error
     g_nt_app.target_dt = target_dt;
     devapi_add_number(result, "fps", fps);
     return true;
+}
+
+/* time.wait{seconds}: defer until game time advances `seconds`. RUN-only + reject pause/scale==0 —
+   game time only flows under RUN with scale>0; in MANUAL it advances per time.step, in pause/scale==0
+   it is frozen, so a passive wait could never resolve and would block the caller. Deadline is GAME
+   TIME (not a frame count), which is the point: RUN's variable dt can't be precomputed as frames. */
+static bool cmd_time_wait(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)result;
+    (void)ud;
+    if (g_nt_app.mode != NT_APP_MODE_RUN || g_nt_app.paused || g_nt_app.scale <= 0.0F) {
+        set_bad_params(err, "time.wait: only valid while game time advances (RUN, unpaused, scale > 0)");
+        return false;
+    }
+    double seconds = 0.0;
+    const cJSON *s = cJSON_GetObjectItemCaseSensitive(params, "seconds");
+    if (s != NULL) {
+        if (!cJSON_IsNumber(s)) {
+            set_bad_params(err, "time.wait: seconds must be a number");
+            return false;
+        }
+        seconds = s->valuedouble;
+    }
+    if (!isfinite(seconds) || seconds < 0.0 || seconds > NT_DEVAPI_TIME_WAIT_MAX_SECONDS) {
+        set_bad_params(err, "time.wait: seconds out of range [0, NT_DEVAPI_TIME_WAIT_MAX_SECONDS]");
+        return false;
+    }
+    return nt_devapi_defer_current_time(seconds);
 }
 // #endregion
 
@@ -226,8 +276,8 @@ static const nt_devapi_command_desc k_time_cmds[] = {
     {
         .method = "time.step",
         .group = "time",
-        .summary = "MANUAL: advance exactly count fixed-dt sim frames (lockstep crunch); blocks until done",
-        .params_shape = "{count?:number}",
+        .summary = "MANUAL: advance count fixed-dt frames OR seconds (= seconds/step_dt frames); lockstep, blocks until done",
+        .params_shape = "{count?:number, seconds?:number}",
         .result_shape = "{deferred:bool}",
         .frame_behavior = "deferred",
         .side_effects = "queues sim advances",
@@ -258,6 +308,15 @@ static const nt_devapi_command_desc k_time_cmds[] = {
         .result_shape = "{fps:number}",
         .frame_behavior = "any",
         .side_effects = "sets target_dt",
+    },
+    {
+        .method = "time.wait",
+        .group = "time",
+        .summary = "RUN-only: defer until seconds of GAME time elapse; rejected in manual/paused/scale=0 (use time.step in manual)",
+        .params_shape = "{seconds?:number}",
+        .result_shape = "{deferred:bool}",
+        .frame_behavior = "deferred",
+        .side_effects = "none",
     },
     {
         .method = "render.set_enabled",
@@ -298,7 +357,7 @@ static const nt_devapi_command_desc k_time_cmds[] = {
 };
 
 static const nt_devapi_handler_fn k_time_handlers[] = {
-    cmd_time_pause, cmd_time_resume, cmd_time_step, cmd_time_set_scale, cmd_time_set_mode, cmd_time_set_fps, cmd_render_set_enabled, cmd_render_info, cmd_frame_current, cmd_frame_wait,
+    cmd_time_pause, cmd_time_resume, cmd_time_step, cmd_time_set_scale, cmd_time_set_mode, cmd_time_set_fps, cmd_time_wait, cmd_render_set_enabled, cmd_render_info, cmd_frame_current, cmd_frame_wait,
 };
 _Static_assert(sizeof(k_time_cmds) / sizeof(k_time_cmds[0]) == sizeof(k_time_handlers) / sizeof(k_time_handlers[0]), "time: descriptor/handler arrays must have equal length");
 

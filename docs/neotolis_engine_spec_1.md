@@ -2560,6 +2560,8 @@ Time control is a set of flags in `g_nt_app`, set via the `nt_app_*` mutators (a
 
 `g_nt_app.frame` is a **simulation-advance counter**: it increments only on a real advance, so pause and manual-idle freeze it. Deferred devapi responses (`frame.wait`, `time.step`) are keyed to it — a wait resolves once `frame` reaches its submit-time deadline (`frame + N`), so it counts game frames, not transport polls, and never resolves while the sim is frozen. `frame.wait` is therefore RUN-only (rejected in manual/paused); in MANUAL a bot uses `time.step{count}`, which advances and blocks until done.
 
+Game-elapsed time `g_nt_app.time` (a `double` — the sum of applied `dt`s, kept double so long deterministic runs don't lose seconds-resolution to float accumulation) is the **second clock**. `time.wait{seconds?}` defers on a game-time deadline (`time + seconds`, default 0 = resolve on the next drain) rather than a frame count — the right tool in RUN, where the variable `dt` (and `scale`) make a frame count meaningless, and where time-authored mechanics (cooldowns, durations) live. Because game time only flows under RUN with `scale > 0`, `time.wait` is rejected in manual/paused/scale-0 (where it could never resolve). In MANUAL the two clocks are **linear** (`time = frames × step_dt`), so `time.step` accepts either `{count}` frames or `{seconds}` (= `ceil(seconds / step_dt)` frames) — convenience for the same time-authored logic in lockstep.
+
 The L1 mutators **assert** their invariants (finite/non-negative scale, positive `step_dt`, valid mode) — callers are trusted game code; untrusted bot input is range-checked at the devapi L2 layer and returns `bad_params`, never an assert.
 
 ---

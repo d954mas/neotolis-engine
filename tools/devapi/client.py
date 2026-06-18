@@ -129,6 +129,15 @@ class DevApiClient:
         """
         return self.result("frame.wait", {"frames": n})
 
+    def time_wait(self, seconds: float) -> Dict[str, Any]:
+        """Block until `seconds` of GAME time elapse (not wall, not frames).
+
+        Deferred, RUN-only: game time advances on the variable RUN dt, so a fixed frame
+        count can't express it (that's the point). Rejected in manual/paused/scale==0 where
+        time is frozen (raises DevApiResultError). Wall duration is ~seconds/scale.
+        """
+        return self.result("time.wait", {"seconds": seconds})
+
     def step(self, count: int = 1) -> Dict[str, Any]:
         """Advance exactly `count` fixed-dt sim frames (lockstep); requires manual mode.
 
@@ -137,6 +146,15 @@ class DevApiClient:
         frame.current reads frame already advanced by exactly count (not the queue mid-drain).
         """
         return self.result("time.step", {"count": count})
+
+    def step_seconds(self, seconds: float) -> Dict[str, Any]:
+        """Advance the MANUAL sim by `seconds` of game time = ceil(seconds/step_dt) fixed-dt frames.
+
+        Sugar over time.step{seconds} for time-authored mechanics (cooldowns, durations). Linear
+        and deterministic in MANUAL since step_dt is fixed. Requires manual mode (raises
+        DevApiResultError in RUN). Deferred; blocks until the steps drain.
+        """
+        return self.result("time.step", {"seconds": seconds})
 
     def pause(self) -> Dict[str, Any]:
         """Zero the simulation dt; the frame callback keeps running (transport poll, bookkeeping)."""
@@ -163,7 +181,7 @@ class DevApiClient:
         return self.result("render.set_enabled", {"enabled": enabled})
 
     def render_info(self) -> Dict[str, Any]:
-        """Read {enabled, draw_calls} — draw_calls is 0 while render is disabled (TIME-04)."""
+        """Read {enabled, draw_calls} — draw_calls is 0 while render is disabled."""
         return self.result("render.info")
 
     def frame_current(self) -> Dict[str, Any]:

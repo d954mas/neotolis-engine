@@ -43,12 +43,23 @@ static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
    third "deferred" outcome without changing the bool handler ABI (out-param route). */
 static bool *s_out_deferred;
 static int s_defer_frames;
+static double s_defer_seconds;
+static bool s_defer_by_time;
 
 bool nt_devapi_defer_current(int frames) {
     NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
     *s_out_deferred = true;
     s_defer_frames = frames;
+    s_defer_by_time = false;
     return true; /* handler returns normally; the bool path is unchanged. */
+}
+
+bool nt_devapi_defer_current_time(double seconds) {
+    NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
+    *s_out_deferred = true;
+    s_defer_seconds = seconds;
+    s_defer_by_time = true;
+    return true;
 }
 
 /* Free owned ids + clear the queue. Called from shutdown so init->shutdown->init is leak-free. */
@@ -60,6 +71,8 @@ void nt_devapi_deferred_reset(void) {
         s_deferred[i].id = NULL;
         s_deferred[i].in_use = false;
         s_deferred[i].target_frame = 0;
+        s_deferred[i].target_time = 0.0;
+        s_deferred[i].by_time = false;
     }
 }
 // #endregion
@@ -177,13 +190,18 @@ static cJSON s_deferred_marker;
 
 /* Enqueue a deferred command: store the owned duplicated id + continuation into a free
    slot. Returns true on success; false on overflow (caller emits a structured error). */
-static bool deferred_enqueue(const cJSON *req, int frames) {
+static bool deferred_enqueue(const cJSON *req, bool by_time, int frames, double seconds) {
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (s_deferred[i].in_use) {
             continue;
         }
-        s_deferred[i].id = dup_request_id(req);                         /* owned; NULL if absent — fine. */
-        s_deferred[i].target_frame = g_nt_app.frame + (uint32_t)frames; /* absolute game-frame deadline. */
+        s_deferred[i].id = dup_request_id(req); /* owned; NULL if absent — fine. */
+        s_deferred[i].by_time = by_time;
+        if (by_time) {
+            s_deferred[i].target_time = g_nt_app.time + seconds; /* absolute game-time deadline. */
+        } else {
+            s_deferred[i].target_frame = g_nt_app.frame + (uint32_t)frames; /* absolute game-frame deadline. */
+        }
         s_deferred[i].in_use = true;
         return true;
     }
@@ -232,12 +250,20 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     bool deferred = false;
     bool *prev_out_deferred = s_out_deferred;
     int prev_defer_frames = s_defer_frames;
+    double prev_defer_seconds = s_defer_seconds;
+    bool prev_defer_by_time = s_defer_by_time;
     s_out_deferred = &deferred;
     s_defer_frames = 0;
+    s_defer_seconds = 0.0;
+    s_defer_by_time = false;
     bool ok = slot->handler(params, result_obj, &err, slot->user_data);
-    int defer_frames = s_defer_frames; /* capture this dispatch's value before restore. */
+    int defer_frames = s_defer_frames; /* capture this dispatch's values before restore. */
+    double defer_seconds = s_defer_seconds;
+    bool defer_by_time = s_defer_by_time;
     s_out_deferred = prev_out_deferred;
     s_defer_frames = prev_defer_frames;
+    s_defer_seconds = prev_defer_seconds;
+    s_defer_by_time = prev_defer_by_time;
 
     if (deferred) {
         /* No ok/error entry: enqueue the continuation (with the owned request_id) and emit
@@ -251,7 +277,7 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
             echo_request_id(entry, req);
             return entry;
         }
-        if (!deferred_enqueue(req, defer_frames)) {
+        if (!deferred_enqueue(req, defer_by_time, defer_frames, defer_seconds)) {
             cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred queue full");
             echo_request_id(entry, req);
             return entry;
@@ -327,7 +353,12 @@ const char *nt_devapi_submit(const char *line) {
 
 /* A slot is ready once the game frame counter has reached its target. Wrap-safe: the subtraction
    wraps together with g_nt_app.frame, so the slot stays pending until its frame deadline. */
-static bool slot_ready(const nt_devapi_deferred_slot *slot) { return (int32_t)(g_nt_app.frame - slot->target_frame) >= 0; }
+static bool slot_ready(const nt_devapi_deferred_slot *slot) {
+    if (slot->by_time) {
+        return g_nt_app.time >= slot->target_time; /* game-time deadline (monotonic double, no wrap). */
+    }
+    return (int32_t)(g_nt_app.frame - slot->target_frame) >= 0; /* frame deadline (wrap-safe). */
+}
 
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
@@ -356,6 +387,8 @@ const char *nt_devapi_poll_response(void) {
         cJSON_Delete(entry);
         s_deferred[i].in_use = false;
         s_deferred[i].target_frame = 0;
+        s_deferred[i].target_time = 0.0;
+        s_deferred[i].by_time = false;
         return out;
     }
     return NULL; /* nothing ready this call. */

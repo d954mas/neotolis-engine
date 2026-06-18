@@ -41,26 +41,34 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_MAX_DEFERRED 128
 #endif
 
-/* Upper bound for frame.wait{frames}. Independent of the slot-count cap: a single long wait
-   holds ONE slot for its whole duration, so a ceiling of a few thousand frames is correct, not
-   the concurrent-slot limit. Override per build with -D. */
+/* Upper bound for frame.wait{frames}, sized to the default 5s client read-timeout: at 60fps a
+   256-frame RUN wait is ~4.3s, under the timeout (a bigger ceiling rejects nothing the client
+   could wait for anyway). Not the slot-count cap. Override per build with -D. */
 #ifndef NT_DEVAPI_FRAME_WAIT_MAX
-#define NT_DEVAPI_FRAME_WAIT_MAX 4096
+#define NT_DEVAPI_FRAME_WAIT_MAX 256
 #endif
 
-/* Upper bound for time.step{count} (lockstep crunch). Bot input must fail fast over this, never
-   queue an unbounded backlog — cJSON clamps huge JSON numbers to INT_MAX, so without a cap one
-   line could wedge the host for billions of frames. Generous for long deterministic crunches yet
-   far below INT_MAX, so nt_app_step's saturate guard is only a backstop. Override per build with -D. */
+/* Upper bound for time.step{count}: a fail-fast ceiling + sane batch size, NOT a UB/overflow guard
+   (cJSON clamps to INT_MAX, nt_app_step saturates). Crunch runs uncapped, so 2^20 is ~a second of
+   fast frames; heavier per-frame work wants smaller batches or a raised client timeout. -D to override. */
 #ifndef NT_DEVAPI_STEP_MAX
 #define NT_DEVAPI_STEP_MAX 1048576
+#endif
+
+/* Upper bound for time.wait{seconds} (game-time deadline), sized to the default 5s read-timeout:
+   at scale 1 a wait runs at wall rate, so >5s never resolves before the client gives up. 4s leaves
+   margin; longer waits need scale>1 or a raised client timeout. Override per build with -D. */
+#ifndef NT_DEVAPI_TIME_WAIT_MAX_SECONDS
+#define NT_DEVAPI_TIME_WAIT_MAX_SECONDS 4.0
 #endif
 
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
     cJSON *id;             /* owned duplicate of request_id (number or string); NULL if absent. */
-    uint32_t target_frame; /* yields once g_nt_app.frame reaches this (wrap-safe compare). */
+    double target_time;    /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
+    uint32_t target_frame; /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
+    bool by_time;          /* selects which deadline field slot_ready compares. */
     bool in_use;
 } nt_devapi_deferred_slot;
 
@@ -68,6 +76,11 @@ typedef struct nt_devapi_deferred_slot {
    g_nt_app.frame has advanced `frames` game frames past submit. Returns true so the handler returns
    normally (the bool ABI is unchanged). Must be called from inside a handler dispatch. */
 bool nt_devapi_defer_current(int frames);
+
+/* Like nt_devapi_defer_current but on a GAME-TIME deadline: yields once g_nt_app.time has advanced
+   `seconds` past submit. For time.wait (RUN, where dt is variable so a frame count can't be
+   precomputed). Must be called from inside a handler dispatch. */
+bool nt_devapi_defer_current_time(double seconds);
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */

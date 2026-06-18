@@ -31,6 +31,13 @@ static const char *advance_sim(void) {
     return nt_devapi_poll_response();
 }
 
+/* Advance game time by `dt` seconds (what the RUN loop does each frame), then drain any slot whose
+   game-time deadline was reached. For time.wait (time-based slots), not frame-based ones. */
+static const char *advance_time(double dt) {
+    g_nt_app.time += dt;
+    return nt_devapi_poll_response();
+}
+
 /* Parse `resp`, assert ok:false + error.code == "bad_params", free the tree. */
 static void assert_bad_params(const char *resp) {
     TEST_ASSERT_NOT_NULL(resp);
@@ -81,6 +88,7 @@ static void test_discovery_lists_new_group(void) {
     TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("time.set_scale"));
     TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("time.set_mode"));
     TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("time.set_fps"));
+    TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("time.wait"));
     TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("render.set_enabled"));
     TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("render.info"));
     TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("frame.current"));
@@ -353,6 +361,98 @@ static void test_step_drains_through_real_loop(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* nothing left queued */
 }
 
+/* ---- time.wait (game-time deadline; the RUN-only sibling of frame.wait) ---- */
+
+/* RUN, scale 1: time.wait{seconds} resolves once g_nt_app.time crosses the deadline, NOT on a frame
+   count — proves the time-based deferred path. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_time_wait_yields_after_seconds(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.wait\",\"request_id\":11,\"params\":{\"seconds\":0.5}}"));
+    TEST_ASSERT_NULL(advance_time(0.2));  /* time 0.2 < 0.5 */
+    TEST_ASSERT_NULL(advance_time(0.2));  /* time 0.4 < 0.5 */
+    const char *resp = advance_time(0.2); /* time 0.6 >= 0.5 -> resolves */
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "deferred")));
+    TEST_ASSERT_EQUAL_INT(11, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+}
+
+/* time.wait{seconds:0}: deadline == current time, so it resolves on the next drain with no time
+   advance (immediate-ack), mirroring frame.wait{frames:0}. */
+static void test_time_wait_zero_resolves_immediately(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.wait\",\"request_id\":13,\"params\":{\"seconds\":0}}"));
+    const char *resp = nt_devapi_poll_response(); /* ready immediately, no g_nt_app.time advance */
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_EQUAL_INT(13, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* drained */
+}
+
+/* time.wait is RUN + scale>0 only: in MANUAL / paused / scale==0 game time is frozen, so a passive
+   wait could never resolve. All three reject fail-fast and register no slot. scale==0 is the case
+   frame.wait would NOT catch (the frame advances while time stays put). */
+static void test_time_wait_rejected_when_time_frozen(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.wait\",\"params\":{\"seconds\":1.0}}"));
+    g_nt_app.mode = NT_APP_MODE_RUN;
+
+    nt_app_pause();
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.wait\",\"params\":{\"seconds\":1.0}}"));
+    nt_app_resume();
+
+    nt_app_set_scale(0.0F);
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.wait\",\"params\":{\"seconds\":1.0}}"));
+
+    TEST_ASSERT_NULL(advance_time(2.0)); /* time 2.0 >> any 1.0s deadline -> proves none of the 3 registered a slot */
+}
+
+/* Over the seconds cap -> bad_params, no slot (a wait longer than the read-timeout could never be
+   received by the client). */
+static void test_time_wait_over_cap_bad_params(void) {
+    char line[96];
+    (void)snprintf(line, sizeof(line), "{\"method\":\"time.wait\",\"params\":{\"seconds\":%f}}", NT_DEVAPI_TIME_WAIT_MAX_SECONDS + 1.0);
+    assert_bad_params(nt_devapi_submit(line));
+    TEST_ASSERT_NULL(advance_time(NT_DEVAPI_TIME_WAIT_MAX_SECONDS + 2.0));
+}
+
+/* time.step{seconds} sugar: ceil(seconds/step_dt) frames. step_dt = 1/60 (setUp), so 1.0s = 60
+   frames; deferral stays FRAME-based (resolves after exactly that many sim-advances). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_time_step_seconds_converts_to_frames(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"request_id\":12,\"params\":{\"seconds\":1.0}}"));
+    TEST_ASSERT_EQUAL_INT(60, g_nt_app.pending_steps);
+    for (int i = 0; i < 59; i++) {
+        TEST_ASSERT_NULL(advance_sim());
+    }
+    const char *resp = advance_sim();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "result"), "deferred")));
+    TEST_ASSERT_EQUAL_INT(12, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+}
+
+/* count and seconds are mutually exclusive; a sub-step duration still queues >= 1 frame (ceil). */
+static void test_time_step_count_seconds_exclusive_and_ceil(void) {
+    g_nt_app.mode = NT_APP_MODE_MANUAL;
+    assert_bad_params(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"count\":2,\"seconds\":1.0}}"));
+    TEST_ASSERT_EQUAL_INT(0, g_nt_app.pending_steps); /* rejected before any side effect */
+
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\",\"params\":{\"seconds\":0.001}}"));
+    TEST_ASSERT_EQUAL_INT(1, g_nt_app.pending_steps); /* ceil(0.001 / (1/60)) == 1 */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_discovery_lists_new_group);
@@ -371,5 +471,11 @@ int main(void) {
     RUN_TEST(test_frame_wait_yields_after_n_sim_advances);
     RUN_TEST(test_frame_wait_rejected_when_not_running);
     RUN_TEST(test_step_drains_through_real_loop);
+    RUN_TEST(test_time_wait_yields_after_seconds);
+    RUN_TEST(test_time_wait_zero_resolves_immediately);
+    RUN_TEST(test_time_wait_rejected_when_time_frozen);
+    RUN_TEST(test_time_wait_over_cap_bad_params);
+    RUN_TEST(test_time_step_seconds_converts_to_frames);
+    RUN_TEST(test_time_step_count_seconds_exclusive_and_ceil);
     return UNITY_END();
 }
