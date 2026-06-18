@@ -369,8 +369,9 @@ void nt_devapi_net_poll(void) {
 }
 // #endregion
 
-/* Per-tick game-facing update: for now just the TCP transport poll. A future web transport will
-   split the transport poll (net/web) out of this core entry so both transports share it. */
+/* TODO(transport-split): this is the game-facing per-tick entry but lives in the TCP module and only
+   drives net_poll. When a second transport (web) lands, move it to the core and poll every registered
+   transport so both share the frame-keyed deferred drain. Single transport today -> kept here (YAGNI). */
 void nt_devapi_update(void) { nt_devapi_net_poll(); }
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
