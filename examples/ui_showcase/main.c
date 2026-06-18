@@ -932,8 +932,11 @@ static void init_styles(void) {
     s_tabbar_light.selected.bg_tint = 0xFFFFFFFFU; /* full warm panel on the active tab */
     s_tabbar_light.selected.fill = 0xFFF0B68AU;    /* fallback: list_sel */
     s_tabbar_light.accent = 0xFF3C8CC8U;           /* warm amber accent for the pale theme */
-    s_tabbar_light.text = 0xFF685C5AU;             /* caption {90,92,104} */
-    s_tabbar_light.text_selected = 0xFF381C0CU;    /* row_sel {12,28,56} */
+    /* Idle nav labels must read on the tan brown-panel tab fill: the prior mid-grey ({90,92,104}) was too
+     * close in luminance to the medium-tan tint -> unreadable. Use a dark warm slate so idle labels have
+     * strong contrast; selected stays the darker navy so the active tab still differentiates. */
+    s_tabbar_light.text = 0xFF2E2620U;          /* dark warm slate {32,38,46} -- strong contrast on tan */
+    s_tabbar_light.text_selected = 0xFF381C0CU; /* row_sel {12,28,56} */
 
     /* ---- Tabs demo strip (begin/end core): horizontal, flat-color, BOTTOM accent. The game owns each
      * tab's content (icon + text, and a brighter icon when selected) -- the style only carries the bar
