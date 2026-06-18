@@ -64,7 +64,17 @@ _Static_assert(sizeof(nt_ui_menu_runtime_t) <= NT_UI_STATE_PAYLOAD_MAX, "menu ru
 /* Kind tags folded into the id hash so a level/panel/row/catcher at one (depth,index) never collides
  * with another. nt_ui_derived_id (XOR) cannot be used to compose depth+index because additive salts
  * with a shared stride XOR-cancel across (depth,index) pairs (e.g. (d=1,i=2) aliased (d=2,i=1)). */
-enum { NT_UI_MENU_KIND_LEVEL = 1, NT_UI_MENU_KIND_PANEL = 2, NT_UI_MENU_KIND_ROW = 3, NT_UI_MENU_KIND_RUNTIME = 4, NT_UI_MENU_KIND_OCCLUDER = 5, NT_UI_MENU_KIND_ARROW = 6, NT_UI_MENU_KIND_ICON = 7 };
+enum {
+    NT_UI_MENU_KIND_LEVEL = 1,
+    NT_UI_MENU_KIND_PANEL = 2,
+    NT_UI_MENU_KIND_ROW = 3,
+    NT_UI_MENU_KIND_RUNTIME = 4,
+    NT_UI_MENU_KIND_OCCLUDER = 5,
+    NT_UI_MENU_KIND_ARROW = 6,
+    NT_UI_MENU_KIND_ICON = 7,
+    NT_UI_MENU_KIND_SHORTCUT = 8,
+    NT_UI_MENU_KIND_CHECK = 9,
+};
 
 /* fmix-style 32-bit hash combining menu_id + kind + depth + index. Non-XOR-symmetric, so distinct
  * (kind,depth,index) tuples never alias. Folds 0 to 1 (id 0 is the empty-slot sentinel). */
@@ -101,6 +111,8 @@ static inline uint32_t menu_occluder_id(uint32_t menu_id) { return menu_hash_id(
  * collide (Clay anonymous-child ids are additive; explicit fmix ids dodge the DUPLICATE_ID crash). */
 static inline uint32_t menu_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ARROW, depth, item_idx); }
 static inline uint32_t menu_icon_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ICON, depth, item_idx); }
+static inline uint32_t menu_shortcut_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_SHORTCUT, depth, item_idx); }
+static inline uint32_t menu_check_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_CHECK, depth, item_idx); }
 
 // #region pure hover-intent algorithm (no GL, unit-tested)
 /* Barycentric sign test: a point is inside the triangle iff all three edge cross-products share a sign
@@ -344,6 +356,36 @@ static void menu_declare_marker(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_
     } else {
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), ">", lbl);
     }
+}
+
+/* The selected checkmark on a row: the checkmark sprite (tinted) when a ref is set, else the "✓" text
+ * fallback. Mirrors menu_declare_marker; the cell carries an explicit fmix id so sibling rows' checkmarks
+ * never collide (Clay anonymous-child ids are additive). */
+static void menu_declare_check(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t check_id, const nt_ui_label_style_t *lbl, nt_ui_menu_style_t *style) {
+    nt_atlas_resolve_ref(&style->checkmark);
+    const bool has_art = (style->checkmark.atlas.id != 0U && style->checkmark.region != NT_ATLAS_INVALID_REGION);
+    if (has_art) {
+        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (checkmark payload)");
+        *p = (nt_ui_image_payload_t){.atlas = style->checkmark.atlas, .region_index = style->checkmark.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
+        const float sz = (style->check_size > 0U) ? (float)style->check_size : (float)style->item_height * 0.5F;
+        CLAY({.id = (Clay_ElementId){.id = check_id},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
+              .image = (Clay_ImageElementConfig){.imageData = p},
+              .backgroundColor = nt_ui_unpack_tint(style->check_tint),
+              .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
+    } else {
+        CLAY({.id = (Clay_ElementId){.id = check_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
+            nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), "\xE2\x9C\x93", lbl);
+        }
+    }
+}
+
+/* The right-aligned shortcut text cell (e.g. "Ctrl+S") drawn in style->shortcut_text. The cell carries an
+ * explicit fmix id so sibling rows' shortcut cells never collide. */
+static void menu_declare_shortcut(nt_ui_context_t *ctx, uint8_t label_layer, uint32_t shortcut_id, const char *shortcut, nt_ui_menu_style_t *style) {
+    const nt_ui_label_style_t sc = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->shortcut_text)};
+    CLAY({.id = (Clay_ElementId){.id = shortcut_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) { nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), shortcut, &sc); }
 }
 
 /* One item row: a fixed-height rect with an optional icon gutter, a label, and a submenu marker for a
@@ -763,11 +805,21 @@ static nt_ui_interaction_t menu_im_row(nt_ui_context_t *ctx, uint32_t key, const
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(row);
     if (!open_element) {
-        menu_declare_icon(ctx, fill_layer, menu_icon_id(ctx->pending_menu.menu_id, depth, running_idx), &opts->icon, style);
+        const uint32_t menu_id = ctx->pending_menu.menu_id;
+        menu_declare_icon(ctx, fill_layer, menu_icon_id(menu_id, depth, running_idx), &opts->icon, style);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), label != NULL ? label : "", &lbl);
-        if (has_sub) {
+        /* One GROW spacer right-aligns the trailing cells (shortcut / checkmark / submenu marker). */
+        if (opts->shortcut != NULL || opts->selected || has_sub) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-            menu_declare_marker(ctx, fill_layer, label_layer, menu_arrow_id(ctx->pending_menu.menu_id, depth, running_idx), &lbl, style);
+        }
+        if (opts->shortcut != NULL) {
+            menu_declare_shortcut(ctx, label_layer, menu_shortcut_id(menu_id, depth, running_idx), opts->shortcut, style);
+        }
+        if (opts->selected) {
+            menu_declare_check(ctx, fill_layer, label_layer, menu_check_id(menu_id, depth, running_idx), &lbl, style);
+        }
+        if (has_sub) {
+            menu_declare_marker(ctx, fill_layer, label_layer, menu_arrow_id(menu_id, depth, running_idx), &lbl, style);
         }
         nt_ui_clay_priv_close_element();
     }
@@ -883,7 +935,7 @@ bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, n
     return opts.enabled && in.clicked;
 }
 
-bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label) { return nt_ui_menu_item_ex(ctx, key, label, (nt_ui_menu_item_opts_t){.enabled = true}); }
+bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label) { return nt_ui_menu_item_ex(ctx, key, label, nt_ui_menu_item_opts_defaults()); }
 
 bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
@@ -1174,4 +1226,6 @@ uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_i
 uint32_t nt_ui_menu_test_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_arrow_id(menu_id, depth, item_idx); }
 uint32_t nt_ui_menu_test_icon_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_icon_id(menu_id, depth, item_idx); }
 uint32_t nt_ui_menu_test_occluder_id(uint32_t menu_id) { return menu_occluder_id(menu_id); }
+uint32_t nt_ui_menu_test_shortcut_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_shortcut_id(menu_id, depth, item_idx); }
+uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_check_id(menu_id, depth, item_idx); }
 #endif

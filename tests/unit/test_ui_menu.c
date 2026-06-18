@@ -903,6 +903,52 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     (void)row_id;
 }
 
+/* ============================ rich-row shortcut + checkmark cells ============================ */
+
+/* Immediate frame: one rich row carrying a shortcut + selected check (Save), one plain row (Plain). The
+ * shortcut/check CELL bbox is asserted (the rendered glyph is user-visual-QA only). */
+static void menu_im_frame_rich(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    nt_pointer_t p = {0};
+    p.x = px;
+    p.y = py;
+    p.active = true;
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_item_opts_t save = nt_ui_menu_item_opts_defaults();
+    save.shortcut = "Ctrl+S";
+    save.selected = true;
+    (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_NEW, "Save", save);
+    (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_QUIT, "Plain", nt_ui_menu_item_opts_defaults());
+    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A rich row with a shortcut declares the shortcut cell (own fmix id); a plain row does NOT. ---- */
+static void test_menu_shortcut_cell_on_rich_row_only(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    menu_im_frame_rich(&st, &style, 0.0F, 0.0F);
+    menu_im_frame_rich(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t sc = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_shortcut_id(MENU_A, 0U, 0U));
+    const nt_ui_bbox_t plain_sc = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_shortcut_id(MENU_A, 0U, 1U));
+    TEST_ASSERT_TRUE_MESSAGE(sc.found, "a row with opts.shortcut must declare the shortcut cell");
+    TEST_ASSERT_FALSE_MESSAGE(plain_sc.found, "a row without a shortcut must NOT declare a shortcut cell");
+}
+
+/* ---- opts.selected declares the checkmark cell (own fmix id); an unselected row does NOT. ---- */
+static void test_menu_check_cell_when_selected(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    menu_im_frame_rich(&st, &style, 0.0F, 0.0F);
+    menu_im_frame_rich(&st, &style, 0.0F, 0.0F);
+    const nt_ui_bbox_t ck = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_check_id(MENU_A, 0U, 0U));
+    const nt_ui_bbox_t unchecked = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_check_id(MENU_A, 0U, 1U));
+    TEST_ASSERT_TRUE_MESSAGE(ck.found, "a selected row must declare the checkmark cell");
+    TEST_ASSERT_FALSE_MESSAGE(unchecked.found, "an unselected row must NOT declare a checkmark cell");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_menu_abi_sizes);
@@ -936,5 +982,7 @@ int main(void) {
     RUN_TEST(test_menu_item_id_distinct_siblings_and_scopes);
     RUN_TEST(test_menu_prevframe_nav_focuses_recorded_item);
     RUN_TEST(test_menu_item_begin_activatable_false_child_owns_click);
+    RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);
+    RUN_TEST(test_menu_check_cell_when_selected);
     return UNITY_END();
 }
