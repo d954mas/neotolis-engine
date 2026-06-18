@@ -64,12 +64,12 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void) {
         .trigger_text = 0xFFE8E8E8U,
         .row_text = 0xFFE0E0E0U,
         .chevron_tint = 0xFFC8C8C8U,
-        .scroll_track_tint = 0xFFFFFFFFU, /* no tint; scroll_track/scroll_thumb refs stay {0} (atlas-free baseline) */
-        .scroll_thumb_tint = 0xFFFFFFFFU,
+        .list_scroll = nt_ui_scroll_style_defaults(), /* atlas-free baseline; game wires bar sprites (consistent with button art refs) */
         .font_size = 14.0F,
         .slice9_scale = 1.0F,
         .state_speed = 16.0F,
         .value_speed = 14.0F,
+        .open_ease_speed = 0.0F, /* snap-open by default; the game opts into a tween */
         .row_height = 28U,
         .min_width = 160U,
         .pad = 6U,
@@ -325,8 +325,8 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     }
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = 0.0F;  /* lists snap open; no spatial tween */
-    pst.layer = fill_layer; /* the popup panel sits on the fill layer */
+    pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
+    pst.layer = fill_layer;                  /* widget-owned: the popup panel sits on the fill layer */
 
     /* Resolve the panel slice9 once: art-or-flat decides whether the panel can round (IMAGE bg can't). */
     nt_atlas_resolve_ref(&style->panel_bg);
@@ -343,14 +343,9 @@ bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
         if (scrolls) {
             /* Long list: wrap the rows in nt_ui_scroll (GC'd cell) — NEVER a raw Clay .clip (Pitfall 7). */
             const float view_h = ((float)style->max_visible_rows * (float)style->row_height) + (2.0F * (float)style->pad);
-            nt_ui_scroll_style_t sst = nt_ui_scroll_style_defaults();
-            /* Wire the dropdown's bar sprites so the list shows a visible scrollbar; scroll skips drawing
-             * a bar when track_ref/thumb_ref are {0} (the defaults), so without this the list scrolls but
-             * shows nothing. {0} refs here keep the atlas-free baseline (still no bar). */
-            sst.track_ref = style->scroll_track;
-            sst.thumb_ref = style->scroll_thumb;
-            sst.track_tint = style->scroll_track_tint;
-            sst.thumb_tint = style->scroll_thumb_tint;
+            /* Game fully owns the list's scroll feel + bar via the embedded list_scroll style (copy); the
+             * dropdown still builds the scroll DECL itself (FIXED panel_w x view_h, padding, panel art bg). */
+            nt_ui_scroll_style_t sst = style->list_scroll;
             /* scroll owns .id/.clip/.userData; the decl supplies only sizing/look. IMAGE panel art can't
              * round, so drop cornerRadius when art is present (rounding is baked into the sprite). */
             Clay_ElementDeclaration scroll_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(view_h)}, .padding = CLAY_PADDING_ALL(style->pad)}};

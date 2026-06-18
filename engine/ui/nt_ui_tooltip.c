@@ -39,6 +39,7 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
         .text_color = 0xFFE8E8E8U,
         .delay_secs = 0.5F,
         .font_size = 13.0F,
+        .open_ease_speed = 0.0F, /* snap-open by default; the game opts into a tween */
         .max_width = 240U,
         .pad = 6U,
         .font_id = 0U,
@@ -79,9 +80,9 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     }
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = 0.0F;  /* tooltips snap; no spatial tween */
-    pst.flags = 0U;         /* D-65-08: NO light-dismiss catcher — hover-driven, never gates base UI */
-    pst.layer = fill_layer; /* the popup panel sits on the fill layer */
+    pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
+    pst.flags = 0U;                          /* widget-owned (D-65-08): NO light-dismiss catcher — hover-driven, never gates base UI */
+    pst.layer = fill_layer;                  /* widget-owned: the popup panel sits on the fill layer */
 
     bool shown = false;
     /* Low-level begin/end (no one-bool wrapper): the open state is engine-derived from the hover timer,

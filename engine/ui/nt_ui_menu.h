@@ -64,6 +64,7 @@ typedef struct {
     float font_size;                /* px; asserted > 0 */
     float slice9_scale;             /* multiplies the panel art's baked slice9 borders; > 0 */
     float state_speed;              /* eases the row hover/focus highlight (0 = instant) */
+    float open_ease_speed;          /* popup open/close tween speed (0 = snap; game opts into a tween) */
     uint16_t item_height;           /* px row height */
     uint16_t min_width;             /* px panel min width */
     uint16_t pad;                   /* px inner padding */
@@ -71,9 +72,9 @@ typedef struct {
     uint16_t icon_size;             /* px leading icon gutter (0 = no gutter / text-only rows) */
     uint16_t arrow_size;            /* px submenu marker sprite box (used only when arrow ref is set) */
     uint16_t separator_height;      /* px NULL-label separator divider thickness */
-    uint8_t _pad[2];
+    uint8_t _pad[6];
 } nt_ui_menu_style_t;
-_Static_assert(sizeof(nt_ui_menu_style_t) == 88, "nt_ui_menu_style_t stable ABI (2 ref + 7 u32 + 3 float + 7 u16 + 2 pad)");
+_Static_assert(sizeof(nt_ui_menu_style_t) == 96, "nt_ui_menu_style_t stable ABI (2 ref + 7 u32 + 4 float + 7 u16 + 6 pad)");
 
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);

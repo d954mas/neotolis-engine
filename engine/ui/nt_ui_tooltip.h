@@ -22,16 +22,17 @@ extern const nt_ui_widget_def_t NT_UI_TOOLTIP_DEF;
 
 /* Visual + timing knobs. Colors are 0xAABBGGRR. */
 typedef struct {
-    uint32_t panel_bg;   /* tooltip panel fill */
-    uint32_t text_color; /* tooltip label color */
-    float delay_secs;    /* accumulated hover before reveal; asserted finite && >= 0 (T-65-17) */
-    float font_size;     /* px; asserted > 0 */
-    uint16_t max_width;  /* px panel max width (0 = no cap, label drives width) */
-    uint16_t pad;        /* px inner padding */
-    uint16_t font_id;    /* label font */
-    uint8_t _pad[2];     /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
+    uint32_t panel_bg;     /* tooltip panel fill */
+    uint32_t text_color;   /* tooltip label color */
+    float delay_secs;      /* accumulated hover before reveal; asserted finite && >= 0 (T-65-17) */
+    float font_size;       /* px; asserted > 0 */
+    float open_ease_speed; /* popup open/close tween speed (0 = snap; game opts into a tween) */
+    uint16_t max_width;    /* px panel max width (0 = no cap, label drives width) */
+    uint16_t pad;          /* px inner padding */
+    uint16_t font_id;      /* label font */
+    uint8_t _pad[2];       /* layer comes from the call (data->layer), NOT the style — mirrors checkbox */
 } nt_ui_tooltip_style_t;
-_Static_assert(sizeof(nt_ui_tooltip_style_t) == 24, "nt_ui_tooltip_style_t stable ABI (2 u32 + 2 float + 3 u16 + 2 pad)");
+_Static_assert(sizeof(nt_ui_tooltip_style_t) == 28, "nt_ui_tooltip_style_t stable ABI (2 u32 + 3 float + 3 u16 + 2 pad)");
 
 /* Valid baseline style (dark), 0.5s reveal delay. */
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void);

@@ -166,6 +166,7 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
         .font_size = 16.0F,
         .slice9_scale = 1.0F,
         .state_speed = 16.0F,
+        .open_ease_speed = 0.0F, /* snap-open by default; the open delay handles flicker, not a tween */
         .item_height = 26U,
         .min_width = 160U,
         .pad = 6U,
@@ -542,8 +543,8 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     menu_assert_items(items, count);
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
-    pst.ease_speed = 0.0F;  /* menus snap; the open delay handles flicker, not a tween */
-    pst.layer = fill_layer; /* each level's popup panel sits on the fill layer */
+    pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
+    pst.layer = fill_layer;                  /* widget-owned: each level's popup panel sits on the fill layer */
     /* Clear light-dismiss so popup-core emits NO catcher per level: a submenu's full-viewport catcher
      * sits at a HIGHER z than ancestor panels (catcher_z(d+1) > panel_z(d)) and would occlude them,
      * trapping the user in the deepest level (hover/click never reach ancestors). The menu owns its own
