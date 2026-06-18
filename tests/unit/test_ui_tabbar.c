@@ -22,10 +22,6 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
-/* Monotonic frame so each nt_input_poll clears the previous frame's input edges. */
-static uint32_t s_test_frame = 0;
-static uint32_t next_test_frame(void) { return ++s_test_frame; }
-
 #define VIEW_W 800.0F
 #define VIEW_H 600.0F
 
@@ -36,7 +32,7 @@ static const char *const s_tabs[] = {"One", "Two", "Three", "Four"};
 void setUp(void) {
     nt_test_assert_install();
     nt_input_clear_all_keys();
-    nt_input_poll(next_test_frame());
+    nt_input_poll();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 

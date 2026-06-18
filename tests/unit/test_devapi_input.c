@@ -1,7 +1,13 @@
 /* L2 devapi input.* group via submit() (no socket): discovery lists the input commands with shapes,
-   thin handlers forward to the L1 inject API, every bot-input violation returns bad_params (never
-   asserts), input.text decodes UTF-8 -> codepoints (INPUT-06), and command.describe returns the
-   full contract. Fire-and-forget: handlers return an immediate ok/queued envelope, never deferred. */
+   thin handlers enqueue into the DEVAPI-SIDE input schedule (frame offsets, hold, gesture stride all
+   live here now — nt_input is a pure apply layer), every bot-input violation returns bad_params
+   (never asserts), input.text decodes UTF-8 -> codepoints (INPUT-06), and command.describe returns
+   the full contract.
+
+   Scheduling is driven by writing g_nt_app.frame, then calling nt_devapi_update() (net_poll +
+   schedule tick — releases due entries into nt_input's immediate buffer ONLY on a real sim-advance)
+   followed by nt_input_poll() (applies that buffer). The advance() helper bundles one sim-advance;
+   tick_no_advance() re-runs update WITHOUT bumping the frame to prove the pause/manual-idle freeze. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -9,15 +15,37 @@
 #include <string.h>
 
 /* clang-format off */
+#include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
+#include "devapi/nt_devapi_net.h" /* nt_devapi_update — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"
-#include "input/nt_input_internal.h" /* inject API: fill the queue to probe L2 whole-or-nothing */
+#include "input/nt_input_internal.h" /* inject API: fill the buffer to probe whole-or-nothing */
 #include "unity.h"
 /* clang-format on */
 
-void setUp(void) { TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); }
+void setUp(void) {
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* re-registers input -> resets the schedule */
+    nt_input_init();                            /* clean immediate buffer + key/pointer state */
+}
 
 void tearDown(void) { nt_devapi_shutdown(); }
+
+/* ---- frame driving ---- */
+
+/* One real sim-advance: bump the frame, run devapi update (which sees the advance and releases due
+   schedule entries into nt_input's immediate buffer), then poll to apply that buffer. */
+static void advance(void) {
+    g_nt_app.frame++;
+    nt_devapi_update();
+    nt_input_poll();
+}
+
+/* A frozen tick (pause / manual-idle): frame UNCHANGED, so nt_devapi_update releases nothing. poll
+   still runs (real device input would still flow), but no scheduled inject is released. */
+static void tick_no_advance(void) {
+    nt_devapi_update();
+    nt_input_poll();
+}
 
 /* ---- helpers (clone of test_devapi_time.c cadence) ---- */
 
@@ -169,37 +197,39 @@ static void test_input_click_button_out_of_range_bad_params(void) { assert_bad_p
 
 static void test_input_button_out_of_range_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":256}}")); }
 
-/* ---- CR-01/WR-05: multi-event sugar is whole-or-nothing on a near-full inject queue ---- */
+/* ---- CR-01/WR-05: multi-event sugar is whole-or-nothing on a near-full SCHEDULE ---- */
 
-/* Fill the inject queue to leave exactly `free` slots, using future-scheduled keys (offset 1000)
-   so a poll cannot drain them. Starts from a clean queue via nt_input_init. */
-static void fill_inject_queue_leaving(uint32_t free) {
-    nt_input_init();
+/* Fill the devapi schedule to leave exactly `free` slots, using future-scheduled keys (hold 1000)
+   so an advancing tick cannot drain them within the test. input.key{hold} stages down@0 + up@1000;
+   one slot per call would be ideal but a tap is 2 entries — instead fill via input.pointer down with
+   a far-future offset is not exposed, so use input.key with no hold (1 entry) WITHOUT advancing, so
+   nothing is released. Starts from a clean schedule via nt_devapi_init in setUp. */
+static void fill_schedule_leaving(uint32_t free) {
+    /* SCHED_MAX mirrors the L1 buffer cap (256). Each input.key (no hold) stages exactly 1 entry; we
+       never advance, so none drain. */
     for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - free; i++) {
-        TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true, 1000));
+        cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     }
 }
 
 /* A click needs 2 entries; with only 1 free it must reject WHOLE and enqueue nothing (no orphan DOWN).
-   Proof of "nothing enqueued": after the reject, exactly 1 free slot must remain — one 1-entry inject
-   then succeeds and a second overflows (same idiom as the L1 test_overflow_rejects_whole). */
+   Proof of "nothing enqueued": after the reject, exactly 1 free slot must remain — one 1-entry key
+   then succeeds and a second overflows. */
 static void test_input_click_near_full_atomic(void) {
-    fill_inject_queue_leaving(1U);
+    fill_schedule_leaving(1U);
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":6}}"));
-    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true, 1000));  /* the 1 free slot survived */
-    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_C, true, 1000)); /* now full -> proves click wrote nothing */
-    nt_input_shutdown();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}"))); /* the 1 free slot survived */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}"));      /* now full -> proves click wrote nothing */
 }
 
 /* A 2-point gesture needs 3 entries (down + 1 move + up, F6); with only 2 free it rejects whole. */
 static void test_input_gesture_near_full_atomic(void) {
-    fill_inject_queue_leaving(2U);
+    fill_schedule_leaving(2U);
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}"));
-    /* 2 free slots must remain intact: two 1-entry injects succeed, the third overflows. */
-    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true, 1000));
-    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_C, true, 1000));
-    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_D, true, 1000));
-    nt_input_shutdown();
+    /* 2 free slots must remain intact: two 1-entry keys succeed, the third overflows. */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}")));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"D\"}}"));
 }
 
 /* ---- WR-05: input.text malformed-UTF-8 reject paths ---- */
@@ -263,13 +293,85 @@ static void test_input_pointer_buttons_fractional_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":0,\"x\":1,\"y\":2,\"buttons\":2.5}}"));
 }
 
+/* ---- scheduling: offset-0 applies on the next advancing update ---- */
+
+/* input.key down@0 -> not visible until a sim-advance ticks the schedule + polls. */
+static void test_sched_offset0_applies_on_advance(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}"))); /* down@0 staged in schedule */
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));                                                 /* not yet — schedule untouched (the drain-race) */
+    advance();
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+}
+
+/* A frozen tick releases NOTHING: an enqueued down@0 stays unscheduled while the frame is unchanged
+   (pause / manual-idle), then lands on the next real advance. This is the new pause-freeze semantic
+   (replaces the old frames_remaining-on-pause freeze inside nt_input). */
+static void test_sched_pause_freeze(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
+    tick_no_advance(); /* frame frozen -> schedule releases nothing */
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    tick_no_advance(); /* still frozen */
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    advance(); /* real advance -> down@0 releases + applies */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+}
+
+/* input.key{hold:3} = down@0 + up@3: held across exactly 3 advances, released on the 4th. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_hold_releases_after_n_advances(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":3}}")));
+    advance(); /* down@0 applies; up frames_remaining 3->2 */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    advance(); /* up 2->1 */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    advance(); /* up 1->0 */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    advance(); /* up==0 releases */
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
+}
+
+/* input.click default hold=1: DOWN frame N (pressed+down), UP frame N+1 (released, not down). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_click_default_hold(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":5,\"y\":6}}")));
+    advance(); /* down@0 applies; up frames_remaining 1->0 (not released yet) */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    advance(); /* up==0 releases */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
+/* gesture ordering across frames: down@0, move@1, up@2 (2 points, stride 1 -> last_offset=1; up@1).
+   3 points keep the offsets clean: down@0 + move@1 + move@2 + up@2. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_gesture_ordered_across_frames(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":3,\"type\":\"touch\",\"points\":[[0,0],[10,0],[20,0]]}}")));
+    nt_pointer_t *slot = NULL;
+    advance(); /* down@0 lands at (0,0) */
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == 3U) {
+            slot = &g_nt_input.pointers[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= -0.001F && slot->x <= 0.001F);
+    advance(); /* move@1 -> x=10 */
+    TEST_ASSERT_TRUE(slot->x >= 9.999F && slot->x <= 10.001F);
+    advance(); /* move@2 -> x=20; up@2 also due this tick (last_offset=2) -> release */
+    TEST_ASSERT_TRUE(slot->x >= 19.999F && slot->x <= 20.001F);
+    TEST_ASSERT_TRUE(slot->buttons[NT_BUTTON_LEFT].is_released);
+}
+
 /* ---- WR-05: offline input.state{pop_text} drain coverage (no socket) ---- */
 
 static void test_input_state_pop_text_drains_codepoints(void) {
-    nt_input_init();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}")));    /* enqueue char@0 'h','i' */
-    nt_input_poll(1);                                                                                        /* new frame -> drain into the ring */
+    advance();                                                                                               /* advance -> release + drain into the ring */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *cps = cJSON_GetObjectItemCaseSensitive(result, "codepoints");
@@ -278,7 +380,6 @@ static void test_input_state_pop_text_drains_codepoints(void) {
     TEST_ASSERT_EQUAL_INT(104, cJSON_GetArrayItem(cps, 0)->valueint);
     TEST_ASSERT_EQUAL_INT(105, cJSON_GetArrayItem(cps, 1)->valueint);
     cJSON_Delete(root);
-    nt_input_shutdown();
 }
 
 /* ---- input.state (the observation hook, INPUT-04/05/06 read-back) ---- */
@@ -305,65 +406,56 @@ static void test_input_state_unknown_key_bad_params(void) { assert_bad_params(nt
 
 static void test_input_state_bad_pop_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":1}}")); }
 
-/* L1+L2: inject A (offset 0) -> poll(new frame) drains it -> input.state{key:A} reads down==true. */
+/* L2: the drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
+   advance yet) -> advance -> input.state reads down==true. */
 static void test_input_state_observes_injected_key(void) {
-    nt_input_init();
-    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"))); /* pre: not yet polled */
-    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"));
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}")); /* pre: not yet polled */
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "down")));
     cJSON_Delete(root);
 
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}"))); /* enqueue down@0 */
-    nt_input_poll(1);                                                                                  /* new frame -> drain applies the inject */
+    advance();                                                                                         /* advance -> release applies the inject */
     root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}"));
     result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "down")));
     cJSON_Delete(root);
-    nt_input_shutdown();
 }
 
 /* ---- F7: input.button happy path — mask actually presses the mapped mouse button ---- */
 
-/* input.button {buttons:2} on the reserved mouse slot -> after poll the RIGHT button is down
-   (creates the slot via DOWN since none is active yet). The reserved slot is a mouse, so the
-   nt_input_mouse_* convenience queries observe it by-value (not just the ok envelope). */
+/* input.button {buttons:2} on the reserved mouse slot -> after an advance the RIGHT button is down. */
 static void test_input_button_right_presses_right(void) {
-    nt_input_init();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
-    nt_input_poll(1);
+    advance();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
     TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_RIGHT));
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
-    nt_input_shutdown();
 }
 
 /* Second input.button on the now-active slot exercises the MOVE branch (slot exists) and
    updates the mask: 4 -> MIDDLE down, RIGHT released (mask cleared its bit). */
 static void test_input_button_move_branch_updates_mask(void) {
-    nt_input_init();
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
-    nt_input_poll(1);
+    advance();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":4}}"))); /* MOVE branch */
-    nt_input_poll(2);
+    advance();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_MIDDLE));
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_RIGHT));
-    nt_input_shutdown();
 }
 
 /* ---- F6: a single-point gesture applies point[0] exactly once at frame 0 (no double-apply) ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_input_gesture_single_point_applied_once(void) {
-    nt_input_init();
     /* 1 point -> down@0 only (no move, no double-apply); queued = 1 down + 0 moves + 1 up = 2. */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":7,\"points\":[[7,7]]}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
     cJSON_Delete(root);
-    nt_input_poll(1); /* down@0 + up@0 both drain this poll (last_offset==0 for a single point) */
+    advance(); /* down@0 + up@0 both release this advancing tick (last_offset==0 for a single point) */
     /* The slot landed at (7,7) with zero accumulated delta — DOWN set it once, no redundant MOVE. */
     nt_pointer_t *slot = NULL;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
@@ -377,7 +469,6 @@ static void test_input_gesture_single_point_applied_once(void) {
     TEST_ASSERT_TRUE(slot->y >= 6.999F && slot->y <= 7.001F);
     TEST_ASSERT_TRUE(slot->dx >= -0.001F && slot->dx <= 0.001F); /* no move@0 -> no delta */
     TEST_ASSERT_TRUE(slot->dy >= -0.001F && slot->dy <= 0.001F);
-    nt_input_shutdown();
 }
 
 /* ---- command.describe ---- */
@@ -436,6 +527,11 @@ int main(void) {
     RUN_TEST(test_input_button_fractional_bad_params);
     RUN_TEST(test_input_click_button_fractional_bad_params);
     RUN_TEST(test_input_pointer_buttons_fractional_bad_params);
+    RUN_TEST(test_sched_offset0_applies_on_advance);
+    RUN_TEST(test_sched_pause_freeze);
+    RUN_TEST(test_sched_hold_releases_after_n_advances);
+    RUN_TEST(test_sched_click_default_hold);
+    RUN_TEST(test_sched_gesture_ordered_across_frames);
     RUN_TEST(test_input_button_right_presses_right);
     RUN_TEST(test_input_button_move_branch_updates_mask);
     RUN_TEST(test_input_gesture_single_point_applied_once);

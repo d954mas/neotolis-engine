@@ -432,8 +432,10 @@ if(NOT EMSCRIPTEN)
         # L2 input group via submit(): discovery + forwarding to the L1 inject API + bad_params +
         # input.text UTF-8 decode + command.describe. Links nt_input_stub (the input.* handlers call
         # the L1 inject symbols nt_input_inject_* / nt_input_set_player_enabled / nt_input_key_from_name).
+        # Links nt_devapi_net for nt_devapi_update: the scheduling tests drive the real per-tick path
+        # (net_poll + advance-gated schedule tick keyed off g_nt_app.frame), not just the schedule TU.
         add_executable(test_devapi_input unit/test_devapi_input.c)
-        target_link_libraries(test_devapi_input PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_input PRIVATE nt_devapi_net nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_input PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1 NT_DEVAPI_REGISTER_input=1
         )

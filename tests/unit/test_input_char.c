@@ -65,7 +65,7 @@ void test_poll_clears_unconsumed_chars(void) {
     nt_input_buffer_char(0x41U); /* 'A' typed but never popped this frame */
     nt_input_buffer_char(0x42U); /* 'B' too */
 
-    nt_input_poll(1U); /* frame boundary: typed text is frame-local, like key edges */
+    nt_input_poll(); /* frame boundary: typed text is frame-local, like key edges */
 
     /* The ring is empty -- the stale chars cannot leak into a field focused next frame. */
     uint32_t cp = 0xDEADBEEFU;

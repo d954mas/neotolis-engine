@@ -24,10 +24,6 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
-/* Monotonic frame so each nt_input_poll clears the previous frame's input edges. */
-static uint32_t s_test_frame = 0;
-static uint32_t next_test_frame(void) { return ++s_test_frame; }
-
 #define VIEW_W 800.0F
 #define VIEW_H 600.0F
 
@@ -36,7 +32,7 @@ static uint32_t next_test_frame(void) { return ++s_test_frame; }
 void setUp(void) {
     nt_test_assert_install();
     nt_input_clear_all_keys();
-    nt_input_poll(next_test_frame()); /* clear sticky pressed/released edges left by a prior test (clear_all_keys leaves them) */
+    nt_input_poll(); /* clear sticky pressed/released edges left by a prior test (clear_all_keys leaves them) */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
@@ -258,7 +254,7 @@ static const nt_ui_menu_item_t s_root[] = {
  * pressed/released edges (tests have no platform poll to do it); clear_all_keys drops the held
  * current state; set_key(true) then raises a clean rising edge. */
 static void menu_key(nt_key_t key) {
-    nt_input_poll(next_test_frame());
+    nt_input_poll();
     nt_input_clear_all_keys();
     nt_input_set_key(key, true);
 }
@@ -344,8 +340,8 @@ static void test_menu_nested_dismiss_esc_deepest_first(void) {
  * outside-click dismiss reads nt_input_mouse_is_pressed (global), NOT the per-frame snapshot. A poll
  * clears stale edges, then pointer_down with mask 1 (LEFT) raises is_pressed on the 0->1 transition. */
 static void menu_mouse_press(float px, float py) {
-    nt_input_poll(next_test_frame()); /* clear stale pressed/released edges */
-    nt_input_clear_all_pointers();    /* drop any prior is_down so the next down is a clean rising edge */
+    nt_input_poll();               /* clear stale pressed/released edges */
+    nt_input_clear_all_pointers(); /* drop any prior is_down so the next down is a clean rising edge */
     nt_input_pointer_down(0U, px, py, 1.0F, NT_POINTER_MOUSE, 1U);
 }
 
@@ -389,7 +385,7 @@ static void test_menu_inside_click_keeps_open(void) {
 /* Drive a clean GLOBAL right-button press edge at (px,py): mask 2 = NT_BUTTON_RIGHT. The menu's dismiss
  * now also fires on a right-press outside (skipping the opening frame). */
 static void menu_right_press_at(float px, float py) {
-    nt_input_poll(next_test_frame());
+    nt_input_poll();
     nt_input_clear_all_pointers();
     nt_input_pointer_down(0U, px, py, 1.0F, NT_POINTER_MOUSE, 2U);
 }
@@ -692,7 +688,7 @@ static void test_menu_root_occluder_present_while_open(void) {
 /* Drive a clean GLOBAL right-button press edge at (px,py): the trigger reads nt_input_mouse_is_pressed
  * (global), the hover gate reads the per-frame snapshot pointer separately. */
 static void menu_right_press(float px, float py) {
-    nt_input_poll(next_test_frame());
+    nt_input_poll();
     nt_input_clear_all_pointers();
     nt_input_pointer_down(0U, px, py, 1.0F, NT_POINTER_MOUSE, 2U); /* mask 2 = NT_BUTTON_RIGHT */
 }
