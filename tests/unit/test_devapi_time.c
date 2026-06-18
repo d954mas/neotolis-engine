@@ -142,7 +142,7 @@ static void test_forwarding_to_nt_app(void) {
    deferred queue directly via advance_sim(); the real loop also drains pending_steps.) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_step_deferred_resolves_after_count(void) {
-    (void)parse_ok(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"manual\"}}"));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"time.set_mode\",\"params\":{\"mode\":\"manual\"}}")));
 
     /* default count = 1 when omitted: queues 1, defers, resolves on the 1st sim-advance. */
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"time.step\"}"));
