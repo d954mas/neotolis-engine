@@ -227,7 +227,7 @@ static void test_events_drag_cancel_resets_progress(void) {
     TEST_ASSERT_TRUE(e_mid.hold_progress > 0.0F);
 
     /* Drag a long way (well past move_radius) while still over the widget center?  Move within the
-     * widget but past the radius from the press origin: shift +40px (default radius 6). press_live
+     * widget but past the radius from the press origin: shift +40px (default radius 16). press_live
      * drops -> progress resets to 0. Keep pointer inside the bbox so held stays true. */
     nt_pointer_t fd = make_pointer(BTN_CX + 40.0F, BTN_CY, true, false, false);
     nt_ui_events_t e_drag = events_btn_frame(&fd, 0.2F, &cfg);

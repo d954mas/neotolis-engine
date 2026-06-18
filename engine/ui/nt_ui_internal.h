@@ -153,12 +153,13 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
-/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. */
+/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
+ * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
 #ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
-#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.30F
+#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.50F
 #endif
 #ifndef NT_UI_GESTURE_MOVE_RADIUS_PX
-#define NT_UI_GESTURE_MOVE_RADIUS_PX 6.0F
+#define NT_UI_GESTURE_MOVE_RADIUS_PX 16.0F
 #endif
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. */
