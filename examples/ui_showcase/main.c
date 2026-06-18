@@ -1668,13 +1668,8 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     root_items[4].icon = s_icon_bunny_ref;
     more_items[0].icon = s_icon_bunny_ref;
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Two menus show the optional target binding: right-click ANYWHERE = global menu; right-click the panel below = zone menu.", g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click the panel = (re)open here; click outside / Esc = close. Hover 'More' to fly out the submenu; arrows/Enter navigate.",
-                g_current->caption);
-
-    /* GLOBAL menu: target_id == 0 -> a right-click (or long-press) ANYWHERE in the tab arms it at the
-     * cursor. No bound widget, so no per-widget events step is needed for the touch trigger. */
-    (void)nt_ui_menu_open_trigger(ctx, s_id_menu_global, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_state);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click the panel -> menu bound to it; right-click anywhere else -> global menu; click outside / Esc closes.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opening one closes the other. Hover 'More' to fly out the submenu; arrows/Enter navigate.", g_current->caption);
 
     /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
      * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
@@ -1689,9 +1684,25 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     static const nt_ui_events_cfg_t menu_cfg = {.long_press_secs = 0.5F, .double_click = false};
     const nt_ui_events_t zone_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);
-    (void)nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, zone_ev.long_pressed, &st->menu.zone_state);
 
-    /* Render both menus (independent state + ids). If both somehow open they coexist fine — separate cells. */
+    /* Mutually exclusive arming: a right-click over the zone panel must arm ONLY the zone menu, anywhere
+     * else ONLY the global. Same cursor + bbox snapshot the trigger reads (prev-frame bbox vs this-frame
+     * pointer), so over_zone matches the zone trigger's own geometry hit-test. */
+    const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
+    const bool over_zone = zone_bb.found && zone_ev.pos[0] >= zone_bb.x && zone_ev.pos[0] <= zone_bb.x + zone_bb.width && zone_ev.pos[1] >= zone_bb.y && zone_ev.pos[1] <= zone_bb.y + zone_bb.height;
+
+    const bool zone_armed = nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, zone_ev.long_pressed, &st->menu.zone_state);
+    /* Global only when NOT over the zone, so a right-click on the panel never also arms the global. */
+    const bool global_armed = !over_zone && nt_ui_menu_open_trigger(ctx, s_id_menu_global, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_state);
+
+    /* Opening one forces the other closed (open_trigger returns true only on the arming frame). */
+    if (zone_armed) {
+        st->menu.global_state.open = false;
+    } else if (global_armed) {
+        st->menu.zone_state.open = false;
+    }
+
+    /* Render both menus (independent state + ids); arming is gated so at most one is open. */
     nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, root_items, root_count, &st->menu.global_state, g_current->menu);
     nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, root_items, root_count, &st->menu.zone_state, g_current->menu);
 
