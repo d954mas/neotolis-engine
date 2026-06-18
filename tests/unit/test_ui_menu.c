@@ -382,6 +382,38 @@ static void test_menu_inside_click_keeps_open(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "a click inside an open panel must NOT dismiss the chain");
 }
 
+/* Drive a clean GLOBAL right-button press edge at (px,py): mask 2 = NT_BUTTON_RIGHT. The menu's dismiss
+ * now also fires on a right-press outside (skipping the opening frame). */
+static void menu_right_press_at(float px, float py) {
+    nt_input_poll();
+    nt_input_clear_all_pointers();
+    nt_input_pointer_down(0U, px, py, 1.0F, NT_POINTER_MOUSE, 2U);
+}
+
+/* ---- Right-click outside (a frame AFTER opening) dismisses the chain, mirroring the left-click dismiss.
+ *      The menu is opened directly (game-set open), so opened_frame stays 0 and never aliases the live
+ *      frame counter — the post-open right-press closes it. ---- */
+static void test_menu_right_click_outside_dismisses_chain(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {.open = true, .anchor_x = 120.0F, .anchor_y = 80.0F};
+
+    /* frame 1: render so the panel bbox exists next frame (no press) */
+    nt_input_clear_all_keys();
+    menu_frame(&st, &style, 700.0F, 500.0F);
+    TEST_ASSERT_TRUE(st.open);
+
+    /* frame 2: RIGHT press far from the panel -> menu-owned outside dismiss. */
+    menu_right_press_at(780.0F, 580.0F);
+    nt_pointer_t p = {.x = 780.0F, .y = 580.0F, .active = true};
+    p.buttons[NT_BUTTON_RIGHT].is_down = true;
+    p.buttons[NT_BUTTON_RIGHT].is_pressed = true;
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, MENU_A, s_root, 2U, &st, &style);
+    nt_ui_end(s_fx.ctx);
+
+    TEST_ASSERT_FALSE_MESSAGE(st.open, "right-click outside (post-open) dismisses the whole chain");
+}
+
 /* ---- Switch root branch via keyboard while a submenu is open (stuck-state guard): open the
  *      File submenu, then Left collapses back to root, Down moves to another root parent (Tools), Right
  *      opens ITS submenu. The user is never locked into the first open branch. ---- */
@@ -693,6 +725,20 @@ static void test_menu_open_trigger_unbound_arms_anywhere(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "unbound trigger must arm on a right-click anywhere");
 }
 
+/* ---- The opening right-click does NOT self-close: arming via open_trigger on the same frame as the
+ *      right-press stamps opened_frame == ctx->frame_counter, so the dismiss is skipped that frame and the
+ *      menu stays open. Without the opened_frame guard the dismiss (now fires on RIGHT) would close it. ---- */
+static void test_menu_opening_right_click_does_not_self_close(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    nt_input_clear_all_keys();
+
+    /* a single right-press both arms (open_trigger) AND is the press the dismiss sees this frame */
+    menu_right_press(20.0F, 20.0F);
+    trigger_frame(&st, &style, 0U, 20.0F, 20.0F, false);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "the opening right-click arms and must NOT self-close the menu");
+}
+
 /* ---- Caller-supplied long-press arms the trigger: the helper does NO mutating gesture step itself; the
  *      caller passes long_pressed from ITS widget's events step. A right-click absent + long_pressed=true
  *      must arm (and bind to the menu anchor at the cursor). ---- */
@@ -775,6 +821,7 @@ int main(void) {
     RUN_TEST(test_menu_root_row_hittable_while_submenu_open);
     RUN_TEST(test_menu_click_root_parent_switches_branch);
     RUN_TEST(test_menu_outside_click_dismisses_chain);
+    RUN_TEST(test_menu_right_click_outside_dismisses_chain);
     RUN_TEST(test_menu_inside_click_keeps_open);
     RUN_TEST(test_menu_depth_cap_asserts);
     RUN_TEST(test_menu_icon_gutter_aligns_labels);
@@ -783,6 +830,7 @@ int main(void) {
     RUN_TEST(test_menu_arrow_marker_on_parent_only);
     RUN_TEST(test_menu_root_occluder_present_while_open);
     RUN_TEST(test_menu_open_trigger_unbound_arms_anywhere);
+    RUN_TEST(test_menu_opening_right_click_does_not_self_close);
     RUN_TEST(test_menu_open_trigger_long_press_passed_in_arms);
     RUN_TEST(test_menu_open_trigger_bound_requires_target_hover);
     RUN_TEST(test_menu_reopen_after_external_close_is_clean);

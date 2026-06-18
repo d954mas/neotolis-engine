@@ -304,10 +304,12 @@ typedef struct {
     bool city_open;
 } dropdown_params_t;
 
-/* Menu tab: the game-owned menu state (open flag + chosen-id sink + anchor). */
+/* Menu tab: two independent game-owned menus to show the optional target binding — a GLOBAL menu
+ * (right-click anywhere in the tab) and a ZONE menu bound to a panel (right-click only over it). */
 typedef struct {
-    nt_ui_menu_state_t state;
-    uint32_t last_chosen; /* latched for the readout */
+    nt_ui_menu_state_t global_state; /* target_id == 0: arms on a right-click anywhere */
+    nt_ui_menu_state_t zone_state;   /* target_id == panel: arms only over the bound panel */
+    uint32_t last_chosen;            /* latched for the readout (either menu) */
 } menu_params_t;
 
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
@@ -370,7 +372,7 @@ static struct tab_state s_state = {
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false},
-    .menu = {.state = {0}, .last_chosen = 0},
+    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = 0},
 };
 // #endregion
 
@@ -416,8 +418,9 @@ static uint32_t s_id_events_dbl;                    /* double-click target */
 static uint32_t s_id_events_fill;                   /* hold_progress fill bar */
 static uint32_t s_id_dd_fruit, s_id_dd_city;        /* dropdown triggers */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c; /* tooltip targets */
-static uint32_t s_id_menu;                          /* context menu (drives every level) */
-static uint32_t s_id_menu_panel;                    /* the panel the menu trigger binds to (opens only over it) */
+static uint32_t s_id_menu_global;                   /* global context menu (right-click anywhere) */
+static uint32_t s_id_menu_zone;                     /* zone context menu (bound to a panel) */
+static uint32_t s_id_menu_panel;                    /* the zone panel the zone menu binds to (opens only over it) */
 static uint32_t s_id_tabs_demo_base;                /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -516,7 +519,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
     {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
-    {"Menu", "Right-click / long-press context menu with a nested submenu: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
+    {"Menu", "Two context menus (global + zone-bound) with nested submenus: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
     {"Tabs", "Tab-bar begin/end core: icon+text tabs with a distinct selected-tab icon; BOTTOM accent.", "examples/ui_showcase/main.c:render_tabs", render_tabs, NULL},
     {"Stress", "N labels @14pt + live frame gpu_ms / draw-calls; label-count panel.", "examples/ui_showcase/main.c:render_stress", render_stress, props_stress},
 };
@@ -1665,29 +1668,38 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     root_items[4].icon = s_icon_bunny_ref;
     more_items[0].icon = s_icon_bunny_ref;
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click (or long-press) the panel below to open the context menu. Hover 'More' to fly out the submenu.", g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Travel diagonally into the submenu (crossing a sibling) and it stays open; Esc closes the deepest level; arrows/Enter navigate.",
-                g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Two menus show the optional target binding: right-click ANYWHERE = global menu; right-click the panel below = zone menu.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click outside / right-click outside / Esc closes. Hover 'More' to fly out the submenu; arrows/Enter navigate.", g_current->caption);
 
-    /* A target panel: the menu binds to its id, so a right-click / long-press arms the menu ONLY over
-     * this panel (not anywhere on the tab). The long-press gesture is arbitrated on the same panel id. */
+    /* GLOBAL menu: target_id == 0 -> a right-click (or long-press) ANYWHERE in the tab arms it at the
+     * cursor. No bound widget, so no per-widget events step is needed for the touch trigger. */
+    (void)nt_ui_menu_open_trigger(ctx, s_id_menu_global, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_state);
+
+    /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
+     * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
+     * trigger does only idempotent reads and binds the right-click to the same id via query_interaction. */
     CLAY({.id = (Clay_ElementId){.id = s_id_menu_panel},
           .layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = g_current->panel_alt,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Right-click / long-press here", g_current->body);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Zone menu: right-click / long-press here", g_current->body);
     }
-    /* The game owns the panel's single canonical events step (long-press gesture for touch); the trigger
-     * does only idempotent reads. Right-click binds to the same id via the trigger's query_interaction. */
     static const nt_ui_events_cfg_t menu_cfg = {.long_press_secs = 0.5F, .double_click = false};
-    const nt_ui_events_t menu_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);
+    const nt_ui_events_t zone_ev = nt_ui_events(ctx, s_id_menu_panel, &menu_cfg);
+    (void)nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, zone_ev.long_pressed, &st->menu.zone_state);
 
-    (void)nt_ui_menu_open_trigger(ctx, s_id_menu, s_id_menu_panel, menu_ev.long_pressed, &st->menu.state);
-    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu, root_items, root_count, &st->menu.state, g_current->menu);
-    if (st->menu.state.chosen_id != 0U) {
-        st->menu.last_chosen = st->menu.state.chosen_id;
-        st->menu.state.chosen_id = 0U; /* game reads + clears (Model D) */
+    /* Render both menus (independent state + ids). If both somehow open they coexist fine — separate cells. */
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, root_items, root_count, &st->menu.global_state, g_current->menu);
+    nt_ui_menu(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, root_items, root_count, &st->menu.zone_state, g_current->menu);
+
+    if (st->menu.global_state.chosen_id != 0U) {
+        st->menu.last_chosen = st->menu.global_state.chosen_id;
+        st->menu.global_state.chosen_id = 0U; /* game reads + clears (Model D) */
+    }
+    if (st->menu.zone_state.chosen_id != 0U) {
+        st->menu.last_chosen = st->menu.zone_state.chosen_id;
+        st->menu.zone_state.chosen_id = 0U;
     }
 
     (void)snprintf(buf, sizeof buf, "last chosen id: %u", st->menu.last_chosen);
@@ -1936,7 +1948,8 @@ static void ensure_ids(void) {
     s_id_tip_a = nt_ui_id("showcase/tip_a");
     s_id_tip_b = nt_ui_id("showcase/tip_b");
     s_id_tip_c = nt_ui_id("showcase/tip_c");
-    s_id_menu = nt_ui_id("showcase/menu");
+    s_id_menu_global = nt_ui_id("showcase/menu_global");
+    s_id_menu_zone = nt_ui_id("showcase/menu_zone");
     s_id_menu_panel = nt_ui_id("showcase/menu_panel");
     s_ids_ready = true;
 }

@@ -51,6 +51,7 @@ typedef struct {
 typedef struct {
     int16_t open_path[NT_UI_MENU_MAX_DEPTH];
     int16_t focus[NT_UI_MENU_MAX_DEPTH];
+    uint32_t opened_frame; /* ctx->frame_counter at arm; the right-click dismiss skips this frame so the opening click never self-closes */
     uint8_t active_depth;
     bool primed; /* a zeroed fresh cell would read open_path[0]==0 (= item 0 open); init to -1 once */
     uint8_t _pad[2];
@@ -200,6 +201,7 @@ static void menu_runtime_reset(nt_ui_menu_runtime_t *rt) {
         rt->focus[d] = -1;
     }
     rt->active_depth = 0U;
+    rt->opened_frame = 0U;
     rt->primed = true;
 }
 
@@ -244,7 +246,9 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
         st->anchor_y = my;
         st->open = true;
         st->chosen_id = 0U;
-        menu_runtime_reset(menu_runtime(ctx, menu_id));
+        nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
+        menu_runtime_reset(rt);
+        rt->opened_frame = ctx->frame_counter; /* skip the dismiss on the opening frame (right-click is also the open trigger) */
     }
     return armed;
 }
@@ -642,9 +646,12 @@ void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t 
     bool close_chain = false;
     menu_declare_level(ctx, fill_layer, label_layer, id, items, count, 0U, rt->active_depth, &root_anchor, rt, style, mx, my, ctx->frame_dt, &chosen, &close_chain);
 
-    /* Menu-owned outside-click dismiss: a primary press this frame OUTSIDE every open panel closes the
-     * whole chain. A press inside a panel is a row interaction (handled by the rows), never a dismiss. */
-    if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT) && !menu_cursor_over_any_panel(ctx, id, rt, mx, my)) {
+    /* Menu-owned outside-click dismiss: a LEFT or RIGHT press this frame OUTSIDE every open panel closes
+     * the whole chain. A press inside a panel is a row interaction (handled by the rows), never a dismiss.
+     * The opening frame is skipped: right-click is also the open trigger, so the very click that armed the
+     * menu must not self-close it (a later right-click outside does close). */
+    const bool outside_press = nt_input_mouse_is_pressed(NT_BUTTON_LEFT) || nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    if (outside_press && !menu_cursor_over_any_panel(ctx, id, rt, mx, my) && ctx->frame_counter != rt->opened_frame) {
         close_chain = true;
     }
 
