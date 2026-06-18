@@ -36,10 +36,15 @@ void test_gate_off_releases_held_key(void) {
 
 void test_gate_off_releases_held_pointer(void) {
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
-    nt_input_set_player_enabled(false); /* ON->OFF edge releases the held button + clears the slot */
-    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
-    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    nt_input_set_player_enabled(false); /* ON->OFF edge releases the held button (deferred deactivation) */
+    /* The release edge is readable via the PUBLIC query this frame: deactivation is deferred one
+       poll (like a normal pointer_up) so find_mouse_pointer still sees the active slot. */
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    nt_input_poll(1U); /* next poll resolves deactivate_pending -> slot deactivates, no leak */
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_released(NT_BUTTON_LEFT)); /* slot gone -> release no longer readable */
 }
 
 void test_gate_reenable_applies_real(void) {

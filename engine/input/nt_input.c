@@ -434,6 +434,9 @@ void nt_input_clear_all_keys(void) {
 }
 
 void nt_input_clear_all_pointers(void) {
+    /* Mirror pointer_up_apply: raise the release edge then DEFER deactivation one frame so the
+       release is readable via nt_input_mouse_is_released this frame (find_mouse_pointer only scans
+       active slots). The next poll resolves deactivate_pending -> slot deactivates, no leak. */
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         if (!g_nt_input.pointers[i].active) {
             continue;
@@ -444,8 +447,7 @@ void nt_input_clear_all_pointers(void) {
             }
             g_nt_input.pointers[i].buttons[b].is_down = false;
         }
-        g_nt_input.pointers[i].active = false;
-        g_nt_input.pointers[i].deactivate_pending = false;
+        g_nt_input.pointers[i].deactivate_pending = true;
     }
 }
 
