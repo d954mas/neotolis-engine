@@ -44,6 +44,7 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void) {
         .pad = 8U,
         .gap = 6U,
         .font_id = 0U,
+        .icon_size = 0U, /* no icon gutter by default (text-only) */
         .dir = NT_UI_TABBAR_VERTICAL,
         .accent_side = NT_UI_TABBAR_ACCENT_LEFT, /* matches the current vertical-bar leading edge */
     };
@@ -59,6 +60,16 @@ static inline uint32_t tabbar_tab_id(uint32_t base_id, uint32_t index) {
     h = (h ^ (h >> 13)) * 0xC2B2AE35U;
     h = h ^ (h >> 16);
     return (h != 0U) ? h : 1U; /* 0 = "no widget" sentinel */
+}
+
+/* Per-tab label cell id (distinct from the tab id so the wrapper's label child carries a stable,
+ * non-aliasing id the icon-gutter probe can query). Salts base_id+index through the same mixed hash. */
+static inline uint32_t tabbar_label_id(uint32_t base_id, uint32_t index) {
+    uint32_t h = (base_id ^ 0x7AB1B00DU) * 0x9E3779B1U;
+    h = (h ^ ((index + 1U) * 0x85EBCA6BU));
+    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
+    h = h ^ (h >> 16);
+    return (h != 0U) ? h : 1U;
 }
 
 /* Fail early on out-of-range state values — a silent "almost works" would otherwise leak. */
@@ -261,15 +272,47 @@ void nt_ui_tabbar_end(nt_ui_context_t *ctx) {
     ctx->pending_tabbar.active = false;
 }
 
+/* Draw the resolved per-tab icon image filling the gutter cell (no-op if the ref is unset/unresolved).
+ * Split out so the gutter cell stays a flat declaration (cognitive-complexity), mirroring menu_draw_icon_image. */
+static void tabbar_draw_icon_image(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_atlas_region_ref_t *icon) {
+    if (icon == NULL || icon->atlas.id == 0U) {
+        return;
+    }
+    nt_atlas_region_ref_t ic = *icon; /* per-tab ref (not style-owned): resolve by-value, never memoize */
+    nt_atlas_resolve_ref(&ic);
+    if (ic.region == NT_ATLAS_INVALID_REGION) {
+        return;
+    }
+    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+    NT_ASSERT(p != NULL && "nt_ui_tabbar: scratch alloc failed (icon payload)");
+    *p = (nt_ui_image_payload_t){.atlas = ic.atlas, .region_index = ic.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .image = (Clay_ImageElementConfig){.imageData = p}, .userData = NT_UI_CLAY_DATA(fill_layer)}) {}
+}
+
+/* Leading icon gutter (UNIFIED icon model, byte-for-byte the dropdown_declare_row / menu_declare_icon
+ * behavior): reserve icon_size px so labels stay aligned across iconed and non-iconed tabs; draw the
+ * per-tab icon if its ref is set, else leave the gutter empty (OS-menu icon-column behavior).
+ * icon_size==0 -> no gutter at all. Icons draw on fill_layer (the bar fill layer). */
+static void tabbar_declare_icon(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_atlas_region_ref_t *icon, const nt_ui_tabbar_style_t *style) {
+    if (style->icon_size == 0U) {
+        return;
+    }
+    const float gut = (float)style->icon_size;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(gut), CLAY_SIZING_FIXED(gut)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) { tabbar_draw_icon_image(ctx, fill_layer, icon); }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — the tab loop + asserts, not real nesting
-int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, int count, int *active, nt_ui_tabbar_style_t *style) {
+int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, const nt_atlas_region_ref_t *icons, int count, int *active,
+                 nt_ui_tabbar_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_tabbar: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(base_id != 0U && labels != NULL && active != NULL && style != NULL && "nt_ui_tabbar: base_id non-zero, pointers non-NULL");
     NT_ASSERT(count >= 0 && "nt_ui_tabbar: count must be >= 0");                                         /* T-65-15 */
     NT_ASSERT(*active >= -1 && (count == 0 || *active < count) && "nt_ui_tabbar: active in [-1,count)"); /* T-65-15 */
 
     int clicked = -1;
-    /* Convenience wrapper built ON the begin/end core: one text-only label child per tab. */
+    /* Convenience wrapper built ON the begin/end core: an optional leading icon gutter + a label child per
+     * tab. `icons` is an OPTIONAL parallel array (NULL = text-only); the gutter mirrors nt_ui_dropdown_list. */
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* icons on data->layer, labels on label_layer */
     nt_ui_tabbar_begin(ctx, data, label_layer, base_id, style);
     for (int i = 0; i < count; ++i) {
         NT_ASSERT(labels[i] != NULL && "nt_ui_tabbar: label entry must be non-NULL"); /* T-65-16 */
@@ -278,11 +321,20 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
             *active = i; /* Model D: latch the game-owned active index */
             clicked = i;
         }
+        const nt_atlas_region_ref_t *icon = (icons != NULL) ? &icons[i] : NULL;
+        tabbar_declare_icon(ctx, fill_layer, icon, style);
         const uint32_t txt = on ? style->text_selected : style->text;
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(txt)};
-        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), labels[i], &lbl);
+        /* Label cell carries a stable id so tests can probe its aligned x position (icon-gutter probe). */
+        CLAY({.id = (Clay_ElementId){.id = tabbar_label_id(base_id, (uint32_t)i)}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), labels[i], &lbl);
+        }
         nt_ui_tab_end(ctx);
     }
     nt_ui_tabbar_end(ctx);
     return clicked;
 }
+
+#ifdef NT_TEST_ACCESS
+nt_ui_bbox_t nt_ui_tabbar_test_label_bbox(const nt_ui_context_t *ctx, uint32_t base_id, int idx) { return nt_ui_get_bbox(ctx, tabbar_label_id(base_id, (uint32_t)idx)); }
+#endif

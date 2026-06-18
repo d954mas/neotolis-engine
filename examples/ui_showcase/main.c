@@ -1995,7 +1995,8 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
           .backgroundColor = g_current->list_bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        (void)nt_ui_tabbar(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tab_btn_base, s_tab_labels, TAB_COUNT, &s_active_tab, g_current->tabbar);
+        /* Text-only nav (icons NULL): the left rail stays clean/cohesive. icon_size stays 0 so no gutter. */
+        (void)nt_ui_tabbar(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tab_btn_base, s_tab_labels, NULL, TAB_COUNT, &s_active_tab, g_current->tabbar);
     }
 }
 

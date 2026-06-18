@@ -7,6 +7,7 @@
 
 #include "clay.h"
 #include "input/nt_input_internal.h"
+#include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -51,19 +52,23 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
     return p;
 }
 
-/* One tab-bar frame: a FIXED-width vertical bar floated at the top-left so each tab's bbox is known.
- * Returns the clicked index (-1 if none). */
-static int tabbar_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) {
+/* One tab-bar frame with an OPTIONAL parallel icons[] array: a FIXED-width vertical bar floated at the
+ * top-left so each tab's bbox is known. Returns the clicked index (-1 if none). */
+static int tabbar_frame_icons(const nt_pointer_t *p, int count, int *active, const nt_atlas_region_ref_t *icons, nt_ui_tabbar_style_t *st) {
     int clicked = -1;
+    nt_mem_scratch_reset(); /* per-frame scratch reset (icon payloads alloc here), exactly as the main loop does */
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = 0.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(300)}}}) {
-        clicked = nt_ui_tabbar(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, count, active, st);
+        clicked = nt_ui_tabbar(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, icons, count, active, st);
     }
     nt_ui_end(s_fx.ctx);
     return clicked;
 }
+
+/* Text-only convenience wrapper (icons NULL) so existing tests keep their call shape. */
+static int tabbar_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) { return tabbar_frame_icons(p, count, active, NULL, st); }
 
 /* The begin/end CORE driven directly: the game owns the per-tab content (a single label child here). */
 static int tabbar_core_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) {
@@ -108,7 +113,7 @@ static void two_tabbars_with_content_frame(const ui_walker_fixture_t *fx, const 
     nt_ui_begin(fx->ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
         /* Nav: the labels[] convenience wrapper, base = TAB_BASE. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_GROW(0)}}}) { (void)nt_ui_tabbar(fx->ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, 4, &nav_active, &nav_st); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_GROW(0)}}}) { (void)nt_ui_tabbar(fx->ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE, s_tabs, NULL, 4, &nav_active, &nav_st); }
         /* Demo: the begin/end core, a DIFFERENT base; each tab holds an icon + a label. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(72)}}}) {
             nt_ui_tabbar_begin(fx->ctx, NT_UI_DATA_LAYER(1), 2U, TAB_BASE + 0x100U, &demo_st);
@@ -228,14 +233,79 @@ static void test_tabbar_no_click_returns_negative(void) {
     TEST_ASSERT_EQUAL_INT(1, active);
 }
 
+/* ---- icon_size default is text-only (no gutter), mirroring dropdown's default. ---- */
+static void test_tabbar_icon_size_default_zero(void) {
+    nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
+    TEST_ASSERT_EQUAL_UINT(0U, st.icon_size);
+}
+
+/* A wrapper tab's label x after two warm frames (1-frame IM lag bakes the bbox). */
+static float tab_label_x(const nt_pointer_t *p, nt_ui_tabbar_style_t *st, const nt_atlas_region_ref_t *icons, int idx) {
+    int active = 0;
+    tabbar_frame_icons(p, 4, &active, icons, st);
+    tabbar_frame_icons(p, 4, &active, icons, st);
+    const nt_ui_bbox_t bb = nt_ui_tabbar_test_label_bbox(s_fx.ctx, TAB_BASE, idx);
+    TEST_ASSERT_TRUE(bb.found);
+    return bb.x;
+}
+
+/* ---- icon_size opens a leading gutter: the tab label shifts RIGHT vs the text-only (icon_size=0) tab.
+ *      Mirrors test_dropdown_icon_size_gutter_shifts_label (identical gutter semantics). ---- */
+static void test_tabbar_icon_size_gutter_shifts_label(void) {
+    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+
+    nt_ui_tabbar_style_t no_gut = nt_ui_tabbar_style_defaults();
+    no_gut.icon_size = 0U; /* text-only: no gutter */
+    const float x_text_only = tab_label_x(&idle, &no_gut, NULL, 0);
+
+    nt_ui_tabbar_style_t gut = nt_ui_tabbar_style_defaults();
+    gut.icon_size = 24U; /* reserves a 24px leading gutter */
+    const float x_gutter = tab_label_x(&idle, &gut, NULL, 0);
+
+    /* The gutter + child gap push the label right by at least the gutter width. */
+    TEST_ASSERT_TRUE_MESSAGE(x_gutter >= x_text_only + (float)gut.icon_size, "icon_size gutter must shift the tab label right by >= icon_size");
+}
+
+/* ---- NULL-icon alignment: with the gutter open, a tab whose icon ref is set and a tab whose icon is
+ *      absent both keep the SAME label x (the gutter holds alignment either way). Mirrors
+ *      test_dropdown_null_icon_aligns (identical aligned-empty-gutter semantics). ---- */
+static void test_tabbar_null_icon_aligns(void) {
+    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+
+    nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
+    st.icon_size = 24U;
+    /* NONE accent: the selected tab adds a leading accent pad that would shift its content; compare two
+     * UNSELECTED tabs with the accent off so only the icon gutter governs the label x. */
+    st.accent_side = (uint8_t)NT_UI_TABBAR_ACCENT_NONE;
+
+    /* Tab 0 carries an icon ref (atlas.id != 0); tabs 1..3 are unset ({0} = aligned-empty gutter). */
+    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x1234U), {0}, {0}, {0}};
+
+    int active = 2; /* neither compared tab (0 = iconed, 1 = empty) is selected */
+    tabbar_frame_icons(&idle, 4, &active, icons, &st);
+    tabbar_frame_icons(&idle, 4, &active, icons, &st);
+
+    const nt_ui_bbox_t iconed = nt_ui_tabbar_test_label_bbox(s_fx.ctx, TAB_BASE, 0);
+    const nt_ui_bbox_t empty = nt_ui_tabbar_test_label_bbox(s_fx.ctx, TAB_BASE, 1);
+    TEST_ASSERT_TRUE(iconed.found);
+    TEST_ASSERT_TRUE(empty.found);
+    /* Same gutter width -> same label x regardless of whether the icon is present (Unity float asserts
+     * are disabled project-wide, so compare a manual epsilon). */
+    const float dx = (iconed.x > empty.x) ? (iconed.x - empty.x) : (empty.x - iconed.x);
+    TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "NULL icon must keep the same aligned tab label x as an iconed tab");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tabbar_abi_size);
     RUN_TEST(test_tabbar_defaults_valid);
+    RUN_TEST(test_tabbar_icon_size_default_zero);
     RUN_TEST(test_tabbar_click_sets_active);
     RUN_TEST(test_tabbar_no_click_returns_negative);
     RUN_TEST(test_tabbar_core_click_sets_active);
     RUN_TEST(test_tabbar_accent_none_ok);
     RUN_TEST(test_tabbar_two_bars_with_content_no_duplicate_id);
+    RUN_TEST(test_tabbar_icon_size_gutter_shifts_label);
+    RUN_TEST(test_tabbar_null_icon_aligns);
     return UNITY_END();
 }

@@ -60,11 +60,11 @@ typedef struct {
     uint16_t pad;                            /* px inner padding */
     uint16_t gap;                            /* px gap between tabs */
     uint16_t font_id;                        /* label font */
+    uint16_t icon_size;                      /* px leading icon gutter (0 = no gutter / text-only tabs) */
     uint8_t dir;                             /* nt_ui_tabbar_dir_t */
     uint8_t accent_side;                     /* nt_ui_tabbar_accent_t (NONE disables the accent) */
-    uint8_t _pad[2];                         /* layer comes from the call (data->layer), NOT the style */
 } nt_ui_tabbar_style_t;
-_Static_assert(sizeof(nt_ui_tabbar_style_t) == 144, "nt_ui_tabbar_style_t stable ABI (3x32 state + 4 u32 + 4 float + 6 u16 + 1 dir + 1 accent_side + 2 pad)");
+_Static_assert(sizeof(nt_ui_tabbar_style_t) == 144, "nt_ui_tabbar_style_t stable ABI (3x32 state + 4 u32 + 4 float + 7 u16 + 1 dir + 1 accent_side)");
 
 /* Valid baseline style (dark, vertical) that looks polished with flat colors and NO atlas art. */
 nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void);
@@ -104,9 +104,22 @@ void nt_ui_tabbar_end(nt_ui_context_t *ctx);
  * axis. ctx/labels/active/style non-NULL; count >= 0; *active in [0,count) when count > 0 (or -1 = none).
  * Returns the index clicked this frame, or -1 if no tab was clicked.
  *
- * Layers: the bar bg + tab fills draw on data->layer; the tab labels on label_layer -- pass them split
- * (fills on the img layer, text on the text layer) to batch fills-then-text in one segment. data may be
- * NULL (fills fall to layer 0). */
-int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, int count, int *active, nt_ui_tabbar_style_t *style);
+ * `icons` is an OPTIONAL parallel array (length `count`, or NULL = text-only). When style->icon_size > 0
+ * each tab reserves a leading gutter of icon_size px so labels stay aligned; the icon is drawn if its ref
+ * is set, else the gutter is left empty (OS-menu icon-column behavior). NULL `icons` with icon_size > 0
+ * still reserves an aligned-empty gutter on every tab. icon_size==0 -> no gutter at all (pure text). This
+ * mirrors nt_ui_dropdown_list's icons[] one-function model; the begin/end core stays the fully-custom path.
+ *
+ * Layers: the bar bg + tab fills + icons draw on data->layer; the tab labels on label_layer -- pass them
+ * split (fills on the img layer, text on the text layer) to batch fills-then-text in one segment. data may
+ * be NULL (fills fall to layer 0). */
+int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t base_id, const char *const *labels, const nt_atlas_region_ref_t *icons, int count, int *active,
+                 nt_ui_tabbar_style_t *style);
+
+#ifdef NT_TEST_ACCESS
+/* The prev-frame bbox of a wrapper tab's text label cell (icon-gutter alignment probe; mirrors the
+ * dropdown row-label probe). Only the convenience wrapper declares the label cell. */
+nt_ui_bbox_t nt_ui_tabbar_test_label_bbox(const nt_ui_context_t *ctx, uint32_t base_id, int idx);
+#endif
 
 #endif /* NT_UI_TABBAR_H */

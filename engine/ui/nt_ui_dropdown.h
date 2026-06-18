@@ -68,7 +68,7 @@ typedef struct {
     uint16_t pad;                                                    /* px inner padding */
     uint16_t font_id;                                                /* label font */
     uint16_t max_visible_rows;                                       /* rows shown before the list scrolls (0 = no cap, never scrolls) */
-    uint16_t icon_size;                                              /* px icon gutter width (0 = no gutter / text-only rows) */
+    uint16_t icon_size;                                              /* px leading icon gutter (0 = no gutter / text-only rows) */
     uint16_t chevron_size;                                           /* px chevron sprite box (0 = no chevron even if a ref is set) */
     uint16_t panel_corner_radius;                                    /* px panel rounding (flat fallback only; IMAGE bg can't round) */
 } nt_ui_dropdown_style_t;
