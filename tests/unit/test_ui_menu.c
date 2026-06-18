@@ -311,7 +311,12 @@ static void test_menu_kbd_nav_activates_nested_leaf(void) {
     menu_key(NT_KEY_ENTER);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE2, 0U), st.chosen_id);
+    /* File2's fully scoped id: File(root idx 0) -> Open(File-submenu idx 1) -> File2(Open-submenu idx 1).
+     * Each submenu pushes its own row id as the child scope (mix(scope,key,running_idx)). */
+    const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
+    const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN, 1U);
+    const uint32_t file2_id = nt_ui_menu_test_item_id(open_scope, KEY_FILE2, 1U);
+    TEST_ASSERT_EQUAL_UINT32(file2_id, st.chosen_id);
     TEST_ASSERT_FALSE(st.open);
 }
 
@@ -829,7 +834,10 @@ static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    /* Frame 3: settle so the focus committed in frame 2 is observable via the prev-frame record probe. */
+    /* Frame 3: settle so the focus committed in frame 2 is observable via the prev-frame record probe.
+     * poll() consumes the frame-2 Down PRESSED edge (clear_all_keys alone leaves the sticky edge, which
+     * would re-step focus this frame). */
+    nt_input_poll();
     nt_input_clear_all_keys();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
@@ -849,13 +857,14 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     const uint32_t inner_btn = 0x1B7701U;
     const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key, 0U);
 
-    /* One frame to bake the inner button bbox (1-frame IM lag). The row opens a custom-content element
-     * with activatable=false; an inner button lives inside it. */
+    /* Frames 0-1 bake the inner button bbox (1-frame IM lag); frame 2 PRESSES over it (capture); frame 3
+     * RELEASES over it -> clicked = is_released && over fires on the inner child. The activatable=false
+     * row must NOT steal that click. */
     bool row_clicked = false;
     bool btn_clicked = false;
-    for (int frame = 0; frame < 3; ++frame) {
-        /* Aim a primary press at the inner button center only on the final frame. */
-        const bool press = (frame == 2);
+    for (int frame = 0; frame < 4; ++frame) {
+        const bool press = (frame == 2);   /* press began this frame -> capture */
+        const bool release = (frame == 3); /* release over the widget -> click one-shot */
         nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, inner_btn);
         const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
         const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
@@ -867,10 +876,15 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
         if (press && bb.found) {
             p.buttons[NT_BUTTON_LEFT].is_down = true;
             p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+        } else if (release && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_released = true; /* down -> up over the widget */
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
         nt_ui_menu_begin(s_fx.ctx, MENU_A, &st, &style);
-        row_clicked = nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false});
+        const bool rc = nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false});
+        if (rc) {
+            row_clicked = true;
+        }
         {
             /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}

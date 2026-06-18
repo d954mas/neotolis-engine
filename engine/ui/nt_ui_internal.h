@@ -261,8 +261,7 @@ struct nt_ui_context {
      * row's id via mix(scope_id[depth], key, item_idx[depth]); a submenu pushes its own row id as the
      * child scope (ImGui PushID), so keys need only be unique among siblings. `st`/`menu_id`/layers are
      * stashed at begin so the per-call item/submenu functions need not re-pass them. `chosen` accumulates
-     * a leaf activation this frame (menu_end latches it into st->chosen_id). `record_gen` toggles the
-     * double-buffered frame_record so menu_end navs the PREVIOUS frame's slice (D-236-06). */
+     * a leaf activation this frame (menu_end latches it into st->chosen_id). */
     struct {
         const void *style; /* nt_ui_menu_style_t* (void to keep the internal header widget-agnostic) */
         nt_ui_menu_state_t *st;
@@ -274,8 +273,8 @@ struct nt_ui_context {
         uint8_t fill_layer;
         uint8_t label_layer;
         uint8_t depth;
-        uint8_t record_gen; /* 0/1: which frame_record buffer this frame writes; menu_end reads the other */
-        bool active;
+        bool active;     /* between menu_begin/menu_end (true even for a CLOSED present-only menu) */
+        bool open_frame; /* this frame's menu is OPEN: false = present-only, item/submenu calls no-op */
     } pending_menu;
     struct {
         uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
@@ -360,11 +359,11 @@ struct nt_ui_context {
      * create_context's memset zero-inits it (same as anim[]). */
     nt_ui_state_cell_t state_pool[NT_UI_STATE_SLOTS];
 
-    /* Immediate-menu per-level nav frame record, double-buffered (one byte record_gen toggle, no
-     * per-frame memcpy): this frame writes [record_gen], menu_end navs the PREVIOUS frame [!record_gen]
-     * for a strict 1-frame latency (D-236-06). frame_record_count is the live per-level count this frame. */
-    nt_ui_menu_record_t frame_record[2][NT_UI_MENU_MAX_DEPTH][NT_UI_MENU_MAX_ITEMS_PER_LEVEL];
-    uint16_t frame_record_count[2][NT_UI_MENU_MAX_DEPTH];
+    /* Immediate-menu per-level nav frame record (live, this frame). menu_end navs the deepest open level
+     * against the record just built this frame; OPENING a deeper level only sets open_path so the new
+     * level is declared (and navigable) NEXT frame — the 1-frame latency of D-236-06. No per-frame memcpy. */
+    nt_ui_menu_record_t frame_record[NT_UI_MENU_MAX_DEPTH][NT_UI_MENU_MAX_ITEMS_PER_LEVEL];
+    uint16_t frame_record_count[NT_UI_MENU_MAX_DEPTH];
 
 #if NT_UI_DEBUG_TOOLS
     /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.

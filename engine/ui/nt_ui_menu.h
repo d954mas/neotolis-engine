@@ -77,6 +77,19 @@ _Static_assert(sizeof(nt_ui_menu_style_t) == 96, "nt_ui_menu_style_t stable ABI 
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
+/* Immediate-item options (D-236-03): the full OS-menu row field set. `enabled` defaults false under a
+ * {0} init, so callers set it explicitly (nt_ui_menu_item supplies enabled=true). `activatable` defaults
+ * true for a plain row; the §7 opt-out (activatable=false) lets an interactive child own the click in
+ * nt_ui_menu_item_begin. `icon` is the leading-gutter sprite (atlas.id==0 = aligned empty gutter). */
+typedef struct {
+    nt_atlas_region_ref_t icon; /* optional leading-gutter sprite (atlas.id==0 = aligned empty gutter) */
+    const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); Plan 03 renders it */
+    bool enabled;               /* greyed + non-selectable when false */
+    bool selected;              /* checkmark (toggle/radio menu items); Plan 03 renders it */
+    bool activatable;           /* false = an interactive child owns the click (§7 opt-out, item_begin only) */
+    uint8_t _pad[1];
+} nt_ui_menu_item_opts_t;
+
 /* Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
  * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly
  * (the menu resets its runtime chain on the closed frame). `chosen_id` latches the activated leaf id
@@ -88,6 +101,22 @@ typedef struct {
     uint8_t _pad[3];
 } nt_ui_menu_state_t;
 _Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI (2 float + 1 u32 + 1 bool + 3 pad)");
+
+/* Immediate-mode menu (begin/end). The game discovers the tree during the frame: open with menu_begin,
+ * declare rows via item / item_ex / item_begin..item_end / submenu_begin..submenu_end / separator, close
+ * with menu_end. Ids derive via the scope stack (mix(scope,key,idx)); submenu_begin pushes its row id as
+ * the child scope so keys need only be unique among siblings. Keyboard nav runs in menu_end against the
+ * PREVIOUS frame's per-level record (1-frame latency). The game owns st (open + anchor + chosen sink). */
+void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
+bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label);                                 /* plain item; returns clicked */
+bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
+bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts);                 /* open a CUSTOM-content row; returns clicked */
+void nt_ui_menu_item_end(nt_ui_context_t *ctx);
+bool nt_ui_menu_submenu_begin(nt_ui_context_t *ctx, uint32_t key, const char *label); /* true ONLY when open -> declare body */
+void nt_ui_menu_submenu_end(nt_ui_context_t *ctx);
+void nt_ui_menu_separator(nt_ui_context_t *ctx);                         /* non-interactive divider (no focus index) */
+void nt_ui_menu_separator_text(nt_ui_context_t *ctx, const char *label); /* optional section header */
+void nt_ui_menu_end(nt_ui_context_t *ctx);
 
 /* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
  * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's

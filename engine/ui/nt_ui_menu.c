@@ -697,6 +697,436 @@ void nt_ui_menu(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t 
     }
 }
 
+// #region immediate-mode menu (begin/item/submenu/separator/end)
+/* The immediate API discovers the tree DURING the frame (begin/item/submenu_begin..end/menu_end) instead
+ * of recursing over an items[] array. It FEEDS the KEPT runtime cell (open_path/focus/active_depth/
+ * opened_frame), the single root occluder, the per-level popup, mouse-aim, and outside-click dismiss
+ * per-call. Keyboard nav runs in menu_end against the PREVIOUS frame's per-level record (D-236-06,
+ * strictly 1-frame latency; NO same-frame, NO prototype). The scope stack derives each row id via
+ * mix(scope_id[depth], key, running_idx); submenu_begin pushes its row id as the child scope. */
+
+#ifdef NT_TEST_ACCESS
+/* Last ctx that ran an immediate menu — lets the post-end focus probe (signature carries no ctx) read the
+ * persisted runtime + frame record after nt_ui_end (g_nt_ui_inframe_ctx is NULL post-end). Test-only. */
+static nt_ui_context_t *s_menu_last_ctx = NULL;
+#endif
+
+/* Append a recorded row into THIS frame's per-level frame record (fail-early on overflow — Task-1 cap). */
+static void menu_record_append(nt_ui_context_t *ctx, uint8_t depth, uint32_t id, uint16_t idx, bool enabled, bool has_sub) {
+    NT_ASSERT(ctx->frame_record_count[depth] < NT_UI_MENU_MAX_ITEMS_PER_LEVEL && "nt_ui_menu: per-level item count exceeds NT_UI_MENU_MAX_ITEMS_PER_LEVEL");
+    const uint16_t n = ctx->frame_record_count[depth]++;
+    ctx->frame_record[depth][n] = (nt_ui_menu_record_t){.id = id, .idx = idx, .enabled = enabled ? 1U : 0U, .has_sub = has_sub ? 1U : 0U};
+}
+
+/* Declare one immediate row (icon gutter + label + optional submenu marker) carrying the scope-stack id,
+ * register + record it, move keyboard focus on hover. Mirrors menu_declare_row but driven by opts, not a
+ * menu_item_t. Leaves the row CLOSED (single-shot rows); item_begin opens its own custom-content element.
+ * The row interaction is returned; the caller does the ONE step_interaction (so item_begin can defer it
+ * to item_end). Returns the row id via *out_id. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon + eased hover + marker branch, not deep nesting
+static nt_ui_interaction_t menu_im_row(nt_ui_context_t *ctx, uint32_t key, const char *label, const nt_ui_menu_item_opts_t *opts, bool has_sub, bool open_element, uint32_t *out_id) {
+    const uint8_t depth = ctx->pending_menu.depth;
+    const uint16_t running_idx = ctx->pending_menu.item_idx[depth];
+    const uint32_t row_id = menu_item_id(ctx->pending_menu.scope_id[depth], key, running_idx);
+    *out_id = row_id;
+    const uint8_t fill_layer = ctx->pending_menu.fill_layer;
+    const uint8_t label_layer = ctx->pending_menu.label_layer;
+    nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)ctx->pending_menu.style;
+    nt_ui_menu_runtime_t *rt = menu_runtime(ctx, ctx->pending_menu.menu_id);
+    const bool enabled = opts->enabled;
+
+    const nt_ui_interaction_t in = enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
+    const bool focused = (rt->focus[depth] == (int16_t)running_idx);
+    const bool highlit = enabled && (in.hovered || focused);
+
+    const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
+    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
+    Clay_Color bg = {0};
+    if (style->item_hover_color != 0U) {
+        bg = nt_ui_unpack_abgr(style->item_hover_color);
+        bg.a = bg.a * a->value_t;
+    }
+    const uint32_t txt = enabled ? style->text_color : style->text_disabled;
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(txt)};
+    const Clay_ElementDeclaration row = {
+        .id = (Clay_ElementId){.id = row_id},
+        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)style->item_height)},
+                   .padding = {.left = style->pad, .right = style->pad},
+                   .childGap = style->pad,
+                   .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+        .backgroundColor = bg,
+        .userData = (void *)nt_ui_make_element_data(fill_layer, NULL),
+    };
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(row);
+    if (!open_element) {
+        menu_declare_icon(ctx, fill_layer, menu_icon_id(ctx->pending_menu.menu_id, depth, running_idx), &opts->icon, style);
+        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), label != NULL ? label : "", &lbl);
+        if (has_sub) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
+            menu_declare_marker(ctx, fill_layer, label_layer, menu_arrow_id(ctx->pending_menu.menu_id, depth, running_idx), &lbl, style);
+        }
+        nt_ui_clay_priv_close_element();
+    }
+    /* open_element=true (item_begin): leave the element OPEN for the game's custom content; the gutter/
+     * label are the game's responsibility there. */
+
+    if (enabled && in.hovered) {
+        rt->focus[depth] = (int16_t)running_idx; /* hover moves keyboard focus too */
+    }
+    menu_record_append(ctx, depth, row_id, running_idx, enabled, has_sub);
+    ctx->pending_menu.item_idx[depth] = (uint16_t)(running_idx + 1U);
+    return in;
+}
+
+/* Open a level's PANEL element (art-or-flat slice9) and LEAVE it open for the level's item children. The
+ * caller (menu_begin / submenu_begin) balances it with nt_ui_clay_priv_close_element. */
+static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t menu_id, uint8_t depth, nt_ui_menu_style_t *style) {
+    nt_atlas_resolve_ref(&style->panel_bg);
+    const bool panel_art = (style->panel_bg.atlas.id != 0U && style->panel_bg.region != NT_ATLAS_INVALID_REGION);
+    Clay_ElementDeclaration panel = {.id = (Clay_ElementId){.id = menu_panel_id(menu_id, depth)},
+                                     .layout = {.sizing = {.width = CLAY_SIZING_FIT(.min = (float)style->min_width), .height = CLAY_SIZING_FIT(0)},
+                                                .padding = CLAY_PADDING_ALL(style->pad),
+                                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                                .childGap = 2},
+                                     .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)};
+    if (panel_art) {
+        nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+        NT_ASSERT(p != NULL && "nt_ui_menu: scratch alloc failed (panel payload)");
+        *p = (nt_ui_image_payload_t){.atlas = style->panel_bg.atlas, .region_index = style->panel_bg.region, .slice9_scale = style->slice9_scale};
+        panel.image = (Clay_ImageElementConfig){.imageData = p};
+        panel.backgroundColor = nt_ui_unpack_tint(style->panel_tint);
+    } else {
+        panel.backgroundColor = nt_ui_unpack_abgr(style->bg_color);
+    }
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(panel);
+}
+
+/* Open a level's popup at `anchor` (no per-level light-dismiss catcher — Pitfall 1; the menu owns its own
+ * outside-click dismiss). */
+static void menu_open_popup(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth, uint8_t fill_layer, const nt_ui_menu_style_t *style, const nt_ui_popup_anchor_t *anchor) {
+    nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
+    pst.ease_speed = style->open_ease_speed;
+    pst.layer = fill_layer;
+    pst.flags &= (uint8_t)~NT_UI_POPUP_LIGHT_DISMISS;
+    (void)nt_ui_popup_begin(ctx, menu_level_id(menu_id, depth), &pst, anchor, true);
+}
+
+/* Present-only state for a CLOSED menu: declare nothing, but the game still calls item/submenu/end every
+ * frame (immediate mode) — so stay `active` (those calls assert it) yet flag open_frame=false to no-op. */
+static void menu_begin_present_only(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t *st) {
+    menu_runtime_reset(menu_runtime(ctx, menu_id)); /* clean chain for a later reopen */
+    ctx->pending_menu.st = st;
+    ctx->pending_menu.menu_id = menu_id;
+    ctx->pending_menu.depth = 0U;
+    ctx->pending_menu.chosen = 0U;
+    ctx->pending_menu.active = true;
+    ctx->pending_menu.open_frame = false;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (one open/closed branch)
+void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+    NT_ASSERT(ctx != NULL && "nt_ui_menu_begin: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_begin: call between nt_ui_begin/end");
+    NT_ASSERT(menu_id != 0U && st != NULL && style != NULL && "nt_ui_menu_begin: menu_id non-zero, st + style non-NULL");
+    NT_ASSERT(style->font_size > 0.0F && "nt_ui_menu_begin: style->font_size must be > 0");
+    NT_ASSERT(!ctx->pending_menu.active && "nt_ui_menu_begin: a menu does not re-enter at depth 0");
+
+#ifdef NT_TEST_ACCESS
+    s_menu_last_ctx = ctx;
+#endif
+
+    if (!st->open) {
+        menu_begin_present_only(ctx, menu_id, st);
+        return;
+    }
+    const uint8_t fill_layer = 0U; /* no data param: fills fall to layer 0, labels to label_layer 0 */
+
+    menu_declare_occluder(ctx, fill_layer, menu_id); /* single root occluder under the whole stack (KEEP) */
+
+    ctx->pending_menu.style = style;
+    ctx->pending_menu.st = st;
+    ctx->pending_menu.menu_id = menu_id;
+    ctx->pending_menu.scope_id[0] = menu_id;
+    ctx->pending_menu.item_idx[0] = 0U;
+    ctx->pending_menu.pending_open[0] = -1;
+    ctx->pending_menu.chosen = 0U;
+    ctx->pending_menu.fill_layer = fill_layer;
+    ctx->pending_menu.label_layer = 0U;
+    ctx->pending_menu.depth = 0U;
+    ctx->pending_menu.active = true;
+    ctx->pending_menu.open_frame = true;
+    ctx->frame_record_count[0] = 0U;
+
+    const nt_ui_popup_anchor_t root_anchor = {.x = st->anchor_x, .y = st->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    menu_open_popup(ctx, menu_id, 0U, fill_layer, style, &root_anchor);
+    menu_open_panel(ctx, fill_layer, menu_id, 0U, style); /* LEFT open for the item children (closed in menu_end) */
+}
+
+bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts) {
+    NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_item_ex: call between nt_ui_menu_begin/end");
+    if (!ctx->pending_menu.open_frame) {
+        return false; /* present-only menu: no-op */
+    }
+    uint32_t row_id = 0U;
+    const nt_ui_interaction_t in = menu_im_row(ctx, key, label, &opts, false, false, &row_id);
+    if (opts.enabled && in.clicked) {
+        ctx->pending_menu.chosen = row_id; /* a plain item always latches its own activation */
+    }
+    if (opts.enabled) {
+        (void)nt_ui_step_interaction(ctx, row_id);
+    }
+    return opts.enabled && in.clicked;
+}
+
+bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label) { return nt_ui_menu_item_ex(ctx, key, label, (nt_ui_menu_item_opts_t){.enabled = true}); }
+
+bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts) {
+    NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
+    NT_ASSERT(!ctx->pending_menu_item.active && "nt_ui_menu_item_begin: a custom row is already open (missing nt_ui_menu_item_end)");
+    if (!ctx->pending_menu.open_frame) {
+        ctx->pending_menu_item.active = true; /* still balance item_end; the body is the game's no-op */
+        ctx->pending_menu_item.activatable = false;
+        ctx->pending_menu_item.id = 0U;
+        return false;
+    }
+    uint32_t row_id = 0U;
+    const nt_ui_interaction_t in = menu_im_row(ctx, key, NULL, &opts, false, true, &row_id);
+    ctx->pending_menu_item.id = row_id;
+    ctx->pending_menu_item.activatable = opts.activatable;
+    ctx->pending_menu_item.active = true;
+    /* activatable=false: the inner interactive child owns the click; the row never reports a click. */
+    return opts.activatable && in.clicked;
+}
+
+void nt_ui_menu_item_end(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx->pending_menu_item.active && "nt_ui_menu_item_end without nt_ui_menu_item_begin");
+    const uint32_t row_id = ctx->pending_menu_item.id;
+    ctx->pending_menu_item.active = false;
+    if (!ctx->pending_menu.open_frame) {
+        return; /* present-only: item_begin opened no element, so close/step nothing */
+    }
+    nt_ui_clay_priv_close_element();
+    if (!ctx->pending_menu_item.activatable) {
+        /* §7 opt-out: the inner interactive child owns the click. The row must NOT step_interaction —
+         * a row step would capture the pointer and starve the child. Hover highlight still works via the
+         * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). */
+        return;
+    }
+    const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, row_id); /* the ONE mutating step per id */
+    if (in.clicked) {
+        ctx->pending_menu.chosen = row_id;
+    }
+}
+
+bool nt_ui_menu_submenu_begin(nt_ui_context_t *ctx, uint32_t key, const char *label) {
+    NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_submenu_begin: call between nt_ui_menu_begin/end");
+    if (!ctx->pending_menu.open_frame) {
+        return false; /* present-only menu: declare nothing, game skips the body */
+    }
+    const uint8_t depth = ctx->pending_menu.depth;
+    const uint16_t running_idx = ctx->pending_menu.item_idx[depth]; /* before menu_im_row advances it */
+    uint32_t row_id = 0U;
+    const nt_ui_interaction_t in = menu_im_row(ctx, key, label, &(nt_ui_menu_item_opts_t){.enabled = true}, true, false, &row_id);
+    (void)nt_ui_step_interaction(ctx, row_id);
+    if (in.clicked) {
+        ctx->pending_menu.pending_open[depth] = (int16_t)running_idx; /* mouse-open this parent (committed in menu_end) */
+    }
+
+    nt_ui_menu_runtime_t *rt = menu_runtime(ctx, ctx->pending_menu.menu_id);
+    if (rt->open_path[depth] != (int16_t)running_idx) {
+        return false; /* this submenu is not the open one — game skips its body */
+    }
+
+    /* Open: push a new level scoped to THIS row's id (ImGui PushID) and fly its panel out. */
+    NT_ASSERT((depth + 1U) < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
+    const uint8_t child = (uint8_t)(depth + 1U);
+    ctx->pending_menu.scope_id[child] = row_id;
+    ctx->pending_menu.item_idx[child] = 0U;
+    ctx->pending_menu.pending_open[child] = -1;
+    ctx->pending_menu.depth = child;
+    ctx->frame_record_count[child] = 0U;
+
+    nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)ctx->pending_menu.style;
+    const uint8_t fill_layer = ctx->pending_menu.fill_layer;
+    const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(ctx, row_id);
+    menu_open_popup(ctx, ctx->pending_menu.menu_id, child, fill_layer, style, &sub_anchor);
+    menu_open_panel(ctx, fill_layer, ctx->pending_menu.menu_id, child, style); /* LEFT open for the submenu's children (closed in submenu_end) */
+    return true;
+}
+
+void nt_ui_menu_submenu_end(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx->pending_menu.active && ctx->pending_menu.depth > 0U && "nt_ui_menu_submenu_end without an open submenu");
+    nt_ui_clay_priv_close_element(); /* the child panel */
+    nt_ui_popup_end(ctx);            /* balance the level's popup_begin */
+    ctx->pending_menu.depth = (uint8_t)(ctx->pending_menu.depth - 1U);
+}
+
+void nt_ui_menu_separator(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_separator: call between nt_ui_menu_begin/end");
+    if (!ctx->pending_menu.open_frame) {
+        return;
+    }
+    nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)ctx->pending_menu.style;
+    menu_declare_separator(ctx, ctx->pending_menu.fill_layer, style);
+    /* A separator has NO id and is NOT recorded (nav skips it), but it DOES advance the running layout
+     * index so sibling ids stay positionally stable. */
+    const uint8_t depth = ctx->pending_menu.depth;
+    ctx->pending_menu.item_idx[depth] = (uint16_t)(ctx->pending_menu.item_idx[depth] + 1U);
+}
+
+void nt_ui_menu_separator_text(nt_ui_context_t *ctx, const char *label) {
+    NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_separator_text: call between nt_ui_menu_begin/end");
+    if (!ctx->pending_menu.open_frame) {
+        return;
+    }
+    nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)ctx->pending_menu.style;
+    const uint8_t fill_layer = ctx->pending_menu.fill_layer;
+    const uint8_t label_layer = ctx->pending_menu.label_layer;
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->separator_color)};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.left = style->pad, .right = style->pad}}, .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
+        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), label != NULL ? label : "", &lbl);
+    }
+    const uint8_t depth = ctx->pending_menu.depth;
+    ctx->pending_menu.item_idx[depth] = (uint16_t)(ctx->pending_menu.item_idx[depth] + 1U);
+}
+
+/* Step focus over THIS-frame-recorded items at a level (prev-frame record), skipping disabled records.
+ * focus is a layout index; find its position in the recorded array, step ±1, return the new layout idx.
+ * From "no focus" (-1) Down lands on the first enabled record, Up on the last. */
+static int16_t menu_im_focus_step(const nt_ui_menu_record_t *recs, uint16_t count, int16_t focus, int step) {
+    if (count == 0U) {
+        return focus;
+    }
+    int pos = -1;
+    for (uint16_t k = 0; k < count; ++k) {
+        if (recs[k].idx == focus) {
+            pos = (int)k;
+            break;
+        }
+    }
+    for (uint16_t guard = 0; guard < count; ++guard) {
+        if (step > 0) {
+            pos = (pos + 1) % (int)count;
+        } else {
+            pos = (pos <= 0) ? (int)count - 1 : pos - 1;
+        }
+        if (recs[pos].enabled != 0U) {
+            return (int16_t)recs[pos].idx;
+        }
+    }
+    return focus;
+}
+
+/* Keyboard nav at nav_depth against the per-level record built THIS frame (the deepest open level was
+ * declared this frame, so its record is complete by menu_end). Up/Down move focus; Right/Enter open a
+ * focused parent (which is declared + navigable NEXT frame — the 1-frame latency of D-236-06); Enter
+ * activates a focused leaf; Left/Esc collapse the level. Mutates rt->focus/open_path/active_depth + the
+ * menu's chosen sink. Returns true if the level should close. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat key branch over the recorded slice, not deep nesting
+static bool menu_im_keyboard_nav(nt_ui_context_t *ctx, uint8_t depth, nt_ui_menu_runtime_t *rt) {
+    const nt_ui_menu_record_t *recs = ctx->frame_record[depth];
+    const uint16_t count = ctx->frame_record_count[depth];
+    int16_t f = rt->focus[depth];
+    if (nt_input_key_is_pressed(NT_KEY_ARROW_DOWN)) {
+        f = menu_im_focus_step(recs, count, f, +1);
+    } else if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
+        f = menu_im_focus_step(recs, count, f, -1);
+    }
+    rt->focus[depth] = f;
+
+    const nt_ui_menu_record_t *cur = NULL;
+    for (uint16_t k = 0; k < count; ++k) {
+        if (recs[k].idx == f && recs[k].enabled != 0U) {
+            cur = &recs[k];
+            break;
+        }
+    }
+    if (cur != NULL) {
+        const bool open_key = nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER);
+        const bool activate_key = nt_input_key_is_pressed(NT_KEY_ENTER);
+        if (cur->has_sub != 0U && open_key) {
+            rt->open_path[depth] = f;
+            if (depth + 1U > rt->active_depth) {
+                rt->active_depth = (uint8_t)(depth + 1U);
+            }
+            if (depth + 1U < NT_UI_MENU_MAX_DEPTH) {
+                rt->focus[depth + 1U] = 0; /* focus the child's first row (layout idx 0), mirroring the data form */
+            }
+        } else if (cur->has_sub == 0U && activate_key) {
+            ctx->pending_menu.chosen = cur->id; /* Right on a leaf is a no-op; only Enter activates */
+        }
+    }
+    return nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) || nt_input_key_is_pressed(NT_KEY_ESCAPE);
+}
+
+/* Resolve this frame's keyboard nav + mouse-open commit + outside-click dismiss against the runtime cell.
+ * Returns true if the whole chain should close (Esc at root / leaf activate / outside-click). */
+static bool menu_resolve_nav_and_dismiss(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_runtime_t *rt) {
+    bool close_chain = false;
+    const uint8_t nav_depth = rt->active_depth; /* frame-start deepest level (its record was built this frame) */
+    if (menu_im_keyboard_nav(ctx, nav_depth, rt)) {
+        if (nav_depth == 0U) {
+            close_chain = true;
+        } else {
+            rt->open_path[nav_depth - 1U] = -1; /* collapse this level back into the parent */
+            rt->active_depth = (uint8_t)(nav_depth - 1U);
+        }
+    }
+    /* Commit a mouse-opened root parent (a click this frame) so submenu_begin returns true next frame. */
+    const int16_t mouse_open = ctx->pending_menu.pending_open[0];
+    if (mouse_open >= 0) {
+        rt->open_path[0] = mouse_open;
+        if (rt->active_depth < 1U) {
+            rt->active_depth = 1U;
+        }
+    }
+    float mx = 0.0F;
+    float my = 0.0F;
+    menu_mouse_pos(ctx, &mx, &my);
+    /* Menu-owned outside-click dismiss (mirrors the data form, Pitfall 6: skip the opening frame). */
+    const bool outside_press = nt_input_mouse_is_pressed(NT_BUTTON_LEFT) || nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    if (outside_press && !menu_cursor_over_any_panel(ctx, menu_id, rt, mx, my) && ctx->frame_counter != rt->opened_frame) {
+        close_chain = true;
+    }
+    return close_chain;
+}
+
+void nt_ui_menu_end(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_end: call between nt_ui_begin/end");
+    if (!ctx->pending_menu.active) {
+        return; /* defensive: menu_end without a begin */
+    }
+    if (!ctx->pending_menu.open_frame) {
+        ctx->pending_menu.active = false; /* present-only: begin declared nothing, nothing to balance */
+        return;
+    }
+    NT_ASSERT(ctx->pending_menu.depth == 0U && "nt_ui_menu_end with an open submenu (missing nt_ui_menu_submenu_end)");
+    NT_ASSERT(!ctx->pending_menu_item.active && "nt_ui_menu_end with an open custom row (missing nt_ui_menu_item_end)");
+
+    nt_ui_clay_priv_close_element(); /* the root panel */
+
+    const uint32_t menu_id = ctx->pending_menu.menu_id;
+    nt_ui_menu_state_t *st = ctx->pending_menu.st;
+    nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
+
+    bool close_chain = menu_resolve_nav_and_dismiss(ctx, menu_id, rt);
+    if (ctx->pending_menu.chosen != 0U) {
+        st->chosen_id = ctx->pending_menu.chosen;
+        close_chain = true;
+    }
+
+    nt_ui_popup_end(ctx); /* balance menu_begin's root popup_begin */
+
+    if (close_chain) {
+        st->open = false;
+        menu_runtime_reset(rt);
+    }
+    ctx->pending_menu.active = false;
+}
+// #endregion
+
 #ifdef NT_TEST_ACCESS
 bool nt_ui_menu_test_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy) { return menu_point_in_tri(px, py, ax, ay, bx, by, cx, cy); }
 
@@ -717,6 +1147,25 @@ float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id,
 }
 
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key, uint32_t idx) { return menu_item_id(scope_id, key, idx); }
+
+/* The most-recently-rendered frame's recorded item id at rt->focus[depth]. 0 if none / no record. */
+uint32_t nt_ui_menu_test_focus_item_id(uint32_t menu_id, uint8_t depth) {
+    nt_ui_context_t *ctx = (nt_ui_internal_get_inframe_ctx() != NULL) ? nt_ui_internal_get_inframe_ctx() : s_menu_last_ctx;
+    NT_ASSERT(ctx != NULL && "nt_ui_menu_test_focus_item_id: no menu ctx (call after at least one nt_ui_menu_begin)");
+    const nt_ui_menu_runtime_t *rt = nt_ui_state_find(ctx, menu_runtime_id(menu_id));
+    if (rt == NULL || depth >= NT_UI_MENU_MAX_DEPTH) {
+        return 0U;
+    }
+    const int16_t focus = rt->focus[depth];
+    const uint16_t count = ctx->frame_record_count[depth];
+    for (uint16_t k = 0; k < count; ++k) {
+        if (ctx->frame_record[depth][k].idx == focus) {
+            return ctx->frame_record[depth][k].id;
+        }
+    }
+    return 0U;
+}
+
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth) { return menu_panel_id(menu_id, depth); }
 uint32_t nt_ui_menu_test_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_row_id(menu_id, depth, item_idx); }
 uint32_t nt_ui_menu_test_arrow_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_arrow_id(menu_id, depth, item_idx); }
