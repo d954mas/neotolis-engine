@@ -330,6 +330,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
+    ctx->frame_counter++; /* one bump per frame; gates the events gesture latch (stable across the whole frame) */
 
     /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
@@ -2502,6 +2503,7 @@ typedef struct {
     /* Latched gesture outputs so nt_ui_query_events can surface what the mutating step computed this
      * frame (game-reads-gestures-via-query_events contract). Recomputed/cleared by the next step. */
     float latched_hold_progress;
+    uint32_t latched_frame;         /* ctx->frame_counter when the latch was last written; query reads it only on the same frame (no stale leak) */
     uint8_t latched_double_clicked; /* 1 if the mutating step fired a double-click this frame */
     uint8_t latched_long_pressed;   /* 1 if the mutating step fired a long-press this frame */
     uint8_t has_prev;               /* 1 once a first press has been seen (clock==0 is a valid time) */
@@ -2593,10 +2595,13 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
         g->long_fired = 0U;
     }
 
-    /* Latch this frame's outputs so query_events can surface them idempotently (next step clears). */
+    /* Latch this frame's outputs so query_events can surface them idempotently (next step clears). Stamp
+     * the write frame so a query on a LATER frame (widget stopped requesting gestures, e.g. cfg==NULL)
+     * reads not-fired / 0 instead of a stale latch. */
     g->latched_double_clicked = e->double_clicked ? 1U : 0U;
     g->latched_long_pressed = e->long_pressed ? 1U : 0U;
     g->latched_hold_progress = e->hold_progress;
+    g->latched_frame = ctx->frame_counter;
 }
 
 nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, const int16_t pad_lrtb[4]) {
@@ -2620,8 +2625,10 @@ nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id) {
     const nt_ui_interaction_t in = nt_ui_query_interaction_padded(ctx, id, NULL);
     nt_ui_events_t e = events_from_interaction(&in);
 
+    /* Frame-guarded: surface the latch ONLY if the mutating step wrote it THIS frame. A stale cell (the
+     * widget stopped stepping gestures) reads not-fired / 0 — never a leaked one-shot or frozen ramp. */
     const nt_ui_events_gesture_t *g = (const nt_ui_events_gesture_t *)nt_ui_state_find(ctx, events_gesture_id(id));
-    if (g != NULL) {
+    if (g != NULL && g->latched_frame == ctx->frame_counter) {
         e.double_clicked = g->latched_double_clicked != 0U;
         e.long_pressed = g->latched_long_pressed != 0U;
         e.hold_progress = g->latched_hold_progress;

@@ -274,7 +274,7 @@ static void test_query_events_idempotent(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- BUG-65-08-1: query_events surfaces the gestures the mutating step computed this frame ----
+/* ---- query_events surfaces the gestures the mutating step computed this frame ----
  * The button->query_events contract: the game runs the mutating nt_ui_events (via the button) and
  * reads gestures back via nt_ui_query_events. Prove double_clicked, long_pressed, and a ramping
  * hold_progress all reach query_events (they were hard-zeroed before the cell-latch fix). */
@@ -331,6 +331,37 @@ static void test_query_events_surfaces_gestures_after_mutating_step(void) {
     TEST_ASSERT_TRUE(q2.double_clicked);  /* and now surfaced via query_events */
 }
 
+/* ---- Frame-guard: a gesture latch written one frame must NOT leak into a later frame's query when the
+ *      widget stops requesting gestures (cfg==NULL). The one-shots read false and hold_progress reads 0. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_query_events_no_stale_latch_across_frames(void) {
+    const nt_ui_events_cfg_t cfg = {.long_press_secs = 1.0F, .double_click = false};
+
+    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&f1);
+
+    /* Press + hold past long_press_secs WITH a gesture cfg -> latch fires (long_pressed + full ramp). */
+    nt_pointer_t fp = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)events_btn_frame(&fp, 0.0F, &cfg);
+    nt_pointer_t fh = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.5F, &fh, 1);
+    declare_btn_element();
+    (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), &cfg);
+    nt_ui_events_t q_live = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(q_live.long_pressed);         /* fired this frame */
+    TEST_ASSERT_TRUE(q_live.hold_progress > 0.0F); /* ramp surfaced this frame */
+
+    /* Next frame: NO mutating gesture step (cfg==NULL), still holding. query must NOT replay the latch. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.5F, &fh, 1);
+    declare_btn_element();
+    (void)nt_ui_events(s_fx.ctx, nt_ui_id("btn"), NULL); /* base step only, no gesture write */
+    nt_ui_events_t q_stale = nt_ui_query_events(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE_MESSAGE(q_stale.long_pressed, "stale long_pressed must not leak into a later frame");
+    TEST_ASSERT_TRUE_MESSAGE(float_near(q_stale.hold_progress, 0.0F, 0.001F), "stale hold_progress must read 0 on a later frame");
+}
+
 /* nt_ui_set_gesture_constants asserts finite & >= 0 (fail-early, no silent clamp). */
 static void test_set_gesture_constants_rejects_bad_values(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, -1.0F, 6.0F));
@@ -352,6 +383,7 @@ int main(void) {
     RUN_TEST(test_events_drag_cancel_resets_progress);
     RUN_TEST(test_query_events_idempotent);
     RUN_TEST(test_query_events_surfaces_gestures_after_mutating_step);
+    RUN_TEST(test_query_events_no_stale_latch_across_frames);
     RUN_TEST(test_set_gesture_constants_rejects_bad_values);
     return UNITY_END();
 }

@@ -267,6 +267,7 @@ struct nt_ui_context {
     nt_ui_interactive_t *interactive_cur;
 
     uint32_t current_generation;
+    uint32_t frame_counter; /* ++ each nt_ui_begin; STABLE for the whole begin->end->post-end-query window (current_generation bumps mid-end, so it can't gate post-end reads) */
     uint32_t interactive_prev_count;
     uint32_t interactive_cur_count;
 
