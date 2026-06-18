@@ -63,6 +63,19 @@ static bool parse_button_mask(const cJSON *bj, const char *cmd, uint8_t *out, nt
     return true;
 }
 
+/* Range-check a non-negative integral frame count (hold / frame_stride) against [0, UINT16_MAX].
+   Reads valuedouble (not valueint) so a fractional or negative-fractional value (e.g. 2.9, -0.5)
+   is REJECTED, not silently truncated toward zero -- mirrors parse_pointer_id's integrality test. */
+static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, nt_devapi_error *err) {
+    double v = nj->valuedouble;
+    if (v < 0.0 || v > (double)UINT16_MAX || v != (double)(uint16_t)v) {
+        set_bad_params(err, cmd);
+        return false;
+    }
+    *out = (uint16_t)v;
+    return true;
+}
+
 // #region input.*
 static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -82,12 +95,11 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
             set_bad_params(err, "input.key: hold must be a number");
             return false;
         }
-        int h = hold->valueint;
-        if (h < 0 || h > UINT16_MAX) {
-            set_bad_params(err, "input.key: hold out of range [0, 65535]");
+        uint16_t h;
+        if (!parse_frame_count(hold, "input.key: hold must be an integer in [0, 65535]", &h, err)) {
             return false;
         }
-        if (!nt_input_inject_key_tap(key, (uint16_t)h)) {
+        if (!nt_input_inject_key_tap(key, h)) {
             set_bad_params(err, "input.key: inject queue overflow");
             return false;
         }
@@ -323,12 +335,9 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
             set_bad_params(err, "input.gesture: frame_stride must be a number");
             return false;
         }
-        int s = sj->valueint;
-        if (s < 0 || s > UINT16_MAX) {
-            set_bad_params(err, "input.gesture: frame_stride out of range [0, 65535]");
+        if (!parse_frame_count(sj, "input.gesture: frame_stride must be an integer in [0, 65535]", &stride, err)) {
             return false;
         }
-        stride = (uint16_t)s;
     }
     /* Validate every point up front so a malformed point rejects the whole gesture before any enqueue. */
     const cJSON *p = NULL;
@@ -351,13 +360,14 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         set_bad_params(err, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
         return false;
     }
-    /* Whole-or-nothing (D-06): reserve DOWN + npoints moves + UP up front so a mid-sequence overflow
-       can't leave a stuck pointer-down. This also bounds npoints to <= QUEUE_MAX-2 (caps the span). */
-    if (!nt_input_inject_can_reserve((uint32_t)npoints + 2U)) {
+    /* Whole-or-nothing (D-06): reserve DOWN + (npoints-1) moves + UP = npoints+1 up front so a
+       mid-sequence overflow can't leave a stuck pointer-down. DOWN@0 already carries point[0], so
+       point[0] gets NO redundant same-frame MOVE (F6); moves cover points[1..n-1] only. */
+    if (!nt_input_inject_can_reserve((uint32_t)npoints + 1U)) {
         set_bad_params(err, "input.gesture: inject queue overflow");
         return false;
     }
-    /* down@0 carrying first point, move per point at its frame offset, up after the last move. */
+    /* down@0 carrying first point, a move per SUBSEQUENT point at its frame offset, up after the last. */
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = (float)cJSON_GetArrayItem(first, 1)->valuedouble;
@@ -368,6 +378,10 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     int queued = 1;
     int idx = 0;
     cJSON_ArrayForEach(p, points) {
+        if (idx == 0) {
+            idx++;
+            continue; /* DOWN already applied point[0] @0 -- skip the redundant same-frame MOVE (F6). */
+        }
         float mx = (float)cJSON_GetArrayItem(p, 0)->valuedouble;
         float my = (float)cJSON_GetArrayItem(p, 1)->valuedouble;
         uint16_t at = (uint16_t)(idx * (int)stride);
@@ -443,8 +457,9 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
 }
 
 /* input.text: walk the UTF-8 string into a local codepoint buffer (decode 1-4 byte sequences;
-   a malformed byte -> bad_params, never assert), then nt_input_inject_text(cps, n) (overflow ->
-   bad_params). Preflight is by codepoint count (the char ring is fed across frames, D-13/INPUT-06). */
+   a malformed byte OR an invalid scalar -> bad_params, never assert), then nt_input_inject_text.
+   All codepoints drain in ONE poll into the 32-slot char ring, so nt_input_inject_text rejects
+   n > NT_INPUT_CHAR_RING -> bad_params; queued never overstates what lands (F2/D-13/INPUT-06). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -486,6 +501,14 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
             cp = (cp << 6U) | (*s & 0x3FU);
             s++;
         }
+        /* Reject structurally-valid-but-invalid scalars: an overlong encoding (below the minimum
+           for its byte-length), a UTF-16 surrogate, or a value above U+10FFFF. A real keyboard
+           never produces these; per D-11 reject untrusted input -> bad_params (never assert). */
+        static const uint32_t k_min_cp[4] = {0x0U, 0x80U, 0x800U, 0x10000U};
+        if (cp < k_min_cp[extra] || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
+            set_bad_params(err, "input.text: invalid UTF-8");
+            return false;
+        }
         if (n >= NT_INPUT_INJECT_QUEUE_MAX) {
             set_bad_params(err, "input.text: too many codepoints (exceeds inject queue)");
             return false;
@@ -493,12 +516,14 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         cps[n] = cp;
         n++;
     }
+    /* Empty text is valid UTF-8 -> a no-op queued:0 (the advertised {queued:number} contract
+       represents 0), not a hard error mid-script (F5). */
     if (n == 0) {
-        set_bad_params(err, "input.text: text must be non-empty");
-        return false;
+        devapi_add_number(result, "queued", 0.0);
+        return true;
     }
     if (!nt_input_inject_text(cps, n)) {
-        set_bad_params(err, "input.text: inject queue overflow");
+        set_bad_params(err, "input.text: exceeds char-ring capacity (32)");
         return false;
     }
     devapi_add_number(result, "queued", (double)n);

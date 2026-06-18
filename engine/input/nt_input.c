@@ -538,6 +538,12 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
     if (cps == NULL || n == 0) {
         return false;
     }
+    /* Every CHAR event is scheduled at frames_remaining=0, so all n drain in a SINGLE poll into
+       the 32-slot char ring; nt_input_buffer_char_apply drops once full. Reject n beyond the ring
+       so queued never lies about what lands (F2, whole-or-nothing consistent with D-06). */
+    if (n > NT_INPUT_CHAR_RING) {
+        return false;
+    }
     nt_inject_event_t *e = inject_reserve(n); /* whole-or-nothing by codepoint count */
     if (e == NULL) {
         return false;

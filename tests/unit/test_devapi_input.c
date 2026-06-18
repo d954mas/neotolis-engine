@@ -105,10 +105,11 @@ static void test_input_click_queues_two(void) {
 }
 
 static void test_input_gesture_queues_ordered(void) {
-    /* down + 2 moves + up = 4 entries. */
+    /* down@0 carries point[0]; a move per SUBSEQUENT point (F6: no redundant move@0 for point[0]) + up.
+       2 points -> down + 1 move + up = 3 entries. */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_INT(4, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
     cJSON_Delete(root);
 }
 
@@ -190,15 +191,14 @@ static void test_input_click_near_full_atomic(void) {
     nt_input_shutdown();
 }
 
-/* A 2-point gesture needs 4 entries (down + 2 moves + up); with only 3 free it rejects whole. */
+/* A 2-point gesture needs 3 entries (down + 1 move + up, F6); with only 2 free it rejects whole. */
 static void test_input_gesture_near_full_atomic(void) {
-    fill_inject_queue_leaving(3U);
+    fill_inject_queue_leaving(2U);
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}"));
-    /* 3 free slots must remain intact: three 1-entry injects succeed, the fourth overflows. */
+    /* 2 free slots must remain intact: two 1-entry injects succeed, the third overflows. */
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_B, true, 1000));
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_C, true, 1000));
-    TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_D, true, 1000));
-    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_E, true, 1000));
+    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_D, true, 1000));
     nt_input_shutdown();
 }
 
@@ -210,6 +210,49 @@ static void test_input_text_bad_lead_byte_bad_params(void) { assert_bad_params(n
 
 /* A 2-byte lead (0xC0) with no continuation byte -> truncated sequence -> bad_params. */
 static void test_input_text_truncated_continuation_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xc0\"}}")); }
+
+/* ---- F1: structurally-valid-but-invalid UTF-8 scalars -> bad_params ---- */
+
+/* Overlong: 0xC0 0x80 is a 2-byte form of U+0000 (below the 2-byte minimum 0x80). */
+static void test_input_text_overlong_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xc0\x80\"}}")); }
+
+/* UTF-16 surrogate: 0xED 0xA0 0x80 decodes to U+D800 (illegal scalar in UTF-8). */
+static void test_input_text_surrogate_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xed\xa0\x80\"}}")); }
+
+/* Out-of-range: 0xF4 0x90 0x80 0x80 decodes to U+110000 (> U+10FFFF). */
+static void test_input_text_above_max_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xf4\x90\x80\x80\"}}")); }
+
+/* ---- F5: empty text is valid -> queued:0 (no-op), NOT bad_params ---- */
+
+static void test_input_text_empty_queued_zero(void) {
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\"}}"));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
+    cJSON_Delete(root);
+}
+
+/* ---- F2: > 32 codepoints can never land whole in the 32-slot char ring -> bad_params ---- */
+
+/* 33 ASCII 'a's: one over NT_INPUT_CHAR_RING. queued must never overstate what lands. */
+static void test_input_text_exceeds_char_ring_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}")); }
+
+/* Exactly 32 codepoints is the boundary -> still accepted (queued:32). */
+static void test_input_text_at_char_ring_ok(void) {
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_EQUAL_INT(32, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
+    cJSON_Delete(root);
+}
+
+/* ---- F5: hold / frame_stride strict integral+sign parse (not silent valueint truncation) ---- */
+
+static void test_input_key_hold_fractional_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":2.9}}")); }
+
+static void test_input_key_hold_negative_fractional_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":-0.5}}")); }
+
+static void test_input_gesture_frame_stride_fractional_bad_params(void) {
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]],\"frame_stride\":1.5}}"));
+}
 
 /* ---- WR-05: offline input.state{pop_text} drain coverage (no socket) ---- */
 
@@ -271,6 +314,63 @@ static void test_input_state_observes_injected_key(void) {
     nt_input_shutdown();
 }
 
+/* ---- F7: input.button happy path — mask actually presses the mapped mouse button ---- */
+
+/* input.button {buttons:2} on the reserved mouse slot -> after poll the RIGHT button is down
+   (creates the slot via DOWN since none is active yet). The reserved slot is a mouse, so the
+   nt_input_mouse_* convenience queries observe it by-value (not just the ok envelope). */
+static void test_input_button_right_presses_right(void) {
+    nt_input_init();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
+    nt_input_poll(1);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_RIGHT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    nt_input_shutdown();
+}
+
+/* Second input.button on the now-active slot exercises the MOVE branch (slot exists) and
+   updates the mask: 4 -> MIDDLE down, RIGHT released (mask cleared its bit). */
+static void test_input_button_move_branch_updates_mask(void) {
+    nt_input_init();
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":2}}")));
+    nt_input_poll(1);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":4}}"))); /* MOVE branch */
+    nt_input_poll(2);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_MIDDLE));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_RIGHT));
+    nt_input_shutdown();
+}
+
+/* ---- F6: a single-point gesture applies point[0] exactly once at frame 0 (no double-apply) ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_input_gesture_single_point_applied_once(void) {
+    nt_input_init();
+    /* 1 point -> down@0 only (no move, no double-apply); queued = 1 down + 0 moves + 1 up = 2. */
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":7,\"points\":[[7,7]]}}"));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
+    cJSON_Delete(root);
+    nt_input_poll(1); /* down@0 + up@0 both drain this poll (last_offset==0 for a single point) */
+    /* The slot landed at (7,7) with zero accumulated delta — DOWN set it once, no redundant MOVE. */
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].id == 7U) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= 6.999F && slot->x <= 7.001F);
+    TEST_ASSERT_TRUE(slot->y >= 6.999F && slot->y <= 7.001F);
+    TEST_ASSERT_TRUE(slot->dx >= -0.001F && slot->dx <= 0.001F); /* no move@0 -> no delta */
+    TEST_ASSERT_TRUE(slot->dy >= -0.001F && slot->dy <= 0.001F);
+    nt_input_shutdown();
+}
+
 /* ---- command.describe ---- */
 
 static void test_input_describe(void) {
@@ -315,6 +415,18 @@ int main(void) {
     RUN_TEST(test_input_gesture_near_full_atomic);
     RUN_TEST(test_input_text_bad_lead_byte_bad_params);
     RUN_TEST(test_input_text_truncated_continuation_bad_params);
+    RUN_TEST(test_input_text_overlong_bad_params);
+    RUN_TEST(test_input_text_surrogate_bad_params);
+    RUN_TEST(test_input_text_above_max_bad_params);
+    RUN_TEST(test_input_text_empty_queued_zero);
+    RUN_TEST(test_input_text_exceeds_char_ring_bad_params);
+    RUN_TEST(test_input_text_at_char_ring_ok);
+    RUN_TEST(test_input_key_hold_fractional_bad_params);
+    RUN_TEST(test_input_key_hold_negative_fractional_bad_params);
+    RUN_TEST(test_input_gesture_frame_stride_fractional_bad_params);
+    RUN_TEST(test_input_button_right_presses_right);
+    RUN_TEST(test_input_button_move_branch_updates_mask);
+    RUN_TEST(test_input_gesture_single_point_applied_once);
     RUN_TEST(test_input_state_pop_text_drains_codepoints);
     RUN_TEST(test_input_state_registers);
     RUN_TEST(test_input_state_describe);

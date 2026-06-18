@@ -116,6 +116,27 @@ void test_inject_wheel_mouse_slot(void) {
     TEST_ASSERT_TRUE(float_near(3.0F, g_nt_input.pointers[0].wheel_dy, 0.001F));
 }
 
+/* INPUT-02: a non-left button mask must press the CORRECT button (bit->button mapping), not just
+   leave the slot active. bit 2 -> RIGHT, bit 4 -> MIDDLE — queried by-value via the mouse helpers. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_inject_button_mask_maps_right_and_middle(void) {
+    /* mask 2 = right only: a mouse-slot DOWN carrying the mask. */
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, 0, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 2U, 0));
+    nt_input_poll(1U);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_RIGHT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_MIDDLE));
+
+    /* mask 4 = middle only (via MOVE on the same slot): RIGHT releases, MIDDLE presses. */
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_MOVE, 0, 1.0F, 1.0F, 1.0F, NT_POINTER_MOUSE, 4U, 0));
+    nt_input_poll(2U);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_MIDDLE));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_MIDDLE));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_RIGHT));
+}
+
 void test_inject_reserved_id(void) {
     /* A real pointer at id=0 and the convenience synthetic id never collide (different slots). */
     nt_input_pointer_down(0, 1.0F, 1.0F, 0.0F, NT_POINTER_MOUSE, 1);
@@ -230,6 +251,7 @@ int main(void) {
     RUN_TEST(test_inject_flows_when_gated);
     RUN_TEST(test_inject_pointer_down_move_up);
     RUN_TEST(test_inject_wheel_mouse_slot);
+    RUN_TEST(test_inject_button_mask_maps_right_and_middle);
     RUN_TEST(test_inject_reserved_id);
     RUN_TEST(test_inject_gesture_ordered);
     RUN_TEST(test_overflow_rejects_whole);
