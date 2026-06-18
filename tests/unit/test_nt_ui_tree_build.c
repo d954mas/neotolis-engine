@@ -228,6 +228,41 @@ static void test_floating_attach_to_parent_inherits_xform(void) {
     TEST_ASSERT_TRUE_MESSAGE(found, "ATTACH_TO_PARENT floating should inherit lexical parent's 45deg rotation");
 }
 
+/* Regression: a floating child with a NEGATIVE zIndex (e.g. a tooltip drop-shadow) makes Clay sort it
+ * ahead of the document root in layoutElementTreeRoots, pushing the doc root off array index 0. The build
+ * pass must identity-seed the doc root by its parentId==0 marker (not by "index 0") and resolve the
+ * negative-z float from its real parent — not trip the "parentId not in hashmap" assert on the doc root. */
+static void test_negative_zindex_float_does_not_displace_root_seed(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_transform_t rot = nt_ui_transform_defaults();
+    rot.rotation_z = DEG2RAD(35.0F);
+    CLAY({.id = CLAY_ID("card"), .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}, .userData = (void *)NT_UI_DATA_XFORM(0, &rot, 1.0F)}) {
+        CLAY({.id = CLAY_ID("shadow"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = -1}, .layout = {.sizing = {CLAY_SIZING_FIXED(200.0F), CLAY_SIZING_FIXED(200.0F)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx); /* pre-fix: traps here — doc root (parentId 0) sorted off index 0 → not in hashmap */
+
+    /* The negative-z float really did displace the doc root from tree-root index 0 (else no regression). */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_internal_test_get_tree_root_for_elem(s_fx.ctx, 0) != 0, "negative-zIndex float should sort ahead of the doc root (test no longer exercises the bug)");
+    /* Doc root (element 0) still identity-seeded despite not being at tree-root index 0. */
+    const nt_ui_baked_xform_t *root_bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, 0);
+    TEST_ASSERT_TRUE_MESSAGE(baked_is_identity(root_bk), "doc root baked must stay identity when a negative-z float reorders tree roots");
+    /* The shadow (floating, attach-to-parent) still inherits the card's 35deg via its real parent. */
+    const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    bool found_shadow_35 = false;
+    for (int32_t i = 1; i < N; ++i) {
+        if (nt_ui_internal_test_get_tree_root_for_elem(s_fx.ctx, i) < 0) {
+            continue;
+        }
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (!baked_is_identity(bk) && fabsf(baked_rotation(bk) - DEG2RAD(35.0F)) <= 1e-3F) {
+            found_shadow_35 = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_shadow_35, "negative-z float should inherit its parent card's 35deg rotation");
+}
+
 /* ---- 7. Floating ATTACH_TO_ELEMENT_WITH_ID → inherits target element's xform. ---- */
 static void test_floating_attach_to_element_with_id_inherits_xform(void) {
     nt_pointer_t mouse = {0};
@@ -654,6 +689,7 @@ int main(void) {
     RUN_TEST(test_opacity_inheritance_2level);
     RUN_TEST(test_floating_attach_to_root_identity_seed);
     RUN_TEST(test_floating_attach_to_parent_inherits_xform);
+    RUN_TEST(test_negative_zindex_float_does_not_displace_root_seed);
     RUN_TEST(test_floating_attach_to_element_with_id_inherits_xform);
     RUN_TEST(test_floating_inside_floating_chain);
     RUN_TEST(test_floating_with_own_xform_composes_on_seed);
