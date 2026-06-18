@@ -423,7 +423,9 @@ static bool menu_keyboard_nav(const nt_ui_menu_item_t *items, uint32_t count, ui
         const nt_ui_menu_item_t *it = &items[f];
         const bool open_key = nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER);
         const bool activate_key = nt_input_key_is_pressed(NT_KEY_ENTER);
-        if (it->enabled) {
+        /* label!=NULL also excludes separators: focus can land on one only when a level is all-separators
+         * (focus_step exhausts), and a malformed separator (enabled, no submenu) must never activate. */
+        if (it->enabled && it->label != NULL) {
             if (it->submenu != NULL && open_key) {
                 rt->open_path[depth] = f;
                 if (depth + 1U > rt->active_depth) {
@@ -572,9 +574,16 @@ static void menu_declare_level(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
 
     /* The currently-open child (authoritative across frames); mouse hover may switch it, gated below. */
     int16_t hovered = -1;
+    const int16_t prev_open = rt->open_path[depth]; /* detect an open-child switch to re-prime the aim corridor */
     int16_t open_idx = menu_declare_panel(ctx, fill_layer, label_layer, menu_id, items, count, depth, rt, style, rt->open_path[depth], &hovered, out_chosen);
     open_idx = menu_resolve_hover_switch(ctx, menu_id, items, count, depth, open_idx, hovered, mx, my, r.side, dt);
     open_idx = menu_commit_and_nav(items, count, depth, nav_depth, rt, open_idx, out_chosen, out_close_chain);
+    /* The open child changed (switch / open / close / reopen): its fly-out at depth+1 now targets a
+     * different rect, so clear the stale mouse-aim apex+timer — menu_hover_intent re-primes next frame
+     * against the new panel. Without this the 2nd+ submenu at a depth reuses the prior child's corridor. */
+    if (open_idx != prev_open) {
+        nt_ui_state_clear(ctx, menu_hover_id(menu_id, (uint8_t)(depth + 1U)));
+    }
 
     /* Recurse into the open submenu (if any). The open_path is authoritative — keyboard-opened menus
      * stay open regardless of cursor position; the hover-intent above only governs MOUSE sibling
