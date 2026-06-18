@@ -92,12 +92,19 @@ static void tooltip_declare_shadow(nt_ui_context_t *ctx, uint8_t fill_layer, uin
  * (apex at top); BELOW the target -> caret on the panel TOP edge pointing up (no flip); ABOVE the target
  * (edge-flip) -> caret on the panel BOTTOM edge pointing down (flip Y). Centered horizontally on the
  * panel. No-op when no ref / caret_size 0. */
-static void tooltip_declare_caret(nt_ui_context_t *ctx, uint8_t fill_layer, nt_ui_tooltip_style_t *style, uint8_t side) {
+static void tooltip_declare_caret(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t panel_id, nt_ui_tooltip_style_t *style, uint8_t side) {
     if (style->caret_size == 0U) {
         return;
     }
     nt_atlas_resolve_ref(&style->caret);
     if (style->caret.atlas.id == 0U || style->caret.region == NT_ATLAS_INVALID_REGION) {
+        return;
+    }
+    /* The caret is a floating ATTACH_TO_PARENT child: its parent (the transient popup panel) must be in
+     * Clay's persistent hashmap, which only holds once the panel existed a prior frame. Skip the first
+     * appear-frame (same 1-frame guard the shadow uses) — else the floating root's parentId is missing
+     * and build_tree trips the "parentId not in hashmap" assert. */
+    if (!nt_ui_get_bbox(ctx, panel_id).found) {
         return;
     }
     const bool above = (side == NT_UI_POPUP_ABOVE); /* tooltip above target -> caret points DOWN */
@@ -210,7 +217,7 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
         nt_ui_clay_priv_open_element();
         nt_ui_clay_priv_configure_open_element(panel);
         tooltip_declare_shadow(ctx, fill_layer, panel_id, style); /* first child: drops UNDER the panel body */
-        tooltip_declare_caret(ctx, fill_layer, style, r.side);
+        tooltip_declare_caret(ctx, fill_layer, panel_id, style, r.side);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), content, &lbl);
         nt_ui_clay_priv_close_element();
         shown = true;
