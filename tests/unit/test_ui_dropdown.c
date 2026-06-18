@@ -272,6 +272,32 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_scroll_test_last_bar_layer(1), "scrollbar must draw on the container content layer, not buried under the panel");
 }
 
+/* ---- ROOT of the Wave-2.9 BUG: the dropdown list is a popup-nested scroll, so its bar must float at a
+ *      Clay zIndex ABOVE the popup panel band (stride*depth) — else the (settled-opaque) panel sorts over
+ *      the bar globally and the bar is only seen through the translucent open/close tween. The Wave-2.8
+ *      content-LAYER fix is necessary but not sufficient (layer orders intra-segment; Clay zIndex orders
+ *      floating roots globally). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_long_list_scrollbar_above_popup_band(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.max_visible_rows = 4; /* 12 rows > 4 -> the list scrolls */
+    st.list_scroll.track_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
+    st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+
+    int selected = 0;
+    bool open = true;
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    dropdown_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+    dropdown_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+
+    TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "popup-nested long list must emit a vertical scrollbar");
+    /* The single dropdown popup floats at depth 1: panel_z == stride*1. The bar must sit strictly above it. */
+    const int16_t stride = s_fx.ctx->modal_zband_stride;
+    const int16_t bar_z = nt_ui_scroll_test_last_bar_zindex(1);
+    TEST_ASSERT_GREATER_THAN_INT16_MESSAGE(0, bar_z, "popup-nested bar zIndex must be > 0");
+    TEST_ASSERT_GREATER_THAN_INT16_MESSAGE(stride, bar_z, "popup-nested bar zIndex must sit ABOVE the popup panel band (stride*depth)");
+}
+
 /* ---- Eased open is STABLE: with open_ease_speed > 0, opening the list then running idle frames with
  *      NO input must NOT oscillate *open (the Wave-2.7 flicker repro). The trigger sits under the
  *      full-viewport catcher when open; a frame with no click must never raise a dismiss-close. ---- */
@@ -452,6 +478,7 @@ int main(void) {
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
     RUN_TEST(test_dropdown_long_list_shows_scrollbar);
     RUN_TEST(test_dropdown_long_list_scrollbar_showcase_fidelity);
+    RUN_TEST(test_dropdown_long_list_scrollbar_above_popup_band);
     RUN_TEST(test_dropdown_eased_open_no_flicker);
     RUN_TEST(test_dropdown_eased_open_no_reseed_under_churn);
     RUN_TEST(test_dropdown_eased_reclick_closes_once);
