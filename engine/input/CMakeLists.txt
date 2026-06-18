@@ -2,11 +2,12 @@
 
 # Synthetic-input inject pipeline (immediate buffer + nt_input_inject_* + per-poll drain) is gated
 # behind NT_INPUT_INJECT_ENABLED so a pure release build (devapi OFF) carries none of it. Its sole
-# driver is the devapi layer; the test targets also drive the L1 inject API directly, so it is ON
-# when devapi is enabled OR when this is a top-level build (NT_BUILDING_TESTS, set by the root
-# CMakeLists, which always builds the tests). A pure release-without-devapi build used as a
-# subdirectory (NT_DEVAPI_ENABLED OFF, NT_BUILDING_TESTS unset) leaves it OFF.
-if(NT_DEVAPI_ENABLED OR NT_BUILDING_TESTS)
+# production driver is the devapi layer, so the SHARED nt_input lib keys the pipeline ONLY on
+# NT_DEVAPI_ENABLED — a devapi-OFF build (top-level or subdirectory) gets a lean nt_input with no
+# inject buffer or symbols. The test targets drive the L1 inject API directly; they link the
+# headless nt_input_stub, which forces the pipeline ON unconditionally (below), so L1-inject tests
+# build regardless of devapi.
+if(NT_DEVAPI_ENABLED)
     set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=1)
 else()
     set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=0)
@@ -52,4 +53,6 @@ nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"
 )
 
 target_link_libraries(nt_input_stub PUBLIC nt_core nt_input_interface)
-target_compile_definitions(nt_input_stub PUBLIC ${NT_INPUT_INJECT_DEFS})
+# The unit tests (test_input_inject / test_devapi_input) link the stub and drive the L1 inject API
+# directly, so the stub ALWAYS carries the inject pipeline regardless of NT_DEVAPI_ENABLED.
+target_compile_definitions(nt_input_stub PUBLIC NT_INPUT_INJECT_ENABLED=1)
