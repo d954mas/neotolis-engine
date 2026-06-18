@@ -83,7 +83,7 @@ static bool s_pack_dumped;
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
-    nt_input_poll(g_nt_app.frame);
+    nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {

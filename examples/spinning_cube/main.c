@@ -254,7 +254,7 @@ static void set_shape_color(void) {
 
 static void frame(void) {
     nt_window_poll();
-    nt_input_poll(g_nt_app.frame);
+    nt_input_poll();
     float dt = g_nt_app.dt;
 
     /* ---- Input: shape cycling and controls ---- */

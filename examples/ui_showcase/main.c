@@ -2116,7 +2116,7 @@ static void declare_props_panel(nt_ui_context_t *ctx) {
 static void frame(void) {
     nt_debug_overlay_frame_begin();
     nt_window_poll();
-    nt_input_poll(g_nt_app.frame);
+    nt_input_poll();
     nt_mem_scratch_reset();
 
     /* Gameplay/global hotkeys yield to an open modal so Esc closes the top modal first and the
