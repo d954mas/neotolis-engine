@@ -486,6 +486,64 @@ static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
     TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "iconed and non-iconed rows must align their labels in one column (same engine gutter)");
 }
 
+/* ---- Custom-trigger (preview form) draws the combo's chevron affordance, just like the plain trigger.
+ *      One preview frame with a resolvable chevron ref; the engine appends the chevron at the trigger's
+ *      right edge between preview_begin/end. chevron_size 0 opts out. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dropdown_style_t *st, bool *open) {
+    nt_mem_scratch_reset();
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    CLAY({.id = (Clay_ElementId){.id = 0xDD0008U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
+        nt_ui_combo_preview_begin(s_fx.ctx, DD_A, st, open);
+        {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}}}) {}
+        } /* game-owned swatch content */
+        if (nt_ui_combo_preview_end(s_fx.ctx)) {
+            for (int i = 0; i < 3; ++i) {
+                (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), s_short[i], false);
+            }
+            nt_ui_combo_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A pre-resolved ref into the fixture atlas (polygon region idx 1): region != INVALID so the chevron's
+ * nt_atlas_resolve_ref no-ops and the affordance actually emits (a name_hash ref would resolve to INVALID
+ * against the fixture's two named regions and skip-draw). */
+static nt_atlas_region_ref_t fixture_chevron_ref(void) { return (nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.polygon_region_idx}; }
+
+static void test_dropdown_preview_trigger_draws_chevron(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.chevron = fixture_chevron_ref(); /* resolvable ref so the chevron emits */
+    bool open = false;
+
+    /* Two warm frames so the chevron element bbox bakes (1-frame IM lag on get_bbox). */
+    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
+    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
+
+    const nt_ui_bbox_t chev = nt_ui_dropdown_test_chevron_bbox(s_fx.ctx, DD_A);
+    TEST_ASSERT_TRUE_MESSAGE(chev.found, "custom-trigger (preview form) must declare the chevron element");
+    TEST_ASSERT_TRUE_MESSAGE(chev.width > 0.0F && chev.height > 0.0F, "chevron must have a non-zero box");
+    /* The GROW spacer pushes the chevron to the right of the trigger's left content edge. */
+    TEST_ASSERT_TRUE_MESSAGE(chev.x > 30.0F, "chevron must sit at the trigger's right edge, not the left");
+}
+
+static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.chevron = fixture_chevron_ref();
+    st.chevron_size = 0U; /* opt out of the affordance even with a ref set */
+    bool open = false;
+
+    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
+    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
+
+    const nt_ui_bbox_t chev = nt_ui_dropdown_test_chevron_bbox(s_fx.ctx, DD_A);
+    TEST_ASSERT_FALSE_MESSAGE(chev.found, "chevron_size 0 must opt out of drawing the chevron");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dropdown_abi_size);
@@ -502,5 +560,7 @@ int main(void) {
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);
     RUN_TEST(test_dropdown_iconed_and_plain_rows_share_one_column);
+    RUN_TEST(test_dropdown_preview_trigger_draws_chevron);
+    RUN_TEST(test_dropdown_preview_chevron_size_zero_opts_out);
     return UNITY_END();
 }

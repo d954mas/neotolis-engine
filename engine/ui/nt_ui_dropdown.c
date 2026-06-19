@@ -25,10 +25,12 @@ const nt_ui_widget_def_t NT_UI_DROPDOWN_DEF = {
 #define NT_UI_DROPDOWN_POPUP_SALT 0x44D90000U
 #define NT_UI_DROPDOWN_SCROLL_SALT 0x44D50000U
 #define NT_UI_DROPDOWN_PANEL_SALT 0x44DA0000U
+#define NT_UI_DROPDOWN_CHEVRON_SALT 0x44DB0000U
 
 static inline uint32_t dropdown_popup_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_POPUP_SALT); }
 static inline uint32_t dropdown_scroll_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_SCROLL_SALT); }
 static inline uint32_t dropdown_panel_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_PANEL_SALT); }
+static inline uint32_t dropdown_chevron_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_CHEVRON_SALT); }
 
 /* Immediate-combo row ids. The INTERACTIVE row folds (combo_id, key, row_idx) so sibling rows never
  * Clay-additive-collide and a key need only be unique among siblings (D-236-02). The non-interactive
@@ -143,8 +145,9 @@ static void dropdown_apply_bg(Clay_ElementDeclaration *decl, bool has_art, const
 }
 
 /* The chevron sprite at the trigger's right edge. Eased open-rotation: 0 closed -> ~180deg open (the
- * down chevron flips to point up). Drawn on the fill layer; tinted; no-op when no ref / chevron_size 0. */
-static void dropdown_declare_chevron(nt_ui_context_t *ctx, uint8_t fill_layer, nt_ui_dropdown_style_t *style, float open_t) {
+ * down chevron flips to point up). Drawn on the fill layer; tinted; no-op when no ref / chevron_size 0.
+ * chevron_id 0 -> anonymous (plain trigger); a derived id lets the custom-trigger path expose a bbox probe. */
+static void dropdown_declare_chevron(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t chevron_id, nt_ui_dropdown_style_t *style, float open_t) {
     if (style->chevron_size == 0U) {
         return;
     }
@@ -158,7 +161,8 @@ static void dropdown_declare_chevron(nt_ui_context_t *ctx, uint8_t fill_layer, n
     /* Eased rotation tied to the open amount so the affordance reads the open/close reveal. */
     const nt_ui_transform_t chev_t = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .rotation_z = open_t * 3.14159265F};
     const nt_ui_element_data_t *chev_data = nt_ui_make_element_data_xform(fill_layer, NULL, &chev_t, 1.0F);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED((float)style->chevron_size), CLAY_SIZING_FIXED((float)style->chevron_size)}},
+    CLAY({.id = (Clay_ElementId){.id = chevron_id},
+          .layout = {.sizing = {CLAY_SIZING_FIXED((float)style->chevron_size), CLAY_SIZING_FIXED((float)style->chevron_size)}},
           .image = (Clay_ImageElementConfig){.imageData = p},
           .backgroundColor = nt_ui_unpack_tint(style->chevron_tint),
           .userData = (void *)chev_data}) {}
@@ -236,10 +240,10 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
 #define NT_UI_COMBO_LABEL_LAYER 1U  /* text shares the content layer (no separate split needed for the combo) */
 #define NT_UI_COMBO_TRIGGER_H 32.0F /* default trigger control height: combo_begin owns sizing (no caller decl), the list anchors to trigger bottom */
 
-/* Emit the trigger element + harvest the toggle. When `leave_open` the element stays OPEN (custom preview
- * content) and the label/chevron/step are deferred to combo_preview_end; otherwise emit the preview label +
- * chevron, close, and do the ONE trigger step_interaction (toggling *open on a click). The trigger interior
- * is fed a single `preview` string (the game-owned current-selection label). */
+/* Emit the trigger element + harvest the toggle. When `leave_open` the element stays OPEN (the game declares
+ * the preview content) and combo_preview_end appends the chevron tail + closes + does the ONE step; otherwise
+ * emit the preview label + chevron inline here, close, and do the step (toggling *open on a click). The
+ * trigger interior is fed a single `preview` string (the game-owned current-selection label). */
 static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool *open, bool leave_open) {
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, id);
 
@@ -273,13 +277,15 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(d);
     if (leave_open) {
-        return; /* the game declares the trigger content; combo_preview_end closes + steps */
+        /* Stash the eased open amount so combo_preview_end draws the chevron WITHOUT re-stepping anim. */
+        ctx->pending_combo.trigger_open_t = a->value_t;
+        return; /* the game declares the trigger content; combo_preview_end appends the chevron, closes + steps */
     }
     /* Label grows to push the chevron to the right edge (mirror the data-form trigger). */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), (preview != NULL) ? preview : "", &lbl);
     }
-    dropdown_declare_chevron(ctx, fill_layer, style, a->value_t);
+    dropdown_declare_chevron(ctx, fill_layer, 0U, style, a->value_t);
     nt_ui_clay_priv_close_element();
     if (nt_ui_step_interaction(ctx, id).clicked) {
         *open = !*open;
@@ -399,6 +405,13 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
     const uint32_t id = ctx->pending_combo.id;
     nt_ui_dropdown_style_t *style = (nt_ui_dropdown_style_t *)ctx->pending_combo.style;
     bool *open = ctx->pending_combo.open;
+
+    /* The chevron is the combo's OWN affordance (open/close indicator), independent of the game's preview
+     * content — draw it in the custom trigger too. GROW spacer pushes it to the right edge past the game's
+     * content (mirrors the plain trigger's [content GROW][chevron] tail); no-op when chevron_size 0. */
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
+    dropdown_declare_chevron(ctx, NT_UI_COMBO_FILL_LAYER, dropdown_chevron_id(id), style, ctx->pending_combo.trigger_open_t);
+
     nt_ui_clay_priv_close_element();
     if (nt_ui_step_interaction(ctx, id).clicked) {
         *open = !*open;
@@ -519,4 +532,5 @@ uint8_t nt_ui_dropdown_test_last_side(void) { return s_last_side; }
 uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id) { return dropdown_scroll_id(dropdown_id); }
 /* Combo rows key the label cell by (combo_id, row_idx); row_idx == idx for the in-order selectable feed. */
 nt_ui_bbox_t nt_ui_dropdown_test_row_label_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id, int idx) { return nt_ui_get_bbox(ctx, combo_row_label_id(dropdown_id, (uint32_t)idx)); }
+nt_ui_bbox_t nt_ui_dropdown_test_chevron_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id) { return nt_ui_get_bbox(ctx, dropdown_chevron_id(dropdown_id)); }
 #endif

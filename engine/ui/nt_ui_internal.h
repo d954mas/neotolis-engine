@@ -297,11 +297,12 @@ struct nt_ui_context {
      * open between combo_preview_begin/end; row_open marks a custom selectable open between
      * selectable_begin/end (its id + click latch deferred to selectable_end). */
     struct {
-        const void *style; /* nt_ui_dropdown_style_t* (void to keep the internal header widget-agnostic) */
-        uint32_t id;       /* the combo id (scope for the row fmix) */
-        bool *open;        /* game-owned open flag; a selectable click clears it (Model-D) */
-        uint32_t row_id;   /* the open custom selectable's row id (for selectable_end's step + click latch) */
-        uint16_t row_idx;  /* per-frame running row index (the selectable fmix fold) */
+        const void *style;    /* nt_ui_dropdown_style_t* (void to keep the internal header widget-agnostic) */
+        uint32_t id;          /* the combo id (scope for the row fmix) */
+        bool *open;           /* game-owned open flag; a selectable click clears it (Model-D) */
+        uint32_t row_id;      /* the open custom selectable's row id (for selectable_end's step + click latch) */
+        float trigger_open_t; /* eased open amount stashed by the custom trigger; combo_preview_end's chevron rotation */
+        uint16_t row_idx;     /* per-frame running row index (the selectable fmix fold) */
         uint8_t fill_layer;
         uint8_t label_layer;
         uint8_t scrolls;      /* list body wraps nt_ui_scroll (vs a plain panel) — combo_end closes the right nesting */
