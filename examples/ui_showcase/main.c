@@ -1592,11 +1592,23 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick a row; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
 
-    /* Short list: fits without scrolling. The selected label is the trigger preview; a couple of rows draw
-     * an icon in the engine gutter (combo_selectable_icon) — all labels stay in one aligned column. */
+    /* Short list: fits without scrolling. A custom trigger so the CLOSED preview shows the selected fruit's
+     * icon + name in the SAME icon-gutter idiom as the open rows (mirrors the engine row gutter); a couple of
+     * rows draw an icon in the engine gutter (combo_selectable_icon) — all labels stay in one aligned column. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
-    const char *fruit_preview = (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "Pick a fruit";
-    if (nt_ui_combo_begin(ctx, s_id_dd_fruit, fruit_preview, g_current->dropdown, &st->dropdown.fruit_open)) {
+    nt_ui_combo_preview_begin(ctx, s_id_dd_fruit, g_current->dropdown, &st->dropdown.fruit_open);
+    {
+        const int sel = st->dropdown.fruit_sel;
+        const float gut = (float)g_current->dropdown->icon_size; /* same gutter as the open rows so the label x matches */
+        /* Reserve the icon gutter every state so the label x stays put; draw the icon only for iconed rows. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(gut), CLAY_SIZING_FIXED(gut)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            if (sel >= 0 && fruit_iconed[sel]) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
+            }
+        }
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), (sel >= 0) ? fruits[sel] : "Pick a fruit", g_current->body);
+    }
+    if (nt_ui_combo_preview_end(ctx)) {
         for (int i = 0; i < fruit_count; ++i) {
             /* Iconed + text-only rows go through the SAME engine column (one icon gutter + left label), so
              * every label aligns at the same x. Iconed rows draw the icon in the gutter; the rest leave it
