@@ -1136,7 +1136,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     /* Project top-left through accum + Y-flip; must differ from axis-aligned. */
     float proj_x = 0.0F;
     float proj_y = 0.0F;
-    nt_ui_internal_project_layout_to_world(z, 0.0F, screen_h, z->visual_l, z->visual_t, &proj_x, &proj_y);
+    nt_ui_internal_project_layout_to_world(z->m, 0.0F, screen_h, z->visual_l, z->visual_t, &proj_x, &proj_y);
     const float flat_x = z->visual_l;
     const float flat_y = screen_h - z->visual_t;
     const float dx = fabsf(proj_x - flat_x);
