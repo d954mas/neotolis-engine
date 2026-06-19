@@ -1596,7 +1596,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
      * icon + name in the SAME icon-gutter idiom as the open rows (mirrors the engine row gutter); a couple of
      * rows draw an icon in the engine gutter (combo_selectable_icon) — all labels stay in one aligned column. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
-    nt_ui_combo_preview_begin(ctx, s_id_dd_fruit, g_current->dropdown, &st->dropdown.fruit_open);
+    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, g_current->dropdown, &st->dropdown.fruit_open);
     {
         const int sel = st->dropdown.fruit_sel;
         const float gut = (float)g_current->dropdown->icon_size; /* same gutter as the open rows so the label x matches */
@@ -1626,7 +1626,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
      * bottom flips the list ABOVE the trigger. Plain selectables (no icon gutter). */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
     const char *city_preview = (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "Pick a city";
-    if (nt_ui_combo_begin(ctx, s_id_dd_city, city_preview, g_current->dropdown, &st->dropdown.city_open)) {
+    if (nt_ui_combo_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, city_preview, g_current->dropdown, &st->dropdown.city_open)) {
         for (int i = 0; i < city_count; ++i) {
             if (nt_ui_combo_selectable(ctx, (uint32_t)i, cities[i], i == st->dropdown.city_sel)) {
                 st->dropdown.city_sel = i;
@@ -1641,7 +1641,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
     static const char *const colors[] = {"Crimson", "Emerald", "Azure", "Amber"};
     static const Clay_Color swatches[] = {{208, 48, 48, 255}, {48, 176, 80, 255}, {48, 128, 208, 255}, {224, 192, 48, 255}}; /* RGBA */
     static const int color_count = (int)(sizeof colors / sizeof colors[0]);
-    nt_ui_combo_preview_begin(ctx, s_id_dd_color, g_current->dropdown, &st->dropdown.color_open);
+    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_color, g_current->dropdown, &st->dropdown.color_open);
     {
         const int sel = st->dropdown.color_sel;
         const Clay_Color sw = (sel >= 0 && sel < color_count) ? swatches[sel] : (Clay_Color){128, 128, 128, 255};

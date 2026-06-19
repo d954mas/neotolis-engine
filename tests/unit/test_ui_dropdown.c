@@ -110,7 +110,7 @@ static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, cons
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     const char *preview = (*selected >= 0 && *selected < count) ? labels[*selected] : "Select...";
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, DD_A, preview, st, open)) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st, open)) {
             for (int i = 0; i < count; ++i) {
                 /* Iconed + text-only rows share the SAME engine column (one icon gutter + left label),
                  * mirroring the showcase render_dropdown idiom — labels align at one x regardless of icon. */
@@ -362,7 +362,7 @@ static void combo_im_frame_busy(const nt_pointer_t *p, const char *const *labels
     }
     const char *preview = (*selected >= 0 && *selected < count) ? labels[*selected] : "Select...";
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, DD_A, preview, st, open)) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st, open)) {
             for (int i = 0; i < count; ++i) {
                 if (nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), labels[i], *selected == i)) {
                     *selected = i;
@@ -498,7 +498,7 @@ static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dr
     nt_mem_scratch_reset();
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.id = (Clay_ElementId){.id = 0xDD0008U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
-        nt_ui_combo_preview_begin(s_fx.ctx, DD_A, st, open);
+        nt_ui_combo_preview_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, st, open);
         {
             CLAY({.id = (Clay_ElementId){.id = SWATCH_ID}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(16)}}}) {}
         } /* game-owned swatch content */
