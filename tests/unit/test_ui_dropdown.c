@@ -580,11 +580,6 @@ static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_f
  *      row. The probe id mix(combo_id,key) is row_idx-independent, and the live row registers at exactly
  *      that id whether or not an earlier sibling row is hidden (so press/release identity never shifts). ---- */
 static void test_dropdown_combo_row_id_stable_across_reorder(void) {
-    /* The probe is pure: the same key yields the same id no matter the positional index. */
-    const uint32_t id_a = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2));
-    const uint32_t id_b = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(id_a, id_b, "combo row id must be key-stable (no row_idx fold)");
-
     nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
     /* Frame with all 3 rows, then a frame with row 0 hidden: ROW_KEY(2) goes from position 2 to position 1,
      * but its interactive row must register at the SAME id (bbox found at the key-stable id both frames). */
@@ -622,6 +617,57 @@ static void test_dropdown_combo_duplicate_key_asserts(void) {
     TEST_ASSERT_TRUE_MESSAGE(tripped, "two selectables with the same key in one combo must trip the duplicate-key NT_ASSERT");
 }
 
+/* One combo frame with a single CUSTOM row: combo_selectable_begin opens the row (void), an inner child
+ * fills it, combo_selectable_end closes it and returns clicked. `*out_clicked` carries that click; the
+ * combo clears *open on the click. Drives the now-symmetric (begin=void / end=clicked) custom-row path. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_clicked) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    bool clicked = false;
+    nt_mem_scratch_reset();
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    CLAY({.id = (Clay_ElementId){.id = 0xDD000BU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, open)) {
+            nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(0), false);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(16)}}}) {} /* game-owned row content */
+            if (nt_ui_combo_selectable_end(s_fx.ctx)) {
+                clicked = true;
+            }
+            nt_ui_combo_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    if (out_clicked != NULL) {
+        *out_clicked = clicked;
+    }
+}
+
+/* ---- A custom-content row (combo_selectable_begin/end) reports its click via _end (the fixed polarity:
+ *      begin=void, end=clicked) and the combo clears *open on that click. ---- */
+static void test_dropdown_custom_selectable_click_selects(void) {
+    bool open = true; /* list already open */
+    const uint32_t row_id = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(0));
+
+    /* Two warm frames bake the custom row's bbox (1-frame IM lag on the trigger anchor + the row geometry). */
+    nt_pointer_t w = pointer_at(0.0F, 0.0F, false, false, false);
+    combo_im_frame_custom(&w, &open, NULL);
+    combo_im_frame_custom(&w, &open, NULL);
+
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, row_id);
+    TEST_ASSERT_TRUE_MESSAGE(bb.found, "the custom row must register its interactive id");
+    const float cx = bb.x + (bb.width * 0.5F);
+    const float cy = bb.y + (bb.height * 0.5F);
+
+    /* Press over the row, then release over it -> combo_selectable_end returns clicked, *open cleared. */
+    nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
+    combo_im_frame_custom(&pr, &open, NULL);
+    bool clicked = false;
+    nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
+    combo_im_frame_custom(&rl, &open, &clicked);
+    TEST_ASSERT_TRUE_MESSAGE(clicked, "combo_selectable_end must return true on the click frame");
+    TEST_ASSERT_FALSE_MESSAGE(open, "a custom-row click must clear *open (the combo closes the list)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dropdown_abi_size);
@@ -642,5 +688,6 @@ int main(void) {
     RUN_TEST(test_dropdown_preview_chevron_size_zero_opts_out);
     RUN_TEST(test_dropdown_combo_row_id_stable_across_reorder);
     RUN_TEST(test_dropdown_combo_duplicate_key_asserts);
+    RUN_TEST(test_dropdown_custom_selectable_click_selects);
     return UNITY_END();
 }

@@ -1103,6 +1103,196 @@ static void test_menu_item_begin_disabled_never_activates(void) {
     }
 }
 
+/* Drive a plain nt_ui_menu_item leaf and report whether its INLINE return fired on the activation frame.
+ * Mirrors menu_item_begin_click_activates but for the item (not item_begin) path: frames 0-1 bake the row
+ * bbox (1-frame IM lag), frame 2 presses over its center, frame 3 releases -> the item returns clicked. */
+static bool menu_item_click_activates(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+    const uint32_t row_key = KEY_NEW;
+    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
+    bool activated = false;
+    for (int frame = 0; frame < 4; ++frame) {
+        const bool press = (frame == 2);
+        const bool release = (frame == 3);
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, row_id);
+        const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
+        const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
+        nt_pointer_t p = {.x = bx, .y = by, .active = true};
+        if (press && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_down = true;
+            p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+        } else if (release && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_released = true;
+        }
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+        if (nt_ui_menu_item(&s_menu, row_key, "Leaf")) {
+            activated = true;
+        }
+        nt_ui_menu_end(&s_menu);
+        nt_ui_end(s_fx.ctx);
+    }
+    return activated;
+}
+
+/* ---- The primary same-frame mouse idiom `if (menu_item()) act()` activates a plain leaf: the inline
+ *      return goes true on the click frame AND the activation closes the chain (st.open -> false). ---- */
+static void test_menu_item_click_activates_leaf(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    const bool act = menu_item_click_activates(&st, &style);
+    TEST_ASSERT_TRUE_MESSAGE(act, "a plain menu_item leaf must return clicked on the mouse activation frame");
+    TEST_ASSERT_FALSE_MESSAGE(st.open, "activating a leaf must close the chain (st.open -> false)");
+}
+
+/* ---- Duplicate sibling key: two nt_ui_menu_item calls sharing a key in ONE open level alias the same
+ *      scope-stack id -> the per-level duplicate-sibling-key NT_ASSERT must fire. ---- */
+static void test_menu_duplicate_sibling_key_asserts(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+
+    bool tripped = false;
+    nt_test_assert_armed = true;
+    if (setjmp(nt_test_assert_jmp) == 0) {
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "First");
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "Dup"); /* same key in the same level -> aliased id */
+        nt_ui_menu_end(&s_menu);
+        nt_ui_end(s_fx.ctx);
+    } else {
+        tripped = true;
+    }
+    nt_test_assert_armed = false;
+    TEST_ASSERT_TRUE_MESSAGE(tripped, "two sibling items sharing a key must trip the duplicate-sibling-key NT_ASSERT");
+}
+
+/* One frame: a section header (separator_text) sits between two leaves. Used to assert Down focus skips
+ * the header (it advances item_idx without recording a nav entry, exactly like a plain separator). */
+static void menu_im_frame_sep_text(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+    nt_pointer_t p = {.active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    (void)nt_ui_menu_item(&s_menu, KEY_NEW, "Top");
+    nt_ui_menu_separator_text(&s_menu, "Section");
+    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item(&s_menu, KEY_QUIT, "Bottom"));
+    nt_ui_menu_end(&s_menu);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A separator_text section header is non-interactive: it registers NO row id and Down focus skips it
+ *      (Top -> Bottom), exactly like a plain separator. ---- */
+static void test_menu_separator_text_non_interactive(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+
+    /* the header (index 1) never registers a row id -> its bbox is not found */
+    menu_im_frame_sep_text(&st, &style);
+    menu_im_frame_sep_text(&st, &style);
+    const nt_ui_bbox_t hdr = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_row_id(MENU_A, 0U, 1U));
+    TEST_ASSERT_FALSE_MESSAGE(hdr.found, "a separator_text header must not register an interactive row id");
+
+    /* Watch Bottom's inline return (keyboard, 1-frame latency). */
+    s_act_capture_id = nt_ui_menu_test_item_id(MENU_A, KEY_QUIT);
+    s_act_hit = false;
+
+    /* Down focuses Top, a second Down must SKIP the header and land on Bottom. */
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_im_frame_sep_text(&st, &style);
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_im_frame_sep_text(&st, &style);
+    menu_key(NT_KEY_ENTER);
+    menu_im_frame_sep_text(&st, &style);
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    menu_im_frame_sep_text(&st, &style);
+    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "Down must skip the section header (focus Top->Bottom); Bottom's inline return fires on Enter");
+}
+
+/* Drive a disabled item_ex row with a mouse click; report whether its inline return fired. Mirrors
+ * menu_item_click_activates but on the item_ex path with opts.enabled=false. */
+static bool menu_item_ex_disabled_click(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+    const uint32_t row_key = KEY_NEW;
+    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
+    bool activated = false;
+    for (int frame = 0; frame < 4; ++frame) {
+        const bool press = (frame == 2);
+        const bool release = (frame == 3);
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, row_id);
+        const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
+        const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
+        nt_pointer_t p = {.x = bx, .y = by, .active = true};
+        if (press && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_down = true;
+            p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+        } else if (release && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_released = true;
+        }
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+        if (nt_ui_menu_item_ex(&s_menu, row_key, "Disabled", (nt_ui_menu_item_opts_t){.enabled = false, .activatable = true})) {
+            activated = true;
+        }
+        nt_ui_menu_end(&s_menu);
+        nt_ui_end(s_fx.ctx);
+    }
+    return activated;
+}
+
+/* ---- A disabled item_ex row never activates on a mouse click and the chain stays open (the disabled
+ *      gate covers the item_ex path, not only item_begin). ---- */
+static void test_menu_item_ex_disabled_no_activate(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    const bool act = menu_item_ex_disabled_click(&st, &style);
+    TEST_ASSERT_FALSE_MESSAGE(act, "a disabled item_ex row must NOT activate on a click");
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "a disabled-row click must leave the chain open (no activation)");
+}
+
+/* One frame: a submenu parent declared via submenu_begin_ex (icon + caller-controlled enabled). The body
+ * declares one child leaf when the parent opens. Used to assert the icon gutter cell exists and a disabled
+ * parent never flies out. */
+static void menu_im_frame_submenu_ex(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, bool enabled) {
+    nt_pointer_t p = {.active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    nt_ui_menu_item_opts_t opts = nt_ui_menu_item_opts_defaults();
+    opts.icon = s_icon_ref;
+    opts.enabled = enabled;
+    if (nt_ui_menu_submenu_begin_ex(&s_menu, KEY_OPEN, "Parent", opts)) {
+        (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "Child");
+        nt_ui_menu_submenu_end(&s_menu);
+    }
+    nt_ui_menu_end(&s_menu);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- submenu_begin_ex honors opts.icon (the parent declares an icon gutter cell) and opts.enabled=false
+ *      (a disabled parent returns false / never flies out, even when the open chain points at it). ---- */
+static void test_menu_submenu_begin_ex_icon_disabled(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    style.icon_size = 20U;
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+
+    /* Enabled parent: two warm frames so the icon gutter cell (index 0) bakes. */
+    menu_im_frame_submenu_ex(&st, &style, true);
+    menu_im_frame_submenu_ex(&st, &style, true);
+    const nt_ui_bbox_t icon = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_icon_id(MENU_A, 0U, 0U));
+    TEST_ASSERT_TRUE_MESSAGE(icon.found, "submenu_begin_ex must declare the parent's icon gutter cell");
+
+    /* Force the open chain to point at the parent (depth-0 item 0), then redeclare it DISABLED: it must not
+     * fly out (the child panel never lays out) even though open_path targets it. */
+    nt_ui_menu_test_force_open_to(s_fx.ctx, MENU_A, 0U);
+    menu_im_frame_submenu_ex(&st, &style, false);
+    menu_im_frame_submenu_ex(&st, &style, false);
+    const nt_ui_bbox_t child_panel = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U));
+    TEST_ASSERT_FALSE_MESSAGE(child_panel.found, "a disabled submenu parent must NOT fly out (no child panel) even when open_path targets it");
+}
+
 /* ============================ rich-row shortcut + checkmark cells ============================ */
 
 /* Immediate frame: one rich row carrying a shortcut + selected check (Save), one plain row (Plain). The
@@ -1319,5 +1509,10 @@ int main(void) {
     RUN_TEST(test_menu_item_begin_disabled_never_activates);
     RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);
     RUN_TEST(test_menu_check_cell_when_selected);
+    RUN_TEST(test_menu_item_click_activates_leaf);
+    RUN_TEST(test_menu_duplicate_sibling_key_asserts);
+    RUN_TEST(test_menu_separator_text_non_interactive);
+    RUN_TEST(test_menu_item_ex_disabled_no_activate);
+    RUN_TEST(test_menu_submenu_begin_ex_icon_disabled);
     return UNITY_END();
 }
