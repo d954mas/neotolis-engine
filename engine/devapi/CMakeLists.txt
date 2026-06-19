@@ -41,28 +41,41 @@ if(NT_DEVAPI_GROUP_DISCOVERY)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_DISCOVERY=1)
 endif()
 
-# Input group: sources + NT_DEVAPI_GROUP_INPUT + NT_INPUT_AUTOMATION_ENABLED (PUBLIC, so the value
-# matches the consumer's nt_input) + nt_input dep.
-if(NT_DEVAPI_GROUP_INPUT)
-    target_sources(nt_devapi PRIVATE nt_devapi_input.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_INPUT=1)
+# The ui group delegates inject scheduling to the input group's single scheduler (one scheduler, one
+# cap <= the immediate buffer — so two sibling groups can never over-subscribe the 256-slot buffer).
+# That hard dependency is explicit: ui without input would link-fail on the reuse wrappers.
+if(NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_INPUT)
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT (ui.click/drag/scroll reuse the input group's inject scheduler).")
+endif()
+
+# NT_INPUT_AUTOMATION_ENABLED is driven by (input OR ui): both groups need nt_input's inject symbols
+# (input directly, ui via the input scheduler's reuse wrappers), so the value must be set once when
+# EITHER is on. PUBLIC so it matches the consumer's nt_input.
+if(NT_DEVAPI_GROUP_INPUT OR NT_DEVAPI_GROUP_UI)
     target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
     target_link_libraries(nt_devapi PRIVATE nt_input_interface)
 endif()
 
-# UI group (ui.tree/ui.element/ui.contexts): the L2 read veneer over nt_ui_probe_collect. Links the
-# HEADER-ONLY nt_ui_interface (not the heavy nt_ui impl chain — the exe picks nt_ui or nt_ui_stub,
-# exactly like nt_input_interface) + nt_input_interface (Plan 05's ui.click reuses inject) + PUBLIC
-# NT_INPUT_AUTOMATION_ENABLED so the value matches the consumer's nt_input + nt_window_interface for
-# the D-10 metadata (g_nt_window, resolves at exe link like the core group).
+# Input group: sources + NT_DEVAPI_GROUP_INPUT. (NT_INPUT_AUTOMATION_ENABLED + nt_input dep are set
+# by the OR block above, shared with the ui group.)
+if(NT_DEVAPI_GROUP_INPUT)
+    target_sources(nt_devapi PRIVATE nt_devapi_input.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_INPUT=1)
+endif()
+
+# UI group (ui.tree/ui.element/ui.contexts/ui.click/drag/scroll): the L2 read veneer over
+# nt_ui_probe_collect + write veneer that DELEGATES inject scheduling to the input group's single
+# scheduler. Links the HEADER-ONLY nt_ui_interface (not the heavy nt_ui impl chain — the exe picks
+# nt_ui or nt_ui_stub, exactly like nt_input_interface) + nt_window_interface for the D-10 metadata
+# (g_nt_window, resolves at exe link like the core group). NT_INPUT_AUTOMATION_ENABLED + the
+# nt_input dep are set by the (input OR ui) block above.
 if(NT_DEVAPI_GROUP_UI)
     target_sources(nt_devapi PRIVATE nt_devapi_ui.c)
     # PUBLIC: nt_devapi_ui_register_context (host-facing, D-15) is gated by NT_DEVAPI_GROUP_UI in the
     # public nt_devapi.h, so a consumer (the host) must see the same gate to call it. (The input group
     # has no host-facing registrar, hence its gate stays PRIVATE.)
     target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_GROUP_UI=1)
-    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
-    target_link_libraries(nt_devapi PRIVATE nt_input_interface nt_ui_interface nt_window_interface)
+    target_link_libraries(nt_devapi PRIVATE nt_ui_interface nt_window_interface)
 endif()
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).

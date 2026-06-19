@@ -2,13 +2,11 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "app/nt_app.h" /* g_nt_app.frame — the advance clock the ui schedule ticks on (like input). */
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
-#include "input/nt_input.h"          /* ui.click/drag/scroll write surface: the inject path. */
-#include "input/nt_input_internal.h" /* inject decls live in the INTERNAL header. */
-#include "ui/nt_ui.h"                /* nt_ui_probe_collect + the POD node + nt_ui_id + nt_ui_get_bbox. */
-#include "window/nt_window.h"        /* g_nt_window: the one coordinate-space metadata source (like core view). */
+#include "input/nt_input.h"   /* nt_inject_kind_t + the reserved mouse id; ui delegates to the input scheduler. */
+#include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id + nt_ui_get_bbox. */
+#include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
 /* L2 veneer over the L1 probe: range-check bot input -> bad_params, never assert. The host
    registers UI contexts by name; the engine keeps NO global ctx registry. */
@@ -43,138 +41,11 @@ void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
     s_ui_ctx_count++;
 }
 
-/* nt_devapi_ui_reset is defined after the schedule region; the decl in nt_devapi_internal.h
-   covers the earlier register-call use. */
 // #endregion
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
-}
-
-// #region devapi ui schedule
-/* The ui group owns its OWN frame scheduler, cloned from nt_devapi_input.c (per-group modularity —
-   no cross-group link dep on the input group's statics). The ONLY ui-vs-input delta is a
-   nt_ui_id->nt_ui_get_bbox resolve step in the handlers BEFORE these sched_* calls. ui.click/drag/
-   scroll enqueue the SAME low-level inject events as raw input (bot==human). */
-
-/* Links the two caps so a full schedule's release can never exceed the immediate inject buffer. */
-_Static_assert(NT_DEVAPI_UI_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "ui schedule must never release more than the immediate buffer can hold");
-
-typedef struct {
-    uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
-    uint8_t kind;              /* nt_inject_kind_t */
-    union {
-        struct {
-            uint32_t id;
-            float x, y, pressure;
-            uint8_t type;
-            uint8_t buttons_mask;
-        } pointer; /* down / move */
-        struct {
-            uint32_t id;
-        } pointer_up;
-        struct {
-            float dx, dy;
-        } wheel;
-    } u;
-} sched_entry_t;
-
-static sched_entry_t s_sched[NT_DEVAPI_UI_SCHED_MAX];
-static uint32_t s_sched_count;
-
-/* Whole-or-nothing reserve: a multi-event command (click=2, drag=N+2, scroll<=2) gets all N slots or
-   none, so a near-full schedule can never accept a DOWN and reject its UP. */
-static sched_entry_t *sched_reserve(uint32_t n) {
-    if (n > NT_DEVAPI_UI_SCHED_MAX - s_sched_count) {
-        return NULL;
-    }
-    sched_entry_t *first = &s_sched[s_sched_count];
-    s_sched_count += n;
-    return first;
-}
-
-static bool sched_can_reserve(uint32_t n) { return n <= NT_DEVAPI_UI_SCHED_MAX - s_sched_count; }
-
-static bool sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    if (e == NULL) {
-        return false;
-    }
-    e->frames_remaining = at_frame;
-    e->kind = (uint8_t)kind;
-    if (kind == NT_INJECT_POINTER_UP) {
-        e->u.pointer_up.id = id;
-    } else {
-        e->u.pointer.id = id;
-        e->u.pointer.x = x;
-        e->u.pointer.y = y;
-        e->u.pointer.pressure = pressure;
-        e->u.pointer.type = type;
-        e->u.pointer.buttons_mask = buttons_mask;
-    }
-    return true;
-}
-
-static bool sched_wheel(float dx, float dy, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    if (e == NULL) {
-        return false;
-    }
-    e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_WHEEL;
-    e->u.wheel.dx = dx;
-    e->u.wheel.dy = dy;
-    return true;
-}
-
-/* Release one due entry into the immediate inject buffer. false == engine invariant violation
-   (capacity preflighted + _Static_assert), so the caller asserts. */
-static bool sched_release_one(const sched_entry_t *e) {
-    switch ((nt_inject_kind_t)e->kind) {
-    case NT_INJECT_POINTER_DOWN:
-    case NT_INJECT_POINTER_MOVE:
-        return nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
-    case NT_INJECT_POINTER_UP:
-        return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
-    case NT_INJECT_WHEEL:
-        return nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
-    case NT_INJECT_KEY:
-    case NT_INJECT_POINTER_BUTTONS:
-    case NT_INJECT_CHAR:
-        break; /* the ui group never schedules these kinds. */
-    }
-    return false; /* unreachable: ui only enqueues pointer down/move/up + wheel. */
-}
-
-/* Release due entries in enqueue order (preserves bot event ordering); survivors decrement + compact. */
-static void sched_tick(void) {
-    uint32_t out = 0;
-    for (uint32_t i = 0; i < s_sched_count; i++) {
-        if (s_sched[i].frames_remaining == 0) {
-            bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
-            NT_ASSERT(ok);                            /* buffer >= schedule by _Static_assert; a drop is a build bug. */
-            (void)ok;
-            continue;
-        }
-        s_sched[i].frames_remaining--;
-        s_sched[out++] = s_sched[i]; /* survivor: decrement + compact down. */
-    }
-    s_sched_count = out;
-}
-
-/* Real sim-advance = g_nt_app.frame changed since last update. Seeded in reset so the first
-   post-reset tick doesn't fire spuriously (identical to nt_devapi_input_update). */
-static uint32_t s_last_frame;
-
-void nt_devapi_ui_update(void) {
-    bool advanced = (g_nt_app.frame != s_last_frame);
-    s_last_frame = g_nt_app.frame;
-    /* A frozen tick (pause / manual-idle) releases nothing: synthetic input holds until the sim
-       advances, so an injected edge can't be missed by a stalled update. */
-    if (advanced) {
-        sched_tick();
-    }
 }
 
 /* Clear the host-registered name->ctx* table. The HOST owns these registrations (registered ONCE at
@@ -187,15 +58,6 @@ static void clear_ui_ctx_table(void) {
     }
     s_ui_ctx_count = 0;
 }
-
-void nt_devapi_ui_reset(void) {
-    /* Client-disconnect reset: drop ONLY devapi-owned transient state (pending schedule + advance
-       clock). The host-owned context table survives reconnects (cleared at init, never here), and
-       applied input is game-owned (bot==human) so it is not released either. */
-    s_sched_count = 0;
-    s_last_frame = g_nt_app.frame;
-}
-// #endregion
 
 /* A bot float coordinate/delta: require a number whose double AND float-narrowed form are finite.
    A huge finite double (1e309 -> inf, or past FLT_MAX) would narrow to inf and poison hit-tests /
@@ -366,11 +228,12 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 
 // #region ui writes
 /* Drag-frame DoS cap: bounds the per-command move-point expansion (frames+2 schedule entries) so a
-   single ui.drag can't blow the schedule. Sized under the schedule cap with room for DOWN+UP. */
+   single ui.drag can't blow the schedule. Derived from the INPUT scheduler's cap (ui delegates there)
+   with room for DOWN+UP. */
 #ifndef NT_DEVAPI_UI_DRAG_FRAMES_MAX
-#define NT_DEVAPI_UI_DRAG_FRAMES_MAX (NT_DEVAPI_UI_SCHED_MAX - 2)
+#define NT_DEVAPI_UI_DRAG_FRAMES_MAX (NT_DEVAPI_INPUT_SCHED_MAX - 2)
 #endif
-_Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_UI_SCHED_MAX, "ui.drag frames+2 must fit the schedule");
+_Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
 
 /* Resolve a target field to a framebuffer-pixel center: EITHER a string id (nt_ui_id -> nt_ui_get_bbox,
    miss/empty -> bad_params, never assert) OR an {x,y} object (raw coords, isfinite-checked). The bbox
@@ -432,12 +295,12 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
             return false;
         }
     }
-    if (!sched_can_reserve(2U)) { /* whole-or-nothing preflight (see sched_reserve). */
+    if (!nt_devapi_input_sched_can_reserve(2U)) { /* whole-or-nothing preflight on the shared scheduler. */
         set_bad_params(err, "ui.click: inject schedule overflow");
         return false;
     }
-    sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
-    sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -465,12 +328,12 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
     if (dyj != NULL && !parse_finite_coord(dyj, "ui.scroll: dy must be a finite number", &dy, err)) {
         return false;
     }
-    if (!sched_can_reserve(2U)) { /* whole-or-nothing: MOVE to center + wheel together. */
+    if (!nt_devapi_input_sched_can_reserve(2U)) { /* whole-or-nothing: MOVE to center + wheel together. */
         set_bad_params(err, "ui.scroll: inject schedule overflow");
         return false;
     }
-    sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
-    sched_wheel(dx, dy, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, cx, cy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+    nt_devapi_input_sched_wheel(dx, dy, 0);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -508,19 +371,19 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
-    if (!sched_can_reserve(total)) { /* whole-or-nothing preflight (see sched_reserve). */
+    if (!nt_devapi_input_sched_can_reserve(total)) { /* whole-or-nothing preflight on the shared scheduler. */
         set_bad_params(err, "ui.drag: inject schedule overflow");
         return false;
     }
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
-    sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
     for (uint16_t i = 1; i <= frames; i++) {
         float t = (float)i / (float)frames; /* frames >= 1 here: a 0-frame drag emits no MOVE. */
         float mx = fx + ((tx - fx) * t);
         float my = fy + ((ty - fy) * t);
-        sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, i);
+        nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, i);
     }
-    sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
+    nt_devapi_input_sched_pointer(NT_INJECT_POINTER_UP, id, tx, ty, 0.0F, (uint8_t)NT_POINTER_MOUSE, 0, frames);
     devapi_add_number(result, "queued", (double)total);
     return true;
 }
@@ -590,11 +453,9 @@ _Static_assert(sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]) == sizeof(k_ui_handlers)
 
 void nt_devapi_register_ui(void) {
     clear_ui_ctx_table(); /* fresh host table at init (the host re-registers its ctx right after). */
-    nt_devapi_ui_reset(); /* fresh schedule + seeded advance clock. */
-    /* The only core coupling point: core/net call these generic hooks, never the group symbols.
-       The tick hook drives the ui group's OWN s_sched (ui.click/drag/scroll release on a real advance). */
-    nt_devapi_register_tick(nt_devapi_ui_update);
-    nt_devapi_register_reset(nt_devapi_ui_reset);
+    /* No tick/reset hook: ui.click/drag/scroll delegate scheduling to the input group's single
+       scheduler, drained by nt_devapi_input_update. The host-owned ctx table survives client
+       disconnects, so there is no ui-owned transient state to reset. */
     /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: NT_ASSERT compiles
        out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
     int n = (int)(sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]));

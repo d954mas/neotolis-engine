@@ -127,15 +127,29 @@ void nt_devapi_register_core(void);
 void nt_devapi_register_time(void);
 #endif
 
-/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
-   nt_devapi_init under the same compile gate; registers the group's commands + lifecycle hooks. */
-#ifdef NT_DEVAPI_GROUP_INPUT
+/* The single inject scheduler lives in the input group, but the ui group reuses it (one scheduler,
+   one cap <= the immediate buffer — so two sibling groups can never over-subscribe the buffer). Its
+   cap + the cross-group reuse wrappers are therefore visible when EITHER group is built. */
+#if defined(NT_DEVAPI_GROUP_INPUT) || defined(NT_DEVAPI_GROUP_UI)
+#include "input/nt_input.h" /* nt_inject_kind_t for the reuse-wrapper signature below. */
+
 /* Bounded BSS schedule cap (-D overridable). Lives here, not in nt_devapi_input.c, so the unit
-   tests derive schedule-fill sizes from the real cap. */
+   tests + the ui drag cap derive their sizes from the real cap. */
 #ifndef NT_DEVAPI_INPUT_SCHED_MAX
 #define NT_DEVAPI_INPUT_SCHED_MAX 256
 #endif
 
+/* Reuse surface for the ui group: it resolves coords then DELEGATES scheduling here, so there is one
+   scheduler on the immediate buffer. Whole-or-nothing: preflight can_reserve(N), then issue N
+   sched_* calls (single-threaded -> atomic). */
+bool nt_devapi_input_sched_can_reserve(uint32_t n);
+bool nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame);
+bool nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame);
+#endif
+
+/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
+   nt_devapi_init under the same compile gate; registers the group's commands + lifecycle hooks. */
+#ifdef NT_DEVAPI_GROUP_INPUT
 void nt_devapi_register_input(void);
 
 /* Per-tick schedule driver (the tick hook): on a real sim-advance releases due entries into the
@@ -148,24 +162,12 @@ void nt_devapi_input_reset(void);
 #endif
 
 /* Engine `ui` group registrar (per-group #ifdef). Defined in nt_devapi_ui.c, invoked from
-   nt_devapi_init under the same compile gate; registers the group's reads + writes + lifecycle hooks.
+   nt_devapi_init under the same compile gate; registers the group's reads + writes + reset hook.
+   ui.click/drag/scroll delegate scheduling to the input group's single scheduler (see the reuse
+   wrappers above) — the ui group registers NO tick hook of its own.
    (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
 #ifdef NT_DEVAPI_GROUP_UI
-/* Bounded BSS schedule cap for the ui group's OWN scheduler (-D overridable). Lives here so any
-   test can derive schedule-fill sizes from the real cap. */
-#ifndef NT_DEVAPI_UI_SCHED_MAX
-#define NT_DEVAPI_UI_SCHED_MAX 256
-#endif
-
 void nt_devapi_register_ui(void);
-
-/* Per-tick schedule driver (the tick hook): on a real sim-advance releases due ui.click/drag/scroll
-   entries into nt_input's immediate inject buffer (the SAME path input.* uses, bot==human). */
-void nt_devapi_ui_update(void);
-
-/* Reset hook: drops the devapi-owned pending schedule + advance clock on client disconnect. The
-   host-owned context name table is NOT cleared here (it survives reconnects; cleared at init). */
-void nt_devapi_ui_reset(void);
 #endif
 
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from

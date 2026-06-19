@@ -123,6 +123,17 @@ static bool sched_wheel(float dx, float dy, uint16_t at_frame) {
     return true;
 }
 
+/* Cross-group reuse wrappers (the ui group delegates here so there is ONE scheduler on the immediate
+   buffer — see nt_devapi_internal.h). Thin pass-throughs to the static scheduler; whole-or-nothing
+   semantics are the caller's (preflight can_reserve(N) then issue N sched_* calls, single-threaded). */
+bool nt_devapi_input_sched_can_reserve(uint32_t n) { return sched_can_reserve(n); }
+
+bool nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+    return sched_pointer(kind, id, x, y, pressure, type, buttons_mask, at_frame);
+}
+
+bool nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) { return sched_wheel(dx, dy, at_frame); }
+
 /* down@0 + up@hold (2 entries): the tap/click hold primitive. */
 static bool sched_tap(nt_key_t key, uint16_t hold_frames) {
     sched_entry_t *e = sched_reserve(2);

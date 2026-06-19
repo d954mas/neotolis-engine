@@ -637,6 +637,43 @@ static void test_input_gesture_single_point_applied_once(void) {
     TEST_ASSERT_TRUE(slot->dy >= -0.001F && slot->dy <= 0.001F);
 }
 
+/* ---- single unified scheduler: a FULL schedule drains in one tick without a buffer overflow ---- */
+
+/* Locks the inject-buffer over-subscription fix: there is ONE scheduler (the input group's), capped
+   <= the 256-slot immediate buffer, so filling it completely with frame-0-due entries and advancing
+   ONE tick releases ALL of them with no sched_tick trap (the buffer can always hold a full schedule).
+   The ui group now delegates to THIS scheduler, so two sibling groups can never over-subscribe the
+   buffer by construction. (The ui.drag-fills-schedule case needs real nt_ui -> deferred to the
+   upcoming test_devapi_ui target.) */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_full_drains_in_one_tick(void) {
+    nt_devapi_input_reset();                                                                                 /* clean schedule + seeded advance clock. */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
+    /* Fill the WHOLE schedule with NT_DEVAPI_INPUT_SCHED_MAX frame-0-due key-down entries. */
+    fill_schedule_leaving(0U);
+    /* One more 1-entry command must now overflow (schedule full) -> whole-or-nothing reject. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}"));
+    /* One advance releases ALL due entries into the 256-slot immediate buffer; sched_tick must NOT
+       trap (NT_ASSERT(ok)) — the single cap <= the buffer guarantees room for the whole schedule. */
+    advance();
+    /* All released + applied: the key set by fill_schedule_leaving (NT_KEY_A) is down, and the
+       schedule is now empty so a fresh 1-entry command succeeds again. */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}")));
+}
+
+/* Over-reserving the schedule is whole-or-nothing: a command that needs more entries than the cap
+   can ever fit is rejected as bad_params with NO partial inject (no orphan DOWN without its UP).
+   A full schedule + a 2-entry click proves the preflight rejects before writing anything. */
+static void test_sched_over_reserve_whole_or_nothing(void) {
+    nt_devapi_input_reset();
+    fill_schedule_leaving(1U); /* exactly 1 free slot */
+    /* A click needs 2 entries -> rejects whole; the 1 free slot must survive intact. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2}}"));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}"))); /* the free slot survived */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}"));      /* now full -> proves click wrote nothing */
+}
+
 /* ---- command.describe ---- */
 
 static void test_input_describe(void) {
@@ -717,6 +754,8 @@ int main(void) {
     RUN_TEST(test_input_button_move_branch_updates_mask);
     RUN_TEST(test_input_button_applies_at_pending_move_position);
     RUN_TEST(test_input_gesture_single_point_applied_once);
+    RUN_TEST(test_sched_full_drains_in_one_tick);
+    RUN_TEST(test_sched_over_reserve_whole_or_nothing);
     RUN_TEST(test_input_state_pop_text_drains_codepoints);
     RUN_TEST(test_input_state_registers);
     RUN_TEST(test_input_state_describe);
