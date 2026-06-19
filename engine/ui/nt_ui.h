@@ -293,11 +293,10 @@ const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32
 /* Returns false (out untouched) when the id is unregistered or has no recorded padding. */
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
 
-// #region probe (UITREE-01)
-/* Flat POD tree extraction for a bot / smoke-test. Clay-free by contract: no Clay type may
- * appear in the node struct or the collect signature (UITREE-01). id_string is COPIED into a
- * node-owned fixed-cap buffer on collect (the borrowed Clay pointer dies at the next
- * nt_ui_begin — spike SC3). DEBUG_TOOLS-gated; the OFF build collapses to a no-op stub. */
+// #region probe
+/* Flat POD tree extraction for a bot / smoke-test. Clay-free by contract: no Clay type may appear
+ * in the node struct or the collect signature. id_string is COPIED into a node-owned fixed-cap
+ * buffer on collect (the borrowed Clay pointer dies at the next nt_ui_begin). DEBUG_TOOLS-gated. */
 
 #ifndef NT_UI_PROBE_ID_CAP
 #define NT_UI_PROBE_ID_CAP 64 /* owned id_string copy cap incl. NUL */
@@ -320,18 +319,18 @@ typedef enum nt_ui_probe_role_t {
 } nt_ui_probe_role_t;
 
 /* Flat node. parent is emitted directly from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
- * children derive from the parent links. bounds = {x, y, w, h} framebuffer px (Y-up). Every node
- * carries its visible/enabled flags — collect emits ALL nodes incl. invisible/offscreen/disabled
- * so the bot decides what to filter (D-05). NO Clay types here (UITREE-01). */
+ * children derive from the parent links. bounds = {x, y, w, h} framebuffer px (Y-up). collect
+ * emits ALL nodes incl. invisible/offscreen/disabled so the bot decides what to filter. NO Clay
+ * types here. */
 #define NT_UI_PROBE_NO_PARENT 0U /* root nodes have id != 0, so 0 is an unambiguous "no parent" */
 
 typedef struct nt_ui_probe_node_t {
     uint32_t id;     /* Clay element id */
     uint32_t parent; /* parent id, or NT_UI_PROBE_NO_PARENT for a root */
     nt_ui_probe_role_t role;
-    char id_string[NT_UI_PROBE_ID_CAP]; /* owned copy, NUL-terminated (D-01/SC3) */
+    char id_string[NT_UI_PROBE_ID_CAP]; /* owned copy, NUL-terminated */
     char text[NT_UI_PROBE_TEXT_CAP];    /* own text content (text leaves only), NUL-terminated */
-    char label[NT_UI_PROBE_TEXT_CAP];   /* first text-child caption, distinct from text (D-07) */
+    char label[NT_UI_PROBE_TEXT_CAP];   /* first text-child caption, distinct from text */
     char role_name[NT_UI_PROBE_ID_CAP]; /* registered def->name when role==WIDGET, else "" */
     float bounds[4];                    /* x, y, w, h in framebuffer px (Y-up) */
     uint16_t id_string_len;
@@ -339,7 +338,7 @@ typedef struct nt_ui_probe_node_t {
     uint16_t label_len;
     uint16_t child_count; /* number of direct children emitted in this collect */
     bool visible;         /* !offscreen AND not ancestor-clipped AND composed opacity > threshold */
-    bool enabled;         /* per-id slot signal; unregistered -> true (D-02) */
+    bool enabled;         /* per-id slot signal; unregistered -> true */
 } nt_ui_probe_node_t;
 
 #if NT_UI_DEBUG_TOOLS

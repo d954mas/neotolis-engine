@@ -151,9 +151,8 @@ void nt_devapi_input_reset(void);
    nt_devapi_init under the same compile gate; registers the group's reads + writes + lifecycle hooks.
    (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
 #ifdef NT_DEVAPI_GROUP_UI
-/* Bounded BSS schedule cap for the ui group's OWN scheduler (-D overridable). Lives here, not in
-   nt_devapi_ui.c, so any test can derive schedule-fill sizes from the real cap (mirrors the input
-   group's NT_DEVAPI_INPUT_SCHED_MAX). */
+/* Bounded BSS schedule cap for the ui group's OWN scheduler (-D overridable). Lives here so any
+   test can derive schedule-fill sizes from the real cap. */
 #ifndef NT_DEVAPI_UI_SCHED_MAX
 #define NT_DEVAPI_UI_SCHED_MAX 256
 #endif
@@ -164,7 +163,8 @@ void nt_devapi_register_ui(void);
    entries into nt_input's immediate inject buffer (the SAME path input.* uses, bot==human). */
 void nt_devapi_ui_update(void);
 
-/* Reset hook: clears the devapi-owned host context name table + pending schedule (B-strict disconnect). */
+/* Reset hook: drops the devapi-owned pending schedule + advance clock on client disconnect. The
+   host-owned context name table is NOT cleared here (it survives reconnects; cleared at init). */
 void nt_devapi_ui_reset(void);
 #endif
 

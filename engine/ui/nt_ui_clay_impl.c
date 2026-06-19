@@ -684,12 +684,12 @@ static bool cdv_is_inspector_owned_id(uint32_t id) {
     return false;
 }
 
-// #region probe collect (UITREE-01)
+// #region probe collect
 #ifndef NT_UI_PROBE_OPACITY_MIN
-#define NT_UI_PROBE_OPACITY_MIN 0.01F /* composed opacity at/below this counts as not visible (D-03) */
+#define NT_UI_PROBE_OPACITY_MIN 0.01F /* composed opacity at/below this counts as not visible */
 #endif
 
-/* Bounded copy of a Clay-borrowed string into a node-owned NUL-terminated buffer (D-01/SC3).
+/* Bounded copy of a Clay-borrowed string into a node-owned NUL-terminated buffer.
  * Returns the stored length (may be truncated to cap-1). */
 static uint16_t probe_copy_string(char *dst, uint32_t cap, const char *src, int32_t src_len) {
     if (cap == 0U) {
@@ -814,10 +814,10 @@ static nt_ui_probe_role_t probe_role_from_mask(uint8_t config_mask) {
 }
 
 /* Flat POD tree collect. Reuses the collect_tree_rows pre-order DFS but emits `parent` directly
- * from the DFS stack (D-06), copies id_string/text on collect (SC3), resolves role from the
- * widget registry with a config-mask fallback (D-04), reads the always-compiled enabled signal
- * (D-02), and computes visible from offscreen + ancestor-clip intersection + composed opacity
- * (D-03). EMITS every node incl. invisible/offscreen/disabled (D-05). Excludes inspector chrome. */
+ * from the DFS stack, copies id_string/text on collect, resolves role from the widget registry
+ * with a config-mask fallback, reads the always-compiled enabled signal, and computes visible
+ * from offscreen + ancestor-clip intersection + composed opacity. EMITS every node incl.
+ * invisible/offscreen/disabled. Excludes inspector chrome. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
     NT_ASSERT(ctx != NULL && "nt_ui_probe_collect: ctx must be non-NULL");
@@ -977,7 +977,7 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
                         }
                     }
 
-                    /* Label = first text-child caption on the enclosing emitted parent (D-07). */
+                    /* Label = first text-child caption on the enclosing emitted parent. */
                     if (is_text && top > 0 && stack[top - 1].out_index >= 0) {
                         nt_ui_probe_node_t *parent_node = &out[stack[top - 1].out_index];
                         if (parent_node->label_len == 0U) {

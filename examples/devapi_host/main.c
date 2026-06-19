@@ -58,26 +58,24 @@ static uint16_t resolve_port(void) {
     return (uint16_t)v;
 }
 
-/* A small probe-able "hud" UI context (no renderer/assets — just layout + the registered-widget slot,
-   which is all nt_ui_probe_collect / nt_ui_get_bbox need; the host never calls nt_ui_walk). Two plain
-   CLAY boxes with KNOWN developer string ids; "hud_btn" carries a togglable enabled flag the UAT
-   observes via ui.element after a synthetic ui.click resolves -> injects -> the sim advances. */
-/* Sized to clear nt_ui_min_arena_size for the default max_elements desc (the create asserts on a
-   too-small arena). 2 MB matches the ui example hosts; the hud tree itself is tiny. */
+/* A small probe-able "hud" UI context — asset-free (layout + the registered-widget slot only; the
+   host never calls nt_ui_walk). "hud_btn" carries a togglable enabled flag a synthetic ui.click
+   flips, observable via ui.element. */
+/* Sized to clear nt_ui_min_arena_size for the default desc (create asserts on a too-small arena). */
 #define HUD_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
 static nt_ui_context_t *s_hud_ctx;
 static bool s_hud_btn_on = true; /* the observable: a synthetic click on "hud_btn" toggles it. */
 
-/* Declare the hud tree + step its interaction once per frame. A click on "hud_btn" (real device OR a
-   synthetic ui.click — bot==human) flips s_hud_btn_on; the widget is re-registered every frame with
-   enabled=s_hud_btn_on so the toggle surfaces through the probe's `enabled` field. */
+/* Declare the hud tree once per frame. A click on "hud_btn" (real device or a synthetic ui.click,
+   bot==human) flips s_hud_btn_on; the widget re-registers each frame with enabled=s_hud_btn_on so
+   the toggle surfaces through the probe's `enabled` field. */
 static void declare_hud(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
     /* Feed ALL pointer slots, not just [0]: a synthetic ui.click lands in the first FREE slot, which is
-       NOT 0 when a real mouse already holds slot 0. Inactive slots are zeroed (origin, no buttons) so
-       they never spuriously hit a widget; this makes the hud bot-drivable regardless of a live device. */
+       NOT 0 when a real mouse already holds slot 0. Deactivated slots keep stale x/y but their button
+       edge bits are cleared, so they fire no buttons and never spuriously hit a widget. */
     nt_ui_begin(s_hud_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
     CLAY({.id = CLAY_ID("hud_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(20), .childGap = 12}}) {
         CLAY({.id = CLAY_ID("hud_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}
@@ -119,7 +117,7 @@ static void frame(void) {
 
     /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
        interaction step. nt_devapi's ui.tree/ui.element read the LAST completed frame — exactly this
-       nt_ui_end's baked tables (D-14). Scratch is reset each frame for the per-element CLAY data. */
+       nt_ui_end's baked tables. Scratch is reset each frame for the per-element CLAY data. */
     nt_mem_scratch_reset();
     declare_hud();
 
@@ -174,7 +172,7 @@ int main(void) {
 
     /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
        self-contained (no gfx/font). The host registers only the CTX — the ui group's commands
-       self-register inside nt_devapi_register_ui under the gate (D-15). */
+       self-register inside nt_devapi_register_ui under the gate. */
     nt_mem_scratch_init((size_t)64U * 1024U);
     nt_ui_module_init();
     const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();

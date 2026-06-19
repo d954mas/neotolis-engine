@@ -5,18 +5,18 @@
 #include "app/nt_app.h" /* g_nt_app.frame — the advance clock the ui schedule ticks on (like input). */
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
-#include "input/nt_input.h"          /* ui.click/drag/scroll write surface: the Phase-66 inject path. */
-#include "input/nt_input_internal.h" /* inject decls live in the INTERNAL header (CORRECTION-3). */
+#include "input/nt_input.h"          /* ui.click/drag/scroll write surface: the inject path. */
+#include "input/nt_input_internal.h" /* inject decls live in the INTERNAL header. */
 #include "ui/nt_ui.h"                /* nt_ui_probe_collect + the POD node + nt_ui_id + nt_ui_get_bbox. */
-#include "window/nt_window.h"        /* g_nt_window: the one D-10 metadata source (like core view). */
+#include "window/nt_window.h"        /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
 /* L2 veneer over the L1 probe: range-check bot input -> bad_params, never assert. The host
-   registers UI contexts by name (D-15); the engine keeps NO global ctx registry. */
+   registers UI contexts by name; the engine keeps NO global ctx registry. */
 
 #ifdef NT_DEVAPI_GROUP_UI
 
 // #region ui context name table
-/* Host-registered name -> ctx* table (D-15). Trusted in-process host calls may assert; bot input
+/* Host-registered name -> ctx* table. Trusted in-process host calls may assert; bot input
    that misses the table is always bad_params. */
 #ifndef NT_DEVAPI_UI_CONTEXT_MAX
 #define NT_DEVAPI_UI_CONTEXT_MAX 4 /* cap = discretion */
@@ -28,8 +28,8 @@ static struct {
 } s_ui_ctx[NT_DEVAPI_UI_CONTEXT_MAX];
 static uint32_t s_ui_ctx_count;
 
-/* The NT_ASSERT(x && "msg") guards inflate the measured complexity past the 25 threshold; the body
-   is a flat append + dup scan. Matches the input-group big-handler NOLINT convention. */
+/* The NT_ASSERT(x && "msg") guards inflate measured complexity past the 25 threshold; the body
+   is a flat append + dup scan. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
     NT_ASSERT(name != NULL && "ui: context name must be non-NULL");
@@ -43,8 +43,8 @@ void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
     s_ui_ctx_count++;
 }
 
-/* nt_devapi_ui_reset is defined after the schedule region (it clears both the name table AND the
-   schedule statics); the decl in nt_devapi_internal.h covers the earlier register-call use. */
+/* nt_devapi_ui_reset is defined after the schedule region; the decl in nt_devapi_internal.h
+   covers the earlier register-call use. */
 // #endregion
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
@@ -56,7 +56,7 @@ static void set_bad_params(nt_devapi_error *err, const char *message) {
 /* The ui group owns its OWN frame scheduler, cloned from nt_devapi_input.c (per-group modularity —
    no cross-group link dep on the input group's statics). The ONLY ui-vs-input delta is a
    nt_ui_id->nt_ui_get_bbox resolve step in the handlers BEFORE these sched_* calls. ui.click/drag/
-   scroll enqueue the SAME low-level inject events as raw input (D-12/D-13, bot==human). */
+   scroll enqueue the SAME low-level inject events as raw input (bot==human). */
 
 /* Links the two caps so a full schedule's release can never exceed the immediate inject buffer. */
 _Static_assert(NT_DEVAPI_UI_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "ui schedule must never release more than the immediate buffer can hold");
@@ -84,7 +84,7 @@ static sched_entry_t s_sched[NT_DEVAPI_UI_SCHED_MAX];
 static uint32_t s_sched_count;
 
 /* Whole-or-nothing reserve: a multi-event command (click=2, drag=N+2, scroll<=2) gets all N slots or
-   none, so a near-full schedule can never accept a DOWN and reject its UP (Phase-66 CR-01). */
+   none, so a near-full schedule can never accept a DOWN and reject its UP. */
 static sched_entry_t *sched_reserve(uint32_t n) {
     if (n > NT_DEVAPI_UI_SCHED_MAX - s_sched_count) {
         return NULL;
@@ -189,10 +189,9 @@ static void clear_ui_ctx_table(void) {
 }
 
 void nt_devapi_ui_reset(void) {
-    /* The client-disconnect reset hook: drop ONLY devapi-owned TRANSIENT state (the pending schedule +
-       advance clock). The host-registered context table is HOST-owned and survives reconnects — it is
-       cleared at init (clear_ui_ctx_table in nt_devapi_register_ui), never here. Applied input is
-       game-owned (bot==human) so it is NOT released either, mirroring nt_devapi_input_reset. */
+    /* Client-disconnect reset: drop ONLY devapi-owned transient state (pending schedule + advance
+       clock). The host-owned context table survives reconnects (cleared at init, never here), and
+       applied input is game-owned (bot==human) so it is not released either. */
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame;
 }
@@ -230,7 +229,7 @@ static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, n
 }
 
 /* Resolve the target ctx from an optional `ctx` string param. Present -> table lookup (miss =
-   bad_params, NEVER assert on bot input, D-15). Absent -> the sole/first context. Empty table ->
+   bad_params, NEVER assert on bot input). Absent -> the sole/first context. Empty table ->
    bad_params. Returns NULL on any failure (err is set). */
 static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
     if (s_ui_ctx_count == 0) {
@@ -259,7 +258,7 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
    dev tool, and keeps the handler off the stack / out of the hot path. */
 static nt_ui_probe_node_t s_probe_nodes[NT_UI_PROBE_MAX_NODES];
 
-/* The top-level D-10 coordinate-space metadata, sourced like core `view` (one canonical g_nt_window
+/* The top-level coordinate-space metadata, sourced like core `view` (one canonical g_nt_window
    read, no ad-hoc dims elsewhere). projection reflects the ctx's 2D-affine vs 3D-raycast mode. */
 static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
     devapi_add_string(result, "space", "framebuffer");
@@ -270,7 +269,7 @@ static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
 }
 
 /* Serialize one probe node into a fresh JSON object. bounds = {x,y,w,h} framebuffer px (Y-up, the
-   L1 convention — any Phase-66 top-left flip is the WRITE-side concern, not this read). */
+   L1 convention — any top-left flip is the WRITE-side concern, not this read). */
 static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
     cJSON *obj = cJSON_CreateObject();
     NT_ASSERT(obj != NULL); /* OOM traps fail-early (matches devapi_add_*). */
@@ -293,8 +292,8 @@ static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
     return obj;
 }
 
-/* ui.tree: IMMEDIATE read (D-14) of the last completed frame's tree. Emits ALL nodes incl.
-   invisible/offscreen/disabled carrying their flags (D-05 — the bot filters, not the engine). */
+/* ui.tree: IMMEDIATE read of the last completed frame's tree. Emits ALL nodes incl.
+   invisible/offscreen/disabled carrying their flags (the bot filters, not the engine). */
 static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
@@ -314,9 +313,8 @@ static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err
     return true;
 }
 
-/* ui.element: one node resolved by developer string id (D-11). collect-then-select so the returned
-   node keeps its parent/label/children consistent (Open-Q3). Unknown/stale id -> bad_params, never
-   assert (D-11). */
+/* ui.element: one node resolved by developer string id. collect-then-select so the returned
+   node keeps its parent/label/children consistent. Unknown/stale id -> bad_params, never assert. */
 static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *jid = cJSON_GetObjectItemCaseSensitive(params, "id");
@@ -344,7 +342,7 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
     return false;
 }
 
-/* ui.contexts: the host-registered context names (D-15). */
+/* ui.contexts: the host-registered context names. */
 static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -370,12 +368,11 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 #endif
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_UI_SCHED_MAX, "ui.drag frames+2 must fit the schedule");
 
-/* Resolve a target field to a framebuffer-pixel center. The field is EITHER a string id (D-11:
-   nt_ui_id -> nt_ui_get_bbox, miss/empty -> bad_params, never assert) OR an {x,y} object (raw coords,
-   isfinite-checked). The bbox center is in Clay layout space (Y-down, top-left) — the SAME space the
-   real pointer device feeds nt_ui_begin, so it is fed to the inject path as-is (no Y-flip: get_bbox is
-   NOT the GL-Y-up probe convention; both the read-back bbox here and the injected pointer share Clay's
-   layout space, so they agree). `key` names the field ("id"/"from"/"to") for the error messages. */
+/* Resolve a target field to a framebuffer-pixel center: EITHER a string id (nt_ui_id -> nt_ui_get_bbox,
+   miss/empty -> bad_params, never assert) OR an {x,y} object (raw coords, isfinite-checked). The bbox
+   center is in Clay layout space (Y-down, top-left) — the SAME space the real pointer feeds nt_ui_begin,
+   so it goes to the inject path as-is with no Y-flip (NOT the GL-Y-up probe convention). `key` names
+   the field ("id"/"from"/"to") for the error messages. */
 static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t *ctx, float *out_x, float *out_y, nt_devapi_error *err) {
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
     if (cJSON_IsString(jt)) {
@@ -406,7 +403,7 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
 }
 
 /* ui.click: resolve id|{x,y} -> bbox center px -> DOWN@0 + UP@hold via the SAME inject path as
-   input.click (reserved synthetic mouse id 0x10000000). Fire-and-forget (D-14); the bot advances with
+   input.click (reserved synthetic mouse id 0x10000000). Fire-and-forget; the bot advances with
    frame.wait/time.step to apply. Whole-or-nothing preflight: reserve both entries or reject (no DOWN
    without its UP). */
 static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -441,8 +438,8 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
     return true;
 }
 
-/* ui.scroll: resolve id|{x,y} center -> MOVE there + wheel(dx,dy) notches via the Phase-66 inject
-   path (reuse the positioned input.wheel form). Whole-or-nothing: MOVE + wheel reserved together. */
+/* ui.scroll: resolve id|{x,y} center -> MOVE there + wheel(dx,dy) notches via the inject path
+   (reuse the positioned input.wheel form). Whole-or-nothing: MOVE + wheel reserved together. */
 static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
@@ -475,8 +472,8 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
 }
 
 /* ui.drag: resolve `from` AND `to` (id|{x,y}) -> DOWN@from + `frames` explicit interpolated MOVE
-   points (the handler expands them — NO engine-side interpolation owner, Phase-66 D-10) + UP@to.
-   frames CAPPED (DoS guard); whole-or-nothing preflight reserves DOWN + frames moves + UP up front. */
+   points (the handler expands them — NO engine-side interpolation owner) + UP@to. frames CAPPED
+   (DoS guard); whole-or-nothing preflight reserves DOWN + frames moves + UP up front. */
 static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
