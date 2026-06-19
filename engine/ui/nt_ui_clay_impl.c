@@ -707,6 +707,101 @@ static uint16_t probe_copy_string(char *dst, uint32_t cap, const char *src, int3
     return (uint16_t)n;
 }
 
+/* Column-major mat4 × vec4 (mirror of nt_ui.c's static-inline helper; that one is file-local). */
+static void probe_mat4_mul_vec4(const float m[16], const float v[4], float out[4]) {
+    out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
+    out[1] = (m[1] * v[0]) + (m[5] * v[1]) + (m[9] * v[2]) + (m[13] * v[3]);
+    out[2] = (m[2] * v[0]) + (m[6] * v[1]) + (m[10] * v[2]) + (m[14] * v[3]);
+    out[3] = (m[3] * v[0]) + (m[7] * v[1]) + (m[11] * v[2]) + (m[15] * v[3]);
+}
+
+/* Returns true if the element has an identity 2D-affine subset (no rotation/scale/translation). */
+static bool probe_xform_is_identity_2d(const float m[16]) { return (m[0] == 1.0F) && (m[4] == 0.0F) && (m[1] == 0.0F) && (m[5] == 1.0F) && (m[12] == 0.0F) && (m[13] == 0.0F); }
+
+/* Min/max accumulator over the 4 projected corners → bounds = {x, y, w, h}. */
+typedef struct {
+    float minx, miny, maxx, maxy;
+} probe_aabb_t;
+
+static void probe_aabb_add(probe_aabb_t *a, uint32_t k, float px, float py) {
+    if (k == 0U) {
+        a->minx = a->maxx = px;
+        a->miny = a->maxy = py;
+        return;
+    }
+    a->minx = (px < a->minx) ? px : a->minx;
+    a->maxx = (px > a->maxx) ? px : a->maxx;
+    a->miny = (py < a->miny) ? py : a->miny;
+    a->maxy = (py > a->maxy) ? py : a->maxy;
+}
+
+static void probe_aabb_store(const probe_aabb_t *a, float bounds[4]) {
+    bounds[0] = a->minx;
+    bounds[1] = a->miny;
+    bounds[2] = a->maxx - a->minx;
+    bounds[3] = a->maxy - a->miny;
+}
+
+/* 2D ctx bounds: identity fast-path keeps the trivial Y-flip; transformed elements project the 4
+ * Clay corners through the 2D-affine subset of tree_baked.m (then the helper's GL-Y-up flip). */
+static void probe_fill_bounds_2d(const float m[16], float vh, const float corners[4][2], float bx, float by, float bw, float bh, float bounds[4]) {
+    if (probe_xform_is_identity_2d(m)) {
+        bounds[0] = bx;
+        bounds[1] = vh - by - bh; /* GL Y-up top-left */
+        bounds[2] = bw;
+        bounds[3] = bh;
+        return;
+    }
+    probe_aabb_t a = {0};
+    for (uint32_t k = 0; k < 4U; ++k) {
+        float px = 0.0F;
+        float py = 0.0F;
+        nt_ui_internal_project_layout_to_world(m, 0.0F, vh, corners[k][0], corners[k][1], &px, &py);
+        probe_aabb_add(&a, k, px, py);
+    }
+    probe_aabb_store(&a, bounds);
+}
+
+/* 3D ctx bounds: corner -> world (tree_baked.m) -> clip (view_proj) -> NDC -> framebuffer px (GL
+ * Y-up, no extra flip; ortho-equivalent to the 2D path). Returns false if any corner is behind the
+ * camera (clip[3] <= 0) — caller flags visible=false and the sentinel zero rect avoids a bad divide. */
+static bool probe_fill_bounds_3d(const float world_m[16], const float view_proj[16], float vw, float vh, const float corners[4][2], float bounds[4]) {
+    probe_aabb_t a = {0};
+    for (uint32_t k = 0; k < 4U; ++k) {
+        const float local[4] = {corners[k][0], corners[k][1], 0.0F, 1.0F};
+        float world[4];
+        float clip[4];
+        probe_mat4_mul_vec4(world_m, local, world);
+        probe_mat4_mul_vec4(view_proj, world, clip);
+        if (clip[3] <= 0.0F) {
+            bounds[0] = 0.0F;
+            bounds[1] = 0.0F;
+            bounds[2] = 0.0F;
+            bounds[3] = 0.0F;
+            return false;
+        }
+        const float px = (((clip[0] / clip[3]) * 0.5F) + 0.5F) * vw;
+        const float py = (((clip[1] / clip[3]) * 0.5F) + 0.5F) * vh;
+        probe_aabb_add(&a, k, px, py);
+    }
+    probe_aabb_store(&a, bounds);
+    return true;
+}
+
+/* Fills bounds (GL-Y-up framebuffer px) as the AABB of the element's 4 projected layout corners.
+ * Returns false only for a behind-camera 3D corner (caller marks the node not visible). */
+static bool probe_fill_bounds(const nt_ui_context_t *ctx, int32_t elem_idx, float bx, float by, float bw, float bh, float bounds[4]) {
+    const float vw = nt_ui_clay_priv_layout_width(ctx->clay);
+    const float vh = nt_ui_clay_priv_layout_height(ctx->clay);
+    const float corners[4][2] = {{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}};
+    const float *m = ctx->tree_baked[elem_idx].m;
+    if (!ctx->use_raycast_input) {
+        probe_fill_bounds_2d(m, vh, corners, bx, by, bw, bh, bounds);
+        return true;
+    }
+    return probe_fill_bounds_3d(m, ctx->view_proj, vw, vh, corners, bounds);
+}
+
 /* Coarse role for an unregistered, non-text element (text leaves resolve to ROLE_TEXT earlier). */
 static nt_ui_probe_role_t probe_role_from_mask(uint8_t config_mask) {
     if ((config_mask & (1U << 3U)) != 0U) { /* Image */
@@ -809,12 +904,12 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
                         bh = item->boundingBox.height;
                         offscreen = Clay__ElementIsOffscreen(&item->boundingBox);
                     }
-                    /* Trivial Y-flip for plain 2D; the 2D-affine + 3D projector land in Plan 03. */
-                    const float vh = nt_ui_clay_priv_layout_height(ctx->clay);
-                    node->bounds[0] = bx;
-                    node->bounds[1] = vh - by - bh; /* fb Y-up top-left */
-                    node->bounds[2] = bw;
-                    node->bounds[3] = bh;
+                    /* Bounds = AABB of the 4 projected corners (2D-affine for 2D ctx, CPU
+                     * corner->NDC->px for 3D ctx). bounds_ok=false flags a behind-camera corner. */
+                    bool bounds_ok = true;
+                    if (item != NULL && stack[top].elem_idx >= 0 && stack[top].elem_idx < baked_count) {
+                        bounds_ok = probe_fill_bounds(ctx, stack[top].elem_idx, bx, by, bw, bh, node->bounds);
+                    }
 
                     Clay_String idStr = ctx->clay->layoutElementIdStrings.internalArray[stack[top].elem_idx];
                     node->id_string_len = probe_copy_string(node->id_string, NT_UI_PROBE_ID_CAP, idStr.chars, idStr.length);
@@ -838,8 +933,9 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
 
                     node->enabled = nt_ui_internal_widget_enabled(ctx, el->id);
 
-                    /* visible = !offscreen AND not clipped out by an ancestor clip AND opacity > min. */
-                    bool visible = !offscreen;
+                    /* visible = on-projector (3D behind-camera flags false) AND !offscreen AND not
+                     * clipped out by an ancestor clip AND opacity > min. */
+                    bool visible = bounds_ok && !offscreen;
                     if (visible && stack[top].clip_valid && item != NULL) {
                         const float ix0 = (bx > stack[top].clip_x) ? bx : stack[top].clip_x;
                         const float iy0 = (by > stack[top].clip_y) ? by : stack[top].clip_y;
