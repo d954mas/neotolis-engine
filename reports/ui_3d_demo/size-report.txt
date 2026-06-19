@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: b394bf4
+# Commit: 8ec758b
 
 ## WASM Section Sizes
 

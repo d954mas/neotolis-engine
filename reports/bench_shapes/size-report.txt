@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: b394bf4
+# Commit: 8ec758b
 
 ## WASM Section Sizes
 
@@ -66,12 +66,12 @@ Module                         Size
 libnt_app.a                 2418 B
 libnt_core.a                2422 B
 libnt_gfx.a                54562 B
-libnt_input.a              18288 B
+libnt_input.a              18370 B
 libnt_log.a                10404 B
 libnt_shape_renderer.a   1140902 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1232936 B
+TOTAL (linked)           1233018 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            2370 B
@@ -80,6 +80,7 @@ libnt_basisu_transcoder.a 1329370 B
 libnt_clipboard.a           6578 B
 libnt_clipboard_stub.a       738 B
 libnt_comp_storage.a        1930 B
+libnt_debug_overlay.a       5896 B
 libnt_drawable_comp.a       4214 B
 libnt_entity.a              3076 B
 libnt_font.a              198350 B
@@ -89,7 +90,7 @@ libnt_gfx_stub.a           31234 B
 libnt_hash.a                4028 B
 libnt_http.a                5984 B
 libnt_http_stub.a           3210 B
-libnt_input_stub.a         11918 B
+libnt_input_stub.a         22180 B
 libnt_log_stub.a             544 B
 libnt_material.a            4338 B
 libnt_material_comp.a       1992 B
@@ -102,7 +103,6 @@ libnt_resource.a          186766 B
 libnt_sort.a                 366 B
 libnt_sprite_comp.a         8892 B
 libnt_sprite_renderer.a   444554 B
-libnt_stats.a               5634 B
 libnt_text_renderer.a    1236522 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4696 B

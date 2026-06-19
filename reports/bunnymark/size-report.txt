@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: b394bf4
+# Commit: 8ec758b
 
 ## WASM Section Sizes
 
@@ -15,9 +15,9 @@ Export                83 B
 Elem                 174 B
 Code              642283 B
 Data              233579 B
-Custom             37065 B
+Custom             37073 B
 ---------------- ----------
-TOTAL             914707 B
+TOTAL             914715 B
 
 ## Top 30 Functions by Size
 
@@ -80,14 +80,15 @@ libnt_clipboard.a           6578 B
 libnt_clipboard_stub.a       738 B
 libnt_comp_storage.a        1930 B
 libnt_core.a                2422 B
+libnt_debug_overlay.a       5896 B
 libnt_drawable_comp.a       4214 B
 libnt_entity.a              3076 B
 libnt_font.a              198350 B
 libnt_fs_stub.a             2620 B
 libnt_gfx_stub.a           31234 B
 libnt_hash.a                4028 B
-libnt_input.a              18288 B
-libnt_input_stub.a         11918 B
+libnt_input.a              18370 B
+libnt_input_stub.a         22180 B
 libnt_log_stub.a             544 B
 libnt_material.a            4338 B
 libnt_material_comp.a       1992 B
@@ -101,7 +102,6 @@ libnt_shape_renderer.a   1140902 B
 libnt_sort.a                 366 B
 libnt_sprite_comp.a         8892 B
 libnt_sprite_renderer.a   444554 B
-libnt_stats.a               5634 B
 libnt_text_renderer.a    1236522 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4696 B
