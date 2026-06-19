@@ -177,12 +177,13 @@ void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* Event kinds applied through the immediate inject buffer (drained every poll). */
 typedef enum {
-    NT_INJECT_KEY = 0,      /* key down/up */
-    NT_INJECT_POINTER_DOWN, /* pointer slot create/press */
-    NT_INJECT_POINTER_MOVE, /* pointer move */
-    NT_INJECT_POINTER_UP,   /* pointer release + deactivate-pending */
-    NT_INJECT_WHEEL,        /* mouse slot only */
-    NT_INJECT_CHAR,         /* codepoint into the char ring */
+    NT_INJECT_KEY = 0,         /* key down/up */
+    NT_INJECT_POINTER_DOWN,    /* pointer slot create/press */
+    NT_INJECT_POINTER_MOVE,    /* pointer move */
+    NT_INJECT_POINTER_UP,      /* pointer release + deactivate-pending */
+    NT_INJECT_POINTER_BUTTONS, /* set button mask at the slot's CURRENT position (no move, no baked x/y) */
+    NT_INJECT_WHEEL,           /* mouse slot only */
+    NT_INJECT_CHAR,            /* codepoint into the char ring */
 } nt_inject_kind_t;
 
 /* Bounded BSS immediate inject buffer cap (-D overridable, like NT_DEVAPI_MAX_DEFERRED). */

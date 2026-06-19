@@ -51,6 +51,10 @@ typedef struct {
             uint32_t id;
         } pointer_up;
         struct {
+            uint32_t id;
+            uint8_t buttons_mask;
+        } buttons; /* set mask at the slot's current position */
+        struct {
             float dx, dy;
         } wheel;
         struct {
@@ -389,6 +393,17 @@ void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_
     nt_input_pointer_move_apply(id, x, y, pressure, type, buttons_mask);
 }
 
+/* Apply a button mask on slot `id` at its CURRENT position — no move, no delta, no baked x/y. If the
+   slot does not exist (no prior pointer), create it at (0,0) as a mouse so the button still lands. */
+static void nt_input_pointer_buttons_apply(uint32_t id, uint8_t buttons_mask) {
+    nt_pointer_t *ptr = find_pointer_by_id(id);
+    if (ptr == NULL || ptr->deactivate_pending) {
+        nt_input_pointer_down_apply(id, 0.0F, 0.0F, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons_mask);
+        return;
+    }
+    apply_buttons_mask(ptr, buttons_mask);
+}
+
 static void nt_input_pointer_up_apply(uint32_t id) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     if (ptr == NULL) {
@@ -508,6 +523,17 @@ bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float 
     return true;
 }
 
+bool nt_input_inject_buttons(uint32_t id, uint8_t buttons_mask) {
+    nt_inject_event_t *e = inject_reserve(1);
+    if (e == NULL) {
+        return false;
+    }
+    e->kind = NT_INJECT_POINTER_BUTTONS;
+    e->u.buttons.id = id;
+    e->u.buttons.buttons_mask = buttons_mask;
+    return true;
+}
+
 bool nt_input_inject_wheel(float dx, float dy) {
     nt_inject_event_t *e = inject_reserve(1);
     if (e == NULL) {
@@ -555,6 +581,9 @@ static void inject_apply_one(const nt_inject_event_t *e) {
         break;
     case NT_INJECT_POINTER_UP:
         nt_input_pointer_up_apply(e->u.pointer_up.id);
+        break;
+    case NT_INJECT_POINTER_BUTTONS:
+        nt_input_pointer_buttons_apply(e->u.buttons.id, e->u.buttons.buttons_mask);
         break;
     case NT_INJECT_WHEEL:
         nt_input_wheel_apply(e->u.wheel.dx, e->u.wheel.dy);

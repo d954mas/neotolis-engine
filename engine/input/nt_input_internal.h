@@ -29,6 +29,11 @@ void nt_input_set_player_enabled(bool enabled);
 #if NT_INPUT_INJECT_ENABLED
 bool nt_input_inject_key(nt_key_t key, bool down);
 bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
+/* Set the button mask on slot `id` at its CURRENT polled position when this applies (apply-time, in
+   schedule order) — never moves the pointer and bakes no x/y. If the slot does not exist yet at apply
+   time it is created at (0,0) (no prior pointer). Lets input.button respect a pending input.move
+   queued ahead of it instead of baking a stale submit-time position. */
+bool nt_input_inject_buttons(uint32_t id, uint8_t buttons_mask);
 bool nt_input_inject_wheel(float dx, float dy);
 bool nt_input_inject_text(const uint32_t *cps, uint32_t n);
 #endif
