@@ -574,7 +574,7 @@ static void menu_begin_present_only(nt_ui_context_t *ctx, uint32_t menu_id, nt_u
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (one open/closed branch)
-void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+void nt_ui_menu_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_begin: call between nt_ui_begin/end");
     NT_ASSERT(menu_id != 0U && st != NULL && style != NULL && "nt_ui_menu_begin: menu_id non-zero, st + style non-NULL");
@@ -589,7 +589,7 @@ void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t
         menu_begin_present_only(ctx, menu_id, st);
         return;
     }
-    const uint8_t fill_layer = 0U; /* no data param: fills fall to layer 0, labels to label_layer 0 */
+    const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fills on data->layer, text on label_layer (game-controlled render order) */
 
     menu_declare_occluder(ctx, fill_layer, menu_id); /* single root occluder under the whole stack (KEEP) */
 
@@ -603,7 +603,7 @@ void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t
     ctx->pending_menu.hover_leaf[0] = 0U;
     ctx->pending_menu.chosen = 0U;
     ctx->pending_menu.fill_layer = fill_layer;
-    ctx->pending_menu.label_layer = 0U;
+    ctx->pending_menu.label_layer = label_layer;
     ctx->pending_menu.depth = 0U;
     ctx->pending_menu.active = true;
     ctx->pending_menu.open_frame = true;

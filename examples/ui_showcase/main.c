@@ -1724,7 +1724,7 @@ enum {
 /* GLOBAL menu (app actions): a rich New row (icon + Ctrl+N shortcut), an "Open recent" submenu, a
  * separator, a checkmark toggle, a disabled-via-custom row, and Quit. Built in CODE every frame. */
 static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
-    nt_ui_menu_begin(ctx, s_id_menu_global, &st->menu.global_state, g_current->menu);
+    nt_ui_menu_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, &st->menu.global_state, g_current->menu);
     nt_ui_menu_item_opts_t newo = nt_ui_menu_item_opts_defaults();
     newo.icon = s_icon_bunny_ref;
     newo.shortcut = "Ctrl+N";
@@ -1763,7 +1763,7 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
 /* ZONE menu (panel actions): distinct rows + a "Move to" submenu so the bound menu is unmistakable, plus a
  * custom activatable=false row whose inner control owns the click while the row only highlights. */
 static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
-    nt_ui_menu_begin(ctx, s_id_menu_zone, &st->menu.zone_state, g_current->menu);
+    nt_ui_menu_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, &st->menu.zone_state, g_current->menu);
     nt_ui_menu_item_opts_t edit = nt_ui_menu_item_opts_defaults();
     edit.icon = s_icon_bunny_ref;
     if (nt_ui_menu_item_ex(ctx, MK_EDIT, "Edit panel", edit)) {

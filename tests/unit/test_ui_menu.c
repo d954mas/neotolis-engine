@@ -254,7 +254,7 @@ static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, flo
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Open")) {
@@ -413,7 +413,7 @@ static void test_menu_right_click_outside_dismisses_chain(void) {
     p.buttons[NT_BUTTON_RIGHT].is_down = true;
     p.buttons[NT_BUTTON_RIGHT].is_pressed = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, &st, &style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         nt_ui_menu_submenu_end(s_fx.ctx);
@@ -437,7 +437,7 @@ static void menu_im_frame2(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, fl
         p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     }
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Open")) {
@@ -552,7 +552,7 @@ static void test_menu_click_root_parent_switches_branch(void) {
  *      tree is built by recursing submenu_begin with the same key per level. ---- */
 static void menu_im_self_ref(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     /* Open as deep as the runtime drives: each open level declares another self-keyed submenu. The cap
      * assert fires when submenu_begin would push past NT_UI_MENU_MAX_DEPTH. */
     int guard = 0;
@@ -603,7 +603,7 @@ static void menu_im_frame25(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, f
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.enabled = true, .icon = s_icon_ref});
     nt_ui_menu_separator(s_fx.ctx);
     (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){.enabled = true});
@@ -734,7 +734,7 @@ static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uin
     }
     nt_ui_block_pointer(s_fx.ctx, TARGET_ID, NULL);
     (void)nt_ui_menu_open_trigger(s_fx.ctx, MENU_A, target_id, long_pressed, st);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         nt_ui_menu_submenu_end(s_fx.ctx);
@@ -880,7 +880,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
             p.buttons[NT_BUTTON_LEFT].is_released = true; /* down -> up over the widget */
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-        nt_ui_menu_begin(s_fx.ctx, MENU_A, &st, &style);
+        nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
         if (nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
             declared = true;
             /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
@@ -913,7 +913,7 @@ static void test_menu_item_begin_closed_skips_body(void) {
     for (int frame = 0; frame < 2; ++frame) {
         nt_pointer_t p = {.x = 0.0F, .y = 0.0F, .active = true};
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-        nt_ui_menu_begin(s_fx.ctx, MENU_A, &st, &style);
+        nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
         if (nt_ui_menu_item_begin(s_fx.ctx, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
             declared = true; /* must stay false: the menu is closed */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
@@ -937,7 +937,7 @@ static void menu_im_frame_rich(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     nt_ui_menu_item_opts_t save = nt_ui_menu_item_opts_defaults();
     save.shortcut = "Ctrl+S";
     save.selected = true;
@@ -978,7 +978,7 @@ static void test_menu_check_cell_when_selected(void) {
 static void menu_im_hover_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {.x = px, .y = py, .active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "Project");
@@ -1058,7 +1058,7 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
 static void menu_im_submenu_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {.x = px, .y = py, .active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "ChildItemLong");
         (void)nt_ui_menu_item(s_fx.ctx, KEY_QUIT, "ChildItem2");

@@ -31,8 +31,8 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 /* Visual knobs. Colors are 0xAABBGGRR. Item rows are plain rects + labels (no button widget) so the
  * hover-intent owns the open/keep/switch decision. The panel is an OPTIONAL slice9 sprite (panel_bg
  * ref) with a flat bg_color fallback; the submenu marker is an OPTIONAL arrow sprite with a ">" text
- * fallback; rows reserve a leading icon gutter (icon_size). layer comes from the call (data->layer),
- * NOT the style — mirrors checkbox/dropdown. */
+ * fallback; rows reserve a leading icon gutter (icon_size). layer comes from the call (data->layer for
+ * fills, label_layer for text), NOT the style — mirrors checkbox/dropdown/tabbar. */
 typedef struct {
     nt_atlas_region_ref_t panel_bg;  /* optional panel slice9 art; atlas.id==0 = flat bg_color */
     nt_atlas_region_ref_t arrow;     /* optional submenu marker sprite; atlas.id==0 = ">" text fallback */
@@ -97,10 +97,13 @@ _Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI 
 
 /* Immediate-mode menu (begin/end). The game discovers the tree during the frame: open with menu_begin,
  * declare rows via item / item_ex / item_begin..item_end / submenu_begin..submenu_end / separator, close
- * with menu_end. Ids derive via the scope stack (mix(scope,key,idx)); submenu_begin pushes its row id as
- * the child scope so keys need only be unique among siblings. Keyboard nav runs in menu_end against the
- * PREVIOUS frame's per-level record (1-frame latency). The game owns st (open + anchor + chosen sink). */
-void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
+ * with menu_end. Ids derive via the scope stack (mix(scope,key)); submenu_begin pushes its row id as the
+ * child scope so keys need only be unique among siblings. Keyboard nav runs in menu_end against the
+ * PREVIOUS frame's per-level record (1-frame latency). The game owns st (open + anchor).
+ * Layers: every level's panel + row fills + icons + markers draw on data->layer (also the popup panel
+ * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
+ * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style. */
+void nt_ui_menu_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
 bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key,
