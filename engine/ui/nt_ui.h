@@ -289,6 +289,73 @@ const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32
 /* Returns false (out untouched) when the id is unregistered or has no recorded padding. */
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
 
+// #region probe (UITREE-01)
+/* Flat POD tree extraction for a bot / smoke-test. Clay-free by contract: no Clay type may
+ * appear in the node struct or the collect signature (UITREE-01). id_string is COPIED into a
+ * node-owned fixed-cap buffer on collect (the borrowed Clay pointer dies at the next
+ * nt_ui_begin — spike SC3). DEBUG_TOOLS-gated; the OFF build collapses to a no-op stub. */
+
+#ifndef NT_UI_PROBE_ID_CAP
+#define NT_UI_PROBE_ID_CAP 64 /* owned id_string copy cap incl. NUL */
+#endif
+#ifndef NT_UI_PROBE_TEXT_CAP
+#define NT_UI_PROBE_TEXT_CAP 64 /* owned text / label copy cap incl. NUL */
+#endif
+#ifndef NT_UI_PROBE_MAX_NODES
+#define NT_UI_PROBE_MAX_NODES 1024
+#endif
+
+/* Coarse role tag. Registered widgets resolve to their def->name; unregistered elements fall
+ * back to the Clay config-mask kind (box/text/image/floating). */
+typedef enum nt_ui_probe_role_t {
+    NT_UI_PROBE_ROLE_BOX = 0, /* default / unregistered container */
+    NT_UI_PROBE_ROLE_TEXT,
+    NT_UI_PROBE_ROLE_IMAGE,
+    NT_UI_PROBE_ROLE_FLOATING,
+    NT_UI_PROBE_ROLE_WIDGET, /* a registered widget; name carries the specific kind (def->name) */
+} nt_ui_probe_role_t;
+
+/* Flat node. parent is emitted directly from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
+ * children derive from the parent links. bounds = {x, y, w, h} framebuffer px (Y-up). Every node
+ * carries its visible/enabled flags — collect emits ALL nodes incl. invisible/offscreen/disabled
+ * so the bot decides what to filter (D-05). NO Clay types here (UITREE-01). */
+#define NT_UI_PROBE_NO_PARENT 0U /* root nodes have id != 0, so 0 is an unambiguous "no parent" */
+
+typedef struct nt_ui_probe_node_t {
+    uint32_t id;     /* Clay element id */
+    uint32_t parent; /* parent id, or NT_UI_PROBE_NO_PARENT for a root */
+    nt_ui_probe_role_t role;
+    char id_string[NT_UI_PROBE_ID_CAP]; /* owned copy, NUL-terminated (D-01/SC3) */
+    char text[NT_UI_PROBE_TEXT_CAP];    /* own text content (text leaves only), NUL-terminated */
+    char label[NT_UI_PROBE_TEXT_CAP];   /* first text-child caption, distinct from text (D-07) */
+    char role_name[NT_UI_PROBE_ID_CAP]; /* registered def->name when role==WIDGET, else "" */
+    float bounds[4];                    /* x, y, w, h in framebuffer px (Y-up) */
+    uint16_t id_string_len;
+    uint16_t text_len;
+    uint16_t label_len;
+    uint16_t child_count; /* number of direct children emitted in this collect */
+    bool visible;         /* !offscreen AND not ancestor-clipped AND composed opacity > threshold */
+    bool enabled;         /* per-id slot signal; unregistered -> true (D-02) */
+} nt_ui_probe_node_t;
+
+#if NT_UI_DEBUG_TOOLS
+/* Collects the LAST completed frame's tree into `out` (up to `cap` nodes). Writes the node count
+ * to *out_count (nullable). Returns the count. ctx must have completed nt_ui_end. Stops at `cap`;
+ * never writes past out[cap-1]. */
+uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count);
+#else
+static inline uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
+    (void)ctx;
+    (void)out;
+    (void)cap;
+    if (out_count != NULL) {
+        *out_count = 0U;
+    }
+    return 0U;
+}
+#endif
+// #endregion
+
 /* Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are hard barriers. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
