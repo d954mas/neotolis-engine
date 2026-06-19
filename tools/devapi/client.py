@@ -276,9 +276,21 @@ class DevApiClient:
             params["buttons"] = buttons
         return self.result("input.pointer", params)
 
-    def wheel(self, dx: float = 0.0, dy: float = 0.0) -> Dict[str, Any]:
-        """Inject a mouse-slot wheel delta (notches)."""
-        return self.result("input.wheel", {"dx": dx, "dy": dy})
+    def wheel(
+        self, dx: float = 0.0, dy: float = 0.0, x: Optional[float] = None, y: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Scroll the mouse slot (notches).
+
+        With x and y, the scroll is self-contained — a move to (x,y) then the wheel, so it lands at
+        (x,y) regardless of prior state. Without x/y it applies at the mouse slot's apply-time
+        position (move first, or it is a no-op if no slot exists).
+        """
+        params: Dict[str, Any] = {"dx": dx, "dy": dy}
+        if x is not None:
+            params["x"] = x
+        if y is not None:
+            params["y"] = y
+        return self.result("input.wheel", params)
 
     def gesture(
         self,
