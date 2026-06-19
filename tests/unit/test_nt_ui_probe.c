@@ -1,13 +1,7 @@
 /* nt_ui probe (L1) — flat POD tree extraction + always-compiled `enabled` signal.
  *
- * Phase 67 Wave 1 scaffold: the `enabled`-in-slot cases land here now (spike SC4:
- * a disabled widget must report enabled=false with the inspector OFF). The
- * collect-contract (Plan 02) and 3D-projection (Plan 03) cases are scaffolded
- * with TEST_IGNORE so later plans fill them in.
- *
  * Asymmetric known geometry (200×60 @ (150,80) in 800×600) mirrors
- * test_nt_ui_3d_hittest.c so axis-swap / flip bugs surface in the projection
- * cases that arrive in Plan 03. */
+ * test_nt_ui_3d_hittest.c so axis-swap / flip bugs surface in the projection cases. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -77,7 +71,7 @@ static const nt_ui_probe_node_t *find_node(const nt_ui_probe_node_t *nodes, uint
     return NULL;
 }
 
-/* ---- enabled signal (Wave 1, the spike SC4 closer) ---- */
+/* ---- enabled signal ---- */
 
 /* A disabled widget reports enabled=false with the inspector OFF. */
 static void test_enabled_false_with_inspector_off(void) {
@@ -99,7 +93,7 @@ static void test_enabled_true(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* An id that was never registered defaults to enabled=true (D-02). */
+/* An id that was never registered defaults to enabled=true. */
 static void test_enabled_default_true_unregistered(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -178,7 +172,7 @@ static void test_collect_flat_pod_nodes(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_UI_PROBE_NO_PARENT, panel->parent);
 }
 
-/* Copy-on-collect: the id_string copy survives a SECOND nt_ui_begin (spike SC3). */
+/* Copy-on-collect: the id_string copy survives a SECOND nt_ui_begin. */
 static void test_collect_id_string_copied(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
@@ -207,7 +201,7 @@ static void test_collect_visible_clip_opacity(void) {
     nt_ui_transform_t ident = nt_ui_transform_defaults();
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("vis_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
-    /* opacity 0 subtree -> composed opacity below the visible threshold (D-03). */
+    /* opacity 0 subtree -> composed opacity below the visible threshold. */
     CLAY({.id = CLAY_ID("hidden_box"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}, .userData = (void *)NT_UI_DATA_XFORM(0U, &ident, 0.0F)}) {}
     nt_ui_end(s_fx.ctx);
 
@@ -219,7 +213,7 @@ static void test_collect_visible_clip_opacity(void) {
     TEST_ASSERT_NOT_NULL(hid);
     TEST_ASSERT_TRUE(vis->visible);
     TEST_ASSERT_FALSE(hid->visible);
-    /* D-05: the invisible node is STILL emitted, carrying visible=false. */
+    /* the invisible node is STILL emitted, carrying visible=false. */
 }
 
 /* role: a registered widget reports role=WIDGET + def->name; an unregistered box falls back. */
@@ -290,7 +284,7 @@ static void test_collect_label_distinct_from_text(void) {
     TEST_ASSERT_TRUE(found_text_leaf);
 }
 
-/* D-05: a disabled widget remains in the collected set carrying enabled=false. */
+/* a disabled widget remains in the collected set carrying enabled=false. */
 static void test_collect_all_nodes_disabled_present(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);

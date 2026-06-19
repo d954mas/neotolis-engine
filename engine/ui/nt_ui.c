@@ -625,7 +625,7 @@ bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id) {
     }
     const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
     const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
-    /* Unregistered / non-interactive id defaults to enabled (D-02). */
+    /* Unregistered / non-interactive id defaults to enabled. */
     return (s->id == id) ? (s->enabled != 0U) : true;
 #else
     (void)ctx;
