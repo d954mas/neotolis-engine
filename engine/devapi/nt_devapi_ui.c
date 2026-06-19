@@ -219,6 +219,10 @@ static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_
    fractional/negative value (2.9, -0.5) is REJECTED, not silently truncated (the DoS cap for
    ui.drag frames, mirrors the input group / time.step). */
 static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, nt_devapi_error *err) {
+    if (nj == NULL || !cJSON_IsNumber(nj)) {
+        set_bad_params(err, cmd);
+        return false;
+    }
     double v = nj->valuedouble;
     if (v < 0.0 || v > (double)UINT16_MAX || v != (double)(uint16_t)v) {
         set_bad_params(err, cmd);

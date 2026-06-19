@@ -3,6 +3,10 @@
 #include "core/nt_assert.h"
 #include "ui/nt_ui.h"
 
+#if !defined(NT_UI_DEBUG_TOOLS) || !NT_UI_DEBUG_TOOLS
+#error "nt_ui_stub requires NT_UI_DEBUG_TOOLS=1"
+#endif
+
 /* Headless stub of the nt_ui probe surface for stub-linked tests (e.g. test_devapi_*). Provides the
    3 symbols the devapi ui group resolves without pulling Clay or the renderer chain. The empty tree
    is sufficient for discovery / bad_params tests; behavioral ui.* tests link the real nt_ui. */
