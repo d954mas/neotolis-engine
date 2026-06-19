@@ -105,6 +105,12 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx);
  * among sibling rows (the combo derives the pool id via mix(id,key,row_idx)). */
 bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected);
 
+/* Iconed row: same single engine column as the plain selectable — the icon is drawn in the leading
+ * gutter (style->icon_size) and the label is left-aligned past it, so iconed and text-only rows align
+ * their labels at the SAME x. Requires style->icon_size > 0 to show a gutter. `icon` non-NULL; pass NULL
+ * to nt_ui_combo_selectable instead for an explicitly empty-gutter row. */
+bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_atlas_region_ref_t *icon, const char *label, bool selected);
+
 /* Custom-content row: opens the row element OPEN for the game's children (icon+label, badges). _end
  * closes it + does the row's one step_interaction. _begin returns the row's prev-frame clicked (the game
  * writes *selected); the combo clears *open on the click in _end. `selected` drives the per-state look. */

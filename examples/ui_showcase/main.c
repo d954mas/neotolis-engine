@@ -1591,22 +1591,19 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a trigger to open its list; pick a row; open the long list near the window bottom to see the edge-flip up.", g_current->caption);
 
-    /* Short list: fits without scrolling. The selected label is the trigger preview; a couple of rows show
-     * the icon gutter (a custom-content selectable carries the inline icon). */
+    /* Short list: fits without scrolling. The selected label is the trigger preview; a couple of rows draw
+     * an icon in the engine gutter (combo_selectable_icon) — all labels stay in one aligned column. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
     const char *fruit_preview = (st->dropdown.fruit_sel >= 0) ? fruits[st->dropdown.fruit_sel] : "Pick a fruit";
     if (nt_ui_combo_begin(ctx, s_id_dd_fruit, fruit_preview, g_current->dropdown, &st->dropdown.fruit_open)) {
         for (int i = 0; i < fruit_count; ++i) {
-            if (fruit_iconed[i]) {
-                /* Custom-content row: the game owns the inline icon + label inside the open selectable. */
-                if (nt_ui_combo_selectable_begin(ctx, (uint32_t)i, i == st->dropdown.fruit_sel)) {
-                    st->dropdown.fruit_sel = i; /* game writes *selected (Model D) */
-                }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(18), CLAY_SIZING_FIXED(18)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
-                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), fruits[i], g_current->body);
-                nt_ui_combo_selectable_end(ctx);
-            } else if (nt_ui_combo_selectable(ctx, (uint32_t)i, fruits[i], i == st->dropdown.fruit_sel)) {
-                st->dropdown.fruit_sel = i;
+            /* Iconed + text-only rows go through the SAME engine column (one icon gutter + left label), so
+             * every label aligns at the same x. Iconed rows draw the icon in the gutter; the rest leave it
+             * empty (OS-menu icon-column behavior). */
+            const bool clicked = fruit_iconed[i] ? nt_ui_combo_selectable_icon(ctx, (uint32_t)i, &s_icon_bunny_ref, fruits[i], i == st->dropdown.fruit_sel)
+                                                 : nt_ui_combo_selectable(ctx, (uint32_t)i, fruits[i], i == st->dropdown.fruit_sel);
+            if (clicked) {
+                st->dropdown.fruit_sel = i; /* game writes *selected (Model D) */
             }
         }
         nt_ui_combo_end(ctx);

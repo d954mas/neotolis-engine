@@ -408,19 +408,31 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
     return combo_open_list(ctx, NT_UI_COMBO_FILL_LAYER, NT_UI_COMBO_LABEL_LAYER, id, style, open);
 }
 
-bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected) {
-    NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_selectable: call between nt_ui_begin/end on the active ctx");
-    NT_ASSERT(ctx->pending_combo.active && !ctx->pending_combo.row_open && "nt_ui_combo_selectable: call between combo_begin and combo_end, not inside a custom row");
-
+/* Shared row emit for the plain + iconed selectable: one engine-owned column ([icon gutter][label LEFT]),
+ * so iconed and text-only rows align their labels at the SAME x (icon drawn in the gutter when set, else
+ * the gutter is empty). `icon` may be NULL (text-only). */
+static bool combo_emit_selectable(nt_ui_context_t *ctx, uint32_t key, const nt_atlas_region_ref_t *icon, const char *label, bool selected) {
     nt_ui_dropdown_style_t *style = (nt_ui_dropdown_style_t *)ctx->pending_combo.style;
     const uint16_t idx = ctx->pending_combo.row_idx++;
     const uint32_t row_id = combo_row_id(ctx->pending_combo.id, key, idx);
     const uint32_t label_id = combo_row_label_id(ctx->pending_combo.id, idx);
-    const bool clicked = dropdown_declare_row(ctx, ctx->pending_combo.fill_layer, ctx->pending_combo.label_layer, row_id, label_id, label, NULL, selected, style);
+    const bool clicked = dropdown_declare_row(ctx, ctx->pending_combo.fill_layer, ctx->pending_combo.label_layer, row_id, label_id, label, icon, selected, style);
     if (clicked) {
         *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open (Model-D) */
     }
     return clicked;
+}
+
+bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected) {
+    NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_selectable: call between nt_ui_begin/end on the active ctx");
+    NT_ASSERT(ctx->pending_combo.active && !ctx->pending_combo.row_open && "nt_ui_combo_selectable: call between combo_begin and combo_end, not inside a custom row");
+    return combo_emit_selectable(ctx, key, NULL, label, selected);
+}
+
+bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_atlas_region_ref_t *icon, const char *label, bool selected) {
+    NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_selectable_icon: call between nt_ui_begin/end on the active ctx");
+    NT_ASSERT(ctx->pending_combo.active && !ctx->pending_combo.row_open && "nt_ui_combo_selectable_icon: call between combo_begin and combo_end, not inside a custom row");
+    return combo_emit_selectable(ctx, key, icon, label, selected);
 }
 
 bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected) {
@@ -462,10 +474,11 @@ bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selec
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(d);
     /* No engine icon gutter here: a custom-content selectable is game-owned (the game declares its OWN
-     * inline icon + label), mirroring nt_ui_menu_item_begin. Reserving a gutter on top of the game's inline
-     * icon double-gutters iconed rows. The plain nt_ui_combo_selectable path keeps the single engine gutter. */
-    /* Empty label cell with the probe id; the game may add content after this row stays OPEN. */
-    CLAY({.id = (Clay_ElementId){.id = label_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}){}(void)label_layer;
+     * inline icon + label), mirroring nt_ui_menu_item_begin. The plain nt_ui_combo_selectable /
+     * nt_ui_combo_selectable_icon paths keep the single engine gutter. */
+    /* Zero-width anchor carrying the probe id at the row's left content edge; FIT(0) so it does NOT push
+     * the game's content right (a GROW cell here would eat the row and float the content rightward). */
+    CLAY({.id = (Clay_ElementId){.id = label_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}){}(void)label_layer;
 
     ctx->pending_combo.row_id = row_id;
     ctx->pending_combo.row_open = 1U;

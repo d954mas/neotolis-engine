@@ -112,18 +112,12 @@ static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, cons
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
         if (nt_ui_combo_begin(s_fx.ctx, DD_A, preview, st, open)) {
             for (int i = 0; i < count; ++i) {
-                if (icons != NULL && st->icon_size > 0U) {
-                    /* Custom-content row: the GAME owns the inline icon + label (no engine gutter), mirroring
-                     * the showcase render_dropdown idiom (a single icon column, never double-guttered). */
-                    if (nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(i), *selected == i)) {
-                        made = true;
-                        *selected = i;
-                    }
-                    if (icons[i].atlas.id != 0U) {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED((float)st->icon_size), CLAY_SIZING_FIXED((float)st->icon_size)}}}) {}
-                    }
-                    nt_ui_combo_selectable_end(s_fx.ctx);
-                } else if (nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), labels[i], *selected == i)) {
+                /* Iconed + text-only rows share the SAME engine column (one icon gutter + left label),
+                 * mirroring the showcase render_dropdown idiom — labels align at one x regardless of icon. */
+                const bool has_icon = (icons != NULL && icons[i].atlas.id != 0U);
+                const bool clicked =
+                    has_icon ? nt_ui_combo_selectable_icon(s_fx.ctx, ROW_KEY(i), &icons[i], labels[i], *selected == i) : nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), labels[i], *selected == i);
+                if (clicked) {
                     made = true;
                     *selected = i;
                 }
@@ -278,7 +272,7 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
     st.list_scroll.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
 
-    /* the icons[] presence routes the rows through combo_selectable_begin/end (custom-content path). */
+    /* row 0 carries an icon (routed through combo_selectable_icon, engine gutter); the rest are plain. */
     const nt_atlas_region_ref_t icons[12] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x300U)};
     int selected = 0;
     bool open = true;
@@ -443,7 +437,8 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_ABOVE, nt_ui_dropdown_test_last_side());
 }
 
-/* The row's label x after two warm frames (1-frame IM lag bakes the bbox). */
+/* The row's label x after two warm frames (1-frame IM lag bakes the bbox). The same `icons` array is fed
+ * to both warm frames so the probed cell is stable; idx selects which row's label cell to read. */
 static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, const nt_atlas_region_ref_t *icons, int idx) {
     int selected = 0;
     bool open = true;
@@ -471,27 +466,24 @@ static void test_dropdown_icon_size_gutter_shifts_label(void) {
     TEST_ASSERT_TRUE_MESSAGE(x_gutter >= x_text_only + (float)gut.icon_size, "icon_size gutter must shift the plain-row label right by >= icon_size");
 }
 
-/* ---- Bug 4 (single icon gutter): the custom-content combo_selectable_begin path reserves NO engine
- *      gutter — the game owns its inline icon. The engine's probe label cell therefore sits at the row's
- *      left content edge, the SAME left x as a plain text-only row (no engine gutter prepended), even with
- *      icon_size=24. A double-gutter would have shifted the probe cell right by icon_size. ---- */
-static void test_dropdown_custom_row_no_engine_gutter(void) {
+/* ---- Single-column alignment: in ONE combo list (icon_size>0), an iconed row and a non-iconed row
+ *      align their labels at the SAME left x — the icon rides the engine gutter, the label starts past
+ *      it for every row, iconed or not (OS-menu icon column). This is the fix invariant: the iconed
+ *      demo rows now route through combo_selectable_icon (engine column), NOT a hand-rolled custom row. ---- */
+static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
     nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
 
-    /* Plain text-only row: label cell at the row's left content edge (no gutter). */
-    nt_ui_dropdown_style_t text_only = nt_ui_dropdown_style_defaults();
-    text_only.icon_size = 0U;
-    const float x_text_only = row_label_x(&idle, &text_only, NULL, 0);
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    st.icon_size = 24U; /* engine gutter so iconed + text-only rows align */
 
-    /* Custom-content row with icon_size=24: the game owns the inline icon; the engine must NOT prepend a
-     * gutter, so the engine probe label cell stays at the same left x as the text-only row. */
-    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x10U), nt_atlas_ref((nt_resource_t){.id = 1U}, 0x11U), nt_atlas_ref((nt_resource_t){.id = 1U}, 0x12U)};
-    nt_ui_dropdown_style_t custom = nt_ui_dropdown_style_defaults();
-    custom.icon_size = 24U;
-    const float x_custom = row_label_x(&idle, &custom, icons, 0);
+    /* Mixed list: row 0 iconed (atlas.id != 0), row 1 non-iconed (atlas.id == 0 -> plain selectable). */
+    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x10U), (nt_atlas_region_ref_t){0}, nt_atlas_ref((nt_resource_t){.id = 1U}, 0x12U)};
 
-    const float dx = (x_custom > x_text_only) ? (x_custom - x_text_only) : (x_text_only - x_custom);
-    TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "custom selectable_begin must reserve NO engine icon gutter (single gutter; game owns the icon)");
+    const float x_iconed = row_label_x(&idle, &st, icons, 0); /* iconed row label */
+    const float x_plain = row_label_x(&idle, &st, icons, 1);  /* non-iconed row label */
+
+    const float dx = (x_iconed > x_plain) ? (x_iconed - x_plain) : (x_plain - x_iconed);
+    TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "iconed and non-iconed rows must align their labels in one column (same engine gutter)");
 }
 
 int main(void) {
@@ -509,6 +501,6 @@ int main(void) {
     RUN_TEST(test_dropdown_eased_reclick_closes_once);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);
-    RUN_TEST(test_dropdown_custom_row_no_engine_gutter);
+    RUN_TEST(test_dropdown_iconed_and_plain_rows_share_one_column);
     return UNITY_END();
 }
