@@ -106,7 +106,7 @@ optional — see "Adding HD Art" above to drop in higher-resolution variants.
 ## Throughput Log Schema
 
 Bunnymark emits its own per-60-frame console log line (game owns the format,
-engine `nt_stats` only provides accessors):
+engine `nt_debug_overlay` only provides accessors):
 
 ```
 fps=F.f cpu=C.c ms gpu=G.g ms draws=D bunnies=B atlas=SD|HD

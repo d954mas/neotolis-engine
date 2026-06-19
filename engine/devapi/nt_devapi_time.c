@@ -9,9 +9,9 @@
 
 /* time/render/frame command group. Bot input is range/type-checked → bad_params; never assert
    on untrusted input (invariants assert, untrusted input returns a structured error).
-   Compiles out entirely when NT_DEVAPI_REGISTER_time is absent. */
+   Compiles out entirely when NT_DEVAPI_GROUP_TIME is absent. */
 
-#ifdef NT_DEVAPI_REGISTER_time
+#ifdef NT_DEVAPI_GROUP_TIME
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
@@ -370,4 +370,4 @@ void nt_devapi_register_time(void) {
     }
 }
 
-#endif /* NT_DEVAPI_REGISTER_time */
+#endif /* NT_DEVAPI_GROUP_TIME */

@@ -21,6 +21,24 @@ option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
+# Defined BEFORE the engine subdirs so engine/input can derive its automation surface (input
+# configures before devapi). Each group flag gates a whole group; see engine/devapi/CMakeLists.txt.
+option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
+option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
+option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
+option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe / features)." ON)
+
+# Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
+if(NOT NT_DEVAPI_ENABLED)
+    foreach(_grp CORE TIME INPUT DISCOVERY)
+        if(NT_DEVAPI_GROUP_${_grp})
+            message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
+                "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "
+                "build the devapi groups.")
+        endif()
+    endforeach()
+endif()
+
 set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap; OFF only via explicit override for final production).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
@@ -87,6 +105,12 @@ if(NOT EMSCRIPTEN)
     # static UCRT, those dllimport thunks are missing. Remove _DLL so GLFW
     # calls the static CRT symbols directly.
     target_compile_options(glfw PRIVATE -U_DLL)
+endif()
+
+# Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the
+# nt_input automation surface, so production nt_input stays lean under a devapi-OFF build.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(NT_BUILDING_TESTS ON)
 endif()
 
 # Core libraries (always available)

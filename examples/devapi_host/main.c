@@ -54,12 +54,29 @@ static uint16_t resolve_port(void) {
     return (uint16_t)v;
 }
 
+/* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
+   bot that drops mid-MANUAL leaves the host frozen. On the connected->disconnected edge, force RUN so
+   the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop. */
+static void recover_on_disconnect(void) {
+    static bool was_connected = false;
+    bool now = nt_devapi_net_has_client();
+    if (was_connected && !now) {
+        g_nt_app.mode = NT_APP_MODE_RUN;
+        g_nt_app.paused = false;
+        g_nt_app.pending_steps = 0;
+    }
+    was_connected = now;
+}
+
 static void frame(void) {
     nt_window_poll();
-    /* Poll devapi at frame start, before input: a command only queues an input
-       injection, nt_input_poll() then samples hardware, and a later apply step
-       overlays the queued injection so it wins (one frame-start touch-point). */
+    /* Order matters: nt_devapi_update first runs net_poll (a command may enqueue into the
+       devapi input schedule), then ticks that schedule and — only on a real sim-advance — releases
+       due events into nt_input's immediate inject buffer. nt_input_poll next samples hardware AND
+       applies that whole buffer post-edge-clear, so an injected rising edge survives to this frame's
+       update. nt_input itself knows nothing about frames; the devapi layer owns the schedule. */
     nt_devapi_update();
+    recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop. */
     nt_input_poll();
 
     /* Draw + swap go TOGETHER under the render flag — never skip-draw-but-swap (that would present a

@@ -374,7 +374,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 /* Convenience getter for g_nt_gfx.frame_stats.draw_calls. Reset by
  * nt_gfx_begin_frame, incremented by every public draw function. Read
- * by nt_stats; equivalent to reading frame_stats.draw_calls directly. */
+ * by nt_debug_overlay; equivalent to reading frame_stats.draw_calls directly. */
 uint32_t nt_gfx_get_frame_draw_calls(void);
 
 /* ---- Instance buffer ---- */
@@ -395,7 +395,7 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —
  * GL can only have one TIME_ELAPSED query active at a time). Game opens
- * the segments it wants to time; nt_stats polls "frame" by convention.
+ * the segments it wants to time; nt_debug_overlay polls "frame" by convention.
  *
  * Pass a stable string literal — the backend hashes for internal slot
  * lookup AND emits glPushDebugGroup so the name shows up in RenderDoc /

@@ -11,6 +11,41 @@ static int s_count;
 
 static bool s_initialized;
 
+// #region lifecycle hooks
+/* Fixed hook tables: one slot per registrable group is plenty (only the input group registers any
+   today). A hook is registered once per init by a group's registrar under its own compile gate. */
+#ifndef NT_DEVAPI_MAX_HOOKS
+#define NT_DEVAPI_MAX_HOOKS 8
+#endif
+
+static nt_devapi_hook_fn s_tick_hooks[NT_DEVAPI_MAX_HOOKS];
+static int s_tick_count;
+static nt_devapi_hook_fn s_reset_hooks[NT_DEVAPI_MAX_HOOKS];
+static int s_reset_count;
+
+void nt_devapi_register_tick(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_tick_count < NT_DEVAPI_MAX_HOOKS);
+    s_tick_hooks[s_tick_count++] = fn;
+}
+
+void nt_devapi_register_reset(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_reset_count < NT_DEVAPI_MAX_HOOKS);
+    s_reset_hooks[s_reset_count++] = fn;
+}
+
+void nt_devapi_run_tick_hooks(void) {
+    for (int i = 0; i < s_tick_count; i++) {
+        s_tick_hooks[i]();
+    }
+}
+
+void nt_devapi_run_reset_hooks(void) {
+    for (int i = 0; i < s_reset_count; i++) {
+        s_reset_hooks[i]();
+    }
+}
+// #endregion
+
 /* Local strdup: portable under strict C17 (POSIX strdup not guaranteed declared). */
 static char *devapi_strdup(const char *src) {
     if (src == NULL) {
@@ -39,18 +74,23 @@ nt_result_t nt_devapi_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     s_count = 0;
+    s_tick_count = 0; /* groups re-register their lifecycle hooks below. */
+    s_reset_count = 0;
     s_initialized = true;
 
-    /* Wire compiled-in engine groups; each is opt-in via its NT_DEVAPI_REGISTER_<group> define. */
-#ifdef NT_DEVAPI_REGISTER_core
+    /* Wire compiled-in engine groups; each is opt-in via its NT_DEVAPI_GROUP_<GROUP> define. */
+#ifdef NT_DEVAPI_GROUP_CORE
     nt_devapi_register_core();
 #endif
-#ifdef NT_DEVAPI_REGISTER_time
+#ifdef NT_DEVAPI_GROUP_TIME
     nt_devapi_register_time();
 #endif
-
-    /* Discovery is always-on when devapi is built. */
+#ifdef NT_DEVAPI_GROUP_INPUT
+    nt_devapi_register_input();
+#endif
+#ifdef NT_DEVAPI_GROUP_DISCOVERY
     nt_devapi_register_discovery();
+#endif
 
     return NT_OK;
 }
@@ -60,6 +100,8 @@ void nt_devapi_shutdown(void) {
         slot_free(&s_slots[i]);
     }
     s_count = 0;
+    s_tick_count = 0; /* drop group hooks so init->shutdown->init re-registers cleanly. */
+    s_reset_count = 0;
     nt_devapi_resp_reset(); /* symmetric teardown of the dispatch-core response buffer. */
     s_initialized = false;
 }

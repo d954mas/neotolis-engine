@@ -180,6 +180,12 @@ static void test_command_describe_message_distinguishes_absent_vs_nonstring(void
 
 /* ---- features ---- */
 
+/* The active command groups depend on which NT_DEVAPI_GROUP_<X> options were ON at configure time.
+   The test target is fed the SAME active-group defines that gate the nt_devapi lib (the per-group
+   NT_DEVAPI_GROUP_<X> defines are PRIVATE to the lib, so they're re-supplied to this TU), so each
+   group's presence + the expected distinct-group count are derived from the defines, not hardcoded.
+   The `discovery` group is always present (this binary requires it) and `game` is registered in
+   setUp via the public API — both are unconditional. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_features_lists_active_groups(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"features\"}");
@@ -187,17 +193,42 @@ static void test_features_lists_active_groups(void) {
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
     cJSON *groups = cJSON_GetObjectItemCaseSensitive(result, "groups");
     TEST_ASSERT_TRUE(cJSON_IsArray(groups));
-    TEST_ASSERT_TRUE(array_has_string(groups, "core"));
+
+    /* Always present: discovery (required by this binary) + game (registered in setUp). */
     TEST_ASSERT_TRUE(array_has_string(groups, "discovery"));
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
-    /* This binary also compiles the time group into nt_devapi (NT_DEVAPI_REGISTER_time=1). */
+    int expected = 2;
+
+#ifdef NT_DEVAPI_GROUP_CORE
+    TEST_ASSERT_TRUE(array_has_string(groups, "core"));
+    expected += 1; /* core */
+#else
+    TEST_ASSERT_FALSE(array_has_string(groups, "core"));
+#endif
+
+#ifdef NT_DEVAPI_GROUP_TIME
+    /* The time TU bundles three distinct group names: time / render / frame. */
     TEST_ASSERT_TRUE(array_has_string(groups, "time"));
     TEST_ASSERT_TRUE(array_has_string(groups, "render"));
     TEST_ASSERT_TRUE(array_has_string(groups, "frame"));
+    expected += 3;
+#else
+    TEST_ASSERT_FALSE(array_has_string(groups, "time"));
+    TEST_ASSERT_FALSE(array_has_string(groups, "render"));
+    TEST_ASSERT_FALSE(array_has_string(groups, "frame"));
+#endif
+
+#ifdef NT_DEVAPI_GROUP_INPUT
+    TEST_ASSERT_TRUE(array_has_string(groups, "input"));
+    expected += 1; /* input */
+#else
+    TEST_ASSERT_FALSE(array_has_string(groups, "input"));
+#endif
+
     /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
     /* groups are distinct: each group's commands collapse to one entry. */
-    TEST_ASSERT_EQUAL_INT(6, cJSON_GetArraySize(groups));
+    TEST_ASSERT_EQUAL_INT(expected, cJSON_GetArraySize(groups));
     cJSON_Delete(root);
 }
 

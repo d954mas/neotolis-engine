@@ -1,4 +1,4 @@
-/* Bridge test: nt_ui_get_last_walk_* -> nt_stats. nt_ui has no nt_stats dep. */
+/* Bridge test: nt_ui_get_last_walk_* -> nt_debug_overlay. nt_ui has no nt_debug_overlay dep. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "clay.h"
-#include "stats/nt_stats.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -24,13 +24,13 @@ void setUp(void) {
     nt_test_assert_install();
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    /* nt_stats is not init'd by the fixture (UI doesn't depend on it).
+    /* nt_debug_overlay is not init'd by the fixture (UI doesn't depend on it).
      * This test exercises the metrics-bridge pattern so we init it here. */
-    nt_stats_init(NULL);
+    nt_debug_overlay_init(NULL);
 }
 
 void tearDown(void) {
-    nt_stats_shutdown();
+    nt_debug_overlay_shutdown();
     ui_walker_fixture_shutdown(&s_fx);
 }
 
@@ -41,10 +41,10 @@ static void inject_frozen_cmds(int32_t count) {
 }
 
 /* Canonical metrics-bridge pattern: walk -> read getter -> publish into
- * nt_stats. After this, nt_stats_format_lines must show the value. */
+ * nt_debug_overlay. After this, nt_debug_overlay_format_lines must show the value. */
 static void publish_ui_metrics_to_stats(const nt_ui_context_t *ctx) {
-    nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(ctx));
-    nt_stats_count("ui_command_count", (uint64_t)nt_ui_get_last_walk_command_count(ctx));
+    nt_debug_overlay_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(ctx));
+    nt_debug_overlay_count("ui_command_count", (uint64_t)nt_ui_get_last_walk_command_count(ctx));
 }
 
 /*after a walk that emits a RECT, the public draw-call
@@ -80,9 +80,9 @@ static void test_get_last_walk_command_count_matches_frozen_cmds(void) {
     TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
 
-/* Bridge pattern: app forwards getter values into nt_stats; both
- * counters appear in nt_stats_format_lines with the expected values. */
-static void test_metrics_bridge_publishes_to_nt_stats(void) {
+/* Bridge pattern: app forwards getter values into nt_debug_overlay; both
+ * counters appear in nt_debug_overlay_format_lines with the expected values. */
+static void test_metrics_bridge_publishes_to_nt_debug_overlay(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 50.0F, .height = 50.0F};
@@ -96,12 +96,12 @@ static void test_metrics_bridge_publishes_to_nt_stats(void) {
     const uint32_t draw_calls = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
 
     char buf[512];
-    const uint32_t n = nt_stats_format_lines(buf, sizeof buf);
+    const uint32_t n = nt_debug_overlay_format_lines(buf, sizeof buf);
     TEST_ASSERT_GREATER_THAN_UINT32(0U, n);
 
     char expected_draw[64];
     (void)snprintf(expected_draw, sizeof expected_draw, "ui_draw_calls: %u", (unsigned)draw_calls);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, expected_draw), "bridge: ui_draw_calls value in nt_stats must match getter output");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, expected_draw), "bridge: ui_draw_calls value in nt_debug_overlay must match getter output");
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_command_count: 1"), "bridge: ui_command_count must equal frozen_cmds.length");
 }
 
@@ -278,7 +278,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_last_walk_draw_calls_after_rect);
     RUN_TEST(test_get_last_walk_command_count_matches_frozen_cmds);
-    RUN_TEST(test_metrics_bridge_publishes_to_nt_stats);
+    RUN_TEST(test_metrics_bridge_publishes_to_nt_debug_overlay);
     RUN_TEST(test_getters_reflect_latest_walk_only);
     RUN_TEST(test_per_type_rect_command_count);
     RUN_TEST(test_per_type_mixed_commands);

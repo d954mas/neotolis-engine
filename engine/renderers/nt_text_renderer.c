@@ -51,7 +51,7 @@ static struct {
 
 #ifdef NT_TEST_ACCESS
     /* Count every set_material / set_font entry regardless of early-out so
-     * nt_stats tests can prove explicit calls. */
+     * nt_debug_overlay tests can prove explicit calls. */
     uint32_t test_set_material_calls;
     uint32_t test_set_font_calls;
     /* Captures the model matrix passed to draw_n on every call, even when the

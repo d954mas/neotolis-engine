@@ -91,8 +91,8 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_text_renderer_init();
     nt_ui_module_init();
 
-    /* nt_stats is NOT init'd here -- nt_ui_walk does not depend on it.
-     * Tests that need nt_stats (e.g. test_nt_ui_stats verifying the
+    /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.
+     * Tests that need nt_debug_overlay (e.g. test_nt_ui_stats verifying the
      * metrics-bridge pattern) init/shutdown it themselves around the
      * fixture calls. */
 

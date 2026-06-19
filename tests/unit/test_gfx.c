@@ -826,7 +826,7 @@ void test_gfx_update_texture_invalid_handle(void) {
 /* ---- Per-frame draw call counter ---- */
 
 void test_gfx_frame_draw_calls(void) {
-    /* Separate draw-call counter for nt_stats consumption.
+    /* Separate draw-call counter for nt_debug_overlay consumption.
      * Verifies counter starts at 0, increments by 1 per draw API, resets on begin_frame. */
 
     /* Minimal pipeline so draws have something bound (stub backend accepts any handle). */
