@@ -900,6 +900,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
      * (true while open) — the body is guarded by it; the click is owned by the inner child. */
     bool declared = false;
     bool btn_clicked = false;
+    bool end_activated = false;
     for (int frame = 0; frame < 4; ++frame) {
         const bool press = (frame == 2);   /* press began this frame -> capture */
         const bool release = (frame == 3); /* release over the widget -> click one-shot */
@@ -928,7 +929,10 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
                 btn_clicked = true;
             }
         }
-        nt_ui_menu_item_end(s_fx.ctx);
+        /* FIX 3: item_end reports activation for an ACTIVATABLE row; an activatable=false row never activates. */
+        if (nt_ui_menu_item_end(s_fx.ctx)) {
+            end_activated = true;
+        }
         nt_ui_menu_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
@@ -938,6 +942,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     /* chosen_id is gone (FIX 2b): an activatable=false row that latched the click as an activation would
      * close the chain. The chain staying OPEN proves the row did NOT steal the inner child's click. */
     TEST_ASSERT_TRUE_MESSAGE(st.open, "an activatable=false row must NOT latch the click as an activation (chain stays open)");
+    TEST_ASSERT_FALSE_MESSAGE(end_activated, "item_end must return false for an activatable=false row (child owns the click)");
     (void)row_id;
 }
 

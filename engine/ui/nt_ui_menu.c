@@ -669,8 +669,8 @@ bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_o
     NT_ASSERT(!ctx->pending_menu_item.active && "nt_ui_menu_item_begin: a custom row is already open (missing nt_ui_menu_item_end)");
     /* Returns DECLARE-BODY (true only when the menu is open this frame), NOT clicked: a present-only
      * (closed) menu opens no row element, so the game MUST guard the custom-content body with the return —
-     * otherwise the body's children leak into the scene's open element (Bug 3). For an activatable row the
-     * click is latched in item_end (-> chosen), so the return need not carry it. */
+     * otherwise the body's children leak into the scene's open element (Bug 3). An activatable row reports
+     * its ACTIVATION via item_end (parallel to item/item_ex returning clicked) — the two bools never alias. */
     if (!ctx->pending_menu.open_frame) {
         ctx->pending_menu_item.active = true; /* still balance item_end; the body is skipped by the guard */
         ctx->pending_menu_item.activatable = false;
@@ -685,26 +685,29 @@ bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_o
     return true; /* open: declare the body */
 }
 
-void nt_ui_menu_item_end(nt_ui_context_t *ctx) {
+bool nt_ui_menu_item_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->pending_menu_item.active && "nt_ui_menu_item_end without nt_ui_menu_item_begin");
     const uint32_t row_id = ctx->pending_menu_item.id;
     ctx->pending_menu_item.active = false;
     if (!ctx->pending_menu.open_frame) {
-        return; /* present-only: item_begin opened no element, so close/step nothing */
+        return false; /* present-only: item_begin opened no element, so close/step nothing (never activated) */
     }
     nt_ui_clay_priv_close_element();
     if (!ctx->pending_menu_item.activatable) {
         /* §7 opt-out: the inner interactive child owns the click. The row must NOT step_interaction —
          * a row step would capture the pointer and starve the child. Hover highlight still works via the
-         * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). */
-        return;
+         * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). Never activates. */
+        return false;
     }
     const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, row_id); /* the ONE mutating step per id */
-    /* Same single-idiom activation as item_ex: mouse same-frame, keyboard via rt->kbd_activated (1-frame). */
+    /* Same single-idiom activation as item_ex: mouse same-frame, keyboard via rt->kbd_activated (1-frame).
+     * Returned to the caller (item_end == "activated"); also latches the internal close-chain signal. */
     const nt_ui_menu_runtime_t *rt = menu_runtime(ctx, ctx->pending_menu.menu_id);
-    if (in.clicked || (row_id == rt->kbd_activated)) {
+    const bool activated = in.clicked || (row_id == rt->kbd_activated);
+    if (activated) {
         ctx->pending_menu.chosen = row_id;
     }
+    return activated;
 }
 
 bool nt_ui_menu_submenu_begin(nt_ui_context_t *ctx, uint32_t key, const char *label) {

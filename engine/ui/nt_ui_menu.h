@@ -106,9 +106,13 @@ _Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI 
 void nt_ui_menu_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
-bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key,
-                           nt_ui_menu_item_opts_t opts); /* open a CUSTOM-content row; TRUE = declare body (menu open), guard with if. Activatable click latches in item_end. */
-void nt_ui_menu_item_end(nt_ui_context_t *ctx);
+/* item_begin returns DECLARE-BODY (true while the menu is OPEN), NOT clicked — guard the custom body with it
+ * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
+ * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
+ * thing: item_begin = "declare the body", item_end = "the row was activated". An activatable=false row never
+ * activates (item_end returns false) — its inner child owns the click. */
+bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
+bool nt_ui_menu_item_end(nt_ui_context_t *ctx); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for activatable=false. */
 bool nt_ui_menu_submenu_begin(nt_ui_context_t *ctx, uint32_t key, const char *label); /* true ONLY when open -> declare body */
 void nt_ui_menu_submenu_end(nt_ui_context_t *ctx);
 void nt_ui_menu_separator(nt_ui_context_t *ctx);                         /* non-interactive divider (no focus index) */
