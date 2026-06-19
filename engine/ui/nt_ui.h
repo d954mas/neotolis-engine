@@ -260,7 +260,7 @@ void nt_ui_end(nt_ui_context_t *ctx);
  *   static const nt_ui_widget_def_t INV_SLOT_DEF = {
  *       .name = "inv_slot", .pill_color = 0xFFB060A0,
  *   };
- *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL); */
+ *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL, true); */
 typedef struct nt_ui_widget_def_t {
     const char *name;    /* shown in inspector pill; e.g. "button" */
     uint32_t pill_color; /* 0xAABBGGRR */
@@ -272,13 +272,14 @@ _Static_assert(sizeof(nt_ui_widget_def_t) == (sizeof(void *) == 8 ? 16 : 12), "n
 /* `pad_lrtb` (optional) is the touch-target inflation; pass NULL for none.
  * Storage is direct-mapped, replace-on-collision (observability-only). */
 #if NT_UI_DEBUG_TOOLS
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], bool enabled);
 #else
-static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], bool enabled) {
     (void)ctx;
     (void)id;
     (void)def;
     (void)pad_lrtb;
+    (void)enabled;
 }
 #endif
 

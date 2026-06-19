@@ -25,7 +25,8 @@ typedef struct {
     uint32_t id;                   /* 0 = slot empty */
     const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
     uint8_t has_padding;
-    uint8_t _pad[3];
+    uint8_t enabled; /* 1 = enabled (default); written every frame at register */
+    uint8_t _pad[2];
     int16_t hit_padding_lrtb[4];
 } nt_ui_widget_slot_t;
 
@@ -450,6 +451,10 @@ typedef struct nt_ui_inspector_element_info {
 } nt_ui_inspector_element_info_t;
 
 nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
+
+/* Probe reads the per-id `enabled` slot signal. Registered id -> the slot byte; unregistered /
+ * non-interactive id -> true (default). Always compiled; independent of inspector/recording. */
+bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id);
 
 /* Caller (nt_ui_end) must run inside the Clay current-ctx scope. */
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx);

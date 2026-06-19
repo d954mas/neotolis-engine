@@ -554,7 +554,7 @@ static void widget_assert_not_dup(const nt_ui_widget_slot_t *s, uint32_t id, con
     }
 }
 
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
     if (id == 0U || def == NULL) {
@@ -565,6 +565,8 @@ void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget
     widget_assert_not_dup(s, id, def);
     s->id = id;
     s->def = def;
+    /* Always-compiled per-id signal for the probe; never gated on recording/inspector. */
+    s->enabled = enabled ? 1U : 0U;
     if (pad_lrtb != NULL) {
         s->has_padding = 1U;
         s->hit_padding_lrtb[0] = pad_lrtb[0];
@@ -594,6 +596,23 @@ const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32
     (void)ctx;
     (void)id;
     return NULL;
+#endif
+}
+
+bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_widget_enabled: ctx must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
+    if (id == 0U) {
+        return true;
+    }
+    const uint32_t bucket = widget_probe_slot(ctx->widget_registry, ctx->widget_registry_cap, ctx->widget_registry_mask, id);
+    const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    /* Unregistered / non-interactive id defaults to enabled (D-02). */
+    return (s->id == id) ? (s->enabled != 0U) : true;
+#else
+    (void)ctx;
+    (void)id;
+    return true;
 #endif
 }
 
