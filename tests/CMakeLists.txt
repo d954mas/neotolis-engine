@@ -525,6 +525,18 @@ if(NOT EMSCRIPTEN)
     )
     nt_setup_test_target(test_sprite_renderer)
 
+    # --- nt_ui_radial widget tests (Wave 0 scaffold; math/ABI land in 66-03/04) ---
+    add_executable(test_ui_radial unit/test_ui_radial.c)
+    target_link_libraries(test_ui_radial PRIVATE unity)
+    target_compile_definitions(test_ui_radial PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_ui_radial PRIVATE -U_DLL)
+    nt_set_warning_flags(test_ui_radial)
+    nt_set_sanitizer_flags(test_ui_radial)
+    set_target_properties(test_ui_radial PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_ui_radial COMMAND test_ui_radial)
+
     # --- nt_mem_scratch tests ---
     add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_mem_scratch PRIVATE
