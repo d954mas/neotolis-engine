@@ -37,4 +37,13 @@ const char *nt_devapi_submit(const char *line);
    call (it shares the same growing buffer as submit). Drain in a loop until it returns NULL. */
 const char *nt_devapi_poll_response(void);
 
+#ifdef NT_DEVAPI_GROUP_UI
+/* Host-facing: register a UI context under a name so the `ui` group can resolve it (D-15). The
+   engine keeps NO global ctx registry — the host owns the handle and registers it explicitly.
+   Trusted in-process call: overflow / duplicate name asserts (not bot input). Forward-declares
+   nt_ui_context_t so this header stays free of the heavy ui/nt_ui.h include. */
+typedef struct nt_ui_context nt_ui_context_t;
+void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx);
+#endif
+
 #endif /* NT_DEVAPI_H */

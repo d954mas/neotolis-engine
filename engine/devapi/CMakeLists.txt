@@ -50,6 +50,17 @@ if(NT_DEVAPI_GROUP_INPUT)
     target_link_libraries(nt_devapi PRIVATE nt_input_interface)
 endif()
 
+# UI group (ui.tree/ui.element/ui.contexts): the L2 read veneer over nt_ui_probe_collect. Links the
+# full nt_ui (the probe symbol lives there; nt_ui has no header-only _interface) + nt_input_interface
+# (Plan 05's ui.click reuses inject) + PUBLIC NT_INPUT_AUTOMATION_ENABLED so the value matches the
+# consumer's nt_input. Window dims come via the core group's nt_window_interface; nt_ui also pulls it.
+if(NT_DEVAPI_GROUP_UI)
+    target_sources(nt_devapi PRIVATE nt_devapi_ui.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_UI=1)
+    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
+    target_link_libraries(nt_devapi PRIVATE nt_input_interface nt_ui)
+endif()
+
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 
 # nt_devapi_net -- native loopback TCP transport. Separate target so a core-only consumer pulls no

@@ -88,6 +88,9 @@ nt_result_t nt_devapi_init(void) {
 #ifdef NT_DEVAPI_GROUP_INPUT
     nt_devapi_register_input();
 #endif
+#ifdef NT_DEVAPI_GROUP_UI
+    nt_devapi_register_ui();
+#endif
 #ifdef NT_DEVAPI_GROUP_DISCOVERY
     nt_devapi_register_discovery();
 #endif

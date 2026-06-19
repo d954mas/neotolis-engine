@@ -27,10 +27,13 @@ option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input in
 option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
 option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
 option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe / features)." ON)
+# The ui group (ui.tree/ui.element/ui.contexts) reads nt_ui_probe_collect, which is itself gated by
+# NT_UI_DEBUG_TOOLS — enable both together for a usable read surface.
+option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over the nt_ui probe)." ON)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)
-    foreach(_grp CORE TIME INPUT DISCOVERY)
+    foreach(_grp CORE TIME INPUT DISCOVERY UI)
         if(NT_DEVAPI_GROUP_${_grp})
             message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
                 "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "

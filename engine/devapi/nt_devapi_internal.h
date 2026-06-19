@@ -147,6 +147,16 @@ void nt_devapi_input_update(void);
 void nt_devapi_input_reset(void);
 #endif
 
+/* Engine `ui` group registrar (per-group #ifdef). Defined in nt_devapi_ui.c, invoked from
+   nt_devapi_init under the same compile gate; registers the group's reads + the reset hook.
+   (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
+#ifdef NT_DEVAPI_GROUP_UI
+void nt_devapi_register_ui(void);
+
+/* Reset hook: clears the devapi-owned host context name table (B-strict disconnect). */
+void nt_devapi_ui_reset(void);
+#endif
+
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
    nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_GROUP_DISCOVERY
