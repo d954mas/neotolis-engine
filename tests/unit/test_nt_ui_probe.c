@@ -258,11 +258,140 @@ static void test_collect_all_nodes_disabled_present(void) {
     TEST_ASSERT_FALSE(btn->enabled);
 }
 
-/* ---- Plan 03: projection (scaffold) ---- */
+/* ---- Plan 03: projection ----
+ *
+ * Framebuffer convention (locked here): bounds are GL-Y-up framebuffer px (origin bottom-left).
+ * The 2D-plain path keeps the Plan-02 trivial Y-flip (vh - by - bh); the 2D-affine path projects
+ * the Clay corners through tree_baked[].m + the same Y-flip; the 3D path projects 4 corners
+ * through hit_baked[].m -> view_proj -> NDC -> px (GL Y-up, no extra flip). The ortho-equivalence
+ * case below proves a 3D-ortho element lands on the SAME pixel rect as the 2D-plain equivalent. */
 
-static void test_project_2d_plain_yflip(void) { TEST_IGNORE_MESSAGE("Plan 03: 2D plain Y-flip bounds match known geometry"); }
-static void test_project_3d_ortho_aabb(void) { TEST_IGNORE_MESSAGE("Plan 03: 3D-ctx AABB matches ortho-projected geometry"); }
-static void test_project_3d_behind_camera_flag(void) { TEST_IGNORE_MESSAGE("Plan 03: behind-camera corner flagged, not garbage pixels"); }
+#define PROJ_EPS 0.5F
+
+/* Unity float asserts are compiled out in this suite; compare via fabsf like test_nt_ui_tree_build. */
+static bool near_eq(float a, float b) { return fabsf(a - b) <= PROJ_EPS; }
+
+/* Rebuild the fixture ctx with use_raycast_input=true (clone of test_nt_ui_3d_hittest.c). */
+static void probe_setup_3d_ctx(void) {
+    nt_ui_destroy_context(s_fx.ctx);
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.use_raycast_input = true;
+    s_fx.ctx = nt_ui_create_context(s_arena, sizeof s_arena, &desc);
+    TEST_ASSERT_NOT_NULL(s_fx.ctx);
+    nt_ui_set_font(s_fx.ctx, 0U, s_fx.stub_font);
+    nt_ui_set_atlas_white_region(s_fx.ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
+    nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
+    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material);
+}
+
+/* Y-DOWN ortho — Clay(x,y) maps to world(x,y) under identity baked.m (matches the 3D hittest fixture). */
+static void make_ortho_clay_y_down(float view_proj[16]) {
+    mat4 m;
+    glm_ortho(0.0F, SCREEN_W, SCREEN_H, 0.0F, -1.0F, 1.0F, m);
+    memcpy(view_proj, m, sizeof(float) * 16);
+}
+
+/* 2D-plain: a known asymmetric box reports bounds = trivial Y-flip of its Clay bbox. */
+static void test_project_2d_plain_yflip(void) {
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("plain"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    uint32_t count = 0;
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("plain"));
+    TEST_ASSERT_NOT_NULL(node);
+    /* Y-up: top-left Clay (150,80) -> bottom edge at vh - by - bh = 600-80-60 = 460. */
+    TEST_ASSERT_TRUE(near_eq(node->bounds[0], BBOX_X));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[1], SCREEN_H - BBOX_Y - BBOX_H));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[2], BBOX_W));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[3], BBOX_H));
+}
+
+/* 2D-affine: a pure-translation transform shifts the projected AABB by the offset (priming-frame:
+ * the composed affine reads the PREVIOUS frame's baked transform). */
+static void test_project_2d_affine_translation(void) {
+    const float ox = 30.0F;
+    const float oy = 20.0F;
+    nt_ui_transform_t t = nt_ui_transform_defaults();
+    t.offset_x = ox;
+    t.offset_y = oy;
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+
+    /* Prime one frame so the baked transform is in tree_baked for the collect frame. */
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("xbox"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
+              .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 1.0F)}) {}
+        nt_ui_end(s_fx.ctx);
+    }
+
+    uint32_t count = 0;
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("xbox"));
+    TEST_ASSERT_NOT_NULL(node);
+    /* Clay corners shift by (ox, oy); Y-up flip: y = vh - (by+oy) - bh. */
+    TEST_ASSERT_TRUE(near_eq(node->bounds[0], BBOX_X + ox));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[1], SCREEN_H - (BBOX_Y + oy) - BBOX_H));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[2], BBOX_W));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[3], BBOX_H));
+}
+
+/* 3D-ctx: an ortho-projected box yields the AABB of its 4 projected corners, equal to the
+ * 2D-plain pixel rect (locks the framebuffer convention, A1 / OQ-2). */
+static void test_project_3d_ortho_aabb(void) {
+    probe_setup_3d_ctx();
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+    CLAY({.id = CLAY_ID("box3d"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    uint32_t count = 0;
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("box3d"));
+    TEST_ASSERT_NOT_NULL(node);
+    /* SAME rect as the 2D-plain equivalent: x=150, y=460 (Y-up), w=200, h=60. */
+    TEST_ASSERT_TRUE(near_eq(node->bounds[0], BBOX_X));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[1], SCREEN_H - BBOX_Y - BBOX_H));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[2], BBOX_W));
+    TEST_ASSERT_TRUE(near_eq(node->bounds[3], BBOX_H));
+    TEST_ASSERT_TRUE(node->visible);
+}
+
+/* 3D behind-camera: a view_proj that puts a corner at clip[3] <= 0 flags the node (visible=false),
+ * never a garbage AABB (negative size / pixels far outside the framebuffer). */
+static void test_project_3d_behind_camera_flag(void) {
+    probe_setup_3d_ctx();
+    /* Perspective frustum looking down -Z; place the panel's plane at/behind the eye so w<=0.
+     * glm_perspective gives clip[3] = -z_eye; a Clay element baked at world z=0 with the camera
+     * at the origin looking down -Z makes the near corners land at w<=0. */
+    mat4 proj;
+    glm_perspective(glm_rad(60.0F), SCREEN_W / SCREEN_H, 0.1F, 100.0F, proj);
+    float vp[16];
+    memcpy(vp, proj, sizeof vp); /* view = identity: eye at origin, Clay z=0 plane is AT the eye (w=0..<0) */
+
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+    CLAY({.id = CLAY_ID("behind"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
+    }
+    nt_ui_end(s_fx.ctx);
+
+    uint32_t count = 0;
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("behind"));
+    TEST_ASSERT_NOT_NULL(node);
+    TEST_ASSERT_FALSE(node->visible); /* behind-camera flagged */
+    /* No garbage AABB: width/height non-negative (sentinel bounds, not a flipped divide). */
+    TEST_ASSERT_TRUE(node->bounds[2] >= 0.0F);
+    TEST_ASSERT_TRUE(node->bounds[3] >= 0.0F);
+}
 
 int main(void) {
     UNITY_BEGIN();
@@ -277,6 +406,7 @@ int main(void) {
     RUN_TEST(test_collect_label_distinct_from_text);
     RUN_TEST(test_collect_all_nodes_disabled_present);
     RUN_TEST(test_project_2d_plain_yflip);
+    RUN_TEST(test_project_2d_affine_translation);
     RUN_TEST(test_project_3d_ortho_aabb);
     RUN_TEST(test_project_3d_behind_camera_flag);
     return UNITY_END();
