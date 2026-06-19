@@ -1013,6 +1013,45 @@ static void test_menu_item_begin_closed_skips_body(void) {
     TEST_ASSERT_FALSE_MESSAGE(child.found, "a closed menu's custom child must not lay out anywhere (no scene leak)");
 }
 
+/* ---- GUARDED pattern on a CLOSED menu must not poison the item scratch: item_end placed INSIDE the guard is
+ *      skipped when item_begin returns false, so pending_menu_item.active must stay clear (a true no-op). The
+ *      next frame OPENS the menu and declares a real custom row through the SAME guarded pattern — it must
+ *      complete with no assert/poison from the prior closed frame. ---- */
+static void test_menu_item_begin_closed_guarded_no_poison(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0}; /* frame 0: present-only (closed) */
+
+    /* Frame 0: CLOSED menu, guarded pattern with item_end INSIDE the if -> begin false, body+item_end skipped. */
+    nt_pointer_t p0 = {.x = 0.0F, .y = 0.0F, .active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p0, 1);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+    bool closed_declared = false;
+    if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = true})) {
+        closed_declared = true; /* skipped: menu closed */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
+        nt_ui_menu_item_end(&s_menu); /* item_end INSIDE the guard -> skipped on a closed menu */
+    }
+    nt_ui_menu_end(&s_menu);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE_MESSAGE(closed_declared, "guarded closed menu must not declare the body");
+
+    /* Frame 1: OPEN the menu and declare a real custom row through the same guarded pattern. If the closed frame
+     * had poisoned pending_menu_item.active, item_begin's NT_ASSERT(!active) here would have fired. */
+    st.open = true;
+    nt_pointer_t p1 = {.x = 0.0F, .y = 0.0F, .active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p1, 1);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+    bool open_declared = false;
+    if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = true})) {
+        open_declared = true;
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
+        nt_ui_menu_item_end(&s_menu);
+    }
+    nt_ui_menu_end(&s_menu); /* must not assert "open custom row" -> scratch was clean */
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(open_declared, "an OPEN menu's guarded item_begin must declare the body (scratch clean after a closed frame)");
+}
+
 /* ---- Disabled custom row never activates: item_begin(opts{.enabled=false, .activatable=true}) + a click
  *      over the row must make item_end return false (mirror item_ex's enabled gate). The enabled+activatable
  *      case still activates on the same click. ---- */
@@ -1276,6 +1315,7 @@ int main(void) {
     RUN_TEST(test_menu_prevframe_nav_focuses_recorded_item);
     RUN_TEST(test_menu_item_begin_activatable_false_child_owns_click);
     RUN_TEST(test_menu_item_begin_closed_skips_body);
+    RUN_TEST(test_menu_item_begin_closed_guarded_no_poison);
     RUN_TEST(test_menu_item_begin_disabled_never_activates);
     RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);
     RUN_TEST(test_menu_check_cell_when_selected);

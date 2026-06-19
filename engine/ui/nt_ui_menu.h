@@ -164,7 +164,11 @@ typedef struct nt_ui_menu_ctx {
 /* ABI guard: 3 pointers (ui + pending_menu.style/.st) + a pointer-independent remainder dominated by
  * frame_record[8][64] (4096) + frame_record_count (16). Express the total via sizeof(void*) so it holds on
  * both 64-bit native (4256) and 32-bit wasm. Tied to NT_UI_MENU_MAX_DEPTH/ITEMS_PER_LEVEL at default caps. */
+/* The struct size scales with the build-overridable caps (frame_record[DEPTH][ITEMS]), so the fixed-layout ABI
+ * check only applies at the default caps — it still catches accidental field reorder/padding in the common config. */
+#if NT_UI_MENU_MAX_DEPTH == 8 && NT_UI_MENU_MAX_ITEMS_PER_LEVEL == 64
 _Static_assert(sizeof(nt_ui_menu_ctx_t) == (3U * sizeof(void *)) + 4232U, "nt_ui_menu_ctx_t stable ABI (3 ptr + frame_record-dominated remainder at default caps)");
+#endif
 
 /* Init-in-place: zero the scratch (mirrors nt_ui_create_context / nt_comp_storage_init). Takes NO ctx and
  * NO magic — the struct is correct fully zeroed (only frame_record_count==0 matters at rest), and the ctx
@@ -189,7 +193,11 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
  * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
  * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
  * thing: item_begin = "declare the body", item_end = "the row was activated". An activatable=false row never
- * activates (item_end returns false) — its inner child owns the click. */
+ * activates (item_end returns false) — its inner child owns the click.
+ * item_end is a NO-OP when item_begin returned false (closed menu opened no row), so BOTH placements are safe:
+ *   if (item_begin(...)) { ...body...; item_end(...); }   // item_end inside the guard
+ *   if (item_begin(...)) { ...body...; }  item_end(...);  // item_end unconditional
+ * A forgotten item_end after an OPEN item_begin is still caught (the next item_begin/menu_end asserts). */
 bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
 bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for activatable=false. */
 bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label); /* true ONLY when open -> declare body */

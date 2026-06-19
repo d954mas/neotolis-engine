@@ -84,8 +84,9 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
  * row text on label_layer (split to batch fills-then-text). data may be NULL (fills fall to layer 0).
  * The popup-nested scrollbar rides the SAME fill layer as the panel and floats above it (floating draws
  * over same-layer siblings), so the band ordering holds at any base the game picks. Mirrors menu/checkbox/
- * tabbar: layer comes from the CALL, NOT the style. Row + label ids are fmix-derived over
- * (combo id, key, row_idx) — never additive. */
+ * tabbar: layer comes from the CALL, NOT the style. The INTERACTIVE/selection/anim row id is KEY-STABLE
+ * mix(combo_id, key) (duplicate sibling keys alias the SAME row state — fail-early NT_ASSERT in debug); row_idx
+ * is positional, used ONLY for the label-cell/probe id. Both fmix-derived — never additive. */
 
 /* Trigger + list root: emits the trigger button (showing `preview`, the game-fed current-selection
  * label) and, while *open (or still tweening closed), opens the popup list for the frame. A click on
@@ -107,7 +108,8 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx);
 
 /* One list row: a per-state rect + label (row_selected look when `selected`). Returns true on the frame
  * it was clicked — the GAME writes its own *selected; the combo clears *open. `key` need only be unique
- * among sibling rows (the combo derives the pool id via mix(id,key,row_idx)). */
+ * among sibling rows; the combo derives the KEY-STABLE interactive row id via mix(combo_id, key) (the
+ * positional row_idx feeds only the label-cell/probe id, never the interactive id). */
 bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected);
 
 /* Iconed row: same single engine column as the plain selectable — the icon is drawn in the leading

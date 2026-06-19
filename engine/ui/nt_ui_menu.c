@@ -672,10 +672,8 @@ bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item
      * otherwise the body's children leak into the scene's open element. An activatable row reports
      * its ACTIVATION via item_end (parallel to item/item_ex returning clicked) — the two bools never alias. */
     if (!menu->pending_menu.open_frame) {
-        menu->pending_menu_item.active = true; /* still balance item_end; the body is skipped by the guard */
-        menu->pending_menu_item.enabled = false;
-        menu->pending_menu_item.activatable = false;
-        menu->pending_menu_item.id = 0U;
+        /* True no-op: open NO row and touch NO scratch. item_end is a no-op when !active, so BOTH the guarded
+         * `if (begin()){ body; end(); }` and the unconditional `if (begin()){ body; } end();` are safe. */
         return false; /* closed: do NOT declare the body */
     }
     uint32_t row_id = 0U;
@@ -688,12 +686,15 @@ bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item
 }
 
 bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu) {
-    NT_ASSERT(menu->pending_menu_item.active && "nt_ui_menu_item_end without nt_ui_menu_item_begin");
+    /* No-op when no row was opened (closed menu, or item_begin returned false): the begin-without-end footgun is
+     * still caught — an OPEN item_begin sets active, so a forgotten item_end trips the next begin/menu_end assert. */
+    if (!menu->pending_menu_item.active) {
+        return false;
+    }
+    /* active is only set on the OPEN path of item_begin (closed begin is a true no-op), so reaching here means a
+     * real row element was opened — close it. */
     const uint32_t row_id = menu->pending_menu_item.id;
     menu->pending_menu_item.active = false;
-    if (!menu->pending_menu.open_frame) {
-        return false; /* present-only: item_begin opened no element, so close/step nothing (never activated) */
-    }
     nt_ui_clay_priv_close_element();
     /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
      * capture the pointer nor fire on a stashed keyboard activation). */
