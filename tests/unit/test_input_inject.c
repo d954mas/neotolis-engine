@@ -1,11 +1,11 @@
-/* L1 synthetic-input + player-gate tests (INPUT-01..04).
+/* L1 synthetic-input + player-gate tests.
  *
  * Covers the L1 player gate at the apply-helper seam: gate-off drops real device events regardless
- * of backend (web-leak guard, Pitfall 2); the ON->OFF edge releases held real keys/pointers so
- * nothing sticks down (Pitfall 3); re-enable starts fresh from real devices. Plus the pure-apply
- * inject API: nt_input is now a pure apply layer — every inject stages into an immediate buffer that
- * nt_input_poll() drains WHOLE that same poll (no frame, no countdown, no schedule). Frame scheduling
- * (hold, gesture stride, pause-freeze) lives in the devapi layer and is covered by test_devapi_input. */
+ * of backend; the ON->OFF edge releases held real keys/pointers so nothing sticks down; re-enable
+ * starts fresh from real devices. Plus the pure-apply inject API: nt_input is a pure apply layer —
+ * every inject stages into an immediate buffer that nt_input_poll() drains WHOLE that same poll (no
+ * frame, no countdown, no schedule). Frame scheduling (hold, gesture stride, pause-freeze) lives in
+ * the devapi layer and is covered by test_devapi_input. */
 
 #include "input/nt_input_internal.h" /* nt_input_set_player_enabled + inject API + apply helpers */
 #include "unity.h"
@@ -118,8 +118,8 @@ void test_inject_wheel_mouse_slot(void) {
     TEST_ASSERT_TRUE(float_near(3.0F, g_nt_input.pointers[0].wheel_dy, 0.001F));
 }
 
-/* INPUT-02: a non-left button mask must press the CORRECT button (bit->button mapping), not just
-   leave the slot active. bit 2 -> RIGHT, bit 4 -> MIDDLE — queried by-value via the mouse helpers. */
+/* A non-left button mask must press the CORRECT button (bit->button mapping), not just leave the
+   slot active. bit 2 -> RIGHT, bit 4 -> MIDDLE — queried by-value via the mouse helpers. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_inject_button_mask_maps_right_and_middle(void) {
     /* mask 2 = right only: a mouse-slot DOWN carrying the mask. */
@@ -137,6 +137,20 @@ void test_inject_button_mask_maps_right_and_middle(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_MIDDLE));
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_RIGHT));
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_RIGHT));
+}
+
+/* nt_input_inject_buttons sets the mask at the slot's CURRENT position without moving it: a prior
+   move places the slot, then a buttons inject presses there with no x/y change. With no prior slot it
+   creates one at (0,0). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_inject_buttons_at_current_position(void) {
+    TEST_ASSERT_TRUE(nt_input_inject_pointer(NT_INJECT_POINTER_MOVE, 0, 70.0F, 80.0F, 0.0F, NT_POINTER_MOUSE, 0));
+    TEST_ASSERT_TRUE(nt_input_inject_buttons(0, 1U)); /* left, at the slot's current (70,80) */
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(float_near(70.0F, g_nt_input.pointers[0].x, 0.001F));
+    TEST_ASSERT_TRUE(float_near(80.0F, g_nt_input.pointers[0].y, 0.001F));
+    TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].dx, 0.001F)); /* no move -> no delta */
 }
 
 void test_inject_reserved_id(void) {
@@ -209,6 +223,7 @@ int main(void) {
     RUN_TEST(test_inject_pointer_down_move_up);
     RUN_TEST(test_inject_wheel_mouse_slot);
     RUN_TEST(test_inject_button_mask_maps_right_and_middle);
+    RUN_TEST(test_inject_buttons_at_current_position);
     RUN_TEST(test_inject_reserved_id);
     RUN_TEST(test_overflow_rejects_whole);
     RUN_TEST(test_key_from_name);

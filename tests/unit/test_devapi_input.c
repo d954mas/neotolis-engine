@@ -1,8 +1,8 @@
 /* L2 devapi input.* group via submit() (no socket): discovery lists the input commands with shapes,
    thin handlers enqueue into the DEVAPI-SIDE input schedule (frame offsets, hold, gesture stride all
    live here now — nt_input is a pure apply layer), every bot-input violation returns bad_params
-   (never asserts), input.text decodes UTF-8 -> codepoints (INPUT-06), and command.describe returns
-   the full contract.
+   (never asserts), input.text decodes UTF-8 -> codepoints, and command.describe returns the full
+   contract.
 
    Scheduling is driven by writing g_nt_app.frame, then calling nt_devapi_update() (net_poll +
    schedule tick — releases due entries into nt_input's immediate buffer ONLY on a real sim-advance)
@@ -338,6 +338,29 @@ static void test_sched_pause_freeze(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
 }
 
+/* Disconnect-reset must release input that ALREADY APPLIED, not just drop the schedule: a long-hold
+   key whose DOWN landed but whose UP is still scheduled would otherwise stay held into the next
+   client. nt_devapi_input_reset (the registered client-reset hook) releases the held key + pointer. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_reset_releases_applied_held_input(void) {
+    /* down@0 + up@100: the DOWN applies on the first advance, the UP is far in the future. */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":100}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":4,\"y\":5,\"hold\":100}}")));
+    advance(); /* DOWNs apply; key A held, left button held, UPs still scheduled */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+
+    nt_devapi_input_reset(); /* simulate client disconnect: drop schedule AND release held input */
+    nt_input_poll();         /* the release edge resolves on the next poll */
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+
+    /* The dropped UP must not resurface on later advances (schedule was cleared). */
+    advance();
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
 /* input.key{hold:3} = down@0 + up@3: held across exactly 3 advances, released on the 4th. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_sched_hold_releases_after_n_advances(void) {
@@ -432,7 +455,7 @@ static void test_sched_click_hold_zero_same_frame(void) {
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* ---- WR-05: offline input.state{pop_text} drain coverage (no socket) ---- */
+/* ---- offline input.state{pop_text} drain coverage (no socket) ---- */
 
 static void test_input_state_pop_text_drains_codepoints(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
@@ -448,7 +471,7 @@ static void test_input_state_pop_text_drains_codepoints(void) {
     cJSON_Delete(root);
 }
 
-/* ---- input.state (the observation hook, INPUT-04/05/06 read-back) ---- */
+/* ---- input.state (the observation read-back hook) ---- */
 
 static void test_input_state_registers(void) { TEST_ASSERT_TRUE(endpoints_has_method_with_shapes("input.state")); }
 
@@ -488,7 +511,7 @@ static void test_input_state_observes_injected_key(void) {
     cJSON_Delete(root);
 }
 
-/* ---- F7: input.button happy path — mask actually presses the mapped mouse button ---- */
+/* ---- input.button happy path — mask actually presses the mapped mouse button ---- */
 
 /* input.button {buttons:2} on the reserved mouse slot -> after an advance the RIGHT button is down. */
 static void test_input_button_right_presses_right(void) {
@@ -512,7 +535,28 @@ static void test_input_button_move_branch_updates_mask(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_RIGHT));
 }
 
-/* ---- F6: a single-point gesture applies point[0] exactly once at frame 0 (no double-apply) ---- */
+/* input.button applies the mask at the slot's APPLY-TIME position, not the live submit-time one: a
+   move queued ahead of the button must win. input.move(100,100) then input.button(1) then one
+   advance -> the button lands at (100,100), not the (0,0) a submit-time read would have baked. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_input_button_applies_at_pending_move_position(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":100,\"y\":100}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":1}}")));
+    advance(); /* move (creates slot @100,100) then buttons applied at that slot position, in order */
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= 99.999F && slot->x <= 100.001F);
+    TEST_ASSERT_TRUE(slot->y >= 99.999F && slot->y <= 100.001F);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
+/* ---- a single-point gesture applies point[0] exactly once at frame 0 (no double-apply) ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_input_gesture_single_point_applied_once(void) {
@@ -603,6 +647,7 @@ int main(void) {
     RUN_TEST(test_input_wheel_overfloat_dy_bad_params);
     RUN_TEST(test_sched_offset0_applies_on_advance);
     RUN_TEST(test_sched_pause_freeze);
+    RUN_TEST(test_reset_releases_applied_held_input);
     RUN_TEST(test_sched_hold_releases_after_n_advances);
     RUN_TEST(test_sched_click_default_hold);
     RUN_TEST(test_sched_gesture_ordered_across_frames);
@@ -611,6 +656,7 @@ int main(void) {
     RUN_TEST(test_sched_click_hold_zero_same_frame);
     RUN_TEST(test_input_button_right_presses_right);
     RUN_TEST(test_input_button_move_branch_updates_mask);
+    RUN_TEST(test_input_button_applies_at_pending_move_position);
     RUN_TEST(test_input_gesture_single_point_applied_once);
     RUN_TEST(test_input_state_pop_text_drains_codepoints);
     RUN_TEST(test_input_state_registers);
