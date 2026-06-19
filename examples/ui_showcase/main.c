@@ -31,6 +31,8 @@
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_progress.h"
+#include "ui/nt_ui_radial.h"
+#include "ui/nt_ui_radial_image.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
@@ -296,6 +298,15 @@ typedef struct {
     float last_progress; /* hold_progress latched for the fill display */
 } events_params_t;
 
+/* Radial tab: a game-owned cooldown timer (ramps 0->1 then resets) drives the cooldown wedge;
+ * the hold-to-confirm radial reads Phase-65 events hold_progress; the rest are static demos. */
+typedef struct {
+    float cooldown;      /* 0..1, ramps over cooldown_secs then loops (drives nt_ui_radial_fill) */
+    float cooldown_secs; /* full sweep duration */
+    uint32_t hold_fires; /* hold-to-confirm fire count (long_pressed) */
+    float hold_progress; /* latched hold_progress for the radial fill display */
+} radial_params_t;
+
 /* Dropdown tab: game-owned selection + open flags. */
 typedef struct {
     int fruit_sel; /* short list selection */
@@ -356,6 +367,7 @@ struct tab_state {
     input_params_t input;
     /* Interaction-events + app-widget tabs. */
     events_params_t events;
+    radial_params_t radial;
     dropdown_params_t dropdown;
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
@@ -379,6 +391,7 @@ static struct tab_state s_state = {
     .stress = {.label_count = 3000},
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
+    .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
     .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
 };
@@ -424,6 +437,7 @@ static uint32_t s_id_tab_btn_base; /* per-tab list buttons salt from this + inde
 static uint32_t s_id_events_hold;                           /* hold-to-confirm button */
 static uint32_t s_id_events_dbl;                            /* double-click target */
 static uint32_t s_id_events_fill;                           /* hold_progress fill bar */
+static uint32_t s_id_radial_hold;                           /* radial tab: hold-to-confirm button */
 static uint32_t s_id_dd_fruit, s_id_dd_city, s_id_dd_color; /* combo triggers (color = custom swatch) */
 static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets */
 static uint32_t s_id_menu_global;                           /* global context menu (right-click anywhere) */
@@ -455,9 +469,22 @@ static nt_resource_t s_sprite_fs_handle;
 static nt_resource_t s_text_vs_handle;
 static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
+/* Radial (Phase 66): shared extended-layout VS + flat SDF FS + textured reveal FS. */
+static nt_resource_t s_radial_vs_handle;
+static nt_resource_t s_radial_fs_handle;
+static nt_resource_t s_radial_image_fs_handle;
+/* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
+ * over the quad, so the wedge stays centered (carried flag from plans 03/04). */
+static nt_resource_t s_radial_art_atlas_handle;
+static nt_resource_t s_radial_art_tex_handle;
 
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
+/* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
+ * mode's u_reveal_mode param stays stable and same-mode radials batch to one draw (RESEARCH A4). */
+static nt_material_t s_radial_material;
+static nt_material_t s_radial_image_material[4]; /* indexed by nt_ui_radial_reveal_mode_t */
+static nt_atlas_region_ref_t s_radial_art_ref;
 static nt_font_t s_font;
 
 static bool s_atlas_bound;
@@ -501,6 +528,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_radial(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st);
@@ -526,6 +554,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
+    {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
     {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
     {"Menu", "Two context menus (global + zone-bound) with nested submenus: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
@@ -1578,6 +1607,111 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
+/* Radial tab (Phase 66): the two radial widgets driven by game-owned feedback state.
+ *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (Model D fill).
+ *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from Phase-65 events hold_progress.
+ *   3. FOUR REVEAL MODES     — nt_ui_radial_image (desat/dim/hide/tint) on the [0,1]-UV art.
+ *   4. DENSE GRID            — N radials sharing ONE material => one batched draw (D-66-07);
+ *      the header's draw-call readout proves the count does NOT scale with radial count.
+ * The flat radials carve a ring (inner_radius_norm) + an oval variant to exercise WGT-66-04. */
+#define RADIAL_TAU (2.0F * NT_PI)
+#define RADIAL_GRID_COLS 12
+#define RADIAL_GRID_ROWS 8
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — four side-by-side demos, not deep nesting
+static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[96];
+    /* The radial material(s) load with the pack; until ready, skip the tab body (no-art early-out). */
+    if (s_radial_material.id == 0U) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
+        return;
+    }
+
+    nt_ui_radial_style_t rstyle = nt_ui_radial_style_defaults();
+    rstyle.material = s_radial_material;
+
+    nt_ui_radial_style_t ring_style = rstyle;
+    ring_style.inner_radius_norm = 0.55F; /* carve a ring (cooldown-meter look) */
+
+    static const Clay_ElementDeclaration disc_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}};
+    static const Clay_ElementDeclaration oval_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(80)}}}; /* aspect != 1 -> oval */
+    static const Clay_ElementDeclaration row_decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 20, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+
+    /* #region 1: cooldown + 2: hold-to-confirm + ring + oval */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (events hold_progress); ring + oval variants.", g_current->caption);
+    CLAY(row_decl) {
+        /* Cooldown: fill ramps 0->1 over ~3s; start at +90deg (top), sweep a full turn. */
+        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &rstyle, &disc_decl);
+        /* Ring (inner cut) cooldown variant. */
+        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &ring_style, &disc_decl);
+        /* Oval: aspect comes from the FIXED w/h decl; a static 270deg sector to show the squash. */
+        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.0F, 1.5F * NT_PI, &rstyle, &oval_decl);
+        /* Hold-to-confirm: a button drives the events cell; its hold_progress fills the radial. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.hold_progress, RADIAL_TAU, &ring_style, &disc_decl);
+            static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_radial_hold, g_current->btn_primary,
+                               &(Clay_ElementDeclaration){
+                                   .layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(40)}, .padding = CLAY_PADDING_ALL(6), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                                   .cornerRadius = CLAY_CORNER_RADIUS(8)},
+                               true, &hold_cfg);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hold", g_current->body);
+            (void)nt_ui_button_end(ctx);
+        }
+    }
+    const nt_ui_events_t hold = nt_ui_query_events(ctx, s_id_radial_hold);
+    st->radial.hold_progress = hold.hold_progress;
+    if (hold.long_pressed) {
+        st->radial.hold_fires++;
+    }
+    // #endregion
+
+    /* #region 3: four reveal modes on the [0,1]-UV radial_art (swept = full color) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Radial-image reveal (swept = full color; un-swept = desaturate / dim / hide / tint), driven by the cooldown fill.", g_current->caption);
+    static const char *const mode_labels[4] = {"desaturate", "dim", "hide", "tint"};
+    static const Clay_ElementDeclaration img_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}};
+    CLAY(row_decl) {
+        for (int m = 0; m < 4; ++m) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                nt_ui_radial_image_style_t istyle = nt_ui_radial_image_style_defaults();
+                istyle.material = s_radial_image_material[m];
+                istyle.mode = (uint8_t)m;
+                /* Sweep starts at the top and reveals clockwise as the cooldown fills. */
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_radial_art_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), mode_labels[m], g_current->caption);
+            }
+        }
+    }
+    // #endregion
+
+    /* #region 4: dense batched grid — N radials, one material, one draw (D-66-07) */
+    (void)snprintf(buf, sizeof buf, "Dense grid: %d radials sharing ONE material -> watch the header draw-call count stay flat.", RADIAL_GRID_COLS * RADIAL_GRID_ROWS);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    static const Clay_ElementDeclaration grid_decl = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}};
+    static const Clay_ElementDeclaration grid_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4}};
+    static const Clay_ElementDeclaration cell_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28)}}};
+    CLAY(grid_decl) {
+        for (int r = 0; r < RADIAL_GRID_ROWS; ++r) {
+            CLAY(grid_row) {
+                for (int c = 0; c < RADIAL_GRID_COLS; ++c) {
+                    /* Each cell sweeps to a different phase so the grid animates, but ALL share
+                     * s_radial_material -> the walker binds the material once and batches them. */
+                    float phase = (float)((r * RADIAL_GRID_COLS) + c) / (float)(RADIAL_GRID_COLS * RADIAL_GRID_ROWS);
+                    float f = st->radial.cooldown + phase;
+                    if (f > 1.0F) {
+                        f -= 1.0F;
+                    }
+                    nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, f, RADIAL_TAU, &rstyle, &cell_decl);
+                }
+            }
+        }
+    }
+    (void)snprintf(buf, sizeof buf, "draw calls: %u   hold confirms: %u   cooldown: %.2f", nt_ui_get_last_walk_draw_calls(ctx), st->radial.hold_fires, (double)st->radial.cooldown);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+    // #endregion
+}
+
 /* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to
  * exercise the scroll path + edge-flip-up near the bottom border, and a custom-trigger / custom-row combo
  * (preview_begin/end + selectable_begin/end). The game feeds rows per-call and owns selection +
@@ -2104,6 +2238,7 @@ static void ensure_ids(void) {
     s_id_events_hold = nt_ui_id("showcase/events_hold");
     s_id_events_dbl = nt_ui_id("showcase/events_dbl");
     s_id_events_fill = nt_ui_id("showcase/events_fill");
+    s_id_radial_hold = nt_ui_id("showcase/radial_hold");
     s_id_dd_fruit = nt_ui_id("showcase/dd_fruit");
     s_id_dd_city = nt_ui_id("showcase/dd_city");
     s_id_dd_color = nt_ui_id("showcase/dd_color");
@@ -2297,6 +2432,15 @@ static void frame(void) {
         }
     }
 
+    /* Radial cooldown: a game-owned timer ramps 0->1 over cooldown_secs then loops, driving the
+     * cooldown wedge + the four-mode radial-image reveal (Model D — the game owns the fill). */
+    if (s_state.radial.cooldown_secs > 0.0F) {
+        s_state.radial.cooldown += g_nt_app.dt / s_state.radial.cooldown_secs;
+        while (s_state.radial.cooldown >= 1.0F) {
+            s_state.radial.cooldown -= 1.0F;
+        }
+    }
+
     if (!s_atlas_bound) {
         try_bind_resources();
         if (s_atlas_bound) {
@@ -2458,7 +2602,8 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
     nt_atlas_init();
 
-    nt_material_init(&(nt_material_desc_t){.max_materials = 4});
+    /* sprite + text + base radial + 4 radial-image reveal-mode materials = 7. */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 8});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
@@ -2495,6 +2640,13 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
+    /* Radial (Phase 66) shaders + the dedicated radial-art atlas + its full-bleed texture. */
+    s_radial_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
+    s_radial_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
+    s_radial_image_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
+    s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
+    s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
+    s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
@@ -2518,6 +2670,45 @@ int main(int argc, char *argv[]) {
         .param_count = 1,
         .label = "ui_showcase_text",
     });
+
+    /* Base radial material (nt_ui_radial): the extended sprite layout (a_radial @ loc 4) + the flat
+     * SDF FS. No texture — the shape is per-pixel. Mirrors the s_sprite_material registration but
+     * declares the custom per-vertex attr so the renderer builds the extended (36B) vertex layout. */
+    s_radial_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_radial_vs_handle,
+        .fs = s_radial_fs_handle,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .attr_map[0] = {.stream_name = "a_radial", .location = 4},
+        .attr_map_count = 1,
+        .label = "ui_showcase_radial",
+    });
+
+    /* One radial-image material per reveal mode (RESEARCH A4): each pins its u_reveal_mode so
+     * same-mode radials keep one stable param and batch to one draw. The widget overwrites the
+     * param per call from the style, so the initial value is just a placeholder; the per-mode
+     * material identity is what groups the batch. All sample the full-bleed radial_art texture. */
+    static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
+    for (int m = 0; m < 4; ++m) {
+        s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
+            .vs = s_radial_vs_handle,
+            .fs = s_radial_image_fs_handle,
+            .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
+            .texture_count = 1,
+            .blend_mode = NT_BLEND_MODE_ALPHA,
+            .depth_test = false,
+            .depth_write = false,
+            .cull_mode = NT_CULL_NONE,
+            .attr_map[0] = {.stream_name = "a_radial", .location = 4},
+            .attr_map_count = 1,
+            .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
+            .params[1] = {.name = NT_UI_RADIAL_IMAGE_PARAM_TINT, .value = {1.0F, 0.85F, 0.2F, 0.6F}},
+            .param_count = 2,
+            .label = k_radial_image_labels[m],
+        });
+    }
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ctx, s_text_material);
@@ -2552,6 +2743,10 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
+    nt_material_destroy(s_radial_material);
+    for (int m = 0; m < 4; ++m) {
+        nt_material_destroy(s_radial_image_material[m]);
+    }
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();
