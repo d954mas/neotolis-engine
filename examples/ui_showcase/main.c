@@ -358,7 +358,7 @@ struct tab_state {
     events_params_t events;
     dropdown_params_t dropdown;
     menu_params_t menu;
-    /* Tabs tab: the begin/end-core demo strip's game-owned active index (Model D). */
+    /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
 };
 
@@ -1530,7 +1530,7 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 /* Events tab: a hold-to-confirm button (nt_ui_events gesture cfg -> hold_progress fill + long_pressed
- * fire) and a double-click target. All counters are game-owned (Model D); the engine owns only the
+ * fire) and a double-click target. All counters are game-owned; the engine owns only the
  * gesture cell behind the button id. */
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
@@ -1581,7 +1581,7 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to
  * exercise the scroll path + edge-flip-up near the bottom border, and a custom-trigger / custom-row combo
  * (preview_begin/end + selectable_begin/end). The game feeds rows per-call and owns selection +
- * open (Model D): a selectable's clicked return is where the game writes *selected; the combo clears *open. */
+ * open: a selectable's clicked return is where the game writes *selected; the combo clears *open. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — three combos' row loops, not deep nesting
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
@@ -2166,7 +2166,7 @@ static void ensure_tab_labels(void) {
 }
 
 /* Demo-selection panel (left, FIXED 240): the reusable nt_ui_tabbar dogfooded. The game owns
- * s_active_tab (Model D); the widget draws the accent bar + selected fill + hover lighten and writes the
+ * s_active_tab; the widget draws the accent bar + selected fill + hover lighten and writes the
  * active index on click. Styled as a card (bg + border + radius) consistent with the other panels. */
 static void declare_tab_list(nt_ui_context_t *ctx) {
     ensure_tab_labels();

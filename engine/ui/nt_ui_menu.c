@@ -135,10 +135,9 @@ static bool menu_point_in_tri(float px, float py, float ax, float ay, float bx, 
     return !(neg && pos);
 }
 
-/* Aim-triangle near corners for an open submenu rect. A submenu opens to the RIGHT of its parent, so
- * the two corners the cursor aims between are the submenu's LEFT edge (top + bottom). When edge-flipped
- * to the LEFT, mirror to the submenu's RIGHT edge. The triangle apex is the cursor's PREVIOUS position
- * (supplied by the caller); these are the base. */
+/* Aim-triangle near corners for an open submenu rect (the two base corners only; the apex is the caller's
+ * stable primed apex). A submenu opens to the RIGHT of its parent, so the cursor aims between the
+ * submenu's LEFT edge top + bottom corners. When edge-flipped to the LEFT, mirror to the RIGHT edge. */
 static void menu_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h, uint8_t side, float *bx, float *by, float *cx, float *cy) {
     const float near_x = (side == NT_UI_POPUP_LEFT) ? (sub_x + sub_w) : sub_x;
     *bx = near_x;

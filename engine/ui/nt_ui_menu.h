@@ -85,7 +85,10 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
 /* Immediate-item options: the full OS-menu row field set. `icon` is the leading-gutter sprite
  * (atlas.id==0 = aligned empty gutter). The two mostly-true bools are stored INVERTED so a {0} init is a
- * normal enabled + activatable row — the common case opts IN to nothing. */
+ * normal enabled + activatable row — the common case opts IN to nothing.
+ * Negative-sense (disabled/non_activatable) — unlike the positional `bool enabled` on
+ * button/checkbox/slider — because a struct field can't default to true, so `{0}` must be the normal
+ * enabled+activatable row. */
 typedef struct {
     nt_atlas_region_ref_t icon; /* optional leading-gutter sprite (atlas.id==0 = aligned empty gutter) */
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
@@ -181,8 +184,9 @@ void nt_ui_menu_init(nt_ui_menu_ctx_t *menu);
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style. */
 /* begin stashes `ctx` into menu->ui for the begin/end span; every inner call reaches the core via
  * menu->ui (no re-passed ctx — visible per-frame binding, no hidden cross-frame back-reference).
- * Call item/submenu/separator/end EVERY frame, open or closed — the calls no-op when closed; do NOT wrap
- * them in `if (st.open)` (that would break the 1-frame keyboard-nav record). */
+ * Returns void (unlike `nt_ui_combo_begin`'s body-guard): call item/submenu/separator/end EVERY frame,
+ * open or closed — the calls no-op when closed; do NOT wrap them in `if (st.open)` (that would break the
+ * 1-frame keyboard-nav record). */
 void nt_ui_menu_begin(nt_ui_menu_ctx_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
