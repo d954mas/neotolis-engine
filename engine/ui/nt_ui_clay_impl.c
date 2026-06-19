@@ -684,6 +684,265 @@ static bool cdv_is_inspector_owned_id(uint32_t id) {
     return false;
 }
 
+// #region probe collect (UITREE-01)
+#ifndef NT_UI_PROBE_OPACITY_MIN
+#define NT_UI_PROBE_OPACITY_MIN 0.01F /* composed opacity at/below this counts as not visible (D-03) */
+#endif
+
+/* Bounded copy of a Clay-borrowed string into a node-owned NUL-terminated buffer (D-01/SC3).
+ * Returns the stored length (may be truncated to cap-1). */
+static uint16_t probe_copy_string(char *dst, uint32_t cap, const char *src, int32_t src_len) {
+    if (cap == 0U) {
+        return 0U;
+    }
+    uint32_t n = 0U;
+    if (src != NULL && src_len > 0) {
+        n = (uint32_t)src_len;
+        if (n > cap - 1U) {
+            n = cap - 1U;
+        }
+        memcpy(dst, src, n);
+    }
+    dst[n] = '\0';
+    return (uint16_t)n;
+}
+
+/* Coarse role for an unregistered, non-text element (text leaves resolve to ROLE_TEXT earlier). */
+static nt_ui_probe_role_t probe_role_from_mask(uint8_t config_mask) {
+    if ((config_mask & (1U << 3U)) != 0U) { /* Image */
+        return NT_UI_PROBE_ROLE_IMAGE;
+    }
+    if ((config_mask & (1U << 4U)) != 0U) { /* Floating */
+        return NT_UI_PROBE_ROLE_FLOATING;
+    }
+    return NT_UI_PROBE_ROLE_BOX;
+}
+
+/* Flat POD tree collect. Reuses the collect_tree_rows pre-order DFS but emits `parent` directly
+ * from the DFS stack (D-06), copies id_string/text on collect (SC3), resolves role from the
+ * widget registry with a config-mask fallback (D-04), reads the always-compiled enabled signal
+ * (D-02), and computes visible from offscreen + ancestor-clip intersection + composed opacity
+ * (D-03). EMITS every node incl. invisible/offscreen/disabled (D-05). Excludes inspector chrome. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
+    NT_ASSERT(ctx != NULL && "nt_ui_probe_collect: ctx must be non-NULL");
+    NT_ASSERT(out != NULL && "nt_ui_probe_collect: out must be non-NULL");
+    if (out_count != NULL) {
+        *out_count = 0U;
+    }
+    if (ctx->clay == NULL || cap == 0U) {
+        return 0U;
+    }
+    cdv_init_owned_ids_once();
+
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+
+    const int32_t baked_count = ctx->clay->layoutElements.length;
+    uint32_t written = 0U;
+    const int32_t roots = ctx->clay->layoutElementTreeRoots.length;
+
+    enum { STACK_CAP = 256 };
+    struct {
+        int32_t elem_idx;
+        int32_t child_cursor;
+        int32_t out_index;                    /* row this frame wrote, or -1 if skipped (e.g. inspector-owned) */
+        uint32_t id;                          /* this node's id (parent link for children) */
+        bool clip_valid;                      /* an ancestor clip rect is in effect */
+        float clip_x, clip_y, clip_w, clip_h; /* inherited ancestor-clip intersection (Clay Y-down) */
+    } stack[STACK_CAP];
+    int32_t sp = 0;
+
+    for (int32_t r = 0; r < roots && written < cap; ++r) {
+        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&ctx->clay->layoutElementTreeRoots, r);
+        if (sp >= STACK_CAP) {
+            break;
+        }
+        stack[sp].elem_idx = root->layoutElementIndex;
+        stack[sp].child_cursor = -1;
+        stack[sp].out_index = -1;
+        stack[sp].id = 0U;
+        stack[sp].clip_valid = false;
+        sp++;
+
+        while (sp > 0 && written < cap) {
+            int32_t top = sp - 1;
+            Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[top].elem_idx);
+            if (stack[top].child_cursor < 0) {
+                // #region node-fill
+                const uint8_t config_mask = inspector_element_config_mask(el);
+                const bool is_text = (uint8_t)Clay__ElementHasConfig(el, CLAY__ELEMENT_CONFIG_TYPE_TEXT) != 0U;
+                bool clip_child_valid = stack[top].clip_valid;
+                float clip_cx = stack[top].clip_x;
+                float clip_cy = stack[top].clip_y;
+                float clip_cw = stack[top].clip_w;
+                float clip_ch = stack[top].clip_h;
+
+                if (cdv_is_inspector_owned_id(el->id)) {
+                    /* Skip engine chrome but still descend; descendants inherit THIS frame's parent
+                     * link (stack[top].id stays the inherited parent, so a real child of the auto-root
+                     * surfaces as a root with parent == NT_UI_PROBE_NO_PARENT, not the chrome id). */
+                    stack[top].out_index = -1;
+                    stack[top].child_cursor = 0;
+                    if (is_text) {
+                        sp--;
+                        continue;
+                    }
+                } else {
+                    nt_ui_probe_node_t *node = &out[written];
+                    memset(node, 0, sizeof *node);
+                    node->id = el->id;
+                    /* parent id was copied onto this frame at child-push (the enclosing emitted node's
+                     * id); roots and chrome-parented nodes carry 0 == NT_UI_PROBE_NO_PARENT. */
+                    node->parent = stack[top].id;
+
+                    float bx = 0.0F;
+                    float by = 0.0F;
+                    float bw = 0.0F;
+                    float bh = 0.0F;
+                    bool offscreen = false;
+                    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(el->id);
+                    if (item != NULL) {
+                        bx = item->boundingBox.x;
+                        by = item->boundingBox.y;
+                        bw = item->boundingBox.width;
+                        bh = item->boundingBox.height;
+                        offscreen = Clay__ElementIsOffscreen(&item->boundingBox);
+                    }
+                    /* Trivial Y-flip for plain 2D; the 2D-affine + 3D projector land in Plan 03. */
+                    const float vh = nt_ui_clay_priv_layout_height(ctx->clay);
+                    node->bounds[0] = bx;
+                    node->bounds[1] = vh - by - bh; /* fb Y-up top-left */
+                    node->bounds[2] = bw;
+                    node->bounds[3] = bh;
+
+                    Clay_String idStr = ctx->clay->layoutElementIdStrings.internalArray[stack[top].elem_idx];
+                    node->id_string_len = probe_copy_string(node->id_string, NT_UI_PROBE_ID_CAP, idStr.chars, idStr.length);
+
+                    if (is_text) {
+                        Clay__TextElementData *td = el->childrenOrTextContent.textElementData;
+                        if (td != NULL) {
+                            node->text_len = probe_copy_string(node->text, NT_UI_PROBE_TEXT_CAP, td->text.chars, td->text.length);
+                        }
+                    }
+
+                    const nt_ui_widget_def_t *def = nt_ui_widget_lookup(ctx, el->id);
+                    if (def != NULL) {
+                        node->role = NT_UI_PROBE_ROLE_WIDGET;
+                        (void)probe_copy_string(node->role_name, NT_UI_PROBE_ID_CAP, def->name, (def->name != NULL) ? (int32_t)strlen(def->name) : 0);
+                    } else if (is_text) {
+                        node->role = NT_UI_PROBE_ROLE_TEXT;
+                    } else {
+                        node->role = probe_role_from_mask(config_mask);
+                    }
+
+                    node->enabled = nt_ui_internal_widget_enabled(ctx, el->id);
+
+                    /* visible = !offscreen AND not clipped out by an ancestor clip AND opacity > min. */
+                    bool visible = !offscreen;
+                    if (visible && stack[top].clip_valid && item != NULL) {
+                        const float ix0 = (bx > stack[top].clip_x) ? bx : stack[top].clip_x;
+                        const float iy0 = (by > stack[top].clip_y) ? by : stack[top].clip_y;
+                        const float ix1 = (bx + bw < stack[top].clip_x + stack[top].clip_w) ? (bx + bw) : (stack[top].clip_x + stack[top].clip_w);
+                        const float iy1 = (by + bh < stack[top].clip_y + stack[top].clip_h) ? (by + bh) : (stack[top].clip_y + stack[top].clip_h);
+                        if (ix1 <= ix0 || iy1 <= iy0) {
+                            visible = false; /* fully clipped out */
+                        }
+                    }
+                    if (visible && stack[top].elem_idx >= 0 && stack[top].elem_idx < baked_count) {
+                        if (ctx->tree_baked[stack[top].elem_idx].opacity <= NT_UI_PROBE_OPACITY_MIN) {
+                            visible = false;
+                        }
+                    }
+                    node->visible = visible;
+
+                    /* Push this node's id as label-target / parent for its children. */
+                    stack[top].out_index = (int32_t)written;
+                    stack[top].id = el->id;
+                    written++;
+
+                    /* A clip node intersects its own bbox into the inherited clip rect for descendants. */
+                    if ((config_mask & (1U << 5U)) != 0U && item != NULL) { /* Clip */
+                        if (clip_child_valid) {
+                            const float nx0 = (bx > clip_cx) ? bx : clip_cx;
+                            const float ny0 = (by > clip_cy) ? by : clip_cy;
+                            const float nx1 = (bx + bw < clip_cx + clip_cw) ? (bx + bw) : (clip_cx + clip_cw);
+                            const float ny1 = (by + bh < clip_cy + clip_ch) ? (by + bh) : (clip_cy + clip_ch);
+                            clip_cx = nx0;
+                            clip_cy = ny0;
+                            clip_cw = (nx1 > nx0) ? (nx1 - nx0) : 0.0F;
+                            clip_ch = (ny1 > ny0) ? (ny1 - ny0) : 0.0F;
+                        } else {
+                            clip_child_valid = true;
+                            clip_cx = bx;
+                            clip_cy = by;
+                            clip_cw = bw;
+                            clip_ch = bh;
+                        }
+                    }
+
+                    /* Label = first text-child caption on the enclosing emitted parent (D-07). */
+                    if (is_text && top > 0 && stack[top - 1].out_index >= 0) {
+                        nt_ui_probe_node_t *parent_node = &out[stack[top - 1].out_index];
+                        if (parent_node->label_len == 0U) {
+                            Clay__TextElementData *td = el->childrenOrTextContent.textElementData;
+                            if (td != NULL) {
+                                parent_node->label_len = probe_copy_string(parent_node->label, NT_UI_PROBE_TEXT_CAP, td->text.chars, td->text.length);
+                            }
+                        }
+                    }
+                    if (stack[top].out_index >= 0 && top > 0 && stack[top - 1].out_index >= 0) {
+                        out[stack[top - 1].out_index].child_count++;
+                    }
+
+                    stack[top].child_cursor = 0;
+                    if (is_text) {
+                        sp--;
+                        continue;
+                    }
+                }
+                /* Stash the clip rect to inherit to children via the push below. */
+                stack[top].clip_valid = clip_child_valid;
+                stack[top].clip_x = clip_cx;
+                stack[top].clip_y = clip_cy;
+                stack[top].clip_w = clip_cw;
+                stack[top].clip_h = clip_ch;
+                // #endregion
+            }
+            // #region child-push
+            const int32_t childCount = (el->childrenOrTextContent.children.elements == NULL) ? 0 : el->childrenOrTextContent.children.length;
+            if (stack[top].child_cursor < childCount) {
+                int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
+                stack[top].child_cursor++;
+                if (sp >= STACK_CAP) {
+                    sp = 0;
+                    break;
+                }
+                stack[sp].elem_idx = child_idx;
+                stack[sp].child_cursor = -1;
+                stack[sp].out_index = -1;
+                stack[sp].id = stack[top].id; /* parent link for the child's node-fill */
+                stack[sp].clip_valid = stack[top].clip_valid;
+                stack[sp].clip_x = stack[top].clip_x;
+                stack[sp].clip_y = stack[top].clip_y;
+                stack[sp].clip_w = stack[top].clip_w;
+                stack[sp].clip_h = stack[top].clip_h;
+                sp++;
+            } else {
+                sp--;
+            }
+            // #endregion
+        }
+    }
+
+    Clay_SetCurrentContext(saved);
+    if (out_count != NULL) {
+        *out_count = written;
+    }
+    return written;
+}
+// #endregion
+
 static const char *cdv_config_label(uint8_t type) {
     switch (type) {
     case CLAY__ELEMENT_CONFIG_TYPE_SHARED:
