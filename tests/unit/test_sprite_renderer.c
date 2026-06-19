@@ -332,20 +332,20 @@ static nt_material_t create_test_material(void) {
  *
  * loc==0 → no attr_map (plain 20B base). loc>0 → one custom FLOAT4 attr
  * "a_radial" bound to that GL location. */
-static nt_material_t create_radial_test_material(const char *stream_name, uint8_t loc) {
-    static nt_resource_t s_shared_vs = {0};
-    static nt_resource_t s_shared_fs = {0};
-    static uint32_t s_shared_pack_seq = 0;
+/* Shared shader handles for the radial helper — reset to {0} in setUp each test
+ * (subsystems are re-init'd per test, so cached handles cannot persist). */
+static nt_resource_t s_radial_shared_vs;
+static nt_resource_t s_radial_shared_fs;
 
-    if (s_shared_vs.id == 0) {
+static nt_material_t create_radial_test_material(const char *stream_name, uint8_t loc) {
+    if (s_radial_shared_vs.id == 0) {
         nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "radial_vs"});
         nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "radial_fs"});
         char vs_name[64];
         char fs_name[64];
         char pack_name[64];
-        s_shared_pack_seq = s_vpack_counter;
-        (void)snprintf(vs_name, sizeof(vs_name), "radial_shared_vs_%u", s_shared_pack_seq);
-        (void)snprintf(fs_name, sizeof(fs_name), "radial_shared_fs_%u", s_shared_pack_seq);
+        (void)snprintf(vs_name, sizeof(vs_name), "radial_shared_vs_%u", s_vpack_counter);
+        (void)snprintf(fs_name, sizeof(fs_name), "radial_shared_fs_%u", s_vpack_counter);
         (void)snprintf(pack_name, sizeof(pack_name), "radial_shared_pack_%u", s_vpack_counter++);
         nt_hash32_t pid = nt_hash32_str(pack_name);
         nt_hash64_t vs_rid = nt_hash64_str(vs_name);
@@ -353,15 +353,15 @@ static nt_material_t create_radial_test_material(const char *stream_name, uint8_
         nt_resource_create_pack(pid, 0);
         nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
         nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
-        s_shared_vs = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-        s_shared_fs = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
+        s_radial_shared_vs = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
+        s_radial_shared_fs = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
         nt_resource_step();
     }
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.vs = s_shared_vs;
-    desc.fs = s_shared_fs;
+    desc.vs = s_radial_shared_vs;
+    desc.fs = s_radial_shared_fs;
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
@@ -411,6 +411,8 @@ void setUp(void) {
     memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_atlas_res = NT_RESOURCE_INVALID;
     s_vpack_counter = 0;
+    s_radial_shared_vs = NT_RESOURCE_INVALID;
+    s_radial_shared_fs = NT_RESOURCE_INVALID;
 
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
