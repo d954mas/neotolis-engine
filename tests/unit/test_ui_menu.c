@@ -986,6 +986,40 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "a non_activatable row must NOT latch the click as an activation (chain stays open)");
     TEST_ASSERT_FALSE_MESSAGE(end_activated, "item_end must return false for a non_activatable row (child owns the click)");
     (void)row_id;
+
+    /* POSITIVE CONTROL: the same click geometry on a {.non_activatable = false} custom row with NO inner
+     * child (nothing steals the click) MUST make item_end return true. Without this control the FALSE
+     * assertion above could pass for the wrong reason (an item_end that always returns false). */
+    nt_ui_menu_state_t st2 = {0};
+    menu_im_open(&st2, 120.0F, 80.0F);
+    const uint32_t ctrl_id = nt_ui_menu_test_item_id(MENU_A, row_key);
+    bool ctrl_activated = false;
+    for (int frame = 0; frame < 4; ++frame) {
+        const bool press = (frame == 2);
+        const bool release = (frame == 3);
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, ctrl_id);
+        const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
+        const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
+        nt_pointer_t p = {.x = bx, .y = by, .active = true};
+        if (press && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_down = true;
+            p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+        } else if (release && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_released = true;
+        }
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st2, &style);
+        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.non_activatable = false})) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {} /* no interactive child */
+        }
+        if (nt_ui_menu_item_end(&s_menu)) {
+            ctrl_activated = true;
+        }
+        nt_ui_menu_end(&s_menu);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(ctrl_activated, "an activatable (non_activatable=false) custom row with no inner child MUST activate via item_end");
+    TEST_ASSERT_FALSE_MESSAGE(st2.open, "activating the control row must close the chain (st.open -> false)");
 }
 
 /* ---- Custom row leak: a CLOSED (present-only) menu's item_begin returns false so the game skips
@@ -1323,6 +1357,12 @@ static void test_menu_shortcut_cell_on_rich_row_only(void) {
     const nt_ui_bbox_t plain_sc = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_shortcut_id(MENU_A, 0U, 1U));
     TEST_ASSERT_TRUE_MESSAGE(sc.found, "a row with opts.shortcut must declare the shortcut cell");
     TEST_ASSERT_FALSE_MESSAGE(plain_sc.found, "a row without a shortcut must NOT declare a shortcut cell");
+    /* Position lock: the GROW spacer right-aligns the shortcut, so its cell sits in the row's RIGHT half
+     * (right of the leading label region), not just present somewhere. The interactive row element uses the
+     * scope-stack id (mix(scope,key)), not the KIND_ROW probe id. */
+    const nt_ui_bbox_t row = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_item_id(MENU_A, KEY_NEW));
+    TEST_ASSERT_TRUE_MESSAGE(row.found, "the rich row must register an interactive row bbox");
+    TEST_ASSERT_TRUE_MESSAGE(sc.x > row.x + (row.width * 0.5F), "the shortcut cell must be right-aligned (right half of the row), not at the label x");
 }
 
 /* ---- opts.selected declares the checkmark cell (own fmix id); an unselected row does NOT. ---- */

@@ -148,6 +148,50 @@ static void test_dropdown_trigger_toggles_open(void) {
     TEST_ASSERT_TRUE(open);
 }
 
+/* Raise exactly one fresh pressed-key edge for this frame (mirrors test_ui_menu's menu_key): poll clears
+ * the sticky edges, clear_all drops the held state, set_key(true) raises a clean rising edge. */
+static void dropdown_key(nt_key_t key) {
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    nt_input_set_key(key, true);
+}
+
+/* ---- Combo keyboard is INERT: the immediate combo wires NO keyboard nav. combo_open_list routes through
+ *      nt_ui_popup_visible (the non-ext popup path), which has esc_close=false and dismisses only on an
+ *      OUTSIDE click — never on Esc. Arrows/Enter never move or commit a selection (mouse-only). Locking
+ *      that contract: an open list + Esc/arrows/Enter leaves *open and *selected unchanged. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_dropdown_combo_keyboard_inert(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    int selected = -1;
+    bool open = true; /* list already open */
+
+    /* Two warm frames so the list anchors to the trigger's prev-frame bbox (1-frame IM lag). */
+    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+
+    /* Esc with the list open: the plain combo popup has no esc_close, so the list stays open. */
+    dropdown_key(NT_KEY_ESCAPE);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(open, "Esc must NOT close the immediate combo (no keyboard dismiss wired)");
+
+    /* Arrows + Enter never move focus nor commit a selection (selection is mouse-only). */
+    dropdown_key(NT_KEY_ARROW_DOWN);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    dropdown_key(NT_KEY_ARROW_UP);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    dropdown_key(NT_KEY_ENTER);
+    bool made = false;
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, &made);
+    TEST_ASSERT_TRUE_MESSAGE(open, "arrows/Enter must not close the combo");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-1, selected, "arrows/Enter must not change *selected (mouse-only)");
+    TEST_ASSERT_FALSE_MESSAGE(made, "Enter must not commit a selectable");
+
+    nt_input_poll();
+    nt_input_clear_all_keys();
+}
+
 /* ---- A combo_selectable click writes *selected and closes the list. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_row_select_sets_int_and_closes(void) {
@@ -462,8 +506,7 @@ static void test_dropdown_icon_size_gutter_shifts_label(void) {
 
 /* ---- Single-column alignment: in ONE combo list (icon_size>0), an iconed row and a non-iconed row
  *      align their labels at the SAME left x — the icon rides the engine gutter, the label starts past
- *      it for every row, iconed or not (OS-menu icon column). This is the fix invariant: the iconed
- *      demo rows now route through combo_selectable_icon (engine column), NOT a hand-rolled custom row. ---- */
+ *      it for every row, iconed or not (OS-menu icon column). ---- */
 static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
     nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
 
@@ -550,6 +593,25 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
     const float sw_right = sw.x + sw.width;
     const float gap = (right_inner > sw_right) ? (right_inner - sw_right) : (sw_right - right_inner);
     TEST_ASSERT_TRUE_MESSAGE(gap <= 0.5F, "opt-out must leave no leftover GROW spacer (swatch fills to the trigger's right inner edge)");
+}
+
+/* ---- The custom preview trigger toggles the game-owned open bool on a click (combo_preview_end's
+ *      step), mirroring the plain combo_begin trigger toggle. Press+release inside the trigger flips
+ *      *open. ---- */
+static void test_dropdown_preview_trigger_toggles_open(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    bool open = false;
+
+    /* Warm frame so the trigger (DD_A) bbox bakes; the preview trigger anchors at (30,30). */
+    nt_pointer_t f1 = pointer_at(0.0F, 0.0F, false, false, false);
+    preview_im_frame(&f1, 30.0F, 30.0F, &st, &open);
+
+    /* Press then release inside the trigger -> click toggles *open true. */
+    nt_pointer_t pr = pointer_at(40.0F, 38.0F, true, true, false);
+    preview_im_frame(&pr, 30.0F, 30.0F, &st, &open);
+    nt_pointer_t rl = pointer_at(40.0F, 38.0F, false, false, true);
+    preview_im_frame(&rl, 30.0F, 30.0F, &st, &open);
+    TEST_ASSERT_TRUE_MESSAGE(open, "custom preview trigger click must toggle *open (combo_preview_end step)");
 }
 
 /* One combo frame whose row SET changes: when `hide_first` the row keyed ROW_KEY(0) is skipped, so the
@@ -673,6 +735,8 @@ int main(void) {
     RUN_TEST(test_dropdown_abi_size);
     RUN_TEST(test_dropdown_defaults_valid);
     RUN_TEST(test_dropdown_trigger_toggles_open);
+    RUN_TEST(test_dropdown_combo_keyboard_inert);
+    RUN_TEST(test_dropdown_preview_trigger_toggles_open);
     RUN_TEST(test_dropdown_row_select_sets_int_and_closes);
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
     RUN_TEST(test_dropdown_long_list_shows_scrollbar);
