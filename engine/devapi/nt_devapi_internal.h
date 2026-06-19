@@ -148,12 +148,23 @@ void nt_devapi_input_reset(void);
 #endif
 
 /* Engine `ui` group registrar (per-group #ifdef). Defined in nt_devapi_ui.c, invoked from
-   nt_devapi_init under the same compile gate; registers the group's reads + the reset hook.
+   nt_devapi_init under the same compile gate; registers the group's reads + writes + lifecycle hooks.
    (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
 #ifdef NT_DEVAPI_GROUP_UI
+/* Bounded BSS schedule cap for the ui group's OWN scheduler (-D overridable). Lives here, not in
+   nt_devapi_ui.c, so any test can derive schedule-fill sizes from the real cap (mirrors the input
+   group's NT_DEVAPI_INPUT_SCHED_MAX). */
+#ifndef NT_DEVAPI_UI_SCHED_MAX
+#define NT_DEVAPI_UI_SCHED_MAX 256
+#endif
+
 void nt_devapi_register_ui(void);
 
-/* Reset hook: clears the devapi-owned host context name table (B-strict disconnect). */
+/* Per-tick schedule driver (the tick hook): on a real sim-advance releases due ui.click/drag/scroll
+   entries into nt_input's immediate inject buffer (the SAME path input.* uses, bot==human). */
+void nt_devapi_ui_update(void);
+
+/* Reset hook: clears the devapi-owned host context name table + pending schedule (B-strict disconnect). */
 void nt_devapi_ui_reset(void);
 #endif
 
