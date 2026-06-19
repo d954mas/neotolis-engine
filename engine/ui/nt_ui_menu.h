@@ -170,6 +170,12 @@ uint32_t nt_ui_menu_test_focus_item_id(uint32_t menu_id, uint8_t depth);
 /* Open-chain probe: the retained open child index at a level (rt->open_path[depth]); -1 = none open.
  * Drives the immediate hover-open test (hover a parent row -> the corridor opens its submenu). */
 int16_t nt_ui_menu_test_open_path(uint32_t menu_id, uint8_t depth);
+/* Deepest-open-level probe (rt->active_depth): the depth-cap regression asserts it never exceeds
+ * NT_UI_MENU_MAX_DEPTH-1 even when Right/Enter-open is driven at the deepest allowable level. */
+uint8_t nt_ui_menu_test_active_depth(uint32_t menu_id);
+/* Force the open chain open `depth` levels deep (clamped to the cap). The depth-cap DEATH test uses this to
+ * drive submenu_begin's decl-time backstop assert directly (the nav-open path now no-ops at the cap). */
+void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
 #endif
 
 #endif /* NT_UI_MENU_H */

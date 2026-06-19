@@ -838,11 +838,13 @@ static bool menu_im_keyboard_nav(nt_ui_context_t *ctx, uint8_t depth, nt_ui_menu
         const bool open_key = nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER);
         const bool activate_key = nt_input_key_is_pressed(NT_KEY_ENTER);
         if (cur->has_sub != 0U && open_key) {
-            rt->open_path[depth] = f;
-            if (depth + 1U > rt->active_depth) {
-                rt->active_depth = (uint8_t)(depth + 1U);
-            }
+            /* The deepest allowable level (depth == MAX_DEPTH-1) cannot open a child: open_path/active_depth/
+             * focus[depth+1] would all index == MAX_DEPTH (OOB). Right/Enter on a parent there is a no-op. */
             if (depth + 1U < NT_UI_MENU_MAX_DEPTH) {
+                rt->open_path[depth] = f;
+                if (depth + 1U > rt->active_depth) {
+                    rt->active_depth = (uint8_t)(depth + 1U);
+                }
                 rt->focus[depth + 1U] = 0; /* focus the child's first row (layout idx 0) */
             }
         } else if (cur->has_sub == 0U && activate_key) {
@@ -875,6 +877,10 @@ static void menu_resolve_hover_open(nt_ui_context_t *ctx, uint32_t menu_id, nt_u
         const int16_t hov_parent = ctx->pending_menu.hover_parent[d];
         const bool hov_leaf = ctx->pending_menu.hover_leaf[d] != 0U;
 
+        /* The deepest allowable level cannot open a child (d+1 would index == MAX_DEPTH, OOB on
+         * level_side/the child-level cells below). A hovered parent there can only collapse, never fly out. */
+        const bool can_open_child = (d + 1U) < NT_UI_MENU_MAX_DEPTH;
+
         /* No switch requested (no hovered sibling parent, no hovered leaf): leave the level as-is. */
         if (hov_parent < 0 && !hov_leaf) {
             continue;
@@ -887,7 +893,7 @@ static void menu_resolve_hover_open(nt_ui_context_t *ctx, uint32_t menu_id, nt_u
         /* If a child is open at this level, gate the switch on the mouse-aim corridor: while the cursor is
          * aiming at / over the open child, KEEP it (do not switch/collapse). */
         bool may_switch = true;
-        if (cur_open >= 0) {
+        if (cur_open >= 0 && can_open_child) {
             const nt_ui_bbox_t cbb = nt_ui_get_bbox(ctx, menu_level_id(menu_id, (uint8_t)(d + 1U)));
             if (cbb.found) {
                 nt_ui_menu_hover_t *hc = menu_hover_cell(ctx, menu_id, (uint8_t)(d + 1U));
@@ -900,8 +906,8 @@ static void menu_resolve_hover_open(nt_ui_context_t *ctx, uint32_t menu_id, nt_u
         }
 
         int16_t new_open = cur_open;
-        if (hov_parent >= 0) {
-            new_open = hov_parent; /* fly out the hovered sibling parent */
+        if (hov_parent >= 0 && can_open_child) {
+            new_open = hov_parent; /* fly out the hovered sibling parent (never past the depth cap) */
         } else if (hov_leaf) {
             new_open = -1; /* a hovered leaf with the corridor released collapses the open child */
         }
@@ -926,7 +932,9 @@ static void menu_resolve_hover_open(nt_ui_context_t *ctx, uint32_t menu_id, nt_u
  * Returns true if the whole chain should close (Esc at root / leaf activate / outside-click). */
 static bool menu_resolve_nav_and_dismiss(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_runtime_t *rt) {
     bool close_chain = false;
-    const uint8_t nav_depth = rt->active_depth; /* frame-start deepest level (its record was built this frame) */
+    /* Defense-in-depth: clamp below the cap so menu_im_keyboard_nav never indexes frame_record[MAX_DEPTH]
+     * even if some other path leaves active_depth at the cap (the open paths already guard against it). */
+    const uint8_t nav_depth = (rt->active_depth < NT_UI_MENU_MAX_DEPTH) ? rt->active_depth : (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U);
     const bool kbd_acted = nt_input_key_is_pressed(NT_KEY_ARROW_UP) || nt_input_key_is_pressed(NT_KEY_ARROW_DOWN) || nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) ||
                            nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER) || nt_input_key_is_pressed(NT_KEY_ESCAPE);
     if (menu_im_keyboard_nav(ctx, nav_depth, rt)) {
@@ -1065,5 +1073,30 @@ int16_t nt_ui_menu_test_open_path(uint32_t menu_id, uint8_t depth) {
         return -1;
     }
     return rt->open_path[depth];
+}
+
+/* The deepest currently-open level (rt->active_depth). 0 = only the root open / no runtime cell yet. */
+uint8_t nt_ui_menu_test_active_depth(uint32_t menu_id) {
+    nt_ui_context_t *ctx = (nt_ui_internal_get_inframe_ctx() != NULL) ? nt_ui_internal_get_inframe_ctx() : s_menu_last_ctx;
+    NT_ASSERT(ctx != NULL && "nt_ui_menu_test_active_depth: no menu ctx (call after at least one nt_ui_menu_begin)");
+    const nt_ui_menu_runtime_t *rt = nt_ui_state_find(ctx, menu_runtime_id(menu_id));
+    return (rt != NULL) ? rt->active_depth : 0U;
+}
+
+/* Force the open chain to a target depth (self-keyed: every level opens item 0). The nav guard now caps
+ * keyboard-open at the cap, so the decl-time backstop assert in submenu_begin is only reachable when the
+ * chain is forced open this deep — the death test drives it directly via this setter. */
+void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {
+    NT_ASSERT(ctx != NULL && "nt_ui_menu_test_force_open_to: ctx must be non-NULL");
+    nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
+    /* Mark every level's item-0 submenu open up to `depth` (clamped to the last valid array index). Setting
+     * open_path at index MAX_DEPTH-1 makes submenu_begin ENTER its body there and try to push past the cap —
+     * the decl-time backstop the death test verifies. active_depth itself stays within the cap. */
+    const uint8_t last = (depth < NT_UI_MENU_MAX_DEPTH) ? depth : (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U);
+    for (uint8_t d = 0; d <= last; ++d) {
+        rt->open_path[d] = 0; /* level d's item 0 (the self-keyed submenu) is open */
+        rt->focus[d] = 0;
+    }
+    rt->active_depth = (last < NT_UI_MENU_MAX_DEPTH - 1U) ? last : (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U);
 }
 #endif

@@ -597,23 +597,64 @@ static void test_menu_depth_cap_asserts(void) {
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
 
-    /* settle: lay out the root so kbd-nav has a level */
+    /* settle: lay out the root so the runtime cell exists */
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_self_ref(&st, &style);
 
-    /* Open one deeper level per frame; after MAX_DEPTH Rights the next push trips the cap assert. */
+    /* The nav-open path now caps at the deepest level (no OOB), so it cannot itself drive submenu_begin past
+     * the cap. Force the open chain to the last valid level so the deepest submenu_begin ENTERS its body and
+     * tries to push child == MAX_DEPTH — the decl-time backstop NT_ASSERT must still fire (different path). */
+    nt_ui_menu_test_force_open_to(s_fx.ctx, MENU_A, (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U));
+    menu_key(NT_KEY_ARROW_DOWN); /* a non-open key so the frame just declares the forced-open chain */
+
     bool tripped = false;
-    for (int i = 0; i < NT_UI_MENU_MAX_DEPTH + 4 && !tripped; ++i) {
-        menu_key(NT_KEY_ARROW_RIGHT);
-        nt_test_assert_armed = true;
-        if (setjmp(nt_test_assert_jmp) == 0) {
-            menu_im_self_ref(&st, &style);
-        } else {
-            tripped = true;
-        }
-        nt_test_assert_armed = false;
+    nt_test_assert_armed = true;
+    if (setjmp(nt_test_assert_jmp) == 0) {
+        menu_im_self_ref(&st, &style);
+    } else {
+        tripped = true;
     }
-    TEST_ASSERT_TRUE_MESSAGE(tripped, "self-referential submenu must trip the depth-cap NT_ASSERT");
+    nt_test_assert_armed = false;
+    TEST_ASSERT_TRUE_MESSAGE(tripped, "submenu_begin at the deepest level must trip the depth-cap NT_ASSERT (decl-time backstop)");
+}
+
+/* ---- Depth-cap OOB regression: a self-referential tree opened to NT_UI_MENU_MAX_DEPTH then driven with
+ *      more Right/Enter at the deepest allowable level must NOT bump active_depth past the cap. At the cap
+ *      the kbd-open path is a no-op (open_path/active_depth/focus[depth+1] would index == MAX_DEPTH, OOB —
+ *      the CI UBSan that flagged frame_record_count[8]). This drives the SAME self-ref driver but only opens
+ *      to MAX_DEPTH-1 (its own submenu_begin asserts before pushing the cap), so it stops short of the
+ *      decl-time assert and exercises the nav-side guard instead. ---- */
+static void menu_im_self_ref_capped(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
+    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    /* Open only while the next push stays within the cap (guard < MAX_DEPTH-1): submenu_begin asserts at
+     * the cap, so we stop one short and let the kbd-nav open path try (and be a no-op) at the deepest level. */
+    int guard = 0;
+    while (guard < (NT_UI_MENU_MAX_DEPTH - 1) && nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "loop")) {
+        ++guard;
+    }
+    for (int i = 0; i < guard; ++i) {
+        nt_ui_menu_submenu_end(s_fx.ctx);
+    }
+    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+static void test_menu_kbd_open_at_depth_cap_is_noop(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+
+    /* Drive enough Right presses to open every allowable level AND keep pressing at the deepest one. Each
+     * frame opens one deeper level (1-frame latency); extra presses past the cap must be no-ops. */
+    for (int i = 0; i < NT_UI_MENU_MAX_DEPTH + 6; ++i) {
+        menu_key(NT_KEY_ARROW_RIGHT);
+        menu_im_self_ref_capped(&st, &style);
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "kbd Right/Enter open must never push active_depth past the depth cap (UBSan OOB)");
+    }
+    /* At the deepest allowable level Enter on a parent stays a no-op (no crash, depth held). The chain is
+     * still open (no dismiss), so the menu survived the cap drive without tripping the decl-time assert. */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "active_depth held within the cap after the open drive");
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu chain stays open across the cap drive (no spurious dismiss)");
 }
 
 /* ============================ icons / separator / occluder ============================ */
@@ -1166,6 +1207,7 @@ int main(void) {
     RUN_TEST(test_menu_right_click_outside_dismisses_chain);
     RUN_TEST(test_menu_inside_click_keeps_open);
     RUN_TEST(test_menu_depth_cap_asserts);
+    RUN_TEST(test_menu_kbd_open_at_depth_cap_is_noop);
     RUN_TEST(test_menu_icon_gutter_aligns_labels);
     RUN_TEST(test_menu_icon_gutter_absent_when_zero);
     RUN_TEST(test_menu_separator_non_interactive);
