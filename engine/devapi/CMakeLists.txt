@@ -1,37 +1,59 @@
+# Each NT_DEVAPI_GROUP_<X> switch gates a whole group (sources + defines + deps).
+# OFF -> the core/net carry zero symbols of that group. ON without its engine impl fails at link.
+
 # nt_devapi -- transport-agnostic, self-describing command core (dev-only, gated by NT_DEVAPI_ENABLED).
+# The ALWAYS-compiled base is just the framework: dispatch + self-describing registry + lifecycle-hook
+# registry. Command groups are added by the per-group if() blocks below.
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
-    nt_devapi_core.c
-    nt_devapi_discovery.c
     nt_devapi_registry.c
-    nt_devapi_time.c
     nt_devapi.h
     nt_devapi_internal.h
     nt_devapi_stub.h
 )
 
-# cjson is PUBLIC: the nt_devapi_handler_fn typedef in the public header takes
-# cJSON* params, so cJSON.h must be visible to every consumer of nt_devapi.h.
-# nt_app_interface + nt_gfx_interface make the time group's app/gfx header deps explicit (same
-# pattern as nt_log). render.info reads draw_calls from its source (nt_gfx), not the nt_stats overlay.
-# The nt_app_* / nt_gfx_get_frame_draw_calls symbols resolve at the final-exe link (the consumer
-# links nt_app[_stub] + nt_gfx[_stub]) — nt_devapi stays a dev-only static lib with no impl.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_gfx_interface)
+# cjson PUBLIC: the public handler typedef takes cJSON* params. nt_app_interface is a base dep --
+# the core deferred-response queue reads g_nt_app.frame/time (resolves at the final-exe link).
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_log_interface nt_app_interface)
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 
-# Per-group compile-time opt-in: handlers are wrapped in
-# #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
-target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
-target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_time=1)
+# Core group: ping / engine.info / view. nt_window_interface is its only engine dep (view reads
+# g_nt_window). OFF -> the core/net carry no window symbols and the core handlers compile out.
+if(NT_DEVAPI_GROUP_CORE)
+    target_sources(nt_devapi PRIVATE nt_devapi_core.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_CORE=1)
+    target_link_libraries(nt_devapi PRIVATE nt_window_interface)
+endif()
+
+# Time group (time.*/render.*/frame.*): nt_gfx_interface is its only added dep (render.info reads
+# draw_calls); nt_app_interface is already a base dep.
+if(NT_DEVAPI_GROUP_TIME)
+    target_sources(nt_devapi PRIVATE nt_devapi_time.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_TIME=1)
+    target_link_libraries(nt_devapi PRIVATE nt_gfx_interface)
+endif()
+
+# Discovery group: endpoints / command.describe / features. Reads only the registry (no engine dep).
+if(NT_DEVAPI_GROUP_DISCOVERY)
+    target_sources(nt_devapi PRIVATE nt_devapi_discovery.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_DISCOVERY=1)
+endif()
+
+# Input group: sources + NT_DEVAPI_GROUP_INPUT + NT_INPUT_AUTOMATION_ENABLED (PUBLIC, so the value
+# matches the consumer's nt_input) + nt_input dep.
+if(NT_DEVAPI_GROUP_INPUT)
+    target_sources(nt_devapi PRIVATE nt_devapi_input.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_INPUT=1)
+    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
+    target_link_libraries(nt_devapi PRIVATE nt_input_interface)
+endif()
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 
-# nt_devapi_net -- native loopback TCP transport, the sole socket boundary. Kept SEPARATE from the
-# core so a core-only consumer (tests, future non-transport tooling) pulls no socket code or ws2_32
-# ("use only what you need"). Native-only: excluded from the Emscripten/web build (a web ccall
-# transport would be a sibling target, not part of this one).
+# nt_devapi_net -- native loopback TCP transport. Separate target so a core-only consumer pulls no
+# socket code/ws2_32. Native-only: excluded from the web build.
 if(NOT EMSCRIPTEN)
     nt_add_module(nt_devapi_net LOG_DOMAIN "devapi_net"
         nt_devapi_net.c

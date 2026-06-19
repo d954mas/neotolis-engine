@@ -2595,6 +2595,41 @@ Game-elapsed time `g_nt_app.time` (a `double` — the sum of applied `dt`s, kept
 
 The L1 mutators **assert** their invariants (finite/non-negative scale, positive `step_dt`, valid mode) — callers are trusted game code; untrusted bot input is range-checked at the devapi L2 layer and returns `bad_params`, never an assert.
 
+## 24.7 Input automation (devapi `input.*` + player gate)
+
+A bot drives input through the devapi `input.*` command group, which is a thin L2 veneer over an L1 engine capability (`nt_input_inject_*` + the player gate). The design rule is **bot-indistinguishable-from-human**: injected events flow through the same input-apply cores a real device hits, so the query API (`nt_input_key_is_*`, `nt_input_mouse_is_*`, `nt_input_pop_char`) cannot tell synthetic input from physical. Compiled out with the rest of devapi when `NT_DEVAPI_ENABLED` is OFF.
+
+**Range-checked, never asserts.** Every `input.*` command validates its params and returns `bad_params` on any out-of-domain value (unknown key name, out-of-range pointer id, a button mask outside `[0,7]` or non-integral, malformed/invalid UTF-8, a frame count outside `[0,65535]`). The L1 inject API itself never asserts — it is driven by untrusted L2 — so bad bot input is always a structured error, never a crash.
+
+**The command group** (all `frame_behavior: any`, all fire-and-forget unless noted):
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `input.key` | `{key, down?, hold?}` | `{ok}` | inject a key edge (`down` default true), or with `hold` a tap = down@0 + up@hold |
+| `input.pointer` | `{action, id, x?, y?, type?, buttons?}` | `{queued}` | the pointer primitive: action `down`/`move`/`up` on a given id (default mouse type) |
+| `input.move` | `{x, y, id?, type?}` | `{queued}` | sugar: pointer move on the default mouse slot |
+| `input.click` | `{x, y, button?, id?, hold?}` | `{queued}` | sugar: pointer down@0 + up@`hold` (2 entries) carrying a button mask; `hold` default 1 frame (a realistic 1-frame-held click), `hold=0` = same-frame instant click |
+| `input.wheel` | `{dx?, dy?, x?, y?}` | `{ok}` | scroll the mouse slot; with `x`/`y` a move to (x,y) then the wheel (self-contained, scrolls AT (x,y)), else at the slot's **apply-time** position (no slot → no-op) |
+| `input.gesture` | `{id, type?, points:[[x,y]], frame_stride?}` | `{queued}` | sugar: down@0 + a move per subsequent point (`frame_stride` apart) + up; NO C interpolation — the bot supplies the path samples |
+| `input.button` | `{buttons, id?}` | `{ok}` | set the mouse-button mask `{1,2,4}` on the given id at the slot's **apply-time** position (respects a pending `input.move` queued ahead of it; no prior slot → created at (0,0)) |
+| `input.set_player_enabled` | `{enabled}` | `{enabled}` | toggle the player gate (see below) |
+| `input.text` | `{text}` | `{queued}` | decode a UTF-8 string → codepoints and enqueue them into the char ring |
+| `input.state` | `{key?, pop_text?}` | `{down?, pressed?, released?, codepoints?}` | **READ** (not an enqueue) of the polled input state — see below |
+
+**The L1 player gate.** `nt_input_set_player_enabled(bool)` gates **real device** events at the apply seam: while disabled, the public real-input wrappers (`nt_input_set_key`, `nt_input_pointer_*`, `nt_input_wheel`, `nt_input_buffer_char`) early-return, so a physical device is suppressed — but injected events still flow, because inject calls the `*_apply` cores directly past the gate. The bot is therefore indistinguishable from a human to the query API while the real player is locked out. The **ON→OFF edge releases held current input state (synthetic and real are indistinguishable by design — bot == human)** so nothing sticks down across a focus-lost-style cutover: held keys raise their release edge, and held pointer buttons raise their release edge with **deferred deactivation** — the slot stays active one more poll so the release edge is readable via the public mouse query, then deactivates on the next poll (the same lifecycle as a normal pointer-up). These release primitives are the **changer's** tool (a graceful bot calls them, or the game does); the engine does **not** invoke them on a devapi client disconnect — applied input is game-owned (see the B-strict disconnect rule below).
+
+**Scheduling lives in the devapi layer; `nt_input` is a pure apply layer.** `nt_input` knows nothing about frames or scheduling: its inject API is **immediate** (`nt_input_inject_key/pointer/wheel/text`), each call staging into a bounded static-BSS **immediate inject buffer** (`NT_INPUT_INJECT_QUEUE_MAX`, `-D` overridable) that `nt_input_poll` drains **whole** every poll, after the platform poll, through the same `*_apply` cores (gate-bypassing). The **frame schedule** is owned by the devapi input group (`NT_DEVAPI_INPUT_SCHED_MAX`, `-D` overridable) — exactly because the devtool is the only side that legitimately knows `g_nt_app.frame`. The `input.*` handlers enqueue into that schedule with their offsets (immediate commands at offset 0; `input.click` = down@0 + up@hold; `input.gesture` = down@0 + moves@(idx·stride) + up@last; a `hold` key = down@0 + up@hold; a UTF-8 string = one entry per codepoint at offset 0). A command reserves its entries **whole-or-nothing** against the schedule, so a near-full schedule can never leave a stuck pointer-down or a key with no release; overflow → `bad_params`.
+
+**The input group is an OPTIONAL devapi module.** A single CMake switch, `NT_DEVAPI_GROUP_INPUT` (default ON), gates the WHOLE group consistently: it compiles `nt_devapi_input.c`, registers the `input.*` commands, links `nt_input` + enables the `nt_input` automation surface (player gate + inject pipeline, `NT_INPUT_AUTOMATION_ENABLED`), and wires the per-tick + client-reset lifecycle hooks. With the group OFF, the devapi core and transport carry **zero** input symbols, and `nt_input` itself is the lean apply layer (no gate, no inject buffer) — "use only what you need". The core never hard-references the group: it exposes a tiny fixed-array **lifecycle-hook registry** (a per-tick hook and a client-reset hook, registered by a group's registrar exactly like its commands). The input group registers its schedule tick as the tick hook and its release-on-disconnect as the reset hook; `nt_devapi_update` and the transport's `close_client` call the generic hook runners, naming no group. Fail-fast is accepted: the group ON without an `nt_input` impl in the executable is an unresolved-symbol **link** error (the developer's responsibility), not a silent no-op.
+
+**Advance-gated release.** `nt_devapi_update` runs every tick: first `net_poll` (handlers enqueue into the schedule), then it runs the per-tick hooks (the input group's schedule tick). The tick detects a real sim-advance by comparing `g_nt_app.frame` to its own last-seen value and, **only on an advance**, releases every entry whose countdown reached 0 into `nt_input`'s immediate buffer (decrementing survivors); the next `nt_input_poll` (same tick) applies that buffer post-edge-clear, so an injected rising edge survives to that frame's update. On a frozen tick (pause / manual-idle) the schedule releases **nothing** — synthetic input holds while the game is paused (real device input still flows through `nt_input_poll`). This replaces the old per-`nt_input` relative-countdown freeze.
+
+**B-strict disconnect ownership.** On a devapi client disconnect the engine resets **only devapi-owned transient state**: the inject schedule, its advance-clock re-seed, and the in-flight deferred-reply queue — the gone bot's own pending bookkeeping, which must not bleed to the next client and is not game state. **Game-owned state is the changer's responsibility, never the engine's**: time mode/pause/scale, the render flag, the player gate, and already-**applied** input (a landed key/pointer DOWN) all stay as they were. The engine deliberately does not clobber them because L1 cannot tell whether the game or the bot set a given state — resetting it on a dev-client drop would violate code-first. A bot restores what it changed before disconnecting (its `finally`), or the host recovers explicitly: the bare `examples/devapi_host` watches `nt_devapi_net_has_client()` for the connected→disconnected edge and applies its OWN policy (return to plain RUN) so an ungraceful drop mid-MANUAL can't leave it frozen — host application code, not the engine library.
+
+**`input.state` is a DEV-ONLY observation read.** It returns the input state `nt_input_poll` last produced — so before a sim-advance an enqueued inject is **not yet visible** (the drain-race, now machine-observable over the socket). With `key`, it returns `{down,pressed,released}` for that key (unknown name → `bad_params`). With `pop_text:true` it is a **CONSUMING read** — it drains the char ring into a `codepoints` raw-codepoint array as a side effect.
+
+**`nt_input_poll(void)` contract.** No frame argument: `nt_input` is a pure apply layer that never includes `app/nt_app.h`. The host order is `nt_window_poll → nt_devapi_update → nt_input_poll → (game update)`. `nt_devapi_update` releases the due scheduled events into the immediate buffer (advance-gated), then `nt_input_poll` drains that whole buffer after the platform poll, in the same post-edge-clear window as the native char drain.
+
 ---
 
 # 25. Engine/Game Boundary
@@ -2663,6 +2698,7 @@ engine/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
     ui/
     font/
+    debug_overlay/          # dev HUD (frame time / draw calls / element count)
     resources/
     packs/
     formats/

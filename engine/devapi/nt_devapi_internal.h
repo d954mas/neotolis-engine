@@ -91,6 +91,21 @@ void nt_devapi_deferred_reset(void);
 /* True between init and shutdown — lets submit enforce init-before-use. */
 bool nt_devapi_initialized(void);
 
+// #region lifecycle hooks
+/* Lifecycle hooks let an optional group plug into the core/transport without either naming the
+   group: a compiled-out group registers nothing, so the core/net TUs carry zero of its symbols. */
+typedef void (*nt_devapi_hook_fn)(void);
+
+/* Register a per-tick / client-reset hook. Cleared on shutdown, re-registered each init;
+   overflow asserts (build-time bug). */
+void nt_devapi_register_tick(nt_devapi_hook_fn fn);
+void nt_devapi_register_reset(nt_devapi_hook_fn fn);
+
+/* Run all registered tick / reset hooks in registration order. */
+void nt_devapi_run_tick_hooks(void);
+void nt_devapi_run_reset_hooks(void);
+// #endregion
+
 /* Registry-table accessors (used by the dispatch core + discovery handlers). */
 int nt_devapi_registry_count(void);
 const nt_devapi_slot *nt_devapi_registry_slot(int index);
@@ -102,18 +117,40 @@ bool nt_devapi_group_is_first(int index);
 
 /* Engine `core` group registrar (per-group #ifdef). Defined in
    nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_REGISTER_core
+#ifdef NT_DEVAPI_GROUP_CORE
 void nt_devapi_register_core(void);
 #endif
 
 /* Engine `time`/`render`/`frame` group registrar (per-group #ifdef). Defined in
    nt_devapi_time.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_REGISTER_time
+#ifdef NT_DEVAPI_GROUP_TIME
 void nt_devapi_register_time(void);
 #endif
 
-/* Discovery group registrar — always-on (not behind an #ifdef). Defined in
-   nt_devapi_discovery.c, invoked from nt_devapi_init. */
+/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
+   nt_devapi_init under the same compile gate; registers the group's commands + lifecycle hooks. */
+#ifdef NT_DEVAPI_GROUP_INPUT
+/* Bounded BSS schedule cap (-D overridable). Lives here, not in nt_devapi_input.c, so the unit
+   tests derive schedule-fill sizes from the real cap. */
+#ifndef NT_DEVAPI_INPUT_SCHED_MAX
+#define NT_DEVAPI_INPUT_SCHED_MAX 256
+#endif
+
+void nt_devapi_register_input(void);
+
+/* Per-tick schedule driver (the tick hook): on a real sim-advance releases due entries into the
+   inject buffer. Exposed for tests that drive the per-tick path directly. */
+void nt_devapi_input_update(void);
+
+/* Reset hook: drop pending entries, release applied held synthetic input, re-seed the advance clock.
+   Also called from tests for order-independence. */
+void nt_devapi_input_reset(void);
+#endif
+
+/* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
+   nt_devapi_init under the same compile gate. */
+#ifdef NT_DEVAPI_GROUP_DISCOVERY
 void nt_devapi_register_discovery(void);
+#endif
 
 #endif /* NT_DEVAPI_INTERNAL_H */

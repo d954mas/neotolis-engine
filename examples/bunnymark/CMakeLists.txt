@@ -30,7 +30,7 @@ target_link_libraries(bunnymark_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_entity nt_transform_comp nt_material_comp
     nt_drawable_comp nt_sprite_comp nt_atlas nt_sprite_renderer_xl
-    nt_stats nt_text_renderer nt_font
+    nt_debug_overlay nt_text_renderer nt_font
     nt_render nt_hash
 )
 # Generated asset headers from builder (bunnymark_assets.h etc.)

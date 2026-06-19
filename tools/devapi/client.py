@@ -188,5 +188,156 @@ class DevApiClient:
         """Read the current {frame, time, dt} from the managed loop's g_nt_app state."""
         return self.result("frame.current")
 
+    def wait_game_seconds(self, total: float, chunk: float = 4.0) -> None:
+        """Wait `total` seconds of GAME time by looping time.wait in <=chunk segments.
+
+        For LIVE-RUN observation only. The engine caps a single time.wait at
+        NT_DEVAPI_TIME_WAIT_MAX_SECONDS (4.0s, sized to the 5s socket read timeout); this
+        helper chains shorter waits to exceed that without raising the client read timeout.
+        For DETERMINISTIC cooldown/duration tests prefer MANUAL mode + step_seconds() — real-time
+        waiting is non-deterministic and slow. RUN + unpaused + scale>0 required (time.wait rejects
+        frozen time).
+        """
+        if total < 0:
+            raise ValueError("total must be >= 0")
+        # chunk <= 0 would never decrement remaining (infinite loop); chunk > 4.0 exceeds the engine
+        # cap (NT_DEVAPI_TIME_WAIT_MAX_SECONDS) so every segment raises. Bound it to (0, 4.0].
+        if not 0 < chunk <= 4.0:
+            raise ValueError("chunk must be in (0, 4.0]")
+        remaining = total
+        while remaining > 0:
+            seg = chunk if remaining > chunk else remaining
+            self.time_wait(seg)  # result() raises on bad_params (manual/paused/scale==0)
+            remaining -= seg
+
+    # #region input.* wrappers — fire-and-forget inject. result() just confirms ok / raises.
+    def key(self, name: str, down: Optional[bool] = None, hold: Optional[float] = None) -> Dict[str, Any]:
+        """Inject a key edge (down default true on the host) OR a tap (hold frames -> down@0 + up@hold)."""
+        params: Dict[str, Any] = {"key": name}
+        if down is not None:
+            params["down"] = down
+        if hold is not None:
+            params["hold"] = hold
+        return self.result("input.key", params)
+
+    def move(
+        self, x: float, y: float, id: Optional[int] = None, type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Inject a pointer move on the default mouse slot (reserved id) unless id/type given."""
+        params: Dict[str, Any] = {"x": x, "y": y}
+        if id is not None:
+            params["id"] = id
+        if type is not None:
+            params["type"] = type
+        return self.result("input.move", params)
+
+    def click(
+        self,
+        x: float,
+        y: float,
+        button: Optional[int] = None,
+        id: Optional[int] = None,
+        hold: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Inject a pointer down+up (2 atomic entries) on the mouse slot.
+
+        Default is a 1-frame hold (down@0 + up@1) — a realistic click held across one frame.
+        Pass hold=0 for an instant same-frame click (down+up collapsed into one frame). `hold`
+        is omitted from the request when None so the host-side default of 1 is the single
+        source of truth.
+        """
+        params: Dict[str, Any] = {"x": x, "y": y}
+        if button is not None:
+            params["button"] = button
+        if id is not None:
+            params["id"] = id
+        if hold is not None:
+            params["hold"] = hold
+        return self.result("input.click", params)
+
+    def pointer(
+        self,
+        action: str,
+        id: int,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        type: Optional[str] = None,
+        buttons: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """The pointer primitive: action down/move/up on a given id (default mouse type)."""
+        params: Dict[str, Any] = {"action": action, "id": id}
+        if x is not None:
+            params["x"] = x
+        if y is not None:
+            params["y"] = y
+        if type is not None:
+            params["type"] = type
+        if buttons is not None:
+            params["buttons"] = buttons
+        return self.result("input.pointer", params)
+
+    def wheel(
+        self, dx: float = 0.0, dy: float = 0.0, x: Optional[float] = None, y: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Scroll the mouse slot (notches).
+
+        With x and y, the scroll is self-contained — a move to (x,y) then the wheel, so it lands at
+        (x,y) regardless of prior state. Without x/y it applies at the mouse slot's apply-time
+        position (move first, or it is a no-op if no slot exists).
+        """
+        params: Dict[str, Any] = {"dx": dx, "dy": dy}
+        if x is not None:
+            params["x"] = x
+        if y is not None:
+            params["y"] = y
+        return self.result("input.wheel", params)
+
+    def gesture(
+        self,
+        id: int,
+        points: List[List[float]],
+        type: Optional[str] = None,
+        frame_stride: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Inject down@0 + a move per point (frame_stride apart) + up; NO interpolation."""
+        params: Dict[str, Any] = {"id": id, "points": points}
+        if type is not None:
+            params["type"] = type
+        if frame_stride is not None:
+            params["frame_stride"] = frame_stride
+        return self.result("input.gesture", params)
+
+    def button(self, buttons: int, id: Optional[int] = None) -> Dict[str, Any]:
+        """Set the mouse-button mask {1,2,4} on the given id (default reserved mouse slot)."""
+        params: Dict[str, Any] = {"buttons": buttons}
+        if id is not None:
+            params["id"] = id
+        return self.result("input.button", params)
+
+    def set_player_enabled(self, enabled: bool) -> Dict[str, Any]:
+        """Toggle the player-input gate (false suppresses the real device; inject still flows)."""
+        return self.result("input.set_player_enabled", {"enabled": enabled})
+
+    def text(self, s: str) -> Dict[str, Any]:
+        """Decode a UTF-8 string -> codepoints and enqueue them into the char ring."""
+        return self.result("input.text", {"text": s})
+
+    def state(self, key: Optional[str] = None, pop_text: bool = False) -> Dict[str, Any]:
+        """IMMEDIATE read of polled input state — the observation hook.
+
+        Returns the result dict (a READ, unlike the fire-and-forget wrappers above). With `key`,
+        result carries {down,pressed,released} for that key; the state is STALE until a sim-advance
+        polls the inject queue (the drain-race). With `pop_text=True`, result carries
+        `codepoints` (a raw-codepoint number array) and DRAINS the char ring as a side effect.
+        """
+        params: Dict[str, Any] = {}
+        if key is not None:
+            params["key"] = key
+        if pop_text:
+            params["pop_text"] = True
+        return self.result("input.state", params)
+
+    # #endregion
+
     def close(self) -> None:
         self._transport.close()

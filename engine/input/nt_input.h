@@ -150,6 +150,12 @@ bool nt_input_key_is_pressed(nt_key_t key);
 bool nt_input_key_is_released(nt_key_t key);
 bool nt_input_any_key_pressed(void);
 
+/* UTF-32 typed-char ring capacity (power-of-2). One frame's typing fits; drop-when-full. Exposed
+   so the devapi layer can reject a text batch that could never land whole. */
+#ifndef NT_INPUT_CHAR_RING
+#define NT_INPUT_CHAR_RING 32
+#endif
+
 /* Drain one typed UTF-32 codepoint (FIFO). Returns false and leaves *out
    untouched when the char ring is empty. Fed by the platform char source. */
 bool nt_input_pop_char(uint32_t *out_codepoint);
@@ -157,6 +163,35 @@ bool nt_input_pop_char(uint32_t *out_codepoint);
 /* Hint the platform on-screen keyboard for the focused text field (mobile soft keyboard).
    No-op on native/stub. Apply it when a field gains focus. */
 void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
+
+/* ---- nt_input automation surface (player gate + synthetic input injection) ---- */
+
+/* Capability gate for the whole nt_input automation surface (inject pipeline + player gate). The
+   sole driver is the devapi input group; CMake derives this from it. Default 0 -> the lean apply
+   layer (no gate, no inject buffer or symbols), so a consumer that forgets to wire it stays lean. */
+#ifndef NT_INPUT_AUTOMATION_ENABLED
+#define NT_INPUT_AUTOMATION_ENABLED 0
+#endif
+
+/* Event kinds applied through the immediate inject buffer (drained every poll). */
+typedef enum {
+    NT_INJECT_KEY = 0,         /* key down/up */
+    NT_INJECT_POINTER_DOWN,    /* pointer slot create/press */
+    NT_INJECT_POINTER_MOVE,    /* pointer move */
+    NT_INJECT_POINTER_UP,      /* pointer release + deactivate-pending */
+    NT_INJECT_POINTER_BUTTONS, /* set button mask at the slot's CURRENT position (no move, no baked x/y) */
+    NT_INJECT_WHEEL,           /* mouse slot only */
+    NT_INJECT_CHAR,            /* codepoint into the char ring */
+} nt_inject_kind_t;
+
+/* Bounded BSS immediate inject buffer cap (-D overridable, like NT_DEVAPI_MAX_DEFERRED). */
+#ifndef NT_INPUT_INJECT_QUEUE_MAX
+#define NT_INPUT_INJECT_QUEUE_MAX 256
+#endif
+
+/* Convenience single-pointer id: a HIGH reserved value so it never collides with a real
+   mouse (id=0) or a small browser pointerId. Explicit bot ids are used verbatim. */
+#define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000U
 
 /* ---- Mouse convenience helpers ---- */
 
@@ -168,8 +203,8 @@ bool nt_input_mouse_is_released(nt_button_t button);
 
 void nt_input_init(void);
 
-/* Poll input state. Drains buffered events from nt_window_poll() and updates
-   input state. Call once per frame AFTER nt_window_poll(). */
+/* Poll input state. Call once per frame AFTER nt_window_poll(). Pure apply: no frame, no schedule
+   (the devapi layer owns scheduling and releases due inject events before this poll). */
 void nt_input_poll(void);
 
 void nt_input_shutdown(void);

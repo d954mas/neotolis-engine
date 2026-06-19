@@ -8,7 +8,7 @@ target_link_libraries(ui_showcase PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
-    nt_render nt_hash nt_mem_scratch nt_stats
+    nt_render nt_hash nt_mem_scratch nt_debug_overlay
 )
 # Generated asset headers from builder (ui_showcase_assets.h etc.)
 target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
