@@ -77,37 +77,74 @@ _Static_assert(sizeof(nt_ui_dropdown_style_t) == 400, "nt_ui_dropdown_style_t st
 /* Valid baseline style (dark) that looks polished with flat colors and NO atlas art (wire refs to opt in). */
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
 
-/* Trigger button: shows the label of the current *selected (or `placeholder` when out of range / -1)
- * and toggles *open on click. Declared like any other widget inside the layout. id/labels/selected/
- * open/style non-NULL; count >= 0; *selected in [-1,count). Returns true on the frame it toggled.
- * Layers: the trigger fill + chevron draw on data->layer, its label on label_layer (split to batch).
- * data may be NULL (fill falls to layer 0). style is mutated in place to memoize resolved refs. */
-bool nt_ui_dropdown_trigger(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, int count, int selected, const char *placeholder,
-                            nt_ui_dropdown_style_t *style, const Clay_ElementDeclaration *decl, bool *open);
+/* ---- Immediate combo API (begin/selectable/end) — mirrors the menu core. ----
+ * The GAME owns `int *selected` (writes it on a selectable's clicked return) + `bool *open`; the combo
+ * only signals + clears *open on a row click. Combos do NOT nest (asserted).
+ * Layers: every combo fill (trigger, rows, panel, chevron, scrollbar) draws on data->layer; trigger +
+ * row text on label_layer (split to batch fills-then-text). data may be NULL (fills fall to layer 0).
+ * The popup-nested scrollbar rides the SAME fill layer as the panel and floats above it (floating draws
+ * over same-layer siblings), so the band ordering holds at any base the game picks. Mirrors menu/checkbox/
+ * tabbar: layer comes from the CALL, NOT the style. The INTERACTIVE/selection/anim row id is KEY-STABLE
+ * mix(combo_id, key) (duplicate sibling keys alias the SAME row state — DEBUG best-effort: scans the first
+ * NT_UI_COMBO_DUP_KEY_WINDOW rows, a complete scan of an unbounded list would need heap or O(N^2); keep
+ * combo keys unique); row_idx is positional, used ONLY for the label-cell/probe id. Both fmix-derived —
+ * never additive. */
 
-/* The open list: a popup-core floating anchored to the trigger's bbox (queried by `id`) with edge-flip
- * up near the bottom border. Rows are per-state rects; a row click sets *selected and clears *open. A
- * list taller than style->max_visible_rows is wrapped in nt_ui_scroll (GC'd; no clip leak). Call every
- * frame AFTER the trigger; it self-balances when fully closed (no end needed by the caller). id/labels/
- * selected/open/style non-NULL; *selected in [-1,count). Returns true if a selection was made this frame.
- *
- * `icons` is an OPTIONAL parallel array (length `count`, or NULL = text-only). When style->icon_size > 0
- * each row reserves a leading gutter of icon_size px so text stays aligned; the icon is drawn if its ref
- * is set, else the gutter is left empty (OS-menu icon-column behavior). NULL `icons` with icon_size > 0
- * still reserves an aligned-empty gutter on every row.
- *
- * Layers: the panel + row fills + icons draw on data->layer (also the popup panel layer), row text on
- * label_layer (split to batch). data may be NULL (fills fall to layer 0). style is mutated in place. */
-bool nt_ui_dropdown_list(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *const *labels, const nt_atlas_region_ref_t *icons, int count,
-                         int *selected, nt_ui_dropdown_style_t *style, bool *open);
+/* Trigger + list root: emits the trigger button (showing `preview`, the game-fed current-selection
+ * label) and, while *open (or still tweening closed), opens the popup list for the frame. A click on
+ * the trigger toggles *open. Returns "declare the selectables this frame?" — true while the list body
+ * should be built. Call combo_selectable rows between this and nt_ui_combo_end. id non-zero; preview may
+ * be NULL (empty trigger text); style/open non-NULL. data carries the fill layer; text on label_layer. */
+bool nt_ui_combo_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool *open);
+
+/* Custom-trigger escape hatch: leaves the TRIGGER element OPEN so the game declares arbitrary content
+ * (swatch+text, icon+label) inside, between preview_begin and preview_end. preview_end closes the trigger,
+ * does its one step_interaction (toggling *open on a click), THEN opens the list and returns "declare the
+ * selectables this frame?" (true while the list body should be built). data/label_layer set the combo's
+ * fill/text layers (threaded through to the list rows). Usage:
+ *   nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, &style, &open);
+ *   ... game trigger content ...
+ *   if (nt_ui_combo_preview_end(ctx)) { ...selectables...; nt_ui_combo_end(ctx); } */
+void nt_ui_combo_preview_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, nt_ui_dropdown_style_t *style, bool *open);
+bool nt_ui_combo_preview_end(nt_ui_context_t *ctx);
+
+/* One list row: a per-state rect + label (row_selected look when `selected`). Returns true on the frame
+ * it was clicked — the GAME writes its own *selected; the combo clears *open. `key` need only be unique
+ * among sibling rows; the combo derives the KEY-STABLE interactive row id via mix(combo_id, key) (the
+ * positional row_idx feeds only the label-cell/probe id, never the interactive id). */
+bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *label, bool selected);
+
+/* Iconed row: same single engine column as the plain selectable — the icon is drawn in the leading
+ * gutter (style->icon_size) and the label is left-aligned past it, so iconed and text-only rows align
+ * their labels at the SAME x. Requires style->icon_size > 0 to show a gutter. `icon` non-NULL; pass NULL
+ * to nt_ui_combo_selectable instead for an explicitly empty-gutter row. */
+bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_atlas_region_ref_t *icon, const char *label, bool selected);
+
+/* Custom-content row, symmetric with the menu's item_begin/item_end (both _end carry the click).
+ * _begin opens the row element for the game's children (icon+label, badges) and returns void — the combo
+ * list is already guarded by combo_begin, so there is no body-guard to report (unlike menu item_begin,
+ * which can be closed). `selected` drives the per-state look.
+ * _end closes the row, does its ONE step_interaction, and returns clicked: the game writes *selected, the
+ * combo clears *open. A combo custom row is whole-row-clickable (no activatable=false opt-out like the
+ * menu) — by design: the list is a flat pick list, custom content is decoration around the choice. */
+void nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
+bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
+
+/* Close the list body (the scroll wrapper or the plain panel) + balance the popup. Pairs combo_begin. */
+void nt_ui_combo_end(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
-/* The popup side chosen for the list on the last nt_ui_dropdown_list call (edge-flip probe). */
+/* The popup side chosen for the combo list on its last open (edge-flip probe). */
 uint8_t nt_ui_dropdown_test_last_side(void);
 /* The scroll id the list used for its long-list wrapper (0 if the list did not scroll). */
 uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id);
 /* The prev-frame bbox of a row's text label cell (icon-gutter alignment probe). */
 nt_ui_bbox_t nt_ui_dropdown_test_row_label_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id, int idx);
+/* The KEY-STABLE interactive row id mix(combo_id, key) — drives the row-id stability test (the id must be
+ * identical regardless of the row's positional index, so reorder/hide a sibling never shifts it). */
+uint32_t nt_ui_dropdown_test_combo_row_id(uint32_t combo_id, uint32_t key);
+/* The prev-frame bbox of the custom-trigger (preview form) chevron element (found => the chevron was drawn). */
+nt_ui_bbox_t nt_ui_dropdown_test_chevron_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id);
 #endif
 
 #endif /* NT_UI_DROPDOWN_H */

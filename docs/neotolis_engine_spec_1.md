@@ -379,6 +379,40 @@ If a decision can be deferred without loss of base architecture — it is deferr
   algorithm is the mouse-aim triangle that keeps a submenu open while the cursor
   travels diagonally toward it (never collapse on raw hover-loss).
 
+  **Immediate menu + combo.** The context-menu and dropdown are immediate-mode:
+  the game declares the tree (or list) in code EVERY frame; there is no items[]
+  data array and no `chosen_id` sink. Menu rows are declared with
+  `nt_ui_menu_begin` / `item` / `item_ex` / `item_begin..item_end` /
+  `submenu_begin` / `submenu_begin_ex..submenu_end` / `separator` /
+  `separator_text` / `menu_end`; the combo with `nt_ui_combo_begin` /
+  `selectable` / `selectable_icon` / `selectable_begin..selectable_end` /
+  `preview_begin..preview_end` / `combo_end`. Activation is reported INLINE by
+  the row call (`if (nt_ui_menu_item(...)) act();` / a combo selectable returns
+  clicked) — there is no per-frame result struct to scan. The game owns the open
+  state (`nt_ui_menu_state_t` / `bool *open`) and, for the combo, the `int`
+  selection; the widget only signals and clears `open` on a pick (Model D, same
+  as popup-core). Both build on the kept popup-core (+ the scroll wrapper for a
+  long combo list). The earlier data-array forms (`nt_ui_menu(items[])`,
+  `nt_ui_dropdown_trigger`/`_list`) were REMOVED — immediate-only.
+
+  Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
+  game — static / app field / arena slice — and init via `nt_ui_menu_init`), so
+  the core `nt_ui_context` pays zero bytes for a game that uses no menu and the
+  menu TU dead-strips. The SAME instance MUST be reused every frame: it holds the
+  per-level keyboard-nav record, so a fresh `{0}` each frame would silently break
+  nav. The combo carries no such scratch (its state lives in the core ctx's pool,
+  bounded by caps). Row identity is KEY-STABLE via a scope stack:
+  `mix(scope_id, key)` (fmix, never additive — additive sibling ids collide in
+  Clay's anonymous child-id space). A submenu pushes its own row id as the child
+  scope (ImGui `PushID` model), so keys need only be unique among SIBLINGS; a
+  duplicate sibling key aliases the same row state and is a DEBUG fail-early
+  (complete for the menu's bounded per-level cap, best-effort window-scanned for
+  the unbounded combo list — a complete scan there would need heap or O(N²)).
+  Keyboard nav runs in `menu_end` against THIS frame's per-level record (built as
+  rows declare, complete by `menu_end`); a focus or open-chain change re-declares
+  the tree and becomes navigable NEXT frame — a 1-frame latency in the EFFECT,
+  not in the record lookup.
+
   **Atlas region identity.** `nt_atlas_region_ref_t { nt_resource_t atlas;
   uint32_t region; }` is the canonical "sprite-in-atlas" handle (atlas.id==0
   is the unset handle; consumers assign their own meaning). The widget APIs

@@ -10,6 +10,8 @@
 #include "test_helpers/ui_atlas.h"
 #include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_dropdown.h" /* nt_ui_dropdown_style_t for the combo fixture decls */
+#include "ui/nt_ui_menu.h"     /* nt_ui_menu_state_t/_style_t for the immediate-menu fixture decls */
 
 #ifdef __cplusplus
 extern "C" {

@@ -310,7 +310,7 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
 
     int clicked = -1;
     /* Convenience wrapper built ON the begin/end core: an optional leading icon gutter + a label child per
-     * tab. `icons` is an OPTIONAL parallel array (NULL = text-only); the gutter mirrors nt_ui_dropdown_list. */
+     * tab. `icons` is an OPTIONAL parallel array (NULL = text-only); the gutter mirrors the combo row gutter. */
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* icons on data->layer, labels on label_layer */
     nt_ui_tabbar_begin(ctx, data, label_layer, base_id, style);
     for (int i = 0; i < count; ++i) {

@@ -8,6 +8,7 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "core/nt_assert.h" /* NT_ASSERT_MODE/NT_ASSERT_OFF gate the debug-only combo dup-key window */
 #include "font/nt_font.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
@@ -153,6 +154,14 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
+/* DEBUG-only combo duplicate-key guard window: row ids are key-stable (mix(combo_id,key) only), so two
+ * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. BEST-EFFORT: only the first
+ * N rows per combo are scanned for a collision (fail-early NT_ASSERT); a duplicate past N silently aliases.
+ * A complete scan of an unbounded list would need heap or O(N^2), so the window is the no-heap design. */
+#ifndef NT_UI_COMBO_DUP_KEY_WINDOW
+#define NT_UI_COMBO_DUP_KEY_WINDOW 64
+#endif
+
 /* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
  * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
 #ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
@@ -240,6 +249,37 @@ struct nt_ui_context {
         uint32_t id; /* the open tab's id (mixed hash of base_id+index; see tabbar_tab_id, NOT additive) */
         bool active; /* a tab element is open (between tab_begin/tab_end) */
     } pending_tab;
+
+    /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
+     * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
+     * void*-decoupled and cheap, so they stay below. */
+
+    /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
+     * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each
+     * combo_selectable derives its INTERACTIVE row id via mix(id, key) only (KEY-STABLE — reorder/hide a
+     * row mid-press never shifts a fixed-key row's identity); row_idx is kept only for the positional LABEL
+     * cell id + the test probe. The GAME owns int *selected and writes it on the selectable's clicked return;
+     * the combo only clears *open on a row click. trigger_open marks a custom preview element
+     * open between combo_preview_begin/end; row_open marks a custom selectable open between
+     * selectable_begin/end (its id + click latch deferred to selectable_end). */
+    struct {
+        const void *style;    /* nt_ui_dropdown_style_t* (void to keep the internal header widget-agnostic) */
+        uint32_t id;          /* the combo id (scope for the row fmix) */
+        bool *open;           /* game-owned open flag; a selectable click clears it */
+        uint32_t row_id;      /* the open custom selectable's row id (for selectable_end's step + click latch) */
+        float trigger_open_t; /* eased open amount stashed by the custom trigger; combo_preview_end's chevron rotation */
+        uint16_t row_idx;     /* per-frame running row index (positional LABEL cell id + test probe only, NOT the interactive id) */
+        uint8_t fill_layer;
+        uint8_t label_layer;
+        uint8_t scrolls;      /* list body wraps nt_ui_scroll (vs a plain panel) — combo_end closes the right nesting */
+        uint8_t active;       /* a combo list is open between combo_begin/combo_end */
+        uint8_t trigger_open; /* a custom trigger element is open between combo_preview_begin/end */
+        uint8_t row_open;     /* a custom selectable element is open between selectable_begin/end */
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+        uint16_t dup_key_count;                           /* rows recorded into dup_key_ids this frame (debug-only) */
+        uint32_t dup_key_ids[NT_UI_COMBO_DUP_KEY_WINDOW]; /* first-N key-stable row ids; scanned for a duplicate key */
+#endif
+    } pending_combo;
 
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
