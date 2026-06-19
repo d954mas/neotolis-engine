@@ -62,7 +62,9 @@ static uint16_t resolve_port(void) {
    which is all nt_ui_probe_collect / nt_ui_get_bbox need; the host never calls nt_ui_walk). Two plain
    CLAY boxes with KNOWN developer string ids; "hud_btn" carries a togglable enabled flag the UAT
    observes via ui.element after a synthetic ui.click resolves -> injects -> the sim advances. */
-#define HUD_ARENA_SIZE ((size_t)256U * 1024U)
+/* Sized to clear nt_ui_min_arena_size for the default max_elements desc (the create asserts on a
+   too-small arena). 2 MB matches the ui example hosts; the hud tree itself is tiny. */
+#define HUD_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
 static nt_ui_context_t *s_hud_ctx;
 static bool s_hud_btn_on = true; /* the observable: a synthetic click on "hud_btn" toggles it. */

@@ -177,17 +177,22 @@ void nt_devapi_ui_update(void) {
     }
 }
 
-void nt_devapi_ui_reset(void) {
-    /* B-strict disconnect: drop devapi-owned state. The host re-registers its contexts on the next
-       init->register cycle, so the name table is devapi-owned and cleared here. */
+/* Clear the host-registered name->ctx* table. The HOST owns these registrations (registered ONCE at
+   startup, like game.* commands) — so this is called only at init/register (before the host registers),
+   NOT on a client disconnect, or every session after the first would see an empty table. */
+static void clear_ui_ctx_table(void) {
     for (uint32_t i = 0; i < NT_DEVAPI_UI_CONTEXT_MAX; i++) {
         s_ui_ctx[i].name = NULL;
         s_ui_ctx[i].ctx = NULL;
     }
     s_ui_ctx_count = 0;
-    /* Drop pending synthetic UI input; re-seed the advance clock so the next update compares against
-       the real frame (applied input is game-owned — a bot is indistinguishable from a human — so it
-       is NOT released here, mirroring nt_devapi_input_reset). */
+}
+
+void nt_devapi_ui_reset(void) {
+    /* The client-disconnect reset hook: drop ONLY devapi-owned TRANSIENT state (the pending schedule +
+       advance clock). The host-registered context table is HOST-owned and survives reconnects — it is
+       cleared at init (clear_ui_ctx_table in nt_devapi_register_ui), never here. Applied input is
+       game-owned (bot==human) so it is NOT released either, mirroring nt_devapi_input_reset. */
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame;
 }
@@ -583,7 +588,8 @@ static const nt_devapi_handler_fn k_ui_handlers[] = {
 _Static_assert(sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]) == sizeof(k_ui_handlers) / sizeof(k_ui_handlers[0]), "ui: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_ui(void) {
-    nt_devapi_ui_reset(); /* fresh name table + schedule + seeded advance clock each init->register. */
+    clear_ui_ctx_table(); /* fresh host table at init (the host re-registers its ctx right after). */
+    nt_devapi_ui_reset(); /* fresh schedule + seeded advance clock. */
     /* The only core coupling point: core/net call these generic hooks, never the group symbols.
        The tick hook drives the ui group's OWN s_sched (ui.click/drag/scroll release on a real advance). */
     nt_devapi_register_tick(nt_devapi_ui_update);
