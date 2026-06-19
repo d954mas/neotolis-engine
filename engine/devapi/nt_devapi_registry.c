@@ -88,9 +88,9 @@ nt_result_t nt_devapi_init(void) {
 #ifdef NT_DEVAPI_REGISTER_input
     nt_devapi_register_input();
 #endif
-
-    /* Discovery is always-on when devapi is built. */
+#ifdef NT_DEVAPI_REGISTER_discovery
     nt_devapi_register_discovery();
+#endif
 
     return NT_OK;
 }

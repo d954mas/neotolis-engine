@@ -153,8 +153,11 @@ void nt_devapi_input_update(void);
 void nt_devapi_input_reset(void);
 #endif
 
-/* Discovery group registrar — always-on (not behind an #ifdef). Defined in
-   nt_devapi_discovery.c, invoked from nt_devapi_init. */
+/* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
+   nt_devapi_init under the same compile gate. When the group is compiled out
+   (NT_DEVAPI_GROUP_DISCOVERY=OFF) nt_devapi_discovery.c is not built and nothing registers. */
+#ifdef NT_DEVAPI_REGISTER_discovery
 void nt_devapi_register_discovery(void);
+#endif
 
 #endif /* NT_DEVAPI_INTERNAL_H */

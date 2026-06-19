@@ -27,6 +27,12 @@ option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
 # wire the per-tick/reset hooks, link nt_input_interface + enable NT_INPUT_INJECT_ENABLED. OFF -> the
 # devapi core/net carry zero input symbols.
 option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
+# Remaining devapi command groups, same modular flag-gated model as the input group: ON gates the
+# group's TU compile + NT_DEVAPI_REGISTER_<x> + its engine-dep links; OFF -> the devapi core/net
+# carry zero symbols of that group or its deps. Default ON keeps the all-groups build behavior.
+option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
+option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
+option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe / features)." ON)
 set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap; OFF only via explicit override for final production).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
