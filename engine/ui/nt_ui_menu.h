@@ -25,8 +25,27 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 
 /* Submenu nesting cap: a runaway tree (cyclic submenu pointer, pathological depth) would exhaust the
- * popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). */
+ * popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). Build-overridable for
+ * parity with every other cap in the subsystem. */
+#ifndef NT_UI_MENU_MAX_DEPTH
 #define NT_UI_MENU_MAX_DEPTH 8
+#endif
+
+/* Per-level immediate-menu nav frame-record cap: a small cap keeps the per-level nav record in BSS
+ * (no heap in hot path). Items past this in one level trip a fail-early assert. Raise it at build time
+ * (or page the data) for data-driven row counts; the menu is not a list view. */
+#ifndef NT_UI_MENU_MAX_ITEMS_PER_LEVEL
+#define NT_UI_MENU_MAX_ITEMS_PER_LEVEL 64
+#endif
+
+/* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates the PREVIOUS
+ * frame's per-level slice (1-frame latency). Separators are never recorded (skipped by nav). */
+typedef struct {
+    uint32_t id;     /* the row's derived scope-stack id */
+    uint16_t idx;    /* the row's running layout index at its level */
+    uint8_t enabled; /* 0 = disabled: nav skips it */
+    uint8_t has_sub; /* 1 = parent (submenu) row */
+} nt_ui_menu_record_t;
 
 /* Visual knobs. Colors are 0xAABBGGRR. Item rows are plain rects + labels (no button widget) so the
  * hover-intent owns the open/keep/switch decision. The panel is an OPTIONAL slice9 sprite (panel_bg

@@ -155,27 +155,12 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
-/* Per-level immediate-menu nav frame-record cap: a small cap keeps the per-level nav record in BSS
- * (no heap in hot path). Items past this in one level trip a fail-early assert. */
-#ifndef NT_UI_MENU_MAX_ITEMS_PER_LEVEL
-#define NT_UI_MENU_MAX_ITEMS_PER_LEVEL 64
-#endif
-
 /* DEBUG-only combo duplicate-key guard window: row ids are now key-stable (mix(combo_id,key) only), so two
  * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. The first N rows per combo
  * are scanned for a collision (fail-early NT_ASSERT); past N the best-effort check stops (debug-only). */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
-
-/* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates the PREVIOUS
- * frame's per-level slice (1-frame latency). Separators are never recorded (skipped by nav). */
-typedef struct {
-    uint32_t id;     /* the row's derived scope-stack id */
-    uint16_t idx;    /* the row's running layout index at its level */
-    uint8_t enabled; /* 0 = disabled: nav skips it */
-    uint8_t has_sub; /* 1 = parent (submenu) row */
-} nt_ui_menu_record_t;
 
 /* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
  * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
