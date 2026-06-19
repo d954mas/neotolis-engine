@@ -175,11 +175,12 @@ static void dropdown_declare_chevron(nt_ui_context_t *ctx, uint8_t fill_layer, u
           .userData = (void *)chev_data}) {}
 }
 
-/* One list row: a fixed-height per-state rect + an optional leading icon gutter + label. Eased
- * hover/press/selected via nt_ui_anim through the fill-layer xform channel. Returns clicked. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — per-state pick + bg branch + icon gutter, not deep nesting
-static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, uint32_t label_id, const char *label, const nt_atlas_region_ref_t *icon, bool selected,
-                                 nt_ui_dropdown_style_t *style) {
+/* Shared row emit for BOTH the plain selectable and the custom selectable_begin: query interaction,
+ * per-state pick (selected -> pressed -> hover -> idle), ease the scale/opacity via nt_ui_anim, resolve
+ * the per-state bg, then OPEN the row element (LEFT open for the caller's children). Returns the prev-frame
+ * interaction so the caller can act on `in.clicked` (custom path) or feed it to a later step (plain path).
+ * The caller balances the open element with nt_ui_clay_priv_close_element. */
+static nt_ui_interaction_t combo_emit_row_decl(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t row_id, bool selected, nt_ui_dropdown_style_t *style) {
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, row_id);
 
     /* Priority: selected -> pressed (held + over) -> hover -> idle. Non-const so the resolve memoizes. */
@@ -200,8 +201,6 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
     nt_atlas_region_ref_t bg;
     const bool has_art = dropdown_resolve_bg(st, &style->row_idle, &bg);
 
-    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->row_text)};
-
     Clay_ElementDeclaration d = {
         .id = (Clay_ElementId){.id = row_id},
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)style->row_height)},
@@ -214,6 +213,16 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
 
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(d);
+    return in;
+}
+
+/* One list row: the shared row rect + an engine column (optional leading icon gutter + left label), closed
+ * here. Returns clicked (the canonical mutating step_interaction). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon-gutter CLAY nesting, not deep control flow
+static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, uint32_t label_id, const char *label, const nt_atlas_region_ref_t *icon, bool selected,
+                                 nt_ui_dropdown_style_t *style) {
+    (void)combo_emit_row_decl(ctx, fill_layer, row_id, selected, style); /* opens the row element; the engine column follows */
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->row_text)};
     {
         /* Icon gutter: reserve icon_size px so text stays aligned; draw the icon if its ref is set, else
          * leave the gutter empty (OS-menu icon-column behavior). icon_size==0 -> no gutter at all. */
@@ -474,42 +483,16 @@ bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selec
     const uint16_t idx = ctx->pending_combo.row_idx++;
     const uint32_t row_id = combo_row_id(ctx->pending_combo.id, key, idx);
     const uint32_t label_id = combo_row_label_id(ctx->pending_combo.id, idx);
-    const uint8_t fill_layer = ctx->pending_combo.fill_layer;
-    const uint8_t label_layer = ctx->pending_combo.label_layer;
 
-    const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, row_id);
-    nt_ui_dd_state_t *st = &style->row_idle;
-    if (selected) {
-        st = &style->row_selected;
-    } else if (in.pressed && in.hovered) {
-        st = &style->row_pressed;
-    } else if (in.hovered) {
-        st = &style->row_hover;
-    }
-    const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity};
-    const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, row_id, &tgt, style->state_speed, 0.0F);
-    const nt_ui_transform_t row_t = {.scale_x = a->scale_x, .scale_y = a->scale_y, .scale_z = 1.0F};
-    const nt_ui_element_data_t *row_data = nt_ui_make_element_data_xform(fill_layer, NULL, &row_t, a->opacity);
+    /* Shared per-state pick + anim + bg + open; the row element stays OPEN for the game's content. */
+    const nt_ui_interaction_t in = combo_emit_row_decl(ctx, ctx->pending_combo.fill_layer, row_id, selected, style);
 
-    nt_atlas_region_ref_t bg;
-    const bool has_art = dropdown_resolve_bg(st, &style->row_idle, &bg);
-
-    Clay_ElementDeclaration d = {.id = (Clay_ElementId){.id = row_id},
-                                 .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)style->row_height)},
-                                            .padding = {.left = style->pad, .right = style->pad},
-                                            .childGap = style->pad,
-                                            .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
-                                 .userData = (void *)row_data};
-    dropdown_apply_bg(&d, has_art, &bg, st, style->slice9_scale);
-
-    nt_ui_clay_priv_open_element();
-    nt_ui_clay_priv_configure_open_element(d);
     /* No engine icon gutter here: a custom-content selectable is game-owned (the game declares its OWN
      * inline icon + label), mirroring nt_ui_menu_item_begin. The plain nt_ui_combo_selectable /
-     * nt_ui_combo_selectable_icon paths keep the single engine gutter. */
-    /* Zero-width anchor carrying the probe id at the row's left content edge; FIT(0) so it does NOT push
+     * nt_ui_combo_selectable_icon paths keep the single engine gutter.
+     * Zero-width anchor carrying the probe id at the row's left content edge; FIT(0) so it does NOT push
      * the game's content right (a GROW cell here would eat the row and float the content rightward). */
-    CLAY({.id = (Clay_ElementId){.id = label_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}){}(void)label_layer;
+    CLAY({.id = (Clay_ElementId){.id = label_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {}
 
     ctx->pending_combo.row_id = row_id;
     ctx->pending_combo.row_open = 1U;
