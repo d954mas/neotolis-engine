@@ -214,12 +214,12 @@ void nt_devapi_input_update(void) {
 }
 
 void nt_devapi_input_reset(void) {
+    /* B-strict: clears ONLY devapi-owned transient state — the inject schedule + its advance clock
+       re-seed. It does NOT release already-APPLIED input: applied state is game-owned (bot ==
+       human, indistinguishable at L1), so the changer restores it (a bot's graceful release, or the
+       host). A pending (unreleased) schedule entry IS dropped here; an applied DOWN stays held. */
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
-    /* Also release input that already APPLIED: a landed DOWN whose UP was just dropped would
-       stay held and bleed into the next client. */
-    nt_input_clear_all_keys();
-    nt_input_clear_all_pointers();
 }
 // #endregion
 

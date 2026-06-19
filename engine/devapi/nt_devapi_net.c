@@ -35,7 +35,6 @@ typedef socklen_t nt_socklen_t;
 #include <string.h>
 #include <time.h>
 
-#include "app/nt_app.h"
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_internal.h" /* nt_devapi_deferred_reset on client drop. */
@@ -101,11 +100,11 @@ static void close_client(void) {
     nt_devapi_deferred_reset();
     /* Generic client-reset hooks: a compiled-out group registers none, so net.c names no group. */
     nt_devapi_run_reset_hooks();
-    /* A dropped client must not leave the loop frozen: in MANUAL/paused g_nt_app.frame stops
-       advancing and a host's frame-count auto-exit never fires. Return to plain RUN. */
-    g_nt_app.mode = NT_APP_MODE_RUN;
-    g_nt_app.paused = false;
-    g_nt_app.pending_steps = 0;
+    /* B-strict ownership: the engine resets ONLY devapi-owned transient state (the deferred queue +
+       the reset hooks' schedule/clock). Game-owned state (time mode/pause, scale, render flag, player
+       gate, applied input) is the changer's responsibility — a bot restores it before disconnect, or
+       the host recovers explicitly (examples/devapi_host). L1 can't tell game-set from bot-set state,
+       so clobbering it on a dev-client drop would violate code-first. */
 }
 
 static void set_nonblocking(nt_sock_t s) {
@@ -235,6 +234,8 @@ bool nt_devapi_net_start(uint16_t port) {
     }
     return true;
 }
+
+bool nt_devapi_net_has_client(void) { return s_client != NT_INVALID_SOCK; }
 
 void nt_devapi_net_stop(void) {
     close_client();

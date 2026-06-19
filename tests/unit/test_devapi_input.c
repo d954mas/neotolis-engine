@@ -350,11 +350,12 @@ static void test_sched_pause_freeze(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
 }
 
-/* Disconnect-reset must release input that ALREADY APPLIED, not just drop the schedule: a long-hold
-   key whose DOWN landed but whose UP is still scheduled would otherwise stay held into the next
-   client. nt_devapi_input_reset (the registered client-reset hook) releases the held key + pointer. */
+/* B-strict disconnect-reset contract: reset clears ONLY devapi-owned transient state — the inject
+   SCHEDULE (a pending UP is dropped, never resurfaces) — but does NOT release already-APPLIED input.
+   Applied state is game-owned (bot == human, indistinguishable at L1), so the changer restores it;
+   the engine must not clobber it on a dev-client drop. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_reset_releases_applied_held_input(void) {
+static void test_reset_drops_schedule_keeps_applied_input(void) {
     /* down@0 + up@100: the DOWN applies on the first advance, the UP is far in the future. */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":100}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":4,\"y\":5,\"hold\":100}}")));
@@ -362,15 +363,17 @@ static void test_reset_releases_applied_held_input(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 
-    nt_devapi_input_reset(); /* simulate client disconnect: drop schedule AND release held input */
-    nt_input_poll();         /* the release edge resolves on the next poll */
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
-    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    nt_devapi_input_reset(); /* simulate client disconnect: drop the schedule, KEEP applied input */
+    nt_input_poll();
+    /* Applied input is game-owned -> still held after the reset (NOT released by the engine). */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 
-    /* The dropped UP must not resurface on later advances (schedule was cleared). */
+    /* The scheduled UP WAS dropped (devapi-owned) -> it must not resurface on later advances; the
+       key/button stay held because nothing releases them (the engine no longer does). */
     advance();
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
-    TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
 /* input.key{hold:3} = down@0 + up@3: held across exactly 3 advances, released on the 4th. */
@@ -702,7 +705,7 @@ int main(void) {
     RUN_TEST(test_input_wheel_overfloat_dy_bad_params);
     RUN_TEST(test_sched_offset0_applies_on_advance);
     RUN_TEST(test_sched_pause_freeze);
-    RUN_TEST(test_reset_releases_applied_held_input);
+    RUN_TEST(test_reset_drops_schedule_keeps_applied_input);
     RUN_TEST(test_sched_hold_releases_after_n_advances);
     RUN_TEST(test_sched_click_default_hold);
     RUN_TEST(test_sched_gesture_ordered_across_frames);

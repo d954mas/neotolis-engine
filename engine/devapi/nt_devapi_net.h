@@ -39,6 +39,11 @@ void nt_devapi_update(void);
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
 void nt_devapi_net_stop(void);
 
+/* True while a devapi client is connected. The host watches the connected->disconnected edge to run
+   its OWN explicit recovery (e.g. unfreeze g_nt_app): the engine resets only devapi-owned state on
+   disconnect, so game-owned time/mode recovery is application policy, not the library's. */
+bool nt_devapi_net_has_client(void);
+
 /* Opt-in pre-loop gate: bounded-busy non-blocking accept until a client connects or timeout_ms
    elapses. Returns true if a client is connected. The game wires this BEFORE its loop when the
    bot must push setup before frame 0; normal per-frame accept continues after it returns. */
