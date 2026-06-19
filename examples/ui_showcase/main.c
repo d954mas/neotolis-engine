@@ -1781,9 +1781,7 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_separator(menu);
     nt_ui_menu_item_opts_t move = nt_ui_menu_item_opts_defaults();
     move.icon = s_icon_bunny_ref;
-    /* submenu_begin ignores opts (label-only); the icon hint is just to mirror the rich global menu. */
-    (void)move;
-    if (nt_ui_menu_submenu_begin(menu, MK_MOVE, "Move to")) {
+    if (nt_ui_menu_submenu_begin_ex(menu, MK_MOVE, "Move to", move)) {
         if (nt_ui_menu_item(menu, MK_MOVE_FRONT, "Front")) {
             st->menu.last_chosen = "Move to > Front";
         }

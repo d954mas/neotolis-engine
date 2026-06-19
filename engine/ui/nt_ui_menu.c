@@ -397,7 +397,6 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
     }
     return a;
 }
-
 // #endregion
 
 /* True when the cursor is inside ANY open level's panel rect (depths 0..active_depth). A click inside
@@ -716,16 +715,23 @@ bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu) {
     return activated;
 }
 
-bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label) {
-    NT_ASSERT(menu->pending_menu.active && "nt_ui_menu_submenu_begin: call between nt_ui_menu_begin/end");
+bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts) {
+    NT_ASSERT(menu->pending_menu.active && "nt_ui_menu_submenu_begin_ex: call between nt_ui_menu_begin/end");
     if (!menu->pending_menu.open_frame) {
         return false; /* present-only menu: declare nothing, game skips the body */
     }
     nt_ui_context_t *ctx = menu->ui;
     const uint8_t depth = menu->pending_menu.depth;
     const uint16_t running_idx = menu->pending_menu.item_idx[depth]; /* before menu_im_row advances it */
+    /* selected/activatable do not apply to a PARENT row (a parent flies out, it is never a checkable leaf
+     * nor a custom-child host) — only icon/shortcut/enabled are honored. */
+    opts.selected = false;
+    opts.activatable = true;
     uint32_t row_id = 0U;
-    const nt_ui_interaction_t in = menu_im_row(menu, key, label, &(nt_ui_menu_item_opts_t){.enabled = true}, true, false, &row_id);
+    const nt_ui_interaction_t in = menu_im_row(menu, key, label, &opts, true, false, &row_id);
+    if (!opts.enabled) {
+        return false; /* a disabled parent never steps, never flies out, never opens */
+    }
     (void)nt_ui_step_interaction(ctx, row_id);
     if (in.clicked) {
         menu->pending_menu.pending_open[depth] = (int16_t)running_idx; /* mouse-open this parent (committed in menu_end) */
@@ -754,6 +760,8 @@ bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *
     menu_open_panel(ctx, fill_layer, menu->pending_menu.menu_id, child, style); /* LEFT open for the submenu's children (closed in submenu_end) */
     return true;
 }
+
+bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label) { return nt_ui_menu_submenu_begin_ex(menu, key, label, nt_ui_menu_item_opts_defaults()); }
 
 void nt_ui_menu_submenu_end(nt_ui_menu_ctx_t *menu) {
     NT_ASSERT(menu->pending_menu.active && menu->pending_menu.depth > 0U && "nt_ui_menu_submenu_end without an open submenu");

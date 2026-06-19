@@ -118,11 +118,15 @@ bool nt_ui_combo_selectable(nt_ui_context_t *ctx, uint32_t key, const char *labe
  * to nt_ui_combo_selectable instead for an explicitly empty-gutter row. */
 bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_atlas_region_ref_t *icon, const char *label, bool selected);
 
-/* Custom-content row: opens the row element OPEN for the game's children (icon+label, badges). _end
- * closes it + does the row's one step_interaction. _begin returns the row's prev-frame clicked (the game
- * writes *selected); the combo clears *open on the click in _end. `selected` drives the per-state look. */
-bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
-void nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
+/* Custom-content row, symmetric with the menu's item_begin/item_end (both _end carry the click).
+ * _begin opens the row element for the game's children (icon+label, badges) and returns void — the combo
+ * list is already guarded by combo_begin, so there is no body-guard to report (unlike menu item_begin,
+ * which can be closed). `selected` drives the per-state look.
+ * _end closes the row, does its ONE step_interaction, and returns clicked: the game writes *selected, the
+ * combo clears *open. A combo custom row is whole-row-clickable (no activatable=false opt-out like the
+ * menu) — by design: the list is a flat pick list, custom content is decoration around the choice. */
+void nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
+bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
 
 /* Close the list body (the scroll wrapper or the plain panel) + balance the popup. Pairs combo_begin. */
 void nt_ui_combo_end(nt_ui_context_t *ctx);

@@ -498,7 +498,7 @@ bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_at
     return combo_emit_selectable(ctx, key, icon, label, selected);
 }
 
-bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected) {
+void nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_selectable_begin: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(ctx->pending_combo.active && !ctx->pending_combo.row_open && "nt_ui_combo_selectable_begin: call between combo_begin and combo_end, not nested");
 
@@ -508,8 +508,10 @@ bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selec
     const uint32_t label_id = combo_row_label_id(ctx->pending_combo.id, idx);
     combo_dup_key_check(ctx, row_id);
 
-    /* Shared per-state pick + anim + bg + open; the row element stays OPEN for the game's content. */
-    const nt_ui_interaction_t in = combo_emit_row_decl(ctx, ctx->pending_combo.fill_layer, row_id, selected, style);
+    /* Shared per-state pick + anim + bg + open; the row element stays OPEN for the game's content. The
+     * query result drives only the hover/anim/selected look here — the click is reported by _end (mirrors
+     * the menu's item_begin = declare-body / item_end = clicked), so _begin returns void. */
+    (void)combo_emit_row_decl(ctx, ctx->pending_combo.fill_layer, row_id, selected, style);
 
     /* No engine icon gutter here: a custom-content selectable is game-owned (the game declares its OWN
      * inline icon + label), mirroring nt_ui_menu_item_begin. The plain nt_ui_combo_selectable /
@@ -520,19 +522,23 @@ bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selec
 
     ctx->pending_combo.row_id = row_id;
     ctx->pending_combo.row_open = 1U;
-    return in.clicked;
 }
 
-void nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
+bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_selectable_end: call between nt_ui_begin/end on the active ctx");
     NT_ASSERT(ctx->pending_combo.row_open && "nt_ui_combo_selectable_end without combo_selectable_begin");
 
     const uint32_t row_id = ctx->pending_combo.row_id;
     nt_ui_clay_priv_close_element();
-    if (nt_ui_step_interaction(ctx, row_id).clicked) {
+    /* A combo custom row is whole-row-clickable (no activatable=false opt-out like the menu): the combo list
+     * is a flat pick list, so a custom row's content is decoration around the choice, never a rival hit
+     * target. The ONE step_interaction owns the click; on click the combo clears *open (game writes *selected). */
+    const nt_ui_interaction_t step = nt_ui_step_interaction(ctx, row_id);
+    if (step.clicked) {
         *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */
     }
     ctx->pending_combo.row_open = 0U;
+    return step.clicked;
 }
 
 void nt_ui_combo_end(nt_ui_context_t *ctx) {

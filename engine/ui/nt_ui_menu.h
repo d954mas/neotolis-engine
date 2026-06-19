@@ -185,7 +185,9 @@ void nt_ui_menu_init(nt_ui_menu_ctx_t *menu);
  * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style. */
 /* begin stashes `ctx` into menu->ui for the begin/end span; every inner call reaches the core via
- * menu->ui (no re-passed ctx — visible per-frame binding, no hidden cross-frame back-reference). */
+ * menu->ui (no re-passed ctx — visible per-frame binding, no hidden cross-frame back-reference).
+ * Call item/submenu/separator/end EVERY frame, open or closed — the calls no-op when closed; do NOT wrap
+ * them in `if (st.open)` (that would break the 1-frame keyboard-nav record). */
 void nt_ui_menu_begin(nt_ui_menu_ctx_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
@@ -201,6 +203,11 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
 bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
 bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for activatable=false. */
 bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label); /* true ONLY when open -> declare body */
+/* Rich submenu parent (icon/shortcut/enabled), mirroring item -> item_ex. enabled=false renders greyed and
+ * returns false (a disabled parent never flies out, never opens). opts.selected/opts.activatable do NOT
+ * apply to a parent row (it is never a checkable leaf nor a custom-child host) and are ignored.
+ * submenu_begin is the thin wrapper calling _ex with nt_ui_menu_item_opts_defaults(). */
+bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts);
 void nt_ui_menu_submenu_end(nt_ui_menu_ctx_t *menu);
 void nt_ui_menu_separator(nt_ui_menu_ctx_t *menu);                         /* non-interactive divider (no focus index) */
 void nt_ui_menu_separator_text(nt_ui_menu_ctx_t *menu, const char *label); /* optional section header */
