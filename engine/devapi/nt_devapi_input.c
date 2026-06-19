@@ -29,10 +29,8 @@
    it releases every due entry into nt_input's immediate buffer (via nt_input_inject_*) and decrements
    survivors; on a frozen tick it releases nothing. */
 
-/* Bounded BSS schedule cap (-D overridable). */
-#ifndef NT_DEVAPI_INPUT_SCHED_MAX
-#define NT_DEVAPI_INPUT_SCHED_MAX 256
-#endif
+/* NT_DEVAPI_INPUT_SCHED_MAX (the bounded BSS schedule cap, -D overridable) is defined in
+   nt_devapi_internal.h so the unit tests can derive fill sizes from the real cap. */
 
 /* A single advancing tick releases EVERY due entry (up to SCHED_MAX) into nt_input's immediate
    inject buffer, which holds NT_INPUT_INJECT_QUEUE_MAX. The two caps are independent -D-overridable
@@ -213,6 +211,9 @@ static bool sched_release_one(const sched_entry_t *e) {
    the two-hop schedule->buffer path). Survivors decrement their countdown and compact down. */
 static void sched_tick(void) {
     uint32_t out = 0;
+    /* Contract: nt_devapi_update() and nt_input_poll() are paired once per frame (nt_app_run
+       guarantees this), so the immediate buffer is empty at tick entry; a full buffer here means the
+       host violated that pairing — fail fast. */
     for (uint32_t i = 0; i < s_sched_count; i++) {
         if (s_sched[i].frames_remaining == 0) {
             bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
@@ -648,7 +649,9 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         }
         float mx = (float)cJSON_GetArrayItem(p, 0)->valuedouble;
         float my = (float)cJSON_GetArrayItem(p, 1)->valuedouble;
-        uint16_t at = (uint16_t)(idx * (int)stride);
+        /* Compute the offset in int64 so the narrowing source is self-evidently within the
+           already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
+        uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
         if (!sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at)) {
             set_bad_params(err, "input.gesture: inject schedule overflow");
             return false;

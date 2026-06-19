@@ -138,6 +138,12 @@ void nt_devapi_register_time(void);
    behind the gate — the core/net TUs never name an input symbol. When the group is compiled out
    (NT_DEVAPI_GROUP_INPUT=OFF) nt_devapi_input.c is not built at all and nothing registers. */
 #ifdef NT_DEVAPI_GROUP_INPUT
+/* Bounded BSS schedule cap (-D overridable). Lives here, not in nt_devapi_input.c, so the unit
+   tests derive schedule-fill sizes from the real cap instead of hardcoding it. */
+#ifndef NT_DEVAPI_INPUT_SCHED_MAX
+#define NT_DEVAPI_INPUT_SCHED_MAX 256
+#endif
+
 void nt_devapi_register_input(void);
 
 /* Per-tick input-schedule driver (registered as the tick hook by nt_devapi_register_input). Owns the

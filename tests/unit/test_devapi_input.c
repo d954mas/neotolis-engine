@@ -202,7 +202,7 @@ static void test_input_button_out_of_range_bad_params(void) { assert_bad_params(
 /* Each input.key (no hold) stages exactly 1 schedule entry; we never advance(), so none drain.
    Leaves the schedule with `free` slots to probe whole-or-nothing reservation. */
 static void fill_schedule_leaving(uint32_t free) {
-    for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX - free; i++) {
+    for (uint32_t i = 0; i < NT_DEVAPI_INPUT_SCHED_MAX - free; i++) {
         cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));
     }
 }
@@ -258,14 +258,34 @@ static void test_input_text_empty_queued_zero(void) {
 
 /* ---- F2: > 32 codepoints can never land whole in the 32-slot char ring -> bad_params ---- */
 
-/* 33 ASCII 'a's: one over NT_INPUT_CHAR_RING. queued must never overstate what lands. */
-static void test_input_text_exceeds_char_ring_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}")); }
+/* Build an input.text request of `count` ASCII 'a's so the boundary derives from the real cap. */
+static char *make_text_request(uint32_t count) {
+    static const char k_prefix[] = "{\"method\":\"input.text\",\"params\":{\"text\":\"";
+    static const char k_suffix[] = "\"}}";
+    size_t prefix_len = sizeof(k_prefix) - 1;
+    size_t suffix_len = sizeof(k_suffix) - 1;
+    char *buf = malloc(prefix_len + count + suffix_len + 1);
+    TEST_ASSERT_NOT_NULL(buf);
+    memcpy(buf, k_prefix, prefix_len);
+    memset(buf + prefix_len, 'a', count);
+    memcpy(buf + prefix_len + count, k_suffix, suffix_len + 1);
+    return buf;
+}
 
-/* Exactly 32 codepoints is the boundary -> still accepted (queued:32). */
+/* One over NT_INPUT_CHAR_RING: can never land whole in the ring. queued must never overstate. */
+static void test_input_text_exceeds_char_ring_bad_params(void) {
+    char *req = make_text_request(NT_INPUT_CHAR_RING + 1U);
+    assert_bad_params(nt_devapi_submit(req));
+    free(req);
+}
+
+/* Exactly NT_INPUT_CHAR_RING codepoints is the boundary -> still accepted (queued:RING). */
 static void test_input_text_at_char_ring_ok(void) {
-    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"));
+    char *req = make_text_request(NT_INPUT_CHAR_RING);
+    cJSON *root = parse_ok(nt_devapi_submit(req));
+    free(req);
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
-    TEST_ASSERT_EQUAL_INT(32, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
+    TEST_ASSERT_EQUAL_INT(NT_INPUT_CHAR_RING, cJSON_GetObjectItemCaseSensitive(result, "queued")->valueint);
     cJSON_Delete(root);
 }
 
