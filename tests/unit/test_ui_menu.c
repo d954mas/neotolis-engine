@@ -25,7 +25,7 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 /* Fixture-owned game menu scratch: one per logical menu, reused across the test's frames (holds the
- * prev-frame nav record). Re-zeroed each setUp so tests don't bleed nav state into each other. */
+ * per-level nav record). Re-zeroed each setUp so tests don't bleed nav state into each other. */
 static nt_ui_menu_ctx_t s_menu;
 
 #define VIEW_W 800.0F
@@ -257,9 +257,10 @@ static void menu_im_open(nt_ui_menu_state_t *st, float anchor_x, float anchor_y)
 }
 
 /* One immediate menu frame, tree: File > (New, Open > (Project, File2), Quit), Edit. Declares the tree
- * via begin/item/submenu_begin..submenu_end/menu_end. The body is identical every frame so the prev-frame
- * frame record (1-frame nav latency) maps focus to a stable item id. The snapshot pointer is
- * positioned but the keyboard path is what most tests assert against (deterministic, no prev-frame bbox). */
+ * via begin/item/submenu_begin..submenu_end/menu_end. The body is identical every frame so this frame's
+ * frame record maps focus to a stable item id (focus committed in menu_end is observable next frame —
+ * a 1-frame effect). The snapshot pointer is positioned but the keyboard path is what most tests assert
+ * against (deterministic, no prev-frame bbox). */
 static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {0};
     p.x = px;
@@ -299,7 +300,7 @@ static void test_menu_smoke_open_and_closed(void) {
 
 /* ---- Keyboard-nav reaches a nested leaf: Down focuses File, Right opens its submenu, Down to Open,
  *      Right opens the grandchild, Down to File2, Enter activates -> File2's INLINE return fires 1 frame
- *      later. Tree built via the immediate calls across frames (prev-frame nav). ---- */
+ *      later. Tree built via the immediate calls across frames (1-frame-effect nav). ---- */
 static void test_menu_kbd_nav_activates_nested_leaf(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
@@ -896,10 +897,10 @@ static void test_menu_item_id_distinct_siblings_and_scopes(void) {
     TEST_ASSERT_TRUE_MESSAGE(b != c, "cross-scope ids must stay distinct");
 }
 
-/* ---- Prev-frame frame-record nav — across two frames build a 3-item level, press Down, and assert the
- *      frame-record introspection probe maps focus to the recorded item id with strictly 1-frame latency.
- *      Drives nt_ui_menu_test_focus_item_id(menu_id, depth). ---- */
-static void test_menu_prevframe_nav_focuses_recorded_item(void) {
+/* ---- Frame-record nav — across two frames build a 3-item level, press Down, and assert the frame-record
+ *      introspection probe maps focus to the recorded item id (focus committed in menu_end is observable
+ *      the following frame — a 1-frame effect). Drives nt_ui_menu_test_focus_item_id(menu_id, depth). ---- */
+static void test_menu_record_nav_focuses_recorded_item(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
@@ -908,11 +909,11 @@ static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     nt_input_clear_all_keys();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    /* Frame 2: Down — nav runs against the PREVIOUS frame's record, focusing the first enabled item. */
+    /* Frame 2: Down — nav runs in menu_end against THIS frame's record, focusing the first enabled item. */
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    /* Frame 3: settle so the focus committed in frame 2 is observable via the prev-frame record probe.
+    /* Frame 3: settle so the focus committed in frame 2 is observable via the record probe (1-frame effect).
      * poll() consumes the frame-2 Down PRESSED edge (clear_all_keys alone leaves the sticky edge, which
      * would re-step focus this frame). */
     nt_input_poll();
@@ -920,7 +921,7 @@ static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
     const uint32_t focus_id = nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (prev-frame record, 1-frame latency)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (this-frame record, 1-frame effect)");
 }
 
 /* ---- A custom-content row with activatable=false lets an inner button own the click — the inner button
@@ -1502,7 +1503,7 @@ int main(void) {
     RUN_TEST(test_menu_open_trigger_long_press_passed_in_arms);
     RUN_TEST(test_menu_open_trigger_bound_requires_target_hover);
     RUN_TEST(test_menu_item_id_distinct_siblings_and_scopes);
-    RUN_TEST(test_menu_prevframe_nav_focuses_recorded_item);
+    RUN_TEST(test_menu_record_nav_focuses_recorded_item);
     RUN_TEST(test_menu_item_begin_activatable_false_child_owns_click);
     RUN_TEST(test_menu_item_begin_closed_skips_body);
     RUN_TEST(test_menu_item_begin_closed_guarded_no_poison);

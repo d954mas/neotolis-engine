@@ -436,8 +436,9 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
 /* The immediate API discovers the tree DURING the frame (begin/item/submenu_begin..end/menu_end) instead
  * of recursing over an items[] array. It FEEDS the KEPT runtime cell (open_path/focus/active_depth/
  * opened_frame), the single root occluder, the per-level popup, mouse-aim, and outside-click dismiss
- * per-call. Keyboard nav runs in menu_end against the PREVIOUS frame's per-level record (strictly
- * 1-frame latency, never same-frame). The scope stack derives each row id via
+ * per-call. Keyboard nav runs in menu_end against THIS frame's per-level record (built as rows declare,
+ * complete by menu_end); a focus/open-chain change re-declares the tree and takes effect NEXT frame — a
+ * 1-frame latency in the EFFECT, not the lookup. The scope stack derives each row id via
  * mix(scope_id[depth], key) (position-stable); submenu_begin pushes its row id as the child scope. */
 
 /* Append a recorded row into THIS frame's per-level frame record (fail-early assert on overflow).
@@ -800,7 +801,7 @@ void nt_ui_menu_separator_text(nt_ui_menu_ctx_t *menu, const char *label) {
     menu->pending_menu.item_idx[depth] = (uint16_t)(menu->pending_menu.item_idx[depth] + 1U);
 }
 
-/* Step focus over THIS-frame-recorded items at a level (prev-frame record), skipping disabled records.
+/* Step focus over this-frame-recorded items at a level, skipping disabled records.
  * focus is a layout index; find its position in the recorded array, step ±1, return the new layout idx.
  * From "no focus" (-1) Down lands on the first enabled record, Up on the last. */
 static int16_t menu_im_focus_step(const nt_ui_menu_record_t *recs, uint16_t count, int16_t focus, int step) {

@@ -38,8 +38,8 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 #define NT_UI_MENU_MAX_ITEMS_PER_LEVEL 64
 #endif
 
-/* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates the PREVIOUS
- * frame's per-level slice (1-frame latency). Separators are never recorded (skipped by nav). */
+/* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates THIS frame's
+ * per-level slice (built as rows declare). Separators are never recorded (skipped by nav). */
 typedef struct {
     uint32_t id;     /* the row's derived scope-stack id */
     uint16_t idx;    /* the row's running layout index at its level */
@@ -114,14 +114,12 @@ typedef struct {
 } nt_ui_menu_state_t;
 _Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI (2 float + 1 bool + 3 pad)");
 
-/* Game-owned per-frame menu scratch (module-owned storage; severs the core->menu type coupling so the
- * core ctx pays zero bytes for a non-menu game and nt_ui_menu.o dead-strips). The game declares ONE per
- * logical menu (static / app field / arena slice) and REUSES THE SAME INSTANCE EVERY FRAME — frame_record
- * holds the PREVIOUS frame's per-level nav slice (1-frame latency), so a fresh {0} every frame would
- * silently break keyboard nav. `ui` is the core ctx, stashed at nt_ui_menu_begin for the begin/end span
- * only and cleared (NULL) at nt_ui_menu_end — no cross-frame borrowed handle (a between-frames inner call
- * traps). The struct works fully zero-initialized: only frame_record_count==0 matters at rest (the depth-
- * stack sentinels are reset per-frame in menu_begin). */
+/* Game-owned per-frame menu scratch (module-owned storage so the core ctx pays zero bytes for a non-menu
+ * game and nt_ui_menu.o dead-strips). REUSE THE SAME INSTANCE EVERY FRAME: frame_record holds the per-level
+ * nav record, so a fresh {0} each frame would silently break keyboard nav. `ui` is stashed at
+ * nt_ui_menu_begin for the begin/end span and cleared (NULL) at nt_ui_menu_end — no cross-frame borrowed
+ * handle. Fully zero-init-correct (only frame_record_count==0 matters at rest). See the spec's
+ * "Immediate menu + combo" for the model. */
 typedef struct nt_ui_menu_ctx {
     nt_ui_context_t *ui; /* core ctx for the current begin/end span; NULL outside it */
 
@@ -179,8 +177,9 @@ void nt_ui_menu_init(nt_ui_menu_ctx_t *menu);
 /* Immediate-mode menu (begin/end). The game discovers the tree during the frame: open with menu_begin,
  * declare rows via item / item_ex / item_begin..item_end / submenu_begin..submenu_end / separator, close
  * with menu_end. Ids derive via the scope stack (mix(scope,key)); submenu_begin pushes its row id as the
- * child scope so keys need only be unique among siblings. Keyboard nav runs in menu_end against the
- * PREVIOUS frame's per-level record (1-frame latency). The game owns st (open + anchor).
+ * child scope so keys need only be unique among siblings. Keyboard nav runs in menu_end against THIS
+ * frame's per-level record (complete by menu_end); a focus/open change re-declares the tree and takes
+ * effect NEXT frame — a 1-frame latency in the EFFECT, not the lookup. The game owns st (open + anchor).
  * Layers: every level's panel + row fills + icons + markers draw on data->layer (also the popup panel
  * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style. */
@@ -259,8 +258,9 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
 /* Scope-stack id derivation probe: mix(scope_id, key) — drives the sibling/scope distinctness test. The
  * id is position-stable (no running idx folded in); the test asserts dynamic sibling lists keep ids. */
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key);
-/* Prev-frame frame-record focus probe: the recorded item id at rt->focus[depth] (1-frame latency). Takes
- * the live ctx (runtime cell lives in its state pool) and the game-owned menu (which owns frame_record). */
+/* Frame-record focus probe: the recorded item id at rt->focus[depth] (the focus committed in the prior
+ * menu_end — a 1-frame-effect latency). Takes the live ctx (runtime cell lives in its state pool) and the
+ * game-owned menu (which owns frame_record). */
 uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, const nt_ui_menu_ctx_t *menu, uint32_t menu_id, uint8_t depth);
 /* Open-chain probe: the retained open child index at a level (rt->open_path[depth]); -1 = none open.
  * Reads only the runtime cell, so it takes the live ctx (no menu needed). Drives the immediate hover-open
