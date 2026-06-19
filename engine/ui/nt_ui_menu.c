@@ -91,14 +91,15 @@ static inline uint32_t menu_hash_id(uint32_t menu_id, uint32_t kind, uint32_t de
     return (h != 0U) ? h : 1U;
 }
 
-/* Scope-stack item id: fmix-fold scope_id + key + running_idx (NOT XOR, NOT base+index — same reason as
- * the warning above). submenu_begin pushes THIS id as the child scope, so a key need only be unique among
- * siblings (D-236-02). Folds 0 to 1 (the no-widget sentinel). */
-static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key, uint32_t running_idx) {
+/* Scope-stack item id: fmix-fold scope_id + key ONLY (NOT XOR, NOT base+index — same reason as the warning
+ * above). The id is POSITION-STABLE: a conditional sibling appearing/disappearing must NOT shift a later
+ * row's id (that would reset its anim/Clay identity AND re-scope its submenu). The running index drives
+ * layout order / focus / the frame record, but NEVER the identity. submenu_begin pushes THIS id as the
+ * child scope, so a key need only be unique among siblings (D-236-02; asserted in DEBUG). Folds 0 to 1. */
+static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key) {
     uint32_t h = scope_id * 0x9E3779B1U;
     h = (h ^ ((key + 1U) * 0x85EBCA6BU));
     h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = (h ^ ((running_idx + 1U) * 0x27D4EB2FU));
     h = (h ^ (h >> 15)) * 0x165667B1U;
     h = h ^ (h >> 16);
     return (h != 0U) ? h : 1U;
@@ -431,7 +432,7 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
  * opened_frame), the single root occluder, the per-level popup, mouse-aim, and outside-click dismiss
  * per-call. Keyboard nav runs in menu_end against the PREVIOUS frame's per-level record (D-236-06,
  * strictly 1-frame latency; NO same-frame, NO prototype). The scope stack derives each row id via
- * mix(scope_id[depth], key, running_idx); submenu_begin pushes its row id as the child scope. */
+ * mix(scope_id[depth], key) (position-stable); submenu_begin pushes its row id as the child scope. */
 
 #ifdef NT_TEST_ACCESS
 /* Last ctx that ran an immediate menu — lets the post-end focus probe (signature carries no ctx) read the
@@ -439,9 +440,17 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
 static nt_ui_context_t *s_menu_last_ctx = NULL;
 #endif
 
-/* Append a recorded row into THIS frame's per-level frame record (fail-early on overflow — Task-1 cap). */
+/* Append a recorded row into THIS frame's per-level frame record (fail-early on overflow — Task-1 cap).
+ * DEBUG-only: ids are now position-stable (mix(scope,key)), so two siblings sharing a key derive the SAME
+ * id -> aliased anim/Clay/submenu identity. Assert sibling-key uniqueness (ImGui's duplicate-id contract);
+ * the linear scan is O(items/level) over the small cap and compiles out with NT_ASSERT in OFF builds. */
 static void menu_record_append(nt_ui_context_t *ctx, uint8_t depth, uint32_t id, uint16_t idx, bool enabled, bool has_sub) {
     NT_ASSERT(ctx->frame_record_count[depth] < NT_UI_MENU_MAX_ITEMS_PER_LEVEL && "nt_ui_menu: per-level item count exceeds NT_UI_MENU_MAX_ITEMS_PER_LEVEL");
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+    for (uint16_t k = 0; k < ctx->frame_record_count[depth]; ++k) {
+        NT_ASSERT(ctx->frame_record[depth][k].id != id && "nt_ui_menu: duplicate sibling key (item keys must be unique among siblings)");
+    }
+#endif
     const uint16_t n = ctx->frame_record_count[depth]++;
     ctx->frame_record[depth][n] = (nt_ui_menu_record_t){.id = id, .idx = idx, .enabled = enabled ? 1U : 0U, .has_sub = has_sub ? 1U : 0U};
 }
@@ -455,7 +464,7 @@ static void menu_record_append(nt_ui_context_t *ctx, uint8_t depth, uint32_t id,
 static nt_ui_interaction_t menu_im_row(nt_ui_context_t *ctx, uint32_t key, const char *label, const nt_ui_menu_item_opts_t *opts, bool has_sub, bool open_element, uint32_t *out_id) {
     const uint8_t depth = ctx->pending_menu.depth;
     const uint16_t running_idx = ctx->pending_menu.item_idx[depth];
-    const uint32_t row_id = menu_item_id(ctx->pending_menu.scope_id[depth], key, running_idx);
+    const uint32_t row_id = menu_item_id(ctx->pending_menu.scope_id[depth], key);
     *out_id = row_id;
     const uint8_t fill_layer = ctx->pending_menu.fill_layer;
     const uint8_t label_layer = ctx->pending_menu.label_layer;
@@ -992,7 +1001,7 @@ float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id,
     return (c != NULL) ? c->switch_timer : 0.0F;
 }
 
-uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key, uint32_t idx) { return menu_item_id(scope_id, key, idx); }
+uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key) { return menu_item_id(scope_id, key); }
 
 /* The most-recently-rendered frame's recorded item id at rt->focus[depth]. 0 if none / no record. */
 uint32_t nt_ui_menu_test_focus_item_id(uint32_t menu_id, uint8_t depth) {

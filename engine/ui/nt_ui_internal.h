@@ -258,7 +258,7 @@ struct nt_ui_context {
     } pending_tab;
 
     /* Immediate-menu begin/end DEPTH stack (menus nest where tabs don't). The scope stack derives each
-     * row's id via mix(scope_id[depth], key, item_idx[depth]); a submenu pushes its own row id as the
+     * row's id via mix(scope_id[depth], key) (position-stable, no idx); a submenu pushes its own row id as the
      * child scope (ImGui PushID), so keys need only be unique among siblings. `st`/`menu_id`/layers are
      * stashed at begin so the per-call item/submenu functions need not re-pass them. `chosen` accumulates
      * a leaf activation this frame (menu_end latches it into st->chosen_id). */

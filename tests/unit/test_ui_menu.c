@@ -312,9 +312,9 @@ static void test_menu_kbd_nav_activates_nested_leaf(void) {
 
     /* File2's fully scoped id: File(root idx 0) -> Open(File-submenu idx 1) -> File2(Open-submenu idx 1).
      * Each submenu pushes its own row id as the child scope (mix(scope,key,running_idx)). */
-    const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
-    const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN, 1U);
-    const uint32_t file2_id = nt_ui_menu_test_item_id(open_scope, KEY_FILE2, 1U);
+    const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
+    const uint32_t file2_id = nt_ui_menu_test_item_id(open_scope, KEY_FILE2);
     TEST_ASSERT_EQUAL_UINT32(file2_id, st.chosen_id);
     TEST_ASSERT_FALSE(st.open);
 }
@@ -480,8 +480,7 @@ static void test_menu_switch_root_branch_while_submenu_open(void) {
     menu_key(NT_KEY_ENTER); /* activate Opt */
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS, 1U), KEY_OPT, 0U), st.chosen_id,
-                                     "must reach the OTHER root branch's leaf while the first was open");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), KEY_OPT), st.chosen_id, "must reach the OTHER root branch's leaf while the first was open");
     TEST_ASSERT_FALSE(st.open);
 }
 
@@ -500,7 +499,7 @@ static void test_menu_root_row_hittable_while_submenu_open(void) {
 
     /* one settle frame so the root Tools row bbox is queryable next frame (1-frame IM lag) */
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
-    const uint32_t tools_row = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS, 1U); /* root item 1 = Tools */
+    const uint32_t tools_row = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS); /* root item 1 = Tools */
     const nt_ui_bbox_t rb = nt_ui_get_bbox(s_fx.ctx, tools_row);
     TEST_ASSERT_TRUE_MESSAGE(rb.found, "root Tools row must lay out while the submenu is open");
 
@@ -529,7 +528,7 @@ static void test_menu_click_root_parent_switches_branch(void) {
     /* settle so the Tools root row bbox is queryable */
     nt_input_clear_all_keys();
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
-    const uint32_t tools_row = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS, 1U);
+    const uint32_t tools_row = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
     nt_ui_bbox_t rb = nt_ui_get_bbox(s_fx.ctx, tools_row);
     TEST_ASSERT_TRUE(rb.found);
     const float cx = rb.x + (rb.width * 0.5F);
@@ -666,7 +665,7 @@ static void test_menu_separator_non_interactive(void) {
     /* settle + activate the focused item: it must be Plain (Down skipped the separator). */
     menu_key(NT_KEY_ENTER);
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT, 2U), st.chosen_id, "Down must skip the separator (focus Iconed->Plain)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), st.chosen_id, "Down must skip the separator (focus Iconed->Plain)");
 }
 
 /* ---- Submenu marker cell: a parent row declares the marker cell (arrow sprite or ">" fallback); a leaf
@@ -801,15 +800,15 @@ static void test_menu_open_trigger_bound_requires_target_hover(void) {
 
 /* ---- NEW (REQ-236-02): scope-stack id distinctness — sibling keys at one scope and the SAME key under
  *      a pushed submenu scope all derive distinct, non-zero ids (mirrors the menu_hash_id non-alias
- *      guarantee). Drives nt_ui_menu_test_item_id(scope, key, idx). ---- */
+ *      guarantee). Drives nt_ui_menu_test_item_id(scope, key) — position-stable, no idx folded in. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat distinctness asserts, not real nesting
 static void test_menu_item_id_distinct_siblings_and_scopes(void) {
     /* root scope = the menu id; two sibling keys at idx 0/1 */
-    const uint32_t a = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
-    const uint32_t b = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT, 1U);
+    const uint32_t a = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    const uint32_t b = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
     /* the SAME key reused under a pushed submenu scope (submenu_begin pushes its derived id as scope) */
-    const uint32_t sub_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U); /* the File submenu's own id == its row id */
-    const uint32_t c = nt_ui_menu_test_item_id(sub_scope, KEY_FILE, 0U);      /* reuse KEY_FILE one level deeper */
+    const uint32_t sub_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE); /* the File submenu's own id == its row id */
+    const uint32_t c = nt_ui_menu_test_item_id(sub_scope, KEY_FILE);      /* reuse KEY_FILE one level deeper */
 
     TEST_ASSERT_TRUE_MESSAGE(a != 0U && b != 0U && c != 0U, "no derived item id may be 0 (the no-widget sentinel)");
     TEST_ASSERT_TRUE_MESSAGE(a != b, "sibling keys at one scope must derive distinct ids");
@@ -841,7 +840,7 @@ static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
     const uint32_t focus_id = nt_ui_menu_test_focus_item_id(MENU_A, 0U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U), focus_id, "Down must focus the first recorded item (prev-frame record, 1-frame latency)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (prev-frame record, 1-frame latency)");
 }
 
 /* ---- NEW (REQ-236-08, Pitfall 4): a custom-content row with activatable=false lets an inner button own
@@ -854,7 +853,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
 
     const uint32_t row_key = KEY_NEW;
     const uint32_t inner_btn = 0x1B7701U;
-    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key, 0U);
+    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
 
     /* Frames 0-1 bake the inner button bbox (1-frame IM lag); frame 2 PRESSES over it (capture); frame 3
      * RELEASES over it -> clicked = is_released && over fires on the inner child. The activatable=false
@@ -1003,7 +1002,7 @@ static void test_menu_hover_opens_submenu(void) {
     menu_im_open(&st, 120.0F, 80.0F);
     nt_input_clear_all_keys();
 
-    const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
+    const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
 
     /* F1: lay out the root so the File row bbox exists next frame. */
     menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
@@ -1029,8 +1028,8 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     menu_im_open(&st, 120.0F, 80.0F);
     nt_input_clear_all_keys();
 
-    const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
-    const uint32_t edit_row = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT, 1U);
+    const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    const uint32_t edit_row = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
 
     /* Open File's submenu via hover (settle a couple frames). */
     menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
