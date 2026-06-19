@@ -311,8 +311,9 @@ typedef struct {
 typedef struct {
     nt_ui_menu_state_t global_state; /* target_id == 0: arms on a right-click anywhere */
     nt_ui_menu_state_t zone_state;   /* target_id == panel: arms only over the bound panel */
-    uint32_t last_chosen;            /* latched for the readout (either menu) */
+    const char *last_chosen;         /* readout label of the last chosen row; points at the row's static literal (NULL = none) */
     bool show_grid;                  /* checkmark-toggle row state (global menu) */
+    uint8_t opacity_pct;             /* custom-row state the inner "reset" button restores to 100 */
 } menu_params_t;
 
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
@@ -375,7 +376,7 @@ static struct tab_state s_state = {
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
-    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = 0, .show_grid = false},
+    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
 };
 // #endregion
 
@@ -1716,14 +1717,14 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
     newo.icon = s_icon_bunny_ref;
     newo.shortcut = "Ctrl+N";
     if (nt_ui_menu_item_ex(ctx, MK_NEW, "New", newo)) {
-        st->menu.last_chosen = 101U;
+        st->menu.last_chosen = "New";
     }
     if (nt_ui_menu_submenu_begin(ctx, MK_RECENT, "Open recent")) {
         if (nt_ui_menu_item(ctx, MK_RECENT_A, "level_01.ntpack")) {
-            st->menu.last_chosen = 211U;
+            st->menu.last_chosen = "Open recent > level_01.ntpack";
         }
         if (nt_ui_menu_item(ctx, MK_RECENT_B, "ui_showcase.ntpack")) {
-            st->menu.last_chosen = 212U;
+            st->menu.last_chosen = "Open recent > ui_showcase.ntpack";
         }
         nt_ui_menu_item_opts_t clr = nt_ui_menu_item_opts_defaults();
         clr.enabled = false; /* disabled item: greyed, not selectable */
@@ -1736,13 +1737,13 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
     grid.selected = st->menu.show_grid;
     if (nt_ui_menu_item_ex(ctx, MK_TOGGLE_GRID, "Show grid", grid)) {
         st->menu.show_grid = !st->menu.show_grid;
-        st->menu.last_chosen = 107U;
+        st->menu.last_chosen = "Show grid";
     }
     if (nt_ui_menu_item(ctx, MK_PREFS, "Preferences")) {
-        st->menu.last_chosen = 102U;
+        st->menu.last_chosen = "Preferences";
     }
     if (nt_ui_menu_item(ctx, MK_QUIT, "Quit")) {
-        st->menu.last_chosen = 103U;
+        st->menu.last_chosen = "Quit";
     }
     nt_ui_menu_end(ctx);
 }
@@ -1754,10 +1755,10 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_item_opts_t edit = nt_ui_menu_item_opts_defaults();
     edit.icon = s_icon_bunny_ref;
     if (nt_ui_menu_item_ex(ctx, MK_EDIT, "Edit panel", edit)) {
-        st->menu.last_chosen = 104U;
+        st->menu.last_chosen = "Edit panel";
     }
     if (nt_ui_menu_item(ctx, MK_DUP, "Duplicate")) {
-        st->menu.last_chosen = 105U;
+        st->menu.last_chosen = "Duplicate";
     }
     nt_ui_menu_separator(ctx);
     nt_ui_menu_item_opts_t move = nt_ui_menu_item_opts_defaults();
@@ -1766,10 +1767,10 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)move;
     if (nt_ui_menu_submenu_begin(ctx, MK_MOVE, "Move to")) {
         if (nt_ui_menu_item(ctx, MK_MOVE_FRONT, "Front")) {
-            st->menu.last_chosen = 221U;
+            st->menu.last_chosen = "Move to > Front";
         }
         if (nt_ui_menu_item(ctx, MK_MOVE_BACK, "Back")) {
-            st->menu.last_chosen = 222U;
+            st->menu.last_chosen = "Move to > Back";
         }
         nt_ui_menu_item_opts_t grp = nt_ui_menu_item_opts_defaults();
         grp.enabled = false;
@@ -1783,17 +1784,20 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Guard the custom body with the return: a CLOSED (present-only) menu returns false and skips the body,
      * so the inner control never leaks onto the scene. item_end is still called unconditionally to balance. */
     if (nt_ui_menu_item_begin(ctx, MK_CUSTOM_OPACITY, op)) {
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opacity", g_current->body);
+        char opacity_buf[24];
+        (void)snprintf(opacity_buf, sizeof opacity_buf, "Opacity %u%%", st->menu.opacity_pct);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), opacity_buf, g_current->body);
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
         nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_menu_opacity_btn, g_current->btn_secondary, NULL, true, NULL);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "reset", g_current->body);
         if (nt_ui_button_end(ctx)) {
-            st->menu.last_chosen = 108U;
+            st->menu.opacity_pct = 100; /* the inner control owns the click; a real state change, not a magic log */
+            st->menu.last_chosen = "Opacity reset";
         }
     }
     nt_ui_menu_item_end(ctx);
     if (nt_ui_menu_item(ctx, MK_DELETE, "Delete")) {
-        st->menu.last_chosen = 106U;
+        st->menu.last_chosen = "Delete";
     }
     nt_ui_menu_end(ctx);
 }
@@ -1846,12 +1850,12 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     render_menu_global(ctx, st);
     render_menu_zone(ctx, st);
 
-    /* Drain the engine's chosen_id latch (immediate item_ex/item also sets it on activation): the rows above
-     * already wrote last_chosen, so just clear it (Model D: game reads + clears). */
+    /* This demo uses the inline bool-return pattern (each row wrote last_chosen above); the engine's chosen_id
+     * sink is the alternative — cleared here so it does not latch twice (Model D: game reads + clears). */
     st->menu.global_state.chosen_id = 0U;
     st->menu.zone_state.chosen_id = 0U;
 
-    (void)snprintf(buf, sizeof buf, "last chosen id: %u", st->menu.last_chosen);
+    (void)snprintf(buf, sizeof buf, "last chosen: %s", st->menu.last_chosen ? st->menu.last_chosen : "(none)");
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
