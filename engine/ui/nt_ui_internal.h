@@ -270,6 +270,13 @@ struct nt_ui_context {
         uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];    /* per-level running layout index (separators advance it) */
         uint32_t chosen;                            /* leaf id activated this frame (0 = none) */
         int16_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* running idx of a row whose submenu a click opens this frame (-1 none) */
+        /* Hover-open (Bug 1): per-depth the running idx of a parent row hovered THIS frame (-1 none), and a
+         * flag that an enabled LEAF (non-parent) row is hovered. menu_end resolves these against the mouse-
+         * aim corridor: a hovered parent opens (next frame, 1-frame IM lag); a hovered leaf collapses the
+         * open child once the corridor releases. Keyboard-open stays authoritative (set directly in nav). */
+        int16_t hover_parent[NT_UI_MENU_MAX_DEPTH]; /* running idx of a hovered parent at this depth (-1 none) */
+        uint8_t hover_leaf[NT_UI_MENU_MAX_DEPTH];   /* 1 = an enabled non-parent row is hovered at this depth */
+        uint8_t level_side[NT_UI_MENU_MAX_DEPTH];   /* each level's resolved popup side (mouse-aim corridor near-edge pick) */
         uint8_t fill_layer;
         uint8_t label_layer;
         uint8_t depth;

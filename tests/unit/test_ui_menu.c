@@ -973,6 +973,87 @@ static void test_menu_check_cell_when_selected(void) {
     TEST_ASSERT_FALSE_MESSAGE(unchecked.found, "an unselected row must NOT declare a checkmark cell");
 }
 
+/* One menu frame: root = [File submenu (2 items), Edit leaf]. Cursor at (px,py). Used by the hover-open
+ * corridor tests — File is the parent that flies out on hover; Edit is the sibling leaf that collapses it. */
+static void menu_im_hover_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    nt_pointer_t p = {.x = px, .y = py, .active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
+        (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "Project");
+        nt_ui_menu_submenu_end(s_fx.ctx);
+    }
+    (void)nt_ui_menu_item(s_fx.ctx, KEY_EDIT, "Edit");
+    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Center of a root row's prev-frame bbox (0,0 if not yet laid out). */
+static void menu_row_center(uint32_t row_id, float *cx, float *cy) {
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, row_id);
+    *cx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
+    *cy = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
+}
+
+/* ---- Bug 1 (hover-open): hovering a parent ROW flies its submenu out (no click), with 1-frame IM lag. ---- */
+static void test_menu_hover_opens_submenu(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    nt_input_clear_all_keys();
+
+    const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
+
+    /* F1: lay out the root so the File row bbox exists next frame. */
+    menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(-1, nt_ui_menu_test_open_path(MENU_A, 0U), "nothing open before any hover");
+
+    /* F2: hover the File parent row center -> records the hover; menu_end commits open_path (1-frame lag). */
+    float fx = 0.0F;
+    float fy = 0.0F;
+    menu_row_center(file_row, &fx, &fy);
+    menu_im_hover_frame(&st, &style, fx, fy);
+
+    /* F3: settle; open_path[0] now points at File (running idx 0), its submenu flies out. */
+    menu_im_hover_frame(&st, &style, fx, fy);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_menu_test_open_path(MENU_A, 0U), "hovering the parent row must open its submenu (idx 0)");
+    TEST_ASSERT_TRUE(st.open);
+}
+
+/* ---- Bug 1 (leave-close): with File's submenu open, hovering the sibling Edit LEAF collapses it once the
+ *      mouse-aim corridor releases (the cursor is no longer aiming at the open child). ---- */
+static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    nt_input_clear_all_keys();
+
+    const uint32_t file_row = nt_ui_menu_test_item_id(MENU_A, KEY_FILE, 0U);
+    const uint32_t edit_row = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT, 1U);
+
+    /* Open File's submenu via hover (settle a couple frames). */
+    menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
+    float fx = 0.0F;
+    float fy = 0.0F;
+    menu_row_center(file_row, &fx, &fy);
+    menu_im_hover_frame(&st, &style, fx, fy);
+    menu_im_hover_frame(&st, &style, fx, fy);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_menu_test_open_path(MENU_A, 0U), "File submenu open before the sibling hover");
+
+    /* Hover the Edit sibling leaf far from the open child corridor for enough frames that the dwell timer
+     * crosses AIM_FALLBACK and the corridor releases -> the open child collapses. */
+    float ex = 0.0F;
+    float ey = 0.0F;
+    menu_row_center(edit_row, &ex, &ey);
+    bool collapsed = false;
+    for (int f = 0; f < 30 && !collapsed; ++f) {
+        menu_im_hover_frame(&st, &style, ex, ey);
+        collapsed = (nt_ui_menu_test_open_path(MENU_A, 0U) < 0);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(collapsed, "hovering a sibling leaf (corridor released) must collapse the open submenu");
+}
+
 /* One menu frame with a single File submenu (two child items), driven by the keyboard nav path. */
 static void menu_im_submenu_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {.x = px, .y = py, .active = true};
@@ -1023,6 +1104,8 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_menu_right_edge_root_clamp_and_submenu_flip);
+    RUN_TEST(test_menu_hover_opens_submenu);
+    RUN_TEST(test_menu_hover_sibling_leaf_collapses_submenu);
     RUN_TEST(test_menu_abi_sizes);
     RUN_TEST(test_menu_defaults_valid);
     RUN_TEST(test_menu_point_in_tri);

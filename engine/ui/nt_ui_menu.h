@@ -159,6 +159,9 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key, uint32_t idx);
 /* Prev-frame frame-record focus probe: the recorded item id at rt->focus[depth] (1-frame latency). */
 uint32_t nt_ui_menu_test_focus_item_id(uint32_t menu_id, uint8_t depth);
+/* Open-chain probe: the retained open child index at a level (rt->open_path[depth]); -1 = none open.
+ * Drives the immediate hover-open test (hover a parent row -> the corridor opens its submenu). */
+int16_t nt_ui_menu_test_open_path(uint32_t menu_id, uint8_t depth);
 #endif
 
 #endif /* NT_UI_MENU_H */
