@@ -677,9 +677,9 @@ static void menu_im_frame25(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, f
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    (void)nt_ui_menu_item_ex(&s_menu, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.enabled = true, .icon = s_icon_ref});
+    (void)nt_ui_menu_item_ex(&s_menu, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.icon = s_icon_ref});
     nt_ui_menu_separator(&s_menu);
-    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(&s_menu, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){.enabled = true}));
+    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(&s_menu, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){0}));
     if (nt_ui_menu_submenu_begin(&s_menu, KEY_OPEN, "Parent")) {
         (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "ChildA");
         nt_ui_menu_submenu_end(&s_menu);
@@ -924,7 +924,7 @@ static void test_menu_record_nav_focuses_recorded_item(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (this-frame record, 1-frame effect)");
 }
 
-/* ---- A custom-content row with activatable=false lets an inner button own the click — the inner button
+/* ---- A custom-content row with non_activatable lets an inner button own the click — the inner button
  *      reports clicked while the row id reports !clicked. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_menu_item_begin_activatable_false_child_owns_click(void) {
@@ -937,7 +937,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
 
     /* Frames 0-1 bake the inner button bbox (1-frame IM lag); frame 2 PRESSES over it (capture); frame 3
-     * RELEASES over it -> clicked = is_released && over fires on the inner child. The activatable=false
+     * RELEASES over it -> clicked = is_released && over fires on the inner child. The non_activatable
      * row must NOT steal that click (the chain stays open — no activation). item_begin returns DECLARE-BODY
      * (true while open) — the body is guarded by it; the click is owned by the inner child. */
     bool declared = false;
@@ -962,7 +962,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
         nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
-        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
+        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.non_activatable = true})) {
             declared = true;
             /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
@@ -971,7 +971,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
                 btn_clicked = true;
             }
         }
-        /* item_end reports activation for an ACTIVATABLE row; an activatable=false row never activates. */
+        /* item_end reports activation for an ACTIVATABLE row; a non_activatable row never activates. */
         if (nt_ui_menu_item_end(&s_menu)) {
             end_activated = true;
         }
@@ -981,10 +981,10 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
 
     TEST_ASSERT_TRUE_MESSAGE(declared, "an open menu must declare the custom-content body (item_begin returns true)");
     TEST_ASSERT_TRUE_MESSAGE(btn_clicked, "the inner child button must own the click");
-    /* An activatable=false row that latched the click as an activation would
+    /* A non_activatable row that latched the click as an activation would
      * close the chain. The chain staying OPEN proves the row did NOT steal the inner child's click. */
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "an activatable=false row must NOT latch the click as an activation (chain stays open)");
-    TEST_ASSERT_FALSE_MESSAGE(end_activated, "item_end must return false for an activatable=false row (child owns the click)");
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "a non_activatable row must NOT latch the click as an activation (chain stays open)");
+    TEST_ASSERT_FALSE_MESSAGE(end_activated, "item_end must return false for a non_activatable row (child owns the click)");
     (void)row_id;
 }
 
@@ -1001,7 +1001,7 @@ static void test_menu_item_begin_closed_skips_body(void) {
         nt_pointer_t p = {.x = 0.0F, .y = 0.0F, .active = true};
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
         nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
-        if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
+        if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.non_activatable = true})) {
             declared = true; /* must stay false: the menu is closed */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
         }
@@ -1027,7 +1027,7 @@ static void test_menu_item_begin_closed_guarded_no_poison(void) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p0, 1);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
     bool closed_declared = false;
-    if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = true})) {
+    if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
         closed_declared = true; /* skipped: menu closed */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
         nt_ui_menu_item_end(&s_menu); /* item_end INSIDE the guard -> skipped on a closed menu */
@@ -1043,7 +1043,7 @@ static void test_menu_item_begin_closed_guarded_no_poison(void) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p1, 1);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
     bool open_declared = false;
-    if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = true})) {
+    if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
         open_declared = true;
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
         nt_ui_menu_item_end(&s_menu);
@@ -1053,9 +1053,9 @@ static void test_menu_item_begin_closed_guarded_no_poison(void) {
     TEST_ASSERT_TRUE_MESSAGE(open_declared, "an OPEN menu's guarded item_begin must declare the body (scratch clean after a closed frame)");
 }
 
-/* ---- Disabled custom row never activates: item_begin(opts{.enabled=false, .activatable=true}) + a click
- *      over the row must make item_end return false (mirror item_ex's enabled gate). The enabled+activatable
- *      case still activates on the same click. ---- */
+/* ---- Disabled custom row never activates: item_begin(opts{.disabled=true}) + a click over the row must
+ *      make item_end return false (mirror item_ex's enabled gate). The enabled + activatable case still
+ *      activates on the same click. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool menu_item_begin_click_activates(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, bool enabled) {
     const uint32_t row_key = KEY_NEW;
@@ -1077,7 +1077,7 @@ static bool menu_item_begin_click_activates(nt_ui_menu_state_t *st, nt_ui_menu_s
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
         nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
-        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.enabled = enabled, .activatable = true})) {
+        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.disabled = !enabled})) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {} /* game body */
         }
         if (nt_ui_menu_item_end(&s_menu)) {
@@ -1094,7 +1094,7 @@ static void test_menu_item_begin_disabled_never_activates(void) {
         nt_ui_menu_state_t st = {0};
         menu_im_open(&st, 120.0F, 80.0F);
         const bool act = menu_item_begin_click_activates(&st, &style, false);
-        TEST_ASSERT_FALSE_MESSAGE(act, "a disabled (enabled=false) custom row must NOT activate via item_end");
+        TEST_ASSERT_FALSE_MESSAGE(act, "a disabled (opts.disabled=true) custom row must NOT activate via item_end");
     }
     {
         nt_ui_menu_state_t st = {0};
@@ -1213,7 +1213,7 @@ static void test_menu_separator_text_non_interactive(void) {
 }
 
 /* Drive a disabled item_ex row with a mouse click; report whether its inline return fired. Mirrors
- * menu_item_click_activates but on the item_ex path with opts.enabled=false. */
+ * menu_item_click_activates but on the item_ex path with opts.disabled=true. */
 static bool menu_item_ex_disabled_click(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     const uint32_t row_key = KEY_NEW;
     const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
@@ -1233,7 +1233,7 @@ static bool menu_item_ex_disabled_click(nt_ui_menu_state_t *st, nt_ui_menu_style
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
         nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
-        if (nt_ui_menu_item_ex(&s_menu, row_key, "Disabled", (nt_ui_menu_item_opts_t){.enabled = false, .activatable = true})) {
+        if (nt_ui_menu_item_ex(&s_menu, row_key, "Disabled", (nt_ui_menu_item_opts_t){.disabled = true})) {
             activated = true;
         }
         nt_ui_menu_end(&s_menu);
@@ -1260,9 +1260,9 @@ static void menu_im_frame_submenu_ex(nt_ui_menu_state_t *st, nt_ui_menu_style_t 
     nt_pointer_t p = {.active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    nt_ui_menu_item_opts_t opts = nt_ui_menu_item_opts_defaults();
+    nt_ui_menu_item_opts_t opts = {0};
     opts.icon = s_icon_ref;
-    opts.enabled = enabled;
+    opts.disabled = !enabled;
     if (nt_ui_menu_submenu_begin_ex(&s_menu, KEY_OPEN, "Parent", opts)) {
         (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "Child");
         nt_ui_menu_submenu_end(&s_menu);
@@ -1271,7 +1271,7 @@ static void menu_im_frame_submenu_ex(nt_ui_menu_state_t *st, nt_ui_menu_style_t 
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- submenu_begin_ex honors opts.icon (the parent declares an icon gutter cell) and opts.enabled=false
+/* ---- submenu_begin_ex honors opts.icon (the parent declares an icon gutter cell) and opts.disabled=true
  *      (a disabled parent returns false / never flies out, even when the open chain points at it). ---- */
 static void test_menu_submenu_begin_ex_icon_disabled(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -1305,11 +1305,9 @@ static void menu_im_frame_rich(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
     nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    nt_ui_menu_item_opts_t save = nt_ui_menu_item_opts_defaults();
-    save.shortcut = "Ctrl+S";
-    save.selected = true;
+    nt_ui_menu_item_opts_t save = {.shortcut = "Ctrl+S", .selected = true};
     (void)nt_ui_menu_item_ex(&s_menu, KEY_NEW, "Save", save);
-    (void)nt_ui_menu_item_ex(&s_menu, KEY_QUIT, "Plain", nt_ui_menu_item_opts_defaults());
+    (void)nt_ui_menu_item_ex(&s_menu, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){0});
     nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }

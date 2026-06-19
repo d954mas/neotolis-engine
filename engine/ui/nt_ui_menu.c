@@ -472,7 +472,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
     const uint8_t label_layer = menu->pending_menu.label_layer;
     nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)menu->pending_menu.style;
     nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu->pending_menu.menu_id);
-    const bool enabled = opts->enabled;
+    const bool enabled = !opts->disabled;
 
     const nt_ui_interaction_t in = enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
     const bool focused = (rt->focus[depth] == (int16_t)running_idx);
@@ -648,21 +648,21 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
     nt_ui_context_t *ctx = menu->ui;
     uint32_t row_id = 0U;
     const nt_ui_interaction_t in = menu_im_row(menu, key, label, &opts, false, false, &row_id);
-    if (opts.enabled) {
+    if (!opts.disabled) {
         (void)nt_ui_step_interaction(ctx, row_id);
     }
     /* The inline bool is the SINGLE activation idiom: mouse clicks same-frame; a keyboard Enter arrives via
      * rt->kbd_activated (set in the PREVIOUS frame's menu_end, 1-frame latency). Both latch pending_menu.chosen
      * (the internal close-chain signal). */
     const nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu->pending_menu.menu_id);
-    const bool activated = opts.enabled && (in.clicked || (row_id == rt->kbd_activated));
+    const bool activated = !opts.disabled && (in.clicked || (row_id == rt->kbd_activated));
     if (activated) {
         menu->pending_menu.chosen = row_id;
     }
     return activated;
 }
 
-bool nt_ui_menu_item(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label) { return nt_ui_menu_item_ex(menu, key, label, nt_ui_menu_item_opts_defaults()); }
+bool nt_ui_menu_item(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label) { return nt_ui_menu_item_ex(menu, key, label, (nt_ui_menu_item_opts_t){0}); }
 
 bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(menu->pending_menu.active && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
@@ -679,8 +679,8 @@ bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item
     uint32_t row_id = 0U;
     (void)menu_im_row(menu, key, NULL, &opts, false, true, &row_id);
     menu->pending_menu_item.id = row_id;
-    menu->pending_menu_item.enabled = opts.enabled;
-    menu->pending_menu_item.activatable = opts.activatable;
+    menu->pending_menu_item.enabled = !opts.disabled;            /* internal state stays positive-sense */
+    menu->pending_menu_item.activatable = !opts.non_activatable; /* derived from the inverted opts */
     menu->pending_menu_item.active = true;
     return true; /* open: declare the body */
 }
@@ -724,13 +724,13 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const cha
     nt_ui_context_t *ctx = menu->ui;
     const uint8_t depth = menu->pending_menu.depth;
     const uint16_t running_idx = menu->pending_menu.item_idx[depth]; /* before menu_im_row advances it */
-    /* selected/activatable do not apply to a PARENT row (a parent flies out, it is never a checkable leaf
-     * nor a custom-child host) — only icon/shortcut/enabled are honored. */
+    /* selected/non_activatable do not apply to a PARENT row (a parent flies out, it is never a checkable leaf
+     * nor a custom-child host) — only icon/shortcut/disabled are honored. */
     opts.selected = false;
-    opts.activatable = true;
+    opts.non_activatable = false;
     uint32_t row_id = 0U;
     const nt_ui_interaction_t in = menu_im_row(menu, key, label, &opts, true, false, &row_id);
-    if (!opts.enabled) {
+    if (opts.disabled) {
         return false; /* a disabled parent never steps, never flies out, never opens */
     }
     (void)nt_ui_step_interaction(ctx, row_id);
@@ -762,7 +762,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const cha
     return true;
 }
 
-bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label) { return nt_ui_menu_submenu_begin_ex(menu, key, label, nt_ui_menu_item_opts_defaults()); }
+bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label) { return nt_ui_menu_submenu_begin_ex(menu, key, label, (nt_ui_menu_item_opts_t){0}); }
 
 void nt_ui_menu_submenu_end(nt_ui_menu_ctx_t *menu) {
     NT_ASSERT(menu->pending_menu.active && menu->pending_menu.depth > 0U && "nt_ui_menu_submenu_end without an open submenu");

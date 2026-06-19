@@ -1730,7 +1730,7 @@ enum {
 static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_ctx_t *menu = &st->menu.global_menu;
     nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, &st->menu.global_state, g_current->menu);
-    nt_ui_menu_item_opts_t newo = nt_ui_menu_item_opts_defaults();
+    nt_ui_menu_item_opts_t newo = {0};
     newo.icon = s_icon_bunny_ref;
     newo.shortcut = "Ctrl+N";
     if (nt_ui_menu_item_ex(menu, MK_NEW, "New", newo)) {
@@ -1743,15 +1743,13 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
         if (nt_ui_menu_item(menu, MK_RECENT_B, "ui_showcase.ntpack")) {
             st->menu.last_chosen = "Open recent > ui_showcase.ntpack";
         }
-        nt_ui_menu_item_opts_t clr = nt_ui_menu_item_opts_defaults();
-        clr.enabled = false; /* disabled item: greyed, not selectable */
+        nt_ui_menu_item_opts_t clr = {.disabled = true}; /* greyed, not selectable */
         (void)nt_ui_menu_item_ex(menu, MK_RECENT_CLEAR, "(clear list)", clr);
         nt_ui_menu_submenu_end(menu);
     }
     nt_ui_menu_separator(menu);
     /* Checkmark toggle row: `selected` draws the checkmark; clicking flips the game-owned bool. */
-    nt_ui_menu_item_opts_t grid = nt_ui_menu_item_opts_defaults();
-    grid.selected = st->menu.show_grid;
+    nt_ui_menu_item_opts_t grid = {.selected = st->menu.show_grid};
     if (nt_ui_menu_item_ex(menu, MK_TOGGLE_GRID, "Show grid", grid)) {
         st->menu.show_grid = !st->menu.show_grid;
         st->menu.last_chosen = "Show grid";
@@ -1766,11 +1764,11 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 /* ZONE menu (panel actions): distinct rows + a "Move to" submenu so the bound menu is unmistakable, plus a
- * custom activatable=false row whose inner control owns the click while the row only highlights. */
+ * custom non_activatable row whose inner control owns the click while the row only highlights. */
 static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_ctx_t *menu = &st->menu.zone_menu;
     nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, &st->menu.zone_state, g_current->menu);
-    nt_ui_menu_item_opts_t edit = nt_ui_menu_item_opts_defaults();
+    nt_ui_menu_item_opts_t edit = {0};
     edit.icon = s_icon_bunny_ref;
     if (nt_ui_menu_item_ex(menu, MK_EDIT, "Edit panel", edit)) {
         st->menu.last_chosen = "Edit panel";
@@ -1779,7 +1777,7 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
         st->menu.last_chosen = "Duplicate";
     }
     nt_ui_menu_separator(menu);
-    nt_ui_menu_item_opts_t move = nt_ui_menu_item_opts_defaults();
+    nt_ui_menu_item_opts_t move = {0};
     move.icon = s_icon_bunny_ref;
     if (nt_ui_menu_submenu_begin_ex(menu, MK_MOVE, "Move to", move)) {
         if (nt_ui_menu_item(menu, MK_MOVE_FRONT, "Front")) {
@@ -1788,15 +1786,13 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
         if (nt_ui_menu_item(menu, MK_MOVE_BACK, "Back")) {
             st->menu.last_chosen = "Move to > Back";
         }
-        nt_ui_menu_item_opts_t grp = nt_ui_menu_item_opts_defaults();
-        grp.enabled = false;
+        nt_ui_menu_item_opts_t grp = {.disabled = true};
         (void)nt_ui_menu_item_ex(menu, MK_MOVE_GROUP, "Group", grp);
         nt_ui_menu_submenu_end(menu);
     }
-    /* Custom-content row (activatable=false): the inner button owns the click; the row only
+    /* Custom-content row (non_activatable): the inner button owns the click; the row only
      * highlights on hover. The game reads the inner button's own interaction. */
-    nt_ui_menu_item_opts_t op = nt_ui_menu_item_opts_defaults();
-    op.activatable = false;
+    nt_ui_menu_item_opts_t op = {.non_activatable = true};
     /* Guard the custom body with the return: a CLOSED (present-only) menu returns false and skips the body,
      * so the inner control never leaks onto the scene. item_end is still called unconditionally to balance. */
     if (nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, op)) {

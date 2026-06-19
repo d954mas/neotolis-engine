@@ -84,23 +84,19 @@ _Static_assert(sizeof(nt_ui_menu_style_t) == 120, "nt_ui_menu_style_t stable ABI
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
 /* Immediate-item options: the full OS-menu row field set. `icon` is the leading-gutter sprite
- * (atlas.id==0 = aligned empty gutter). A {0} init reads enabled=false + activatable=false — wrong for a
- * normal row, so prefer nt_ui_menu_item_opts_defaults() (enabled+activatable true) and opt OUT, not IN. */
+ * (atlas.id==0 = aligned empty gutter). The two mostly-true bools are stored INVERTED so a {0} init is a
+ * normal enabled + activatable row — the common case opts IN to nothing. */
 typedef struct {
     nt_atlas_region_ref_t icon; /* optional leading-gutter sprite (atlas.id==0 = aligned empty gutter) */
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
-    bool enabled;               /* greyed + non-selectable when false */
+    bool disabled;              /* greyed + non-selectable when true (default false = enabled) */
     bool selected;              /* checkmark (toggle/radio menu items) */
-    bool activatable;           /* false = an interactive child owns the click (item_begin only) */
+    bool non_activatable;       /* true = an interactive child owns the click (item_begin only; default false) */
     uint8_t _pad[1];
 } nt_ui_menu_item_opts_t;
 /* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
  * multiple of the 8-byte ref alignment; express portably as 16 + the (ptr+4) cell rounded up to 8. */
 _Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 3 bool + pad, 8-aligned)");
-
-/* Safe baseline: a normal enabled, activatable row (no icon/shortcut/check). Callers opt OUT (clear
- * enabled/activatable), never IN — a zeroed opts would otherwise silently disable + de-activate the row. */
-static inline nt_ui_menu_item_opts_t nt_ui_menu_item_opts_defaults(void) { return (nt_ui_menu_item_opts_t){.enabled = true, .activatable = true}; }
 
 /* Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
  * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly
@@ -200,12 +196,12 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
  *   if (item_begin(...)) { ...body...; }  item_end(...);  // item_end unconditional
  * A forgotten item_end after an OPEN item_begin is still caught (the next item_begin/menu_end asserts). */
 bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
-bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for activatable=false. */
+bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for opts.non_activatable. */
 bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label); /* true ONLY when open -> declare body */
-/* Rich submenu parent (icon/shortcut/enabled), mirroring item -> item_ex. enabled=false renders greyed and
- * returns false (a disabled parent never flies out, never opens). opts.selected/opts.activatable do NOT
+/* Rich submenu parent (icon/shortcut/disabled), mirroring item -> item_ex. opts.disabled renders greyed and
+ * returns false (a disabled parent never flies out, never opens). opts.selected/opts.non_activatable do NOT
  * apply to a parent row (it is never a checkable leaf nor a custom-child host) and are ignored.
- * submenu_begin is the thin wrapper calling _ex with nt_ui_menu_item_opts_defaults(). */
+ * submenu_begin is the thin wrapper calling _ex with a zero-init opts (a normal enabled parent). */
 bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts);
 void nt_ui_menu_submenu_end(nt_ui_menu_ctx_t *menu);
 void nt_ui_menu_separator(nt_ui_menu_ctx_t *menu);                         /* non-interactive divider (no focus index) */
