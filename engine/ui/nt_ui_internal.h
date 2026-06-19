@@ -154,7 +154,7 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
-/* DEBUG-only combo duplicate-key guard window: row ids are now key-stable (mix(combo_id,key) only), so two
+/* DEBUG-only combo duplicate-key guard window: row ids are key-stable (mix(combo_id,key) only), so two
  * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. The first N rows per combo
  * are scanned for a collision (fail-early NT_ASSERT); past N the best-effort check stops (debug-only). */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -249,24 +249,22 @@ struct nt_ui_context {
         bool active; /* a tab element is open (between tab_begin/tab_end) */
     } pending_tab;
 
-    /* Immediate-menu scratch (pending_menu depth-stack, pending_menu_item, frame_record) moved OUT to the
-     * game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h). Migration criterion: widget scratch stays in
-     * this ctx unless it's heavy (>>1 KB) AND forces a widget header into this header — only the menu
-     * qualified (~4.2 KB + the lone nt_ui_menu.h include); tabbar/combo are void*-decoupled and cheap, so
-     * they stay below. */
+    /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
+     * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
+     * void*-decoupled and cheap, so they stay below. */
 
     /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
      * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each
      * combo_selectable derives its INTERACTIVE row id via mix(id, key) only (KEY-STABLE — reorder/hide a
      * row mid-press never shifts a fixed-key row's identity); row_idx is kept only for the positional LABEL
-     * cell id + the test probe. The GAME owns int *selected and writes it on the selectable's clicked return
-     * (Model-D); the combo only clears *open on a row click. trigger_open marks a custom preview element
+     * cell id + the test probe. The GAME owns int *selected and writes it on the selectable's clicked return;
+     * the combo only clears *open on a row click. trigger_open marks a custom preview element
      * open between combo_preview_begin/end; row_open marks a custom selectable open between
      * selectable_begin/end (its id + click latch deferred to selectable_end). */
     struct {
         const void *style;    /* nt_ui_dropdown_style_t* (void to keep the internal header widget-agnostic) */
         uint32_t id;          /* the combo id (scope for the row fmix) */
-        bool *open;           /* game-owned open flag; a selectable click clears it (Model-D) */
+        bool *open;           /* game-owned open flag; a selectable click clears it */
         uint32_t row_id;      /* the open custom selectable's row id (for selectable_end's step + click latch) */
         float trigger_open_t; /* eased open amount stashed by the custom trigger; combo_preview_end's chevron rotation */
         uint16_t row_idx;     /* per-frame running row index (positional LABEL cell id + test probe only, NOT the interactive id) */

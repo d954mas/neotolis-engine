@@ -79,7 +79,7 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
 
 /* ---- Immediate combo API (begin/selectable/end) — mirrors the menu core. ----
  * The GAME owns `int *selected` (writes it on a selectable's clicked return) + `bool *open`; the combo
- * only signals + clears *open on a row click (Model-D). Combos do NOT nest (asserted).
+ * only signals + clears *open on a row click. Combos do NOT nest (asserted).
  * Layers: every combo fill (trigger, rows, panel, chevron, scrollbar) draws on data->layer; trigger +
  * row text on label_layer (split to batch fills-then-text). data may be NULL (fills fall to layer 0).
  * The popup-nested scrollbar rides the SAME fill layer as the panel and floats above it (floating draws

@@ -318,7 +318,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
         ctx->pending_combo.trigger_open_t = a->value_t;
         return; /* the game declares the trigger content; combo_preview_end appends the chevron, closes + steps */
     }
-    /* Label grows to push the chevron to the right edge (mirror the data-form trigger). */
+    /* Label grows to push the chevron to the right edge. */
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), (preview != NULL) ? preview : "", &lbl);
     }
@@ -481,7 +481,7 @@ static bool combo_emit_selectable(nt_ui_context_t *ctx, uint32_t key, const nt_a
     combo_dup_key_check(ctx, row_id);
     const bool clicked = dropdown_declare_row(ctx, ctx->pending_combo.fill_layer, ctx->pending_combo.label_layer, row_id, label_id, label, icon, selected, style);
     if (clicked) {
-        *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open (Model-D) */
+        *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */
     }
     return clicked;
 }
@@ -530,7 +530,7 @@ void nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
     const uint32_t row_id = ctx->pending_combo.row_id;
     nt_ui_clay_priv_close_element();
     if (nt_ui_step_interaction(ctx, row_id).clicked) {
-        *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open (Model-D) */
+        *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */
     }
     ctx->pending_combo.row_open = 0U;
 }

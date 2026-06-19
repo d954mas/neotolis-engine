@@ -10,16 +10,12 @@
 #include "test_helpers/ui_atlas.h"
 #include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_dropdown.h" /* nt_ui_dropdown_style_t for the combo RED decls */
-#include "ui/nt_ui_menu.h"     /* nt_ui_menu_state_t/_style_t for the immediate-menu RED decls */
+#include "ui/nt_ui_dropdown.h" /* nt_ui_dropdown_style_t for the combo fixture decls */
+#include "ui/nt_ui_menu.h"     /* nt_ui_menu_state_t/_style_t for the immediate-menu fixture decls */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* #236 immediate-mode menu + combo begin/end decls + their probes now live in the canonical engine
- * headers: menu in ui/nt_ui_menu.h (Plan 02), combo in ui/nt_ui_dropdown.h (Plan 04). The Wave-0 RED
- * forward-decl block was removed once each plan landed the real decls (a duplicate here would conflict). */
 
 /* Bit-mask of walker setters fixture_init calls; uint32_t so `ALL & ~MASK`
  * is well-defined (an enum type would trip EnumCastOutOfRange). */

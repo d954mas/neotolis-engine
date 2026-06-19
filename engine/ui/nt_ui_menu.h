@@ -245,8 +245,7 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
  * id is position-stable (no running idx folded in); the test asserts dynamic sibling lists keep ids. */
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key);
 /* Prev-frame frame-record focus probe: the recorded item id at rt->focus[depth] (1-frame latency). Takes
- * the live ctx (runtime cell lives in its state pool) AND the game-owned menu (frame_record now lives on
- * menu). The explicit ctx replaces the old file-static post-end fallback (s_menu_last_ctx is gone). */
+ * the live ctx (runtime cell lives in its state pool) and the game-owned menu (which owns frame_record). */
 uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, const nt_ui_menu_ctx_t *menu, uint32_t menu_id, uint8_t depth);
 /* Open-chain probe: the retained open child index at a level (rt->open_path[depth]); -1 = none open.
  * Reads only the runtime cell, so it takes the live ctx (no menu needed). Drives the immediate hover-open
@@ -256,7 +255,7 @@ int16_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, 
  * NT_UI_MENU_MAX_DEPTH-1 even when Right/Enter-open is driven at the deepest allowable level. */
 uint8_t nt_ui_menu_test_active_depth(const nt_ui_context_t *ctx, uint32_t menu_id);
 /* Force the open chain open `depth` levels deep (clamped to the cap). The depth-cap DEATH test uses this to
- * drive submenu_begin's decl-time backstop assert directly (the nav-open path now no-ops at the cap). */
+ * drive submenu_begin's decl-time backstop assert directly (the nav-open path no-ops at the cap). */
 void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
 #endif
 

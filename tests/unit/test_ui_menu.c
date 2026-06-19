@@ -63,7 +63,7 @@ void tearDown(void) {
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
-/* Inline-activation capture: chosen_id was removed (FIX 2b) — activation is reported by the row's inline
+/* Inline-activation capture: activation is reported by the row's inline
  * bool for BOTH mouse and keyboard. The immediate drivers OR each target row's return into s_act_hit so a
  * test can assert the leaf's inline return fired (keyboard arrives 1 frame after Enter). Reset per test. */
 static uint32_t s_act_capture_id; /* the fully-scoped row id a test wants to watch (0 = watch nothing) */
@@ -87,7 +87,7 @@ static void fx_begin(float dt) {
 static void test_menu_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT(EXPECTED_MENU_STYLE_ABI, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT((unsigned)(16U + ((((sizeof(void *) + 4U) + 7U) / 8U) * 8U)), (unsigned)sizeof(nt_ui_menu_item_opts_t));
-    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_menu_state_t)); /* chosen_id removed: 2 float + 1 bool + 3 pad */
+    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_menu_state_t)); /* 2 float + 1 bool + 3 pad */
 }
 
 static void test_menu_defaults_valid(void) {
@@ -299,13 +299,13 @@ static void test_menu_smoke_open_and_closed(void) {
 
 /* ---- Keyboard-nav reaches a nested leaf: Down focuses File, Right opens its submenu, Down to Open,
  *      Right opens the grandchild, Down to File2, Enter activates -> File2's INLINE return fires 1 frame
- *      later (FIX 2b: no chosen_id sink). Tree built via the immediate calls across frames (prev-frame nav). ---- */
+ *      later. Tree built via the immediate calls across frames (prev-frame nav). ---- */
 static void test_menu_kbd_nav_activates_nested_leaf(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
 
-    /* Watch File2's inline return: keyboard Enter must fire it (1 frame after Enter), proving FIX 2b. */
+    /* Watch File2's inline return: keyboard Enter must fire it (1 frame after Enter). */
     const uint32_t file_scope0 = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t open_scope0 = nt_ui_menu_test_item_id(file_scope0, KEY_OPEN);
     s_act_capture_id = nt_ui_menu_test_item_id(open_scope0, KEY_FILE2);
@@ -337,7 +337,7 @@ static void test_menu_kbd_nav_activates_nested_leaf(void) {
     nt_input_clear_all_keys();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "keyboard Enter must fire the leaf's INLINE return (1-frame latency), proving FIX 2b");
+    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "keyboard Enter must fire the leaf's INLINE return (1-frame latency)");
     TEST_ASSERT_FALSE(st.open);
 }
 
@@ -605,7 +605,7 @@ static void test_menu_depth_cap_asserts(void) {
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_self_ref(&st, &style);
 
-    /* The nav-open path now caps at the deepest level (no OOB), so it cannot itself drive submenu_begin past
+    /* The nav-open path caps at the deepest level (no OOB), so it cannot itself drive submenu_begin past
      * the cap. Force the open chain to the last valid level so the deepest submenu_begin ENTERS its body and
      * tries to push child == MAX_DEPTH — the decl-time backstop NT_ASSERT must still fire (different path). */
     nt_ui_menu_test_force_open_to(s_fx.ctx, MENU_A, (uint8_t)(NT_UI_MENU_MAX_DEPTH - 1U));
@@ -668,7 +668,7 @@ static void test_menu_kbd_open_at_depth_cap_is_noop(void) {
 static const nt_atlas_region_ref_t s_icon_ref = {.atlas = {.id = 1U}, .region = NT_ATLAS_INVALID_REGION};
 
 /* Immediate frame for the icon/separator vitrine: Iconed (item_ex with icon), a separator, Plain (no
- * icon), Parent (submenu marker). Mirrors the data-form s_root25 row set. */
+ * icon), Parent (submenu marker). */
 static void menu_im_frame25(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {0};
     p.x = px;
@@ -970,7 +970,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
                 btn_clicked = true;
             }
         }
-        /* FIX 3: item_end reports activation for an ACTIVATABLE row; an activatable=false row never activates. */
+        /* item_end reports activation for an ACTIVATABLE row; an activatable=false row never activates. */
         if (nt_ui_menu_item_end(&s_menu)) {
             end_activated = true;
         }
@@ -980,7 +980,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
 
     TEST_ASSERT_TRUE_MESSAGE(declared, "an open menu must declare the custom-content body (item_begin returns true)");
     TEST_ASSERT_TRUE_MESSAGE(btn_clicked, "the inner child button must own the click");
-    /* chosen_id is gone (FIX 2b): an activatable=false row that latched the click as an activation would
+    /* An activatable=false row that latched the click as an activation would
      * close the chain. The chain staying OPEN proves the row did NOT steal the inner child's click. */
     TEST_ASSERT_TRUE_MESSAGE(st.open, "an activatable=false row must NOT latch the click as an activation (chain stays open)");
     TEST_ASSERT_FALSE_MESSAGE(end_activated, "item_end must return false for an activatable=false row (child owns the click)");

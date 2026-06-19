@@ -95,7 +95,7 @@ static void test_dropdown_defaults_valid(void) {
 /* One full immediate combo frame: combo_begin emits the trigger (preview = current selection label) and
  * opens the list when *open; each row is a combo_selectable; combo_end balances. The trigger is wrapped
  * in a floating element so its bbox is at (tx,ty). `*out_made` reports whether a selectable was clicked.
- * The combo writes *selected itself on a selectable click (Model-D). */
+ * The combo clears *open on a selectable click; the game writes *selected. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, const char *const *labels, const nt_atlas_region_ref_t *icons, int count, int *selected, bool *open,
                                  nt_ui_dropdown_style_t *st, bool *out_made) {
@@ -576,7 +576,7 @@ static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_f
     return nt_ui_get_bbox(s_fx.ctx, nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2)));
 }
 
-/* ---- FIX 3: a combo whose row set changes across frames keeps a STABLE interactive id for a fixed-key
+/* ---- a combo whose row set changes across frames keeps a STABLE interactive id for a fixed-key
  *      row. The probe id mix(combo_id,key) is row_idx-independent, and the live row registers at exactly
  *      that id whether or not an earlier sibling row is hidden (so press/release identity never shifts). ---- */
 static void test_dropdown_combo_row_id_stable_across_reorder(void) {
@@ -595,7 +595,7 @@ static void test_dropdown_combo_row_id_stable_across_reorder(void) {
     TEST_ASSERT_TRUE_MESSAGE(shifted.found, "fixed-key row keeps its key-stable id after an earlier sibling is hidden");
 }
 
-/* ---- FIX 3: two selectables sharing a key in one combo list alias the SAME id -> the debug duplicate-key
+/* ---- two selectables sharing a key in one combo list alias the SAME id -> the debug duplicate-key
  *      NT_ASSERT must fire (keys must be unique within a list). ---- */
 static void test_dropdown_combo_duplicate_key_asserts(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();

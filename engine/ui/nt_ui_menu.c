@@ -442,7 +442,7 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
  * mix(scope_id[depth], key) (position-stable); submenu_begin pushes its row id as the child scope. */
 
 /* Append a recorded row into THIS frame's per-level frame record (fail-early assert on overflow).
- * DEBUG-only: ids are now position-stable (mix(scope,key)), so two siblings sharing a key derive the SAME
+ * DEBUG-only: ids are position-stable (mix(scope,key)), so two siblings sharing a key derive the SAME
  * id -> aliased anim/Clay/submenu identity. Assert sibling-key uniqueness (ImGui's duplicate-id contract);
  * the linear scan is O(items/level) over the small cap and compiles out with NT_ASSERT in OFF builds. */
 static void menu_record_append(nt_ui_menu_ctx_t *menu, uint8_t depth, uint32_t id, uint16_t idx, bool enabled, bool has_sub) {
@@ -1080,7 +1080,7 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
 
 /* The retained open-chain index at a level (rt->open_path[depth]): -1 = no submenu open at that depth.
  * Drives the immediate hover-open probe (hover a parent row -> open_path opens it). The runtime cell lives
- * in ctx's state pool, so the explicit ctx replaces the old post-end file-static fallback. */
+ * in ctx's state pool. */
 int16_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {
     NT_ASSERT(ctx != NULL && "nt_ui_menu_test_open_path: ctx must be non-NULL");
     const nt_ui_menu_runtime_t *rt = nt_ui_state_find((nt_ui_context_t *)ctx, menu_runtime_id(menu_id));
@@ -1097,7 +1097,7 @@ uint8_t nt_ui_menu_test_active_depth(const nt_ui_context_t *ctx, uint32_t menu_i
     return (rt != NULL) ? rt->active_depth : 0U;
 }
 
-/* Force the open chain to a target depth (self-keyed: every level opens item 0). The nav guard now caps
+/* Force the open chain to a target depth (self-keyed: every level opens item 0). The nav guard caps
  * keyboard-open at the cap, so the decl-time backstop assert in submenu_begin is only reachable when the
  * chain is forced open this deep — the death test drives it directly via this setter. */
 void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth) {

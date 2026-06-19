@@ -296,7 +296,7 @@ typedef struct {
     float last_progress; /* hold_progress latched for the fill display */
 } events_params_t;
 
-/* Dropdown tab: game-owned selection + open flags (Model D). */
+/* Dropdown tab: game-owned selection + open flags. */
 typedef struct {
     int fruit_sel; /* short list selection */
     bool fruit_open;
@@ -1620,7 +1620,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
             const bool clicked = fruit_iconed[i] ? nt_ui_combo_selectable_icon(ctx, (uint32_t)i, &s_icon_bunny_ref, fruits[i], i == st->dropdown.fruit_sel)
                                                  : nt_ui_combo_selectable(ctx, (uint32_t)i, fruits[i], i == st->dropdown.fruit_sel);
             if (clicked) {
-                st->dropdown.fruit_sel = i; /* game writes *selected (Model D) */
+                st->dropdown.fruit_sel = i; /* game writes *selected */
             }
         }
         nt_ui_combo_end(ctx);
@@ -1892,7 +1892,7 @@ static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st) {
         for (int i = 0; i < count; ++i) {
             const bool on = (i == st->tabs_demo_active);
             if (nt_ui_tab_begin(ctx, i, on)) {
-                st->tabs_demo_active = i; /* Model D */
+                st->tabs_demo_active = i;
             }
             /* Game-owned content: the tab keeps its OWN icon always (swapping it to a checkmark loses the
              * tab's identity); the selected tab ADDS a trailing checkmark badge instead. */
