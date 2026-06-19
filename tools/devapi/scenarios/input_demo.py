@@ -69,24 +69,15 @@ def resolve_port(argv) -> int:
 
 def run(client: DevApiClient) -> None:
     """Drive the three workflows; raise AssertionError on any contract violation."""
-    # 1. Drain-race — a tap's RELEASE pins to the sim-advance count, not wall-clock.
-    #
-    # Both edges of a tap release through the devapi schedule on sim-advances: down@0 releases on the
-    # first advance, up@N decrements only on real advances (frozen across MANUAL-idle / paused ticks).
-    # A tap(hold=N) schedules down@0 + up@N, so the key stays down across the hold window and releases
-    # only after stepping past it — the advance-pinned property only a live socket exercises.
+    # 1. Drain-race — a tap's release pins to the sim-advance count, not wall-clock.
     client.set_mode("manual")
-    # Settle C to a known-released state first: a re-run (or a prior session) may have left a residual
-    # down/inject for C, which would skew the tap. Release + one advance flushes it.
+    # Settle C to a known-released state: a prior session may have left a residual down/inject.
     client.key("C", down=False)
     client.step(count=1)
     assert client.state(key="C").get("down") is False, "pre-tap settle: C.down expected False"
 
-    # A LONG-hold tap makes the proof race-free over the socket: assert the inject is observed (down
-    # at all — neither lost nor only enqueued) AND pinned to sim-advances (still held mid-hold,
-    # released only after stepping well past the hold), without depending on the exact landing step.
-    # Exact-count timing is fragile over a live socket because the managed loop keeps polling between
-    # round-trips; what is deterministic is that the up@offset countdown ticks only on a real advance.
+    # Long hold makes the proof race-free: exact landing step is fragile over a live socket, but the
+    # up@offset countdown is deterministic (ticks only on a real advance).
     hold = 8
     client.key("C", hold=hold)  # down@0 + up@offset=hold
     client.step(count=1)
@@ -114,16 +105,8 @@ def run(client: DevApiClient) -> None:
     )
 
     # 3. input.text — codepoints reach the char ring; the pop_text drain reads them back.
-    #
-    # Post-refactor semantics: scheduling lives in devapi and an offset-0 inject releases into
-    # nt_input's immediate buffer ONLY on a real sim-advance (a frozen MANUAL-idle / paused tick
-    # releases nothing — this is the cleaner replacement for the old per-poll drain). So a text()
-    # inject is invisible until a step() advances the frame; that advance both releases the chars
-    # AND drains them into the char ring in the same poll. The ring stays frame-local: the NEXT
-    # idle poll clears it, so the pop_text read is observable only in the inter-poll window right
-    # after the advancing step. Still in MANUAL from test 1, so we drive the advance explicitly.
-    # text() also returns {queued} synchronously (proving the UTF-8->codepoint decode); the
-    # pop_text drain proves the codepoints actually reached the ring after the advance.
+    # A text() inject is invisible until a step() advances: that advance releases the chars AND drains
+    # them into the (frame-local) ring in the same poll, so pop_text must read in that same window.
     queued = client.text("hi")
     assert isinstance(queued.get("queued"), int), f"input.text echoed {queued!r}, expected {{queued:int}}"
     cps = []

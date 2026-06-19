@@ -1,11 +1,4 @@
-/* L1 synthetic-input + player-gate tests.
- *
- * Covers the L1 player gate at the apply-helper seam: gate-off drops real device events regardless
- * of backend; the ON->OFF edge releases held real keys/pointers so nothing sticks down; re-enable
- * starts fresh from real devices. Plus the pure-apply inject API: nt_input is a pure apply layer —
- * every inject stages into an immediate buffer that nt_input_poll() drains WHOLE that same poll (no
- * frame, no countdown, no schedule). Frame scheduling (hold, gesture stride, pause-freeze) lives in
- * the devapi layer and is covered by test_devapi_input. */
+/* L1 player-gate + pure-apply inject tests. Frame scheduling lives in devapi (test_devapi_input). */
 
 #include "input/nt_input_internal.h" /* nt_input_set_player_enabled + inject API + apply helpers */
 #include "unity.h"

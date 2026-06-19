@@ -1,13 +1,5 @@
-/* L2 devapi input.* group via submit() (no socket): discovery lists the input commands with shapes,
-   thin handlers enqueue into the DEVAPI-SIDE input schedule (frame offsets, hold, gesture stride all
-   live here now — nt_input is a pure apply layer), every bot-input violation returns bad_params
-   (never asserts), input.text decodes UTF-8 -> codepoints, and command.describe returns the full
-   contract.
-
-   Scheduling is driven by writing g_nt_app.frame, then calling nt_devapi_update() (net_poll +
-   schedule tick — releases due entries into nt_input's immediate buffer ONLY on a real sim-advance)
-   followed by nt_input_poll() (applies that buffer). The advance() helper bundles one sim-advance;
-   tick_no_advance() re-runs update WITHOUT bumping the frame to prove the pause/manual-idle freeze. */
+/* L2 devapi input.* group via submit() (no socket). Scheduling: write g_nt_app.frame, call
+   nt_devapi_update() (releases due entries only on a real sim-advance), then nt_input_poll(). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>

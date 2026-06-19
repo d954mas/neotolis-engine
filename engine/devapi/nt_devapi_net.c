@@ -99,10 +99,7 @@ static void close_client(void) {
     /* Drop the gone client's in-flight deferred results so a reconnecting client
        can't receive them tagged with the old client's request_id. */
     nt_devapi_deferred_reset();
-    /* Run the registered client-reset hooks so an optional group can clear its cross-client state
-       (e.g. the input group drops its pending schedule AND releases any applied held synthetic
-       key/pointer). Generic: no group is named here, so a group compiled out registers no hook and
-       this is a no-op — net.c carries zero of that group's symbols. */
+    /* Generic client-reset hooks: a compiled-out group registers none, so net.c names no group. */
     nt_devapi_run_reset_hooks();
     /* A dropped client must not leave the loop frozen: in MANUAL/paused g_nt_app.frame stops
        advancing and a host's frame-count auto-exit never fires. Return to plain RUN. */
@@ -379,10 +376,7 @@ void nt_devapi_net_poll(void) {
    every registered transport so both share the frame-keyed deferred drain. Single transport today ->
    kept here (YAGNI). */
 void nt_devapi_update(void) {
-    nt_devapi_net_poll(); /* handlers enqueue (e.g. into the input schedule) first */
-    /* Then run the registered per-tick hooks (e.g. the input group's advance-gated schedule tick).
-       Generic: no group is named here, so a group compiled out registers no hook — net.c carries
-       zero of that group's symbols. */
+    nt_devapi_net_poll(); /* handlers enqueue first, then per-tick hooks release due entries. */
     nt_devapi_run_tick_hooks();
 }
 

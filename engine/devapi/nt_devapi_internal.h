@@ -92,21 +92,16 @@ void nt_devapi_deferred_reset(void);
 bool nt_devapi_initialized(void);
 
 // #region lifecycle hooks
-/* Per-tick + client-reset lifecycle hooks: how an optional group (e.g. the input group) plugs into
-   the transport-agnostic core WITHOUT the core or the transport hard-referencing the group. A group's
-   registrar registers its hooks under its own compile gate; a group compiled out registers nothing,
-   so the core/net TUs carry zero of that group's symbols. Same self-describing pattern as the command
-   registry. Fixed array, no heap; registration happens at init (not a frame-hot path). */
+/* Lifecycle hooks let an optional group plug into the core/transport without either naming the
+   group: a compiled-out group registers nothing, so the core/net TUs carry zero of its symbols. */
 typedef void (*nt_devapi_hook_fn)(void);
 
-/* Register a per-tick hook (run by nt_devapi_run_tick_hooks once per nt_devapi_update, after the
-   transport poll) and a client-reset hook (run by nt_devapi_run_reset_hooks on client disconnect).
-   Cleared on shutdown; re-registered each init. Overflow is a build-time bug → asserts. */
+/* Register a per-tick / client-reset hook. Cleared on shutdown, re-registered each init;
+   overflow asserts (build-time bug). */
 void nt_devapi_register_tick(nt_devapi_hook_fn fn);
 void nt_devapi_register_reset(nt_devapi_hook_fn fn);
 
-/* Run all registered tick / reset hooks in registration order. The transport calls these instead of
-   naming any group directly. */
+/* Run all registered tick / reset hooks in registration order. */
 void nt_devapi_run_tick_hooks(void);
 void nt_devapi_run_reset_hooks(void);
 // #endregion
@@ -133,35 +128,27 @@ void nt_devapi_register_time(void);
 #endif
 
 /* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
-   nt_devapi_init under the same compile gate. Registers the group's commands AND its per-tick +
-   reset lifecycle hooks, so the group (schedule, advance clock, inject link) is wholly contained
-   behind the gate — the core/net TUs never name an input symbol. When the group is compiled out
-   (NT_DEVAPI_GROUP_INPUT=OFF) nt_devapi_input.c is not built at all and nothing registers. */
+   nt_devapi_init under the same compile gate; registers the group's commands + lifecycle hooks. */
 #ifdef NT_DEVAPI_GROUP_INPUT
 /* Bounded BSS schedule cap (-D overridable). Lives here, not in nt_devapi_input.c, so the unit
-   tests derive schedule-fill sizes from the real cap instead of hardcoding it. */
+   tests derive schedule-fill sizes from the real cap. */
 #ifndef NT_DEVAPI_INPUT_SCHED_MAX
 #define NT_DEVAPI_INPUT_SCHED_MAX 256
 #endif
 
 void nt_devapi_register_input(void);
 
-/* Per-tick input-schedule driver (registered as the tick hook by nt_devapi_register_input). Owns the
-   advance clock: reads g_nt_app.frame, detects a real sim-advance vs the last update, and on advance
-   releases every due schedule entry into nt_input's immediate inject buffer (decrementing survivors);
-   on a frozen tick (pause / manual-idle) releases nothing. Exposed for the unit tests that drive the
-   per-tick path directly. */
+/* Per-tick schedule driver (the tick hook): on a real sim-advance releases due entries into the
+   inject buffer. Exposed for tests that drive the per-tick path directly. */
 void nt_devapi_input_update(void);
 
-/* Reset the input schedule (drop all pending entries), release any applied held synthetic key/pointer
-   so it can't bleed into the next client, and re-seed the advance clock against the current
-   g_nt_app.frame. Registered as the reset hook; also called from tests for order-independence. */
+/* Reset hook: drop pending entries, release applied held synthetic input, re-seed the advance clock.
+   Also called from tests for order-independence. */
 void nt_devapi_input_reset(void);
 #endif
 
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
-   nt_devapi_init under the same compile gate. When the group is compiled out
-   (NT_DEVAPI_GROUP_DISCOVERY=OFF) nt_devapi_discovery.c is not built and nothing registers. */
+   nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_GROUP_DISCOVERY
 void nt_devapi_register_discovery(void);
 #endif

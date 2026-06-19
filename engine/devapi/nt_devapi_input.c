@@ -7,26 +7,17 @@
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h"
 
-/* input.* command group: a thin L2 veneer over the L1 inject API (nt_input_inject_*). Bot input is
-   range/type-checked -> bad_params; never asserts on untrusted input. Fire-and-forget: validate ->
-   enqueue -> immediate ok (no defer). The WHOLE TU is gated by NT_DEVAPI_GROUP_INPUT, so a group-OFF
-   build carries zero input symbols in the devapi core/net. */
+/* L2 veneer over the L1 inject API: range-check bot input -> bad_params, never assert. */
 
 #ifdef NT_DEVAPI_GROUP_INPUT
 
 // #region devapi input schedule
-/* The frame schedule lives here, NOT in nt_input (a pure apply layer): the devtool is the only side
-   that legitimately knows g_nt_app.frame. Each entry carries a sim-advance countdown + the L1 inject
-   payload; nt_devapi_input_update releases due entries on a real advance, decrements survivors. */
+/* Schedule lives in devapi, not nt_input: only the devtool legitimately knows g_nt_app.frame. */
 
-/* NT_DEVAPI_INPUT_SCHED_MAX (the bounded BSS schedule cap, -D overridable) is defined in
-   nt_devapi_internal.h so the unit tests can derive fill sizes from the real cap. */
+/* NT_DEVAPI_INPUT_SCHED_MAX (bounded BSS schedule cap, -D overridable) is defined in
+   nt_devapi_internal.h so the unit tests derive fill sizes from the real cap. */
 
-/* A single advancing tick releases EVERY due entry (up to SCHED_MAX) into nt_input's immediate
-   inject buffer, which holds NT_INPUT_INJECT_QUEUE_MAX. The two caps are independent -D-overridable
-   macros; this links them so a full schedule's release can never exceed the buffer. With this held,
-   a failed release in sched_release_one is an engine invariant violation, not bot overflow — so it
-   asserts there rather than silently dropping a UP whose DOWN already landed. */
+/* Links the two caps so a full schedule's release can never exceed the immediate buffer. */
 _Static_assert(NT_DEVAPI_INPUT_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "schedule must never release more than the immediate buffer can hold");
 
 typedef struct {
@@ -107,8 +98,7 @@ static bool sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, 
     return true;
 }
 
-/* Set the button mask at the slot's apply-time position (input.button), in schedule order — never
-   bakes a submit-time x/y, so a preceding queued input.move is respected on apply. */
+/* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
 static bool sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
     sched_entry_t *e = sched_reserve(1);
     if (e == NULL) {
@@ -150,8 +140,7 @@ static bool sched_tap(nt_key_t key, uint16_t hold_frames) {
     return true;
 }
 
-/* All n CHARs release in ONE advancing tick into the 32-slot char ring; reject n beyond the ring
-   so queued never lies about what lands (whole-or-nothing by codepoint count). */
+/* whole-or-nothing by codepoint count: reject n beyond the char ring so queued never overstates. */
 static bool sched_text(const uint32_t *cps, uint32_t n) {
     if (cps == NULL || n == 0) {
         return false;
@@ -171,10 +160,8 @@ static bool sched_text(const uint32_t *cps, uint32_t n) {
     return true;
 }
 
-/* Release one due entry into nt_input's immediate inject buffer (applied in the next poll). Returns
-   the L1 inject result: capacity was preflighted at enqueue and the _Static_assert above guarantees
-   a full schedule fits the immediate buffer, so false here is an engine invariant violation (the
-   caller asserts it) — never a silently dropped synthetic event. */
+/* Release one due entry into the immediate inject buffer. false == engine invariant violation
+   (capacity preflighted + _Static_assert), so the caller asserts. */
 static bool sched_release_one(const sched_entry_t *e) {
     switch ((nt_inject_kind_t)e->kind) {
     case NT_INJECT_KEY:
@@ -196,14 +183,9 @@ static bool sched_release_one(const sched_entry_t *e) {
     return false; /* unreachable: kind is always one of the above. */
 }
 
-/* Release every due entry in schedule-array order (which is enqueue order — release order ==
-   enqueue order is what preserves the bot's cross-command + within-command event ordering through
-   the two-hop schedule->buffer path). Survivors decrement their countdown and compact down. */
+/* Release due entries in enqueue order (preserves bot event ordering); survivors decrement + compact. */
 static void sched_tick(void) {
     uint32_t out = 0;
-    /* Contract: nt_devapi_update() and nt_input_poll() are paired once per frame (nt_app_run
-       guarantees this), so the immediate buffer is empty at tick entry; a full buffer here means the
-       host violated that pairing — fail fast. */
     for (uint32_t i = 0; i < s_sched_count; i++) {
         if (s_sched[i].frames_remaining == 0) {
             bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
@@ -217,10 +199,8 @@ static void sched_tick(void) {
     s_sched_count = out;
 }
 
-/* Advance clock: a real sim-advance is g_nt_app.frame changing vs the last update. Seeded against
-   the current frame in nt_devapi_input_reset, so the FIRST update after a reset compares against
-   the true starting frame and only fires on a genuine change (a host that starts paused does not
-   get a spurious forced-advance on its first tick). */
+/* Real sim-advance = g_nt_app.frame changed since last update. Seeded in reset so the
+   first post-reset tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
 void nt_devapi_input_update(void) {
@@ -236,18 +216,14 @@ void nt_devapi_input_update(void) {
 void nt_devapi_input_reset(void) {
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
-    /* Release any synthetic input that already APPLIED to g_nt_input: dropping the schedule alone is
-       not enough — if a DOWN already landed and its UP is still scheduled (now discarded), the
-       key/button would stay held and bleed into the next client. Release held key + pointer state the
-       same way the player-gate ON->OFF / focus-lost edge does. */
+    /* Also release input that already APPLIED: a landed DOWN whose UP was just dropped would
+       stay held and bleed into the next client. */
     nt_input_clear_all_keys();
     nt_input_clear_all_pointers();
 }
 // #endregion
 
-/* string -> nt_key_t name table. L2 string-parse: L1 inject takes a nt_key_t directly, so the table
-   lives here, not in nt_input. Indexed by nt_key_t; each string = the enum identifier minus NT_KEY_.
-   The _Static_assert guards drift: adding an enum value without a name breaks the build. */
+/* string -> nt_key_t, indexed by enum value; each name = the enum minus NT_KEY_. */
 static const char *const k_key_names[NT_KEY_COUNT] = {
     "A",        "B",          "C",          "D",           "E",     "F",     "G",      "H",   "I",         "J",      "K",      "L",     "M",     "N",       "O",         "P",  "Q",  "R",
     "S",        "T",          "U",          "V",           "W",     "X",     "Y",      "Z",   "0",         "1",      "2",      "3",     "4",     "5",       "6",         "7",  "8",  "9",
@@ -494,9 +470,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* sugar = pointer down@0 + up@hold (2 entries) on the default mouse slot with the given button mask.
-   hold defaults to 1: a realistic 1-frame-held click (down@0 + up@1) — symmetric with input.key tap.
-   hold=0 collapses both edges into one frame (instant same-frame click, what real hardware can't do). */
+/* down@0 + up@hold on the mouse slot; hold default 1 (1-frame click), 0 = same-frame. */
 static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
@@ -539,13 +513,11 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
             return false;
         }
     }
-    /* Whole-or-nothing: preflight both entries so a near-full schedule can never accept the
-       DOWN and reject the UP, leaving a stuck synthetic pointer-down. */
+    /* whole-or-nothing: preflight both entries (see sched_reserve). */
     if (!sched_can_reserve(2U)) {
         set_bad_params(err, "input.click: inject schedule overflow");
         return false;
     }
-    /* down@0 carries the button mask, up@hold releases. Enqueue down then up so the click is ordered. */
     if (!sched_pointer(NT_INJECT_POINTER_DOWN, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0)) {
         set_bad_params(err, "input.click: inject schedule overflow");
         return false;
@@ -558,11 +530,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
-/* input.wheel{dx,dy,x?,y?}: scroll the mouse slot. With x/y -> a MOVE to (x,y) on the default mouse
-   slot THEN the wheel (whole-or-nothing, so the scroll always lands at (x,y) — self-contained).
-   Without x/y -> the wheel applies at the mouse slot's APPLY-TIME position (mirrors input.button);
-   with no mouse slot at apply time it is a documented no-op (pass x/y or input.move first). Never
-   creates a phantom (0,0) slot and never reads g_nt_input at submit. */
+/* Without x/y the wheel applies at the slot's apply-time position (no submit-time g_nt_input read). */
 static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     float dx = 0.0F;
@@ -584,8 +552,7 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!parse_finite_coord(xj, "input.wheel: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.wheel: y must be a finite number", &y, err)) {
             return false;
         }
-        /* Whole-or-nothing: MOVE + wheel reserve together so a near-full schedule can't land the
-           move and drop the scroll (a positioned scroll at the wrong place). */
+        /* whole-or-nothing: reserve MOVE + wheel together (see sched_reserve). */
         if (!sched_can_reserve(2U)) {
             set_bad_params(err, "input.wheel: inject schedule overflow");
             return false;
@@ -661,9 +628,8 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         set_bad_params(err, "input.gesture: span (points*frame_stride) exceeds the frame-offset range");
         return false;
     }
-    /* Whole-or-nothing: reserve DOWN + (npoints-1) moves + UP = npoints+1 up front so a
-       mid-sequence overflow can't leave a stuck pointer-down. DOWN@0 already carries point[0], so
-       point[0] gets NO redundant same-frame MOVE; moves cover points[1..n-1] only. */
+    /* whole-or-nothing: reserve DOWN + (npoints-1) moves + UP up front (see sched_reserve).
+       DOWN@0 carries point[0], so moves cover points[1..n-1] only. */
     if (!sched_can_reserve((uint32_t)npoints + 1U)) {
         set_bad_params(err, "input.gesture: inject schedule overflow");
         return false;
@@ -727,10 +693,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
             return false;
         }
     }
-    /* Apply the mask at the slot's position AT APPLY TIME (in schedule order) — NOT the live
-       submit-time position. This way a preceding queued input.move is honored: the button lands at
-       the moved-to position, not a baked stale one. No prior pointer at apply time -> the slot is
-       created at (0,0) (a DOWN), preserving the no-active-slot behavior. */
+    /* Mask applies at the slot's apply-time position (schedule order), so a queued move is honored. */
     if (!sched_buttons(id, buttons, 0)) {
         set_bad_params(err, "input.button: inject schedule overflow");
         return false;
@@ -752,10 +715,7 @@ static bool cmd_input_set_player_enabled(const cJSON *params, cJSON *result, nt_
     return true;
 }
 
-/* input.text: walk the UTF-8 string into a local codepoint buffer (decode 1-4 byte sequences;
-   a malformed byte OR an invalid scalar -> bad_params, never assert), then nt_input_inject_text.
-   All codepoints drain in ONE poll into the 32-slot char ring, so nt_input_inject_text rejects
-   n > NT_INPUT_CHAR_RING -> bad_params; queued never overstates what lands. */
+/* Decode UTF-8 -> codepoints (malformed/invalid scalar -> bad_params, never assert). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -826,11 +786,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* input.state: IMMEDIATE read (NOT deferred, NOT an enqueue) of the polled input state. Reads the
-   state nt_input_poll last produced — so before a sim-advance an enqueued inject is NOT yet visible
-   (the drain-race, now machine-observable over the socket). `key` -> {down,pressed,released}
-   for that key (unknown name -> bad_params, never assert on bot input). `pop_text:true`
-   DRAINS the char ring (consuming side effect) into a `codepoints` raw-codepoint number array. */
+/* IMMEDIATE read of the last polled state: an enqueued inject is not visible until a sim-advance.
+   pop_text:true DRAINS the char ring (consuming side effect). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -973,9 +930,7 @@ _Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_
 
 void nt_devapi_register_input(void) {
     nt_devapi_input_reset(); /* fresh schedule + seeded advance clock each init->register. */
-    /* Plug the group into the core via the generic lifecycle hooks: the per-tick schedule driver and
-       the client-reset release. This is the ONLY coupling point — the core/net call the hooks, never
-       these symbols directly, so the group is decoupled and naturally gated by NT_DEVAPI_GROUP_INPUT. */
+    /* The only core coupling point: core/net call these generic hooks, never the group symbols. */
     nt_devapi_register_tick(nt_devapi_input_update);
     nt_devapi_register_reset(nt_devapi_input_reset);
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT

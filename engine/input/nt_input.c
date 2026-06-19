@@ -23,9 +23,8 @@ static uint32_t s_char_tail; /* next read slot */
 
 /* ---- nt_input automation surface (player gate + immediate inject buffer) ---- */
 
-/* The whole automation surface (player gate + inject pipeline) exists ONLY to serve the devapi
-   layer. NT_INPUT_AUTOMATION_ENABLED gates it so a build without the devapi input group carries
-   none of it ("tiny size — every byte counts"); OFF leaves the plain lean apply layer. */
+/* Automation surface (player gate + inject pipeline) serves only the devapi layer.
+   NT_INPUT_AUTOMATION_ENABLED gates it: OFF leaves the lean apply layer (every byte counts). */
 #if NT_INPUT_AUTOMATION_ENABLED
 
 /* Gate at the apply seam: covers native drain + web direct apply. */
@@ -138,10 +137,8 @@ void nt_input_poll(void) {
     /* Clear edge flags accumulated since last poll */
     memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
     memset(s_keys_released, 0, sizeof(s_keys_released));
-    /* Typed text is frame-local like key edges: drop any chars unconsumed last frame so they can't
-     * leak into a field focused later. platform_poll below refills the ring with this frame's chars
-     * -- BOTH backends stage chars and drain them in platform_poll (web: _ntCharBuf; native:
-     * s_char_buf via nt_input_buffer_char_event), so a same-frame typed char survives this clear. */
+    /* Typed text is frame-local like key edges: drop unconsumed chars; platform_poll refills this
+       frame's (both backends stage then drain in poll, so same-frame typed chars survive). */
     s_char_tail = s_char_head;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         g_nt_input.pointers[i].dx = 0.0F;
@@ -454,8 +451,7 @@ void nt_input_set_player_enabled(bool enabled) {
     s_player_enabled = enabled;
 }
 
-/* Apply a button mask on slot `id` at its CURRENT position — no move, no delta, no baked x/y. If the
-   slot does not exist (no prior pointer), create it at (0,0) as a mouse so the button still lands. */
+/* Mask at the slot's current position; no prior slot -> create at (0,0) as mouse so the button lands. */
 static void nt_input_pointer_buttons_apply(uint32_t id, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     if (ptr == NULL || ptr->deactivate_pending) {
@@ -544,13 +540,11 @@ bool nt_input_inject_text(const uint32_t *cps, uint32_t n) {
     if (cps == NULL || n == 0) {
         return false;
     }
-    /* All n CHARs drain in this SINGLE poll into the 32-slot char ring; nt_input_buffer_char_apply
-       drops once full. Reject n beyond the ring so the caller never lies about what lands
-       (whole-or-nothing by codepoint count). */
+    /* whole-or-nothing by codepoint count: reject n beyond the char ring (see inject_reserve). */
     if (n > NT_INPUT_CHAR_RING) {
         return false;
     }
-    nt_inject_event_t *e = inject_reserve(n); /* whole-or-nothing by codepoint count */
+    nt_inject_event_t *e = inject_reserve(n);
     if (e == NULL) {
         return false;
     }

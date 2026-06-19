@@ -21,20 +21,14 @@ option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
-# Optional devapi input.* group (synthetic input injection). Defined BEFORE the engine subdirs so
-# engine/input can derive its automation surface from it (input subdir configures before devapi). ON
-# gates the whole group; OFF -> the devapi core/net carry zero input symbols and nt_input is lean.
+# Defined BEFORE the engine subdirs so engine/input can derive its automation surface (input
+# configures before devapi). Each group flag gates a whole group; see engine/devapi/CMakeLists.txt.
 option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
-# Remaining devapi command groups, same modular flag-gated model as the input group: ON gates the
-# group's TU compile + the NT_DEVAPI_GROUP_<X> compile define + its engine-dep links; OFF -> the devapi core/net
-# carry zero symbols of that group or its deps. Default ON keeps the all-groups build behavior.
 option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
 option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
 option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe / features)." ON)
 
-# A NT_DEVAPI_GROUP_<X>=ON flag has no effect when the master NT_DEVAPI_ENABLED gate is OFF: the
-# devapi subdir (and all its groups) are not built at all. Warn (do not error — the lean build is
-# still valid) so a group flag set with devapi disabled is not silently ignored.
+# Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)
     foreach(_grp CORE TIME INPUT DISCOVERY)
         if(NT_DEVAPI_GROUP_${_grp})
@@ -113,10 +107,8 @@ if(NOT EMSCRIPTEN)
     target_compile_options(glfw PRIVATE -U_DLL)
 endif()
 
-# Tests are built only at top level (see the matching guard below). NT_BUILDING_TESTS gates whether
-# the test targets are configured; it does NOT touch the nt_input automation surface (the test
-# targets link nt_input_stub, which forces NT_INPUT_AUTOMATION_ENABLED on by itself), so the
-# production nt_input stays lean under a top-level devapi-OFF build.
+# Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the
+# nt_input automation surface, so production nt_input stays lean under a devapi-OFF build.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(NT_BUILDING_TESTS ON)
 endif()
