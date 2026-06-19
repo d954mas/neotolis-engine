@@ -54,8 +54,11 @@ static inline uint32_t combo_row_label_id(uint32_t combo_id, uint32_t row_idx) {
 }
 
 /* DEBUG-only duplicate-key guard: row ids are key-stable (mix(combo_id,key)), so two selectables sharing a
- * key alias the SAME interactive/anim/Clay/selection id. Scan the first-N rows this frame for a collision
- * (fail-early, mirrors the menu's duplicate-sibling-key assert). Compiles out in NT_ASSERT_OFF builds. */
+ * key alias the SAME interactive/anim/Clay/selection id. BEST-EFFORT: scans only the first
+ * NT_UI_COMBO_DUP_KEY_WINDOW rows this frame for a collision — a complete scan of an unbounded list would
+ * need heap or O(N^2), so a duplicate past the window silently aliases (keep combo keys unique). Unlike the
+ * menu (bounded by the hard per-level cap, so its check is complete), the combo list has no per-row cap.
+ * Compiles out in NT_ASSERT_OFF builds. */
 static inline void combo_dup_key_check(nt_ui_context_t *ctx, uint32_t row_id) {
 #if NT_ASSERT_MODE != NT_ASSERT_OFF
     const uint16_t n = ctx->pending_combo.dup_key_count;

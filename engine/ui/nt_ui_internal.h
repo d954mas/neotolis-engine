@@ -155,8 +155,9 @@ typedef struct {
 #endif
 
 /* DEBUG-only combo duplicate-key guard window: row ids are key-stable (mix(combo_id,key) only), so two
- * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. The first N rows per combo
- * are scanned for a collision (fail-early NT_ASSERT); past N the best-effort check stops (debug-only). */
+ * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. BEST-EFFORT: only the first
+ * N rows per combo are scanned for a collision (fail-early NT_ASSERT); a duplicate past N silently aliases.
+ * A complete scan of an unbounded list would need heap or O(N^2), so the window is the no-heap design. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
