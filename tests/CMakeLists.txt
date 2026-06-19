@@ -601,6 +601,37 @@ if(NOT EMSCRIPTEN)
         nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 
+    # L2 devapi ui group via submit() over a REAL headless nt_ui ctx (the ONLY automated coverage of
+    # ui.tree/element/contexts/click + the Y-up flip + drag whole-or-nothing). Declared HERE (not in the
+    # devapi block above) because it reuses the nt_ui test-helper sources/includes, which are defined in
+    # this section — a CMake variable read before its set() is empty. Gated on the same devapi options.
+    # The heaviest link in the suite: real nt_ui pulls its renderer/resource chain (the ui_walker_fixture
+    # helper builds + binds a probe-able ctx headlessly), and nt_devapi_net drives the shared inject
+    # schedule so a resolved ui.click coord is observable in g_nt_input.
+    #   GNU ld single-pass ordering: consumers before providers. nt_devapi_net/nt_devapi (reference the
+    # probe + scheduler symbols) precede nt_ui; nt_ui (references the renderer/resource chain) precedes
+    # those providers; nt_input_stub (the L1 inject API the ui group delegates to) + nt_core/nt_log_stub
+    # trail last. NT_DEVAPI_GROUP_INPUT is defined too: the ui group delegates scheduling to the input
+    # group's single scheduler, and the whole-or-nothing test pre-fills it via input.* commands.
+    if(NT_DEVAPI_ENABLED AND NT_DEVAPI_GROUP_UI)
+        add_executable(test_devapi_ui
+            unit/test_devapi_ui.c
+            ${_nt_ui_test_helper_sources}
+        )
+        target_include_directories(test_devapi_ui PRIVATE ${_nt_ui_test_helper_includes})
+        target_link_libraries(test_devapi_ui PRIVATE
+            nt_devapi_net nt_devapi cjson
+            nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+            nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay
+            nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_core
+            nt_http_stub nt_fs_stub nt_log_stub unity
+        )
+        target_compile_definitions(test_devapi_ui PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_UI=1 NT_DEVAPI_GROUP_INPUT=1
+        )
+        nt_setup_test_target(test_devapi_ui)
+    endif()
+
     set(_nt_ui_test_names
         test_nt_ui_lifecycle
         test_nt_ui_multictx
