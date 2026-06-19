@@ -113,10 +113,14 @@ static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, cons
         if (nt_ui_combo_begin(s_fx.ctx, DD_A, preview, st, open)) {
             for (int i = 0; i < count; ++i) {
                 if (icons != NULL && st->icon_size > 0U) {
-                    /* custom-content row carrying the per-row icon, mirroring the data-form icons[] path */
+                    /* Custom-content row: the GAME owns the inline icon + label (no engine gutter), mirroring
+                     * the showcase render_dropdown idiom (a single icon column, never double-guttered). */
                     if (nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(i), *selected == i)) {
                         made = true;
                         *selected = i;
+                    }
+                    if (icons[i].atlas.id != 0U) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED((float)st->icon_size), CLAY_SIZING_FIXED((float)st->icon_size)}}}) {}
                     }
                     nt_ui_combo_selectable_end(s_fx.ctx);
                 } else if (nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), labels[i], *selected == i)) {
@@ -450,7 +454,8 @@ static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, cons
     return bb.x;
 }
 
-/* ---- icon_size opens a leading gutter: the row label shifts RIGHT vs the text-only (icon_size=0) row. ---- */
+/* ---- icon_size opens a leading gutter on the PLAIN combo_selectable path: the row label shifts RIGHT vs
+ *      the text-only (icon_size=0) row. The plain path owns the single engine gutter. ---- */
 static void test_dropdown_icon_size_gutter_shifts_label(void) {
     nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
 
@@ -459,38 +464,34 @@ static void test_dropdown_icon_size_gutter_shifts_label(void) {
     const float x_text_only = row_label_x(&idle, &no_gut, NULL, 0);
 
     nt_ui_dropdown_style_t gut = nt_ui_dropdown_style_defaults();
-    gut.icon_size = 24U; /* reserves a 24px leading gutter */
-    /* an icons[] forces the custom-content selectable path that reserves the gutter */
-    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x10U), nt_atlas_ref((nt_resource_t){.id = 1U}, 0x11U), nt_atlas_ref((nt_resource_t){.id = 1U}, 0x12U)};
-    const float x_gutter = row_label_x(&idle, &gut, icons, 0);
+    gut.icon_size = 24U;                                      /* plain path reserves a 24px leading gutter */
+    const float x_gutter = row_label_x(&idle, &gut, NULL, 0); /* NULL icons -> plain selectable path */
 
     /* The gutter + child gap push the label right by at least the gutter width. */
-    TEST_ASSERT_TRUE_MESSAGE(x_gutter >= x_text_only + (float)gut.icon_size, "icon_size gutter must shift the label right by >= icon_size");
+    TEST_ASSERT_TRUE_MESSAGE(x_gutter >= x_text_only + (float)gut.icon_size, "icon_size gutter must shift the plain-row label right by >= icon_size");
 }
 
-/* ---- NULL-icon alignment: with the gutter open, a row whose icon ref is set and a row whose icon is
- *      absent both keep the SAME label x (the gutter holds alignment either way). ---- */
-static void test_dropdown_null_icon_aligns(void) {
+/* ---- Bug 4 (single icon gutter): the custom-content combo_selectable_begin path reserves NO engine
+ *      gutter — the game owns its inline icon. The engine's probe label cell therefore sits at the row's
+ *      left content edge, the SAME left x as a plain text-only row (no engine gutter prepended), even with
+ *      icon_size=24. A double-gutter would have shifted the probe cell right by icon_size. ---- */
+static void test_dropdown_custom_row_no_engine_gutter(void) {
     nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
 
-    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
-    st.icon_size = 24U;
+    /* Plain text-only row: label cell at the row's left content edge (no gutter). */
+    nt_ui_dropdown_style_t text_only = nt_ui_dropdown_style_defaults();
+    text_only.icon_size = 0U;
+    const float x_text_only = row_label_x(&idle, &text_only, NULL, 0);
 
-    /* Row 0 carries an icon ref (atlas.id != 0); rows 1/2 are unset ({0} = aligned-empty gutter). */
-    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x1234U), {0}, {0}};
+    /* Custom-content row with icon_size=24: the game owns the inline icon; the engine must NOT prepend a
+     * gutter, so the engine probe label cell stays at the same left x as the text-only row. */
+    const nt_atlas_region_ref_t icons[] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x10U), nt_atlas_ref((nt_resource_t){.id = 1U}, 0x11U), nt_atlas_ref((nt_resource_t){.id = 1U}, 0x12U)};
+    nt_ui_dropdown_style_t custom = nt_ui_dropdown_style_defaults();
+    custom.icon_size = 24U;
+    const float x_custom = row_label_x(&idle, &custom, icons, 0);
 
-    int selected = 0;
-    bool open = true;
-    combo_im_frame_icons(&idle, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, &st, NULL);
-    combo_im_frame_icons(&idle, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, &st, NULL);
-
-    const nt_ui_bbox_t iconed = nt_ui_dropdown_test_row_label_bbox(s_fx.ctx, DD_A, 0);
-    const nt_ui_bbox_t empty = nt_ui_dropdown_test_row_label_bbox(s_fx.ctx, DD_A, 1);
-    TEST_ASSERT_TRUE(iconed.found);
-    TEST_ASSERT_TRUE(empty.found);
-    /* Same gutter width -> same label x regardless of whether the icon is present. */
-    const float dx = (iconed.x > empty.x) ? (iconed.x - empty.x) : (empty.x - iconed.x);
-    TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "NULL icon must keep the same aligned label x as an iconed row");
+    const float dx = (x_custom > x_text_only) ? (x_custom - x_text_only) : (x_text_only - x_custom);
+    TEST_ASSERT_TRUE_MESSAGE(dx <= 0.5F, "custom selectable_begin must reserve NO engine icon gutter (single gutter; game owns the icon)");
 }
 
 int main(void) {
@@ -508,6 +509,6 @@ int main(void) {
     RUN_TEST(test_dropdown_eased_reclick_closes_once);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);
-    RUN_TEST(test_dropdown_null_icon_aligns);
+    RUN_TEST(test_dropdown_custom_row_no_engine_gutter);
     return UNITY_END();
 }

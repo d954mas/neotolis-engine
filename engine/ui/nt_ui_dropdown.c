@@ -461,12 +461,9 @@ bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selec
 
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(d);
-    /* Reserve the leading icon gutter (icon_size > 0) so the game's content stays aligned, then a label
-     * cell carrying the stable probe id; the game declares its content (icon/text) inside the open row. */
-    if (style->icon_size > 0U) {
-        const float gut = (float)style->icon_size;
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(gut), CLAY_SIZING_FIXED(gut)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {}
-    }
+    /* No engine icon gutter here: a custom-content selectable is game-owned (the game declares its OWN
+     * inline icon + label), mirroring nt_ui_menu_item_begin. Reserving a gutter on top of the game's inline
+     * icon double-gutters iconed rows. The plain nt_ui_combo_selectable path keeps the single engine gutter. */
     /* Empty label cell with the probe id; the game may add content after this row stays OPEN. */
     CLAY({.id = (Clay_ElementId){.id = label_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}){}(void)label_layer;
 
