@@ -24,6 +24,9 @@
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
+/* Fixture-owned game menu scratch: one per logical menu, reused across the test's frames (holds the
+ * prev-frame nav record). Re-zeroed each setUp so tests don't bleed nav state into each other. */
+static nt_ui_menu_ctx_t s_menu;
 
 #define VIEW_W 800.0F
 #define VIEW_H 600.0F
@@ -50,6 +53,7 @@ void setUp(void) {
     nt_input_clear_all_keys();
     nt_input_poll(); /* clear sticky pressed/released edges left by a prior test (clear_all_keys leaves them) */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
+    nt_ui_menu_init(&s_menu); /* zero the game menu scratch: fresh nav record per test */
 }
 
 void tearDown(void) {
@@ -262,21 +266,21 @@ static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, flo
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
     const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
-        if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Open")) {
-            (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "Project");
-            act_capture(nt_ui_menu_test_item_id(open_scope, KEY_FILE2), nt_ui_menu_item(s_fx.ctx, KEY_FILE2, "File2"));
-            nt_ui_menu_submenu_end(s_fx.ctx);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "New");
+        if (nt_ui_menu_submenu_begin(&s_menu, KEY_OPEN, "Open")) {
+            (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "Project");
+            act_capture(nt_ui_menu_test_item_id(open_scope, KEY_FILE2), nt_ui_menu_item(&s_menu, KEY_FILE2, "File2"));
+            nt_ui_menu_submenu_end(&s_menu);
         }
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_QUIT, "Quit");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+        (void)nt_ui_menu_item(&s_menu, KEY_QUIT, "Quit");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    (void)nt_ui_menu_item(s_fx.ctx, KEY_EDIT, "Edit");
-    nt_ui_menu_end(s_fx.ctx);
+    (void)nt_ui_menu_item(&s_menu, KEY_EDIT, "Edit");
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -431,13 +435,13 @@ static void test_menu_right_click_outside_dismisses_chain(void) {
     p.buttons[NT_BUTTON_RIGHT].is_down = true;
     p.buttons[NT_BUTTON_RIGHT].is_pressed = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "New");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    (void)nt_ui_menu_item(s_fx.ctx, KEY_EDIT, "Edit");
-    nt_ui_menu_end(s_fx.ctx);
+    (void)nt_ui_menu_item(&s_menu, KEY_EDIT, "Edit");
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_FALSE_MESSAGE(st.open, "right-click outside (post-open) dismisses the whole chain");
@@ -455,23 +459,23 @@ static void menu_im_frame2(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, fl
         p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     }
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
     const uint32_t tools_scope = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
-        if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Open")) {
-            (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "Project");
-            (void)nt_ui_menu_item(s_fx.ctx, KEY_FILE2, "File2");
-            nt_ui_menu_submenu_end(s_fx.ctx);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "New");
+        if (nt_ui_menu_submenu_begin(&s_menu, KEY_OPEN, "Open")) {
+            (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "Project");
+            (void)nt_ui_menu_item(&s_menu, KEY_FILE2, "File2");
+            nt_ui_menu_submenu_end(&s_menu);
         }
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_QUIT, "Quit");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+        (void)nt_ui_menu_item(&s_menu, KEY_QUIT, "Quit");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_TOOLS, "Tools")) {
-        act_capture(nt_ui_menu_test_item_id(tools_scope, KEY_OPT), nt_ui_menu_item(s_fx.ctx, KEY_OPT, "Opt"));
-        nt_ui_menu_submenu_end(s_fx.ctx);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_TOOLS, "Tools")) {
+        act_capture(nt_ui_menu_test_item_id(tools_scope, KEY_OPT), nt_ui_menu_item(&s_menu, KEY_OPT, "Opt"));
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -579,17 +583,17 @@ static void test_menu_click_root_parent_switches_branch(void) {
  *      tree is built by recursing submenu_begin with the same key per level. ---- */
 static void menu_im_self_ref(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
     /* Open as deep as the runtime drives: each open level declares another self-keyed submenu. The cap
      * assert fires when submenu_begin would push past NT_UI_MENU_MAX_DEPTH. */
     int guard = 0;
-    while (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "loop") && guard < NT_UI_MENU_MAX_DEPTH + 4) {
+    while (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "loop") && guard < NT_UI_MENU_MAX_DEPTH + 4) {
         ++guard;
     }
     for (int i = 0; i < guard; ++i) {
-        nt_ui_menu_submenu_end(s_fx.ctx);
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 static void test_menu_depth_cap_asserts(void) {
@@ -626,17 +630,17 @@ static void test_menu_depth_cap_asserts(void) {
  *      decl-time assert and exercises the nav-side guard instead. ---- */
 static void menu_im_self_ref_capped(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
     /* Open only while the next push stays within the cap (guard < MAX_DEPTH-1): submenu_begin asserts at
      * the cap, so we stop one short and let the kbd-nav open path try (and be a no-op) at the deepest level. */
     int guard = 0;
-    while (guard < (NT_UI_MENU_MAX_DEPTH - 1) && nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "loop")) {
+    while (guard < (NT_UI_MENU_MAX_DEPTH - 1) && nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "loop")) {
         ++guard;
     }
     for (int i = 0; i < guard; ++i) {
-        nt_ui_menu_submenu_end(s_fx.ctx);
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 static void test_menu_kbd_open_at_depth_cap_is_noop(void) {
@@ -649,11 +653,11 @@ static void test_menu_kbd_open_at_depth_cap_is_noop(void) {
     for (int i = 0; i < NT_UI_MENU_MAX_DEPTH + 6; ++i) {
         menu_key(NT_KEY_ARROW_RIGHT);
         menu_im_self_ref_capped(&st, &style);
-        TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "kbd Right/Enter open must never push active_depth past the depth cap (UBSan OOB)");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "kbd Right/Enter open must never push active_depth past the depth cap (UBSan OOB)");
     }
     /* At the deepest allowable level Enter on a parent stays a no-op (no crash, depth held). The chain is
      * still open (no dismiss), so the menu survived the cap drive without tripping the decl-time assert. */
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "active_depth held within the cap after the open drive");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_active_depth(s_fx.ctx, MENU_A) <= NT_UI_MENU_MAX_DEPTH - 1, "active_depth held within the cap after the open drive");
     TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu chain stays open across the cap drive (no spurious dismiss)");
 }
 
@@ -671,15 +675,15 @@ static void menu_im_frame25(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, f
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.enabled = true, .icon = s_icon_ref});
-    nt_ui_menu_separator(s_fx.ctx);
-    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(s_fx.ctx, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){.enabled = true}));
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Parent")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "ChildA");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    (void)nt_ui_menu_item_ex(&s_menu, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.enabled = true, .icon = s_icon_ref});
+    nt_ui_menu_separator(&s_menu);
+    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(&s_menu, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){.enabled = true}));
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_OPEN, "Parent")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "ChildA");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -809,13 +813,13 @@ static void trigger_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, uin
     }
     nt_ui_block_pointer(s_fx.ctx, TARGET_ID, NULL);
     (void)nt_ui_menu_open_trigger(s_fx.ctx, MENU_A, target_id, long_pressed, st);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "New");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    (void)nt_ui_menu_item(s_fx.ctx, KEY_EDIT, "Edit");
-    nt_ui_menu_end(s_fx.ctx);
+    (void)nt_ui_menu_item(&s_menu, KEY_EDIT, "Edit");
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -915,7 +919,7 @@ static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     nt_input_clear_all_keys();
     menu_im_frame(&st, &style, 0.0F, 0.0F);
 
-    const uint32_t focus_id = nt_ui_menu_test_focus_item_id(MENU_A, 0U);
+    const uint32_t focus_id = nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (prev-frame record, 1-frame latency)");
 }
 
@@ -956,8 +960,8 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
             p.buttons[NT_BUTTON_LEFT].is_released = true; /* down -> up over the widget */
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-        nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
-        if (nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
             declared = true;
             /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
@@ -967,10 +971,10 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
             }
         }
         /* FIX 3: item_end reports activation for an ACTIVATABLE row; an activatable=false row never activates. */
-        if (nt_ui_menu_item_end(s_fx.ctx)) {
+        if (nt_ui_menu_item_end(&s_menu)) {
             end_activated = true;
         }
-        nt_ui_menu_end(s_fx.ctx);
+        nt_ui_menu_end(&s_menu);
         nt_ui_end(s_fx.ctx);
     }
 
@@ -995,13 +999,13 @@ static void test_menu_item_begin_closed_skips_body(void) {
     for (int frame = 0; frame < 2; ++frame) {
         nt_pointer_t p = {.x = 0.0F, .y = 0.0F, .active = true};
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-        nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
-        if (nt_ui_menu_item_begin(s_fx.ctx, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+        if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
             declared = true; /* must stay false: the menu is closed */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
         }
-        nt_ui_menu_item_end(s_fx.ctx);
-        nt_ui_menu_end(s_fx.ctx);
+        nt_ui_menu_item_end(&s_menu);
+        nt_ui_menu_end(&s_menu);
         nt_ui_end(s_fx.ctx);
     }
     TEST_ASSERT_FALSE_MESSAGE(declared, "a closed (present-only) menu must NOT declare the custom-content body");
@@ -1032,14 +1036,14 @@ static bool menu_item_begin_click_activates(nt_ui_menu_state_t *st, nt_ui_menu_s
             p.buttons[NT_BUTTON_LEFT].is_released = true;
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-        nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
-        if (nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = enabled, .activatable = true})) {
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.enabled = enabled, .activatable = true})) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {} /* game body */
         }
-        if (nt_ui_menu_item_end(s_fx.ctx)) {
+        if (nt_ui_menu_item_end(&s_menu)) {
             end_activated = true;
         }
-        nt_ui_menu_end(s_fx.ctx);
+        nt_ui_menu_end(&s_menu);
         nt_ui_end(s_fx.ctx);
     }
     return end_activated;
@@ -1070,13 +1074,13 @@ static void menu_im_frame_rich(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
     nt_ui_menu_item_opts_t save = nt_ui_menu_item_opts_defaults();
     save.shortcut = "Ctrl+S";
     save.selected = true;
-    (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_NEW, "Save", save);
-    (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_QUIT, "Plain", nt_ui_menu_item_opts_defaults());
-    nt_ui_menu_end(s_fx.ctx);
+    (void)nt_ui_menu_item_ex(&s_menu, KEY_NEW, "Save", save);
+    (void)nt_ui_menu_item_ex(&s_menu, KEY_QUIT, "Plain", nt_ui_menu_item_opts_defaults());
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1111,14 +1115,14 @@ static void test_menu_check_cell_when_selected(void) {
 static void menu_im_hover_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {.x = px, .y = py, .active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "Project");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "New");
+        (void)nt_ui_menu_item(&s_menu, KEY_PROJECT, "Project");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    (void)nt_ui_menu_item(s_fx.ctx, KEY_EDIT, "Edit");
-    nt_ui_menu_end(s_fx.ctx);
+    (void)nt_ui_menu_item(&s_menu, KEY_EDIT, "Edit");
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1140,7 +1144,7 @@ static void test_menu_hover_opens_submenu(void) {
 
     /* F1: lay out the root so the File row bbox exists next frame. */
     menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(-1, nt_ui_menu_test_open_path(MENU_A, 0U), "nothing open before any hover");
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(-1, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U), "nothing open before any hover");
 
     /* F2: hover the File parent row center -> records the hover; menu_end commits open_path (1-frame lag). */
     float fx = 0.0F;
@@ -1150,7 +1154,7 @@ static void test_menu_hover_opens_submenu(void) {
 
     /* F3: settle; open_path[0] now points at File (running idx 0), its submenu flies out. */
     menu_im_hover_frame(&st, &style, fx, fy);
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_menu_test_open_path(MENU_A, 0U), "hovering the parent row must open its submenu (idx 0)");
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U), "hovering the parent row must open its submenu (idx 0)");
     TEST_ASSERT_TRUE(st.open);
 }
 
@@ -1172,7 +1176,7 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     menu_row_center(file_row, &fx, &fy);
     menu_im_hover_frame(&st, &style, fx, fy);
     menu_im_hover_frame(&st, &style, fx, fy);
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_menu_test_open_path(MENU_A, 0U), "File submenu open before the sibling hover");
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(0, nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U), "File submenu open before the sibling hover");
 
     /* Hover the Edit sibling leaf far from the open child corridor for enough frames that the dwell timer
      * crosses AIM_FALLBACK and the corridor releases -> the open child collapses. */
@@ -1182,7 +1186,7 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     bool collapsed = false;
     for (int f = 0; f < 30 && !collapsed; ++f) {
         menu_im_hover_frame(&st, &style, ex, ey);
-        collapsed = (nt_ui_menu_test_open_path(MENU_A, 0U) < 0);
+        collapsed = (nt_ui_menu_test_open_path(s_fx.ctx, MENU_A, 0U) < 0);
     }
     TEST_ASSERT_TRUE_MESSAGE(collapsed, "hovering a sibling leaf (corridor released) must collapse the open submenu");
 }
@@ -1191,13 +1195,13 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
 static void menu_im_submenu_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {.x = px, .y = py, .active = true};
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
-    nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
-    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "ChildItemLong");
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_QUIT, "ChildItem2");
-        nt_ui_menu_submenu_end(s_fx.ctx);
+    nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    if (nt_ui_menu_submenu_begin(&s_menu, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(&s_menu, KEY_NEW, "ChildItemLong");
+        (void)nt_ui_menu_item(&s_menu, KEY_QUIT, "ChildItem2");
+        nt_ui_menu_submenu_end(&s_menu);
     }
-    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_menu_end(&s_menu);
     nt_ui_end(s_fx.ctx);
 }
 

@@ -114,6 +114,64 @@ typedef struct {
 } nt_ui_menu_state_t;
 _Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI (2 float + 1 bool + 3 pad)");
 
+/* Game-owned per-frame menu scratch (module-owned storage; severs the core->menu type coupling so the
+ * core ctx pays zero bytes for a non-menu game and nt_ui_menu.o dead-strips). The game declares ONE per
+ * logical menu (static / app field / arena slice) and REUSES THE SAME INSTANCE EVERY FRAME — frame_record
+ * holds the PREVIOUS frame's per-level nav slice (1-frame latency), so a fresh {0} every frame would
+ * silently break keyboard nav. `ui` is the core ctx, stashed at nt_ui_menu_begin for the begin/end span
+ * only and cleared (NULL) at nt_ui_menu_end — no cross-frame borrowed handle (a between-frames inner call
+ * traps). The struct works fully zero-initialized: only frame_record_count==0 matters at rest (the depth-
+ * stack sentinels are reset per-frame in menu_begin). */
+typedef struct nt_ui_menu_ctx {
+    nt_ui_context_t *ui; /* core ctx for the current begin/end span; NULL outside it */
+
+    /* Immediate-menu begin/end DEPTH stack (menus nest where tabs don't). The scope stack derives each
+     * row's id via mix(scope_id[depth], key) (position-stable, no idx); a submenu pushes its own row id as
+     * the child scope (ImGui PushID), so keys need only be unique among siblings. `st`/`menu_id`/layers are
+     * stashed at begin so the per-call item/submenu functions need not re-pass them. `chosen` accumulates a
+     * leaf activation this frame (INTERNAL close-chain signal only; the game sees activation via the row's
+     * inline bool return, not a public sink). */
+    struct {
+        const void *style; /* nt_ui_menu_style_t* (void to keep this struct's deps minimal) */
+        nt_ui_menu_state_t *st;
+        uint32_t menu_id;
+        uint32_t scope_id[NT_UI_MENU_MAX_DEPTH];    /* mix base per level; level 0 = menu_id */
+        uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];    /* per-level running layout index (separators advance it) */
+        uint32_t chosen;                            /* leaf id activated this frame (0 = none) */
+        int16_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* running idx of a row whose submenu a click opens this frame (-1 none) */
+        int16_t hover_parent[NT_UI_MENU_MAX_DEPTH]; /* running idx of a hovered parent at this depth (-1 none) */
+        uint8_t hover_leaf[NT_UI_MENU_MAX_DEPTH];   /* 1 = an enabled non-parent row is hovered at this depth */
+        uint8_t level_side[NT_UI_MENU_MAX_DEPTH];   /* each level's resolved popup side (mouse-aim corridor near-edge pick) */
+        uint8_t fill_layer;
+        uint8_t label_layer;
+        uint8_t depth;
+        bool active;     /* between menu_begin/menu_end (true even for a CLOSED present-only menu) */
+        bool open_frame; /* this frame's menu is OPEN: false = present-only, item/submenu calls no-op */
+    } pending_menu;
+    struct {
+        uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
+        bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
+        bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
+        bool active;      /* a custom-content row element is open (between item_begin/item_end) */
+    } pending_menu_item;
+
+    /* Immediate-menu per-level nav frame record (live, this frame). menu_end navs the deepest open level
+     * against the record just built this frame; OPENING a deeper level only sets open_path so the new level
+     * is declared (and navigable) NEXT frame — the 1-frame latency. No per-frame memcpy. */
+    nt_ui_menu_record_t frame_record[NT_UI_MENU_MAX_DEPTH][NT_UI_MENU_MAX_ITEMS_PER_LEVEL];
+    uint16_t frame_record_count[NT_UI_MENU_MAX_DEPTH];
+} nt_ui_menu_ctx_t;
+/* ABI guard: 3 pointers (ui + pending_menu.style/.st) + a pointer-independent remainder dominated by
+ * frame_record[8][64] (4096) + frame_record_count (16). Express the total via sizeof(void*) so it holds on
+ * both 64-bit native (4256) and 32-bit wasm. Tied to NT_UI_MENU_MAX_DEPTH/ITEMS_PER_LEVEL at default caps. */
+_Static_assert(sizeof(nt_ui_menu_ctx_t) == (3U * sizeof(void *)) + 4232U, "nt_ui_menu_ctx_t stable ABI (3 ptr + frame_record-dominated remainder at default caps)");
+
+/* Init-in-place: zero the scratch (mirrors nt_ui_create_context / nt_comp_storage_init). Takes NO ctx and
+ * NO magic — the struct is correct fully zeroed (only frame_record_count==0 matters at rest), and the ctx
+ * binds per-frame at nt_ui_menu_begin. Static/BSS callers MAY skip this (C zero-inits static storage);
+ * call it for arena/stack allocation and as an explicit "initialized here" marker. */
+void nt_ui_menu_init(nt_ui_menu_ctx_t *menu);
+
 /* Immediate-mode menu (begin/end). The game discovers the tree during the frame: open with menu_begin,
  * declare rows via item / item_ex / item_begin..item_end / submenu_begin..submenu_end / separator, close
  * with menu_end. Ids derive via the scope stack (mix(scope,key)); submenu_begin pushes its row id as the
@@ -122,21 +180,23 @@ _Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI 
  * Layers: every level's panel + row fills + icons + markers draw on data->layer (also the popup panel
  * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style. */
-void nt_ui_menu_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
-bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label);                                 /* plain item; returns clicked */
-bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
+/* begin stashes `ctx` into menu->ui for the begin/end span; every inner call reaches the core via
+ * menu->ui (no re-passed ctx — visible per-frame binding, no hidden cross-frame back-reference). */
+void nt_ui_menu_begin(nt_ui_menu_ctx_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
+bool nt_ui_menu_item(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label);                                 /* plain item; returns clicked */
+bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
 /* item_begin returns DECLARE-BODY (true while the menu is OPEN), NOT clicked — guard the custom body with it
  * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
  * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
  * thing: item_begin = "declare the body", item_end = "the row was activated". An activatable=false row never
  * activates (item_end returns false) — its inner child owns the click. */
-bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
-bool nt_ui_menu_item_end(nt_ui_context_t *ctx); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for activatable=false. */
-bool nt_ui_menu_submenu_begin(nt_ui_context_t *ctx, uint32_t key, const char *label); /* true ONLY when open -> declare body */
-void nt_ui_menu_submenu_end(nt_ui_context_t *ctx);
-void nt_ui_menu_separator(nt_ui_context_t *ctx);                         /* non-interactive divider (no focus index) */
-void nt_ui_menu_separator_text(nt_ui_context_t *ctx, const char *label); /* optional section header */
-void nt_ui_menu_end(nt_ui_context_t *ctx);
+bool nt_ui_menu_item_begin(nt_ui_menu_ctx_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
+bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu); /* TRUE = the activatable row was activated (mouse same-frame / keyboard 1-frame); always false for activatable=false. */
+bool nt_ui_menu_submenu_begin(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label); /* true ONLY when open -> declare body */
+void nt_ui_menu_submenu_end(nt_ui_menu_ctx_t *menu);
+void nt_ui_menu_separator(nt_ui_menu_ctx_t *menu);                         /* non-interactive divider (no focus index) */
+void nt_ui_menu_separator_text(nt_ui_menu_ctx_t *menu, const char *label); /* optional section header */
+void nt_ui_menu_end(nt_ui_menu_ctx_t *menu);
 
 /* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
  * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
@@ -184,14 +244,17 @@ uint32_t nt_ui_menu_test_check_id(uint32_t menu_id, uint8_t depth, uint32_t item
 /* Scope-stack id derivation probe: mix(scope_id, key) — drives the sibling/scope distinctness test. The
  * id is position-stable (no running idx folded in); the test asserts dynamic sibling lists keep ids. */
 uint32_t nt_ui_menu_test_item_id(uint32_t scope_id, uint32_t key);
-/* Prev-frame frame-record focus probe: the recorded item id at rt->focus[depth] (1-frame latency). */
-uint32_t nt_ui_menu_test_focus_item_id(uint32_t menu_id, uint8_t depth);
+/* Prev-frame frame-record focus probe: the recorded item id at rt->focus[depth] (1-frame latency). Takes
+ * the live ctx (runtime cell lives in its state pool) AND the game-owned menu (frame_record now lives on
+ * menu). The explicit ctx replaces the old file-static post-end fallback (s_menu_last_ctx is gone). */
+uint32_t nt_ui_menu_test_focus_item_id(const nt_ui_context_t *ctx, const nt_ui_menu_ctx_t *menu, uint32_t menu_id, uint8_t depth);
 /* Open-chain probe: the retained open child index at a level (rt->open_path[depth]); -1 = none open.
- * Drives the immediate hover-open test (hover a parent row -> the corridor opens its submenu). */
-int16_t nt_ui_menu_test_open_path(uint32_t menu_id, uint8_t depth);
+ * Reads only the runtime cell, so it takes the live ctx (no menu needed). Drives the immediate hover-open
+ * test (hover a parent row -> the corridor opens its submenu). */
+int16_t nt_ui_menu_test_open_path(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
 /* Deepest-open-level probe (rt->active_depth): the depth-cap regression asserts it never exceeds
  * NT_UI_MENU_MAX_DEPTH-1 even when Right/Enter-open is driven at the deepest allowable level. */
-uint8_t nt_ui_menu_test_active_depth(uint32_t menu_id);
+uint8_t nt_ui_menu_test_active_depth(const nt_ui_context_t *ctx, uint32_t menu_id);
 /* Force the open chain open `depth` levels deep (clamped to the cap). The depth-cap DEATH test uses this to
  * drive submenu_begin's decl-time backstop assert directly (the nav-open path now no-ops at the cap). */
 void nt_ui_menu_test_force_open_to(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);

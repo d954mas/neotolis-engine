@@ -14,7 +14,6 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
-#include "ui/nt_ui_menu.h" /* NT_UI_MENU_MAX_DEPTH + nt_ui_menu_state_t for the immediate menu depth stack */
 #include "ui/nt_ui_state.h"
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
@@ -250,39 +249,11 @@ struct nt_ui_context {
         bool active; /* a tab element is open (between tab_begin/tab_end) */
     } pending_tab;
 
-    /* Immediate-menu begin/end DEPTH stack (menus nest where tabs don't). The scope stack derives each
-     * row's id via mix(scope_id[depth], key) (position-stable, no idx); a submenu pushes its own row id as the
-     * child scope (ImGui PushID), so keys need only be unique among siblings. `st`/`menu_id`/layers are
-     * stashed at begin so the per-call item/submenu functions need not re-pass them. `chosen` accumulates
-     * a leaf activation this frame (INTERNAL close-chain signal only; the game sees activation via the row's
-     * inline bool return, not a public sink). */
-    struct {
-        const void *style; /* nt_ui_menu_style_t* (void to keep the internal header widget-agnostic) */
-        nt_ui_menu_state_t *st;
-        uint32_t menu_id;
-        uint32_t scope_id[NT_UI_MENU_MAX_DEPTH];    /* mix base per level; level 0 = menu_id */
-        uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];    /* per-level running layout index (separators advance it) */
-        uint32_t chosen;                            /* leaf id activated this frame (0 = none) */
-        int16_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* running idx of a row whose submenu a click opens this frame (-1 none) */
-        /* Hover-open: per-depth the running idx of a parent row hovered THIS frame (-1 none), and a
-         * flag that an enabled LEAF (non-parent) row is hovered. menu_end resolves these against the mouse-
-         * aim corridor: a hovered parent opens (next frame, 1-frame IM lag); a hovered leaf collapses the
-         * open child once the corridor releases. Keyboard-open stays authoritative (set directly in nav). */
-        int16_t hover_parent[NT_UI_MENU_MAX_DEPTH]; /* running idx of a hovered parent at this depth (-1 none) */
-        uint8_t hover_leaf[NT_UI_MENU_MAX_DEPTH];   /* 1 = an enabled non-parent row is hovered at this depth */
-        uint8_t level_side[NT_UI_MENU_MAX_DEPTH];   /* each level's resolved popup side (mouse-aim corridor near-edge pick) */
-        uint8_t fill_layer;
-        uint8_t label_layer;
-        uint8_t depth;
-        bool active;     /* between menu_begin/menu_end (true even for a CLOSED present-only menu) */
-        bool open_frame; /* this frame's menu is OPEN: false = present-only, item/submenu calls no-op */
-    } pending_menu;
-    struct {
-        uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
-        bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
-        bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
-        bool active;      /* a custom-content row element is open (between item_begin/item_end) */
-    } pending_menu_item;
+    /* Immediate-menu scratch (pending_menu depth-stack, pending_menu_item, frame_record) moved OUT to the
+     * game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h). Migration criterion: widget scratch stays in
+     * this ctx unless it's heavy (>>1 KB) AND forces a widget header into this header — only the menu
+     * qualified (~4.2 KB + the lone nt_ui_menu.h include); tabbar/combo are void*-decoupled and cheap, so
+     * they stay below. */
 
     /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
      * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each
@@ -387,12 +358,6 @@ struct nt_ui_context {
     /* Generic per-id retained-state pool. Arena auto-sizes via sizeof(struct nt_ui_context);
      * create_context's memset zero-inits it (same as anim[]). */
     nt_ui_state_cell_t state_pool[NT_UI_STATE_SLOTS];
-
-    /* Immediate-menu per-level nav frame record (live, this frame). menu_end navs the deepest open level
-     * against the record just built this frame; OPENING a deeper level only sets open_path so the new
-     * level is declared (and navigable) NEXT frame — the 1-frame latency. No per-frame memcpy. */
-    nt_ui_menu_record_t frame_record[NT_UI_MENU_MAX_DEPTH][NT_UI_MENU_MAX_ITEMS_PER_LEVEL];
-    uint16_t frame_record_count[NT_UI_MENU_MAX_DEPTH];
 
 #if NT_UI_DEBUG_TOOLS
     /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.
