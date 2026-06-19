@@ -1,10 +1,14 @@
 #include "app/nt_app.h"
 #include "cJSON.h"
+#include "clay.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_net.h"
 #include "input/nt_input.h"
+#include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui.h"
+#include "ui/nt_ui_button.h" /* NT_UI_BUTTON_DEF for the registered-widget role. */
 #include "window/nt_window.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -54,6 +58,36 @@ static uint16_t resolve_port(void) {
     return (uint16_t)v;
 }
 
+/* A small probe-able "hud" UI context (no renderer/assets — just layout + the registered-widget slot,
+   which is all nt_ui_probe_collect / nt_ui_get_bbox need; the host never calls nt_ui_walk). Two plain
+   CLAY boxes with KNOWN developer string ids; "hud_btn" carries a togglable enabled flag the UAT
+   observes via ui.element after a synthetic ui.click resolves -> injects -> the sim advances. */
+#define HUD_ARENA_SIZE ((size_t)256U * 1024U)
+static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
+static nt_ui_context_t *s_hud_ctx;
+static bool s_hud_btn_on = true; /* the observable: a synthetic click on "hud_btn" toggles it. */
+
+/* Declare the hud tree + step its interaction once per frame. A click on "hud_btn" (real device OR a
+   synthetic ui.click — bot==human) flips s_hud_btn_on; the widget is re-registered every frame with
+   enabled=s_hud_btn_on so the toggle surfaces through the probe's `enabled` field. */
+static void declare_hud(void) {
+    const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
+    const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
+    const nt_pointer_t mouse = g_nt_input.pointers[0]; /* fb-px, the SAME space ui.click resolves into. */
+    nt_ui_begin(s_hud_ctx, fb_w, fb_h, g_nt_app.dt, &mouse, 1);
+    CLAY({.id = CLAY_ID("hud_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(20), .childGap = 12}}) {
+        CLAY({.id = CLAY_ID("hud_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}
+        CLAY({.id = CLAY_ID("hud_btn_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}
+    }
+    /* Register AFTER declare so the ids exist this frame; enabled reflects the current toggle. */
+    nt_ui_widget_register(s_hud_ctx, nt_ui_id("hud_btn"), &NT_UI_BUTTON_DEF, NULL, s_hud_btn_on);
+    nt_ui_widget_register(s_hud_ctx, nt_ui_id("hud_btn_b"), &NT_UI_BUTTON_DEF, NULL, true);
+    if (nt_ui_step_interaction(s_hud_ctx, nt_ui_id("hud_btn")).clicked) {
+        s_hud_btn_on = !s_hud_btn_on;
+    }
+    nt_ui_end(s_hud_ctx);
+}
+
 /* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
    bot that drops mid-MANUAL leaves the host frozen. On the connected->disconnected edge, force RUN so
    the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop. */
@@ -79,10 +113,15 @@ static void frame(void) {
     recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop. */
     nt_input_poll();
 
-    /* Draw + swap go TOGETHER under the render flag — never skip-draw-but-swap (that would present a
-       stale buffer). Render off => draw_calls stays 0. */
+    /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
+       interaction step. nt_devapi's ui.tree/ui.element read the LAST completed frame — exactly this
+       nt_ui_end's baked tables (D-14). Scratch is reset each frame for the per-element CLAY data. */
+    nt_mem_scratch_reset();
+    declare_hud();
+
+    /* No real renderer here (the host issues no draw — nt_ui_walk is unnecessary for the probe). Swap
+       only under the render flag so draw_calls stays 0 / render.* stays honest. */
     if (nt_app_render_enabled()) {
-        /* placeholder: real draw / nt_ui_walk goes here */
         nt_window_swap_buffers();
     }
 
@@ -129,6 +168,16 @@ int main(void) {
         return 1;
     }
 
+    /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
+       self-contained (no gfx/font). The host registers only the CTX — the ui group's commands
+       self-register inside nt_devapi_register_ui under the gate (D-15). */
+    nt_mem_scratch_init((size_t)64U * 1024U);
+    nt_ui_module_init();
+    const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
+    s_hud_ctx = nt_ui_create_context(s_hud_arena, sizeof s_hud_arena, &ui_desc);
+    NT_ASSERT(s_hud_ctx != NULL && "devapi_host: failed to create hud UI context");
+    nt_devapi_ui_register_context("hud", s_hud_ctx);
+
     uint16_t port = resolve_port();
     if (!nt_devapi_net_start(port)) {
         printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
@@ -152,6 +201,9 @@ int main(void) {
 
     nt_devapi_net_stop();
     nt_devapi_shutdown();
+    nt_ui_destroy_context(s_hud_ctx);
+    nt_ui_module_shutdown();
+    nt_mem_scratch_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();
     nt_engine_shutdown();

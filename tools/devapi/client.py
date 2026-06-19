@@ -339,5 +339,79 @@ class DevApiClient:
 
     # #endregion
 
+    # #region ui.* wrappers — reads return the result dict; writes are fire-and-forget (result() confirms ok).
+    def ui_tree(self, ctx: Optional[str] = None) -> Dict[str, Any]:
+        """IMMEDIATE read of the last completed frame's UI tree.
+
+        Returns the result dict: a {space, fb_width, fb_height, dpr, projection} metadata block
+        plus `nodes` (ALL nodes incl. invisible/disabled — the bot filters). `ctx` selects a
+        registered context by name (omitted -> the host's sole/first).
+        """
+        params: Dict[str, Any] = {}
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.tree", params)
+
+    def ui_element(self, id: str, ctx: Optional[str] = None) -> Dict[str, Any]:
+        """Read one UI node by developer string id (unknown/stale id raises DevApiResultError)."""
+        params: Dict[str, Any] = {"id": id}
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.element", params)
+
+    def ui_contexts(self) -> Dict[str, Any]:
+        """List the host-registered UI context names (result dict carries `contexts`)."""
+        return self.result("ui.contexts", {})
+
+    def ui_click(
+        self, id: Any, hold: Optional[int] = None, ctx: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Resolve `id` (a string id, or an {"x":..,"y":..} dict) -> bbox center -> synthetic click.
+
+        Fire-and-forget: the down+up enqueue, applied only once the sim advances — pair with
+        step()/wait_frames() before reading the widget back. `hold` is the down->up frame gap
+        (omitted -> host default of 1).
+        """
+        params: Dict[str, Any] = {"id": id}
+        if hold is not None:
+            params["hold"] = hold
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.click", params)
+
+    def ui_scroll(
+        self,
+        id: Any,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        ctx: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resolve `id` (string id or {x,y}) -> element center -> synthetic wheel(dx,dy) notches."""
+        params: Dict[str, Any] = {"id": id, "dx": dx, "dy": dy}
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.scroll", params)
+
+    def ui_drag(
+        self,
+        from_: Any,
+        to: Any,
+        frames: Optional[int] = None,
+        ctx: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Synthetic drag from `from_` to `to` (each a string id or {x,y}).
+
+        `frames` interpolated move points are emitted between down@from and up@to (omitted ->
+        host default). Fire-and-forget — advance the sim to apply.
+        """
+        params: Dict[str, Any] = {"from": from_, "to": to}
+        if frames is not None:
+            params["frames"] = frames
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.drag", params)
+
+    # #endregion
+
     def close(self) -> None:
         self._transport.close()

@@ -57,7 +57,10 @@ endif()
 # the D-10 metadata (g_nt_window, resolves at exe link like the core group).
 if(NT_DEVAPI_GROUP_UI)
     target_sources(nt_devapi PRIVATE nt_devapi_ui.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_UI=1)
+    # PUBLIC: nt_devapi_ui_register_context (host-facing, D-15) is gated by NT_DEVAPI_GROUP_UI in the
+    # public nt_devapi.h, so a consumer (the host) must see the same gate to call it. (The input group
+    # has no host-facing registrar, hence its gate stays PRIVATE.)
+    target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_GROUP_UI=1)
     target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
     target_link_libraries(nt_devapi PRIVATE nt_input_interface nt_ui_interface nt_window_interface)
 endif()
