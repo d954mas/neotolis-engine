@@ -75,8 +75,10 @@ static bool s_hud_btn_on = true; /* the observable: a synthetic click on "hud_bt
 static void declare_hud(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
-    const nt_pointer_t mouse = g_nt_input.pointers[0]; /* fb-px, the SAME space ui.click resolves into. */
-    nt_ui_begin(s_hud_ctx, fb_w, fb_h, g_nt_app.dt, &mouse, 1);
+    /* Feed ALL pointer slots, not just [0]: a synthetic ui.click lands in the first FREE slot, which is
+       NOT 0 when a real mouse already holds slot 0. Inactive slots are zeroed (origin, no buttons) so
+       they never spuriously hit a widget; this makes the hud bot-drivable regardless of a live device. */
+    nt_ui_begin(s_hud_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
     CLAY({.id = CLAY_ID("hud_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(20), .childGap = 12}}) {
         CLAY({.id = CLAY_ID("hud_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}
         CLAY({.id = CLAY_ID("hud_btn_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}
