@@ -286,6 +286,7 @@ struct nt_ui_context {
     } pending_menu;
     struct {
         uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
+        bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
         bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
         bool active;      /* a custom-content row element is open (between item_begin/item_end) */
     } pending_menu_item;

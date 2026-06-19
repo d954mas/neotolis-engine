@@ -672,6 +672,7 @@ bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_o
      * its ACTIVATION via item_end (parallel to item/item_ex returning clicked) — the two bools never alias. */
     if (!ctx->pending_menu.open_frame) {
         ctx->pending_menu_item.active = true; /* still balance item_end; the body is skipped by the guard */
+        ctx->pending_menu_item.enabled = false;
         ctx->pending_menu_item.activatable = false;
         ctx->pending_menu_item.id = 0U;
         return false; /* closed: do NOT declare the body */
@@ -679,6 +680,7 @@ bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_o
     uint32_t row_id = 0U;
     (void)menu_im_row(ctx, key, NULL, &opts, false, true, &row_id);
     ctx->pending_menu_item.id = row_id;
+    ctx->pending_menu_item.enabled = opts.enabled;
     ctx->pending_menu_item.activatable = opts.activatable;
     ctx->pending_menu_item.active = true;
     return true; /* open: declare the body */
@@ -692,7 +694,9 @@ bool nt_ui_menu_item_end(nt_ui_context_t *ctx) {
         return false; /* present-only: item_begin opened no element, so close/step nothing (never activated) */
     }
     nt_ui_clay_priv_close_element();
-    if (!ctx->pending_menu_item.activatable) {
+    /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
+     * capture the pointer nor fire on a stashed keyboard activation). */
+    if (!ctx->pending_menu_item.enabled || !ctx->pending_menu_item.activatable) {
         /* activatable=false: the inner interactive child owns the click. The row must NOT step_interaction —
          * a row step would capture the pointer and starve the child. Hover highlight still works via the
          * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). Never activates. */

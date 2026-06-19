@@ -1009,6 +1009,57 @@ static void test_menu_item_begin_closed_skips_body(void) {
     TEST_ASSERT_FALSE_MESSAGE(child.found, "a closed menu's custom child must not lay out anywhere (no scene leak)");
 }
 
+/* ---- Disabled custom row never activates: item_begin(opts{.enabled=false, .activatable=true}) + a click
+ *      over the row must make item_end return false (mirror item_ex's enabled gate). The enabled+activatable
+ *      case still activates on the same click. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool menu_item_begin_click_activates(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, bool enabled) {
+    const uint32_t row_key = KEY_NEW;
+    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
+    bool end_activated = false;
+    /* Frames 0-1 bake the row bbox (1-frame IM lag); frame 2 presses over it; frame 3 releases -> click. */
+    for (int frame = 0; frame < 4; ++frame) {
+        const bool press = (frame == 2);
+        const bool release = (frame == 3);
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, row_id);
+        const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
+        const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
+        nt_pointer_t p = {.x = bx, .y = by, .active = true};
+        if (press && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_down = true;
+            p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+        } else if (release && bb.found) {
+            p.buttons[NT_BUTTON_LEFT].is_released = true;
+        }
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+        if (nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = enabled, .activatable = true})) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {} /* game body */
+        }
+        if (nt_ui_menu_item_end(s_fx.ctx)) {
+            end_activated = true;
+        }
+        nt_ui_menu_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    return end_activated;
+}
+static void test_menu_item_begin_disabled_never_activates(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    {
+        nt_ui_menu_state_t st = {0};
+        menu_im_open(&st, 120.0F, 80.0F);
+        const bool act = menu_item_begin_click_activates(&st, &style, false);
+        TEST_ASSERT_FALSE_MESSAGE(act, "a disabled (enabled=false) custom row must NOT activate via item_end");
+    }
+    {
+        nt_ui_menu_state_t st = {0};
+        menu_im_open(&st, 120.0F, 80.0F);
+        const bool act = menu_item_begin_click_activates(&st, &style, true);
+        TEST_ASSERT_TRUE_MESSAGE(act, "an enabled activatable custom row must still activate on a click");
+    }
+}
+
 /* ============================ rich-row shortcut + checkmark cells ============================ */
 
 /* Immediate frame: one rich row carrying a shortcut + selected check (Save), one plain row (Plain). The
@@ -1221,6 +1272,7 @@ int main(void) {
     RUN_TEST(test_menu_prevframe_nav_focuses_recorded_item);
     RUN_TEST(test_menu_item_begin_activatable_false_child_owns_click);
     RUN_TEST(test_menu_item_begin_closed_skips_body);
+    RUN_TEST(test_menu_item_begin_disabled_never_activates);
     RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);
     RUN_TEST(test_menu_check_cell_when_selected);
     return UNITY_END();
