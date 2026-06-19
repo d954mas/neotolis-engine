@@ -1783,8 +1783,9 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
      * highlights on hover. The game reads the inner button's own interaction. */
     nt_ui_menu_item_opts_t op = nt_ui_menu_item_opts_defaults();
     op.activatable = false;
-    (void)nt_ui_menu_item_begin(ctx, MK_CUSTOM_OPACITY, op);
-    {
+    /* Guard the custom body with the return: a CLOSED (present-only) menu returns false and skips the body,
+     * so the inner control never leaks onto the scene. item_end is still called unconditionally to balance. */
+    if (nt_ui_menu_item_begin(ctx, MK_CUSTOM_OPACITY, op)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opacity", g_current->body);
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
         nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_menu_opacity_btn, g_current->btn_secondary, NULL, true, NULL);

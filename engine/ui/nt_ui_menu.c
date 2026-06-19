@@ -629,19 +629,22 @@ bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label) { re
 bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(ctx->pending_menu.active && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
     NT_ASSERT(!ctx->pending_menu_item.active && "nt_ui_menu_item_begin: a custom row is already open (missing nt_ui_menu_item_end)");
+    /* Returns DECLARE-BODY (true only when the menu is open this frame), NOT clicked: a present-only
+     * (closed) menu opens no row element, so the game MUST guard the custom-content body with the return —
+     * otherwise the body's children leak into the scene's open element (Bug 3). For an activatable row the
+     * click is latched in item_end (-> chosen), so the return need not carry it. */
     if (!ctx->pending_menu.open_frame) {
-        ctx->pending_menu_item.active = true; /* still balance item_end; the body is the game's no-op */
+        ctx->pending_menu_item.active = true; /* still balance item_end; the body is skipped by the guard */
         ctx->pending_menu_item.activatable = false;
         ctx->pending_menu_item.id = 0U;
-        return false;
+        return false; /* closed: do NOT declare the body */
     }
     uint32_t row_id = 0U;
-    const nt_ui_interaction_t in = menu_im_row(ctx, key, NULL, &opts, false, true, &row_id);
+    (void)menu_im_row(ctx, key, NULL, &opts, false, true, &row_id);
     ctx->pending_menu_item.id = row_id;
     ctx->pending_menu_item.activatable = opts.activatable;
     ctx->pending_menu_item.active = true;
-    /* activatable=false: the inner interactive child owns the click; the row never reports a click. */
-    return opts.activatable && in.clicked;
+    return true; /* open: declare the body */
 }
 
 void nt_ui_menu_item_end(nt_ui_context_t *ctx) {

@@ -858,8 +858,9 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
 
     /* Frames 0-1 bake the inner button bbox (1-frame IM lag); frame 2 PRESSES over it (capture); frame 3
      * RELEASES over it -> clicked = is_released && over fires on the inner child. The activatable=false
-     * row must NOT steal that click. */
-    bool row_clicked = false;
+     * row must NOT steal that click (chosen_id stays unset). item_begin now returns DECLARE-BODY (true
+     * while open) — the body is guarded by it; the click is owned by the inner child. */
+    bool declared = false;
     bool btn_clicked = false;
     for (int frame = 0; frame < 4; ++frame) {
         const bool press = (frame == 2);   /* press began this frame -> capture */
@@ -880,11 +881,8 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
         }
         nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
         nt_ui_menu_begin(s_fx.ctx, MENU_A, &st, &style);
-        const bool rc = nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false});
-        if (rc) {
-            row_clicked = true;
-        }
-        {
+        if (nt_ui_menu_item_begin(s_fx.ctx, row_key, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
+            declared = true;
             /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
             const nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, inner_btn);
@@ -897,9 +895,36 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
         nt_ui_end(s_fx.ctx);
     }
 
+    TEST_ASSERT_TRUE_MESSAGE(declared, "an open menu must declare the custom-content body (item_begin returns true)");
     TEST_ASSERT_TRUE_MESSAGE(btn_clicked, "the inner child button must own the click");
-    TEST_ASSERT_FALSE_MESSAGE(row_clicked, "an activatable=false row must NOT latch the click as an activation");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.chosen_id, "an activatable=false row must NOT latch the click as an activation");
     (void)row_id;
+}
+
+/* ---- Bug 3 (custom row leak): a CLOSED (present-only) menu's item_begin returns false so the game skips
+ *      the custom body — the inner child must NOT lay out (no bbox) when the menu is closed, so it can
+ *      never leak onto the scene. ---- */
+static void test_menu_item_begin_closed_skips_body(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0}; /* st.open stays false -> present-only */
+    const uint32_t inner_btn = 0x1B7703U;
+
+    bool declared = false;
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_pointer_t p = {.x = 0.0F, .y = 0.0F, .active = true};
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        nt_ui_menu_begin(s_fx.ctx, MENU_A, &st, &style);
+        if (nt_ui_menu_item_begin(s_fx.ctx, KEY_NEW, (nt_ui_menu_item_opts_t){.enabled = true, .activatable = false})) {
+            declared = true; /* must stay false: the menu is closed */
+            CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
+        }
+        nt_ui_menu_item_end(s_fx.ctx);
+        nt_ui_menu_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(declared, "a closed (present-only) menu must NOT declare the custom-content body");
+    const nt_ui_bbox_t child = nt_ui_get_bbox(s_fx.ctx, inner_btn);
+    TEST_ASSERT_FALSE_MESSAGE(child.found, "a closed menu's custom child must not lay out anywhere (no scene leak)");
 }
 
 /* ============================ rich-row shortcut + checkmark cells ============================ */
@@ -981,6 +1006,7 @@ int main(void) {
     RUN_TEST(test_menu_item_id_distinct_siblings_and_scopes);
     RUN_TEST(test_menu_prevframe_nav_focuses_recorded_item);
     RUN_TEST(test_menu_item_begin_activatable_false_child_owns_click);
+    RUN_TEST(test_menu_item_begin_closed_skips_body);
     RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);
     RUN_TEST(test_menu_check_cell_when_selected);
     return UNITY_END();

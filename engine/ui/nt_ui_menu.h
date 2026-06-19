@@ -103,7 +103,8 @@ _Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI 
 void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t *st, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
-bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_opts_t opts);                 /* open a CUSTOM-content row; returns clicked */
+bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key,
+                           nt_ui_menu_item_opts_t opts); /* open a CUSTOM-content row; TRUE = declare body (menu open), guard with if. Activatable click latches in item_end. */
 void nt_ui_menu_item_end(nt_ui_context_t *ctx);
 bool nt_ui_menu_submenu_begin(nt_ui_context_t *ctx, uint32_t key, const char *label); /* true ONLY when open -> declare body */
 void nt_ui_menu_submenu_end(nt_ui_context_t *ctx);
