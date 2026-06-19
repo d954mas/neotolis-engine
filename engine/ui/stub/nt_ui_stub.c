@@ -7,9 +7,9 @@
 #error "nt_ui_stub requires NT_UI_DEBUG_TOOLS=1"
 #endif
 
-/* Headless stub of the nt_ui probe surface for stub-linked tests (e.g. test_devapi_*). Provides the
-   3 symbols the devapi ui group resolves without pulling Clay or the renderer chain. The empty tree
-   is sufficient for discovery / bad_params tests; behavioral ui.* tests link the real nt_ui. */
+/* Headless stub of the nt_ui probe + bbox surface for stub-linked tests (e.g. test_devapi_*) without
+   pulling Clay or the renderer chain. The empty tree + not-found bbox suffice for discovery /
+   bad_params tests; behavioral ui.* tests link the real nt_ui. */
 
 #if NT_UI_DEBUG_TOOLS
 uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
@@ -38,4 +38,11 @@ uint32_t nt_ui_id(const char *s) {
 bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx) {
     (void)ctx;
     return false;
+}
+
+/* Headless: no layout, so every id resolves not-found (ui.click/drag -> bad_params in stub tests). */
+nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
+    (void)ctx;
+    (void)id;
+    return (nt_ui_bbox_t){0};
 }
