@@ -261,7 +261,8 @@ struct nt_ui_context {
      * row's id via mix(scope_id[depth], key) (position-stable, no idx); a submenu pushes its own row id as the
      * child scope (ImGui PushID), so keys need only be unique among siblings. `st`/`menu_id`/layers are
      * stashed at begin so the per-call item/submenu functions need not re-pass them. `chosen` accumulates
-     * a leaf activation this frame (menu_end latches it into st->chosen_id). */
+     * a leaf activation this frame (INTERNAL close-chain signal only; the game sees activation via the row's
+     * inline bool return, not a public sink). */
     struct {
         const void *style; /* nt_ui_menu_style_t* (void to keep the internal header widget-agnostic) */
         nt_ui_menu_state_t *st;

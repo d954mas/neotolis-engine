@@ -53,7 +53,9 @@ typedef struct {
 typedef struct {
     int16_t open_path[NT_UI_MENU_MAX_DEPTH];
     int16_t focus[NT_UI_MENU_MAX_DEPTH];
-    uint32_t opened_frame; /* ctx->frame_counter at arm; the right-click dismiss skips this frame so the opening click never self-closes */
+    uint32_t opened_frame;  /* ctx->frame_counter at arm; the right-click dismiss skips this frame so the opening click never self-closes */
+    uint32_t kbd_activated; /* row id a keyboard Enter activated in the PREVIOUS frame's menu_end; the NEXT frame's row call fires its inline return for it, then menu_end clears it (1-frame latency,
+                               fires once) */
     uint8_t active_depth;
     bool primed; /* a zeroed fresh cell would read open_path[0]==0 (= item 0 open); init to -1 once */
     uint8_t _pad[2];
@@ -222,6 +224,7 @@ static void menu_runtime_reset(nt_ui_menu_runtime_t *rt) {
     }
     rt->active_depth = 0U;
     rt->opened_frame = 0U;
+    rt->kbd_activated = 0U;
     rt->primed = true;
 }
 
@@ -275,7 +278,6 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
         st->anchor_x = mx;
         st->anchor_y = my;
         st->open = true;
-        st->chosen_id = 0U;
         nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
         menu_runtime_reset(rt);
         rt->opened_frame = ctx->frame_counter; /* skip the dismiss on the opening frame (right-click is also the open trigger) */
@@ -646,13 +648,18 @@ bool nt_ui_menu_item_ex(nt_ui_context_t *ctx, uint32_t key, const char *label, n
     }
     uint32_t row_id = 0U;
     const nt_ui_interaction_t in = menu_im_row(ctx, key, label, &opts, false, false, &row_id);
-    if (opts.enabled && in.clicked) {
-        ctx->pending_menu.chosen = row_id; /* a plain item always latches its own activation */
-    }
     if (opts.enabled) {
         (void)nt_ui_step_interaction(ctx, row_id);
     }
-    return opts.enabled && in.clicked;
+    /* The inline bool is the SINGLE activation idiom: mouse clicks same-frame; a keyboard Enter arrives via
+     * rt->kbd_activated (set in the PREVIOUS frame's menu_end, 1-frame latency). Both latch pending_menu.chosen
+     * (the internal close-chain signal). */
+    const nt_ui_menu_runtime_t *rt = menu_runtime(ctx, ctx->pending_menu.menu_id);
+    const bool activated = opts.enabled && (in.clicked || (row_id == rt->kbd_activated));
+    if (activated) {
+        ctx->pending_menu.chosen = row_id;
+    }
+    return activated;
 }
 
 bool nt_ui_menu_item(nt_ui_context_t *ctx, uint32_t key, const char *label) { return nt_ui_menu_item_ex(ctx, key, label, nt_ui_menu_item_opts_defaults()); }
@@ -693,7 +700,9 @@ void nt_ui_menu_item_end(nt_ui_context_t *ctx) {
         return;
     }
     const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, row_id); /* the ONE mutating step per id */
-    if (in.clicked) {
+    /* Same single-idiom activation as item_ex: mouse same-frame, keyboard via rt->kbd_activated (1-frame). */
+    const nt_ui_menu_runtime_t *rt = menu_runtime(ctx, ctx->pending_menu.menu_id);
+    if (in.clicked || (row_id == rt->kbd_activated)) {
         ctx->pending_menu.chosen = row_id;
     }
 }
@@ -835,7 +844,10 @@ static bool menu_im_keyboard_nav(nt_ui_context_t *ctx, uint8_t depth, nt_ui_menu
                 rt->focus[depth + 1U] = 0; /* focus the child's first row (layout idx 0), mirroring the data form */
             }
         } else if (cur->has_sub == 0U && activate_key) {
-            ctx->pending_menu.chosen = cur->id; /* Right on a leaf is a no-op; only Enter activates */
+            /* Right on a leaf is a no-op; only Enter activates. Stash the leaf id for the NEXT frame's row
+             * call to fire its inline return (1-frame latency); do NOT latch chosen here, so the chain stays
+             * open one more frame and the inline return can fire before the close. */
+            rt->kbd_activated = cur->id;
         }
     }
     return nt_input_key_is_pressed(NT_KEY_ARROW_LEFT) || nt_input_key_is_pressed(NT_KEY_ESCAPE);
@@ -948,6 +960,22 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_context_t *ctx, uint32_t menu_id,
     return close_chain;
 }
 
+/* Resolve nav/dismiss + fold the activation signals into the close decision. The kbd_activated set in the
+ * PREVIOUS frame's menu_end was already consumed by THIS frame's row calls (they ran before menu_end), so
+ * snapshot it before kbd-nav (which may set a NEW activation for the next frame) and clear ONLY that
+ * consumed value — so each keyboard activation fires its inline return exactly once. */
+static bool menu_resolve_and_consume_kbd(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_runtime_t *rt) {
+    const uint32_t consumed_kbd = rt->kbd_activated;
+    bool close_chain = menu_resolve_nav_and_dismiss(ctx, menu_id, rt);
+    if (ctx->pending_menu.chosen != 0U) {
+        close_chain = true; /* an activation (mouse this frame, or keyboard consumed via the inline return) closes the chain */
+    }
+    if (rt->kbd_activated == consumed_kbd) {
+        rt->kbd_activated = 0U; /* a fresh value set by kbd-nav this frame survives for the next frame's row call */
+    }
+    return close_chain;
+}
+
 void nt_ui_menu_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_end: call between nt_ui_begin/end");
     if (!ctx->pending_menu.active) {
@@ -966,11 +994,7 @@ void nt_ui_menu_end(nt_ui_context_t *ctx) {
     nt_ui_menu_state_t *st = ctx->pending_menu.st;
     nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu_id);
 
-    bool close_chain = menu_resolve_nav_and_dismiss(ctx, menu_id, rt);
-    if (ctx->pending_menu.chosen != 0U) {
-        st->chosen_id = ctx->pending_menu.chosen;
-        close_chain = true;
-    }
+    const bool close_chain = menu_resolve_and_consume_kbd(ctx, menu_id, rt);
 
     nt_ui_popup_end(ctx); /* balance menu_begin's root popup_begin */
 

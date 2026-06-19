@@ -1816,7 +1816,7 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
 
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
  * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The immediate API builds the tree in
- * CODE every frame (no static items[]); the game owns the open flag + chosen-id sink (Model D). The
+ * CODE every frame (no static items[]); the game owns the open flag; activation is reported inline. The
  * nt_ui_menu_open_trigger arming (D-236-05) is KEPT 1:1. */
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
@@ -1858,14 +1858,10 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 
     /* Render both menus (independent state + ids); arming is gated so at most one is open. Each tree is
-     * built in CODE; rows latch their own game-id into last_chosen on click (replacing the chosen_id sink). */
+     * built in CODE; every row reports activation via its inline bool (if (menu_item(...)) ...), writing
+     * last_chosen — the SINGLE idiom for both mouse and keyboard (no chosen_id sink). */
     render_menu_global(ctx, st);
     render_menu_zone(ctx, st);
-
-    /* This demo uses the inline bool-return pattern (each row wrote last_chosen above); the engine's chosen_id
-     * sink is the alternative — cleared here so it does not latch twice (Model D: game reads + clears). */
-    st->menu.global_state.chosen_id = 0U;
-    st->menu.zone_state.chosen_id = 0U;
 
     (void)snprintf(buf, sizeof buf, "last chosen: %s", st->menu.last_chosen ? st->menu.last_chosen : "(none)");
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);

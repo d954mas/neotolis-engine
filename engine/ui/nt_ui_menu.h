@@ -7,7 +7,7 @@
  * it even when the path crosses sibling items (never collapse on raw hover-loss). Per-level edge-flip,
  * nested dismiss from the deepest level up, and keyboard-nav across levels round it out.
  *
- * The GAME owns the open `bool` and the chosen-item id sink; the menu only signals. */
+ * The GAME owns the open `bool`; activation is reported inline by the row calls (no chosen-item sink). */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -85,15 +85,15 @@ static inline nt_ui_menu_item_opts_t nt_ui_menu_item_opts_defaults(void) { retur
 
 /* Live menu state the game owns and persists across frames. `open` is set by an open helper (or the
  * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly
- * (the menu resets its runtime chain on the closed frame). `chosen_id` latches the activated leaf id
- * (0 = none yet) — the game reads + clears it. anchor_x/y is the screen-space open point (cursor at open). */
+ * (the menu resets its runtime chain on the closed frame). anchor_x/y is the screen-space open point
+ * (cursor at open). Activation is reported INLINE by the row calls (if (menu_item(...)) act();) for BOTH
+ * mouse (same-frame) and keyboard (1-frame latency) — there is no chosen_id sink (DESIGN §2). */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
-    uint32_t chosen_id;       /* latched activated leaf id; 0 = none. Game reads + clears. */
     bool open;                /* game-owned open flag; menu clears on dismiss */
     uint8_t _pad[3];
 } nt_ui_menu_state_t;
-_Static_assert(sizeof(nt_ui_menu_state_t) == 16, "nt_ui_menu_state_t stable ABI (2 float + 1 u32 + 1 bool + 3 pad)");
+_Static_assert(sizeof(nt_ui_menu_state_t) == 12, "nt_ui_menu_state_t stable ABI (2 float + 1 bool + 3 pad)");
 
 /* Immediate-mode menu (begin/end). The game discovers the tree during the frame: open with menu_begin,
  * declare rows via item / item_ex / item_begin..item_end / submenu_begin..submenu_end / separator, close

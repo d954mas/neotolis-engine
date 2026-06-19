@@ -62,6 +62,18 @@ void tearDown(void) {
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
+/* Inline-activation capture: chosen_id was removed (FIX 2b) — activation is reported by the row's inline
+ * bool for BOTH mouse and keyboard. The immediate drivers OR each target row's return into s_act_hit so a
+ * test can assert the leaf's inline return fired (keyboard arrives 1 frame after Enter). Reset per test. */
+static uint32_t s_act_capture_id; /* the fully-scoped row id a test wants to watch (0 = watch nothing) */
+static bool s_act_hit;            /* set true the frame the watched row's inline return goes true */
+/* OR a row's inline return into the capture if its scoped id matches the watched id. */
+static void act_capture(uint32_t row_scoped_id, bool clicked) {
+    if (clicked && row_scoped_id == s_act_capture_id) {
+        s_act_hit = true;
+    }
+}
+
 /* nt_ui_begin asserts pointers != NULL; the hover-intent probes don't read the pointer, so a single
  * inactive snapshot at the origin is enough to satisfy the frame contract. */
 static void fx_begin(float dt) {
@@ -75,7 +87,7 @@ static void fx_begin(float dt) {
 static void test_menu_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT(EXPECTED_MENU_STYLE_ABI, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT((unsigned)(16U + ((((sizeof(void *) + 4U) + 7U) / 8U) * 8U)), (unsigned)sizeof(nt_ui_menu_item_opts_t));
-    TEST_ASSERT_EQUAL_UINT(16U, (unsigned)sizeof(nt_ui_menu_state_t));
+    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_menu_state_t)); /* chosen_id removed: 2 float + 1 bool + 3 pad */
 }
 
 static void test_menu_defaults_valid(void) {
@@ -255,11 +267,13 @@ static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, flo
     p.active = true;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
     nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Open")) {
             (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "Project");
-            (void)nt_ui_menu_item(s_fx.ctx, KEY_FILE2, "File2");
+            act_capture(nt_ui_menu_test_item_id(open_scope, KEY_FILE2), nt_ui_menu_item(s_fx.ctx, KEY_FILE2, "File2"));
             nt_ui_menu_submenu_end(s_fx.ctx);
         }
         (void)nt_ui_menu_item(s_fx.ctx, KEY_QUIT, "Quit");
@@ -284,12 +298,18 @@ static void test_menu_smoke_open_and_closed(void) {
 }
 
 /* ---- Keyboard-nav reaches a nested leaf: Down focuses File, Right opens its submenu, Down to Open,
- *      Right opens the grandchild, Down to File2, Enter activates -> chosen_id is File2. The tree is
- *      built via the immediate begin/submenu/item calls across frames (prev-frame nav). ---- */
+ *      Right opens the grandchild, Down to File2, Enter activates -> File2's INLINE return fires 1 frame
+ *      later (FIX 2b: no chosen_id sink). Tree built via the immediate calls across frames (prev-frame nav). ---- */
 static void test_menu_kbd_nav_activates_nested_leaf(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
+
+    /* Watch File2's inline return: keyboard Enter must fire it (1 frame after Enter), proving FIX 2b. */
+    const uint32_t file_scope0 = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    const uint32_t open_scope0 = nt_ui_menu_test_item_id(file_scope0, KEY_OPEN);
+    s_act_capture_id = nt_ui_menu_test_item_id(open_scope0, KEY_FILE2);
+    s_act_hit = false;
 
     /* Frame 1: focus root item 0 (File) via Down. */
     menu_key(NT_KEY_ARROW_DOWN);
@@ -306,16 +326,18 @@ static void test_menu_kbd_nav_activates_nested_leaf(void) {
     /* Frame 5: Down to File2. */
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    /* Frame 6: Enter activates File2 -> chosen_id, chain closes. */
+    /* Frame 6: Enter on File2 -> menu_end stashes kbd_activated for next frame (does NOT close yet). */
     menu_key(NT_KEY_ENTER);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "keyboard activation is deferred 1 frame; the inline return must NOT fire on the Enter frame");
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "the chain stays open one more frame so the inline return can fire");
 
-    /* File2's fully scoped id: File(root idx 0) -> Open(File-submenu idx 1) -> File2(Open-submenu idx 1).
-     * Each submenu pushes its own row id as the child scope (mix(scope,key,running_idx)). */
-    const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
-    const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
-    const uint32_t file2_id = nt_ui_menu_test_item_id(open_scope, KEY_FILE2);
-    TEST_ASSERT_EQUAL_UINT32(file2_id, st.chosen_id);
+    /* Frame 7: File2's row call consumes kbd_activated -> its inline return goes true; the chain closes. */
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+
+    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "keyboard Enter must fire the leaf's INLINE return (1-frame latency), proving FIX 2b");
     TEST_ASSERT_FALSE(st.open);
 }
 
@@ -438,6 +460,7 @@ static void menu_im_frame2(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, fl
     }
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
     nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
+    const uint32_t tools_scope = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "New");
         if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Open")) {
@@ -449,7 +472,7 @@ static void menu_im_frame2(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, fl
         nt_ui_menu_submenu_end(s_fx.ctx);
     }
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_TOOLS, "Tools")) {
-        (void)nt_ui_menu_item(s_fx.ctx, KEY_OPT, "Opt");
+        act_capture(nt_ui_menu_test_item_id(tools_scope, KEY_OPT), nt_ui_menu_item(s_fx.ctx, KEY_OPT, "Opt"));
         nt_ui_menu_submenu_end(s_fx.ctx);
     }
     nt_ui_menu_end(s_fx.ctx);
@@ -473,14 +496,23 @@ static void test_menu_switch_root_branch_while_submenu_open(void) {
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(st.open, "Left collapses the submenu but the root stays open");
 
+    /* Watch the Tools>Opt leaf's inline return (keyboard, 1-frame latency). */
+    s_act_capture_id = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), KEY_OPT);
+    s_act_hit = false;
+
     menu_key(NT_KEY_ARROW_DOWN); /* move to Tools (root item 1) */
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
     menu_key(NT_KEY_ARROW_RIGHT); /* open Tools submenu */
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
-    menu_key(NT_KEY_ENTER); /* activate Opt */
+    menu_key(NT_KEY_ENTER); /* activate Opt -> stashes kbd_activated for next frame */
     menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), KEY_OPT), st.chosen_id, "must reach the OTHER root branch's leaf while the first was open");
+    /* Settle one frame: Opt's row call consumes kbd_activated -> its inline return fires; the chain closes. */
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    menu_im_frame2(&st, &style, 0.0F, 0.0F, false);
+
+    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "must reach the OTHER root branch's leaf (inline return) while the first was open");
     TEST_ASSERT_FALSE(st.open);
 }
 
@@ -605,7 +637,7 @@ static void menu_im_frame25(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, f
     nt_ui_menu_begin(s_fx.ctx, NULL, 0U, MENU_A, st, style);
     (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.enabled = true, .icon = s_icon_ref});
     nt_ui_menu_separator(s_fx.ctx);
-    (void)nt_ui_menu_item_ex(s_fx.ctx, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){.enabled = true});
+    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(s_fx.ctx, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){.enabled = true}));
     if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_OPEN, "Parent")) {
         (void)nt_ui_menu_item(s_fx.ctx, KEY_PROJECT, "ChildA");
         nt_ui_menu_submenu_end(s_fx.ctx);
@@ -657,15 +689,22 @@ static void test_menu_separator_non_interactive(void) {
     const nt_ui_bbox_t sep = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_row_id(MENU_A, 0U, 1U));
     TEST_ASSERT_FALSE_MESSAGE(sep.found, "a separator must not register an interactive row id");
 
+    /* Watch the Plain row's inline return (keyboard, 1-frame latency). */
+    s_act_capture_id = nt_ui_menu_test_item_id(MENU_A, KEY_QUIT);
+    s_act_hit = false;
+
     /* Down focuses Iconed, a second Down must SKIP the separator and land on Plain. */
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
-    /* settle + activate the focused item: it must be Plain (Down skipped the separator). */
+    /* Enter on the focused item -> stashes kbd_activated; the next frame's row call fires the inline return. */
     menu_key(NT_KEY_ENTER);
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), st.chosen_id, "Down must skip the separator (focus Iconed->Plain)");
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    menu_im_frame25(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "Down must skip the separator (focus Iconed->Plain); Plain's inline return fires on Enter");
 }
 
 /* ---- Submenu marker cell: a parent row declares the marker cell (arrow sprite or ">" fallback); a leaf
@@ -857,8 +896,8 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
 
     /* Frames 0-1 bake the inner button bbox (1-frame IM lag); frame 2 PRESSES over it (capture); frame 3
      * RELEASES over it -> clicked = is_released && over fires on the inner child. The activatable=false
-     * row must NOT steal that click (chosen_id stays unset). item_begin now returns DECLARE-BODY (true
-     * while open) — the body is guarded by it; the click is owned by the inner child. */
+     * row must NOT steal that click (the chain stays open — no activation). item_begin returns DECLARE-BODY
+     * (true while open) — the body is guarded by it; the click is owned by the inner child. */
     bool declared = false;
     bool btn_clicked = false;
     for (int frame = 0; frame < 4; ++frame) {
@@ -896,7 +935,9 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
 
     TEST_ASSERT_TRUE_MESSAGE(declared, "an open menu must declare the custom-content body (item_begin returns true)");
     TEST_ASSERT_TRUE_MESSAGE(btn_clicked, "the inner child button must own the click");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.chosen_id, "an activatable=false row must NOT latch the click as an activation");
+    /* chosen_id is gone (FIX 2b): an activatable=false row that latched the click as an activation would
+     * close the chain. The chain staying OPEN proves the row did NOT steal the inner child's click. */
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "an activatable=false row must NOT latch the click as an activation (chain stays open)");
     (void)row_id;
 }
 
