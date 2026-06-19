@@ -489,6 +489,10 @@ static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
 /* ---- Custom-trigger (preview form) draws the combo's chevron affordance, just like the plain trigger.
  *      One preview frame with a resolvable chevron ref; the engine appends the chevron at the trigger's
  *      right edge between preview_begin/end. chevron_size 0 opts out. ---- */
+/* The game-owned preview child carries a stable id (so a test can probe its right edge) and GROWs to fill
+ * the trigger interior — a leftover GROW spacer would steal that slack, so its right edge is the no-spacer
+ * witness on opt-out. */
+#define SWATCH_ID 0x44D0E5U
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dropdown_style_t *st, bool *open) {
     nt_mem_scratch_reset();
@@ -496,7 +500,7 @@ static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dr
     CLAY({.id = (Clay_ElementId){.id = 0xDD0008U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
         nt_ui_combo_preview_begin(s_fx.ctx, DD_A, st, open);
         {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}}}) {}
+            CLAY({.id = (Clay_ElementId){.id = SWATCH_ID}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(16)}}}) {}
         } /* game-owned swatch content */
         if (nt_ui_combo_preview_end(s_fx.ctx)) {
             for (int i = 0; i < 3; ++i) {
@@ -542,6 +546,16 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
 
     const nt_ui_bbox_t chev = nt_ui_dropdown_test_chevron_bbox(s_fx.ctx, DD_A);
     TEST_ASSERT_FALSE_MESSAGE(chev.found, "chevron_size 0 must opt out of drawing the chevron");
+
+    /* No leftover GROW spacer: the game's GROW swatch fills the interior, so its right edge reaches the
+     * trigger's right inner edge (within pad). A spacer would split the slack and pull the swatch left. */
+    const nt_ui_bbox_t trig = nt_ui_get_bbox(s_fx.ctx, DD_A);
+    const nt_ui_bbox_t sw = nt_ui_get_bbox(s_fx.ctx, SWATCH_ID);
+    TEST_ASSERT_TRUE_MESSAGE(trig.found && sw.found, "opt-out trigger and its preview child must measure");
+    const float right_inner = trig.x + trig.width - (float)st.pad;
+    const float sw_right = sw.x + sw.width;
+    const float gap = (right_inner > sw_right) ? (right_inner - sw_right) : (sw_right - right_inner);
+    TEST_ASSERT_TRUE_MESSAGE(gap <= 0.5F, "opt-out must leave no leftover GROW spacer (swatch fills to the trigger's right inner edge)");
 }
 
 int main(void) {

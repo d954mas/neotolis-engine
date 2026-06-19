@@ -144,15 +144,22 @@ static void dropdown_apply_bg(Clay_ElementDeclaration *decl, bool has_art, const
     }
 }
 
+/* Whether the chevron will actually draw: a non-zero box AND a resolvable ref. Single predicate so the
+ * custom-trigger path can gate the GROW spacer on the same condition (no spacer when no chevron). The
+ * resolve is idempotent/caching, so calling it here and again in dropdown_declare_chevron is free. */
+static bool dropdown_has_chevron(nt_ui_dropdown_style_t *style) {
+    if (style->chevron_size == 0U) {
+        return false;
+    }
+    nt_atlas_resolve_ref(&style->chevron);
+    return style->chevron.atlas.id != 0U && style->chevron.region != NT_ATLAS_INVALID_REGION;
+}
+
 /* The chevron sprite at the trigger's right edge. Eased open-rotation: 0 closed -> ~180deg open (the
  * down chevron flips to point up). Drawn on the fill layer; tinted; no-op when no ref / chevron_size 0.
  * chevron_id 0 -> anonymous (plain trigger); a derived id lets the custom-trigger path expose a bbox probe. */
 static void dropdown_declare_chevron(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t chevron_id, nt_ui_dropdown_style_t *style, float open_t) {
-    if (style->chevron_size == 0U) {
-        return;
-    }
-    nt_atlas_resolve_ref(&style->chevron);
-    if (style->chevron.atlas.id == 0U || style->chevron.region == NT_ATLAS_INVALID_REGION) {
+    if (!dropdown_has_chevron(style)) {
         return;
     }
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
@@ -408,9 +415,12 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
 
     /* The chevron is the combo's OWN affordance (open/close indicator), independent of the game's preview
      * content — draw it in the custom trigger too. GROW spacer pushes it to the right edge past the game's
-     * content (mirrors the plain trigger's [content GROW][chevron] tail); no-op when chevron_size 0. */
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-    dropdown_declare_chevron(ctx, NT_UI_COMBO_FILL_LAYER, dropdown_chevron_id(id), style, ctx->pending_combo.trigger_open_t);
+     * content (mirrors the plain trigger's [content GROW][chevron] tail). Both gated on the chevron actually
+     * drawing: opting out (chevron_size 0 / no ref) emits NEITHER, so the game owns the trigger interior. */
+    if (dropdown_has_chevron(style)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
+        dropdown_declare_chevron(ctx, NT_UI_COMBO_FILL_LAYER, dropdown_chevron_id(id), style, ctx->pending_combo.trigger_open_t);
+    }
 
     nt_ui_clay_priv_close_element();
     if (nt_ui_step_interaction(ctx, id).clicked) {
