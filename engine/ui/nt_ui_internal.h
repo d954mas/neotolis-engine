@@ -8,6 +8,7 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "core/nt_assert.h" /* NT_ASSERT_MODE/NT_ASSERT_OFF gate the debug-only combo dup-key window */
 #include "font/nt_font.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
@@ -160,6 +161,13 @@ typedef struct {
 #define NT_UI_MENU_MAX_ITEMS_PER_LEVEL 64
 #endif
 
+/* DEBUG-only combo duplicate-key guard window: row ids are now key-stable (mix(combo_id,key) only), so two
+ * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. The first N rows per combo
+ * are scanned for a collision (fail-early NT_ASSERT); past N the best-effort check stops (debug-only). */
+#ifndef NT_UI_COMBO_DUP_KEY_WINDOW
+#define NT_UI_COMBO_DUP_KEY_WINDOW 64
+#endif
+
 /* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates the PREVIOUS
  * frame's per-level slice (1-frame latency). Separators are never recorded (skipped by nav). */
 typedef struct {
@@ -293,8 +301,9 @@ struct nt_ui_context {
 
     /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
      * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each
-     * combo_selectable derives its row id via mix(id, key, row_idx), the running row_idx folding the
-     * per-frame row order. The GAME owns int *selected and writes it on the selectable's clicked return
+     * combo_selectable derives its INTERACTIVE row id via mix(id, key) only (KEY-STABLE — reorder/hide a
+     * row mid-press never shifts a fixed-key row's identity); row_idx is kept only for the positional LABEL
+     * cell id + the test probe. The GAME owns int *selected and writes it on the selectable's clicked return
      * (Model-D); the combo only clears *open on a row click. trigger_open marks a custom preview element
      * open between combo_preview_begin/end; row_open marks a custom selectable open between
      * selectable_begin/end (its id + click latch deferred to selectable_end). */
@@ -304,13 +313,17 @@ struct nt_ui_context {
         bool *open;           /* game-owned open flag; a selectable click clears it (Model-D) */
         uint32_t row_id;      /* the open custom selectable's row id (for selectable_end's step + click latch) */
         float trigger_open_t; /* eased open amount stashed by the custom trigger; combo_preview_end's chevron rotation */
-        uint16_t row_idx;     /* per-frame running row index (the selectable fmix fold) */
+        uint16_t row_idx;     /* per-frame running row index (positional LABEL cell id + test probe only, NOT the interactive id) */
         uint8_t fill_layer;
         uint8_t label_layer;
         uint8_t scrolls;      /* list body wraps nt_ui_scroll (vs a plain panel) — combo_end closes the right nesting */
         uint8_t active;       /* a combo list is open between combo_begin/combo_end */
         uint8_t trigger_open; /* a custom trigger element is open between combo_preview_begin/end */
         uint8_t row_open;     /* a custom selectable element is open between selectable_begin/end */
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+        uint16_t dup_key_count;                           /* rows recorded into dup_key_ids this frame (debug-only) */
+        uint32_t dup_key_ids[NT_UI_COMBO_DUP_KEY_WINDOW]; /* first-N key-stable row ids; scanned for a duplicate key */
+#endif
     } pending_combo;
 
     /* nt_ui_walk asserts each is non-zero at entry. */

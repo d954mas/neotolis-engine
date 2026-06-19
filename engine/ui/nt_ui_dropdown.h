@@ -132,6 +132,9 @@ uint8_t nt_ui_dropdown_test_last_side(void);
 uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id);
 /* The prev-frame bbox of a row's text label cell (icon-gutter alignment probe). */
 nt_ui_bbox_t nt_ui_dropdown_test_row_label_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id, int idx);
+/* The KEY-STABLE interactive row id mix(combo_id, key) — drives the row-id stability test (the id must be
+ * identical regardless of the row's positional index, so reorder/hide a sibling never shifts it). */
+uint32_t nt_ui_dropdown_test_combo_row_id(uint32_t combo_id, uint32_t key);
 /* The prev-frame bbox of the custom-trigger (preview form) chevron element (found => the chevron was drawn). */
 nt_ui_bbox_t nt_ui_dropdown_test_chevron_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id);
 #endif

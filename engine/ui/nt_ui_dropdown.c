@@ -32,15 +32,15 @@ static inline uint32_t dropdown_scroll_id(uint32_t id) { return nt_ui_derived_id
 static inline uint32_t dropdown_panel_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_PANEL_SALT); }
 static inline uint32_t dropdown_chevron_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_CHEVRON_SALT); }
 
-/* Immediate-combo row ids. The INTERACTIVE row folds (combo_id, key, row_idx) so sibling rows never
- * Clay-additive-collide and a key need only be unique among siblings. The non-interactive
- * LABEL cell folds (combo_id, row_idx) only — key-independent so the _test_row_label_bbox probe can
- * reproduce it from the idx alone (row_idx is unique per frame). fmix, NEVER additive base+index. */
-static inline uint32_t combo_row_id(uint32_t combo_id, uint32_t key, uint32_t row_idx) {
+/* Immediate-combo row ids. The INTERACTIVE row folds (combo_id, key) ONLY — KEY-STABLE: inserting/hiding/
+ * reordering a row during a press/release must NOT shift the interactive/anim/Clay/selection identity of a
+ * fixed-key row (the same stability the menu's mix(scope,key) row id gives). The non-interactive LABEL cell
+ * folds (combo_id, row_idx) only — key-independent so the _test_row_label_bbox probe can reproduce it from
+ * the idx alone (row_idx is unique per frame, positional). fmix, NEVER additive base+index. */
+static inline uint32_t combo_row_id(uint32_t combo_id, uint32_t key) {
     uint32_t h = combo_id * 0x9E3779B1U;
     h = (h ^ ((key + 1U) * 0x85EBCA6BU));
     h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = (h ^ ((row_idx + 1U) * 0x27D4EB2FU));
     h = (h ^ (h >> 15)) * 0x165667B1U;
     h = h ^ (h >> 16);
     return (h != 0U) ? h : 1U;
@@ -51,6 +51,25 @@ static inline uint32_t combo_row_label_id(uint32_t combo_id, uint32_t row_idx) {
     h = (h ^ (h >> 15)) * 0x85EBCA6BU;
     h = h ^ (h >> 16);
     return (h != 0U) ? h : 1U;
+}
+
+/* DEBUG-only duplicate-key guard: row ids are key-stable (mix(combo_id,key)), so two selectables sharing a
+ * key alias the SAME interactive/anim/Clay/selection id. Scan the first-N rows this frame for a collision
+ * (fail-early, mirrors the menu's duplicate-sibling-key assert). Compiles out in NT_ASSERT_OFF builds. */
+static inline void combo_dup_key_check(nt_ui_context_t *ctx, uint32_t row_id) {
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+    const uint16_t n = ctx->pending_combo.dup_key_count;
+    for (uint16_t k = 0; k < n; ++k) {
+        NT_ASSERT(ctx->pending_combo.dup_key_ids[k] != row_id && "nt_ui_combo: duplicate selectable key (keys must be unique within one combo list)");
+    }
+    if (n < NT_UI_COMBO_DUP_KEY_WINDOW) {
+        ctx->pending_combo.dup_key_ids[n] = row_id;
+        ctx->pending_combo.dup_key_count = (uint16_t)(n + 1U);
+    }
+#else
+    (void)ctx;
+    (void)row_id;
+#endif
 }
 
 #ifdef NT_TEST_ACCESS
@@ -384,6 +403,9 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
     ctx->pending_combo.id = id;
     ctx->pending_combo.open = open;
     ctx->pending_combo.row_idx = 0U;
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+    ctx->pending_combo.dup_key_count = 0U; /* fresh per-list dup-key window */
+#endif
     ctx->pending_combo.fill_layer = fill_layer;
     ctx->pending_combo.label_layer = label_layer;
     ctx->pending_combo.scrolls = scrolls ? 1U : 0U;
@@ -454,8 +476,9 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
 static bool combo_emit_selectable(nt_ui_context_t *ctx, uint32_t key, const nt_atlas_region_ref_t *icon, const char *label, bool selected) {
     nt_ui_dropdown_style_t *style = (nt_ui_dropdown_style_t *)ctx->pending_combo.style;
     const uint16_t idx = ctx->pending_combo.row_idx++;
-    const uint32_t row_id = combo_row_id(ctx->pending_combo.id, key, idx);
+    const uint32_t row_id = combo_row_id(ctx->pending_combo.id, key); /* key-stable interactive identity */
     const uint32_t label_id = combo_row_label_id(ctx->pending_combo.id, idx);
+    combo_dup_key_check(ctx, row_id);
     const bool clicked = dropdown_declare_row(ctx, ctx->pending_combo.fill_layer, ctx->pending_combo.label_layer, row_id, label_id, label, icon, selected, style);
     if (clicked) {
         *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open (Model-D) */
@@ -481,8 +504,9 @@ bool nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selec
 
     nt_ui_dropdown_style_t *style = (nt_ui_dropdown_style_t *)ctx->pending_combo.style;
     const uint16_t idx = ctx->pending_combo.row_idx++;
-    const uint32_t row_id = combo_row_id(ctx->pending_combo.id, key, idx);
+    const uint32_t row_id = combo_row_id(ctx->pending_combo.id, key); /* key-stable interactive identity */
     const uint32_t label_id = combo_row_label_id(ctx->pending_combo.id, idx);
+    combo_dup_key_check(ctx, row_id);
 
     /* Shared per-state pick + anim + bg + open; the row element stays OPEN for the game's content. */
     const nt_ui_interaction_t in = combo_emit_row_decl(ctx, ctx->pending_combo.fill_layer, row_id, selected, style);
@@ -534,4 +558,5 @@ uint32_t nt_ui_dropdown_test_scroll_id(uint32_t dropdown_id) { return dropdown_s
 /* Combo rows key the label cell by (combo_id, row_idx); row_idx == idx for the in-order selectable feed. */
 nt_ui_bbox_t nt_ui_dropdown_test_row_label_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id, int idx) { return nt_ui_get_bbox(ctx, combo_row_label_id(dropdown_id, (uint32_t)idx)); }
 nt_ui_bbox_t nt_ui_dropdown_test_chevron_bbox(const nt_ui_context_t *ctx, uint32_t dropdown_id) { return nt_ui_get_bbox(ctx, dropdown_chevron_id(dropdown_id)); }
+uint32_t nt_ui_dropdown_test_combo_row_id(uint32_t combo_id, uint32_t key) { return combo_row_id(combo_id, key); }
 #endif

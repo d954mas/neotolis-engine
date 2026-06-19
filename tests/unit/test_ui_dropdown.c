@@ -552,6 +552,76 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
     TEST_ASSERT_TRUE_MESSAGE(gap <= 0.5F, "opt-out must leave no leftover GROW spacer (swatch fills to the trigger's right inner edge)");
 }
 
+/* One combo frame whose row SET changes: when `hide_first` the row keyed ROW_KEY(0) is skipped, so the
+ * remaining rows shift their positional index. A fixed-key row (ROW_KEY(2)) must keep the SAME interactive
+ * id regardless (the id no longer folds row_idx). Returns the live bbox of ROW_KEY(2)'s interactive row. */
+static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_first) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    bool open = true;
+    int selected = -1;
+    nt_mem_scratch_reset();
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
+    CLAY({.id = (Clay_ElementId){.id = 0xDD0009U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, &open)) {
+            for (int i = 0; i < 3; ++i) {
+                if (hide_first && i == 0) {
+                    continue; /* the row set changes: ROW_KEY(0) is gone this frame -> ROW_KEY(2) shifts position */
+                }
+                (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), s_short[i], selected == i);
+            }
+            nt_ui_combo_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    return nt_ui_get_bbox(s_fx.ctx, nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2)));
+}
+
+/* ---- FIX 3: a combo whose row set changes across frames keeps a STABLE interactive id for a fixed-key
+ *      row. The probe id mix(combo_id,key) is row_idx-independent, and the live row registers at exactly
+ *      that id whether or not an earlier sibling row is hidden (so press/release identity never shifts). ---- */
+static void test_dropdown_combo_row_id_stable_across_reorder(void) {
+    /* The probe is pure: the same key yields the same id no matter the positional index. */
+    const uint32_t id_a = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2));
+    const uint32_t id_b = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(id_a, id_b, "combo row id must be key-stable (no row_idx fold)");
+
+    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    /* Frame with all 3 rows, then a frame with row 0 hidden: ROW_KEY(2) goes from position 2 to position 1,
+     * but its interactive row must register at the SAME id (bbox found at the key-stable id both frames). */
+    combo_im_frame_skip_first(&f, false);
+    const nt_ui_bbox_t full = combo_im_frame_skip_first(&f, false);
+    const nt_ui_bbox_t shifted = combo_im_frame_skip_first(&f, true);
+    TEST_ASSERT_TRUE_MESSAGE(full.found, "fixed-key row must register at its key-stable id (full list)");
+    TEST_ASSERT_TRUE_MESSAGE(shifted.found, "fixed-key row keeps its key-stable id after an earlier sibling is hidden");
+}
+
+/* ---- FIX 3: two selectables sharing a key in one combo list alias the SAME id -> the debug duplicate-key
+ *      NT_ASSERT must fire (keys must be unique within a list). ---- */
+static void test_dropdown_combo_duplicate_key_asserts(void) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    bool open = true;
+    nt_pointer_t p = pointer_at(0.0F, 0.0F, false, false, false);
+
+    bool tripped = false;
+    nt_test_assert_armed = true;
+    if (setjmp(nt_test_assert_jmp) == 0) {
+        nt_mem_scratch_reset();
+        nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+        CLAY({.id = (Clay_ElementId){.id = 0xDD000AU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
+            if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, &open)) {
+                (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(0), "Alpha", false);
+                (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(0), "Dup", false); /* same key -> aliased id */
+                nt_ui_combo_end(s_fx.ctx);
+            }
+        }
+        nt_ui_end(s_fx.ctx);
+    } else {
+        tripped = true;
+    }
+    nt_test_assert_armed = false;
+    TEST_ASSERT_TRUE_MESSAGE(tripped, "two selectables with the same key in one combo must trip the duplicate-key NT_ASSERT");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dropdown_abi_size);
@@ -570,5 +640,7 @@ int main(void) {
     RUN_TEST(test_dropdown_iconed_and_plain_rows_share_one_column);
     RUN_TEST(test_dropdown_preview_trigger_draws_chevron);
     RUN_TEST(test_dropdown_preview_chevron_size_zero_opts_out);
+    RUN_TEST(test_dropdown_combo_row_id_stable_across_reorder);
+    RUN_TEST(test_dropdown_combo_duplicate_key_asserts);
     return UNITY_END();
 }
