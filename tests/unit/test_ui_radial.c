@@ -38,6 +38,7 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_radial.h"
+#include "ui/nt_ui_radial_image.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -379,6 +380,189 @@ static void test_radial_fill_emit_payload(void) {
     TEST_ASSERT_TRUE(approx(out[3], 1.0F));                   /* square bbox → aspect 1 */
 }
 
+/* ===== WGT-66-05: nt_ui_radial_image — textured reveal widget ===== */
+
+/* Radial-IMAGE material: a_radial @ loc 4 (extended layout) PLUS a u_reveal_mode
+ * vec4 param so the reveal-mode plumbing is observable via nt_material_get_info. */
+static nt_material_t make_radial_image_material(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "ri_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "ri_fs"});
+
+    char pack_name[64];
+    char vs_name[64];
+    char fs_name[64];
+    (void)snprintf(pack_name, sizeof pack_name, "ri_mat_pack_%u", s_vpack_counter);
+    (void)snprintf(vs_name, sizeof vs_name, "ri_test_vs_%u", s_vpack_counter);
+    (void)snprintf(fs_name, sizeof fs_name, "ri_test_fs_%u", s_vpack_counter);
+    s_vpack_counter++;
+
+    const nt_hash32_t pid = nt_hash32_str(pack_name);
+    const nt_hash64_t vs_rid = nt_hash64_str(vs_name);
+    const nt_hash64_t fs_rid = nt_hash64_str(fs_name);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
+    const nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
+    const nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
+    nt_resource_step();
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof desc);
+    desc.vs = vs_res;
+    desc.fs = fs_res;
+    desc.depth_test = false;
+    desc.depth_write = false;
+    desc.cull_mode = NT_CULL_NONE;
+    desc.color_mode = NT_COLOR_MODE_NONE;
+    desc.attr_map[0].stream_name = "a_radial";
+    desc.attr_map[0].location = 4;
+    desc.attr_map_count = 1;
+    desc.params[0].name = NT_UI_RADIAL_IMAGE_PARAM_MODE;
+    desc.params[0].value[0] = -1.0F; /* sentinel: widget must overwrite */
+    desc.param_count = 1;
+    desc.label = "radial_image_test_material";
+
+    const nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+    return mat;
+}
+
+/* Read back the u_reveal_mode param's .x from the material info (-1 if absent). */
+static float reveal_mode_param_x(nt_material_t mat) {
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    const uint32_t want = nt_hash32_str(NT_UI_RADIAL_IMAGE_PARAM_MODE).value;
+    for (uint8_t i = 0; i < info->param_count; i++) {
+        if (info->param_name_hashes[i] == want) {
+            return info->params[i][0];
+        }
+    }
+    return -1.0F;
+}
+
+/* Drive a textured radial_image through the walker against a real atlas region. */
+static void radial_image_walk(nt_atlas_region_ref_t *ref, nt_ui_radial_image_style_t *style, float fixed_w, float fixed_h) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("ri_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(fixed_w), CLAY_SIZING_FIXED(fixed_h)}}}) {
+        const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(fixed_w), CLAY_SIZING_FIXED(fixed_h)}}};
+        nt_ui_radial_image(s_fx.ctx, NULL, ref, 0.25F, 1.75F, style, &decl);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (a) region path: a textured radial_image emits via emit_region; the a_radial
+ * FLOAT4 is baked into every vertex of the region quad (4 verts on the white
+ * region). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_radial_image_region_bakes_payload(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    style.inner_radius_norm = 0.5F;
+
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    radial_image_walk(&ref, &style, 64.0F, 32.0F);
+
+    /* White region = 4 verts; every vert carries the same a_radial block. */
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    const float expect_aspect = 64.0F / 32.0F;
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 0.25F), "a_radial.x == angle_start");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 1.75F), "a_radial.y == angle_end");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], expect_aspect), "a_radial.w == aspect (w/h)");
+    }
+}
+
+/* (b) slice9 path: a slice9 override routes through emit_slice9; the a_radial
+ * block is duplicated across all 16 slice9 verts. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_radial_image_slice9_bakes_payload(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    style.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
+    style.slice9_lrtb[0] = 4;
+    style.slice9_lrtb[1] = 4;
+    style.slice9_lrtb[2] = 4;
+    style.slice9_lrtb[3] = 4;
+
+    /* Region 1 is a 16x16 untrimmed region (white 1x1 cannot fit slice9 borders). */
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.polygon_region_idx);
+    radial_image_walk(&ref, &style, 64.0F, 64.0F);
+
+    /* Slice9 = 16 verts; each carries the same a_radial block. */
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    for (uint32_t v = 0; v < 16U; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 0.25F), "slice9 a_radial.x == angle_start");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 1.75F), "slice9 a_radial.y == angle_end");
+    }
+}
+
+/* (c) reveal mode plumbed to the material as u_reveal_mode.x = mode. */
+static void test_radial_image_reveal_mode_plumbed(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    style.mode = (uint8_t)NT_UI_RADIAL_REVEAL_HIDE; /* == 2 */
+
+    /* Before the walk the sentinel is -1 (widget must overwrite). */
+    TEST_ASSERT_TRUE(approx(reveal_mode_param_x(style.material), -1.0F));
+
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    radial_image_walk(&ref, &style, 40.0F, 40.0F);
+
+    TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "u_reveal_mode.x == reveal mode");
+}
+
+/* (d) style ABI guard + defaults sane + all four reveal modes distinct. */
+static void test_radial_image_style_abi(void) {
+    TEST_ASSERT_EQUAL_UINT32(48U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
+    nt_ui_radial_image_style_t d = nt_ui_radial_image_style_defaults();
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.color_packed);
+    TEST_ASSERT_TRUE(approx(d.slice9_scale, 1.0F));
+    TEST_ASSERT_EQUAL_UINT32(0U, d.material.id);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_RADIAL_REVEAL_DESATURATE, d.mode);
+    /* Four distinct reveal modes. */
+    TEST_ASSERT_EQUAL_INT(0, (int)NT_UI_RADIAL_REVEAL_DESATURATE);
+    TEST_ASSERT_EQUAL_INT(1, (int)NT_UI_RADIAL_REVEAL_DIM);
+    TEST_ASSERT_EQUAL_INT(2, (int)NT_UI_RADIAL_REVEAL_HIDE);
+    TEST_ASSERT_EQUAL_INT(3, (int)NT_UI_RADIAL_REVEAL_TINT);
+}
+
+/* fill convenience drives the same textured emit; angle_end follows fill->angle. */
+static void test_radial_image_fill_emit(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+
+    const float start = 0.0F;
+    const float sweep = 2.0F * WGT_PI;
+    const float fill = 0.25F;
+
+    nt_pointer_t mouse = {0};
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("ri_fill_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {
+        const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}};
+        nt_ui_radial_image_fill(s_fx.ctx, NULL, &ref, start, fill, sweep, &style, &decl);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    float out[4] = {0};
+    nt_sprite_renderer_test_last_emit_radial(0, out, 4);
+    TEST_ASSERT_TRUE(approx(out[0], start));
+    TEST_ASSERT_TRUE(approx(out[1], start + (fill * sweep))); /* fill->angle */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_route_a_custom_binds_radial_material);
@@ -391,5 +575,10 @@ int main(void) {
     RUN_TEST(test_radial_style_abi);
     RUN_TEST(test_radial_emit_bakes_payload);
     RUN_TEST(test_radial_fill_emit_payload);
+    RUN_TEST(test_radial_image_region_bakes_payload);
+    RUN_TEST(test_radial_image_slice9_bakes_payload);
+    RUN_TEST(test_radial_image_reveal_mode_plumbed);
+    RUN_TEST(test_radial_image_style_abi);
+    RUN_TEST(test_radial_image_fill_emit);
     return UNITY_END();
 }

@@ -35,6 +35,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_radial_image.h" /* NT_UI_IMAGE_FLAG_RADIAL_IMAGE */
 #include "ui/nt_ui_state.h"
 
 // #region module_state
@@ -1512,6 +1513,14 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
             emit_radial(ctx, &local, rcol, world_mat4);
             return;
+        }
+        /* Textured radial (nt_ui_radial_image): the TEXTURED region/slice9 emit
+         * with the per-widget a_radial block baked across all verts (the reveal
+         * fs reads it). emit_image picks region vs slice9; both bake the current
+         * custom attrs (plan-01). The radial material (set above) carries the
+         * reveal fs + u_reveal_mode params. */
+        if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL_IMAGE)) {
+            nt_sprite_renderer_set_custom_attrs(ip->radial, (uint8_t)sizeof ip->radial);
         }
         emit_image(&local, world_mat4);
         return;

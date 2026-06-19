@@ -1,0 +1,113 @@
+#include "ui/nt_ui_radial_image.h"
+
+#include <math.h>
+#include <string.h>
+
+#include "core/nt_assert.h"
+#include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_image.h"
+#include "ui/nt_ui_internal.h"
+
+/* aspect (a_radial.w) corrects the angle test on a non-square bbox so 0 stays
+ * +X. FIXED w/h give an exact ratio; otherwise default to 1. Shared shape with
+ * nt_ui_radial's radial_aspect (kept local — the math is a trivial clamp+ratio,
+ * not the nontrivial fill->angle map which IS shared via nt_ui_radial_fill_to_end). */
+static float radial_image_aspect(const Clay_ElementDeclaration *decl) {
+    if (decl == NULL) {
+        return 1.0F;
+    }
+    const Clay_SizingAxis w = decl->layout.sizing.width;
+    const Clay_SizingAxis h = decl->layout.sizing.height;
+    if (w.type == CLAY__SIZING_TYPE_FIXED && h.type == CLAY__SIZING_TYPE_FIXED && w.size.minMax.min > 0.0F && h.size.minMax.min > 0.0F) {
+        return w.size.minMax.min / h.size.minMax.min;
+    }
+    return 1.0F;
+}
+
+/* Push the reveal-mode params onto the material so the fs composites the un-swept
+ * sector. Per-material in v1: many radials sharing one mode share one material and
+ * one batch (RESEARCH A4). u_reveal_mode = {mode, dim_factor, 0, 0}; u_reveal_tint
+ * = {r, g, b, strength} in 0..1. Skipped if the material lacks the param. */
+static void radial_image_set_reveal_params(const nt_ui_radial_image_style_t *style) {
+    const float mode_params[4] = {(float)style->mode, style->dim_factor, 0.0F, 0.0F};
+    if (nt_material_has_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_MODE)) {
+        nt_material_set_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_MODE, mode_params);
+    }
+    if (nt_material_has_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_TINT)) {
+        const Clay_Color t = nt_ui_unpack_abgr(style->tint_color_packed);
+        const float tint_params[4] = {t.r / 255.0F, t.g / 255.0F, t.b / 255.0F, style->tint_strength};
+        nt_material_set_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_TINT, tint_params);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float angle_end, const nt_ui_radial_image_style_t *style,
+                        const Clay_ElementDeclaration *decl) {
+    NT_ASSERT(ctx != NULL && "nt_ui_radial_image: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_radial_image: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(style != NULL && "nt_ui_radial_image: style must be non-NULL");
+    NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_radial_image: invalid atlas handle");
+    NT_ASSERT(style->material.id != 0 && "nt_ui_radial_image: style.material must be a valid radial-image material");
+    NT_ASSERT(style->mode <= (uint8_t)NT_UI_RADIAL_REVEAL_TINT && "nt_ui_radial_image: mode out of range");
+    NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
+    NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
+    NT_ASSERT(isfinite(style->dim_factor) && style->dim_factor >= 0.0F && "nt_ui_radial_image: dim_factor must be finite >= 0");
+    NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
+    NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
+    if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
+        NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
+    }
+    if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_radial_image: decl->id must be 0 (id auto-assigned by Clay)");
+        NT_ASSERT(decl->image.imageData == NULL && "nt_ui_radial_image: decl->image.imageData must be NULL (atlas+region controls image)");
+        NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_radial_image: decl->backgroundColor must be zero (style->color_packed controls)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_radial_image: decl->userData must be NULL (data param controls)");
+    }
+
+    /* No-art terminal: resolve lazily, memoize into *region; skip the emit on an
+     * unresolved/no-art ref (mirror nt_ui_fill.c). */
+    nt_atlas_resolve_ref(region);
+    if (region->region == NT_ATLAS_INVALID_REGION) {
+        return;
+    }
+
+    radial_image_set_reveal_params(style);
+
+    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
+    NT_ASSERT(p != NULL && "nt_ui_radial_image: scratch alloc failed");
+    *p = (nt_ui_image_payload_t){
+        .atlas = region->atlas,
+        .region_index = region->region,
+        .origin_x = style->origin_x,
+        .origin_y = style->origin_y,
+        .slice9_scale = style->slice9_scale,
+        .flip_bits = style->flip_bits,
+        .flags = (uint8_t)(style->flags | NT_UI_IMAGE_FLAG_RADIAL_IMAGE),
+        .material = style->material,
+        .radial = {angle_start, angle_end, style->inner_radius_norm, radial_image_aspect(decl)},
+    };
+    memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
+
+    /* Transparency lives in opacity (element_data), not tint alpha. */
+    const Clay_Color tint = nt_ui_unpack_tint(style->color_packed);
+
+    Clay_ElementDeclaration final;
+    if (decl != NULL) {
+        final = *decl;
+    } else {
+        final = (Clay_ElementDeclaration){.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)}}};
+    }
+    final.image = (Clay_ImageElementConfig){.imageData = p};
+    final.backgroundColor = tint;
+    final.userData = (void *)data;
+
+    CLAY(final) { nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL); }
+}
+
+void nt_ui_radial_image_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float fill, float sweep_total,
+                             const nt_ui_radial_image_style_t *style, const Clay_ElementDeclaration *decl) {
+    NT_ASSERT(isfinite(angle_start) && isfinite(fill) && isfinite(sweep_total) && "nt_ui_radial_image_fill: angle_start/fill/sweep_total must be finite");
+    const float angle_end = nt_ui_radial_fill_to_end(angle_start, fill, sweep_total);
+    nt_ui_radial_image(ctx, data, region, angle_start, angle_end, style, decl);
+}
