@@ -646,6 +646,7 @@ if(NOT EMSCRIPTEN)
     list(APPEND _nt_ui_test_names
         test_nt_ui_debug_hit_zones
         test_nt_ui_inspector
+        test_nt_ui_probe
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)
