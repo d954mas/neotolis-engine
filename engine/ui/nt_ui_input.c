@@ -1014,7 +1014,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
 
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(root);
-    nt_ui_widget_register(ctx, id, &NT_UI_INPUT_DEF, NULL);
+    nt_ui_widget_register(ctx, id, &NT_UI_INPUT_DEF, NULL, true);
 
     /* Content-clip child: pad_x-inset horizontally (scissors long text), full field height vertically.
      * The selection/text/caret attach to it and are vertically centered, so descenders are never shaved

@@ -150,7 +150,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
     }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(track_decl);
-    nt_ui_widget_register(ctx, id, &NT_UI_SLIDER_DEF, NULL);
+    nt_ui_widget_register(ctx, id, &NT_UI_SLIDER_DEF, NULL, true);
 
     /* Fill child (shared helper). The fill edge meets the THUMB CENTER, not fraction*track_w —
      * the thumb travels [thumb_w/2 .. track_w - thumb_w/2], a raw fraction under/overshoots it. */

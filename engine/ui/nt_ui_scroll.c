@@ -852,7 +852,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     nt_ui_clay_priv_configure_open_element(track_decl);
     int16_t reg_pad[4];
     scrollbar_hit_pad(axis, thickness, reg_pad); /* same pad the interact step used (inspector overlay parity) */
-    nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, reg_pad);
+    nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, reg_pad, true);
     nt_ui_clay_priv_close_element();
 
     /* Thumb piece is a separate floating image (no own id; the track owns the hit-test). */
@@ -943,7 +943,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     final.userData = (void *)data;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(final);
-    nt_ui_widget_register(ctx, id, &NT_UI_SCROLL_DEF, NULL);
+    nt_ui_widget_register(ctx, id, &NT_UI_SCROLL_DEF, NULL, true);
 
     /* Scrollbars float over the container edges (escape the clip, no layout cost). They
      * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. The bar draws on

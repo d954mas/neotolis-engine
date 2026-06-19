@@ -64,7 +64,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     nt_ui_clay_priv_configure_open_element(final);
 
     /* Clay auto-assigns the id; fetch post-open. */
-    nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_PANEL_DEF, NULL);
+    nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_PANEL_DEF, NULL, true);
 }
 
 void nt_ui_panel_end(nt_ui_context_t *ctx) {
@@ -93,7 +93,7 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(final);
 
-    nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_GROUP_DEF, NULL);
+    nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_GROUP_DEF, NULL, true);
 }
 
 void nt_ui_group_end(nt_ui_context_t *ctx) {
