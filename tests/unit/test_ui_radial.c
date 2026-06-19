@@ -17,6 +17,7 @@
  *
  * The widget math/ABI for nt_ui_radial / nt_ui_radial_image lands in 66-03/04. */
 
+#include <math.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -34,7 +35,9 @@
 #include "resource/nt_resource.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_radial.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -273,6 +276,109 @@ static void test_route_b_zero_material_uses_base(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
+/* ===== WGT-66-04: nt_ui_radial widget math + ABI + emit payload ===== */
+
+#define WGT_PI 3.14159265358979323846F
+
+static bool approx(float a, float b) { return fabsf(a - b) < 1e-5F; }
+
+/* (a) fill→angle: angle_end = angle_start + clamp(fill,0,1)*sweep_total. */
+static void test_radial_fill_to_angle(void) {
+    const float start = 0.5F;
+    const float sweep = 2.0F * WGT_PI;
+    TEST_ASSERT_TRUE(approx(nt_ui_radial_fill_to_end(start, 0.0F, sweep), start));
+    TEST_ASSERT_TRUE(approx(nt_ui_radial_fill_to_end(start, 0.5F, sweep), start + (0.5F * sweep)));
+    TEST_ASSERT_TRUE(approx(nt_ui_radial_fill_to_end(start, 1.0F, sweep), start + sweep));
+    /* Clamp below 0 → start; above 1 → start+sweep. */
+    TEST_ASSERT_TRUE(approx(nt_ui_radial_fill_to_end(start, -0.5F, sweep), start));
+    TEST_ASSERT_TRUE(approx(nt_ui_radial_fill_to_end(start, 1.5F, sweep), start + sweep));
+}
+
+/* (b) two-angle swap reverses the sweep direction (flip is API-layer, no shader
+ * branch): the start→end span and end→start span are complementary modulo TAU. */
+static void test_radial_two_angle_swap(void) {
+    const float a = 0.25F;
+    const float b = 1.75F;
+    const float tau = 2.0F * WGT_PI;
+    const float fwd = fmodf((b - a) + tau, tau);
+    const float rev = fmodf((a - b) + tau, tau);
+    TEST_ASSERT_TRUE(approx(fwd + rev, tau)); /* swapping start/end complements the span */
+    TEST_ASSERT_FALSE(approx(fwd, rev));      /* and it is genuinely a different sweep */
+}
+
+/* (d) style ABI guard present + defaults sane. */
+static void test_radial_style_abi(void) {
+    TEST_ASSERT_EQUAL_UINT32(16U, (uint32_t)sizeof(nt_ui_radial_style_t));
+    nt_ui_radial_style_t d = nt_ui_radial_style_defaults();
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.color_packed);
+    TEST_ASSERT_TRUE(approx(d.inner_radius_norm, 0.0F));
+    TEST_ASSERT_TRUE(approx(d.aa_softness, 1.0F));
+    TEST_ASSERT_EQUAL_UINT32(0U, d.material.id);
+}
+
+/* (c) the a_radial FLOAT4 payload is baked per-vertex when nt_ui_radial is driven
+ * through the walker: read back via the plan-01 test_last_emit_radial accessor. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_radial_emit_bakes_payload(void) {
+    nt_ui_radial_style_t style = nt_ui_radial_style_defaults();
+    style.material = make_radial_material();
+    style.inner_radius_norm = 0.5F;
+
+    const float start = 0.25F;
+    const float end = 1.75F;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(32)}}}) {
+        const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(32)}}};
+        nt_ui_radial(s_fx.ctx, NULL, start, end, &style, &decl);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* A bbox quad: 4 vertices, each carrying the same a_radial block. */
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    const float expect_aspect = 64.0F / 32.0F;
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], start), "a_radial.x == angle_start");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[1], end), "a_radial.y == angle_end");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], expect_aspect), "a_radial.w == aspect (w/h)");
+    }
+}
+
+/* fill convenience drives the same emit path: angle_end follows fill→angle. */
+static void test_radial_fill_emit_payload(void) {
+    nt_ui_radial_style_t style = nt_ui_radial_style_defaults();
+    style.material = make_radial_material();
+
+    const float start = 0.0F;
+    const float sweep = 2.0F * WGT_PI;
+    const float fill = 0.25F;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {
+        const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}};
+        nt_ui_radial_fill(s_fx.ctx, NULL, start, fill, sweep, &style, &decl);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    float out[4] = {0};
+    nt_sprite_renderer_test_last_emit_radial(0, out, 4);
+    TEST_ASSERT_TRUE(approx(out[0], start));
+    TEST_ASSERT_TRUE(approx(out[1], start + (fill * sweep))); /* fill→angle */
+    TEST_ASSERT_TRUE(approx(out[3], 1.0F));                   /* square bbox → aspect 1 */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_route_a_custom_binds_radial_material);
@@ -280,5 +386,10 @@ int main(void) {
     RUN_TEST(test_route_b_shared_material_batches);
     RUN_TEST(test_route_b_distinct_material_switches);
     RUN_TEST(test_route_b_zero_material_uses_base);
+    RUN_TEST(test_radial_fill_to_angle);
+    RUN_TEST(test_radial_two_angle_swap);
+    RUN_TEST(test_radial_style_abi);
+    RUN_TEST(test_radial_emit_bakes_payload);
+    RUN_TEST(test_radial_fill_emit_payload);
     return UNITY_END();
 }

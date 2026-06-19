@@ -1046,6 +1046,28 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : r->origin_y;
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
+
+/* nt_ui_radial: a flat SDF bbox-quad against the white pixel. The radial material
+ * (already bound by the dispatch) supplies the SDF fs + extended layout; the
+ * per-widget a_radial FLOAT4 is baked into every vertex via set_custom_attrs.
+ * The fs derives its [-1,1] local coord from gl_VertexID over the 4-corner quad
+ * (emitted TL/TR/BR/BL), so no extra per-vertex attribute is needed (the 16 B
+ * custom block is fully spent on a_radial). NO triangle fan — SDF does the shape
+ * per-pixel (D-66-11). */
+static void emit_radial(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    NT_ASSERT(p != NULL && "nt_ui RADIAL: imageData must point to nt_ui_image_payload_t");
+    const Clay_BoundingBox bb = c->boundingBox;
+    if (bb.width <= 0.0F || bb.height <= 0.0F) {
+        return;
+    }
+    nt_sprite_renderer_set_custom_attrs(p->radial, (uint8_t)sizeof p->radial);
+    /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
+     * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
+    const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
+}
 // #endregion
 
 // #region helper_emit_text
@@ -1483,6 +1505,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             } else {
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
+        }
+        if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL)) {
+            const Clay_Color rt = local.renderData.image.backgroundColor;
+            const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
+            const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
+            emit_radial(ctx, &local, rcol, world_mat4);
+            return;
         }
         emit_image(&local, world_mat4);
         return;

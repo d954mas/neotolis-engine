@@ -91,7 +91,7 @@ typedef struct {
     float origin_y;
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
-    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
+    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE | NT_UI_IMAGE_FLAG_RADIAL */
     uint8_t _reserved[2];
     /* Optional per-element sprite material override (radial reveal needs a custom
      * fs + extended layout). .id==0 = use the walker's bound base material. The
@@ -99,8 +99,13 @@ typedef struct {
      * elements sharing one material batch to a single draw (set_material no-ops
      * on same .id). */
     nt_material_t material;
+    /* Per-widget custom per-vertex block fed to nt_sprite_renderer_set_custom_attrs
+     * when NT_UI_IMAGE_FLAG_RADIAL is set: a_radial = {angle_start, angle_end,
+     * inner_radius_norm, aspect}. Baked into every vertex of the radial's bbox quad
+     * (D-66-09/D-66-08). Ignored for plain images. */
+    float radial[4];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 36, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 52, "nt_ui_image_payload_t stable ABI");
 
 /* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {
