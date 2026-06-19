@@ -21,18 +21,15 @@ static uint32_t s_char_ring[NT_INPUT_CHAR_RING];
 static uint32_t s_char_head; /* next write slot */
 static uint32_t s_char_tail; /* next read slot */
 
-/* ---- Player gate ---- */
+/* ---- nt_input automation surface (player gate + immediate inject buffer) ---- */
+
+/* The whole automation surface (player gate + inject pipeline) exists ONLY to serve the devapi
+   layer. NT_INPUT_AUTOMATION_ENABLED gates it so a build without the devapi input group carries
+   none of it ("tiny size — every byte counts"); OFF leaves the plain lean apply layer. */
+#if NT_INPUT_AUTOMATION_ENABLED
 
 /* Gate at the apply seam: covers native drain + web direct apply. */
 static bool s_player_enabled = true;
-
-/* ---- Synthetic immediate inject buffer (bounded BSS; drained whole every poll) ---- */
-
-/* The whole inject pipeline (buffer, nt_input_inject_*, per-poll drain) exists ONLY to serve the
-   devapi layer. NT_INPUT_INJECT_ENABLED is wired ON by CMake when devapi is in the build (or for
-   tests, which drive the L1 inject API directly) and OFF for a pure release-without-devapi build,
-   so production binaries carry none of this ("tiny size — every byte counts"). */
-#if NT_INPUT_INJECT_ENABLED
 
 typedef struct {
     uint8_t kind; /* nt_inject_kind_t */
@@ -68,7 +65,7 @@ static uint32_t s_inject_count;
 
 static void inject_drain(void);
 
-#endif /* NT_INPUT_INJECT_ENABLED */
+#endif /* NT_INPUT_AUTOMATION_ENABLED */
 
 /* ---- Internal pointer helpers ---- */
 
@@ -122,10 +119,10 @@ void nt_input_init(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
-#if NT_INPUT_INJECT_ENABLED
+#if NT_INPUT_AUTOMATION_ENABLED
     s_inject_count = 0;
-#endif
     s_player_enabled = true; /* clean default: real devices drive until a bot gates them */
+#endif
     nt_input_platform_init();
 }
 
@@ -161,7 +158,7 @@ void nt_input_poll(void) {
        which set edge flags immediately) */
     nt_input_platform_poll();
 
-#if NT_INPUT_INJECT_ENABLED
+#if NT_INPUT_AUTOMATION_ENABLED
     /* Apply the whole immediate inject buffer in the same post-clear window as the native char
        drain, so an injected rising edge survives to this frame's update. The devapi layer staged
        only the due events (it owns the schedule + sim-advance gating). */
@@ -179,10 +176,10 @@ void nt_input_shutdown(void) {
     memset(s_keys_released, 0, sizeof(s_keys_released));
     s_char_head = 0;
     s_char_tail = 0;
-#if NT_INPUT_INJECT_ENABLED
+#if NT_INPUT_AUTOMATION_ENABLED
     s_inject_count = 0;
-#endif
     s_player_enabled = true;
+#endif
 }
 
 /* ---- Key query functions ---- */
@@ -211,31 +208,6 @@ bool nt_input_key_is_released(nt_key_t key) {
 bool nt_input_any_key_pressed(void) {
     for (int i = 0; i < NT_KEY_COUNT; i++) {
         if (s_keys_pressed[i]) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* ---- string -> nt_key_t name table ---- */
-
-/* Indexed by nt_key_t; each string = the enum identifier minus the NT_KEY_ prefix. The
-   _Static_assert is the drift guard: adding an enum value without a name breaks the build. */
-static const char *const k_key_names[NT_KEY_COUNT] = {
-    "A",        "B",          "C",          "D",           "E",     "F",     "G",      "H",   "I",         "J",      "K",      "L",     "M",     "N",       "O",         "P",  "Q",  "R",
-    "S",        "T",          "U",          "V",           "W",     "X",     "Y",      "Z",   "0",         "1",      "2",      "3",     "4",     "5",       "6",         "7",  "8",  "9",
-    "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT", "SPACE", "ENTER", "ESCAPE", "TAB", "BACKSPACE", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT",    "RALT",      "F1", "F2", "F3",
-    "F4",       "F5",         "F6",         "F7",          "F8",    "F9",    "F10",    "F11", "F12",       "DELETE", "INSERT", "HOME",  "END",   "PAGE_UP", "PAGE_DOWN",
-};
-_Static_assert(sizeof(k_key_names) / sizeof(k_key_names[0]) == NT_KEY_COUNT, "key-name table must match nt_key_t");
-
-bool nt_input_key_from_name(const char *name, nt_key_t *out) {
-    if (name == NULL || out == NULL) {
-        return false;
-    }
-    for (int i = 0; i < NT_KEY_COUNT; i++) {
-        if (strcmp(name, k_key_names[i]) == 0) {
-            *out = (nt_key_t)i;
             return true;
         }
     }
@@ -311,9 +283,11 @@ static void nt_input_set_key_apply(nt_key_t key, bool down) {
 }
 
 void nt_input_set_key(nt_key_t key, bool down) {
+#if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
-        return;
+        return; /* gated: real device suppressed while a bot drives (inject bypasses via *_apply). */
     }
+#endif
     nt_input_set_key_apply(key, down);
 }
 
@@ -327,9 +301,11 @@ static void nt_input_buffer_char_apply(uint32_t cp) {
 }
 
 void nt_input_buffer_char(uint32_t cp) {
+#if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
     }
+#endif
     nt_input_buffer_char_apply(cp);
 }
 
@@ -355,9 +331,11 @@ static void nt_input_pointer_down_apply(uint32_t id, float x, float y, float pre
 }
 
 void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+#if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
     }
+#endif
     nt_input_pointer_down_apply(id, x, y, pressure, type, buttons_mask);
 }
 
@@ -387,21 +365,12 @@ static void nt_input_pointer_move_apply(uint32_t id, float x, float y, float pre
 }
 
 void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+#if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
     }
+#endif
     nt_input_pointer_move_apply(id, x, y, pressure, type, buttons_mask);
-}
-
-/* Apply a button mask on slot `id` at its CURRENT position — no move, no delta, no baked x/y. If the
-   slot does not exist (no prior pointer), create it at (0,0) as a mouse so the button still lands. */
-static void nt_input_pointer_buttons_apply(uint32_t id, uint8_t buttons_mask) {
-    nt_pointer_t *ptr = find_pointer_by_id(id);
-    if (ptr == NULL || ptr->deactivate_pending) {
-        nt_input_pointer_down_apply(id, 0.0F, 0.0F, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons_mask);
-        return;
-    }
-    apply_buttons_mask(ptr, buttons_mask);
 }
 
 static void nt_input_pointer_up_apply(uint32_t id) {
@@ -419,25 +388,29 @@ static void nt_input_pointer_up_apply(uint32_t id) {
 }
 
 void nt_input_pointer_up(uint32_t id) {
+#if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
     }
+#endif
     nt_input_pointer_up_apply(id);
 }
 
 static void nt_input_wheel_apply(float dx, float dy) {
     nt_pointer_t *mouse = find_mouse_pointer();
     if (mouse == NULL) {
-        return; /* No mouse slot yet — wheel before first move is lost */
+        return; /* No mouse slot at apply time -> documented no-op (caller passes x/y or moves first). */
     }
     mouse->wheel_dx += dx;
     mouse->wheel_dy += dy;
 }
 
 void nt_input_wheel(float dx, float dy) {
+#if NT_INPUT_AUTOMATION_ENABLED
     if (!s_player_enabled) {
         return;
     }
+#endif
     nt_input_wheel_apply(dx, dy);
 }
 
@@ -468,6 +441,10 @@ void nt_input_clear_all_pointers(void) {
     }
 }
 
+/* ---- nt_input automation surface (player gate API + synthetic input injection) ---- */
+
+#if NT_INPUT_AUTOMATION_ENABLED
+
 void nt_input_set_player_enabled(bool enabled) {
     /* ON->OFF edge: release held real input so no key/button sticks down (focus-lost reuse). */
     if (s_player_enabled && !enabled) {
@@ -477,9 +454,16 @@ void nt_input_set_player_enabled(bool enabled) {
     s_player_enabled = enabled;
 }
 
-/* ---- Synthetic input injection ---- */
-
-#if NT_INPUT_INJECT_ENABLED
+/* Apply a button mask on slot `id` at its CURRENT position — no move, no delta, no baked x/y. If the
+   slot does not exist (no prior pointer), create it at (0,0) as a mouse so the button still lands. */
+static void nt_input_pointer_buttons_apply(uint32_t id, uint8_t buttons_mask) {
+    nt_pointer_t *ptr = find_pointer_by_id(id);
+    if (ptr == NULL || ptr->deactivate_pending) {
+        nt_input_pointer_down_apply(id, 0.0F, 0.0F, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons_mask);
+        return;
+    }
+    apply_buttons_mask(ptr, buttons_mask);
+}
 
 /* Whole-or-nothing reserve: a command needing N entries either gets all N or none -- a partial
    stage would leave a stuck key-down or a drag with no release. Returns the first reserved
@@ -494,6 +478,9 @@ static nt_inject_event_t *inject_reserve(uint32_t n) {
 }
 
 bool nt_input_inject_key(nt_key_t key, bool down) {
+    if (key >= NT_KEY_COUNT) {
+        return false; /* L1 defense-in-depth: out-of-range key (L2 validates first; never asserts). */
+    }
     nt_inject_event_t *e = inject_reserve(1);
     if (e == NULL) {
         return false;
@@ -505,6 +492,14 @@ bool nt_input_inject_key(nt_key_t key, bool down) {
 }
 
 bool nt_input_inject_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
+    /* L1 defense-in-depth (L2 validates first; never asserts): reject a kind that is not a pointer
+       event, an unknown pointer type, or a mask with bits outside {1,2,4}. */
+    if (kind != NT_INJECT_POINTER_DOWN && kind != NT_INJECT_POINTER_MOVE && kind != NT_INJECT_POINTER_UP) {
+        return false;
+    }
+    if (kind != NT_INJECT_POINTER_UP && (type > (uint8_t)NT_POINTER_PEN || buttons_mask > 7U)) {
+        return false;
+    }
     nt_inject_event_t *e = inject_reserve(1);
     if (e == NULL) {
         return false;
@@ -603,4 +598,4 @@ static void inject_drain(void) {
     s_inject_count = 0;
 }
 
-#endif /* NT_INPUT_INJECT_ENABLED */
+#endif /* NT_INPUT_AUTOMATION_ENABLED */

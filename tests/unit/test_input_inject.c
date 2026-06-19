@@ -193,22 +193,19 @@ void test_overflow_rejects_whole(void) {
     TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_D, true));
 }
 
-/* ---- string -> nt_key_t ---- */
+/* ---- L1 defensive validation: inject rejects out-of-domain key/kind/type/mask (never asserts) ---- */
 
-void test_key_from_name(void) {
-    nt_key_t out = NT_KEY_COUNT;
-    TEST_ASSERT_TRUE(nt_input_key_from_name("A", &out));
-    TEST_ASSERT_EQUAL_INT(NT_KEY_A, out);
-    TEST_ASSERT_TRUE(nt_input_key_from_name("SPACE", &out));
-    TEST_ASSERT_EQUAL_INT(NT_KEY_SPACE, out);
-    TEST_ASSERT_TRUE(nt_input_key_from_name("ARROW_UP", &out));
-    TEST_ASSERT_EQUAL_INT(NT_KEY_ARROW_UP, out);
-    TEST_ASSERT_TRUE(nt_input_key_from_name("F1", &out));
-    TEST_ASSERT_EQUAL_INT(NT_KEY_F1, out);
-
-    nt_key_t untouched = NT_KEY_Z;
-    TEST_ASSERT_FALSE(nt_input_key_from_name("NOPE", &untouched));
-    TEST_ASSERT_EQUAL_INT(NT_KEY_Z, untouched); /* out left untouched on unknown */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_inject_rejects_invalid_args(void) {
+    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_COUNT, true));                                          /* key out of range */
+    TEST_ASSERT_FALSE(nt_input_inject_pointer(NT_INJECT_KEY, 0, 0, 0, 0, NT_POINTER_MOUSE, 0));          /* not a pointer kind */
+    TEST_ASSERT_FALSE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, 0, 0, 0, 0, 99, 0));               /* bad pointer type */
+    TEST_ASSERT_FALSE(nt_input_inject_pointer(NT_INJECT_POINTER_DOWN, 0, 0, 0, 0, NT_POINTER_MOUSE, 8)); /* mask bit > {1,2,4} */
+    /* Each reject must write NOTHING: the buffer still has full capacity, so CAP keys all stage. */
+    for (uint32_t i = 0; i < NT_INPUT_INJECT_QUEUE_MAX; i++) {
+        TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
+    }
+    TEST_ASSERT_FALSE(nt_input_inject_key(NT_KEY_A, true)); /* now full */
 }
 
 int main(void) {
@@ -226,6 +223,6 @@ int main(void) {
     RUN_TEST(test_inject_buttons_at_current_position);
     RUN_TEST(test_inject_reserved_id);
     RUN_TEST(test_overflow_rejects_whole);
-    RUN_TEST(test_key_from_name);
+    RUN_TEST(test_inject_rejects_invalid_args);
     return UNITY_END();
 }

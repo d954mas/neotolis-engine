@@ -8,26 +8,16 @@
 #include "input/nt_input_internal.h"
 
 /* input.* command group: a thin L2 veneer over the L1 inject API (nt_input_inject_*). Bot input is
-   range/type-checked -> bad_params; never assert on untrusted input (invariants assert, untrusted
-   input returns a structured error). Fire-and-forget: validate -> enqueue -> immediate ok (or an
-   immediate overflow/bad_params); NO defer (defer lives only in frame.wait/time.step).
-
-   This WHOLE TU is the optional input group: it compiles only when NT_DEVAPI_GROUP_INPUT is ON
-   (CMake adds the source under the option and defines NT_DEVAPI_GROUP_INPUT). The schedule, the
-   advance clock, the per-tick + reset lifecycle hooks, AND the command handlers all live behind the
-   group gate, so a group-OFF build carries zero input symbols in the devapi core/net ("set of
-   modules / use only what you need"). nt_devapi_register_input registers the commands AND the
-   lifecycle hooks, so the core never names an input symbol directly. */
+   range/type-checked -> bad_params; never asserts on untrusted input. Fire-and-forget: validate ->
+   enqueue -> immediate ok (no defer). The WHOLE TU is gated by NT_DEVAPI_GROUP_INPUT, so a group-OFF
+   build carries zero input symbols in the devapi core/net. */
 
 #ifdef NT_DEVAPI_GROUP_INPUT
 
 // #region devapi input schedule
-/* The frame schedule lives here, NOT in nt_input: nt_input is a pure apply layer (every poll it
-   drains its immediate inject buffer), and the devtool is the only side that legitimately knows
-   g_nt_app.frame. Each entry carries a sim-advance countdown + the same event payload the L1
-   immediate inject API takes. nt_devapi_input_update ticks this AFTER net_poll: on a real sim-advance
-   it releases every due entry into nt_input's immediate buffer (via nt_input_inject_*) and decrements
-   survivors; on a frozen tick it releases nothing. */
+/* The frame schedule lives here, NOT in nt_input (a pure apply layer): the devtool is the only side
+   that legitimately knows g_nt_app.frame. Each entry carries a sim-advance countdown + the L1 inject
+   payload; nt_devapi_input_update releases due entries on a real advance, decrements survivors. */
 
 /* NT_DEVAPI_INPUT_SCHED_MAX (the bounded BSS schedule cap, -D overridable) is defined in
    nt_devapi_internal.h so the unit tests can derive fill sizes from the real cap. */
@@ -255,6 +245,30 @@ void nt_devapi_input_reset(void) {
 }
 // #endregion
 
+/* string -> nt_key_t name table. L2 string-parse: L1 inject takes a nt_key_t directly, so the table
+   lives here, not in nt_input. Indexed by nt_key_t; each string = the enum identifier minus NT_KEY_.
+   The _Static_assert guards drift: adding an enum value without a name breaks the build. */
+static const char *const k_key_names[NT_KEY_COUNT] = {
+    "A",        "B",          "C",          "D",           "E",     "F",     "G",      "H",   "I",         "J",      "K",      "L",     "M",     "N",       "O",         "P",  "Q",  "R",
+    "S",        "T",          "U",          "V",           "W",     "X",     "Y",      "Z",   "0",         "1",      "2",      "3",     "4",     "5",       "6",         "7",  "8",  "9",
+    "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT", "SPACE", "ENTER", "ESCAPE", "TAB", "BACKSPACE", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT",    "RALT",      "F1", "F2", "F3",
+    "F4",       "F5",         "F6",         "F7",          "F8",    "F9",    "F10",    "F11", "F12",       "DELETE", "INSERT", "HOME",  "END",   "PAGE_UP", "PAGE_DOWN",
+};
+_Static_assert(sizeof(k_key_names) / sizeof(k_key_names[0]) == NT_KEY_COUNT, "key-name table must match nt_key_t");
+
+static bool nt_input_key_from_name(const char *name, nt_key_t *out) {
+    if (name == NULL || out == NULL) {
+        return false;
+    }
+    for (int i = 0; i < NT_KEY_COUNT; i++) {
+        if (strcmp(name, k_key_names[i]) == 0) {
+            *out = (nt_key_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
@@ -325,7 +339,7 @@ static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, n
    1e309 -> inf, or a finite value past FLT_MAX) would narrow to inf and poison hit-tests / deltas.
    Mirrors time.set_scale's double + float-narrow isfinite check; never asserts on bot input. */
 static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_devapi_error *err) {
-    if (!cJSON_IsNumber(nj)) {
+    if (nj == NULL || !cJSON_IsNumber(nj)) {
         set_bad_params(err, cmd);
         return false;
     }
@@ -544,6 +558,11 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     return true;
 }
 
+/* input.wheel{dx,dy,x?,y?}: scroll the mouse slot. With x/y -> a MOVE to (x,y) on the default mouse
+   slot THEN the wheel (whole-or-nothing, so the scroll always lands at (x,y) — self-contained).
+   Without x/y -> the wheel applies at the mouse slot's APPLY-TIME position (mirrors input.button);
+   with no mouse slot at apply time it is a documented no-op (pass x/y or input.move first). Never
+   creates a phantom (0,0) slot and never reads g_nt_input at submit. */
 static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     float dx = 0.0F;
@@ -556,7 +575,24 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
     if (dyj != NULL && !parse_finite_coord(dyj, "input.wheel: dy must be a finite number", &dy, err)) {
         return false;
     }
-    if (!sched_wheel(dx, dy, 0)) {
+    const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
+    const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
+    if (xj != NULL || yj != NULL) {
+        /* Positioned scroll: x AND y both required, both finite. */
+        float x;
+        float y;
+        if (!parse_finite_coord(xj, "input.wheel: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.wheel: y must be a finite number", &y, err)) {
+            return false;
+        }
+        /* Whole-or-nothing: MOVE + wheel reserve together so a near-full schedule can't land the
+           move and drop the scroll (a positioned scroll at the wrong place). */
+        if (!sched_can_reserve(2U)) {
+            set_bad_params(err, "input.wheel: inject schedule overflow");
+            return false;
+        }
+        sched_pointer(NT_INJECT_POINTER_MOVE, NT_INPUT_INJECT_POINTER_ID_BASE, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, 0, 0);
+        sched_wheel(dx, dy, 0);
+    } else if (!sched_wheel(dx, dy, 0)) {
         set_bad_params(err, "input.wheel: inject schedule overflow");
         return false;
     }
@@ -877,11 +913,11 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.wheel",
         .group = "input",
-        .summary = "inject a mouse-slot wheel delta (notches)",
-        .params_shape = "{dx?:number, dy?:number}",
+        .summary = "scroll the mouse slot (notches); with x/y scrolls AT (x,y), else at the slot's apply-time position (no slot -> no-op)",
+        .params_shape = "{dx?:number, dy?:number, x?:number, y?:number}",
         .result_shape = "{ok:bool}",
         .frame_behavior = "any",
-        .side_effects = "enqueues a synthetic wheel event",
+        .side_effects = "enqueues a synthetic wheel event (with x/y, a preceding move)",
     },
     {
         .method = "input.gesture",

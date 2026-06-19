@@ -464,6 +464,49 @@ static void test_sched_wheel_applies_on_advance(void) {
     TEST_ASSERT_TRUE(slot->wheel_dy >= 2.999F && slot->wheel_dy <= 3.001F);
 }
 
+/* input.wheel{dx,dy,x,y}: self-contained positioned scroll. The handler enqueues a MOVE to (x,y) on
+   the default mouse slot then the wheel, so after one advance the slot exists at (x,y) and carries
+   the wheel delta — no prior input.move needed. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_wheel_with_coords_scrolls_at_xy(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":2,\"x\":40,\"y\":50}}")));
+    advance();
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= 39.999F && slot->x <= 40.001F);
+    TEST_ASSERT_TRUE(slot->y >= 49.999F && slot->y <= 50.001F);
+    TEST_ASSERT_TRUE(slot->wheel_dy >= 1.999F && slot->wheel_dy <= 2.001F);
+}
+
+/* input.wheel without x/y applies at the mouse slot's APPLY-TIME position: a prior input.move(60,70)
+   places the slot, then a coordless wheel lands there (not a phantom (0,0)). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_wheel_no_coords_applies_at_moved_position(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":60,\"y\":70}}")));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":4}}")));
+    advance(); /* move creates the slot @ (60,70), wheel accumulates on it in stage order */
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= 59.999F && slot->x <= 60.001F);
+    TEST_ASSERT_TRUE(slot->y >= 69.999F && slot->y <= 70.001F);
+    TEST_ASSERT_TRUE(slot->wheel_dy >= 3.999F && slot->wheel_dy <= 4.001F);
+}
+
+/* Non-finite x/y on a positioned wheel -> bad_params (never stored as inf). */
+static void test_input_wheel_inf_x_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":1,\"x\":1e309,\"y\":0}}")); }
+
 /* input.click hold=0 (same-frame instant click): down@0 + up@0 both release on one advancing tick,
    so the button is pressed AND released this frame, ending not-down. Exercises the sched up@0 path. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -673,6 +716,9 @@ int main(void) {
     RUN_TEST(test_sched_gesture_ordered_across_frames);
     RUN_TEST(test_sched_move_applies_on_advance);
     RUN_TEST(test_sched_wheel_applies_on_advance);
+    RUN_TEST(test_sched_wheel_with_coords_scrolls_at_xy);
+    RUN_TEST(test_sched_wheel_no_coords_applies_at_moved_position);
+    RUN_TEST(test_input_wheel_inf_x_bad_params);
     RUN_TEST(test_sched_click_hold_zero_same_frame);
     RUN_TEST(test_input_button_right_presses_right);
     RUN_TEST(test_input_button_move_branch_updates_mask);

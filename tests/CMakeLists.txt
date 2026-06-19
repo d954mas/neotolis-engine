@@ -459,7 +459,7 @@ if(NOT EMSCRIPTEN)
 
         # L2 input group via submit(): discovery + forwarding to the L1 inject API + bad_params +
         # input.text UTF-8 decode + command.describe. Links nt_input_stub (the input.* handlers call
-        # the L1 inject symbols nt_input_inject_* / nt_input_set_player_enabled / nt_input_key_from_name).
+        # the L1 inject symbols nt_input_inject_* / nt_input_set_player_enabled).
         # Links nt_devapi_net for nt_devapi_update: the scheduling tests drive the real per-tick path
         # (net_poll + advance-gated schedule tick keyed off g_nt_app.frame), not just the schedule TU.
         if(NT_DEVAPI_GROUP_INPUT)

@@ -58,14 +58,14 @@ endif()
 
 # Input group: one flag gates EVERYTHING. nt_devapi_input.c is added (so the schedule, advance clock,
 # lifecycle hooks + command handlers compile) only here; NT_DEVAPI_GROUP_INPUT compile define is set only here (so
-# the registrar wires the group); nt_input_interface is linked + NT_INPUT_INJECT_ENABLED=1 set only
-# here (so the exe's nt_input carries the inject pipeline; PUBLIC so the value matches the consumer's
-# nt_input). OFF -> none of this; the core/net never reference an input symbol (the per-tick + reset
-# hooks are generic). The core dispatches the group purely through the registered lifecycle hooks.
+# the registrar wires the group); nt_input_interface is linked + NT_INPUT_AUTOMATION_ENABLED=1 set
+# only here (so the exe's nt_input carries the automation surface; PUBLIC so the value matches the
+# consumer's nt_input). OFF -> none of this; the core/net never reference an input symbol (the
+# per-tick + reset hooks are generic). The core dispatches the group purely through the lifecycle hooks.
 if(NT_DEVAPI_GROUP_INPUT)
     target_sources(nt_devapi PRIVATE nt_devapi_input.c)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_INPUT=1)
-    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_INJECT_ENABLED=1)
+    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
     target_link_libraries(nt_devapi PRIVATE nt_input_interface)
 endif()
 

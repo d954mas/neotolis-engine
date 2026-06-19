@@ -21,11 +21,9 @@ option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
-# Optional devapi input.* group (synthetic input injection). Defined here, BEFORE the engine
-# subdirs, so engine/input can key its inject pipeline on it (add_subdirectory(input) runs before
-# add_subdirectory(devapi)). ON gates the whole group: compile nt_devapi_input.c, register input.*,
-# wire the per-tick/reset hooks, link nt_input_interface + enable NT_INPUT_INJECT_ENABLED. OFF -> the
-# devapi core/net carry zero input symbols.
+# Optional devapi input.* group (synthetic input injection). Defined BEFORE the engine subdirs so
+# engine/input can derive its automation surface from it (input subdir configures before devapi). ON
+# gates the whole group; OFF -> the devapi core/net carry zero input symbols and nt_input is lean.
 option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
 # Remaining devapi command groups, same modular flag-gated model as the input group: ON gates the
 # group's TU compile + the NT_DEVAPI_GROUP_<X> compile define + its engine-dep links; OFF -> the devapi core/net
@@ -116,9 +114,9 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # Tests are built only at top level (see the matching guard below). NT_BUILDING_TESTS gates whether
-# the test targets are configured; it does NOT touch the input inject pipeline (the test targets
-# link nt_input_stub, which forces NT_INPUT_INJECT_ENABLED on by itself), so the production nt_input
-# stays lean under a top-level devapi-OFF build.
+# the test targets are configured; it does NOT touch the nt_input automation surface (the test
+# targets link nt_input_stub, which forces NT_INPUT_AUTOMATION_ENABLED on by itself), so the
+# production nt_input stays lean under a top-level devapi-OFF build.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(NT_BUILDING_TESTS ON)
 endif()

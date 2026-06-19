@@ -1,19 +1,13 @@
 # nt_input -- input polling with swappable backends
 
-# Synthetic-input inject pipeline (immediate buffer + nt_input_inject_* + per-poll drain) is gated
-# behind NT_INPUT_INJECT_ENABLED so a build without the devapi input group carries none of it. Its
-# sole production driver is the devapi input group, so the SHARED nt_input lib keys the pipeline on
-# NT_DEVAPI_ENABLED AND the input group being ON — a devapi-OFF build, OR a devapi build with the
-# input group switched off (NT_DEVAPI_GROUP_INPUT=OFF), gets a lean nt_input with no inject buffer or
-# symbols. The test targets drive the L1 inject API directly; they link the headless nt_input_stub,
-# which forces the pipeline ON unconditionally (below), so L1-inject tests build regardless.
-# NT_INPUT_INJECT_ENABLED is DERIVED here from the devapi input group and is never set by hand: it is
-# an nt_input-layer flag (this module must not carry a devapi name), so it stays distinct from the
-# NT_DEVAPI_GROUP_INPUT switch that drives it.
+# nt_input automation surface (player gate + inject pipeline) is gated behind
+# NT_INPUT_AUTOMATION_ENABLED so a build without the devapi input group is the lean apply layer (no
+# gate, no inject buffer or symbols). DERIVED from the devapi input group, never hand-set: it is an
+# nt_input-layer flag (this module must not carry a devapi name), distinct from NT_DEVAPI_GROUP_INPUT.
 if(NT_DEVAPI_ENABLED AND NT_DEVAPI_GROUP_INPUT)
-    set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=1)
+    set(NT_INPUT_AUTOMATION_DEFS NT_INPUT_AUTOMATION_ENABLED=1)
 else()
-    set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=0)
+    set(NT_INPUT_AUTOMATION_DEFS NT_INPUT_AUTOMATION_ENABLED=0)
 endif()
 
 # Header-only interface carries nt_input.h's include root; the exe selects the impl.
@@ -36,9 +30,9 @@ else()
 endif()
 
 target_link_libraries(nt_input PUBLIC nt_core nt_input_interface)
-# PUBLIC: nt_input.h's #if NT_INPUT_INJECT_ENABLED is evaluated in every consumer TU (the devapi
+# PUBLIC: nt_input.h's #if NT_INPUT_AUTOMATION_ENABLED is evaluated in every consumer TU (the devapi
 # layer + the input header itself), so the value must propagate to anything that links nt_input.
-target_compile_definitions(nt_input PUBLIC ${NT_INPUT_INJECT_DEFS})
+target_compile_definitions(nt_input PUBLIC ${NT_INPUT_AUTOMATION_DEFS})
 if(EMSCRIPTEN)
     # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping.
     # g_nt_window resolves at executable link time (exe picks a window impl).
@@ -57,5 +51,5 @@ nt_add_module(nt_input_stub LOG_DOMAIN "input_stub"
 
 target_link_libraries(nt_input_stub PUBLIC nt_core nt_input_interface)
 # The unit tests (test_input_inject / test_devapi_input) link the stub and drive the L1 inject API
-# directly, so the stub ALWAYS carries the inject pipeline regardless of NT_DEVAPI_ENABLED.
-target_compile_definitions(nt_input_stub PUBLIC NT_INPUT_INJECT_ENABLED=1)
+# directly, so the stub ALWAYS carries the automation surface regardless of NT_DEVAPI_ENABLED.
+target_compile_definitions(nt_input_stub PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)

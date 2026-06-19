@@ -164,15 +164,13 @@ bool nt_input_pop_char(uint32_t *out_codepoint);
    No-op on native/stub. Apply it when a field gains focus. */
 void nt_input_set_text_input_mode(nt_text_input_mode_t mode);
 
-/* ---- Synthetic input injection ---- */
+/* ---- nt_input automation surface (player gate + synthetic input injection) ---- */
 
-/* Capability gate for the whole inject pipeline (immediate buffer + nt_input_inject_* + per-poll
-   drain). The sole driver is the devapi layer, so CMake defines this =1 when devapi is in the build
-   and for the test targets (which exercise the L1 inject API directly); a pure release build leaves
-   it 0 so nt_input carries no inject buffer or symbols. Default 0 so a consumer that forgets to wire
-   it gets the lean build, not a link error. */
-#ifndef NT_INPUT_INJECT_ENABLED
-#define NT_INPUT_INJECT_ENABLED 0
+/* Capability gate for the whole nt_input automation surface (inject pipeline + player gate). The
+   sole driver is the devapi input group; CMake derives this from it. Default 0 -> the lean apply
+   layer (no gate, no inject buffer or symbols), so a consumer that forgets to wire it stays lean. */
+#ifndef NT_INPUT_AUTOMATION_ENABLED
+#define NT_INPUT_AUTOMATION_ENABLED 0
 #endif
 
 /* Event kinds applied through the immediate inject buffer (drained every poll). */
@@ -195,10 +193,6 @@ typedef enum {
    mouse (id=0) or a small browser pointerId. Explicit bot ids are used verbatim. */
 #define NT_INPUT_INJECT_POINTER_ID_BASE 0x10000000U
 
-/* Map a key name ("A","SPACE","ARROW_UP","F1" -- the enum identifier minus NT_KEY_) to its
-   nt_key_t. Returns false (out untouched) on unknown. */
-bool nt_input_key_from_name(const char *name, nt_key_t *out);
-
 /* ---- Mouse convenience helpers ---- */
 
 bool nt_input_mouse_is_down(nt_button_t button);
@@ -209,10 +203,8 @@ bool nt_input_mouse_is_released(nt_button_t button);
 
 void nt_input_init(void);
 
-/* Poll input state. Drains buffered events from nt_window_poll() and updates input state, then
-   applies the WHOLE immediate inject buffer (FIFO). Call once per frame AFTER nt_window_poll().
-   Pure apply: no frame, no schedule -- the devapi layer owns scheduling and releases due events
-   into the immediate buffer before this poll, so nt_input never includes app/nt_app.h. */
+/* Poll input state. Call once per frame AFTER nt_window_poll(). Pure apply: no frame, no schedule
+   (the devapi layer owns scheduling and releases due inject events before this poll). */
 void nt_input_poll(void);
 
 void nt_input_shutdown(void);
