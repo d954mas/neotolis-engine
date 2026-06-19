@@ -23,8 +23,10 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
+#include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_slider.h"
 #include "unity.h"
 
 #if NT_UI_DEBUG_TOOLS
@@ -102,6 +104,51 @@ static void test_enabled_default_true_unregistered(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
     TEST_ASSERT_TRUE(nt_ui_internal_widget_enabled(s_fx.ctx, nt_ui_id("never_registered")));
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A DISABLED input field forwards its real enabled state to the probe (must read false,
+ * not the hardcoded true the compose path used to register). */
+static void test_input_disabled_reports_enabled_false(void) {
+    nt_ui_input_style_t style = nt_ui_input_style_defaults();
+    style.text.font_id = 0;
+    style.placeholder.font_id = 0;
+    nt_ui_input_props_t props;
+    memset(&props, 0, sizeof props);
+    const Clay_ElementDeclaration field = {.layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}};
+    char buf[8] = "";
+
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    const uint32_t id = nt_ui_id("disabled_input");
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, sizeof buf, &props, &style, &field, false, NULL);
+    TEST_ASSERT_FALSE(nt_ui_internal_widget_enabled(s_fx.ctx, id));
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A DISABLED slider forwards its real enabled state to the probe (must read false). */
+static void test_slider_disabled_reports_enabled_false(void) {
+    const nt_atlas_region_ref_t art = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    nt_ui_slider_style_t style = nt_ui_slider_style_defaults();
+    for (int i = 0; i < 4; ++i) {
+        style.states[i].track = art;
+        style.states[i].fill = art;
+        style.states[i].thumb = art;
+    }
+    style.track_w = BBOX_W;
+    style.track_h = 20.0F;
+    style.thumb_w = 20.0F;
+    style.thumb_h = 24.0F;
+    style.state_speed = 0.0F;
+    style.value_speed = 0.0F;
+    const Clay_ElementDeclaration track = {.layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(20.0F)}}};
+    float value = 0.5F;
+
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    const uint32_t id = nt_ui_id("disabled_slider");
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, id, NULL, &value, 0.0F, 1.0F, 0.0F, &style, &track, false);
+    TEST_ASSERT_FALSE(nt_ui_internal_widget_enabled(s_fx.ctx, id));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -398,6 +445,8 @@ int main(void) {
     RUN_TEST(test_enabled_false_with_inspector_off);
     RUN_TEST(test_enabled_true);
     RUN_TEST(test_enabled_default_true_unregistered);
+    RUN_TEST(test_input_disabled_reports_enabled_false);
+    RUN_TEST(test_slider_disabled_reports_enabled_false);
     RUN_TEST(test_collect_flat_pod_nodes);
     RUN_TEST(test_collect_id_string_copied);
     RUN_TEST(test_collect_visible_clip_opacity);

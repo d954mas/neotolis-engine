@@ -118,7 +118,7 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
  * the OUTER track container (one clickable target). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, const nt_ui_slider_cell_t *cell,
-                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, float fraction, float eased_opacity, const Clay_ElementDeclaration *decl) {
+                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, float fraction, float eased_opacity, const Clay_ElementDeclaration *decl, bool enabled) {
     const uint8_t layer = (data != NULL) ? data->layer : 0U;
     void *user = (data != NULL) ? data->user_data : NULL;
 
@@ -150,7 +150,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
     }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(track_decl);
-    nt_ui_widget_register(ctx, id, &NT_UI_SLIDER_DEF, NULL, true);
+    nt_ui_widget_register(ctx, id, &NT_UI_SLIDER_DEF, NULL, enabled);
 
     /* Fill child (shared helper). The fill edge meets the THUMB CENTER, not fraction*track_w —
      * the thumb travels [thumb_w/2 .. track_w - thumb_w/2], a raw fraction under/overshoots it. */
@@ -293,7 +293,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     view->track_w = style->track_w;
     view->thumb_w = style->thumb_w;
 
-    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, eased_frac, a->opacity, decl);
+    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, eased_frac, a->opacity, decl, enabled);
 
     /* Changed when the drag moved the (snapped) fraction off the incoming game value. */
     *changed = enabled && (fabsf(frac - in_frac) > 1e-6F);
