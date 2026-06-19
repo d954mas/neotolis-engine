@@ -603,7 +603,23 @@ void nt_ui_menu_begin(nt_ui_context_t *ctx, uint32_t menu_id, nt_ui_menu_state_t
     ctx->pending_menu.open_frame = true;
     ctx->frame_record_count[0] = 0U;
 
-    const nt_ui_popup_anchor_t root_anchor = {.x = st->anchor_x, .y = st->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    /* Root opens BELOW the cursor point; BELOW only edge-flips on the VERTICAL axis, so a cursor near the
+     * RIGHT screen edge would grow the root panel off-screen horizontally (and drag the whole submenu stack
+     * with it). Clamp the anchor x left by the measured prev-frame panel width so the root (and every level
+     * anchored under it) stays on-screen — mirrors the OS context-menu shift. 1-frame IM lag on the width;
+     * the open point is unclamped the first frame, then settles. */
+    float root_x = st->anchor_x;
+    const nt_ui_bbox_t root_bb = nt_ui_get_bbox(ctx, menu_level_id(menu_id, 0U));
+    if (root_bb.found) {
+        const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+        if (root_x + root_bb.width > screen_w) {
+            root_x = screen_w - root_bb.width;
+        }
+        if (root_x < 0.0F) {
+            root_x = 0.0F;
+        }
+    }
+    const nt_ui_popup_anchor_t root_anchor = {.x = root_x, .y = st->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
     menu_open_popup(ctx, menu_id, 0U, fill_layer, style, &root_anchor);
     menu_open_panel(ctx, fill_layer, menu_id, 0U, style); /* LEFT open for the item children (closed in menu_end) */
 }

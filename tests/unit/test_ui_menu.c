@@ -973,8 +973,56 @@ static void test_menu_check_cell_when_selected(void) {
     TEST_ASSERT_FALSE_MESSAGE(unchecked.found, "an unselected row must NOT declare a checkmark cell");
 }
 
+/* One menu frame with a single File submenu (two child items), driven by the keyboard nav path. */
+static void menu_im_submenu_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    nt_pointer_t p = {.x = px, .y = py, .active = true};
+    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, &p, 1);
+    nt_ui_menu_begin(s_fx.ctx, MENU_A, st, style);
+    if (nt_ui_menu_submenu_begin(s_fx.ctx, KEY_FILE, "File")) {
+        (void)nt_ui_menu_item(s_fx.ctx, KEY_NEW, "ChildItemLong");
+        (void)nt_ui_menu_item(s_fx.ctx, KEY_QUIT, "ChildItem2");
+        nt_ui_menu_submenu_end(s_fx.ctx);
+    }
+    nt_ui_menu_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Bug 2 (right-edge flip): a menu opened hard against the RIGHT screen edge must (a) clamp the ROOT
+ *      panel back on-screen (BELOW only flips vertically, so a point-anchored root needs a horizontal
+ *      clamp), and (b) flip its submenu LEFT so the whole stack stays visible. ---- */
+static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 780.0F, 100.0F); /* open hard against the right edge (780 + min_width 160 > 800) */
+
+    nt_input_clear_all_keys();
+    menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F1: lay out root */
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F2: focus File */
+    menu_key(NT_KEY_ARROW_RIGHT);
+    menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F3: open File submenu */
+    nt_input_poll();
+    nt_input_clear_all_keys();
+    menu_im_submenu_frame(&st, &style, 0.0F, 0.0F); /* F4-5: settle so widths measure + side resolves */
+    menu_im_submenu_frame(&st, &style, 0.0F, 0.0F);
+
+    /* (a) ROOT panel clamped on-screen: its right edge must not exceed the viewport width. */
+    const nt_ui_bbox_t root = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 0U));
+    TEST_ASSERT_TRUE(root.found);
+    TEST_ASSERT_TRUE_MESSAGE(root.x + root.width <= VIEW_W + 0.5F, "root menu near the right edge must clamp on-screen (no right clip)");
+    TEST_ASSERT_TRUE_MESSAGE(root.x >= -0.5F, "clamped root must not push off the left edge");
+
+    /* (b) Submenu flipped LEFT and stays on-screen. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_POPUP_LEFT, nt_ui_popup_test_last_side(), "submenu near the right edge must flip LEFT");
+    const nt_ui_bbox_t sub = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 1U));
+    TEST_ASSERT_TRUE(sub.found);
+    TEST_ASSERT_TRUE_MESSAGE(sub.x + sub.width <= VIEW_W + 0.5F, "left-flipped submenu must stay on-screen (right edge within the viewport)");
+    TEST_ASSERT_TRUE_MESSAGE(sub.x >= -0.5F, "left-flipped submenu must not clip off the left edge");
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_menu_right_edge_root_clamp_and_submenu_flip);
     RUN_TEST(test_menu_abi_sizes);
     RUN_TEST(test_menu_defaults_valid);
     RUN_TEST(test_menu_point_in_tri);
