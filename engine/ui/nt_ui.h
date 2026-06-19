@@ -228,6 +228,10 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc);
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_ui_create_desc_t *desc);
 void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
+/* The ctx's 3D-mode flag (the create-desc use_raycast_input). Lets read-only consumers (e.g. the
+   probe / devapi) report a 2D-vs-3D projection tag without reaching into the opaque ctx. */
+bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx);
+
 /* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
  * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
  * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the

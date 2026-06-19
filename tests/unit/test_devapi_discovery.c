@@ -225,6 +225,13 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_FALSE(array_has_string(groups, "input"));
 #endif
 
+#ifdef NT_DEVAPI_GROUP_UI
+    TEST_ASSERT_TRUE(array_has_string(groups, "ui"));
+    expected += 1; /* ui */
+#else
+    TEST_ASSERT_FALSE(array_has_string(groups, "ui"));
+#endif
+
     /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
     /* groups are distinct: each group's commands collapse to one entry. */

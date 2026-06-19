@@ -89,15 +89,33 @@ set(NT_UI_SOURCES
     nt_ui_inspector.h
 )
 
+# Header-only interface carries nt_ui.h's include root (the engine/ root resolves font/input/
+# material/resource headers it pulls); a consumer that only needs the probe API decls (e.g. the
+# devapi ui group, or a stub-linked test) depends on this rather than the heavy nt_ui impl chain.
+nt_declare_interface(nt_ui)
+
 nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
 
 # Propagate to consumers via target_link_libraries — public headers use
-# #if NT_UI_DEBUG_TOOLS. Always defined 0/1 to be -Wundef-safe.
+# #if NT_UI_DEBUG_TOOLS. Always defined 0/1 to be -Wundef-safe. Attached to the interface too so
+# the probe decl-vs-stub switch is identical whether a consumer links the impl or just the headers.
 if(NT_UI_DEBUG_TOOLS)
     target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=1)
+    target_compile_definitions(nt_ui_interface INTERFACE NT_UI_DEBUG_TOOLS=1)
 else()
     target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=0)
+    target_compile_definitions(nt_ui_interface INTERFACE NT_UI_DEBUG_TOOLS=0)
 endif()
+target_link_libraries(nt_ui PUBLIC nt_ui_interface)
+
+# Stub impl for headless / stub-linked tests: the 3 probe symbols the devapi ui group resolves
+# (nt_ui_probe_collect / nt_ui_id / nt_ui_context_uses_raycast) without Clay or the renderer chain.
+# Always carries NT_UI_DEBUG_TOOLS=1 so the non-stub probe decl is in scope (mirrors nt_input_stub).
+nt_add_module(nt_ui_stub LOG_DOMAIN "ui_stub"
+    stub/nt_ui_stub.c
+)
+target_link_libraries(nt_ui_stub PUBLIC nt_core nt_ui_interface)
+target_compile_definitions(nt_ui_stub PUBLIC NT_UI_DEBUG_TOOLS=1)
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
 # public surface: nt_ui wraps lifecycle (context, walker, themes) but

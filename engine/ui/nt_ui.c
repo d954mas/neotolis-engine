@@ -300,6 +300,11 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx) {
 #endif
     memset(ctx, 0, sizeof(*ctx));
 }
+
+bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_context_uses_raycast: ctx must be non-NULL");
+    return ctx->use_raycast_input;
+}
 // #endregion
 
 // #region font_registry
