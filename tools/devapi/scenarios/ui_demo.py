@@ -8,12 +8,15 @@ gates cover registration + the in-process probe; this UAT covers the inject->set
 the bad_params paths over a real socket.
 
   1. ui.contexts lists the host-registered "hud" context.
-  2. ui.tree returns the {space, fb_width, fb_height, dpr, projection} metadata block + nodes, and the
-     known "hud_btn" node is present with framebuffer bounds.
+  2. ui.tree returns the {space, origin, y_axis, width, height, dpr, projection} metadata block + nodes,
+     explicitly declaring the Y-up (origin bottom-left) coordinate contract, and the known "hud_btn"
+     node is present with bounds in that space.
   3. ui.click("hud_btn") then stepping the sim toggles the widget: the host flips hud_btn's `enabled`
      on the synthetic click, observed via ui.element read-back (resolve -> inject -> settle -> react).
-  4. ui.click("does_not_exist") is caught as bad_params (unknown id -> no crash/assert).
-  5. a non-finite-coord / over-cap-frames ui.drag is rejected as bad_params (coords/frames hardened).
+  4. read hud_btn's Y-up bounds from ui.tree, compute the center, and ui.click({x,y}) with those Y-up
+     coords WITHOUT any bot-side flip — the click lands and the widget toggles, proving read==write.
+  5. ui.click("does_not_exist") is caught as bad_params (unknown id -> no crash/assert).
+  6. a non-finite-coord / over-cap-frames ui.drag is rejected as bad_params (coords/frames hardened).
 
 ui.* are fire-and-forget/immediate (D-14): the down/up enqueue and apply only as the sim advances, so
 the UAT runs in manual mode and step()s between the click and the read-back. Unlike the input UAT there
@@ -75,6 +78,23 @@ def _find_node(tree, node_id):
     return None
 
 
+def _hud_btn_enabled(client: DevApiClient):
+    """Read hud_btn's current `enabled` via ui.element; asserts it is a bool."""
+    v = client.ui_element("hud_btn").get("node", {}).get("enabled")
+    assert isinstance(v, bool), f"ui.element(hud_btn).enabled is {v!r}, expected a bool"
+    return v
+
+
+def _click_until_toggled(client: DevApiClient, do_click, before) -> bool:
+    """Re-issue do_click() + step until hud_btn.enabled flips off `before`; True if it toggled."""
+    for _ in range(20):  # generous budget: down@0/up@1 apply across advancing frames (1-frame IM lag)
+        do_click()           # enqueue down+up (fire-and-forget)
+        client.step(count=4)  # advance: release+apply the down, then the up; the click lands
+        if _hud_btn_enabled(client) != before:
+            return True
+    return False
+
+
 def run(client: DevApiClient) -> None:
     """Drive the ui read + write workflows; raise AssertionError on any contract violation."""
     # Manual mode so the fire-and-forget inject's down/up apply on explicit, deterministic step()s.
@@ -84,13 +104,16 @@ def run(client: DevApiClient) -> None:
     # 1. ui.contexts lists the host-registered "hud" context.
     contexts = client.ui_contexts().get("contexts")
     assert contexts == ["hud"], f"ui.contexts is {contexts!r}, expected ['hud']"
-    print("PASS[1/5] ui.contexts lists the registered 'hud' context.")
+    print("PASS[1/6] ui.contexts lists the registered 'hud' context.")
 
-    # 2. ui.tree returns the metadata block + nodes; hud_btn is present with framebuffer bounds.
+    # 2. ui.tree returns the metadata block declaring the Y-up contract; hud_btn is present with bounds.
     tree = client.ui_tree()
-    for key in ("space", "fb_width", "fb_height", "dpr", "projection", "nodes"):
+    for key in ("space", "origin", "y_axis", "width", "height", "dpr", "projection", "nodes"):
         assert key in tree, f"ui.tree missing top-level key {key!r} (got {sorted(tree)})"
-    assert tree["space"] == "framebuffer", f"ui.tree space is {tree['space']!r}, expected 'framebuffer'"
+    assert tree["space"] == "ui", f"ui.tree space is {tree['space']!r}, expected 'ui'"
+    assert tree["origin"] == "bottom-left", f"ui.tree origin is {tree['origin']!r}, expected 'bottom-left'"
+    assert tree["y_axis"] == "up", f"ui.tree y_axis is {tree['y_axis']!r}, expected 'up'"
+    assert tree["height"] > 0, f"ui.tree height is {tree['height']!r}, expected > 0"
     assert tree["projection"] in ("2d", "3d"), f"ui.tree projection is {tree['projection']!r}"
     btn = _find_node(tree, "hud_btn")
     assert btn is not None, "ui.tree did not contain the 'hud_btn' node"
@@ -98,31 +121,35 @@ def run(client: DevApiClient) -> None:
     for k in ("x", "y", "w", "h"):
         assert k in bounds, f"hud_btn bounds missing {k!r} (got {bounds})"
     assert bounds["w"] > 0 and bounds["h"] > 0, f"hud_btn has degenerate bounds {bounds}"
-    print(f"PASS[2/5] ui.tree returns the metadata block + hud_btn with framebuffer bounds {bounds}.")
+    print(f"PASS[2/6] ui.tree declares the Y-up (origin bottom-left) contract + hud_btn bounds {bounds}.")
 
     # 3. ui.click("hud_btn") -> step -> the host toggles hud_btn.enabled (resolve->inject->settle->react).
-    before = client.ui_element("hud_btn").get("node", {}).get("enabled")
-    assert isinstance(before, bool), f"ui.element(hud_btn).enabled is {before!r}, expected a bool"
-    toggled = False
-    for _ in range(20):  # generous budget: the down@0/up@1 apply across advancing frames (1-frame IM lag)
-        client.ui_click("hud_btn")  # enqueue down+up (fire-and-forget)
-        client.step(count=4)        # advance: release+apply the down, then the up; the click lands
-        now = client.ui_element("hud_btn").get("node", {}).get("enabled")
-        if now != before:
-            toggled = True
-            break
+    before = _hud_btn_enabled(client)
+    toggled = _click_until_toggled(client, lambda: client.ui_click("hud_btn"), before)
     assert toggled, f"ui.click('hud_btn') did not toggle enabled off {before!r} after stepping (resolve->inject->react failed)"
-    print("PASS[3/5] ui.click('hud_btn') resolved -> injected -> settled -> the widget toggled (read-back confirms).")
+    print("PASS[3/6] ui.click('hud_btn') resolved -> injected -> settled -> the widget toggled (read-back confirms).")
 
-    # 4. unknown id -> bad_params, never a crash/assert.
+    # 4. THE regression for the original bug: read hud_btn Y-up bounds from ui.tree, compute the center,
+    #    and ui.click({x,y}) with those Y-up coords directly (NO bot-side flip). read==write -> it lands.
+    btn = _find_node(client.ui_tree(), "hud_btn")
+    assert btn is not None, "ui.tree did not contain 'hud_btn' on the {x,y} regression read"
+    b = btn["bounds"]
+    cx = b["x"] + (b["w"] * 0.5)
+    cy = b["y"] + (b["h"] * 0.5)  # Y-up center, straight from the bounds — exactly what we feed back.
+    before = _hud_btn_enabled(client)
+    toggled = _click_until_toggled(client, lambda: client.ui_click({"x": cx, "y": cy}), before)
+    assert toggled, f"ui.click({{x:{cx}, y:{cy}}}) (Y-up bounds center) did not toggle hud_btn — read-bounds != click-{{x,y}} (the flip bug)"
+    print(f"PASS[4/6] ui.click({{x:{cx:.1f}, y:{cy:.1f}}}) from Y-up bounds toggled hud_btn (read-bounds -> click-{{x,y}} lands, no bot flip).")
+
+    # 5. unknown id -> bad_params, never a crash/assert.
     try:
         client.ui_click("does_not_exist")
         raise AssertionError("ui.click('does_not_exist') unexpectedly succeeded; expected bad_params")
     except DevApiResultError as exc:
         assert "bad_params" in str(exc), f"ui.click(unknown) raised {exc!r}, expected a bad_params error"
-    print("PASS[4/5] ui.click(unknown id) -> bad_params (no crash/assert on bot input).")
+    print("PASS[5/6] ui.click(unknown id) -> bad_params (no crash/assert on bot input).")
 
-    # 5. Non-finite coord and over-cap frames on ui.drag -> bad_params (untrusted coords/frames hardened).
+    # 6. Non-finite coord and over-cap frames on ui.drag -> bad_params (untrusted coords/frames hardened).
     # 1e39 is a VALID-JSON finite double that narrows to float +inf (FLT_MAX ~ 3.4e38) — it exercises
     # the host's parse_finite_coord isfinite() guard over the wire (a literal NaN/Infinity is not legal
     # JSON, so the realistic bot-supplied non-finite arrives as an overflowing finite number).
@@ -136,7 +163,7 @@ def run(client: DevApiClient) -> None:
         raise AssertionError("ui.drag with over-cap frames unexpectedly succeeded; expected bad_params")
     except DevApiResultError as exc:
         assert "bad_params" in str(exc), f"ui.drag(over-cap frames) raised {exc!r}, expected bad_params"
-    print("PASS[5/5] ui.drag(NaN coord / over-cap frames) -> bad_params (whole-or-nothing, never a partial inject).")
+    print("PASS[6/6] ui.drag(NaN coord / over-cap frames) -> bad_params (whole-or-nothing, never a partial inject).")
 
     # Restore a normal live state for the next session: back to RUN.
     client.set_mode("run")

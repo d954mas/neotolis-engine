@@ -40,6 +40,14 @@ bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx) {
     return false;
 }
 
+/* Headless: no Clay layout, so the coordinate-space dims are 0,0 (stub tests never inspect them). */
+void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *out_h) {
+    (void)ctx;
+    NT_ASSERT(out_w != NULL && out_h != NULL && "nt_ui_context_layout_size: out pointers must be non-NULL");
+    *out_w = 0.0F;
+    *out_h = 0.0F;
+}
+
 /* Headless: no layout, so every id resolves not-found (ui.click/drag -> bad_params in stub tests). */
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     (void)ctx;

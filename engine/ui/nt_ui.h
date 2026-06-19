@@ -232,6 +232,12 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
    probe / devapi) report a 2D-vs-3D projection tag without reaching into the opaque ctx. */
 bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx);
 
+/* The ctx's last-frame Clay LAYOUT dimensions — the SAME space the probe bounds + the Y-up flip use
+   (nt_ui_scale apps make these differ from raw g_nt_window.fb_*). Read-only consumers (probe / devapi
+   coord metadata) report THESE as the coordinate-space dims so read==write stays exact. Writes 0,0 on
+   a NULL clay (pre-first-frame). */
+void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *out_h);
+
 /* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
  * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
  * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the

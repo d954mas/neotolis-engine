@@ -124,18 +124,26 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
    dev tool, and keeps the handler off the stack / out of the hot path. */
 static nt_ui_probe_node_t s_probe_nodes[NT_UI_PROBE_MAX_NODES];
 
-/* The top-level coordinate-space metadata, sourced like core `view` (one canonical g_nt_window
-   read, no ad-hoc dims elsewhere). projection reflects the ctx's 2D-affine vs 3D-raycast mode. */
+/* The top-level coordinate-space metadata: EXPLICITLY declares the one ui.* contract — Y-up,
+   origin bottom-left — that BOTH the read (bounds) AND the write ({x,y}) speak. width/height are the
+   ctx LAYOUT dims (the SAME space the bounds + the resolve_target Y-flip use), NOT raw g_nt_window.fb_*
+   (those differ under nt_ui_scale, a latent mislabel). projection = 2D-affine vs 3D-raycast mode. */
 static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
-    devapi_add_string(result, "space", "framebuffer");
-    devapi_add_number(result, "fb_width", g_nt_window.fb_width);
-    devapi_add_number(result, "fb_height", g_nt_window.fb_height);
+    float lw = 0.0F;
+    float lh = 0.0F;
+    nt_ui_context_layout_size(ctx, &lw, &lh);
+    devapi_add_string(result, "space", "ui");
+    devapi_add_string(result, "origin", "bottom-left");
+    devapi_add_string(result, "y_axis", "up");
+    devapi_add_number(result, "width", (double)lw);
+    devapi_add_number(result, "height", (double)lh);
     devapi_add_number(result, "dpr", (double)g_nt_window.dpr);
     devapi_add_string(result, "projection", nt_ui_context_uses_raycast(ctx) ? "3d" : "2d");
 }
 
-/* Serialize one probe node into a fresh JSON object. bounds = {x,y,w,h} framebuffer px (Y-up, the
-   L1 convention — any top-left flip is the WRITE-side concern, not this read). */
+/* Serialize one probe node into a fresh JSON object. bounds = {x,y,w,h} in the declared ui space
+   (Y-up, origin bottom-left). read==write: a bot may feed these bounds straight into ui.click({x,y})
+   with no flip — the one Y-up->device flip lives in resolve_target. */
 static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
     cJSON *obj = cJSON_CreateObject();
     NT_ASSERT(obj != NULL); /* OOM traps fail-early (matches devapi_add_*). */
@@ -235,11 +243,19 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 #endif
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
 
-/* Resolve a target field to a framebuffer-pixel center: EITHER a string id (nt_ui_id -> nt_ui_get_bbox,
-   miss/empty -> bad_params, never assert) OR an {x,y} object (raw coords, isfinite-checked). The bbox
-   center is in Clay layout space (Y-down, top-left) — the SAME space the real pointer feeds nt_ui_begin,
-   so it goes to the inject path as-is with no Y-flip (NOT the GL-Y-up probe convention). `key` names
-   the field ("id"/"from"/"to") for the error messages. */
+/* Resolve a target field to a DEVICE/Clay-space (Y-down, top-left) pixel center for the inject path:
+   EITHER a string id (nt_ui_id -> nt_ui_get_bbox, miss/empty -> bad_params, never assert) OR an {x,y}
+   object (isfinite-checked). The user-facing ui.* contract is Y-up (origin bottom-left), declared in
+   ui.tree/element metadata; the ONE documented flip from that Y-up space to the device Y-down the
+   pointer needs lives HERE.
+     - {x,y}: interpreted as Y-up in the declared space -> flipped (out_y = layout_h - in_y) using the
+       SAME layout height the metadata + probe bounds use, so read(bounds)==write({x,y}) is exact.
+       Assumes layout==device (unscaled ctx, e.g. the hud); for an nt_ui_scale app the device<->layout
+       mapping is app-owned and NOT inverted here — use the string-id form (resolves through the live
+       ctx) for scaled UIs. Documented limitation, not a silent bug.
+     - string id: nt_ui_get_bbox already returns Clay/device Y-down; it never exposes Y-up to the user,
+       so it goes through with NO flip.
+   `key` names the field ("id"/"from"/"to") for the error messages. */
 static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t *ctx, float *out_x, float *out_y, nt_devapi_error *err) {
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
     if (cJSON_IsString(jt)) {
@@ -260,9 +276,15 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
     if (cJSON_IsObject(jt)) {
         const cJSON *jx = cJSON_GetObjectItemCaseSensitive(jt, "x");
         const cJSON *jy = cJSON_GetObjectItemCaseSensitive(jt, "y");
-        if (!parse_finite_coord(jx, "ui: target x must be a finite number", out_x, err) || !parse_finite_coord(jy, "ui: target y must be a finite number", out_y, err)) {
+        float in_y = 0.0F;
+        if (!parse_finite_coord(jx, "ui: target x must be a finite number", out_x, err) || !parse_finite_coord(jy, "ui: target y must be a finite number", &in_y, err)) {
             return false;
         }
+        /* The sole, documented Y-up -> device Y-down flip; same layout height as the probe bounds. */
+        float lw = 0.0F;
+        float lh = 0.0F;
+        nt_ui_context_layout_size(ctx, &lw, &lh);
+        *out_y = lh - in_y;
         return true;
     }
     set_bad_params(err, "ui: target must be a string id or an {x,y} object");
@@ -393,18 +415,21 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.tree",
         .group = "ui",
-        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,fb_width,fb_height,dpr,projection} block",
+        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,origin,y_axis,width,height,dpr,projection} block; bounds are Y-up (origin "
+                   "bottom-left), same space ui.click({x,y}) takes",
         .params_shape = "{ctx?:string}",
-        .result_shape = "{space:string,fb_width:number,fb_height:number,dpr:number,projection:string,nodes:[{id,parent,role,id_string,text,label,child_count,visible,enabled,bounds}]}",
+        .result_shape =
+            "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,nodes:[{id,parent,role,id_string,text,label,child_count,visible,enabled,bounds}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
     {
         .method = "ui.element",
         .group = "ui",
-        .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params)",
+        .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params); bounds Y-up (origin bottom-left)",
         .params_shape = "{id:string, ctx?:string}",
-        .result_shape = "{space:string,fb_width:number,fb_height:number,dpr:number,projection:string,node:{id,parent,role,id_string,text,label,child_count,visible,enabled,bounds}}",
+        .result_shape =
+            "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,node:{id,parent,role,id_string,text,label,child_count,visible,enabled,bounds}}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
@@ -420,7 +445,8 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.click",
         .group = "ui",
-        .summary = "resolve a developer string id (or {x,y}) -> bbox center px -> synthetic pointer down@0 + up@hold (fire-and-forget; advance a frame to apply)",
+        .summary = "resolve a developer string id (or Y-up {x,y}, origin bottom-left — same space as ui.tree bounds) -> center -> synthetic pointer down@0 + up@hold (fire-and-forget; advance a frame "
+                   "to apply)",
         .params_shape = "{id:string|{x,y}, hold?:number, ctx?:string}",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
@@ -429,7 +455,7 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.scroll",
         .group = "ui",
-        .summary = "resolve id (or {x,y}) -> element center -> synthetic move + wheel(dx,dy) notches (fire-and-forget)",
+        .summary = "resolve id (or Y-up {x,y}, origin bottom-left) -> element center -> synthetic move + wheel(dx,dy) notches (fire-and-forget)",
         .params_shape = "{id:string|{x,y}, dx?:number, dy?:number, ctx?:string}",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
@@ -438,7 +464,7 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.drag",
         .group = "ui",
-        .summary = "resolve from/to (id|{x,y}) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; fire-and-forget)",
+        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; fire-and-forget)",
         .params_shape = "{from:string|{x,y}, to:string|{x,y}, frames?:number, ctx?:string}",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",

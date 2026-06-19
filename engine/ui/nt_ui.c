@@ -305,6 +305,19 @@ bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_context_uses_raycast: ctx must be non-NULL");
     return ctx->use_raycast_input;
 }
+
+void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *out_h) {
+    NT_ASSERT(ctx != NULL && "nt_ui_context_layout_size: ctx must be non-NULL");
+    NT_ASSERT(out_w != NULL && out_h != NULL && "nt_ui_context_layout_size: out pointers must be non-NULL");
+    /* Same clay layout dims the probe Y-up flip uses (probe_fill_bounds_2d: vh - by - bh). */
+    if (ctx->clay == NULL) {
+        *out_w = 0.0F;
+        *out_h = 0.0F;
+        return;
+    }
+    *out_w = nt_ui_clay_priv_layout_width(ctx->clay);
+    *out_h = nt_ui_clay_priv_layout_height(ctx->clay);
+}
 // #endregion
 
 // #region font_registry

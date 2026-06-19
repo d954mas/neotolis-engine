@@ -343,9 +343,11 @@ class DevApiClient:
     def ui_tree(self, ctx: Optional[str] = None) -> Dict[str, Any]:
         """IMMEDIATE read of the last completed frame's UI tree.
 
-        Returns the result dict: a {space, fb_width, fb_height, dpr, projection} metadata block
-        plus `nodes` (ALL nodes incl. invisible/disabled — the bot filters). `ctx` selects a
-        registered context by name (omitted -> the host's sole/first).
+        Returns the result dict: a {space, origin, y_axis, width, height, dpr, projection} metadata
+        block plus `nodes` (ALL nodes incl. invisible/disabled — the bot filters). Bounds are Y-up
+        (origin bottom-left) — the SAME space ui_click/drag/scroll {x,y} take, so a bot may feed
+        bounds straight back with no flip. `ctx` selects a registered context by name (omitted ->
+        the host's sole/first).
         """
         params: Dict[str, Any] = {}
         if ctx is not None:
@@ -368,9 +370,10 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Resolve `id` (a string id, or an {"x":..,"y":..} dict) -> bbox center -> synthetic click.
 
-        Fire-and-forget: the down+up enqueue, applied only once the sim advances — pair with
-        step()/wait_frames() before reading the widget back. `hold` is the down->up frame gap
-        (omitted -> host default of 1).
+        {x,y} are Y-up (origin bottom-left), the SAME space as ui_tree bounds — feed a node's bounds
+        center straight in with no flip. Fire-and-forget: the down+up enqueue, applied only once the
+        sim advances — pair with step()/wait_frames() before reading the widget back. `hold` is the
+        down->up frame gap (omitted -> host default of 1).
         """
         params: Dict[str, Any] = {"id": id}
         if hold is not None:
@@ -386,7 +389,7 @@ class DevApiClient:
         dy: float = 0.0,
         ctx: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Resolve `id` (string id or {x,y}) -> element center -> synthetic wheel(dx,dy) notches."""
+        """Resolve `id` (string id or Y-up {x,y}, origin bottom-left) -> element center -> synthetic wheel(dx,dy) notches."""
         params: Dict[str, Any] = {"id": id, "dx": dx, "dy": dy}
         if ctx is not None:
             params["ctx"] = ctx
@@ -399,10 +402,11 @@ class DevApiClient:
         frames: Optional[int] = None,
         ctx: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Synthetic drag from `from_` to `to` (each a string id or {x,y}).
+        """Synthetic drag from `from_` to `to` (each a string id or Y-up {x,y}, origin bottom-left).
 
-        `frames` interpolated move points are emitted between down@from and up@to (omitted ->
-        host default). Fire-and-forget — advance the sim to apply.
+        {x,y} are Y-up — the SAME space as ui_tree bounds (no bot-side flip). `frames` interpolated
+        move points are emitted between down@from and up@to (omitted -> host default).
+        Fire-and-forget — advance the sim to apply.
         """
         params: Dict[str, Any] = {"from": from_, "to": to}
         if frames is not None:
