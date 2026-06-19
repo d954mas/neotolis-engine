@@ -1361,14 +1361,18 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 }
 #endif
 
-/* Drain pending text, lazy-rebind sprite if a prior text/scissor/custom closed it. */
-static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) {
+/* Drain pending text, then bind the sprite material this command wants.
+ * desired = ctx->sprite_material for plain content, or a per-element override
+ * (radial reveal). set_material no-ops on same .id, so consecutive elements
+ * sharing one material batch to a single draw (D-66-07); only the base<->override
+ * boundary — or a prior text/scissor/custom barrier (dirty) — flushes. */
+static inline void prep_sprite_dispatch_mat(nt_material_t desired, bool *sprite_pipeline_dirty) {
     nt_text_renderer_flush();
-    if (*sprite_pipeline_dirty) {
-        nt_sprite_renderer_set_material(ctx->sprite_material);
-        *sprite_pipeline_dirty = false;
-    }
+    nt_sprite_renderer_set_material(desired);
+    *sprite_pipeline_dirty = false;
 }
+
+static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) { prep_sprite_dispatch_mat(ctx->sprite_material, sprite_pipeline_dirty); }
 
 static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
     out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
@@ -1462,7 +1466,12 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         counters->image_command_count++;
-        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
+        /* Per-element material override (radial reveal): .id==0 = base material.
+         * Routed through prep so a shared override batches and the base<->override
+         * boundary flushes exactly once (Route B, INT-66-06 / D-66-07). */
+        const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+        const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
+        prep_sprite_dispatch_mat(img_mat, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
         if (ws->accum_opacity < 1.0F) {
             Clay_Color tint = local.renderData.image.backgroundColor;

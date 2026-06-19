@@ -188,9 +188,97 @@ static void test_route_a_custom_does_not_batch(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)n, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
+/* ---- Route B: per-element material on the walker IMAGE path ---- */
+
+/* File-scope so payloads/layer data outlive the walk. */
+static nt_ui_image_payload_t s_img_payloads[16];
+static const nt_ui_element_data_t k_layer0 = {.layer = 0U};
+
+static void make_image(int idx, float x, nt_resource_t atlas, uint32_t region_index, nt_material_t material) {
+    Clay_RenderCommand *c = &s_test_cmds[idx];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    c->zIndex = 0;
+    c->boundingBox = (Clay_BoundingBox){.x = x, .y = 0, .width = 32, .height = 32};
+    c->renderData.image.backgroundColor = (Clay_Color){0}; /* untinted */
+    s_img_payloads[idx] = (nt_ui_image_payload_t){.atlas = atlas, .region_index = region_index, .slice9_scale = 1.0F, .material = material};
+    c->renderData.image.imageData = &s_img_payloads[idx];
+    c->userData = (void *)&k_layer0;
+}
+
+/* N IMAGE radials sharing ONE material flush+draw together: only the
+ * base<->radial boundary flushes (set_material no-ops on same .id). The
+ * draw-call count is CONSTANT in N (D-66-07), unlike Route A's per-radial flush. */
+static void test_route_b_shared_material_batches(void) {
+    const nt_material_t radial = make_radial_material();
+    const uint32_t region = s_fx.atlas.white_region_idx;
+
+    /* Two radials sharing one material. */
+    make_image(0, 0.0F, s_fx.atlas.handle, region, radial);
+    make_image(1, 40.0F, s_fx.atlas.handle, region, radial);
+    inject_frozen_cmds(2);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    const uint32_t calls_2 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
+
+    /* Five radials sharing the SAME material. If batching holds, the draw-call
+     * count does NOT grow with N. */
+    for (int i = 0; i < 5; i++) {
+        make_image(i, (float)(i * 40), s_fx.atlas.handle, region, radial);
+    }
+    inject_frozen_cmds(5);
+    nt_ui_walk(s_fx.ctx, &target);
+    const uint32_t calls_5 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
+
+    TEST_ASSERT_EQUAL_UINT32(calls_2, calls_5); /* constant in N — batched */
+    TEST_ASSERT_EQUAL_UINT32(1U, calls_5);      /* one radial material = one draw */
+}
+
+/* A single radial IMAGE with a material distinct from the bound base binds
+ * correctly: base (RECT) + radial (IMAGE) = a material switch (2 draws). */
+static void test_route_b_distinct_material_switches(void) {
+    const nt_material_t radial = make_radial_material();
+
+    /* RECT on base material, then a radial IMAGE with a distinct material. */
+    Clay_RenderCommand *r = &s_test_cmds[0];
+    r->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    r->zIndex = 0;
+    r->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    r->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    r->userData = (void *)&k_layer0;
+    make_image(1, 40.0F, s_fx.atlas.handle, s_fx.atlas.white_region_idx, radial);
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* base RECT flushes when the radial material binds → 2 draws. */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+}
+
+/* A .id==0 payload material uses the base — a plain IMAGE batches with a RECT
+ * on the same base material (1 draw), proving the sentinel path. */
+static void test_route_b_zero_material_uses_base(void) {
+    Clay_RenderCommand *r = &s_test_cmds[0];
+    r->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    r->zIndex = 0;
+    r->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    r->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    r->userData = (void *)&k_layer0;
+    make_image(1, 40.0F, s_fx.atlas.handle, s_fx.atlas.white_region_idx, NT_MATERIAL_INVALID);
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_route_a_custom_binds_radial_material);
     RUN_TEST(test_route_a_custom_does_not_batch);
+    RUN_TEST(test_route_b_shared_material_batches);
+    RUN_TEST(test_route_b_distinct_material_switches);
+    RUN_TEST(test_route_b_zero_material_uses_base);
     return UNITY_END();
 }

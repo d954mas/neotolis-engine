@@ -93,8 +93,14 @@ typedef struct {
     uint8_t flip_bits;
     uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
     uint8_t _reserved[2];
+    /* Optional per-element sprite material override (radial reveal needs a custom
+     * fs + extended layout). .id==0 = use the walker's bound base material. The
+     * walker set_material's it only when it differs from the bound one; many
+     * elements sharing one material batch to a single draw (set_material no-ops
+     * on same .id). */
+    nt_material_t material;
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 32, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 36, "nt_ui_image_payload_t stable ABI");
 
 /* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {
