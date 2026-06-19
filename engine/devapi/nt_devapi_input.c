@@ -13,13 +13,13 @@
    immediate overflow/bad_params); NO defer (defer lives only in frame.wait/time.step).
 
    This WHOLE TU is the optional input group: it compiles only when NT_DEVAPI_GROUP_INPUT is ON
-   (CMake adds the source under the option and defines NT_DEVAPI_REGISTER_input). The schedule, the
+   (CMake adds the source under the option and defines NT_DEVAPI_GROUP_INPUT). The schedule, the
    advance clock, the per-tick + reset lifecycle hooks, AND the command handlers all live behind the
    group gate, so a group-OFF build carries zero input symbols in the devapi core/net ("set of
    modules / use only what you need"). nt_devapi_register_input registers the commands AND the
    lifecycle hooks, so the core never names an input symbol directly. */
 
-#ifdef NT_DEVAPI_REGISTER_input
+#ifdef NT_DEVAPI_GROUP_INPUT
 
 // #region devapi input schedule
 /* The frame schedule lives here, NOT in nt_input: nt_input is a pure apply layer (every poll it
@@ -949,4 +949,4 @@ void nt_devapi_register_input(void) {
     }
 }
 
-#endif /* NT_DEVAPI_REGISTER_input */
+#endif /* NT_DEVAPI_GROUP_INPUT */

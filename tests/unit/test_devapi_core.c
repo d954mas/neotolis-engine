@@ -24,7 +24,7 @@ void setUp(void) {
     g_nt_window.height = 540;
     g_nt_window.dpr = 2.5F; /* fractional on purpose: catches int-truncation of dpr. */
 
-    /* init auto-registers the core group (NT_DEVAPI_REGISTER_core). */
+    /* init auto-registers the core group (NT_DEVAPI_GROUP_CORE). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
 }
 

@@ -7,6 +7,9 @@
 # input group switched off (NT_DEVAPI_GROUP_INPUT=OFF), gets a lean nt_input with no inject buffer or
 # symbols. The test targets drive the L1 inject API directly; they link the headless nt_input_stub,
 # which forces the pipeline ON unconditionally (below), so L1-inject tests build regardless.
+# NT_INPUT_INJECT_ENABLED is DERIVED here from the devapi input group and is never set by hand: it is
+# an nt_input-layer flag (this module must not carry a devapi name), so it stays distinct from the
+# NT_DEVAPI_GROUP_INPUT switch that drives it.
 if(NT_DEVAPI_ENABLED AND NT_DEVAPI_GROUP_INPUT)
     set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=1)
 else()

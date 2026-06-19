@@ -122,13 +122,13 @@ bool nt_devapi_group_is_first(int index);
 
 /* Engine `core` group registrar (per-group #ifdef). Defined in
    nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_REGISTER_core
+#ifdef NT_DEVAPI_GROUP_CORE
 void nt_devapi_register_core(void);
 #endif
 
 /* Engine `time`/`render`/`frame` group registrar (per-group #ifdef). Defined in
    nt_devapi_time.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_REGISTER_time
+#ifdef NT_DEVAPI_GROUP_TIME
 void nt_devapi_register_time(void);
 #endif
 
@@ -137,7 +137,7 @@ void nt_devapi_register_time(void);
    reset lifecycle hooks, so the group (schedule, advance clock, inject link) is wholly contained
    behind the gate — the core/net TUs never name an input symbol. When the group is compiled out
    (NT_DEVAPI_GROUP_INPUT=OFF) nt_devapi_input.c is not built at all and nothing registers. */
-#ifdef NT_DEVAPI_REGISTER_input
+#ifdef NT_DEVAPI_GROUP_INPUT
 void nt_devapi_register_input(void);
 
 /* Per-tick input-schedule driver (registered as the tick hook by nt_devapi_register_input). Owns the
@@ -156,7 +156,7 @@ void nt_devapi_input_reset(void);
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
    nt_devapi_init under the same compile gate. When the group is compiled out
    (NT_DEVAPI_GROUP_DISCOVERY=OFF) nt_devapi_discovery.c is not built and nothing registers. */
-#ifdef NT_DEVAPI_REGISTER_discovery
+#ifdef NT_DEVAPI_GROUP_DISCOVERY
 void nt_devapi_register_discovery(void);
 #endif
 

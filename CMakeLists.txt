@@ -28,7 +28,7 @@ option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
 # devapi core/net carry zero input symbols.
 option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
 # Remaining devapi command groups, same modular flag-gated model as the input group: ON gates the
-# group's TU compile + NT_DEVAPI_REGISTER_<x> + its engine-dep links; OFF -> the devapi core/net
+# group's TU compile + the NT_DEVAPI_GROUP_<X> compile define + its engine-dep links; OFF -> the devapi core/net
 # carry zero symbols of that group or its deps. Default ON keeps the all-groups build behavior.
 option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
 option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)

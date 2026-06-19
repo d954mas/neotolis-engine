@@ -78,17 +78,17 @@ nt_result_t nt_devapi_init(void) {
     s_reset_count = 0;
     s_initialized = true;
 
-    /* Wire compiled-in engine groups; each is opt-in via its NT_DEVAPI_REGISTER_<group> define. */
-#ifdef NT_DEVAPI_REGISTER_core
+    /* Wire compiled-in engine groups; each is opt-in via its NT_DEVAPI_GROUP_<GROUP> define. */
+#ifdef NT_DEVAPI_GROUP_CORE
     nt_devapi_register_core();
 #endif
-#ifdef NT_DEVAPI_REGISTER_time
+#ifdef NT_DEVAPI_GROUP_TIME
     nt_devapi_register_time();
 #endif
-#ifdef NT_DEVAPI_REGISTER_input
+#ifdef NT_DEVAPI_GROUP_INPUT
     nt_devapi_register_input();
 #endif
-#ifdef NT_DEVAPI_REGISTER_discovery
+#ifdef NT_DEVAPI_GROUP_DISCOVERY
     nt_devapi_register_discovery();
 #endif
 

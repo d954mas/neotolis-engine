@@ -182,7 +182,7 @@ static void test_command_describe_message_distinguishes_absent_vs_nonstring(void
 
 /* The active command groups depend on which NT_DEVAPI_GROUP_<X> options were ON at configure time.
    The test target is fed the SAME active-group defines that gate the nt_devapi lib (the per-group
-   NT_DEVAPI_REGISTER_<x> defines are PRIVATE to the lib, so they're re-supplied to this TU), so each
+   NT_DEVAPI_GROUP_<X> defines are PRIVATE to the lib, so they're re-supplied to this TU), so each
    group's presence + the expected distinct-group count are derived from the defines, not hardcoded.
    The `discovery` group is always present (this binary requires it) and `game` is registered in
    setUp via the public API — both are unconditional. */
@@ -199,14 +199,14 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_TRUE(array_has_string(groups, "game"));
     int expected = 2;
 
-#ifdef NT_DEVAPI_REGISTER_core
+#ifdef NT_DEVAPI_GROUP_CORE
     TEST_ASSERT_TRUE(array_has_string(groups, "core"));
     expected += 1; /* core */
 #else
     TEST_ASSERT_FALSE(array_has_string(groups, "core"));
 #endif
 
-#ifdef NT_DEVAPI_REGISTER_time
+#ifdef NT_DEVAPI_GROUP_TIME
     /* The time TU bundles three distinct group names: time / render / frame. */
     TEST_ASSERT_TRUE(array_has_string(groups, "time"));
     TEST_ASSERT_TRUE(array_has_string(groups, "render"));
@@ -218,7 +218,7 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_FALSE(array_has_string(groups, "frame"));
 #endif
 
-#ifdef NT_DEVAPI_REGISTER_input
+#ifdef NT_DEVAPI_GROUP_INPUT
     TEST_ASSERT_TRUE(array_has_string(groups, "input"));
     expected += 1; /* input */
 #else

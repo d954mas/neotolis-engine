@@ -3,9 +3,9 @@
 
 /* Discovery group: endpoints / command.describe / features — the self-describing
    surface a client reads without source. Compiles out entirely when
-   NT_DEVAPI_REGISTER_discovery is absent. */
+   NT_DEVAPI_GROUP_DISCOVERY is absent. */
 
-#ifdef NT_DEVAPI_REGISTER_discovery
+#ifdef NT_DEVAPI_GROUP_DISCOVERY
 
 /* Emit one descriptor: detail=false → {method,group,summary}; true → all 7 fields. */
 static void emit_command(cJSON *arr, const nt_devapi_slot *slot, bool detail) {
@@ -146,4 +146,4 @@ void nt_devapi_register_discovery(void) {
     }
 }
 
-#endif /* NT_DEVAPI_REGISTER_discovery */
+#endif /* NT_DEVAPI_GROUP_DISCOVERY */

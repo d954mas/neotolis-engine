@@ -4,9 +4,9 @@
 #include "window/nt_window.h"
 
 /* Engine `core` command group: ping / engine.info / view. Compiles out entirely
-   when NT_DEVAPI_REGISTER_core is absent. */
+   when NT_DEVAPI_GROUP_CORE is absent. */
 
-#ifdef NT_DEVAPI_REGISTER_core
+#ifdef NT_DEVAPI_GROUP_CORE
 
 static bool cmd_ping(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
@@ -85,4 +85,4 @@ void nt_devapi_register_core(void) {
     }
 }
 
-#endif /* NT_DEVAPI_REGISTER_core */
+#endif /* NT_DEVAPI_GROUP_CORE */

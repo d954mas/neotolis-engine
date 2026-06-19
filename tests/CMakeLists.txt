@@ -371,22 +371,22 @@ if(NOT EMSCRIPTEN)
     # --- DevAPI module tests (NT_DEVAPI_ENABLED-gated) ---
     if(NT_DEVAPI_ENABLED)
         # Active-group define list, driven by the SAME NT_DEVAPI_GROUP_<X> options that gate the
-        # nt_devapi lib. The per-group NT_DEVAPI_REGISTER_<x> defines are PRIVATE to nt_devapi, so a
+        # nt_devapi lib. The per-group NT_DEVAPI_GROUP_<X> compile defines are PRIVATE to nt_devapi, so a
         # test linking the lib cannot see them — the discovery test re-derives the active set here and
         # #ifdef-gates its per-group assertions + expected count against it. Each group-specific test
         # target is itself gated on its option below, so a group-OFF config drops the tests that need it.
         set(NT_DEVAPI_ACTIVE_GROUP_DEFS "")
         if(NT_DEVAPI_GROUP_CORE)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_REGISTER_core=1)
+            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_CORE=1)
         endif()
         if(NT_DEVAPI_GROUP_TIME)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_REGISTER_time=1)
+            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_TIME=1)
         endif()
         if(NT_DEVAPI_GROUP_DISCOVERY)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_REGISTER_discovery=1)
+            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_DISCOVERY=1)
         endif()
         if(NT_DEVAPI_GROUP_INPUT)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_REGISTER_input=1)
+            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_INPUT=1)
         endif()
 
         # registry register / dup-reject / owned-copy survival. Group-independent (registers its own
@@ -427,7 +427,7 @@ if(NOT EMSCRIPTEN)
             add_executable(test_devapi_core unit/test_devapi_core.c)
             target_link_libraries(test_devapi_core PRIVATE nt_devapi cjson nt_app_stub nt_gfx_stub nt_input_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_core PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_core=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_CORE=1
             )
             nt_setup_test_target(test_devapi_core)
         endif()
@@ -452,7 +452,7 @@ if(NOT EMSCRIPTEN)
             add_executable(test_devapi_time unit/test_devapi_time.c)
             target_link_libraries(test_devapi_time PRIVATE nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_time PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_time=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_TIME=1
             )
             nt_setup_test_target(test_devapi_time)
         endif()
@@ -466,7 +466,7 @@ if(NOT EMSCRIPTEN)
             add_executable(test_devapi_input unit/test_devapi_input.c)
             target_link_libraries(test_devapi_input PRIVATE nt_devapi_net nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_input PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_REGISTER_input=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_INPUT=1
             )
             nt_setup_test_target(test_devapi_input)
         endif()
