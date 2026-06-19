@@ -99,10 +99,11 @@ static void close_client(void) {
     /* Drop the gone client's in-flight deferred results so a reconnecting client
        can't receive them tagged with the old client's request_id. */
     nt_devapi_deferred_reset();
-    /* Symmetric with the deferred reset: drop the gone client's pending synthetic input so a
-       reconnecting client can't inherit a mid-drag pointer or a held key it never issued. The
-       immediate buffer self-clears (drained whole each poll), so only the schedule needs reset. */
-    nt_devapi_input_reset();
+    /* Run the registered client-reset hooks so an optional group can clear its cross-client state
+       (e.g. the input group drops its pending schedule AND releases any applied held synthetic
+       key/pointer). Generic: no group is named here, so a group compiled out registers no hook and
+       this is a no-op — net.c carries zero of that group's symbols. */
+    nt_devapi_run_reset_hooks();
     /* A dropped client must not leave the loop frozen: in MANUAL/paused g_nt_app.frame stops
        advancing and a host's frame-count auto-exit never fires. Return to plain RUN. */
     g_nt_app.mode = NT_APP_MODE_RUN;
@@ -375,14 +376,14 @@ void nt_devapi_net_poll(void) {
 
 /* TODO(transport-split): this is the game-facing per-tick entry but lives in the TCP module and only
    drives net_poll. When a second transport (web) lands, move the transport poll to the core and poll
-   every registered transport so both share the frame-keyed deferred drain. The advance clock + input
-   schedule tick already moved to nt_devapi_input.c (it owns g_nt_app); only the transport poll itself
-   remains misplaced. Single transport today -> kept here (YAGNI). */
+   every registered transport so both share the frame-keyed deferred drain. Single transport today ->
+   kept here (YAGNI). */
 void nt_devapi_update(void) {
-    nt_devapi_net_poll(); /* handlers enqueue into the input schedule first */
-    /* Then tick it: advance-gated release of due entries into nt_input. Always present (declared in
-       nt_devapi_internal.h); an empty schedule (input group compiled out) is a harmless no-op. */
-    nt_devapi_input_update();
+    nt_devapi_net_poll(); /* handlers enqueue (e.g. into the input schedule) first */
+    /* Then run the registered per-tick hooks (e.g. the input group's advance-gated schedule tick).
+       Generic: no group is named here, so a group compiled out registers no hook — net.c carries
+       zero of that group's symbols. */
+    nt_devapi_run_tick_hooks();
 }
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)

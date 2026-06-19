@@ -1,3 +1,10 @@
+# The input group is an OPTIONAL devapi module ("set of modules / use only what you need"). The
+# NT_DEVAPI_GROUP_INPUT switch (defined at the project root, before the engine subdirs) gates the
+# WHOLE group: its TU is compiled, its commands registered, its lifecycle hooks wired, the nt_input
+# inject pipeline linked + enabled — ALL only when ON. OFF -> the devapi core/net carry ZERO input
+# symbols. Fail-fast is accepted: ON without an nt_input impl in the exe fails at the final link,
+# which is the developer's responsibility (no graceful no-op fallback).
+
 # nt_devapi -- transport-agnostic, self-describing command core (dev-only, gated by NT_DEVAPI_ENABLED).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
@@ -5,7 +12,6 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi_discovery.c
     nt_devapi_registry.c
     nt_devapi_time.c
-    nt_devapi_input.c
     nt_devapi.h
     nt_devapi_internal.h
     nt_devapi_stub.h
@@ -17,30 +23,30 @@ nt_add_module(nt_devapi LOG_DOMAIN "devapi"
 # pattern as nt_log). render.info reads draw_calls from its source (nt_gfx), not the nt_debug_overlay overlay.
 # The nt_app_* / nt_gfx_get_frame_draw_calls symbols resolve at the final-exe link (the consumer
 # links nt_app[_stub] + nt_gfx[_stub]) — nt_devapi stays a dev-only static lib with no impl.
-# nt_input_interface adds the input group's L1 inject deps the same way: the nt_input_inject_* /
-# nt_input_set_player_enabled / nt_input_key_from_name symbols resolve at the final-exe link (the
-# consumer links nt_input[_stub]). Order is kept consistent for GNU ld single-pass.
-target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_gfx_interface nt_input_interface)
+# Order is kept consistent for GNU ld single-pass. The input group adds nt_input_interface + its
+# inject define ONLY when ON (below), so a group-OFF devapi has no input link or symbols.
+target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_window_interface nt_log_interface nt_app_interface nt_gfx_interface)
 
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
-
-# The input group drives the L1 inject pipeline, so nt_input's inject machinery must be compiled in.
-# nt_devapi links nt_input via the header-only interface (the impl resolves at the final-exe link),
-# so the PUBLIC define on nt_input does NOT reach nt_devapi's own TUs — set it here too (PUBLIC so it
-# matches the value the exe's nt_input carries; devapi is only built when enabled, hence always 1).
-target_compile_definitions(nt_devapi PUBLIC NT_INPUT_INJECT_ENABLED=1)
 
 # Per-group compile-time opt-in: handlers are wrapped in
 # #ifdef NT_DEVAPI_REGISTER_core; later groups clone this pattern.
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_core=1)
 target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_time=1)
-# input stays PRIVATE like the other groups: the per-tick transport entry nt_devapi_update (in the
-# SEPARATE nt_devapi_net TU) calls nt_devapi_input_update unconditionally — that symbol is declared
-# always in nt_devapi_internal.h and defined always in nt_devapi_input.c (the schedule + tick live
-# outside the group gate), so the net TU links it without seeing NT_DEVAPI_REGISTER_input. Only the
-# input.* command handlers + registrar are gated, and only nt_devapi's own TUs need the define.
-target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_input=1)
+
+# Input group: one flag gates EVERYTHING. nt_devapi_input.c is added (so the schedule, advance clock,
+# lifecycle hooks + command handlers compile) only here; NT_DEVAPI_REGISTER_input is set only here (so
+# the registrar wires the group); nt_input_interface is linked + NT_INPUT_INJECT_ENABLED=1 set only
+# here (so the exe's nt_input carries the inject pipeline; PUBLIC so the value matches the consumer's
+# nt_input). OFF -> none of this; the core/net never reference an input symbol (the per-tick + reset
+# hooks are generic). The core dispatches the group purely through the registered lifecycle hooks.
+if(NT_DEVAPI_GROUP_INPUT)
+    target_sources(nt_devapi PRIVATE nt_devapi_input.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_REGISTER_input=1)
+    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_INJECT_ENABLED=1)
+    target_link_libraries(nt_devapi PRIVATE nt_input_interface)
+endif()
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 

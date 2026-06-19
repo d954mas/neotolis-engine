@@ -21,6 +21,12 @@ option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
+# Optional devapi input.* group (synthetic input injection). Defined here, BEFORE the engine
+# subdirs, so engine/input can key its inject pipeline on it (add_subdirectory(input) runs before
+# add_subdirectory(devapi)). ON gates the whole group: compile nt_devapi_input.c, register input.*,
+# wire the per-tick/reset hooks, link nt_input_interface + enable NT_INPUT_INJECT_ENABLED. OFF -> the
+# devapi core/net carry zero input symbols.
+option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input injection)." ON)
 set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap; OFF only via explicit override for final production).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})

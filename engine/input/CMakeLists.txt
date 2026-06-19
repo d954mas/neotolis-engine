@@ -1,13 +1,13 @@
 # nt_input -- input polling with swappable backends
 
 # Synthetic-input inject pipeline (immediate buffer + nt_input_inject_* + per-poll drain) is gated
-# behind NT_INPUT_INJECT_ENABLED so a pure release build (devapi OFF) carries none of it. Its sole
-# production driver is the devapi layer, so the SHARED nt_input lib keys the pipeline ONLY on
-# NT_DEVAPI_ENABLED — a devapi-OFF build (top-level or subdirectory) gets a lean nt_input with no
-# inject buffer or symbols. The test targets drive the L1 inject API directly; they link the
-# headless nt_input_stub, which forces the pipeline ON unconditionally (below), so L1-inject tests
-# build regardless of devapi.
-if(NT_DEVAPI_ENABLED)
+# behind NT_INPUT_INJECT_ENABLED so a build without the devapi input group carries none of it. Its
+# sole production driver is the devapi input group, so the SHARED nt_input lib keys the pipeline on
+# NT_DEVAPI_ENABLED AND the input group being ON — a devapi-OFF build, OR a devapi build with the
+# input group switched off (NT_DEVAPI_GROUP_INPUT=OFF), gets a lean nt_input with no inject buffer or
+# symbols. The test targets drive the L1 inject API directly; they link the headless nt_input_stub,
+# which forces the pipeline ON unconditionally (below), so L1-inject tests build regardless.
+if(NT_DEVAPI_ENABLED AND NT_DEVAPI_GROUP_INPUT)
     set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=1)
 else()
     set(NT_INPUT_INJECT_DEFS NT_INPUT_INJECT_ENABLED=0)

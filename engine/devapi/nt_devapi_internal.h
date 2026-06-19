@@ -91,6 +91,26 @@ void nt_devapi_deferred_reset(void);
 /* True between init and shutdown — lets submit enforce init-before-use. */
 bool nt_devapi_initialized(void);
 
+// #region lifecycle hooks
+/* Per-tick + client-reset lifecycle hooks: how an optional group (e.g. the input group) plugs into
+   the transport-agnostic core WITHOUT the core or the transport hard-referencing the group. A group's
+   registrar registers its hooks under its own compile gate; a group compiled out registers nothing,
+   so the core/net TUs carry zero of that group's symbols. Same self-describing pattern as the command
+   registry. Fixed array, no heap; registration happens at init (not a frame-hot path). */
+typedef void (*nt_devapi_hook_fn)(void);
+
+/* Register a per-tick hook (run by nt_devapi_run_tick_hooks once per nt_devapi_update, after the
+   transport poll) and a client-reset hook (run by nt_devapi_run_reset_hooks on client disconnect).
+   Cleared on shutdown; re-registered each init. Overflow is a build-time bug → asserts. */
+void nt_devapi_register_tick(nt_devapi_hook_fn fn);
+void nt_devapi_register_reset(nt_devapi_hook_fn fn);
+
+/* Run all registered tick / reset hooks in registration order. The transport calls these instead of
+   naming any group directly. */
+void nt_devapi_run_tick_hooks(void);
+void nt_devapi_run_reset_hooks(void);
+// #endregion
+
 /* Registry-table accessors (used by the dispatch core + discovery handlers). */
 int nt_devapi_registry_count(void);
 const nt_devapi_slot *nt_devapi_registry_slot(int index);
@@ -112,26 +132,26 @@ void nt_devapi_register_core(void);
 void nt_devapi_register_time(void);
 #endif
 
-/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c,
-   invoked from nt_devapi_init under the same compile gate. */
+/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
+   nt_devapi_init under the same compile gate. Registers the group's commands AND its per-tick +
+   reset lifecycle hooks, so the group (schedule, advance clock, inject link) is wholly contained
+   behind the gate — the core/net TUs never name an input symbol. When the group is compiled out
+   (NT_DEVAPI_GROUP_INPUT=OFF) nt_devapi_input.c is not built at all and nothing registers. */
 #ifdef NT_DEVAPI_REGISTER_input
 void nt_devapi_register_input(void);
-#endif
 
-/* Per-tick input-schedule driver. Declared ALWAYS (not behind NT_DEVAPI_REGISTER_input) so the
-   separate transport TU (nt_devapi_net.c) can call it unconditionally without seeing the group
-   gate — nt_devapi_input.c is always compiled into nt_devapi, so the symbol always links.
-   Owns the advance clock: reads g_nt_app.frame, detects a real sim-advance vs the last update,
-   and on advance releases every due schedule entry into nt_input's immediate inject buffer
-   (decrementing survivors); on a frozen tick (pause / manual-idle) releases nothing. Ticking an
-   empty schedule (group compiled out) is a harmless no-op. Call once per nt_devapi_update AFTER
-   net_poll so this tick's handler enqueues are seen. */
+/* Per-tick input-schedule driver (registered as the tick hook by nt_devapi_register_input). Owns the
+   advance clock: reads g_nt_app.frame, detects a real sim-advance vs the last update, and on advance
+   releases every due schedule entry into nt_input's immediate inject buffer (decrementing survivors);
+   on a frozen tick (pause / manual-idle) releases nothing. Exposed for the unit tests that drive the
+   per-tick path directly. */
 void nt_devapi_input_update(void);
 
-/* Reset the input schedule (drop all pending entries) and re-seed the advance clock against the
-   current g_nt_app.frame. Called on client disconnect so a gone client's queued synthetic input
-   can't release into a reconnecting client's session, and from tests for order-independence. */
+/* Reset the input schedule (drop all pending entries), release any applied held synthetic key/pointer
+   so it can't bleed into the next client, and re-seed the advance clock against the current
+   g_nt_app.frame. Registered as the reset hook; also called from tests for order-independence. */
 void nt_devapi_input_reset(void);
+#endif
 
 /* Discovery group registrar — always-on (not behind an #ifdef). Defined in
    nt_devapi_discovery.c, invoked from nt_devapi_init. */

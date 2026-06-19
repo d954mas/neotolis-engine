@@ -11,9 +11,15 @@
    range/type-checked -> bad_params; never assert on untrusted input (invariants assert, untrusted
    input returns a structured error). Fire-and-forget: validate -> enqueue -> immediate ok (or an
    immediate overflow/bad_params); NO defer (defer lives only in frame.wait/time.step).
-   The command handlers + registrar compile out when NT_DEVAPI_REGISTER_input is absent; the
-   schedule + tick + advance clock below are ALWAYS compiled so the transport TU can call
-   nt_devapi_input_update unconditionally (ticking an empty schedule is a no-op). */
+
+   This WHOLE TU is the optional input group: it compiles only when NT_DEVAPI_GROUP_INPUT is ON
+   (CMake adds the source under the option and defines NT_DEVAPI_REGISTER_input). The schedule, the
+   advance clock, the per-tick + reset lifecycle hooks, AND the command handlers all live behind the
+   group gate, so a group-OFF build carries zero input symbols in the devapi core/net ("set of
+   modules / use only what you need"). nt_devapi_register_input registers the commands AND the
+   lifecycle hooks, so the core never names an input symbol directly. */
+
+#ifdef NT_DEVAPI_REGISTER_input
 
 // #region devapi input schedule
 /* The frame schedule lives here, NOT in nt_input: nt_input is a pure apply layer (every poll it
@@ -52,6 +58,10 @@ typedef struct {
         struct {
             uint32_t id;
         } pointer_up;
+        struct {
+            uint32_t id;
+            uint8_t buttons_mask;
+        } buttons; /* set mask at the slot's apply-time position */
         struct {
             float dx, dy;
         } wheel;
@@ -106,6 +116,20 @@ static bool sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, 
         e->u.pointer.type = type;
         e->u.pointer.buttons_mask = buttons_mask;
     }
+    return true;
+}
+
+/* Set the button mask at the slot's apply-time position (input.button), in schedule order — never
+   bakes a submit-time x/y, so a preceding queued input.move is respected on apply. */
+static bool sched_buttons(uint32_t id, uint8_t buttons_mask, uint16_t at_frame) {
+    sched_entry_t *e = sched_reserve(1);
+    if (e == NULL) {
+        return false;
+    }
+    e->frames_remaining = at_frame;
+    e->kind = NT_INJECT_POINTER_BUTTONS;
+    e->u.buttons.id = id;
+    e->u.buttons.buttons_mask = buttons_mask;
     return true;
 }
 
@@ -172,6 +196,8 @@ static bool sched_release_one(const sched_entry_t *e) {
         return nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
     case NT_INJECT_POINTER_UP:
         return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
+    case NT_INJECT_POINTER_BUTTONS:
+        return nt_input_inject_buttons(e->u.buttons.id, e->u.buttons.buttons_mask);
     case NT_INJECT_WHEEL:
         return nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
     case NT_INJECT_CHAR: {
@@ -219,10 +245,14 @@ void nt_devapi_input_update(void) {
 void nt_devapi_input_reset(void) {
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
+    /* Release any synthetic input that already APPLIED to g_nt_input: dropping the schedule alone is
+       not enough — if a DOWN already landed and its UP is still scheduled (now discarded), the
+       key/button would stay held and bleed into the next client. Release held key + pointer state the
+       same way the player-gate ON->OFF / focus-lost edge does. */
+    nt_input_clear_all_keys();
+    nt_input_clear_all_pointers();
 }
 // #endregion
-
-#ifdef NT_DEVAPI_REGISTER_input
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
@@ -658,18 +688,11 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
             return false;
         }
     }
-    /* A move at the current slot position carrying the new button mask (apply_buttons_mask edges). */
-    nt_pointer_t *ptr = NULL;
-    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == id) {
-            ptr = &g_nt_input.pointers[i];
-            break;
-        }
-    }
-    float x = ptr != NULL ? ptr->x : 0.0F;
-    float y = ptr != NULL ? ptr->y : 0.0F;
-    nt_inject_kind_t kind = ptr != NULL ? NT_INJECT_POINTER_MOVE : NT_INJECT_POINTER_DOWN;
-    if (!sched_pointer(kind, id, x, y, 1.0F, (uint8_t)NT_POINTER_MOUSE, buttons, 0)) {
+    /* Apply the mask at the slot's position AT APPLY TIME (in schedule order) — NOT the live
+       submit-time position. This way a preceding queued input.move is honored: the button lands at
+       the moved-to position, not a baked stale one. No prior pointer at apply time -> the slot is
+       created at (0,0) (a DOWN), preserving the no-active-slot behavior. */
+    if (!sched_buttons(id, buttons, 0)) {
         set_bad_params(err, "input.button: inject schedule overflow");
         return false;
     }
@@ -911,6 +934,11 @@ _Static_assert(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]) == sizeof(k_input_
 
 void nt_devapi_register_input(void) {
     nt_devapi_input_reset(); /* fresh schedule + seeded advance clock each init->register. */
+    /* Plug the group into the core via the generic lifecycle hooks: the per-tick schedule driver and
+       the client-reset release. This is the ONLY coupling point — the core/net call the hooks, never
+       these symbols directly, so the group is decoupled and naturally gated by NT_DEVAPI_GROUP_INPUT. */
+    nt_devapi_register_tick(nt_devapi_input_update);
+    nt_devapi_register_reset(nt_devapi_input_reset);
     /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
        compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
     int n = (int)(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]));
