@@ -54,11 +54,9 @@ static uint16_t resolve_port(void) {
     return (uint16_t)v;
 }
 
-/* Host-OWNED disconnect recovery. The engine resets only devapi-owned transient state on a client
-   drop (B-strict); time/mode is game-owned, so a bot that disconnects mid-MANUAL would leave this
-   host frozen (no sim-advance). We watch the connected->disconnected edge and apply OUR explicit
-   policy — return to plain RUN — so the bare host stays usable without engine magic. A graceful bot
-   already restores mode itself; this only catches an ungraceful drop. */
+/* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
+   bot that drops mid-MANUAL leaves the host frozen. On the connected->disconnected edge, force RUN so
+   the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop. */
 static void recover_on_disconnect(void) {
     static bool was_connected = false;
     bool now = nt_devapi_net_has_client();

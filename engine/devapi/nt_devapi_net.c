@@ -100,11 +100,8 @@ static void close_client(void) {
     nt_devapi_deferred_reset();
     /* Generic client-reset hooks: a compiled-out group registers none, so net.c names no group. */
     nt_devapi_run_reset_hooks();
-    /* B-strict ownership: the engine resets ONLY devapi-owned transient state (the deferred queue +
-       the reset hooks' schedule/clock). Game-owned state (time mode/pause, scale, render flag, player
-       gate, applied input) is the changer's responsibility — a bot restores it before disconnect, or
-       the host recovers explicitly (examples/devapi_host). L1 can't tell game-set from bot-set state,
-       so clobbering it on a dev-client drop would violate code-first. */
+    /* Resets ONLY devapi-owned transient state (deferred queue + reset-hook schedules). Game-owned
+       state (time mode, gate, applied input) is the changer's job — L1 can't tell game from bot. */
 }
 
 static void set_nonblocking(nt_sock_t s) {

@@ -125,7 +125,7 @@ static void test_input_click_queues_two(void) {
 }
 
 static void test_input_gesture_queues_ordered(void) {
-    /* down@0 carries point[0]; a move per SUBSEQUENT point (F6: no redundant move@0 for point[0]) + up.
+    /* down@0 carries point[0]; a move per SUBSEQUENT point (no redundant move@0 for point[0]) + up.
        2 points -> down + 1 move + up = 3 entries. */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}"));
     cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
@@ -142,7 +142,7 @@ static void test_input_set_player_enabled_ok(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":true}}")));
 }
 
-/* ---- input.text (INPUT-06) ---- */
+/* ---- input.text ---- */
 
 static void test_input_text_ok(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"hi\"}}"));
@@ -175,7 +175,7 @@ static void test_input_text_bad_type_bad_params(void) { assert_bad_params(nt_dev
 
 static void test_input_set_player_enabled_bad_type_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.set_player_enabled\",\"params\":{\"enabled\":1}}")); }
 
-/* ---- WR-02: out-of-domain numeric bot input -> bad_params (never silently coerced) ---- */
+/* ---- out-of-domain numeric bot input -> bad_params (never silently coerced) ---- */
 
 static void test_input_pointer_negative_id_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.pointer\",\"params\":{\"action\":\"down\",\"id\":-1,\"x\":1,\"y\":2}}")); }
 
@@ -189,7 +189,7 @@ static void test_input_click_button_out_of_range_bad_params(void) { assert_bad_p
 
 static void test_input_button_out_of_range_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.button\",\"params\":{\"buttons\":256}}")); }
 
-/* ---- CR-01/WR-05: multi-event sugar is whole-or-nothing on a near-full SCHEDULE ---- */
+/* ---- multi-event sugar is whole-or-nothing on a near-full SCHEDULE ---- */
 
 /* Each input.key (no hold) stages exactly 1 schedule entry; we never advance(), so none drain.
    Leaves the schedule with `free` slots to probe whole-or-nothing reservation. */
@@ -209,7 +209,7 @@ static void test_input_click_near_full_atomic(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}"));      /* now full -> proves click wrote nothing */
 }
 
-/* A 2-point gesture needs 3 entries (down + 1 move + up, F6); with only 2 free it rejects whole. */
+/* A 2-point gesture needs 3 entries (down + 1 move + up); with only 2 free it rejects whole. */
 static void test_input_gesture_near_full_atomic(void) {
     fill_schedule_leaving(2U);
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.gesture\",\"params\":{\"id\":1,\"points\":[[0,0],[5,5]]}}"));
@@ -219,7 +219,7 @@ static void test_input_gesture_near_full_atomic(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"D\"}}"));
 }
 
-/* ---- WR-05: input.text malformed-UTF-8 reject paths ---- */
+/* ---- input.text malformed-UTF-8 reject paths ---- */
 
 /* Raw 0xFF byte (NOT a \u escape, which would produce valid UTF-8) -> malformed lead byte. cJSON
    copies high bytes between quotes verbatim, so the handler's decoder is what rejects it. */
@@ -228,7 +228,7 @@ static void test_input_text_bad_lead_byte_bad_params(void) { assert_bad_params(n
 /* A 2-byte lead (0xC0) with no continuation byte -> truncated sequence -> bad_params. */
 static void test_input_text_truncated_continuation_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xc0\"}}")); }
 
-/* ---- F1: structurally-valid-but-invalid UTF-8 scalars -> bad_params ---- */
+/* ---- structurally-valid-but-invalid UTF-8 scalars -> bad_params ---- */
 
 /* Overlong: 0xC0 0x80 is a 2-byte form of U+0000 (below the 2-byte minimum 0x80). */
 static void test_input_text_overlong_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xc0\x80\"}}")); }
@@ -239,7 +239,7 @@ static void test_input_text_surrogate_bad_params(void) { assert_bad_params(nt_de
 /* Out-of-range: 0xF4 0x90 0x80 0x80 decodes to U+110000 (> U+10FFFF). */
 static void test_input_text_above_max_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\xf4\x90\x80\x80\"}}")); }
 
-/* ---- F5: empty text is valid -> queued:0 (no-op), NOT bad_params ---- */
+/* ---- empty text is valid -> queued:0 (no-op), NOT bad_params ---- */
 
 static void test_input_text_empty_queued_zero(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"\"}}"));
@@ -248,7 +248,7 @@ static void test_input_text_empty_queued_zero(void) {
     cJSON_Delete(root);
 }
 
-/* ---- F2: > 32 codepoints can never land whole in the 32-slot char ring -> bad_params ---- */
+/* ---- > 32 codepoints can never land whole in the 32-slot char ring -> bad_params ---- */
 
 /* Build an input.text request of `count` ASCII 'a's so the boundary derives from the real cap. */
 static char *make_text_request(uint32_t count) {
@@ -281,7 +281,7 @@ static void test_input_text_at_char_ring_ok(void) {
     cJSON_Delete(root);
 }
 
-/* ---- F5: hold / frame_stride strict integral+sign parse (not silent valueint truncation) ---- */
+/* ---- hold / frame_stride strict integral+sign parse (not silent valueint truncation) ---- */
 
 static void test_input_key_hold_fractional_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":2.9}}")); }
 
@@ -350,10 +350,8 @@ static void test_sched_pause_freeze(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
 }
 
-/* B-strict disconnect-reset contract: reset clears ONLY devapi-owned transient state — the inject
-   SCHEDULE (a pending UP is dropped, never resurfaces) — but does NOT release already-APPLIED input.
-   Applied state is game-owned (bot == human, indistinguishable at L1), so the changer restores it;
-   the engine must not clobber it on a dev-client drop. */
+/* Reset drops ONLY the devapi-owned schedule (a pending UP never resurfaces); already-APPLIED input
+   is game-owned and stays held — the engine must not release it on a client drop. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_reset_drops_schedule_keeps_applied_input(void) {
     /* down@0 + up@100: the DOWN applies on the first advance, the UP is far in the future. */

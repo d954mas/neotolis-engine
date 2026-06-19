@@ -46,7 +46,7 @@ void test_gate_reenable_applies_real(void) {
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_B));
 }
 
-/* ---- INPUT-01: inject is IMMEDIATE — staged this poll, applied this poll ---- */
+/* ---- inject is IMMEDIATE — staged this poll, applied this poll ---- */
 
 void test_inject_key_down_up(void) {
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
@@ -71,13 +71,13 @@ void test_inject_same_poll_down_then_up(void) {
 }
 
 void test_inject_flows_when_gated(void) {
-    nt_input_set_player_enabled(false); /* real device dropped, inject still flows (D-03) */
+    nt_input_set_player_enabled(false); /* real device dropped, inject still flows */
     TEST_ASSERT_TRUE(nt_input_inject_key(NT_KEY_A, true));
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
 }
 
-/* ---- INPUT-02: inject pointer down/move/up + wheel + reserved id ---- */
+/* ---- inject pointer down/move/up + wheel + reserved id ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_inject_pointer_down_move_up(void) {
@@ -169,7 +169,7 @@ void test_inject_reserved_id(void) {
     TEST_ASSERT_TRUE(real != synth); /* distinct slots, no collision */
 }
 
-/* ---- INPUT-03: whole-or-nothing overflow rejection (no poll between fills: the buffer drains
+/* ---- whole-or-nothing overflow rejection (no poll between fills: the buffer drains
    whole each poll, so the cap is probed purely by staging without draining) ---- */
 
 void test_overflow_rejects_whole(void) {
