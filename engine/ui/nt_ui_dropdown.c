@@ -33,7 +33,7 @@ static inline uint32_t dropdown_panel_id(uint32_t id) { return nt_ui_derived_id(
 static inline uint32_t dropdown_chevron_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_DROPDOWN_CHEVRON_SALT); }
 
 /* Immediate-combo row ids. The INTERACTIVE row folds (combo_id, key, row_idx) so sibling rows never
- * Clay-additive-collide and a key need only be unique among siblings (D-236-02). The non-interactive
+ * Clay-additive-collide and a key need only be unique among siblings. The non-interactive
  * LABEL cell folds (combo_id, row_idx) only — key-independent so the _test_row_label_bbox probe can
  * reproduce it from the idx alone (row_idx is unique per frame). fmix, NEVER additive base+index. */
 static inline uint32_t combo_row_id(uint32_t combo_id, uint32_t key, uint32_t row_idx) {
@@ -325,8 +325,8 @@ static void combo_apply_panel_bg(Clay_ElementDeclaration *decl, const nt_ui_drop
     }
 }
 
-/* The combo list body: ALWAYS wrap the rows in nt_ui_scroll (GC'd cell, NEVER a raw .clip — Pitfall 5)
- * when max_visible_rows > 0; the viewport FITs short lists and caps+scrolls long ones (the immediate API
+/* The combo list body: ALWAYS wrap the rows in nt_ui_scroll — a raw .clip leaks a scroll-container pool
+ * slot per open. When max_visible_rows > 0 the viewport FITs short lists and caps+scrolls long ones (the immediate API
  * discovers the row count during the frame, so the cap is a height bound, not a count branch). Otherwise a
  * plain panel. Leaves the inner row container OPEN for the selectables. */
 static void combo_open_body(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t id, nt_ui_dropdown_style_t *style, bool scrolls, bool panel_art) {

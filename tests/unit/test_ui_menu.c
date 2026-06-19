@@ -1,13 +1,10 @@
-/* Context-menu + recursive submenu tests, re-expressed against the IMMEDIATE begin/end API (#236).
+/* Context-menu + recursive submenu tests against the IMMEDIATE begin/end API.
  * Covers the algorithm in isolation — the mouse-aim triangle hover-intent keeps an open submenu open
  * along a diagonal that crosses sibling items, the off-triangle dwell switches after AIM_FALLBACK, the
  * per-level edge-flip mirrors the aim corners near all 4 borders, depth-salted state cells never alias
- * across levels, and the depth cap asserts. The full-UI tests drive nt_ui_menu_begin/item/submenu/end
- * instead of an items[] array. Driven through the walker fixture + NT_TEST_ACCESS probes (no GL surface).
- * UNITY_EXCLUDE_FLOAT: compare floats via an eps helper.
- *
- * RED scaffold (Wave 0): the immediate begin/end symbols + nt_ui_menu_test_item_id / _focus_item_id
- * probes are defined by Plans 02-04, so this file COMPILES but link-FAILS until then. */
+ * across levels, and the depth cap asserts. The full-UI tests drive nt_ui_menu_begin/item/submenu/end.
+ * Driven through the walker fixture + NT_TEST_ACCESS probes (no GL surface).
+ * UNITY_EXCLUDE_FLOAT: compare floats via an eps helper. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -33,8 +30,8 @@ static ui_walker_fixture_t s_fx;
 
 #define MENU_A 0x4E5001U
 
-/* Grown style ABI (Plan 03): + shortcut_text color + checkmark ref/tint/size. 3 ref + 9 u32 + 4 float +
- * 8 u16 + 4 tail pad = 120. Mirrors the _Static_assert in nt_ui_menu.h (both must agree). */
+/* Menu style ABI: 3 ref + 9 u32 + 4 float + 8 u16 + 4 tail pad = 120. Mirrors the _Static_assert in
+ * nt_ui_menu.h (both must agree). */
 #define EXPECTED_MENU_STYLE_ABI 120U
 
 /* Sibling item keys for the immediate driver (unique among siblings; scope stack disambiguates depth). */
@@ -82,8 +79,7 @@ static void fx_begin(float dt) {
 }
 
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. The style line
- *      tracks the GROWN size symbolically via EXPECTED_MENU_STYLE_ABI. The data-form item struct's ABI
- *      line was dropped with the data form (Plan 05); only the immediate-API ABIs remain. ---- */
+ *      tracks the size symbolically via EXPECTED_MENU_STYLE_ABI. ---- */
 static void test_menu_abi_sizes(void) {
     TEST_ASSERT_EQUAL_UINT(EXPECTED_MENU_STYLE_ABI, (unsigned)sizeof(nt_ui_menu_style_t));
     TEST_ASSERT_EQUAL_UINT((unsigned)(16U + ((((sizeof(void *) + 4U) + 7U) / 8U) * 8U)), (unsigned)sizeof(nt_ui_menu_item_opts_t));
@@ -97,7 +93,7 @@ static void test_menu_defaults_valid(void) {
     TEST_ASSERT_TRUE(st.open_ease_speed == 0.0F); /* plumbed knob; default snaps (0) */
 }
 
-/* ---- Pure point_in_tri: inside, outside, on an edge. (KEEP — algorithm probe, paradigm-agnostic) ---- */
+/* ---- Pure point_in_tri: inside, outside, on an edge. ---- */
 static void test_menu_point_in_tri(void) {
     /* triangle (0,0)-(10,0)-(0,10) */
     TEST_ASSERT_TRUE(nt_ui_menu_test_point_in_tri(2.0F, 2.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 10.0F));
@@ -106,7 +102,7 @@ static void test_menu_point_in_tri(void) {
     TEST_ASSERT_TRUE(nt_ui_menu_test_point_in_tri(5.0F, 5.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 10.0F));
 }
 
-/* ---- Aim corners: submenu RIGHT => near edge is its LEFT; LEFT (edge-flipped) => its RIGHT. (KEEP) ---- */
+/* ---- Aim corners: submenu RIGHT => near edge is its LEFT; LEFT (edge-flipped) => its RIGHT. ---- */
 static void test_menu_aim_corners_mirror(void) {
     float bx = 0.0F;
     float by = 0.0F;
@@ -125,7 +121,7 @@ static void test_menu_aim_corners_mirror(void) {
 }
 
 /* ---- Aim KEEP: a diagonal cursor path from a parent toward an open submenu (crossing a sibling row)
- *      stays inside the triangle every frame -> the submenu stays open (aiming==true). (KEEP) ---- */
+ *      stays inside the triangle every frame -> the submenu stays open (aiming==true). ---- */
 static void test_menu_aim_keeps_submenu_open_on_diagonal(void) {
     const float sub_x = 300.0F;
     const float sub_y = 100.0F;
@@ -151,7 +147,7 @@ static void test_menu_aim_keeps_submenu_open_on_diagonal(void) {
     TEST_ASSERT_TRUE(nt_ui_menu_test_switch_timer(s_fx.ctx, MENU_A, 1U) < NT_UI_MENU_AIM_FALLBACK_SECS);
 }
 
-/* ---- Aim SWITCH: the cursor sits OFF the triangle; after AIM_FALLBACK the keep flips false. (KEEP) ---- */
+/* ---- Aim SWITCH: the cursor sits OFF the triangle; after AIM_FALLBACK the keep flips false. ---- */
 static void test_menu_aim_switch_after_fallback(void) {
     const float sub_x = 300.0F;
     const float sub_y = 100.0F;
@@ -180,7 +176,7 @@ static void test_menu_aim_switch_after_fallback(void) {
 }
 
 /* ---- Stuck-state regression: vertical travel along the parent panel toward a sibling leaves the
- *      narrow corridor, so the dwell races AIM_FALLBACK and a switch is allowed. (KEEP) ---- */
+ *      narrow corridor, so the dwell races AIM_FALLBACK and a switch is allowed. ---- */
 static void test_menu_hover_switch_to_sibling_releases(void) {
     const float sub_x = 300.0F;
     const float sub_y = 100.0F;
@@ -208,7 +204,7 @@ static void test_menu_hover_switch_to_sibling_releases(void) {
     TEST_ASSERT_TRUE_MESSAGE(frames_to_switch >= 1 && frames_to_switch <= 9, "sibling switch must free the user within the grace");
 }
 
-/* ---- Depth-salted cells: level 1 and level 2 must own distinct timers (no aliasing). (KEEP) ---- */
+/* ---- Depth-salted cells: level 1 and level 2 must own distinct timers (no aliasing). ---- */
 static void test_menu_hover_cells_distinct_per_depth(void) {
     const float dt = 1.0F / 60.0F;
     const float sub_x = 300.0F;
@@ -231,7 +227,7 @@ static void test_menu_hover_cells_distinct_per_depth(void) {
     TEST_ASSERT_TRUE_MESSAGE(float_near(t2, 0.0F, 0.0001F), "level-2 aiming dwell must stay 0 (no aliasing)");
 }
 
-/* ---- Depth-cap constant exists and stays within the popup cap. (KEEP) ---- */
+/* ---- Depth-cap constant exists and stays within the popup cap. ---- */
 static void test_menu_max_depth_constant(void) {
     TEST_ASSERT_TRUE(NT_UI_MENU_MAX_DEPTH >= 1);
     TEST_ASSERT_TRUE(NT_UI_MENU_MAX_DEPTH <= NT_UI_MODAL_MAX_DEPTH);
@@ -258,7 +254,7 @@ static void menu_im_open(nt_ui_menu_state_t *st, float anchor_x, float anchor_y)
 
 /* One immediate menu frame, tree: File > (New, Open > (Project, File2), Quit), Edit. Declares the tree
  * via begin/item/submenu_begin..submenu_end/menu_end. The body is identical every frame so the prev-frame
- * frame record (D-236-06, 1-frame nav latency) maps focus to a stable item id. The snapshot pointer is
+ * frame record (1-frame nav latency) maps focus to a stable item id. The snapshot pointer is
  * positioned but the keyboard path is what most tests assert against (deterministic, no prev-frame bbox). */
 static void menu_im_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {0};
@@ -835,11 +831,11 @@ static void test_menu_open_trigger_bound_requires_target_hover(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "bound trigger must arm when the pointer is over the target");
 }
 
-/* ============================ NEW immediate-mode RED tests ============================ */
+/* ============================ immediate-mode full menu ============================ */
 
-/* ---- NEW (REQ-236-02): scope-stack id distinctness — sibling keys at one scope and the SAME key under
- *      a pushed submenu scope all derive distinct, non-zero ids (mirrors the menu_hash_id non-alias
- *      guarantee). Drives nt_ui_menu_test_item_id(scope, key) — position-stable, no idx folded in. ---- */
+/* ---- Scope-stack id distinctness — sibling keys at one scope and the SAME key under a pushed submenu
+ *      scope all derive distinct, non-zero ids (mirrors the menu_hash_id non-alias guarantee). Drives
+ *      nt_ui_menu_test_item_id(scope, key) — position-stable, no idx folded in. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat distinctness asserts, not real nesting
 static void test_menu_item_id_distinct_siblings_and_scopes(void) {
     /* root scope = the menu id; two sibling keys at idx 0/1 */
@@ -855,9 +851,9 @@ static void test_menu_item_id_distinct_siblings_and_scopes(void) {
     TEST_ASSERT_TRUE_MESSAGE(b != c, "cross-scope ids must stay distinct");
 }
 
-/* ---- NEW (REQ-236-05): prev-frame frame-record nav — across two frames build a 3-item level, press
- *      Down, and assert the frame-record introspection probe maps focus to the recorded item id with
- *      strictly 1-frame latency (D-236-06). Drives nt_ui_menu_test_focus_item_id(menu_id, depth). ---- */
+/* ---- Prev-frame frame-record nav — across two frames build a 3-item level, press Down, and assert the
+ *      frame-record introspection probe maps focus to the recorded item id with strictly 1-frame latency.
+ *      Drives nt_ui_menu_test_focus_item_id(menu_id, depth). ---- */
 static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
@@ -882,8 +878,8 @@ static void test_menu_prevframe_nav_focuses_recorded_item(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (prev-frame record, 1-frame latency)");
 }
 
-/* ---- NEW (REQ-236-08, Pitfall 4): a custom-content row with activatable=false lets an inner button own
- *      the click — the inner button reports clicked while the row id reports !clicked. ---- */
+/* ---- A custom-content row with activatable=false lets an inner button own the click — the inner button
+ *      reports clicked while the row id reports !clicked. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -946,7 +942,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
     (void)row_id;
 }
 
-/* ---- Bug 3 (custom row leak): a CLOSED (present-only) menu's item_begin returns false so the game skips
+/* ---- Custom row leak: a CLOSED (present-only) menu's item_begin returns false so the game skips
  *      the custom body — the inner child must NOT lay out (no bbox) when the menu is closed, so it can
  *      never leak onto the scene. ---- */
 static void test_menu_item_begin_closed_skips_body(void) {
@@ -1041,7 +1037,7 @@ static void menu_row_center(uint32_t row_id, float *cx, float *cy) {
     *cy = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
 }
 
-/* ---- Bug 1 (hover-open): hovering a parent ROW flies its submenu out (no click), with 1-frame IM lag. ---- */
+/* ---- Hover-open: hovering a parent ROW flies its submenu out (no click), with 1-frame IM lag. ---- */
 static void test_menu_hover_opens_submenu(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
@@ -1066,7 +1062,7 @@ static void test_menu_hover_opens_submenu(void) {
     TEST_ASSERT_TRUE(st.open);
 }
 
-/* ---- Bug 1 (leave-close): with File's submenu open, hovering the sibling Edit LEAF collapses it once the
+/* ---- Leave-close: with File's submenu open, hovering the sibling Edit LEAF collapses it once the
  *      mouse-aim corridor releases (the cursor is no longer aiming at the open child). ---- */
 static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -1113,7 +1109,7 @@ static void menu_im_submenu_frame(nt_ui_menu_state_t *st, nt_ui_menu_style_t *st
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Bug 2 (right-edge flip): a menu opened hard against the RIGHT screen edge must (a) clamp the ROOT
+/* ---- Right-edge flip: a menu opened hard against the RIGHT screen edge must (a) clamp the ROOT
  *      panel back on-screen (BELOW only flips vertically, so a point-anchored root needs a horizontal
  *      clamp), and (b) flip its submenu LEFT so the whole stack stays visible. ---- */
 static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {

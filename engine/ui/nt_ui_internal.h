@@ -161,7 +161,7 @@ typedef struct {
 #endif
 
 /* One recorded immediate-menu row per level this frame; keyboard nav (menu_end) iterates the PREVIOUS
- * frame's per-level slice (D-236-06, 1-frame latency). Separators are never recorded (skipped by nav). */
+ * frame's per-level slice (1-frame latency). Separators are never recorded (skipped by nav). */
 typedef struct {
     uint32_t id;     /* the row's derived scope-stack id */
     uint16_t idx;    /* the row's running layout index at its level */
@@ -271,7 +271,7 @@ struct nt_ui_context {
         uint16_t item_idx[NT_UI_MENU_MAX_DEPTH];    /* per-level running layout index (separators advance it) */
         uint32_t chosen;                            /* leaf id activated this frame (0 = none) */
         int16_t pending_open[NT_UI_MENU_MAX_DEPTH]; /* running idx of a row whose submenu a click opens this frame (-1 none) */
-        /* Hover-open (Bug 1): per-depth the running idx of a parent row hovered THIS frame (-1 none), and a
+        /* Hover-open: per-depth the running idx of a parent row hovered THIS frame (-1 none), and a
          * flag that an enabled LEAF (non-parent) row is hovered. menu_end resolves these against the mouse-
          * aim corridor: a hovered parent opens (next frame, 1-frame IM lag); a hovered leaf collapses the
          * open child once the corridor releases. Keyboard-open stays authoritative (set directly in nav). */
@@ -391,7 +391,7 @@ struct nt_ui_context {
 
     /* Immediate-menu per-level nav frame record (live, this frame). menu_end navs the deepest open level
      * against the record just built this frame; OPENING a deeper level only sets open_path so the new
-     * level is declared (and navigable) NEXT frame — the 1-frame latency of D-236-06. No per-frame memcpy. */
+     * level is declared (and navigable) NEXT frame — the 1-frame latency. No per-frame memcpy. */
     nt_ui_menu_record_t frame_record[NT_UI_MENU_MAX_DEPTH][NT_UI_MENU_MAX_ITEMS_PER_LEVEL];
     uint16_t frame_record_count[NT_UI_MENU_MAX_DEPTH];
 

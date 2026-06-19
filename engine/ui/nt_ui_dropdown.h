@@ -77,7 +77,7 @@ _Static_assert(sizeof(nt_ui_dropdown_style_t) == 400, "nt_ui_dropdown_style_t st
 /* Valid baseline style (dark) that looks polished with flat colors and NO atlas art (wire refs to opt in). */
 nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
 
-/* ---- Immediate combo API (begin/selectable/end) — mirrors the menu core (DESIGN §3, D-236-04). ----
+/* ---- Immediate combo API (begin/selectable/end) — mirrors the menu core. ----
  * The GAME owns `int *selected` (writes it on a selectable's clicked return) + `bool *open`; the combo
  * only signals + clears *open on a row click (Model-D). Combos do NOT nest (asserted).
  * Layers: every combo fill (trigger, rows, panel, chevron, scrollbar) draws on data->layer; trigger +

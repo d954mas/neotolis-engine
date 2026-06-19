@@ -1,11 +1,13 @@
 #ifndef NT_UI_MENU_H
 #define NT_UI_MENU_H
 
-/* Context-menu + recursive submenus built ON popup-core. Each menu level is a popup-core floating
- * (z-band per depth); a parent item carrying a `submenu` pointer opens its child as a nested popup
- * fly-out. The mouse-aim triangle keeps an open submenu open while the cursor travels diagonally toward
- * it even when the path crosses sibling items (never collapse on raw hover-loss). Per-level edge-flip,
- * nested dismiss from the deepest level up, and keyboard-nav across levels round it out.
+/* Context-menu + recursive submenus built ON popup-core. Immediate-mode: the game discovers the tree
+ * during the frame (menu_begin, item / item_ex / item_begin..item_end / submenu_begin..submenu_end /
+ * separator, menu_end). Each menu level is a popup-core floating (z-band per depth); submenu_begin opens
+ * its child as a nested popup fly-out. The mouse-aim triangle keeps an open submenu open while the cursor
+ * travels diagonally toward it even when the path crosses sibling items (never collapse on raw
+ * hover-loss). Per-level edge-flip, nested dismiss from the deepest level up, and keyboard-nav across
+ * levels round it out.
  *
  * The GAME owns the open `bool`; activation is reported inline by the row calls (no chosen-item sink). */
 
@@ -19,10 +21,8 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 
-/* AIM_FALLBACK is how long the cursor may sit OFF the aim triangle before the hovered sibling wins;
- * OPEN_DELAY gates the submenu open so a quick pass-over does not flash every child. */
+/* AIM_FALLBACK is how long the cursor may sit OFF the aim triangle before the hovered sibling wins. */
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
-#define NT_UI_MENU_OPEN_DELAY_SECS 0.20F
 
 /* Submenu nesting cap: a runaway tree (cyclic submenu pointer, pathological depth) would exhaust the
  * popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). */
@@ -64,7 +64,7 @@ _Static_assert(sizeof(nt_ui_menu_style_t) == 120, "nt_ui_menu_style_t stable ABI
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
-/* Immediate-item options (D-236-03): the full OS-menu row field set. `icon` is the leading-gutter sprite
+/* Immediate-item options: the full OS-menu row field set. `icon` is the leading-gutter sprite
  * (atlas.id==0 = aligned empty gutter). A {0} init reads enabled=false + activatable=false — wrong for a
  * normal row, so prefer nt_ui_menu_item_opts_defaults() (enabled+activatable true) and opt OUT, not IN. */
 typedef struct {
@@ -72,7 +72,7 @@ typedef struct {
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
     bool enabled;               /* greyed + non-selectable when false */
     bool selected;              /* checkmark (toggle/radio menu items) */
-    bool activatable;           /* false = an interactive child owns the click (§7 opt-out, item_begin only) */
+    bool activatable;           /* false = an interactive child owns the click (item_begin only) */
     uint8_t _pad[1];
 } nt_ui_menu_item_opts_t;
 /* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
@@ -87,7 +87,7 @@ static inline nt_ui_menu_item_opts_t nt_ui_menu_item_opts_defaults(void) { retur
  * game directly); the menu clears it on dismiss. Setting open false then true directly reopens cleanly
  * (the menu resets its runtime chain on the closed frame). anchor_x/y is the screen-space open point
  * (cursor at open). Activation is reported INLINE by the row calls (if (menu_item(...)) act();) for BOTH
- * mouse (same-frame) and keyboard (1-frame latency) — there is no chosen_id sink (DESIGN §2). */
+ * mouse (same-frame) and keyboard (1-frame latency) — there is no chosen_id sink. */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     bool open;                /* game-owned open flag; menu clears on dismiss */

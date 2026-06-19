@@ -1,12 +1,8 @@
-/* Dropdown / combobox tests, re-expressed against the IMMEDIATE combo begin/selectable/end API (#236).
+/* Dropdown / combobox tests against the IMMEDIATE combo begin/selectable/end API.
  * Driven through the walker fixture + NT_TEST_ACCESS probes (no GL surface). Covers: a selectable click
  * writes the game-owned int* selected and closes the list; a long list scrolls via the nt_ui_scroll
  * wrapper without leaking a scroll-container state-pool slot across N open/close cycles; the list
- * edge-flips ABOVE near the bottom border; icon-gutter alignment.
- *
- * RED scaffold (Wave 0): the nt_ui_combo_* symbols are defined by Plan 04, so this file COMPILES but
- * link-FAILS on the missing combo symbols until then. The KEPT probes (_test_last_side / _test_scroll_id
- * / _test_row_label_bbox) survive the rewrite. */
+ * edge-flips ABOVE near the bottom border; icon-gutter alignment. */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -68,8 +64,6 @@ static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, 
 
 /* ---- ABI sanity ---- */
 static void test_dropdown_abi_size(void) {
-    /* combo style change is Claude's discretion in Plan 03; keep 400 for now so the RED is the missing
-     * combo symbols, not this assert. Plan 03 updates this number if it grows the style. */
     TEST_ASSERT_EQUAL_UINT(400U, (unsigned)sizeof(nt_ui_dropdown_style_t));
     TEST_ASSERT_EQUAL_UINT(32U, (unsigned)sizeof(nt_ui_dd_state_t));
 }
@@ -185,8 +179,8 @@ static void test_dropdown_row_select_sets_int_and_closes(void) {
 }
 
 /* ---- Non-leak: opening + closing a LONG (scrolling) list >= 8 times must not grow the state-pool slot
- *      count monotonically (the scroll container's cell is GC-safe; a raw .clip would leak). Pitfall 5
- *      preserved verbatim against the combo list path. ---- */
+ *      count monotonically (the scroll container's cell is GC-safe; a raw .clip would leak a
+ *      scroll-container pool slot per open). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_long_list_scroll_no_leak(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
@@ -221,7 +215,7 @@ static void test_dropdown_long_list_scroll_no_leak(void) {
 }
 
 /* ---- Long list with bar sprites wired shows a visible scrollbar: the y-bar emits with non-zero
- *      geometry + opacity (the combo list wraps the rows in nt_ui_scroll, KEEP). ---- */
+ *      geometry + opacity (the combo list wraps the rows in nt_ui_scroll). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_long_list_shows_scrollbar(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();

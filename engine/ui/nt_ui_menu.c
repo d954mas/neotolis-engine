@@ -97,7 +97,7 @@ static inline uint32_t menu_hash_id(uint32_t menu_id, uint32_t kind, uint32_t de
  * above). The id is POSITION-STABLE: a conditional sibling appearing/disappearing must NOT shift a later
  * row's id (that would reset its anim/Clay identity AND re-scope its submenu). The running index drives
  * layout order / focus / the frame record, but NEVER the identity. submenu_begin pushes THIS id as the
- * child scope, so a key need only be unique among siblings (D-236-02; asserted in DEBUG). Folds 0 to 1. */
+ * child scope, so a key need only be unique among siblings (asserted in DEBUG). Folds 0 to 1. */
 static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key) {
     uint32_t h = scope_id * 0x9E3779B1U;
     h = (h ^ ((key + 1U) * 0x85EBCA6BU));
@@ -112,8 +112,7 @@ static inline uint32_t menu_level_id(uint32_t menu_id, uint8_t depth) { return m
 static inline uint32_t menu_panel_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_PANEL, depth, 0U); }
 static inline uint32_t menu_occluder_id(uint32_t menu_id) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_OCCLUDER, 0U, 0U); }
 #ifdef NT_TEST_ACCESS
-/* Data-form row id (KIND_ROW): the immediate path keys rows by the scope-stack menu_item_id instead; only
- * the nt_ui_menu_test_row_id probe still reproduces this id. */
+/* KIND_ROW id reproduced for the nt_ui_menu_test_row_id probe (test-only). */
 static inline uint32_t menu_row_id(uint32_t menu_id, uint8_t depth, uint32_t item_idx) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_ROW, depth, item_idx); }
 #endif
 /* Per-row sub-element ids (arrow marker / icon cell): fmix-derived so consecutive rows' children never
@@ -432,8 +431,8 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
 /* The immediate API discovers the tree DURING the frame (begin/item/submenu_begin..end/menu_end) instead
  * of recursing over an items[] array. It FEEDS the KEPT runtime cell (open_path/focus/active_depth/
  * opened_frame), the single root occluder, the per-level popup, mouse-aim, and outside-click dismiss
- * per-call. Keyboard nav runs in menu_end against the PREVIOUS frame's per-level record (D-236-06,
- * strictly 1-frame latency; NO same-frame, NO prototype). The scope stack derives each row id via
+ * per-call. Keyboard nav runs in menu_end against the PREVIOUS frame's per-level record (strictly
+ * 1-frame latency, never same-frame). The scope stack derives each row id via
  * mix(scope_id[depth], key) (position-stable); submenu_begin pushes its row id as the child scope. */
 
 #ifdef NT_TEST_ACCESS
@@ -442,7 +441,7 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
 static nt_ui_context_t *s_menu_last_ctx = NULL;
 #endif
 
-/* Append a recorded row into THIS frame's per-level frame record (fail-early on overflow — Task-1 cap).
+/* Append a recorded row into THIS frame's per-level frame record (fail-early assert on overflow).
  * DEBUG-only: ids are now position-stable (mix(scope,key)), so two siblings sharing a key derive the SAME
  * id -> aliased anim/Clay/submenu identity. Assert sibling-key uniqueness (ImGui's duplicate-id contract);
  * the linear scan is O(items/level) over the small cap and compiles out with NT_ASSERT in OFF builds. */
@@ -522,7 +521,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_context_t *ctx, uint32_t key, const
 
     if (enabled && in.hovered) {
         rt->focus[depth] = (int16_t)running_idx; /* hover moves keyboard focus too */
-        /* Hover-open (Bug 1): record the hovered row so menu_end can drive the mouse-aim corridor. A
+        /* Hover-open: record the hovered row so menu_end can drive the mouse-aim corridor. A
          * hovered PARENT is a candidate to fly out; a hovered LEAF requests collapsing the open child
          * (gated by the corridor so a diagonal cursor toward the open child does not collapse it). */
         if (has_sub) {
@@ -560,7 +559,7 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
     nt_ui_clay_priv_configure_open_element(panel);
 }
 
-/* Open a level's popup at `anchor` (no per-level light-dismiss catcher — Pitfall 1; the menu owns its own
+/* Open a level's popup at `anchor` (no per-level light-dismiss catcher — the menu owns its own
  * outside-click dismiss). Stashes the resolved side per depth so the mouse-aim corridor picks the right
  * near-edge (the submenu prefers RIGHT but edge-flips LEFT near the screen edge). */
 static void menu_open_popup(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth, uint8_t fill_layer, const nt_ui_menu_style_t *style, const nt_ui_popup_anchor_t *anchor) {
@@ -602,7 +601,7 @@ void nt_ui_menu_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     }
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fills on data->layer, text on label_layer (game-controlled render order) */
 
-    menu_declare_occluder(ctx, fill_layer, menu_id); /* single root occluder under the whole stack (KEEP) */
+    menu_declare_occluder(ctx, fill_layer, menu_id); /* single root occluder under the whole stack */
 
     ctx->pending_menu.style = style;
     ctx->pending_menu.st = st;
@@ -669,7 +668,7 @@ bool nt_ui_menu_item_begin(nt_ui_context_t *ctx, uint32_t key, nt_ui_menu_item_o
     NT_ASSERT(!ctx->pending_menu_item.active && "nt_ui_menu_item_begin: a custom row is already open (missing nt_ui_menu_item_end)");
     /* Returns DECLARE-BODY (true only when the menu is open this frame), NOT clicked: a present-only
      * (closed) menu opens no row element, so the game MUST guard the custom-content body with the return —
-     * otherwise the body's children leak into the scene's open element (Bug 3). An activatable row reports
+     * otherwise the body's children leak into the scene's open element. An activatable row reports
      * its ACTIVATION via item_end (parallel to item/item_ex returning clicked) — the two bools never alias. */
     if (!ctx->pending_menu.open_frame) {
         ctx->pending_menu_item.active = true; /* still balance item_end; the body is skipped by the guard */
@@ -694,7 +693,7 @@ bool nt_ui_menu_item_end(nt_ui_context_t *ctx) {
     }
     nt_ui_clay_priv_close_element();
     if (!ctx->pending_menu_item.activatable) {
-        /* §7 opt-out: the inner interactive child owns the click. The row must NOT step_interaction —
+        /* activatable=false: the inner interactive child owns the click. The row must NOT step_interaction —
          * a row step would capture the pointer and starve the child. Hover highlight still works via the
          * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). Never activates. */
         return false;
@@ -813,7 +812,7 @@ static int16_t menu_im_focus_step(const nt_ui_menu_record_t *recs, uint16_t coun
 
 /* Keyboard nav at nav_depth against the per-level record built THIS frame (the deepest open level was
  * declared this frame, so its record is complete by menu_end). Up/Down move focus; Right/Enter open a
- * focused parent (which is declared + navigable NEXT frame — the 1-frame latency of D-236-06); Enter
+ * focused parent (which is declared + navigable NEXT frame — the 1-frame latency); Enter
  * activates a focused leaf; Left/Esc collapse the level. Mutates rt->focus/open_path/active_depth + the
  * menu's chosen sink. Returns true if the level should close. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat key branch over the recorded slice, not deep nesting
@@ -844,7 +843,7 @@ static bool menu_im_keyboard_nav(nt_ui_context_t *ctx, uint8_t depth, nt_ui_menu
                 rt->active_depth = (uint8_t)(depth + 1U);
             }
             if (depth + 1U < NT_UI_MENU_MAX_DEPTH) {
-                rt->focus[depth + 1U] = 0; /* focus the child's first row (layout idx 0), mirroring the data form */
+                rt->focus[depth + 1U] = 0; /* focus the child's first row (layout idx 0) */
             }
         } else if (cur->has_sub == 0U && activate_key) {
             /* Right on a leaf is a no-op; only Enter activates. Stash the leaf id for the NEXT frame's row
@@ -862,7 +861,7 @@ static nt_ui_menu_hover_t *menu_hover_cell(nt_ui_context_t *ctx, uint32_t menu_i
     return nt_ui_state(ctx, menu_hover_id(menu_id, depth), sizeof(nt_ui_menu_hover_t), NT_UI_MENU_TAG);
 }
 
-/* Hover-open + mouse-aim corridor + leave-close for the immediate fly-out (Bug 1). For each open level
+/* Hover-open + mouse-aim corridor + leave-close for the immediate fly-out. For each open level
  * d (0..active_depth), drive the corridor against the OPEN child's prev-frame bbox: while the cursor aims
  * at (or sits over) the open child, KEEP it (a diagonal toward the child never collapses it). Once the
  * corridor releases, a hovered SIBLING parent flies out instead, or a hovered leaf collapses the child.
@@ -941,7 +940,7 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_context_t *ctx, uint32_t menu_id,
     float mx = 0.0F;
     float my = 0.0F;
     menu_mouse_pos(ctx, &mx, &my);
-    /* Hover-open (Bug 1): the mouse-aim corridor drives the open chain. Skipped on a keyboard-nav frame so a
+    /* Hover-open: the mouse-aim corridor drives the open chain. Skipped on a keyboard-nav frame so a
      * keyboard-opened submenu is authoritative and never collapses from cursor distance the same frame. */
     if (!kbd_acted) {
         menu_resolve_hover_open(ctx, menu_id, rt, mx, my, ctx->frame_dt);
@@ -955,7 +954,7 @@ static bool menu_resolve_nav_and_dismiss(nt_ui_context_t *ctx, uint32_t menu_id,
             rt->active_depth = 1U;
         }
     }
-    /* Menu-owned outside-click dismiss (mirrors the data form, Pitfall 6: skip the opening frame). */
+    /* Menu-owned outside-click dismiss; skip the opening frame so the arming click does not self-dismiss. */
     const bool outside_press = nt_input_mouse_is_pressed(NT_BUTTON_LEFT) || nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
     if (outside_press && !menu_cursor_over_any_panel(ctx, menu_id, rt, mx, my) && ctx->frame_counter != rt->opened_frame) {
         close_chain = true;

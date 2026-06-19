@@ -302,7 +302,7 @@ typedef struct {
     bool fruit_open;
     int city_sel; /* long (scrolling) list selection */
     bool city_open;
-    int color_sel; /* custom swatch-trigger combo selection (D-236-04) */
+    int color_sel; /* custom swatch-trigger combo selection */
     bool color_open;
 } dropdown_params_t;
 
@@ -1576,7 +1576,7 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 
 /* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to
  * exercise the scroll path + edge-flip-up near the bottom border, and a custom-trigger / custom-row combo
- * (preview_begin/end + selectable_begin/end, D-236-04). The game feeds rows per-call and owns selection +
+ * (preview_begin/end + selectable_begin/end). The game feeds rows per-call and owns selection +
  * open (Model D): a selectable's clicked return is where the game writes *selected; the combo clears *open. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — three combos' row loops, not deep nesting
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1635,7 +1635,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_combo_end(ctx);
     }
 
-    /* Custom-trigger combo (D-236-04): a swatch + label preview instead of the plain string trigger. The
+    /* Custom-trigger combo: a swatch + label preview instead of the plain string trigger. The
      * trigger content lives between preview_begin/end; the list body is plain selectables. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Color (custom swatch trigger)", g_current->caption);
     static const char *const colors[] = {"Crimson", "Emerald", "Azure", "Amber"};
@@ -1789,7 +1789,7 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
         (void)nt_ui_menu_item_ex(ctx, MK_MOVE_GROUP, "Group", grp);
         nt_ui_menu_submenu_end(ctx);
     }
-    /* Custom-content row (activatable=false, §7 opt-out): the inner button owns the click; the row only
+    /* Custom-content row (activatable=false): the inner button owns the click; the row only
      * highlights on hover. The game reads the inner button's own interaction. */
     nt_ui_menu_item_opts_t op = nt_ui_menu_item_opts_defaults();
     op.activatable = false;
@@ -1817,7 +1817,7 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
  * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The immediate API builds the tree in
  * CODE every frame (no static items[]); the game owns the open flag; activation is reported inline. The
- * nt_ui_menu_open_trigger arming (D-236-05) is KEPT 1:1. */
+ * nt_ui_menu_open_trigger arms the menu at the cursor on a right-click / long-press. */
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
 
