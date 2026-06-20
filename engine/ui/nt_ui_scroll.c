@@ -298,6 +298,7 @@ static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const 
     if (!bb->found || bb->box.width <= 0.0F || bb->box.height <= 0.0F) {
         return; /* no solved geometry -> never a hit (frame-1 lag or a zeroed stale entry) */
     }
+    nt_ui_internal_ensure_pointers_layout(ctx); /* layout-space bbox compare below; force conversion */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_pointer_t *p = &ctx->frame_pointers[i];
         if (p->wheel_dx == 0.0F && p->wheel_dy == 0.0F) {
@@ -324,6 +325,7 @@ static void scroll_gather_wheel(nt_ui_context_t *ctx, uint32_t scroll_id, const 
  * equal-best candidate (latest declaration) override. */
 void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_resolve_wheel_owners: ctx must be non-NULL");
+    nt_ui_internal_ensure_pointers_layout(ctx); /* end-of-frame resolve compares pointer vs layout bbox */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_pointer_t *p = &ctx->frame_pointers[i];
         uint32_t best_id = 0U;
@@ -435,6 +437,9 @@ static bool scroll_capture_excluded(const nt_ui_context_t *ctx, uint32_t scroll_
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const nt_scroll_bbox_t *bb, const float content[2],
                               const float container[2], bool inspector_owned) {
+    /* Pointers are raw device until the viewport conversion runs; this gesture path reads them directly
+     * (not via step), so force the once-per-frame conversion before any layout-space compare. */
+    nt_ui_internal_ensure_pointers_layout(ctx);
     /* Per-axis scrollability: a gesture only arms/steals on an axis that is BOTH enabled and can
      * actually move (content overflows). A container whose content fits takes no gestures at all,
      * so taps + drags pass through to inner widgets untouched (no no-op scroll stealing clicks). */

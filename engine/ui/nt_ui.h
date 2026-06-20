@@ -260,7 +260,28 @@ void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-/* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. */
+/* Device->layout viewport. The ctx owns the single device<->layout mapping: nt_ui_begin takes the
+ * RAW device pointer, and the lazy hit-test resolve converts it through this viewport.
+ *   (x, y) — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
+ *   (w, h) — device-space size of that content rect (logical_dim * scale)
+ * w/h must be > 0. */
+typedef struct {
+    float x, y, w, h;
+} nt_ui_viewport_t;
+
+/* Overrides this frame's viewport (begin reset it to the identity {0,0,screen_w,screen_h}).
+ * Call AFTER nt_ui_begin and BEFORE the first hit-test resolve (step/query/pointer_hot) — same
+ * lazy window as nt_ui_set_view_proj. Scaled apps feed nt_ui_viewport_from_scale here. */
+void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
+
+/* Bidirectional device<->layout converters through the ctx viewport (cglm vec2 = float[2], passed
+ * float[16]-style so the public header stays cglm-free). screen = device px; layout = Clay px.
+ * No Y-flip (device and Clay layout are both Y-down). */
+void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]);
+void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]);
+
+/* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. pointers carry
+ * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve. */
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
 void nt_ui_end(nt_ui_context_t *ctx);
 

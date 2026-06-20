@@ -320,6 +320,45 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
 }
 // #endregion
 
+// #region viewport
+/* Single device<->layout math path: the converters AND the lazy pointer conversion all route here.
+ * device->layout: layout = (device - vp.offset) * (logical_dim / vp.size); the inverse for the other
+ * direction. vp.size > 0 is the caller's contract (begin's identity default is > 0 when dims > 0). */
+static void nt_ui_screen_to_layout_vp(const nt_ui_viewport_t *vp, float logical_w, float logical_h, const float screen[2], float out_layout[2]) {
+    NT_ASSERT(vp->w > 0.0F && vp->h > 0.0F && "nt_ui_screen_to_layout_vp: viewport size must be > 0");
+    out_layout[0] = (screen[0] - vp->x) * (logical_w / vp->w);
+    out_layout[1] = (screen[1] - vp->y) * (logical_h / vp->h);
+}
+
+static void nt_ui_layout_to_screen_vp(const nt_ui_viewport_t *vp, float logical_w, float logical_h, const float layout[2], float out_screen[2]) {
+    NT_ASSERT(logical_w > 0.0F && logical_h > 0.0F && "nt_ui_layout_to_screen_vp: logical dims must be > 0");
+    out_screen[0] = vp->x + layout[0] * (vp->w / logical_w);
+    out_screen[1] = vp->y + layout[1] * (vp->h / logical_h);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): the validation assert chain inflates the count; the body is two stores
+void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_viewport: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_set_viewport: call between nt_ui_begin and the first hit-test (reset each begin)");
+    NT_ASSERT(!ctx->frame_pointers_converted && "nt_ui_set_viewport: fed too late — the pointer conversion already latched this frame; set BEFORE the first step/query/pointer_hot");
+    NT_ASSERT(isfinite(vp.x) && isfinite(vp.y) && "nt_ui_set_viewport: offset must be finite");
+    NT_ASSERT(isfinite(vp.w) && isfinite(vp.h) && vp.w > 0.0F && vp.h > 0.0F && "nt_ui_set_viewport: viewport size must be finite and > 0");
+    ctx->viewport = vp;
+}
+
+void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_screen_to_layout: ctx must be non-NULL");
+    NT_ASSERT(screen != NULL && out_layout != NULL && "nt_ui_screen_to_layout: vec args must be non-NULL");
+    nt_ui_screen_to_layout_vp(&ctx->viewport, ctx->begin_w, ctx->begin_h, screen, out_layout);
+}
+
+void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_layout_to_screen: ctx must be non-NULL");
+    NT_ASSERT(layout != NULL && out_screen != NULL && "nt_ui_layout_to_screen: vec args must be non-NULL");
+    nt_ui_layout_to_screen_vp(&ctx->viewport, ctx->begin_w, ctx->begin_h, layout, out_screen);
+}
+// #endregion
+
 // #region font_registry
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_font: ctx must be non-NULL");
@@ -350,10 +389,17 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     g_nt_ui_inframe_ctx = ctx;
     ctx->frame_counter++; /* one bump per frame; gates the events gesture latch (stable across the whole frame) */
 
-    /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. */
+    /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. The pointers are RAW DEVICE
+     * coords; the lazy hot resolve converts them to layout space via ctx->viewport (set below to the
+     * identity default; a scaled app overrides it via nt_ui_set_viewport before the first hit-test). */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
     ctx->frame_pointer_count = count;
     ctx->frame_dt = dt;
+    ctx->frame_pointers_converted = false;
+    /* Default viewport = identity device==layout (no set_viewport => unscaled apps unchanged). */
+    ctx->begin_w = screen_w;
+    ctx->begin_h = screen_h;
+    ctx->viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h};
 
     /* Orphan cleanup — captures unqueried last frame would hold the pointer forever. */
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
@@ -2369,8 +2415,35 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
  * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-registered, i.e.
  * later step_interaction call). Registry holds game-layer widgets only, so their distances share one
  * view_proj and compare cleanly. */
+
+/* Convert this frame's RAW DEVICE pointers to LAYOUT space via ctx->viewport, in place, once per frame.
+ * Runs at the lazy hot resolve (after nt_ui_set_viewport, before any hit-test reads frame_pointers). The
+ * identity default viewport leaves device==layout, so unscaled paths see no change. Other-TU pointer
+ * consumers (scroll wheel, menu) call this too (idempotent) to stay correct independent of call order. */
+void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
+    if (ctx->frame_pointers_converted) {
+        return;
+    }
+    ctx->frame_pointers_converted = true;
+    const float inv_sx = ctx->begin_w / ctx->viewport.w; /* logical_dim / vp.size; see nt_ui_screen_to_layout_vp */
+    const float inv_sy = ctx->begin_h / ctx->viewport.h;
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        nt_pointer_t *p = &ctx->frame_pointers[i];
+        const float screen[2] = {p->x, p->y};
+        float layout[2];
+        nt_ui_screen_to_layout_vp(&ctx->viewport, ctx->begin_w, ctx->begin_h, screen, layout);
+        p->x = layout[0];
+        p->y = layout[1];
+        p->dx *= inv_sx; /* delta carries only the scale (no offset) */
+        p->dy *= inv_sy;
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
+    /* MUST precede the hot_resolved early-out: a frame where set_pointer_occlusion latches hot via a
+     * different call still needs the device->layout conversion to have run before any hit-test reads. */
+    nt_ui_internal_ensure_pointers_layout(ctx);
     if (ctx->hot_resolved) {
         return;
     }

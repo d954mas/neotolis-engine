@@ -54,3 +54,24 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     (void)id;
     return (nt_ui_bbox_t){0};
 }
+
+/* Headless: no in-frame ctx, so the viewport setter is a no-op. */
+void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp) {
+    (void)ctx;
+    (void)vp;
+}
+
+/* Headless identity: no stored viewport/dims, so device==layout (stub coord tests never scale). */
+void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]) {
+    (void)ctx;
+    NT_ASSERT(screen != NULL && out_layout != NULL && "nt_ui_screen_to_layout: vec args must be non-NULL");
+    out_layout[0] = screen[0];
+    out_layout[1] = screen[1];
+}
+
+void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]) {
+    (void)ctx;
+    NT_ASSERT(layout != NULL && out_screen != NULL && "nt_ui_layout_to_screen: vec args must be non-NULL");
+    out_screen[0] = layout[0];
+    out_screen[1] = layout[1];
+}
