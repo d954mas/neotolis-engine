@@ -3034,8 +3034,9 @@ boundaries:
 1. **No per-vertex data.** A composite widget (segmented bar, sparkline, minimap
    blips) is N separate emit calls, not one call with a vertex stream.
 2. **16-float cap.** Four FLOAT4 attrs at `NT_SPRITE_CUSTOM_STRIDE_MAX` (64 B).
-3. **Time / animation is not a walker injection.** The wrapper writes the current
-   time into `custom_attrs` itself each frame; the walker injects only layout.
+3. **Time / animation is not a walker injection.** A widget that needs a time-driven
+   shader writes the current time into `custom_attrs` itself each frame — no shipped
+   widget does this (the demo animates via `color_packed`); the walker injects only layout.
 4. **A second texture rides the material** (`textures[]`), not the custom block.
 
 ## 31.5 Reveal modes and v1 limits (`nt_ui_radial_image`)

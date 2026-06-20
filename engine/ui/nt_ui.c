@@ -1350,14 +1350,9 @@ typedef struct {
     scissor_rect_t rect;
 } clip_cache_entry_t;
 
-/* Sprite-pipeline bind state carried through the walk.
- *   dirty       — a text/scissor/custom barrier flushed the open cmd; the next sprite
- *                 dispatch must rebind even on the same material id.
- *   last_mat_id — id of the last material the walker bound. A run of same-material
- *                 IMAGEs skips the redundant set_material (it does get_info+validation
- *                 even on its no-op path). MUST be reset to 0 at every walker flush /
- *                 barrier / emit_custom: set_material's same-id no-op holds ONLY while a
- *                 cmd is open, and those paths close it (or bind a different material). */
+/* Sprite-pipeline bind state. dirty — a barrier closed the open cmd; next dispatch must
+ * rebind. last_mat_id — skip redundant set_material across a same-material run; reset to 0
+ * at every flush/barrier (the same-id no-op holds only while a cmd is open). */
 typedef struct {
     bool dirty;
     uint32_t last_mat_id;
@@ -1615,18 +1610,12 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 }
 #endif
 
-/* Drain pending text, then bind the sprite material this command wants.
- * desired = ctx->sprite_material for plain content, or a per-element override
- * (radial reveal). set_material no-ops on same .id, so consecutive elements
- * sharing one material batch to a single draw; only the base<->override
- * boundary — or a prior text/scissor/custom barrier (dirty) — flushes. */
+/* desired = ctx->sprite_material or a per-element override (radial reveal). Skip
+ * set_material (does get_info+validation even on its no-op) across a same-material run;
+ * a barrier (dirty) or material switch rebinds. The text flush is a DIFFERENT (TEXT)
+ * pipeline — it never closes the sprite cmd, so can't invalidate the cache. */
 static inline void prep_sprite_dispatch_mat(nt_material_t desired, nt_ui_sprite_bind_t *bind) {
     nt_text_renderer_flush();
-    /* Skip the redundant set_material (get_info + validation even on its no-op path)
-     * for a run of same-material dispatches. The cmd stays open across same-material
-     * IMAGEs, so the same-id no-op holds; a barrier (dirty) or material switch rebinds.
-     * NOTE: nt_text_renderer_flush above is the TEXT pipeline — it does NOT close the
-     * sprite cmd, so it never invalidates the sprite material cache. */
     if (desired.id != bind->last_mat_id || bind->dirty) {
         nt_sprite_renderer_set_material(desired);
         bind->last_mat_id = desired.id;
@@ -1746,14 +1735,9 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
-        /* ONE generic custom-attr branch: no per-widget identity. custom_bytes > 0
-         * means the bound material declares per-vertex attrs; the walker bakes the
-         * widget's block (with bbox aspect / region uvrect injected) and dispatches
-         * by geom_mode. GEOMETRY = clean white-pixel bbox quad (SDF gl_VertexID corner
-         * derivation); REGION = the textured emit_region/emit_slice9 path. */
+        /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
+         * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
         if (ip != NULL && ip->custom != NULL) {
-            /* Build the name-bound custom block ONCE (dedup across geom modes), bind it,
-             * then dispatch by geom_mode. Both emit paths bake the bound block per-vertex. */
             float blk[16];
             const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, blk);
             nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));

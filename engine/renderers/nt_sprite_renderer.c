@@ -125,9 +125,8 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     /* Custom flush indexes into indices[] too, so cmv must not exceed the base
      * caps. */
     NT_ASSERT(d.custom_max_vertices <= d.max_vertices && "sprite custom_max_vertices must not exceed max_vertices");
-    /* Fixed-count custom emits (region=4, slice9=16 verts) write at the extended stride;
-     * a cap below the largest (16) would overrun the custom staging. emit_geometry's
-     * arbitrary count keeps its own per-emit guard. */
+    /* Largest fixed single emit is slice9 = 16 verts; a smaller cap overruns custom
+     * staging at the extended stride. emit_geometry guards its own arbitrary count. */
     NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
 
     memset(&s_sprite, 0, sizeof(s_sprite));

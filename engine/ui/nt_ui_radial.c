@@ -22,20 +22,18 @@ void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float 
         NT_ASSERT(decl->userData == NULL && "nt_ui_radial: decl->userData must be NULL (data param controls)");
     }
 
-    /* Custom block, attr_map order [a_radial, a_layout]:
-     *   a_radial @ 0..3 = {angle_start, angle_end, inner_radius_norm, 0}
-     *   a_layout @ 4..7 = {0,0,0,0} placeholders — the walker fills a_layout by NAME
-     *                     (aspect = bbox w/h, bbox px size). The material must declare
-     *                     attr_map [a_radial, a_layout].
-     * Flat radial rasterizes as a clean white-pixel bbox quad (GEOMETRY mode) — the SDF
-     * fs derives its local coord from gl_VertexID&3, so no region UV is needed. */
+    /* attr_map order [a_radial, a_layout]: a_radial = block, a_layout filled by name at
+     * emit (bbox aspect+px). Flat = white-pixel GEOMETRY quad; SDF derives local from
+     * gl_VertexID&3, no region UV. */
     const float blk[8] = {angle_start, angle_end, style->inner_radius_norm, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+    static const char *const attr_names[] = {"a_radial", "a_layout", NULL};
     const nt_ui_image_custom_t img = {
         .atlas = ctx->atlas,
         .region_index = ctx->white_region,
         .material = style->material,
         .custom_attrs = blk,
         .custom_bytes = (uint8_t)sizeof blk,
+        .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
         .slice9_scale = 1.0F,
         .color_packed = style->color_packed,

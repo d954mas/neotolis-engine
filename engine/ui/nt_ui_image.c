@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "hash/nt_hash.h" /* nt_hash32_str — attr-name validation */
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
 #include "renderers/nt_sprite_renderer.h" /* NT_SPRITE_CUSTOM_STRIDE_MAX */
@@ -16,6 +17,22 @@ const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
     .pill_color = 0xFFB45A78U,
     ._reserved = 0U,
 };
+
+/* Evaluated only inside NT_ASSERT: the material's attr_map must list exactly `names`
+ * in the same order — the verbatim data attrs (a_radial/a_tint/...) bake at those offsets. */
+static bool nt_ui_image_attr_order_ok(const nt_material_info_t *mi, const char *const *names) {
+    if (names == NULL) {
+        return true;
+    }
+    uint8_t n = 0;
+    while (names[n] != NULL) {
+        if (n >= mi->attr_map_count || mi->attr_map_hashes[n] != nt_hash32_str(names[n]).value) {
+            return false;
+        }
+        ++n;
+    }
+    return n == mi->attr_map_count;
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
@@ -84,6 +101,7 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const nt_material_info_t *mi = nt_material_get_info(img->material);
     NT_ASSERT(mi != NULL && mi->ready && "nt_ui_image_custom: material must be ready");
     NT_ASSERT((uint32_t)mi->attr_map_count * 16U == (uint32_t)img->custom_bytes && "nt_ui_image_custom: custom_bytes must equal material attr_map_count*16");
+    NT_ASSERT(nt_ui_image_attr_order_ok(mi, img->attr_names) && "nt_ui_image_custom: material attr_map names/order must match img->attr_names (data attrs bake at fixed offsets)");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_image_custom: decl->id must be 0 (id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image_custom: decl->image.imageData must be NULL (atlas+region controls image)");

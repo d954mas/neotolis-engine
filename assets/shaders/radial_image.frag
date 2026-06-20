@@ -32,7 +32,7 @@ void main() {
     float angle_start = v_radial.x;
     float angle_end = v_radial.y;
     float inner = v_radial.z;
-    float aspect = v_layout.x; // walker-injected bbox w/h (a_radial.w is now free)
+    float aspect = v_layout.x; // walker-injected bbox w/h
 
     // Region-local UV → [-1,1] for the angular/ring test (image path reuses the
     // UV rather than gl_VertexID). v_texcoord is normalized against the region's

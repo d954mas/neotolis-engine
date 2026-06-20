@@ -3,8 +3,8 @@
 
 /* Flat SDF arc/sector/ring/oval widget on the white pixel. The game owns fill/state;
  * style is static-const safe. Rides the custom-attr image path so radials sharing one
- * material batch to a single draw. Angular convention: 0 = +X, CCW+; swapping the two
- * angles reverses the sweep (no CW/CCW flag).
+ * material batch to a single draw. Angular convention: 0 = +X, CCW+. The wedge runs CCW
+ * from start to end; swapping start/end selects the COMPLEMENTARY span, not a mirror.
  * design + reveal/angle rationale: docs/neotolis_engine_spec_1.md
  * "Radial widgets & the custom-attr image path" */
 
@@ -43,8 +43,10 @@ static inline float nt_ui_radial_fill_to_end(float angle_start, float fill, floa
 }
 
 /* Two-angle form. angle_start/angle_end in radians, mathematical convention
- * (0=+X, CCW+). Swapping the two reverses the swept direction — flip is API-layer,
- * no shader branch. Both finite-asserted. data may be NULL. decl may be NULL
+ * (0=+X, CCW+). The wedge runs CCW from angle_start to angle_end; swapping the two
+ * selects the complementary span (API-layer, no shader branch). A negative
+ * fill*sweep_total puts end before start -> the complement, not a short reverse arc.
+ * Both finite-asserted. data may be NULL. decl may be NULL
  * (GROW/GROW); the widget owns image/backgroundColor/userData. Must be called
  * between nt_ui_begin and nt_ui_end on the active ctx. */
 void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float angle_start, float angle_end, const nt_ui_radial_style_t *style, const Clay_ElementDeclaration *decl);

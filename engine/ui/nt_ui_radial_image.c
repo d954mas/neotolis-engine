@@ -45,22 +45,19 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
     const Clay_Color tint_rgb = nt_ui_unpack_abgr(style->tint_color_packed);
 
-    /* 64 B custom block, attr_map order [a_radial, a_tint, a_uvrect, a_layout]:
-     *   a_radial @ 0..3  = {angle_start, angle_end, inner_radius_norm, 0}
-     *   a_tint   @ 4..7  = {r, g, b, tint_strength} in 0..1
-     *   a_uvrect @ 8..11 = region min/max atlas UV — placeholder, walker fills BY NAME
-     *   a_layout @ 12..15 = aspect + bbox px — placeholder, walker fills BY NAME
-     * REGION mode = the textured emit_region/emit_slice9 path (origin/flip honored;
-     * slice9 asserted unset above). The material must declare matching attr_map names. */
+    /* attr_map order [a_radial, a_tint, a_uvrect, a_layout]; a_uvrect/a_layout filled by
+     * name at emit. REGION = textured emit path (origin/flip; slice9 asserted unset). */
     const float blk[16] = {
         angle_start, angle_end, style->inner_radius_norm, 0.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
     };
+    static const char *const attr_names[] = {"a_radial", "a_tint", "a_uvrect", "a_layout", NULL};
     const nt_ui_image_custom_t img = {
         .atlas = region->atlas,
         .region_index = region->region,
         .material = style->material,
         .custom_attrs = blk,
         .custom_bytes = (uint8_t)sizeof blk,
+        .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_REGION,
         .flip_bits = style->flip_bits,
         .flags = style->flags,
