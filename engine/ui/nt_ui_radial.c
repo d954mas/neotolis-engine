@@ -9,22 +9,6 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 
-/* aspect (a_radial.w) corrects the angle test on a non-square bbox so 0 stays
- * +X. FIXED w/h give an exact ratio; otherwise default to 1 (the shape still
- * fills the bbox via the gl_VertexID local coord — aspect only re-rounds the
- * wedge). */
-static float radial_aspect(const Clay_ElementDeclaration *decl) {
-    if (decl == NULL) {
-        return 1.0F;
-    }
-    const Clay_SizingAxis w = decl->layout.sizing.width;
-    const Clay_SizingAxis h = decl->layout.sizing.height;
-    if (w.type == CLAY__SIZING_TYPE_FIXED && h.type == CLAY__SIZING_TYPE_FIXED && w.size.minMax.min > 0.0F && h.size.minMax.min > 0.0F) {
-        return w.size.minMax.min / h.size.minMax.min;
-    }
-    return 1.0F;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float angle_start, float angle_end, const nt_ui_radial_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_radial: ctx must be non-NULL");
@@ -50,7 +34,9 @@ void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float 
         .slice9_scale = 1.0F,
         .flags = (uint8_t)NT_UI_IMAGE_FLAG_RADIAL,
         .material = style->material,
-        .radial = {angle_start, angle_end, style->inner_radius_norm, radial_aspect(decl)},
+        /* radial.w (aspect) is a placeholder; the walker overwrites it with the
+         * real bbox w/h at emit (correct under any sizing). */
+        .radial = {angle_start, angle_end, style->inner_radius_norm, 1.0F},
     };
 
     /* Transparency lives in opacity (element_data), not tint alpha. */

@@ -1,21 +1,17 @@
-/* Phase 66 — walker → custom-material binding for radial emits (INT-66-06).
+/* walker → custom-material binding for radial emits.
  *
- * The phase's one genuine open integration risk: how a custom-material radial
- * emit reaches the UI walker. The walker binds ONE ctx->sprite_material per pass
- * and (before this plan) had no per-element material override on the image path.
+ * The walker binds ONE ctx->sprite_material per pass; radials need a per-element
+ * material override on the image path. Two binding routes are covered:
  *
  * Route A (prototype): a CUSTOM-command handler binds the radial material and
- * runs the plan-01 custom-attr emit. It proves the renderer hook end-to-end
- * through the walker, but CUSTOM is a hard barrier (is_segmentable false) so it
- * flushes per radial — it does NOT meet the D-66-07 thousands-in-one-draw scale
- * target. Superseded by Route B below.
+ * runs a custom-attr emit. Proves the renderer hook end-to-end through the walker,
+ * but CUSTOM is a hard barrier (is_segmentable false) so it flushes per radial —
+ * it does NOT meet the thousands-in-one-draw scale target. Superseded by Route B.
  *
  * Route B (shipped): an optional material handle on nt_ui_image_payload_t; the
  * walker image dispatch binds it via set_material (auto-flush on .id change) when
  * it differs from the bound base. N radials sharing ONE radial material batch to
- * one flush + one draw (D-66-07).
- *
- * The widget math/ABI for nt_ui_radial / nt_ui_radial_image lands in 66-03/04. */
+ * one flush + one draw. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -47,7 +43,7 @@ static ui_walker_fixture_t s_fx;
 #define MAX_TEST_CMDS 64
 static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
 
-/* One FLOAT4 a_radial block (matches the plan-01 v1 payload). */
+/* One FLOAT4 a_radial block (matches the v1 payload). */
 static const float k_radial_attrs[4] = {0.25F, 1.75F, 0.5F, 1.0F};
 
 static uint32_t s_vpack_counter;
@@ -168,7 +164,7 @@ static void test_route_a_custom_binds_radial_material(void) {
 /* Route A is a HARD BARRIER: CUSTOM is not segmentable, so emit_custom flushes
  * before AND the radial emit's own boundary flushes — N radials via CUSTOM scale
  * the draw-call count linearly. This is the documented prototype-only limitation
- * that fails D-66-07; contrast test_route_b_*_batches below. */
+ * that fails the batch-scale target; contrast test_route_b_*_batches below. */
 static void test_route_a_custom_does_not_batch(void) {
     route_a_ctx_t rc = {.atlas = s_fx.atlas.handle, .region_index = s_fx.atlas.white_region_idx, .radial_mat = make_radial_material(), .calls = 0};
     nt_ui_set_custom_handler(s_fx.ctx, route_a_handler, &rc);
@@ -188,7 +184,7 @@ static void test_route_a_custom_does_not_batch(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(n, rc.calls);
-    /* Each CUSTOM is its own draw — linear in N, NOT batched (Pitfall 3). */
+    /* Each CUSTOM is its own draw — linear in N, NOT batched. */
     TEST_ASSERT_EQUAL_UINT32((uint32_t)n, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
@@ -198,20 +194,25 @@ static void test_route_a_custom_does_not_batch(void) {
 static nt_ui_image_payload_t s_img_payloads[16];
 static const nt_ui_element_data_t k_layer0 = {.layer = 0U};
 
+/* A flat-radial IMAGE payload: the RADIAL flag routes it through emit_radial,
+ * which bakes the 16 B a_radial block matching the radial material's attr_map —
+ * so a custom-attr material is never bound to a plain (no-custom-attr) emit. The
+ * batching semantics under test (one material .id = one draw) are unchanged. */
 static void make_image(int idx, float x, nt_resource_t atlas, uint32_t region_index, nt_material_t material) {
     Clay_RenderCommand *c = &s_test_cmds[idx];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
     c->zIndex = 0;
     c->boundingBox = (Clay_BoundingBox){.x = x, .y = 0, .width = 32, .height = 32};
     c->renderData.image.backgroundColor = (Clay_Color){0}; /* untinted */
-    s_img_payloads[idx] = (nt_ui_image_payload_t){.atlas = atlas, .region_index = region_index, .slice9_scale = 1.0F, .material = material};
+    const uint8_t flags = (material.id != 0) ? (uint8_t)NT_UI_IMAGE_FLAG_RADIAL : 0U;
+    s_img_payloads[idx] = (nt_ui_image_payload_t){.atlas = atlas, .region_index = region_index, .slice9_scale = 1.0F, .flags = flags, .material = material};
     c->renderData.image.imageData = &s_img_payloads[idx];
     c->userData = (void *)&k_layer0;
 }
 
 /* N IMAGE radials sharing ONE material flush+draw together: only the
  * base<->radial boundary flushes (set_material no-ops on same .id). The
- * draw-call count is CONSTANT in N (D-66-07), unlike Route A's per-radial flush. */
+ * draw-call count is CONSTANT in N, unlike Route A's per-radial flush. */
 static void test_route_b_shared_material_batches(void) {
     const nt_material_t radial = make_radial_material();
     const uint32_t region = s_fx.atlas.white_region_idx;
@@ -277,7 +278,7 @@ static void test_route_b_zero_material_uses_base(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
-/* ===== WGT-66-04: nt_ui_radial widget math + ABI + emit payload ===== */
+/* ===== nt_ui_radial widget math + ABI + emit payload ===== */
 
 #define WGT_PI 3.14159265358979323846F
 
@@ -317,7 +318,7 @@ static void test_radial_style_abi(void) {
 }
 
 /* (c) the a_radial FLOAT4 payload is baked per-vertex when nt_ui_radial is driven
- * through the walker: read back via the plan-01 test_last_emit_radial accessor. */
+ * through the walker: read back via the test_last_emit_radial accessor. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_radial_emit_bakes_payload(void) {
     nt_ui_radial_style_t style = nt_ui_radial_style_defaults();
@@ -379,7 +380,7 @@ static void test_radial_fill_emit_payload(void) {
     TEST_ASSERT_TRUE(approx(out[3], 1.0F));                   /* square bbox → aspect 1 */
 }
 
-/* ===== WGT-66-05: nt_ui_radial_image — textured reveal widget ===== */
+/* ===== nt_ui_radial_image — textured reveal widget ===== */
 
 /* Radial-IMAGE material: a_radial @ loc 4 (extended layout) PLUS a u_reveal_mode
  * vec4 param baked at creation so the reveal-mode look is observable via
@@ -417,7 +418,9 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     desc.color_mode = NT_COLOR_MODE_NONE;
     desc.attr_map[0].stream_name = "a_radial";
     desc.attr_map[0].location = 4;
-    desc.attr_map_count = 1;
+    desc.attr_map[1].stream_name = "a_tint";
+    desc.attr_map[1].location = 5;
+    desc.attr_map_count = 2;
     desc.params[0].name = NT_UI_RADIAL_IMAGE_PARAM_MODE;
     desc.params[0].value[0] = (float)mode; /* reveal look baked at creation */
     desc.param_count = 1;
@@ -479,32 +482,6 @@ static void test_radial_image_region_bakes_payload(void) {
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 1.75F), "a_radial.y == angle_end");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[3], expect_aspect), "a_radial.w == aspect (w/h)");
-    }
-}
-
-/* (b) slice9 path: a slice9 override routes through emit_slice9; the a_radial
- * block is duplicated across all 16 slice9 verts. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_radial_image_slice9_bakes_payload(void) {
-    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
-    style.material = make_radial_image_material();
-    style.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
-    style.slice9_lrtb[0] = 4;
-    style.slice9_lrtb[1] = 4;
-    style.slice9_lrtb[2] = 4;
-    style.slice9_lrtb[3] = 4;
-
-    /* Region 1 is a 16x16 untrimmed region (white 1x1 cannot fit slice9 borders). */
-    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.polygon_region_idx);
-    radial_image_walk(&ref, &style, 64.0F, 64.0F);
-
-    /* Slice9 = 16 verts; each carries the same a_radial block. */
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
-    for (uint32_t v = 0; v < 16U; v++) {
-        float out[4] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 0.25F), "slice9 a_radial.x == angle_start");
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 1.75F), "slice9 a_radial.y == angle_end");
     }
 }
 
@@ -596,7 +573,6 @@ int main(void) {
     RUN_TEST(test_radial_emit_bakes_payload);
     RUN_TEST(test_radial_fill_emit_payload);
     RUN_TEST(test_radial_image_region_bakes_payload);
-    RUN_TEST(test_radial_image_slice9_bakes_payload);
     RUN_TEST(test_radial_image_reveal_mode_plumbed);
     RUN_TEST(test_radial_image_style_abi);
     RUN_TEST(test_radial_image_fill_emit);

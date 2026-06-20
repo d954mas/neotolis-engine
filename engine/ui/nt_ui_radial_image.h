@@ -6,15 +6,20 @@
  * via four reveal modes — the swept sector renders at full color. nt_ui_image is
  * left UNTOUCHED; this is a separate widget.
  *
- * It rides the sprite renderer's textured emit paths (emit_region / emit_slice9)
- * through the custom per-vertex attribute capability: the a_radial FLOAT4
- * (angle_start, angle_end, inner_radius_norm, aspect) is baked into every vertex
- * of the region/slice9 quad, and the walker binds the radial-image material (the
- * per-element material) which carries the SDF fs + reveal-mode params.
+ * It rides the sprite renderer's textured emit_region path through the custom
+ * per-vertex attribute capability: the a_radial FLOAT4 (angle_start, angle_end,
+ * inner_radius_norm, aspect) is baked into every vertex of the region quad, and
+ * the walker binds the radial-image material (the per-element material) which
+ * carries the SDF fs + reveal-mode params. aspect is bbox-derived at emit (the
+ * walker overwrites the widget's placeholder with the real bbox w/h).
  *
- * HARD v1 constraint: the textured wedge derives its local coord from the region
- * UV (v_texcoord*2-1), so the region MUST be a full-bleed texture whose UV spans
- * [0,1]. A packed atlas SUB-region re-centers the wedge — unsupported in v1.
+ * HARD v1 constraints — REGION-ONLY:
+ *   - The textured wedge derives its local coord from the region UV (v_texcoord*2-1),
+ *     so the region MUST be a full-bleed texture whose UV spans [0,1]. A packed
+ *     atlas SUB-region re-centers the wedge — unsupported in v1.
+ *   - slice9 is unsupported: the UV is non-linear across slice9 patches, so the
+ *     ring/reveal would deform. The slice9 struct fields remain (ABI) but the
+ *     widget asserts they are unset. A real geometry-local coord is the future path.
  *
  * Angular convention is mathematical: 0 = +X axis, CCW positive. Two independent
  * angles drive the sweep; `fill` 0..1 is a thin convenience mapping to angle_end
@@ -45,8 +50,8 @@ typedef enum {
     NT_UI_RADIAL_REVEAL_TINT = 3,       /* un-swept -> mixed toward tint_color */
 } nt_ui_radial_reveal_mode_t;
 
-/* Visual-only style. Mirrors nt_ui_image_style_t's slice9/origin/flip fields so a
- * textured radial supports polygon + slice9 regions. mode + dim_factor are baked on
+/* Visual-only style. Mirrors nt_ui_image_style_t's slice9/origin/flip fields for ABI
+ * parity, but slice9 is REJECTED in v1 (region-only — see header note). mode + dim_factor are baked on
  * the MATERIAL at creation (u_reveal_mode), so N widgets sharing a material reveal in
  * the same MODE. The TINT, however, is PER-WIDGET (tint_color_packed + tint_strength
  * -> baked into a_tint), so many differently-tinted radials share ONE tint-mode
@@ -56,7 +61,7 @@ typedef enum {
 typedef struct {
     uint32_t color_packed;      /* 0xAABBGGRR; 0xFFFFFFFF = no tint */
     float inner_radius_norm;    /* [0,1); 0 = solid sector, >0 = ring */
-    uint16_t slice9_lrtb[4];    /* {0,0,0,0} + no flag = atlas default */
+    uint16_t slice9_lrtb[4];    /* ABI only — v1 asserts {0,0,0,0} + SLICE9 flag unset (region-only) */
     float origin_x;             /* 0..1; only used when ORIGIN_OVERRIDE set */
     float origin_y;             /* 0..1; only used when ORIGIN_OVERRIDE set */
     float slice9_scale;         /* MUST be finite > 0 (helper asserts) */
@@ -64,7 +69,7 @@ typedef struct {
     uint32_t tint_color_packed; /* 0xAABBGGRR; TINT mode target color (per-widget) */
     float tint_strength;        /* [0,1]; TINT mix strength (per-widget) */
     uint8_t flip_bits;          /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
-    uint8_t flags;              /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
+    uint8_t flags;              /* NT_UI_IMAGE_ORIGIN_OVERRIDE (SLICE9_OVERRIDE rejected in v1) */
     uint8_t _reserved[2];
 } nt_ui_radial_image_style_t;
 _Static_assert(sizeof(nt_ui_radial_image_style_t) == 44, "nt_ui_radial_image_style_t stable ABI (44 B)");

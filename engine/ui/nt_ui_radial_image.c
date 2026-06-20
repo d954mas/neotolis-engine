@@ -9,22 +9,6 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 
-/* aspect (a_radial.w) corrects the angle test on a non-square bbox so 0 stays
- * +X. FIXED w/h give an exact ratio; otherwise default to 1. Shared shape with
- * nt_ui_radial's radial_aspect (kept local — the math is a trivial clamp+ratio,
- * not the nontrivial fill->angle map which IS shared via nt_ui_radial_fill_to_end). */
-static float radial_image_aspect(const Clay_ElementDeclaration *decl) {
-    if (decl == NULL) {
-        return 1.0F;
-    }
-    const Clay_SizingAxis w = decl->layout.sizing.width;
-    const Clay_SizingAxis h = decl->layout.sizing.height;
-    if (w.type == CLAY__SIZING_TYPE_FIXED && h.type == CLAY__SIZING_TYPE_FIXED && w.size.minMax.min > 0.0F && h.size.minMax.min > 0.0F) {
-        return w.size.minMax.min / h.size.minMax.min;
-    }
-    return 1.0F;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float angle_end, const nt_ui_radial_image_style_t *style,
                         const Clay_ElementDeclaration *decl) {
@@ -37,6 +21,11 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
     NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
+    /* slice9 unsupported in v1: the reveal fs derives its geometry-local coord from
+     * the atlas UV, which is non-linear across slice9 patches → the ring/reveal
+     * deforms. Region-only until a real geometry-local coord lands. */
+    NT_ASSERT(!(style->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) && style->slice9_lrtb[0] == 0 && style->slice9_lrtb[1] == 0 && style->slice9_lrtb[2] == 0 && style->slice9_lrtb[3] == 0 &&
+              "nt_ui_radial_image: slice9 is unsupported in v1 (region-only); the reveal fs needs a geometry-local coord");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }
@@ -68,7 +57,9 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .flip_bits = style->flip_bits,
         .flags = (uint8_t)(style->flags | NT_UI_IMAGE_FLAG_RADIAL_IMAGE),
         .material = style->material,
-        .radial = {angle_start, angle_end, style->inner_radius_norm, radial_image_aspect(decl)},
+        /* radial.w (aspect) is a placeholder; the walker overwrites it with the
+         * real bbox w/h at emit (correct under any sizing). */
+        .radial = {angle_start, angle_end, style->inner_radius_norm, 1.0F},
         .tint = {tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength},
     };
     memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));

@@ -60,7 +60,7 @@ static struct {
     uint32_t index_count;
 
     /* Separate byte-staging buffer for custom-attr (extended-layout) emits —
-     * keeps the 20 B nt_sprite_vertex_t hot path untouched (D-66-06, Pitfall 2).
+     * keeps the 20 B nt_sprite_vertex_t hot path untouched.
      * Mirrors nt_mesh_renderer's instance_data byte buffer. Written in parallel
      * with vertices[] only when the bound material declares custom attrs. The
      * extended-stride GPU upload (base 20 B + custom block) is interleaved here
@@ -73,6 +73,11 @@ static struct {
      * into every emitted vertex like color). cur_custom_bytes==0 → plain emit. */
     uint8_t cur_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX];
     uint8_t cur_custom_bytes;
+    /* Custom byte count the bound material's attr_map declares (attr_map_count *
+     * 16, one FLOAT4 per attr — matches build_sprite_layout). bake asserts the
+     * caller's cur_custom_bytes matches, catching a forgotten/mismatched
+     * set_custom_attrs. 0 for a plain material. */
+    uint8_t cur_material_custom_bytes;
     /* Largest custom block baked into this flush (0 = pure plain flush). Drives
      * the flush-time interleave: nonzero → upload base+custom at the extended
      * stride; zero → upload the 20 B path verbatim (zero regression). */
@@ -244,8 +249,7 @@ static void assert_attr_location_free(const nt_vertex_layout_t *layout, uint32_t
  * the material declares custom attrs (attr_map_count>0) — each declared attr
  * appended after offset 20 as a FLOAT4, with its GL location pulled from the
  * attr_map (NOT hardcoded). Plain materials get the base layout verbatim
- * (opt-in, D-66-06). Mirrors nt_mesh_renderer's attr_map-driven location
- * lookup. */
+ * (opt-in). Mirrors nt_mesh_renderer's attr_map-driven location lookup. */
 static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info) {
     nt_vertex_layout_t layout = s_sprite_layout;
     if (mat_info->attr_map_count == 0) {
@@ -268,9 +272,9 @@ static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info
 
 /* Layout discriminator folded into the pipeline-cache key: 0 for the base 20 B
  * layout, a distinct non-zero value for each extended layout, so a base
- * material and a custom-attr material can never alias the same pipeline
- * (Pitfall 1). Mixes attr_map count + each (location, FLOAT4) so two distinct
- * attr_maps yield distinct keys. */
+ * material and a custom-attr material can never alias the same pipeline.
+ * Mixes attr_map count + each (location, FLOAT4) so two distinct attr_maps
+ * yield distinct keys. */
 static uint64_t nt_sprite_layout_hash(const nt_material_info_t *mat_info) {
     if (mat_info->attr_map_count == 0) {
         return 0;
@@ -288,7 +292,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     /* Pipeline signature: layout discriminator + vs/fs handles + render-state
      * bits. The layout is folded UNCONDITIONALLY (base=0, custom=distinct) so a
      * custom-attr material's extended layout never aliases the base 20 B
-     * pipeline (RND-66-02, Pitfall 1). */
+     * pipeline. */
     uint64_t key = nt_sprite_layout_hash(mat_info);
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
@@ -362,6 +366,11 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     c->pipeline = pip;
     c->material = mat;
     s_sprite.current_mat = mat;
+    /* Expected custom-attr bytes for the bound material (one FLOAT4 per declared
+     * attr) — bake asserts the caller's set_custom_attrs block matches. Set here
+     * (not in set_material) so the ECS draw_list path, which calls open_cmd
+     * directly, is covered too. */
+    s_sprite.cur_material_custom_bytes = (uint8_t)(mi->attr_map_count * 16);
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->resolved_tex[i] = mi->resolved_tex[i];
@@ -423,11 +432,15 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 // #region custom_attrs
 /* Bake the current per-widget custom attr block into custom_vertices[] for the
  * vertex range [base, base+count) — identical for every vertex of the emit
- * (the value is per-widget, supplied by the caller, like color, D-66-03/07).
+ * (the value is per-widget, supplied by the caller, like color).
  * No-op when no custom attrs are set (plain emit). Indexed at the fixed
  * NT_SPRITE_CUSTOM_STRIDE_MAX slot stride; flush re-packs to the material's
  * actual extended stride. */
 static inline void bake_custom_attrs(uint32_t base, uint32_t count) {
+    /* The pipeline stride comes from the material's attr_map; the bake stride comes
+     * from set_custom_attrs. A mismatch (forgot set_custom_attrs, or wrong byte
+     * count) corrupts the draw — catch it here. Plain material: both 0. */
+    NT_ASSERT(s_sprite.cur_custom_bytes == s_sprite.cur_material_custom_bytes && "custom-attr bytes don't match the bound material's attr_map stride (forgot set_custom_attrs or wrong size)");
     if (s_sprite.cur_custom_bytes == 0) {
         return;
     }
@@ -1304,7 +1317,7 @@ void nt_sprite_renderer_flush(void) {
      * Plain flush (flush_custom_bytes==0): upload the 20 B path verbatim — zero
      * regression. Custom-attr flush: interleave base 20 B + the custom block per
      * vertex at the material's extended stride so the extended-layout pipeline
-     * reads a_radial @ offset 20 (D-66-03). The pipeline's stride is the base
+     * reads a_radial @ offset 20. The pipeline's stride is the base
      * 20 B + flush_custom_bytes; emit baked an identical block into every vertex
      * of each custom widget. */
     if (s_sprite.flush_custom_bytes == 0) {

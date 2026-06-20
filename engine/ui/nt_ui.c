@@ -1085,7 +1085,10 @@ static void emit_radial(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
     }
-    nt_sprite_renderer_set_custom_attrs(p->radial, (uint8_t)sizeof p->radial);
+    /* aspect (a_radial.w) is bbox-derived at emit so the angle test stays correct
+     * under GROW/FIT/PERCENT/null-decl, not just FIXED w/h. */
+    float radial[4] = {p->radial[0], p->radial[1], p->radial[2], bb.width / bb.height};
+    nt_sprite_renderer_set_custom_attrs(radial, (uint8_t)sizeof radial);
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
@@ -1410,7 +1413,7 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 /* Drain pending text, then bind the sprite material this command wants.
  * desired = ctx->sprite_material for plain content, or a per-element override
  * (radial reveal). set_material no-ops on same .id, so consecutive elements
- * sharing one material batch to a single draw (D-66-07); only the base<->override
+ * sharing one material batch to a single draw; only the base<->override
  * boundary — or a prior text/scissor/custom barrier (dirty) — flushes. */
 static inline void prep_sprite_dispatch_mat(nt_material_t desired, bool *sprite_pipeline_dirty) {
     nt_text_renderer_flush();
@@ -1514,7 +1517,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->image_command_count++;
         /* Per-element material override (radial reveal): .id==0 = base material.
          * Routed through prep so a shared override batches and the base<->override
-         * boundary flushes exactly once (Route B, INT-66-06 / D-66-07). */
+         * boundary flushes exactly once. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
         prep_sprite_dispatch_mat(img_mat, sprite_pipeline_dirty);
@@ -1537,15 +1540,18 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             emit_radial(ctx, &local, rcol, world_mat4);
             return;
         }
-        /* Textured radial (nt_ui_radial_image): the TEXTURED region/slice9 emit
-         * with the per-widget a_radial block baked across all verts (the reveal
-         * fs reads it). emit_image picks region vs slice9; both bake the current
-         * custom attrs (plan-01). The radial material (set above) carries the
-         * reveal fs + u_reveal_mode params. */
+        /* Textured radial (nt_ui_radial_image): the TEXTURED region emit with the
+         * per-widget a_radial block baked across all verts (the reveal fs reads
+         * it). emit_image bakes the current custom attrs. The radial material (set
+         * above) carries the reveal fs + u_reveal_mode params. */
         if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL_IMAGE)) {
             /* radial + tint are contiguous: bake both as one 32 B custom block
-             * (a_radial @ loc 4, a_tint @ loc 5). Flat radial bakes only 16 B. */
-            nt_sprite_renderer_set_custom_attrs(ip->radial, (uint8_t)(sizeof ip->radial + sizeof ip->tint));
+             * (a_radial @ loc 4, a_tint @ loc 5). Flat radial bakes only 16 B.
+             * aspect (a_radial.w) is bbox-derived at emit (correct under any
+             * sizing), overriding the widget's placeholder. */
+            const Clay_BoundingBox bb = c->boundingBox;
+            float block[8] = {ip->radial[0], ip->radial[1], ip->radial[2], (bb.height > 0.0F) ? (bb.width / bb.height) : 1.0F, ip->tint[0], ip->tint[1], ip->tint[2], ip->tint[3]};
+            nt_sprite_renderer_set_custom_attrs(block, (uint8_t)sizeof block);
         }
         emit_image(&local, world_mat4);
         return;
