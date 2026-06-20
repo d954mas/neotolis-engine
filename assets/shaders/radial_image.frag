@@ -1,15 +1,14 @@
 precision highp float;
 
-// Textured radial reveal (nt_ui_radial_image, D-66-12). Pairs with
-// sprite_radial.vert. Samples a real atlas region, then reveals the UN-SWEPT
-// (remaining) sector via one of four modes while the SWEPT sector stays full
-// color. Mathematical angle convention: 0 = +X, CCW positive (D-66-10).
+// Textured radial reveal (nt_ui_radial_image). Pairs with sprite_radial.vert.
+// Samples a real atlas region, then reveals the UN-SWEPT (remaining) sector via
+// one of four modes while the SWEPT sector stays full color. Mathematical angle
+// convention: 0 = +X, CCW positive.
 //
 // Wedge local coord is derived from the region UV remapped to [-1,1]
-// (v_local_uv = v_texcoord*2-1) — no extra per-vertex attr on the image path
-// (RESEARCH §SDF Math). NOTE: this assumes the region UV spans [0,1] over the
-// quad; a sub-region atlas tile re-centers the wedge — flagged for the plan-05
-// visual-QA gate.
+// (v_local_uv = v_texcoord*2-1) — no extra per-vertex attr on the image path.
+// NOTE: this assumes the region UV spans [0,1] over the quad; a sub-region atlas
+// tile re-centers the wedge (unsupported in v1).
 
 uniform sampler2D u_texture;
 // .x = reveal mode (0 DESATURATE / 1 DIM / 2 HIDE / 3 TINT), .y = dim_factor.
@@ -56,8 +55,8 @@ void main() {
     float trail = clamp(r * (total - sweep) * ppu + 0.5, 0.0, 1.0);
     float wedge_cov = full_turn ? 1.0 : (lead * trail);
 
-    // Premultiply (Pitfall 5): texture is premultiplied; premultiply vertex color
-    // too. Identical to sprite.frag.
+    // Premultiply: texture is premultiplied; premultiply vertex color too.
+    // Identical to sprite.frag.
     vec4 tex = texture(u_texture, v_texcoord);
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
     vec4 lit = tex * c;

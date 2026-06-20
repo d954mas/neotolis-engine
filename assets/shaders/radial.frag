@@ -1,9 +1,9 @@
 precision highp float;
 
-// Flat SDF arc/sector/ring/oval on a plain quad (D-66-08/11). No texture sample
-// — the shape is per-pixel. v_radial = {angle_start, angle_end, inner_radius_norm,
-// aspect}; v_local is the [-1,1] quad-local coord. Mathematical convention:
-// 0 = +X, CCW positive (D-66-10). Crisp AA via fwidth/smoothstep, NO facets.
+// Flat SDF arc/sector/ring/oval on a plain quad. No texture sample — the shape is
+// per-pixel. v_radial = {angle_start, angle_end, inner_radius_norm, aspect};
+// v_local is the [-1,1] quad-local coord. Mathematical convention: 0 = +X, CCW
+// positive. Crisp AA via fwidth/smoothstep, NO facets.
 
 in vec2 v_texcoord;
 in vec4 v_color;
@@ -48,7 +48,7 @@ void main() {
     if (a <= 0.0) {
         discard;
     }
-    // Premultiply (Pitfall 5): the sprite pipeline blends (ONE, ONE_MINUS_SRC_ALPHA),
-    // which expects src.rgb pre-scaled by src.a.
+    // Premultiply: the sprite pipeline blends (ONE, ONE_MINUS_SRC_ALPHA), which
+    // expects src.rgb pre-scaled by src.a.
     frag_color = vec4(v_color.rgb * a, a);
 }

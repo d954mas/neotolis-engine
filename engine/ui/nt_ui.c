@@ -1054,7 +1054,14 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
  * The fs derives its [-1,1] local coord from gl_VertexID over the 4-corner quad
  * (emitted TL/TR/BR/BL), so no extra per-vertex attribute is needed (the 16 B
  * custom block is fully spent on a_radial). NO triangle fan — SDF does the shape
- * per-pixel (D-66-11). */
+ * per-pixel.
+ *
+ * INVARIANT (load-bearing): radial.frag's gl_VertexID&3 corner derivation requires
+ * each radial quad's base vertex index to be a multiple of 4. This holds because
+ * radials use a DISTINCT material — flushed on material change, which resets the
+ * staging vertex_count to 0 — and emit EXACTLY 4 verts per widget. Emitting
+ * non-4-vertex geometry into the radial material, or sharing the radial material
+ * with other geometry, would break the corner derivation. */
 static void emit_radial(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui RADIAL: imageData must point to nt_ui_image_payload_t");
