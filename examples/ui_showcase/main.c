@@ -2659,17 +2659,6 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
-        /* Occupancy log only when it grows or evicts — a frame-rate log repeats identical lines. */
-        static uint32_t s_state_peak;
-        static uint32_t s_state_ev_logged;
-        const uint32_t state_used = nt_ui_state_used_slots(s_ctx);
-        const uint32_t state_ev = nt_ui_state_evictions(s_ctx);
-        if (state_used > s_state_peak || state_ev != s_state_ev_logged) {
-            s_state_peak = (state_used > s_state_peak) ? state_used : s_state_peak;
-            s_state_ev_logged = state_ev;
-            nt_log_info("ui_state: %u/%u cells, %u evictions", state_used, nt_ui_state_slots(s_ctx), state_ev);
-        }
-
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         {
