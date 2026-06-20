@@ -104,10 +104,10 @@ def run(client: DevApiClient) -> None:
     client.set_mode("manual")
     client.step(count=1)
 
-    # 1. ui.contexts lists the host-registered "hud" context.
+    # 1. ui.contexts lists the host-registered contexts (order-independent).
     contexts = client.ui_contexts().get("contexts")
-    assert contexts == ["hud"], f"ui.contexts is {contexts!r}, expected ['hud']"
-    print("PASS[1/6] ui.contexts lists the registered 'hud' context.")
+    assert set(contexts) == {"hud", "hud_scaled"}, f"ui.contexts is {contexts!r}, expected hud + hud_scaled"
+    print("PASS[1/7] ui.contexts lists the registered 'hud' + 'hud_scaled' contexts.")
 
     # 2. ui.tree returns the metadata block declaring the Y-up contract; hud_btn is present with bounds.
     tree = client.ui_tree()
@@ -124,7 +124,7 @@ def run(client: DevApiClient) -> None:
     for k in ("x", "y", "w", "h"):
         assert k in bounds, f"hud_btn bounds missing {k!r} (got {bounds})"
     assert bounds["w"] > 0 and bounds["h"] > 0, f"hud_btn has degenerate bounds {bounds}"
-    print(f"PASS[2/6] ui.tree declares the Y-up (origin bottom-left) contract + hud_btn bounds {bounds}.")
+    print(f"PASS[2/7] ui.tree declares the Y-up (origin bottom-left) contract + hud_btn bounds {bounds}.")
 
     # 3. ui.click("hud_btn") -> step -> the host toggles hud_btn.enabled (resolve->inject->settle->react).
     before = _btn_enabled(client)
