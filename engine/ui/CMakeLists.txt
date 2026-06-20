@@ -108,13 +108,15 @@ else()
 endif()
 target_link_libraries(nt_ui PUBLIC nt_ui_interface)
 
-# Stub impl for headless / stub-linked tests: the 3 probe symbols the devapi ui group resolves
-# (nt_ui_probe_collect / nt_ui_id / nt_ui_context_uses_raycast) without Clay or the renderer chain.
-# Always carries NT_UI_DEBUG_TOOLS=1 so the non-stub probe decl is in scope (mirrors nt_input_stub).
+# Stub impl for headless / stub-linked tests: the probe symbols the devapi ui group resolves
+# (nt_ui_probe_collect / _owned / nt_ui_get_bbox / ...) without Clay or the renderer chain.
+# Forces NT_UI_DEBUG_TOOLS=1 so the probe decls are in scope. Deliberately does NOT link
+# nt_ui_interface: that carries the GLOBAL DEBUG_TOOLS value, which collides with the forced =1 under a
+# DEBUG_TOOLS=OFF build (-Wmacro-redefined). nt_add_module already gives the engine-root include.
 nt_add_module(nt_ui_stub LOG_DOMAIN "ui_stub"
     stub/nt_ui_stub.c
 )
-target_link_libraries(nt_ui_stub PUBLIC nt_core nt_ui_interface)
+target_link_libraries(nt_ui_stub PUBLIC nt_core)
 target_compile_definitions(nt_ui_stub PUBLIC NT_UI_DEBUG_TOOLS=1)
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's

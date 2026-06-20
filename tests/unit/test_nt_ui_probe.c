@@ -529,6 +529,11 @@ int main(void) {
 
 #else /* NT_UI_DEBUG_TOOLS off: probe is DEBUG_TOOLS-gated; compile to a passing stub. */
 
+/* main's UnityBegin/End refs pull unity.c.obj whole, and its UnityDefaultTestRun references
+ * setUp/tearDown — define empty stubs so the stub links even though no RUN_TEST runs here. */
+void setUp(void) {}
+void tearDown(void) {}
+
 int main(void) {
     UNITY_BEGIN();
     return UNITY_END();
