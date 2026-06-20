@@ -35,13 +35,14 @@
  * sizes all layout-bound storage:
  *   - Clay arena (sized via Clay's own formula)
  *   - tree/hit baked-xform + index arrays (production)
- *   - debug_zones, widget_registry, inspector_collapsed_ids (DEBUG_TOOLS only)
+ *   - debug_zones, widget_registry, inspector_collapsed_ids, probe_scratch (DEBUG_TOOLS only)
  *
  * Memory cost per ctx (production / production+debug; post-3D-refactor, mat4 baked storage):
- *   max_elements=1024  → ~210 KB / ~350 KB
- *   max_elements=4096  → ~820 KB / ~1.4 MB
- *   max_elements=8192  → ~1.7 MB / ~2.7 MB
- * tree_baked + hit_baked grow at 160 B/element (vs 64 B pre-refactor): mat4(64) + opacity(4) + pad(12) × 2 arrays.
+ *   max_elements=1024  → ~210 KB / ~650 KB
+ *   max_elements=4096  → ~820 KB / ~2.6 MB
+ *   max_elements=8192  → ~1.7 MB / ~5.1 MB
+ * The DEBUG_TOOLS delta is now dominated by probe_scratch (~290 B/element — owned-string POD nodes sized
+ * to max_elements so the devapi reads the FULL tree). tree_baked + hit_baked grow at 160 B/element.
  *
  * Override the default via game's compile defs:
  *   target_compile_definitions(my_game PRIVATE NT_UI_DEFAULT_MAX_ELEMENT_COUNT=4096)
