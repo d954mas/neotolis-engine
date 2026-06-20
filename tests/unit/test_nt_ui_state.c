@@ -155,68 +155,20 @@ static void test_assert_id_zero(void) { NT_TEST_EXPECT_ASSERT((void)nt_ui_state(
 /* size > payload max -> assert (game must store its own pointer). */
 static void test_assert_oversize(void) { NT_TEST_EXPECT_ASSERT((void)nt_ui_state(s_fx.ctx, 0xBBBBU, NT_UI_STATE_PAYLOAD_MAX + 1U, T_TAG)); }
 
-#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
-
-/* ---- Probe-window exhaustion EVICTS the stalest slot (no overflow assert). The fixture ctx has
- *      current_generation == 0 (no nt_ui_begin), so every cell's last_touch is 0 and all ages are 0;
- *      the eviction then falls on the FIRST occupied candidate in the window (k == 0 == the base).
- *      Assert: a stale cell is reclaimed, the eviction counter ticks, and occupancy stays bounded. ---- */
-static void test_state_probe_exhaust_evicts_stalest(void) {
+/* Fill the probe chain for one base bucket, then one more create -> overflow assert
+ * (NON-evicting, fail-fast). state_probe_max + 1 ids that all hash to the same base. */
+static void test_assert_probe_overflow(void) {
     const uint32_t base = 3U;
     const uint32_t slots = s_fx.ctx->state_slots;
     const uint32_t probe = s_fx.ctx->state_probe_max;
-    /* Fill the whole probe window for `base`. */
     for (uint32_t k = 0; k < probe; ++k) {
-        uint32_t *p = (uint32_t *)nt_ui_state(s_fx.ctx, base + (k * slots), sizeof(uint32_t), T_TAG);
-        *p = 0xA0000000U + k;
+        (void)nt_ui_state(s_fx.ctx, base + (k * slots), 8U, T_TAG);
     }
-    const uint32_t evictions_before = nt_ui_state_evictions(s_fx.ctx);
-    const uint32_t slots_before = nt_ui_state_used_slots(s_fx.ctx);
-
-    /* One more colliding id: window is full -> evicts a slot, does NOT assert/crash. */
-    const uint32_t intruder = base + (probe * slots);
-    uint32_t *q = (uint32_t *)nt_ui_state(s_fx.ctx, intruder, sizeof(uint32_t), T_TAG);
-    TEST_ASSERT_NOT_NULL(q);
-    TEST_ASSERT_EQUAL_UINT32(0U, *q); /* evicted cell is re-zeroed for the new id */
-    TEST_ASSERT_EQUAL_UINT32(evictions_before + 1U, nt_ui_state_evictions(s_fx.ctx));
-    /* Occupancy stays bounded: an eviction replaces, never grows past the window. */
-    TEST_ASSERT_EQUAL_UINT32(slots_before, nt_ui_state_used_slots(s_fx.ctx));
-    TEST_ASSERT_NOT_NULL(nt_ui_state_find(s_fx.ctx, intruder));
-    /* The base (k==0, stalest under equal ages) was the evicted victim. */
-    TEST_ASSERT_NULL(nt_ui_state_find(s_fx.ctx, base));
+    const uint32_t one_too_many = base + (probe * slots);
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_state(s_fx.ctx, one_too_many, 8U, T_TAG));
 }
 
-/* ---- A cell touched THIS frame is protected: with one fresh cell among stale ones, the fresh cell
- *      survives an exhausting create. Drive current_generation forward via the public begin/end so
- *      last_touch ages diverge. ---- */
-static void test_state_fresh_cell_survives_eviction(void) {
-    const uint32_t base = 7U;
-    const uint32_t slots = s_fx.ctx->state_slots;
-    const uint32_t probe = s_fx.ctx->state_probe_max;
-
-    const nt_pointer_t dummy = {0};
-
-    /* Frame 1: fill all-but-one window slots (these become stale next frame). */
-    nt_ui_begin(s_fx.ctx, 320.0F, 240.0F, 0.016F, &dummy, 1);
-    for (uint32_t k = 0; k < probe - 1U; ++k) {
-        (void)nt_ui_state(s_fx.ctx, base + (k * slots), sizeof(uint32_t), T_TAG);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    /* Frame 2: touch the LAST window slot fresh, then force an exhausting create. */
-    nt_ui_begin(s_fx.ctx, 320.0F, 240.0F, 0.016F, &dummy, 1);
-    const uint32_t fresh = base + ((probe - 1U) * slots);
-    uint32_t *fp = (uint32_t *)nt_ui_state(s_fx.ctx, fresh, sizeof(uint32_t), T_TAG);
-    *fp = 0xFEEDU;
-    const uint32_t intruder = base + (probe * slots);
-    (void)nt_ui_state(s_fx.ctx, intruder, sizeof(uint32_t), T_TAG);
-    nt_ui_end(s_fx.ctx);
-
-    /* The fresh cell (touched this frame) must NOT be the one evicted. */
-    uint32_t *still = (uint32_t *)nt_ui_state_find(s_fx.ctx, fresh);
-    TEST_ASSERT_NOT_NULL(still);
-    TEST_ASSERT_EQUAL_UINT32(0xFEEDU, *still);
-}
+#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 /* ---- clear() leaves a hole mid probe-chain: the LATER colliding cell must stay reachable,
  *      and a fresh acquire of an unrelated id may reuse the hole without duplicating ids. ---- */
@@ -257,8 +209,7 @@ int main(void) {
     RUN_TEST(test_assert_tag_mismatch);
     RUN_TEST(test_assert_id_zero);
     RUN_TEST(test_assert_oversize);
+    RUN_TEST(test_assert_probe_overflow);
 #endif
-    RUN_TEST(test_state_probe_exhaust_evicts_stalest);
-    RUN_TEST(test_state_fresh_cell_survives_eviction);
     return UNITY_END();
 }

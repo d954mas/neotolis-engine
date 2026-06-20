@@ -355,11 +355,10 @@ struct nt_ui_context {
     uint32_t anim_collision_count;
 
     /* Generic per-id retained-state pool. Arena-allocated, cap = state_slots (desc-configurable,
-     * power-of-2). state_probe_max = probe window; state_evictions counts stalest-slot evictions. */
+     * power-of-2). state_probe_max = probe window; NON-EVICTING, overflow fail-fast asserts. */
     nt_ui_state_cell_t *state_pool;
     uint32_t state_slots;
     uint32_t state_probe_max;
-    uint32_t state_evictions;
 
 #if NT_UI_DEBUG_TOOLS
     /* Per-slot layer cache: 3D ctx hit-test branches inspector vs game view_proj on this.

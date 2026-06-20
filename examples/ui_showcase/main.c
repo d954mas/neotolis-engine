@@ -2730,8 +2730,8 @@ int main(int argc, char *argv[]) {
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     ui_desc.max_elements = UI_MAX_ELEMENTS; /* Stress tab worst case (6000 labels + rows). */
-    /* 16 tabs of scrolls/tooltips/gestures: 512 slots + 16-deep probe keeps the working set
-     * resident across tabs (eviction never triggers -> scrolls preserved on switch). */
+    /* 16 tabs of scrolls/tooltips/gestures: 512 slots + 16-deep probe give the non-evicting
+     * pool enough headroom that it never overflows -> scrolls preserved across tab switches. */
     ui_desc.state_slots = 512U;
     ui_desc.state_probe_max = 16U;
     s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);

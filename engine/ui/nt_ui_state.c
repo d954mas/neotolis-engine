@@ -12,50 +12,31 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
     NT_ASSERT(size <= (uint32_t)NT_UI_STATE_PAYLOAD_MAX && "nt_ui_state: size > payload max; store a game-owned pointer instead");
 
     /* Two passes over the window: clear() leaves holes mid-chain, so the id must be searched
-     * in the FULL window before claiming an earlier hole (else one id lands in two cells).
-     * Track the stalest occupied slot as the eviction fallback when the window is full. */
-    const uint16_t tick = (uint16_t)ctx->current_generation;
+     * in the FULL window before claiming an earlier hole (else one id lands in two cells). */
     const uint32_t mask = ctx->state_slots - 1U;
     const uint32_t base = id & mask;
     nt_ui_state_cell_t *first_empty = NULL;
-    nt_ui_state_cell_t *stalest = NULL;
-    uint16_t stalest_age = 0U;
     for (uint32_t k = 0; k < ctx->state_probe_max; ++k) {
         nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & mask];
         if (c->id == id) {
             NT_ASSERT(c->size == size && "nt_ui_state: id reused with a different size (two widgets colliding on one id?)");
             NT_ASSERT(c->tag == tag && "nt_ui_state: id reused by a different widget tag (two widgets colliding on one id)");
-            c->last_touch = tick;
             return c->payload;
         }
-        if (c->id == 0U) {
-            if (first_empty == NULL) {
-                first_empty = c;
-            }
-        } else {
-            /* Wrap-safe age: ticks behind the current frame. Least-recently-touched wins. */
-            const uint16_t age = (uint16_t)(tick - c->last_touch);
-            if (stalest == NULL || age > stalest_age) {
-                stalest = c;
-                stalest_age = age;
-            }
+        if (c->id == 0U && first_empty == NULL) {
+            first_empty = c;
         }
     }
-    nt_ui_state_cell_t *target = first_empty;
-    if (target == NULL) {
-        /* Window full: evict the stalest slot (mirrors nt_ui_anim). Counter surfaces the
-         * degradation so games can raise state_slots / state_probe_max. stalest is non-NULL:
-         * no empty slot means every probed cell was occupied (probe_max >= 1). */
-        NT_ASSERT(stalest != NULL && "nt_ui_state: full window must yield a stalest victim");
-        ctx->state_evictions++;
-        target = stalest;
+    if (first_empty != NULL) {
+        first_empty->id = id;
+        first_empty->size = size;
+        first_empty->tag = tag;
+        memset(first_empty->payload, 0, sizeof first_empty->payload);
+        return first_empty->payload;
     }
-    target->id = id;
-    target->size = size;
-    target->tag = tag;
-    target->last_touch = tick;
-    memset(target->payload, 0, sizeof target->payload);
-    return target->payload;
+    /* No eviction: the game clears on screen close or raises state_slots / state_probe_max. */
+    NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise state_slots/state_probe_max");
+    return NULL;
 }
 
 void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id) {
@@ -139,11 +120,6 @@ uint32_t nt_ui_state_used_bytes(const nt_ui_context_t *ctx) {
         }
     }
     return bytes;
-}
-
-uint32_t nt_ui_state_evictions(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_state_evictions: ctx must be non-NULL");
-    return ctx->state_evictions;
 }
 
 uint32_t nt_ui_state_slots(const nt_ui_context_t *ctx) {

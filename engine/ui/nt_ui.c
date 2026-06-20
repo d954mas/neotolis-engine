@@ -267,7 +267,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->state_pool = (nt_ui_state_cell_t *)((char *)arena + after_interactive);
     ctx->state_slots = state_slots;
     ctx->state_probe_max = state_probe_max;
-    ctx->state_evictions = 0U;
     memset(ctx->state_pool, 0, sizeof(nt_ui_state_cell_t) * state_slots);
     const size_t after_state = after_interactive + state_pool_bytes;
 #if NT_UI_DEBUG_TOOLS
