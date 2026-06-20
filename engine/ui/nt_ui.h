@@ -105,12 +105,17 @@ typedef struct {
      * Ignored for plain images. */
     float radial[4];
     /* RADIAL_IMAGE only: a_tint = {tint.r, tint.g, tint.b, tint_strength} in 0..1.
-     * Contiguous with radial so the walker bakes both as one 32 B custom block
-     * (&radial, sizeof radial + sizeof tint). Lets many tint colors share ONE
+     * Contiguous with radial+uvrect so the walker bakes all three as one 48 B custom
+     * block (&radial, sizeof radial+tint+uvrect). Lets many tint colors share ONE
      * material. The flat radial path bakes only radial (16 B) and ignores this. */
     float tint[4];
+    /* RADIAL_IMAGE only: a_uvrect = {u0, v0, u1, v1} = the region's min/max atlas UV
+     * in 0..1 (walker-baked from the region's atlas vertices). The reveal fs normalizes
+     * v_texcoord into region-local [-1,1] using this, so any rectangular packed sub-region
+     * centers the wedge correctly. Contiguous with tint for the one-block bake. */
+    float uvrect[4];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 68, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 84, "nt_ui_image_payload_t stable ABI");
 
 /* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {

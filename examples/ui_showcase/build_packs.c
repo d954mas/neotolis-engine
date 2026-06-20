@@ -234,12 +234,10 @@ int main(int argc, char *argv[]) {
     // #endregion
 
     // #region atlas: radial-image art (single full-bleed sprite -> UV spans [0,1])
-    /* The radial-image reveal (nt_ui_radial_image) derives its wedge local coord from
-     * v_texcoord*2-1, which is only centered when the region UV covers [0,1] over the quad
-     * (carried flag from plans 03/04). A sub-region in the shared atlas carries packed
-     * atlas-space UVs, so the swept sector would shift. We bake a DEDICATED single-sprite
-     * atlas with no padding/margin/extrude, non-POT, RECT, and a fully-OPAQUE image (so the
-     * trimmer strips nothing) — the lone sprite fills its page and its UV is exactly [0,1]. */
+    /* The reveal now centers on ANY rectangular region (region-local UV via a_uvrect), so a
+     * packed sub-region works too — the showcase proves that on the shared atlas's bunny. This
+     * DEDICATED full-bleed single-sprite atlas (no padding/margin/extrude, non-POT, RECT,
+     * fully-OPAQUE so the trimmer strips nothing) is kept for the A/B [0,1]-UV reference cell. */
     nt_atlas_opts_t radial_opts = nt_atlas_opts_defaults();
     radial_opts.shape = NT_ATLAS_SHAPE_RECT;
     radial_opts.allow_transform = false;

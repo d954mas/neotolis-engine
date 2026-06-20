@@ -487,7 +487,8 @@ static nt_material_t s_text_material;
 /* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
  * mode's u_reveal_mode param stays stable and same-mode radials batch to one draw. */
 static nt_material_t s_radial_material;
-static nt_material_t s_radial_image_material[4]; /* indexed by nt_ui_radial_reveal_mode_t */
+static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
+static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
 static nt_atlas_region_ref_t s_radial_art_ref;
 static nt_font_t s_font;
 
@@ -1791,6 +1792,20 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+    /* #region 3a: PACKED-region reveal — the SAME reveal on a REAL packed sub-region of the
+     * shared atlas (the bunny icon), proving the wedge centers on any rectangular region (not
+     * just full-bleed art). A/B against the full-bleed radial_art cell above. */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Packed-region reveal: a real sub-region of the SHARED atlas (bunny) -- wedge centers via region-local UV.", g_current->caption);
+    CLAY(row_decl) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_radial_image_style_t pstyle = nt_ui_radial_image_style_defaults();
+            pstyle.material = s_radial_image_packed_material;
+            nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_icon_bunny_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &pstyle, &img_decl);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "packed (bunny)", g_current->caption);
+        }
+    }
+    // #endregion
+
     /* #region 3b: TINT reveal in three colors (extracted to keep render_radial simple) */
     render_radial_tint_row(ctx);
     // #endregion
@@ -2719,8 +2734,8 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode materials = 7. */
-    nt_material_init(&(nt_material_desc_t){.max_materials = 8});
+    /* sprite + text + base radial + 4 radial-image reveal-mode + 1 packed-region material = 8. */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 9});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
@@ -2809,7 +2824,8 @@ int main(int argc, char *argv[]) {
 
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
      * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
-     * tint color from one batch. attr_map declares both custom attrs (a_radial + a_tint). */
+     * tint color from one batch. attr_map declares all three custom attrs (a_radial + a_tint +
+     * a_uvrect @ loc 6 — the latter remaps the wedge into region-local space for any region). */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
@@ -2823,12 +2839,34 @@ int main(int argc, char *argv[]) {
             .cull_mode = NT_CULL_NONE,
             .attr_map[0] = {.stream_name = "a_radial", .location = 4},
             .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-            .attr_map_count = 2,
+            .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
+            .attr_map_count = 3,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
             .param_count = 1,
             .label = k_radial_image_labels[m],
         });
     }
+
+    /* Packed-region proof: a radial-image material bound to the SHARED ui_showcase atlas
+     * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
+     * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
+    s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_radial_vs_handle,
+        .fs = s_radial_image_fs_handle,
+        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
+        .texture_count = 1,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .attr_map[0] = {.stream_name = "a_radial", .location = 4},
+        .attr_map[1] = {.stream_name = "a_tint", .location = 5},
+        .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
+        .attr_map_count = 3,
+        .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
+        .param_count = 1,
+        .label = "ui_showcase_radial_img_packed",
+    });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ctx, s_text_material);
@@ -2867,6 +2905,7 @@ int main(int argc, char *argv[]) {
     for (int m = 0; m < 4; ++m) {
         nt_material_destroy(s_radial_image_material[m]);
     }
+    nt_material_destroy(s_radial_image_packed_material);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

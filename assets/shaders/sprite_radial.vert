@@ -15,11 +15,16 @@ layout(location = 4) in vec4 a_radial;
 // RADIAL_IMAGE only (loc 5): rgb=reveal tint, w=tint_strength, both 0..1. The flat
 // radial material doesn't bind loc 5 → reads the disabled-attr default; its FS ignores v_tint.
 layout(location = 5) in vec4 a_tint;
+// RADIAL_IMAGE only (loc 6): the region's min/max atlas UV {u0,v0,u1,v1}. The reveal fs
+// uses it to remap v_texcoord into region-local [-1,1] for any rectangular packed region.
+// Flat radial doesn't bind loc 6 → disabled-attr default; its FS ignores v_uvrect.
+layout(location = 6) in vec4 a_uvrect;
 
 out vec2 v_texcoord;
 out vec4 v_color;
 out vec4 v_radial;
 out vec4 v_tint;
+out vec4 v_uvrect;
 out vec2 v_local;
 
 void main() {
@@ -28,6 +33,7 @@ void main() {
     v_color = a_color;
     v_radial = a_radial;
     v_tint = a_tint;
+    v_uvrect = a_uvrect;
     // The widget emits a 4-corner quad TL/TR/BR/BL; derive the [-1,1] local coord
     // from gl_VertexID so no extra per-vertex attribute is needed (the 16 B custom
     // block is fully spent on a_radial). The 16-bit quad indices cycle 0..3 per

@@ -13,13 +13,14 @@
  * carries the SDF fs + reveal-mode params. aspect is bbox-derived at emit (the
  * walker overwrites the widget's placeholder with the real bbox w/h).
  *
- * HARD v1 constraints — REGION-ONLY:
- *   - The textured wedge derives its local coord from the region UV (v_texcoord*2-1),
- *     so the region MUST be a full-bleed texture whose UV spans [0,1]. A packed
- *     atlas SUB-region re-centers the wedge — unsupported in v1.
- *   - slice9 is unsupported: the UV is non-linear across slice9 patches, so the
- *     ring/reveal would deform. The slice9 struct fields remain (ABI) but the
- *     widget asserts they are unset. A real geometry-local coord is the future path.
+ * Works with ANY rectangular atlas region — a full-bleed [0,1] texture OR a packed
+ * sub-region. The walker bakes the region's atlas UV rect into a_uvrect; the reveal
+ * fs normalizes v_texcoord into region-local [-1,1] so the wedge always centers on
+ * the region, wherever it sits in the page.
+ *
+ * HARD constraint — slice9 unsupported: the UV is non-linear across slice9 patches,
+ * so the ring/reveal would deform. The slice9 struct fields remain (ABI) but the
+ * widget asserts they are unset. A real geometry-local coord is the future path.
  *
  * Angular convention is mathematical: 0 = +X axis, CCW positive. Two independent
  * angles drive the sweep; `fill` 0..1 is a thin convenience mapping to angle_end

@@ -1544,12 +1544,28 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * it). emit_image bakes the current custom attrs. The radial material (set
          * above) carries the reveal fs + u_reveal_mode params. */
         if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL_IMAGE)) {
-            /* radial + tint are contiguous: bake both as one 32 B custom block
-             * (a_radial @ loc 4, a_tint @ loc 5). Flat radial bakes only 16 B.
-             * aspect (a_radial.w) is bbox-derived at emit (correct under any
-             * sizing), overriding the widget's placeholder. */
+            /* radial + tint + uvrect are contiguous: bake all three as one 48 B custom
+             * block (a_radial @ loc 4, a_tint @ loc 5, a_uvrect @ loc 6). Flat radial
+             * bakes only 16 B. aspect (a_radial.w) is bbox-derived at emit (correct
+             * under any sizing), overriding the widget's placeholder. uvrect is the
+             * region's min/max atlas UV — lets the reveal fs re-center the wedge over
+             * any rectangular packed sub-region (not just a full-bleed [0,1] tile). */
             const Clay_BoundingBox bb = c->boundingBox;
-            float block[8] = {ip->radial[0], ip->radial[1], ip->radial[2], (bb.height > 0.0F) ? (bb.width / bb.height) : 1.0F, ip->tint[0], ip->tint[1], ip->tint[2], ip->tint[3]};
+            nt_atlas_region_handles_t rh;
+            nt_atlas_get_region_handles(ip->atlas, ip->region_index, &rh);
+            float u0 = 1.0F;
+            float v0 = 1.0F;
+            float u1 = 0.0F;
+            float v1 = 0.0F;
+            for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
+                const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
+                const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
+                u0 = (u < u0) ? u : u0;
+                v0 = (v < v0) ? v : v0;
+                u1 = (u > u1) ? u : u1;
+                v1 = (v > v1) ? v : v1;
+            }
+            float block[12] = {ip->radial[0], ip->radial[1], ip->radial[2], (bb.height > 0.0F) ? (bb.width / bb.height) : 1.0F, ip->tint[0], ip->tint[1], ip->tint[2], ip->tint[3], u0, v0, u1, v1};
             nt_sprite_renderer_set_custom_attrs(block, (uint8_t)sizeof block);
         }
         emit_image(&local, world_mat4);

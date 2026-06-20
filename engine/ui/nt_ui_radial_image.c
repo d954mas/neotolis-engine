@@ -21,11 +21,12 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
     NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
-    /* slice9 unsupported in v1: the reveal fs derives its geometry-local coord from
-     * the atlas UV, which is non-linear across slice9 patches → the ring/reveal
-     * deforms. Region-only until a real geometry-local coord lands. */
+    /* slice9 unsupported: the reveal fs normalizes the atlas UV against the region's
+     * UV rect, which assumes a LINEAR mapping over the quad. slice9's per-patch UV is
+     * non-linear → the ring/reveal would deform. Any rectangular (non-slice9) region
+     * is supported; a real geometry-local coord is the future path for slice9. */
     NT_ASSERT(!(style->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) && style->slice9_lrtb[0] == 0 && style->slice9_lrtb[1] == 0 && style->slice9_lrtb[2] == 0 && style->slice9_lrtb[3] == 0 &&
-              "nt_ui_radial_image: slice9 is unsupported in v1 (region-only); the reveal fs needs a geometry-local coord");
+              "nt_ui_radial_image: slice9 is unsupported (non-linear UV); rectangular regions only");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }

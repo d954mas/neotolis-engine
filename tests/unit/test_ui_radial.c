@@ -382,9 +382,9 @@ static void test_radial_fill_emit_payload(void) {
 
 /* ===== nt_ui_radial_image — textured reveal widget ===== */
 
-/* Radial-IMAGE material: a_radial @ loc 4 (extended layout) PLUS a u_reveal_mode
- * vec4 param baked at creation so the reveal-mode look is observable via
- * nt_material_get_info. */
+/* Radial-IMAGE material: a_radial @ loc 4 + a_tint @ loc 5 + a_uvrect @ loc 6 (the
+ * full 48 B extended layout the walker bakes) PLUS a u_reveal_mode vec4 param baked
+ * at creation so the reveal-mode look is observable via nt_material_get_info. */
 static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t mode) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "ri_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "ri_fs"});
@@ -420,7 +420,9 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     desc.attr_map[0].location = 4;
     desc.attr_map[1].stream_name = "a_tint";
     desc.attr_map[1].location = 5;
-    desc.attr_map_count = 2;
+    desc.attr_map[2].stream_name = "a_uvrect";
+    desc.attr_map[2].location = 6;
+    desc.attr_map_count = 3;
     desc.params[0].name = NT_UI_RADIAL_IMAGE_PARAM_MODE;
     desc.params[0].value[0] = (float)mode; /* reveal look baked at creation */
     desc.param_count = 1;
@@ -487,7 +489,7 @@ static void test_radial_image_region_bakes_payload(void) {
 
 /* (c) mode stays a MATERIAL-level look (u_reveal_mode.x == mode), but the TINT is now
  * PER-WIDGET: tint_color_packed + tint_strength bake into the a_tint block (floats 4..7
- * of the 32 B custom block). Verify both: material mode intact + per-vertex tint baked. */
+ * of the 48 B custom block). Verify both: material mode intact + per-vertex tint baked. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_radial_image_reveal_mode_plumbed(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
@@ -532,6 +534,30 @@ static void test_radial_image_style_abi(void) {
     TEST_ASSERT_EQUAL_INT(3, (int)NT_UI_RADIAL_REVEAL_TINT);
 }
 
+/* (e) PACKED-region path: a radial_image over a region whose atlas UV does NOT span
+ * [0,1] bakes a_uvrect (custom floats 8..11) = the region's actual min/max atlas UV,
+ * so the reveal fs can re-center the wedge. The 48 B custom block carries radial(0..3)
+ * + tint(4..7) + uvrect(8..11). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_radial_image_packed_region_bakes_uvrect(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
+    radial_image_walk(&ref, &style, 64.0F, 64.0F);
+
+    /* Packed quad = 4 verts; every vert carries the same a_uvrect = the region UV bounds. */
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[12] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 12); /* full 48 B block */
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[8], MINIMAL_UI_ATLAS_PACKED_U0), "a_uvrect.x == region u0");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[9], MINIMAL_UI_ATLAS_PACKED_V0), "a_uvrect.y == region v0");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[10], MINIMAL_UI_ATLAS_PACKED_U1), "a_uvrect.z == region u1");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[11], MINIMAL_UI_ATLAS_PACKED_V1), "a_uvrect.w == region v1");
+    }
+}
+
 /* fill convenience drives the same textured emit; angle_end follows fill->angle. */
 static void test_radial_image_fill_emit(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
@@ -574,6 +600,7 @@ int main(void) {
     RUN_TEST(test_radial_fill_emit_payload);
     RUN_TEST(test_radial_image_region_bakes_payload);
     RUN_TEST(test_radial_image_reveal_mode_plumbed);
+    RUN_TEST(test_radial_image_packed_region_bakes_uvrect);
     RUN_TEST(test_radial_image_style_abi);
     RUN_TEST(test_radial_image_fill_emit);
     return UNITY_END();
