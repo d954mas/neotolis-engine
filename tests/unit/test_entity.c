@@ -136,6 +136,78 @@ void test_entity_slot_zero_reserved(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT16(1, index);
 }
 
+/* ---- at_index enumeration accessor (D-12) ---- */
+
+void test_entity_at_index_reproduces_live_set(void) {
+    /* Create 5, destroy #2 and #4, iterate slots: 1,3,5 live; rest invalid. */
+    nt_entity_t e[5];
+    for (int i = 0; i < 5; i++) {
+        e[i] = nt_entity_create();
+    }
+    nt_entity_destroy(e[1]);
+    nt_entity_destroy(e[3]);
+
+    int live_count = 0;
+    for (uint16_t i = 1; i <= nt_entity_max(); i++) {
+        nt_entity_t h = nt_entity_at_index(i);
+        if (h.id == 0) {
+            continue;
+        }
+        /* Returned handle must be live and carry the slot index. */
+        TEST_ASSERT_TRUE(nt_entity_is_alive(h));
+        TEST_ASSERT_EQUAL_UINT16(i, nt_entity_index(h));
+        live_count++;
+    }
+    /* 5 created - 2 destroyed = 3 live. */
+    TEST_ASSERT_EQUAL_INT(3, live_count);
+
+    /* The live handles match exactly slots of e[0], e[2], e[4]. */
+    TEST_ASSERT_EQUAL_UINT32(e[0].id, nt_entity_at_index(nt_entity_index(e[0])).id);
+    TEST_ASSERT_EQUAL_UINT32(e[2].id, nt_entity_at_index(nt_entity_index(e[2])).id);
+    TEST_ASSERT_EQUAL_UINT32(e[4].id, nt_entity_at_index(nt_entity_index(e[4])).id);
+}
+
+void test_entity_at_index_dead_slot_invalid(void) {
+    nt_entity_t a = nt_entity_create();
+    nt_entity_t b = nt_entity_create();
+    uint16_t b_index = nt_entity_index(b);
+    nt_entity_destroy(b);
+
+    /* Dead slot returns NT_ENTITY_INVALID — never a stale handle. */
+    nt_entity_t got = nt_entity_at_index(b_index);
+    TEST_ASSERT_EQUAL_UINT32(0, got.id);
+    /* The old saved handle is not alive. */
+    TEST_ASSERT_FALSE(nt_entity_is_alive(b));
+    /* Live slot still resolves. */
+    TEST_ASSERT_EQUAL_UINT32(a.id, nt_entity_at_index(nt_entity_index(a)).id);
+}
+
+void test_entity_at_index_slot_zero_invalid(void) {
+    nt_entity_t got = nt_entity_at_index(0);
+    TEST_ASSERT_EQUAL_UINT32(0, got.id);
+}
+
+void test_entity_at_index_out_of_range_invalid(void) {
+    nt_entity_t got = nt_entity_at_index((uint16_t)(nt_entity_max() + 1));
+    TEST_ASSERT_EQUAL_UINT32(0, got.id);
+}
+
+void test_entity_at_index_returns_new_after_recreate(void) {
+    nt_entity_t first = nt_entity_create();
+    uint16_t index = nt_entity_index(first);
+    nt_entity_destroy(first);
+
+    nt_entity_t second = nt_entity_create();
+    TEST_ASSERT_EQUAL_UINT16(index, nt_entity_index(second));
+
+    /* at_index returns the NEW handle (bumped generation), not the stale one. */
+    nt_entity_t got = nt_entity_at_index(index);
+    TEST_ASSERT_EQUAL_UINT32(second.id, got.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, got.id);
+    TEST_ASSERT_FALSE(nt_entity_is_alive(first));
+    TEST_ASSERT_TRUE(nt_entity_is_alive(got));
+}
+
 void test_entity_register_storage_and_destroy_cleanup(void) {
     nt_entity_register_storage(&(nt_comp_storage_reg_t){
         .name = "mock",
@@ -169,6 +241,11 @@ int main(void) {
     RUN_TEST(test_entity_index_extraction);
     RUN_TEST(test_entity_generation_extraction);
     RUN_TEST(test_entity_slot_zero_reserved);
+    RUN_TEST(test_entity_at_index_reproduces_live_set);
+    RUN_TEST(test_entity_at_index_dead_slot_invalid);
+    RUN_TEST(test_entity_at_index_slot_zero_invalid);
+    RUN_TEST(test_entity_at_index_out_of_range_invalid);
+    RUN_TEST(test_entity_at_index_returns_new_after_recreate);
     RUN_TEST(test_entity_register_storage_and_destroy_cleanup);
     return UNITY_END();
 }
