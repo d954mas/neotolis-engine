@@ -813,11 +813,8 @@ static nt_ui_probe_role_t probe_role_from_mask(uint8_t config_mask) {
     return NT_UI_PROBE_ROLE_BOX;
 }
 
-/* Flat POD tree collect. Reuses the collect_tree_rows pre-order DFS but emits `parent` directly
- * from the DFS stack, copies id_string/text on collect, resolves role from the widget registry
- * with a config-mask fallback, reads the always-compiled enabled signal, and computes visible
- * from offscreen + ancestor-clip intersection + composed opacity. EMITS every node incl.
- * invisible/offscreen/disabled. Excludes inspector chrome. */
+/* Flat POD tree collect. Reuses the collect_tree_rows pre-order DFS, emitting `parent` directly from
+ * the DFS stack. EMITS every node incl. invisible/offscreen/disabled; excludes inspector chrome. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
     NT_ASSERT(ctx != NULL && "nt_ui_probe_collect: ctx must be non-NULL");

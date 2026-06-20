@@ -1,4 +1,4 @@
-/* nt_ui probe (L1) — flat POD tree extraction + always-compiled `enabled` signal.
+/* nt_ui probe — flat POD tree extraction + always-compiled `enabled` signal.
  *
  * Asymmetric known geometry (200×60 @ (150,80) in 800×600) mirrors
  * test_nt_ui_3d_hittest.c so axis-swap / flip bugs surface in the projection cases. */
@@ -146,7 +146,7 @@ static void test_slider_disabled_reports_enabled_false(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Plan 02: collect contract ---- */
+/* ---- collect contract ---- */
 
 static nt_ui_probe_node_t s_nodes[NT_UI_PROBE_MAX_NODES];
 
@@ -299,13 +299,13 @@ static void test_collect_all_nodes_disabled_present(void) {
     TEST_ASSERT_FALSE(btn->enabled);
 }
 
-/* ---- Plan 03: projection ----
+/* ---- projection ----
  *
  * Framebuffer convention (locked here): bounds are GL-Y-up framebuffer px (origin bottom-left).
- * The 2D-plain path keeps the Plan-02 trivial Y-flip (vh - by - bh); the 2D-affine path projects
- * the Clay corners through tree_baked[].m + the same Y-flip; the 3D path projects 4 corners
- * through hit_baked[].m -> view_proj -> NDC -> px (GL Y-up, no extra flip). The ortho-equivalence
- * case below proves a 3D-ortho element lands on the SAME pixel rect as the 2D-plain equivalent. */
+ * The 2D-plain path keeps the trivial Y-flip (vh - by - bh); the 2D-affine path projects the Clay
+ * corners through tree_baked[].m + the same Y-flip; the 3D path projects 4 corners through
+ * hit_baked[].m -> view_proj -> NDC -> px (GL Y-up, no extra flip). The ortho-equivalence case below
+ * proves a 3D-ortho element lands on the SAME pixel rect as the 2D-plain equivalent. */
 
 #define PROJ_EPS 0.5F
 
@@ -382,7 +382,7 @@ static void test_project_2d_affine_translation(void) {
 }
 
 /* 3D-ctx: an ortho-projected box yields the AABB of its 4 projected corners, equal to the
- * 2D-plain pixel rect (locks the framebuffer convention, A1 / OQ-2). */
+ * 2D-plain pixel rect (locks the framebuffer convention). */
 static void test_project_3d_ortho_aabb(void) {
     probe_setup_3d_ctx();
     float vp[16];

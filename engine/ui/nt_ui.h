@@ -264,11 +264,9 @@ void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-/* Device->layout viewport. The ctx owns the single device<->layout mapping: nt_ui_begin takes the
- * RAW device pointer, and the lazy hit-test resolve converts it through this viewport.
+/* Device->layout viewport, the ctx's single device<->layout mapping.
  *   (x, y) — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
- *   (w, h) — device-space size of that content rect (logical_dim * scale)
- * w/h must be > 0. */
+ *   (w, h) — device-space size of that content rect (logical_dim * scale), must be > 0. */
 typedef struct {
     float x, y, w, h;
 } nt_ui_viewport_t;
@@ -349,10 +347,9 @@ typedef enum nt_ui_probe_role_t {
     NT_UI_PROBE_ROLE_WIDGET, /* a registered widget; name carries the specific kind (def->name) */
 } nt_ui_probe_role_t;
 
-/* Flat node. parent is emitted directly from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
- * children derive from the parent links. bounds = {x, y, w, h} framebuffer px (Y-up). collect
- * emits ALL nodes incl. invisible/offscreen/disabled so the bot decides what to filter. NO Clay
- * types here. */
+/* Flat node, NO Clay types. parent is emitted from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
+ * bounds = {x, y, w, h} framebuffer px (Y-up). collect emits ALL nodes incl. invisible/offscreen/
+ * disabled so the bot decides what to filter. */
 #define NT_UI_PROBE_NO_PARENT 0U /* root nodes have id != 0, so 0 is an unambiguous "no parent" */
 
 typedef struct nt_ui_probe_node_t {

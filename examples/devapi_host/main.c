@@ -68,10 +68,9 @@ static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
 static nt_ui_context_t *s_hud_ctx;
 static bool s_hud_btn_on = true; /* the observable: a synthetic click on "hud_btn" toggles it. */
 
-/* A second, SCALED hud ("hud_scaled"): same layout fed through a non-trivial nt_ui_scale viewport
-   (LETTERBOX: 300x300 ref into the 800x600 fb -> 2x scale + a 100px horizontal margin). Proves a
-   ui.click lands on a SCALED ctx over the live socket — resolve_target maps layout->device via the
-   ctx viewport. "scaled_btn" is the togglable observable, mirroring "hud_btn". */
+/* A second, SCALED hud ("hud_scaled"): same layout through a non-trivial nt_ui_scale viewport
+   (LETTERBOX: 300x300 ref into the 800x600 fb -> 2x scale + 100px horizontal margin), so a ui.click
+   on a scaled ctx exercises the layout->device map via the ctx viewport. */
 #define SCALED_REF_W 300.0F
 #define SCALED_REF_H 300.0F
 static NT_UI_DECLARE_ARENA(s_hud_scaled_arena, HUD_ARENA_SIZE);

@@ -161,10 +161,8 @@ void nt_devapi_input_update(void);
 void nt_devapi_input_reset(void);
 #endif
 
-/* Engine `ui` group registrar (per-group #ifdef). Defined in nt_devapi_ui.c, invoked from
-   nt_devapi_init under the same compile gate; registers the group's reads + writes + reset hook.
-   ui.click/drag/scroll delegate scheduling to the input group's single scheduler (see the reuse
-   wrappers above) — the ui group registers NO tick hook of its own.
+/* Engine `ui` group registrar. ui.click/drag/scroll delegate scheduling to the input group's single
+   scheduler (see the reuse wrappers above), so the ui group registers NO tick hook of its own.
    (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
 #ifdef NT_DEVAPI_GROUP_UI
 void nt_devapi_register_ui(void);

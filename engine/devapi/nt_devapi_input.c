@@ -8,7 +8,7 @@
 #include "input/nt_input_internal.h"
 #include "window/nt_window.h" /* g_nt_window.fb_height — the height basis for the input.* Y flip. */
 
-/* L2 veneer over the L1 inject API: range-check bot input -> bad_params, never assert. */
+/* Veneer over the core inject API: range-check bot input -> bad_params, never assert. */
 
 #ifdef NT_DEVAPI_GROUP_INPUT
 
@@ -54,8 +54,8 @@ typedef struct {
 static sched_entry_t s_sched[NT_DEVAPI_INPUT_SCHED_MAX];
 static uint32_t s_sched_count;
 
-/* Whole-or-nothing reserve mirrors the old L1 inject_reserve: a multi-event command gets all N
-   slots or none, so a near-full schedule can never accept a DOWN and reject its UP. */
+/* Whole-or-nothing reserve: a multi-event command gets all N slots or none, so a near-full
+   schedule can never accept a DOWN and reject its UP. */
 static sched_entry_t *sched_reserve(uint32_t n) {
     if (n > NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count) {
         return NULL;
@@ -227,7 +227,7 @@ void nt_devapi_input_update(void) {
 
 void nt_devapi_input_reset(void) {
     /* Clears ONLY devapi-owned transient state (schedule + advance clock). Applied input is
-       game-owned (a bot is indistinguishable from a human at L1), so it is NOT released here. */
+       game-owned (a bot is indistinguishable from a human at the inject layer), so it is NOT released here. */
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
 }
@@ -339,11 +339,8 @@ static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_
     return true;
 }
 
-/* The ONE documented Y-up -> device flip for the whole input.* surface. The user-facing input.*
-   contract is Y-up (origin bottom-left), matching ui.* — a bot uses one convention across both.
-   input.* is device/framebuffer space (no ctx/layout), so the basis is g_nt_window.fb_height; ui.*
-   uses its ctx LAYOUT height — different basis by design (input is lower-level device, ui is layout),
-   NOT a bug. The scheduled/injected entry holds device Y-down, so the inject path stays verbatim. */
+/* The ONE Y-up -> device flip for input.*. Basis is g_nt_window.fb_height (device space), distinct
+   from ui.*'s ctx LAYOUT height — different basis by design, not a bug. */
 static float flip_y_up_to_device(float y_up) { return (float)g_nt_window.fb_height - y_up; }
 
 // #region input.*
@@ -428,7 +425,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
         if (!parse_finite_coord(xj, "input.pointer: x must be a finite number for down/move", &x, err) || !parse_finite_coord(yj, "input.pointer: y must be a finite number for down/move", &y, err)) {
             return false;
         }
-        y = flip_y_up_to_device(y); /* Y-up in -> device Y-down in the scheduled entry. */
+        y = flip_y_up_to_device(y);
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
@@ -464,7 +461,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!parse_finite_coord(xj, "input.move: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.move: y must be a finite number", &y, err)) {
         return false;
     }
-    y = flip_y_up_to_device(y); /* Y-up in -> device Y-down in the scheduled entry. */
+    y = flip_y_up_to_device(y);
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
@@ -499,7 +496,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     if (!parse_finite_coord(xj, "input.click: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.click: y must be a finite number", &y, err)) {
         return false;
     }
-    y = flip_y_up_to_device(y); /* Y-up in -> device Y-down in the scheduled entry. */
+    y = flip_y_up_to_device(y);
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {

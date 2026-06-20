@@ -7,9 +7,9 @@
 #error "nt_ui_stub requires NT_UI_DEBUG_TOOLS=1"
 #endif
 
-/* Headless stub of the nt_ui probe + bbox surface for stub-linked tests (e.g. test_devapi_*) without
-   pulling Clay or the renderer chain. The empty tree + not-found bbox suffice for discovery /
-   bad_params tests; behavioral ui.* tests link the real nt_ui. */
+/* Headless stub of the nt_ui probe + bbox surface for stub-linked tests, without pulling Clay or the
+   renderer chain. The empty tree + not-found bbox suffice for discovery / bad_params tests; behavioral
+   ui.* tests link the real nt_ui. */
 
 #if NT_UI_DEBUG_TOOLS
 uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {

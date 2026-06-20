@@ -8,7 +8,7 @@
 #include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id (resolve via the probe). */
 #include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
-/* L2 veneer over the L1 probe: range-check bot input -> bad_params, never assert. The host
+/* Veneer over the probe: range-check bot input -> bad_params, never assert. The host
    registers UI contexts by name; the engine keeps NO global ctx registry. */
 
 #ifdef NT_DEVAPI_GROUP_UI
@@ -94,9 +94,8 @@ static bool parse_frame_count(const cJSON *nj, const char *cmd, uint16_t *out, n
     return true;
 }
 
-/* Resolve the target ctx from an optional `ctx` string param. Present -> table lookup (miss =
-   bad_params, NEVER assert on bot input). Absent -> the sole/first context. Empty table ->
-   bad_params. Returns NULL on any failure (err is set). */
+/* Resolve the target ctx from an optional `ctx` string. Miss/empty -> bad_params, NEVER assert on
+   bot input; absent -> the sole/first context. Returns NULL on failure (err is set). */
 static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
     if (s_ui_ctx_count == 0) {
         set_bad_params(err, "ui: no UI context registered");
@@ -136,11 +135,9 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
    dev tool, and keeps the handler off the stack / out of the hot path. */
 static nt_ui_probe_node_t s_probe_nodes[NT_UI_PROBE_MAX_NODES];
 
-/* The top-level coordinate-space metadata: EXPLICITLY declares the one ui.* contract — Y-up,
-   origin bottom-left — that BOTH the read (bounds) AND the write ({x,y}) speak. width/height are the
-   ctx LAYOUT dims (the SAME space the bounds + the resolve_target Y-flip use), NOT raw g_nt_window.fb_*
-   (those differ under nt_ui_scale, a latent mislabel). projection = 2D-affine vs 3D-raycast mode; the
-   viewport block is emitted for 2D only (a 3D-raycast ctx has no device<->layout affine to report). */
+/* Declares the one ui.* contract (Y-up, origin bottom-left) that both the read and the write speak.
+   width/height are the ctx LAYOUT dims (the same space bounds + the resolve_target flip use), NOT raw
+   g_nt_window.fb_* — those differ under nt_ui_scale. viewport block emitted for 2D only. */
 static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
     float lw = 0.0F;
     float lh = 0.0F;
@@ -250,7 +247,6 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
     return false;
 }
 
-/* ui.contexts: the host-registered context names. */
 static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -277,24 +273,11 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 #endif
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
 
-/* Resolve a target field to a DEVICE-space (Y-down, top-left) pixel center for the inject path:
-   EITHER a string id (probe-collect -> matching node's bounds center, miss/empty -> bad_params, never
-   assert) OR an {x,y} object (isfinite-checked). The user-facing ui.* contract is Y-up (origin
-   bottom-left), declared in ui.tree/element metadata; the ONE documented Y-up->Y-down flip lives HERE,
-   then the resulting LAYOUT coord is mapped LAYOUT->DEVICE through the ctx viewport
-   (nt_ui_layout_to_screen) so the injected pointer is a real device coord — the ctx converts it back to
-   layout for hit-test on nt_ui_begin.
-     - {x,y}: interpreted as Y-up in the declared space -> flipped (layout_y = layout_h - in_y) using the
-       SAME layout height the metadata + probe bounds use -> layout->device.
-     - string id: resolves to the PROJECTED bounds center the probe (ui.tree/ui.element) reports for that
-       id — the SAME nt_ui_probe_collect projection (tree_baked.m for 2D-affine, view_proj for 3D), NOT
-       the untransformed Clay bbox. This GUARANTEES read==id-write: a click by id lands exactly where
-       ui.tree says the widget is, even for an offset/rotated/3D widget. The probe bounds are Y-up layout
-       px, so the center feeds through the SAME Y-up->Y-down flip as the {x,y} path. For an identity
-       transform the projected center == the layout center, so the unscaled hud is byte-identical.
-   For an unscaled ctx the viewport is identity so device==layout (the hud is byte-identical); for an
-   nt_ui_scale ctx the viewport inverts the scale+letterbox so a scaled ui.click lands correctly.
-   `key` names the field ("id"/"from"/"to") for the error messages. */
+/* Resolve a target field (string id | {x,y}) to a DEVICE-space pixel center for the inject path. The
+   ONE Y-up->device flip lives HERE: flip to layout, then layout->device through the ctx viewport. An id
+   resolves to the SAME probe projection ui.tree reports for that id (not the untransformed Clay bbox), so
+   read==id-write — a click by id lands exactly where ui.tree says the widget is. `key` names the field
+   ("id"/"from"/"to") for the error messages. */
 static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t *ctx, float *out_x, float *out_y, nt_devapi_error *err) {
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
     if (cJSON_IsString(jt)) {
@@ -353,10 +336,8 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
     return false;
 }
 
-/* ui.click: resolve id|{x,y} -> bbox center px -> DOWN@0 + UP@hold via the SAME inject path as
-   input.click (reserved synthetic mouse id 0x10000000). Fire-and-forget; the bot advances with
-   frame.wait/time.step to apply. Whole-or-nothing preflight: reserve both entries or reject (no DOWN
-   without its UP). */
+/* ui.click: resolve id|{x,y} -> center -> DOWN@0 + UP@hold via the SAME inject path as input.click.
+   Fire-and-forget. Whole-or-nothing preflight: reserve both entries or reject (no DOWN without its UP). */
 static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
@@ -379,7 +360,7 @@ static bool cmd_ui_click(const cJSON *params, cJSON *result, nt_devapi_error *er
             return false;
         }
     }
-    if (!nt_devapi_input_sched_can_reserve(2U)) { /* whole-or-nothing preflight on the shared scheduler. */
+    if (!nt_devapi_input_sched_can_reserve(2U)) {
         set_bad_params(err, "ui.click: inject schedule overflow");
         return false;
     }
@@ -412,7 +393,7 @@ static bool cmd_ui_scroll(const cJSON *params, cJSON *result, nt_devapi_error *e
     if (dyj != NULL && !parse_finite_coord(dyj, "ui.scroll: dy must be a finite number", &dy, err)) {
         return false;
     }
-    if (!nt_devapi_input_sched_can_reserve(2U)) { /* whole-or-nothing: MOVE to center + wheel together. */
+    if (!nt_devapi_input_sched_can_reserve(2U)) {
         set_bad_params(err, "ui.scroll: inject schedule overflow");
         return false;
     }
@@ -455,7 +436,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     }
     /* DOWN@0 + `frames` interpolated MOVEs (one per frame, t=1..frames) + UP@frames. */
     uint32_t total = (uint32_t)frames + 2U;
-    if (!nt_devapi_input_sched_can_reserve(total)) { /* whole-or-nothing preflight on the shared scheduler. */
+    if (!nt_devapi_input_sched_can_reserve(total)) {
         set_bad_params(err, "ui.drag: inject schedule overflow");
         return false;
     }

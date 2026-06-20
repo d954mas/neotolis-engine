@@ -50,7 +50,7 @@ endif()
 
 # The ui READ surface (ui.tree/ui.element) reads through nt_ui_probe_collect, which only has a real
 # impl under NT_UI_DEBUG_TOOLS (else a 0-node stub). Hard-fail so GROUP_UI can never compile to a
-# vacuously-passing probe (the false-green test_devapi_ui saw with DEBUG_TOOLS OFF).
+# vacuously-passing probe (a false green when DEBUG_TOOLS is OFF).
 if(NT_DEVAPI_GROUP_UI AND NOT NT_UI_DEBUG_TOOLS)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS (the ui probe is DEBUG_TOOLS-gated).")
 endif()
@@ -70,17 +70,14 @@ if(NT_DEVAPI_GROUP_INPUT)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_INPUT=1)
 endif()
 
-# UI group (ui.tree/ui.element/ui.contexts/ui.click/drag/scroll): the L2 read veneer over
-# nt_ui_probe_collect + write veneer that DELEGATES inject scheduling to the input group's single
-# scheduler. Links the HEADER-ONLY nt_ui_interface (not the heavy nt_ui impl chain — the exe picks
-# nt_ui or nt_ui_stub, exactly like nt_input_interface) + nt_window_interface for the D-10 metadata
-# (g_nt_window, resolves at exe link like the core group). NT_INPUT_AUTOMATION_ENABLED + the
-# nt_input dep are set by the (input OR ui) block above.
+# UI group: read veneer over nt_ui_probe_collect + write veneer that delegates inject scheduling to the
+# input group's scheduler. Links HEADER-ONLY nt_ui_interface (the exe picks nt_ui or nt_ui_stub, like
+# nt_input_interface) + nt_window_interface for the coordinate-space metadata (g_nt_window).
 if(NT_DEVAPI_GROUP_UI)
     target_sources(nt_devapi PRIVATE nt_devapi_ui.c)
-    # PUBLIC: nt_devapi_ui_register_context (host-facing, D-15) is gated by NT_DEVAPI_GROUP_UI in the
-    # public nt_devapi.h, so a consumer (the host) must see the same gate to call it. (The input group
-    # has no host-facing registrar, hence its gate stays PRIVATE.)
+    # PUBLIC: nt_devapi_ui_register_context (host-facing) is gated by NT_DEVAPI_GROUP_UI in the public
+    # nt_devapi.h, so a consumer (the host) must see the same gate to call it. (The input group has no
+    # host-facing registrar, hence its gate stays PRIVATE.)
     target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_GROUP_UI=1)
     target_link_libraries(nt_devapi PRIVATE nt_ui_interface nt_window_interface)
 endif()

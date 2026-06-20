@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DevAPI ui demo — the live-socket UAT for the ui.* read + write surface (UITREE-02/04).
+"""DevAPI ui demo — the live-socket UAT for the ui.* read + write surface.
 
 Connects to a running examples/devapi_host over loopback TCP and exercises the ui group end-to-end,
 the layer only a live socket proves: resolve a developer string id -> bbox center px -> inject the
@@ -21,7 +21,7 @@ the bad_params paths over a real socket.
   6. ui.click("does_not_exist") is caught as bad_params (unknown id -> no crash/assert).
   7. a non-finite-coord / over-cap-frames ui.drag is rejected as bad_params (coords/frames hardened).
 
-ui.* are fire-and-forget/immediate (D-14): the down/up enqueue and apply only as the sim advances, so
+ui.* are fire-and-forget/immediate: the down/up enqueue and apply only as the sim advances, so
 the UAT runs in manual mode and step()s between the click and the read-back. Unlike the input UAT there
 is NO blocking-drain-race to assert — the exit code IS the assertion.
 

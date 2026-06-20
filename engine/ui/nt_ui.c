@@ -381,9 +381,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     NT_ASSERT(pointers != NULL && "nt_ui_begin: pointers must be non-NULL");
     NT_ASSERT(count > 0U && count <= NT_INPUT_MAX_POINTERS && "nt_ui_begin: count must be 1..NT_INPUT_MAX_POINTERS");
     /* isfinite() rejects NaN + +-inf which `> 0.0F` alone lets through. Dims MUST be strictly positive:
-       the device->layout resolve divides by the viewport size derived from these, so 0 traps later at the
-       first hit-test — fail-early here with a clear message instead. Callers feeding fb dims guard 0 with
-       a fallback (see devapi_host), so no legitimate 0-dim begin exists. */
+       the device->layout resolve divides by the viewport size derived from these, so 0 would trap later
+       at the first hit-test — fail-early here with a clear message instead. */
     NT_ASSERT(isfinite(screen_w) && screen_w > 0.0F && "nt_ui_begin: screen_w must be finite and strictly positive");
     NT_ASSERT(isfinite(screen_h) && screen_h > 0.0F && "nt_ui_begin: screen_h must be finite and strictly positive");
     NT_ASSERT(isfinite(dt) && dt >= 0.0F && "nt_ui_begin: dt must be finite and non-negative");
@@ -405,10 +404,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->frame_dt = dt;
     ctx->frame_pointers_converted = false;
 #if NT_UI_DEBUG_TOOLS
-    /* Snapshot LAST frame's viewport before the identity reset below: the inspector's Clay_SetPointerState
-     * (further down) is tested against last frame's tree, so it must convert with last frame's viewport.
-     * Frame 1 has no prior tree; a degenerate (zero-size) prev viewport falls back to this frame's
-     * identity so the convert stays valid (result is moot — pointerOverIds is empty frame 1). */
+    /* Snapshot LAST frame's viewport before the identity reset below: the inspector's pointer-over is
+     * tested against last frame's tree, so it must convert with last frame's viewport. Frame 1 has no
+     * prior tree, so a degenerate prev viewport falls back to this frame's identity. */
     if (ctx->viewport.w > 0.0F && ctx->viewport.h > 0.0F && ctx->begin_w > 0.0F && ctx->begin_h > 0.0F) {
         ctx->prev_viewport = ctx->viewport;
         ctx->prev_begin_w = ctx->begin_w;
@@ -500,10 +498,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const nt_pointer_t *primary = &pointers[0];
 
 #if NT_UI_DEBUG_TOOLS
-    /* The inspector consumes the LAYOUT-space pointer. Clay's pointer-over is tested against LAST frame's
-     * solved tree (the BeginLayout below wipes the roots), laid out with last frame's viewport — so the
-     * gate + Clay feed convert with prev_*. nt_ui_internal_ensure_pointers_layout re-gates with THIS
-     * frame's viewport once nt_ui_set_viewport has run (before any step/query/scroll reads the flag). */
+    /* The inspector consumes the LAYOUT-space pointer, tested against LAST frame's solved tree (the
+     * BeginLayout below wipes the roots), so the gate + Clay feed convert with prev_*. */
     float insp_screen[2] = {primary->x, primary->y};
     float insp_layout[2] = {primary->x, primary->y};
     if (ctx->prev_viewport.w > 0.0F && ctx->prev_viewport.h > 0.0F && ctx->prev_begin_w > 0.0F && ctx->prev_begin_h > 0.0F) {

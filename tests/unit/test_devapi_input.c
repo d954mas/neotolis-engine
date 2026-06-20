@@ -1,4 +1,4 @@
-/* L2 devapi input.* group via submit() (no socket). Scheduling: write g_nt_app.frame, call
+/* devapi input.* group via submit() (no socket). Scheduling: write g_nt_app.frame, call
    nt_devapi_update() (releases due entries only on a real sim-advance), then nt_input_poll(). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
@@ -433,7 +433,7 @@ static void test_sched_gesture_ordered_across_frames(void) {
 }
 
 /* input.move on the default mouse slot applies its position on the next advancing tick (by value,
-   not just queued count) — exercises sched_release_one's NT_INJECT_POINTER_MOVE branch at L2.
+   not just queued count) — exercises sched_release_one's NT_INJECT_POINTER_MOVE branch.
    The input.* {x,y} is Y-up: y=34 must land at device Y = fb_height-34, locking the one flip. */
 static void test_sched_move_applies_on_advance(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":12,\"y\":34}}")));
@@ -473,7 +473,7 @@ static void test_input_yup_flip_lands_at_device_y(void) {
 }
 
 /* input.wheel lands on the mouse slot after an advance: a move creates the slot, the wheel delta
-   accumulates onto it — exercises sched_release_one's NT_INJECT_WHEEL branch at L2 by value. */
+   accumulates onto it — exercises sched_release_one's NT_INJECT_WHEEL branch by value. */
 static void test_sched_wheel_applies_on_advance(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":5,\"y\":5}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":3}}")));
@@ -585,7 +585,7 @@ static void test_input_state_unknown_key_bad_params(void) { assert_bad_params(nt
 
 static void test_input_state_bad_pop_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":1}}")); }
 
-/* L2: the drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
+/* The drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
    advance yet) -> advance -> input.state reads down==true. */
 static void test_input_state_observes_injected_key(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}")); /* pre: not yet polled */
@@ -678,9 +678,8 @@ static void test_input_gesture_single_point_applied_once(void) {
 /* Locks the inject-buffer over-subscription fix: there is ONE scheduler (the input group's), capped
    <= the 256-slot immediate buffer, so filling it completely with frame-0-due entries and advancing
    ONE tick releases ALL of them with no sched_tick trap (the buffer can always hold a full schedule).
-   The ui group now delegates to THIS scheduler, so two sibling groups can never over-subscribe the
-   buffer by construction. (The ui.drag-fills-schedule case needs real nt_ui -> deferred to the
-   upcoming test_devapi_ui target.) */
+   The ui group delegates to THIS scheduler, so two sibling groups can never over-subscribe the buffer
+   by construction. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_sched_full_drains_in_one_tick(void) {
     nt_devapi_input_reset();                                                                                 /* clean schedule + seeded advance clock. */

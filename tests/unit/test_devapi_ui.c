@@ -1,10 +1,7 @@
-/* L2 devapi ui.* group over a REAL headless nt_ui ctx. Combines two patterns: a real probe-able
-   tree (ui_walker_fixture + CLAY, like test_nt_ui_probe) registered via nt_devapi_ui_register_context,
-   and dispatch-driven command testing (nt_devapi_submit + JSON asserts, like test_devapi_input).
-
-   The whole body is NT_UI_DEBUG_TOOLS-gated: ui.tree/ui.element read through nt_ui_probe_collect,
-   whose real impl only exists under that flag (else a 0-node stub). OFF builds compile to a passing
-   stub main so compile_commands.json / tidy stay complete (mirrors test_nt_ui_probe). */
+/* devapi ui.* group over a REAL headless nt_ui ctx: a real probe-able tree registered via
+   nt_devapi_ui_register_context, driven through nt_devapi_submit + JSON asserts. The whole body is
+   NT_UI_DEBUG_TOOLS-gated (ui.tree/ui.element need the real nt_ui_probe_collect, else a 0-node stub);
+   OFF builds compile to a passing stub main so compile_commands.json / tidy stay complete. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <math.h>
@@ -338,10 +335,8 @@ static void test_click_xy_yup_flip_matches_string_id(void) {
 /* ---- TRANSFORMED widget: ui.click(id) targets the PROJECTED bounds center (read==id-write) ---- */
 
 /* A widget with a NON-IDENTITY 2D transform: ui.click(id) must resolve to the SAME projected position
-   ui.tree reports for that id — NOT the untransformed Clay layout center. Proves the W1 fix: a click by
-   id on a transformed widget lands where the read says it is. Two assertions: (1) the resolved device
-   point equals the ui.tree node bounds center mapped to device; (2) a begin+step round-trip confirms the
-   transform-aware hit-test actually hits the widget at that point. */
+   ui.tree reports for that id — NOT the untransformed Clay layout center (read==id-write). Asserts both
+   the resolved device point and a begin+step round-trip that the transform-aware hit-test really hits it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_transformed_click_id_targets_projected_center(void) {
     declare_xform_tree();

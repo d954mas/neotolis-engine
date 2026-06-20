@@ -601,7 +601,7 @@ if(NOT EMSCRIPTEN)
         nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 
-    # L2 devapi ui group via submit() over a REAL headless nt_ui ctx (the ONLY automated coverage of
+    # devapi ui group via submit() over a REAL headless nt_ui ctx (the ONLY automated coverage of
     # ui.tree/element/contexts/click + the Y-up flip + drag whole-or-nothing). Declared HERE (not in the
     # devapi block above) because it reuses the nt_ui test-helper sources/includes, which are defined in
     # this section — a CMake variable read before its set() is empty. Gated on the same devapi options.
@@ -610,7 +610,7 @@ if(NOT EMSCRIPTEN)
     # schedule so a resolved ui.click coord is observable in g_nt_input.
     #   GNU ld single-pass ordering: consumers before providers. nt_devapi_net/nt_devapi (reference the
     # probe + scheduler symbols) precede nt_ui; nt_ui (references the renderer/resource chain) precedes
-    # those providers; nt_input_stub (the L1 inject API the ui group delegates to) + nt_core/nt_log_stub
+    # those providers; nt_input_stub (the inject API the ui group delegates to) + nt_core/nt_log_stub
     # trail last. NT_DEVAPI_GROUP_INPUT is defined too: the ui group delegates scheduling to the input
     # group's single scheduler, and the whole-or-nothing test pre-fills it via input.* commands.
     if(NT_DEVAPI_ENABLED AND NT_DEVAPI_GROUP_UI)
