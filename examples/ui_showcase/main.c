@@ -1738,6 +1738,11 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &ring_style, &disc_decl);
         /* Oval: aspect comes from the FIXED w/h decl; a static 270deg sector to show the squash. */
         nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.0F, 1.5F * NT_PI, &rstyle, &oval_decl);
+        /* Animated color: a full disc whose per-widget color_packed (RGBA8) cycles the hue wheel
+         * every cooldown loop — the standard sprite color is full-color and animates per-frame, free. */
+        nt_ui_radial_style_t cstyle = rstyle;
+        cstyle.color_packed = showcase_hue_abgr(st->radial.cooldown);
+        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.0F, RADIAL_TAU, &cstyle, &disc_decl);
         /* Hold-to-confirm: a button drives the events cell; its hold_progress fills the radial. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.hold_progress, RADIAL_TAU, &ring_style, &disc_decl);
