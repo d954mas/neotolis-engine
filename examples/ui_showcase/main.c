@@ -60,8 +60,10 @@
 // #region layers + reference resolution
 /* Walker batches RECTs/IMAGEs first, then TEXT within each Clay zIndex. */
 #define LAYER_BG 0
-#define LAYER_IMG 1
-#define LAYER_TEXT 2
+#define LAYER_RADIAL 1     /* flat SDF radials — own layer so they batch as one run */
+#define LAYER_RADIAL_IMG 2 /* textured radial-image — own layer, grouped by reveal material */
+#define LAYER_IMG 3
+#define LAYER_TEXT 4
 
 #define UI_REF_W 1280.0F
 #define UI_REF_H 800.0F
@@ -1677,7 +1679,7 @@ static void render_radial_tint_row(nt_ui_context_t *ctx) {
                 tstyle.material = s_radial_image_material[NT_UI_RADIAL_REVEAL_TINT];
                 tstyle.tint_color_packed = tint_colors[t];
                 tstyle.tint_strength = 0.85F;
-                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_radial_art_ref, 0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, 0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), tint_labels[t], g_current->caption);
             }
         }
@@ -1705,7 +1707,7 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
         for (int i = 0; i < 5; ++i) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                 rs.color_packed = showcase_hue_abgr((float)i / 5.0F);
-                nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), starts[i], ends[i], &rs, &cell);
+                nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), starts[i], ends[i], &rs, &cell);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), labels[i], g_current->caption);
             }
         }
@@ -1736,19 +1738,19 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (events hold_progress); ring + oval variants.", g_current->caption);
     CLAY(row_decl) {
         /* Cooldown: fill ramps 0->1 over ~3s; start at +90deg (top), sweep a full turn. */
-        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &rstyle, &disc_decl);
+        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &rstyle, &disc_decl);
         /* Ring (inner cut) cooldown variant. */
-        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &ring_style, &disc_decl);
+        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &ring_style, &disc_decl);
         /* Oval: aspect comes from the FIXED w/h decl; a static 270deg sector to show the squash. */
-        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.0F, 1.5F * NT_PI, &rstyle, &oval_decl);
+        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.0F, 1.5F * NT_PI, &rstyle, &oval_decl);
         /* Animated color: a full disc whose per-widget color_packed (RGBA8) cycles the hue wheel
          * every cooldown loop — the standard sprite color is full-color and animates per-frame, free. */
         nt_ui_radial_style_t cstyle = rstyle;
         cstyle.color_packed = showcase_hue_abgr(st->radial.cooldown);
-        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.0F, RADIAL_TAU, &cstyle, &disc_decl);
+        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.0F, RADIAL_TAU, &cstyle, &disc_decl);
         /* Hold-to-confirm: a button drives the events cell; its hold_progress fills the radial. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, st->radial.hold_progress, RADIAL_TAU, &ring_style, &disc_decl);
+            nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.hold_progress, RADIAL_TAU, &ring_style, &disc_decl);
             static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
             nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_radial_hold, g_current->btn_primary,
                                &(Clay_ElementDeclaration){
@@ -1782,7 +1784,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
                 /* mode + dim baked on the per-mode material; tint is per-widget (gold here). */
                 istyle.tint_color_packed = 0xFF33BFFFU; /* 0xAABBGGRR gold (r255 g191 b51) */
                 istyle.tint_strength = 0.85F;
-                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_radial_art_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), mode_labels[m], g_current->caption);
             }
         }
@@ -1811,7 +1813,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
                         f -= 1.0F;
                     }
                     rstyle.color_packed = showcase_hue_abgr(phase);
-                    nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, f, RADIAL_TAU, &rstyle, &cell_decl);
+                    nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, f, RADIAL_TAU, &rstyle, &cell_decl);
                 }
             }
         }
