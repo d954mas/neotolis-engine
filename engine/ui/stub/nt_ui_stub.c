@@ -12,12 +12,15 @@
    ui.* tests link the real nt_ui. */
 
 #if NT_UI_DEBUG_TOOLS
-uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
+uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated) {
     (void)ctx;
     (void)out;
     (void)cap;
     if (out_count != NULL) {
         *out_count = 0U;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = false; /* empty tree never truncates */
     }
     return 0U;
 }

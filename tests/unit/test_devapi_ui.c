@@ -259,6 +259,11 @@ static void test_tree_meta_and_yup_bounds(void) {
     TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(result, "dpr")->valuedouble, 1.0F));
     TEST_ASSERT_EQUAL_STRING("2d", cJSON_GetObjectItemCaseSensitive(result, "projection")->valuestring);
 
+    /* Truncation flag forwarded from the probe: the small known tree fits, so it must be false. */
+    cJSON *trunc = cJSON_GetObjectItemCaseSensitive(result, "truncated");
+    TEST_ASSERT_TRUE(cJSON_IsBool(trunc));
+    TEST_ASSERT_FALSE(cJSON_IsTrue(trunc));
+
     cJSON *nodes = cJSON_GetObjectItemCaseSensitive(result, "nodes");
     TEST_ASSERT_TRUE(cJSON_IsArray(nodes));
     cJSON *b = find_node_bounds(nodes, "widget");

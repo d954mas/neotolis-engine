@@ -197,8 +197,9 @@ static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
     return obj;
 }
 
-/* ui.tree: IMMEDIATE read of the last completed frame's tree. Emits ALL nodes incl.
-   invisible/offscreen/disabled carrying their flags (the bot filters, not the engine). */
+/* ui.tree: IMMEDIATE read of the last completed frame's tree. Emits up to NT_UI_PROBE_MAX_NODES nodes
+   incl. invisible/offscreen/disabled carrying their flags (the bot filters, not the engine); the
+   top-level `truncated` flag tells the bot the snapshot was cut at the cap (nodes beyond are absent). */
 static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
@@ -206,8 +207,10 @@ static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err
         return false;
     }
     uint32_t count = 0;
-    nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    bool truncated = false;
+    nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count, &truncated);
     add_meta(result, ctx);
+    devapi_add_bool(result, "truncated", truncated);
     cJSON *arr = cJSON_AddArrayToObject(result, "nodes");
     NT_ASSERT(arr != NULL);
     for (uint32_t i = 0; i < count; i++) {
@@ -233,17 +236,20 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
     }
     uint32_t target = nt_ui_id(jid->valuestring);
     uint32_t count = 0;
-    nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    bool truncated = false;
+    nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count, &truncated);
     for (uint32_t i = 0; i < count; i++) {
         if (s_probe_nodes[i].id == target) {
             add_meta(result, ctx);
+            devapi_add_bool(result, "truncated", truncated);
             cJSON_bool added = cJSON_AddItemToObject(result, "node", node_to_json(&s_probe_nodes[i]));
             NT_ASSERT(added);
             (void)added;
             return true;
         }
     }
-    set_bad_params(err, "ui.element: unknown or stale id");
+    /* A miss under a truncated snapshot may be a real widget past the cap, not a stale id — say so. */
+    set_bad_params(err, truncated ? "ui.element: id not found in the probe snapshot (truncated at cap)" : "ui.element: unknown or stale id");
     return false;
 }
 
@@ -287,7 +293,8 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         }
         uint32_t uid = nt_ui_id(jt->valuestring); /* non-empty pre-checked above; nt_ui_id asserts s!=NULL, not the hash. */
         uint32_t count = 0;
-        nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count);
+        bool truncated = false;
+        nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count, &truncated);
         const nt_ui_probe_node_t *hit = NULL;
         for (uint32_t i = 0; i < count; i++) {
             if (s_probe_nodes[i].id == uid) {
@@ -296,7 +303,8 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
             }
         }
         if (hit == NULL) {
-            set_bad_params(err, "ui: unknown or stale target id");
+            /* Past the cap the id may be a real widget the snapshot dropped — don't call it stale. */
+            set_bad_params(err, truncated ? "ui: target id not found in the probe snapshot (truncated at cap)" : "ui: unknown or stale target id");
             return false;
         }
         /* A behind-camera 3D node / collapsed element has a zero rect (visible=false); its center would
@@ -464,21 +472,23 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.tree",
         .group = "ui",
-        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,origin,y_axis,width,height,dpr,projection,viewport?} block (viewport omitted "
-                   "when projection==3d); bounds are Y-up (origin bottom-left), same space ui.click({x,y}) takes",
+        .summary = "IMMEDIATE read of the last completed frame's UI tree (up to NT_UI_PROBE_MAX_NODES nodes incl. invisible/disabled; `truncated` true when the cap cut it) + a "
+                   "{space,origin,y_axis,width,height,dpr,projection,viewport?} block (viewport omitted when projection==3d); bounds are Y-up (origin bottom-left), same space ui.click({x,y}) takes",
         .params_shape = "{ctx?:string}",
-        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},nodes:[{id,parent,role,id_string,text,label,child_count,"
-                        "visible,enabled,bounds}]}",
+        .result_shape =
+            "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},truncated:bool,nodes:[{id,parent,role,id_string,text,label,"
+            "child_count,visible,enabled,bounds}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
     {
         .method = "ui.element",
         .group = "ui",
-        .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params); bounds Y-up (origin bottom-left)",
+        .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params; a miss under a truncated snapshot says so); bounds Y-up (origin bottom-left)",
         .params_shape = "{id:string, ctx?:string}",
-        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},node:{id,parent,role,id_string,text,label,child_count,"
-                        "visible,enabled,bounds}}",
+        .result_shape =
+            "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},truncated:bool,node:{id,parent,role,id_string,text,label,"
+            "child_count,visible,enabled,bounds}}",
         .frame_behavior = "any",
         .side_effects = "none",
     },

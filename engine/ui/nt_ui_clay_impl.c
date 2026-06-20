@@ -814,17 +814,22 @@ static nt_ui_probe_role_t probe_role_from_mask(uint8_t config_mask) {
 }
 
 /* Flat POD tree collect. Reuses the collect_tree_rows pre-order DFS, emitting `parent` directly from
- * the DFS stack. EMITS every node incl. invisible/offscreen/disabled; excludes inspector chrome. */
+ * the DFS stack. Emits every node incl. invisible/offscreen/disabled (excludes inspector chrome), up to
+ * `cap` nodes; sets *out_truncated when the cap or the internal DFS-stack limit cut the walk short. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
+uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated) {
     NT_ASSERT(ctx != NULL && "nt_ui_probe_collect: ctx must be non-NULL");
     NT_ASSERT(out != NULL && "nt_ui_probe_collect: out must be non-NULL");
     if (out_count != NULL) {
         *out_count = 0U;
     }
+    if (out_truncated != NULL) {
+        *out_truncated = false;
+    }
     if (ctx->clay == NULL || cap == 0U) {
         return 0U;
     }
+    bool truncated = false;
     cdv_init_owned_ids_once();
 
     Clay_Context *saved = Clay_GetCurrentContext();
@@ -844,10 +849,13 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
         float clip_x, clip_y, clip_w, clip_h; /* inherited ancestor-clip intersection (Clay Y-down) */
     } stack[STACK_CAP];
     int32_t sp = 0;
+    int32_t last_root = -1; /* highest root index entered; (last_root+1 < roots) means a root went unvisited */
 
     for (int32_t r = 0; r < roots && written < cap; ++r) {
+        last_root = r;
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&ctx->clay->layoutElementTreeRoots, r);
         if (sp >= STACK_CAP) {
+            truncated = true;
             break;
         }
         stack[sp].elem_idx = root->layoutElementIndex;
@@ -1008,6 +1016,7 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
                 int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
                 stack[top].child_cursor++;
                 if (sp >= STACK_CAP) {
+                    truncated = true;
                     sp = 0;
                     break;
                 }
@@ -1028,9 +1037,29 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
         }
     }
 
+    /* Cap-truncation: the walk stopped on `written == cap` while real work was still pending — an
+     * unvisited root, or a stack frame with children it never reached. Distinguishes a true overflow
+     * from an exact fit (cap == total nodes), which leaves no pending work. */
+    if (!truncated && written == cap) {
+        bool pending = (last_root + 1) < roots;
+        for (int32_t i = 0; i < sp && !pending; ++i) {
+            const Clay_LayoutElement *fel = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[i].elem_idx);
+            const int32_t fchildren = (fel->childrenOrTextContent.children.elements == NULL) ? 0 : fel->childrenOrTextContent.children.length;
+            const bool not_filled = stack[i].child_cursor < 0;       /* node-fill not yet run */
+            const bool has_more = stack[i].child_cursor < fchildren; /* children left to push */
+            if (not_filled || has_more) {
+                pending = true;
+            }
+        }
+        truncated = pending;
+    }
+
     Clay_SetCurrentContext(saved);
     if (out_count != NULL) {
         *out_count = written;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = truncated;
     }
     return written;
 }

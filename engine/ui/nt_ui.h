@@ -348,8 +348,8 @@ typedef enum nt_ui_probe_role_t {
 } nt_ui_probe_role_t;
 
 /* Flat node, NO Clay types. parent is emitted from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
- * bounds = {x, y, w, h} framebuffer px (Y-up). collect emits ALL nodes incl. invisible/offscreen/
- * disabled so the bot decides what to filter. */
+ * bounds = {x, y, w, h} framebuffer px (Y-up). collect emits nodes incl. invisible/offscreen/disabled
+ * so the bot decides what to filter; up to NT_UI_PROBE_MAX_NODES, then truncated (see collect). */
 #define NT_UI_PROBE_NO_PARENT 0U /* root nodes have id != 0, so 0 is an unambiguous "no parent" */
 
 typedef struct nt_ui_probe_node_t {
@@ -370,17 +370,21 @@ typedef struct nt_ui_probe_node_t {
 } nt_ui_probe_node_t;
 
 #if NT_UI_DEBUG_TOOLS
-/* Collects the LAST completed frame's tree into `out` (up to `cap` nodes). Writes the node count
- * to *out_count (nullable). Returns the count. ctx must have completed nt_ui_end. Stops at `cap`;
- * never writes past out[cap-1]. */
-uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count);
+/* Collects the LAST completed frame's tree into `out` (up to `cap` nodes). Writes the node count to
+ * *out_count (nullable). Sets *out_truncated (nullable) true when the walk stopped early — the `cap`
+ * node limit or the internal DFS-stack limit was hit, so the tree is partial. Returns the count.
+ * ctx must have completed nt_ui_end. Stops at `cap`; never writes past out[cap-1]. */
+uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated);
 #else
-static inline uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count) {
+static inline uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated) {
     (void)ctx;
     (void)out;
     (void)cap;
     if (out_count != NULL) {
         *out_count = 0U;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = false;
     }
     return 0U;
 }

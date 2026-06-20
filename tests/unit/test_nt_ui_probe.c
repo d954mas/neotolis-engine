@@ -160,7 +160,7 @@ static void test_collect_flat_pod_nodes(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     TEST_ASSERT_EQUAL_UINT32(n, count);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2U, n);
 
@@ -172,6 +172,33 @@ static void test_collect_flat_pod_nodes(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_UI_PROBE_NO_PARENT, panel->parent);
 }
 
+/* A `cap` smaller than the node count truncates: out_count saturates at cap, out_truncated=true. The
+ * cap PARAMETER exercises the same early-stop path the 1024-node BSS cap hits, without a huge tree. */
+static void test_collect_cap_truncation_signaled(void) {
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
+        CLAY({.id = CLAY_ID("child_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
+        CLAY({.id = CLAY_ID("child_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Full collect to learn the real node count, then a cap one below it. */
+    uint32_t full = 0;
+    bool full_trunc = true;
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &full, &full_trunc);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2U, n);
+    TEST_ASSERT_FALSE(full_trunc); /* whole tree fits: not truncated */
+
+    const uint32_t cap = n - 1U;
+    uint32_t count = 0;
+    bool truncated = false;
+    const uint32_t got = nt_ui_probe_collect(s_fx.ctx, s_nodes, cap, &count, &truncated);
+    TEST_ASSERT_EQUAL_UINT32(cap, got);
+    TEST_ASSERT_EQUAL_UINT32(cap, count);
+    TEST_ASSERT_TRUE(truncated);
+}
+
 /* Copy-on-collect: the id_string copy survives a SECOND nt_ui_begin. */
 static void test_collect_id_string_copied(void) {
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
@@ -180,7 +207,7 @@ static void test_collect_id_string_copied(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("persistent"));
     TEST_ASSERT_NOT_NULL(node);
     TEST_ASSERT_EQUAL_STRING("persistent", node->id_string);
@@ -206,7 +233,7 @@ static void test_collect_visible_clip_opacity(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *vis = find_node(s_nodes, n, nt_ui_id("vis_box"));
     const nt_ui_probe_node_t *hid = find_node(s_nodes, n, nt_ui_id("hidden_box"));
     TEST_ASSERT_NOT_NULL(vis);
@@ -226,7 +253,7 @@ static void test_collect_role_from_def_name(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *box = find_node(s_nodes, n, nt_ui_id("plain_box"));
     const nt_ui_probe_node_t *btn = find_node(s_nodes, n, nt_ui_id("reg_btn"));
     TEST_ASSERT_NOT_NULL(box);
@@ -247,7 +274,7 @@ static void test_collect_parent_children(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *outer = find_node(s_nodes, n, nt_ui_id("outer"));
     const nt_ui_probe_node_t *a = find_node(s_nodes, n, nt_ui_id("inner_a"));
     const nt_ui_probe_node_t *b = find_node(s_nodes, n, nt_ui_id("inner_b"));
@@ -268,7 +295,7 @@ static void test_collect_label_distinct_from_text(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *box = find_node(s_nodes, n, nt_ui_id("save_box"));
     TEST_ASSERT_NOT_NULL(box);
     TEST_ASSERT_EQUAL_STRING("Save", box->label);
@@ -293,7 +320,7 @@ static void test_collect_all_nodes_disabled_present(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *btn = find_node(s_nodes, n, nt_ui_id("dis_btn"));
     TEST_ASSERT_NOT_NULL(btn); /* present despite disabled */
     TEST_ASSERT_FALSE(btn->enabled);
@@ -340,7 +367,7 @@ static void test_project_2d_plain_yflip(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("plain"));
     TEST_ASSERT_NOT_NULL(node);
     /* Y-up: top-left Clay (150,80) -> bottom edge at vh - by - bh = 600-80-60 = 460. */
@@ -371,7 +398,7 @@ static void test_project_2d_affine_translation(void) {
     }
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("xbox"));
     TEST_ASSERT_NOT_NULL(node);
     /* Clay corners shift by (ox, oy); Y-up flip: y = vh - (by+oy) - bh. */
@@ -394,7 +421,7 @@ static void test_project_3d_ortho_aabb(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("box3d"));
     TEST_ASSERT_NOT_NULL(node);
     /* SAME rect as the 2D-plain equivalent: x=150, y=460 (Y-up), w=200, h=60. */
@@ -425,7 +452,7 @@ static void test_project_3d_behind_camera_flag(void) {
     nt_ui_end(s_fx.ctx);
 
     uint32_t count = 0;
-    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count);
+    const uint32_t n = nt_ui_probe_collect(s_fx.ctx, s_nodes, NT_UI_PROBE_MAX_NODES, &count, NULL);
     const nt_ui_probe_node_t *node = find_node(s_nodes, n, nt_ui_id("behind"));
     TEST_ASSERT_NOT_NULL(node);
     TEST_ASSERT_FALSE(node->visible); /* behind-camera flagged */
@@ -442,6 +469,7 @@ int main(void) {
     RUN_TEST(test_input_disabled_reports_enabled_false);
     RUN_TEST(test_slider_disabled_reports_enabled_false);
     RUN_TEST(test_collect_flat_pod_nodes);
+    RUN_TEST(test_collect_cap_truncation_signaled);
     RUN_TEST(test_collect_id_string_copied);
     RUN_TEST(test_collect_visible_clip_opacity);
     RUN_TEST(test_collect_role_from_def_name);
