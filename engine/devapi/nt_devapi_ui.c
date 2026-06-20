@@ -5,7 +5,7 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_internal.h"
 #include "input/nt_input.h"   /* nt_inject_kind_t + the reserved mouse id; ui delegates to the input scheduler. */
-#include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id + nt_ui_get_bbox. */
+#include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id (resolve via the probe). */
 #include "window/nt_window.h" /* g_nt_window: the one coordinate-space metadata source (like core view). */
 
 /* L2 veneer over the L1 probe: range-check bot input -> bad_params, never assert. The host
@@ -271,14 +271,20 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
 
 /* Resolve a target field to a DEVICE-space (Y-down, top-left) pixel center for the inject path:
-   EITHER a string id (nt_ui_id -> nt_ui_get_bbox, miss/empty -> bad_params, never assert) OR an {x,y}
-   object (isfinite-checked). The user-facing ui.* contract is Y-up (origin bottom-left), declared in
-   ui.tree/element metadata; the ONE documented Y-up->Y-down flip lives HERE, then the resulting LAYOUT
-   coord is mapped LAYOUT->DEVICE through the ctx viewport (nt_ui_layout_to_screen) so the injected
-   pointer is a real device coord — the ctx converts it back to layout for hit-test on nt_ui_begin.
+   EITHER a string id (probe-collect -> matching node's bounds center, miss/empty -> bad_params, never
+   assert) OR an {x,y} object (isfinite-checked). The user-facing ui.* contract is Y-up (origin
+   bottom-left), declared in ui.tree/element metadata; the ONE documented Y-up->Y-down flip lives HERE,
+   then the resulting LAYOUT coord is mapped LAYOUT->DEVICE through the ctx viewport
+   (nt_ui_layout_to_screen) so the injected pointer is a real device coord — the ctx converts it back to
+   layout for hit-test on nt_ui_begin.
      - {x,y}: interpreted as Y-up in the declared space -> flipped (layout_y = layout_h - in_y) using the
        SAME layout height the metadata + probe bounds use -> layout->device.
-     - string id: nt_ui_get_bbox returns Clay Y-down layout center; NO flip -> layout->device.
+     - string id: resolves to the PROJECTED bounds center the probe (ui.tree/ui.element) reports for that
+       id — the SAME nt_ui_probe_collect projection (tree_baked.m for 2D-affine, view_proj for 3D), NOT
+       the untransformed Clay bbox. This GUARANTEES read==id-write: a click by id lands exactly where
+       ui.tree says the widget is, even for an offset/rotated/3D widget. The probe bounds are Y-up layout
+       px, so the center feeds through the SAME Y-up->Y-down flip as the {x,y} path. For an identity
+       transform the projected center == the layout center, so the unscaled hud is byte-identical.
    For an unscaled ctx the viewport is identity so device==layout (the hud is byte-identical); for an
    nt_ui_scale ctx the viewport inverts the scale+letterbox so a scaled ui.click lands correctly.
    `key` names the field ("id"/"from"/"to") for the error messages. */
@@ -289,13 +295,28 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
             set_bad_params(err, "ui: target id must be a non-empty string");
             return false;
         }
-        uint32_t uid = nt_ui_id(jt->valuestring); /* pre-checked non-empty: get_bbox asserts id!=0. */
-        nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, uid);
-        if (!bb.found) {
+        uint32_t uid = nt_ui_id(jt->valuestring); /* pre-checked non-empty: nt_ui_id asserts id!=0. */
+        uint32_t count = 0;
+        nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count);
+        const nt_ui_probe_node_t *hit = NULL;
+        for (uint32_t i = 0; i < count; i++) {
+            if (s_probe_nodes[i].id == uid) {
+                hit = &s_probe_nodes[i];
+                break;
+            }
+        }
+        if (hit == NULL) {
             set_bad_params(err, "ui: unknown or stale target id");
             return false;
         }
-        const float layout[2] = {bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F)};
+        /* bounds are {x,y,w,h} Y-up layout px -> center, then the SAME Y-up->Y-down flip the {x,y}
+           path uses (layout_y = layout_h - y_up) so id and {x,y} resolve identically. */
+        const float yup_cx = hit->bounds[0] + (hit->bounds[2] * 0.5F);
+        const float yup_cy = hit->bounds[1] + (hit->bounds[3] * 0.5F);
+        float lw = 0.0F;
+        float lh = 0.0F;
+        nt_ui_context_layout_size(ctx, &lw, &lh);
+        const float layout[2] = {yup_cx, lh - yup_cy};
         float device[2];
         nt_ui_layout_to_screen(ctx, layout, device);
         *out_x = device[0];

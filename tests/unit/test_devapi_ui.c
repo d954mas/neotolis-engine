@@ -106,6 +106,33 @@ static void declare_tree(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* A pure-translation 2D transform for the "read==id-write under transform" case. The probe projects
+   the Clay corners through tree_baked.m, so the reported bounds (and ui.click(id)) shift by (ox,oy) —
+   whereas the untransformed Clay bbox does NOT. Offset chosen asymmetric so an axis swap would surface. */
+#define XFORM_OX 40.0F
+#define XFORM_OY (-25.0F)
+
+/* Declare a SECOND widget "xwidget" in the hud ctx carrying a translation transform, primed over two
+   frames so tree_baked holds the composed affine for the collect frame (the probe reads the PREVIOUS
+   frame's baked transform — mirrors test_nt_ui_probe's 2D-affine fixture). */
+static void declare_xform_tree(void) {
+    nt_ui_transform_t t = nt_ui_transform_defaults();
+    t.offset_x = XFORM_OX;
+    t.offset_y = XFORM_OY;
+    for (int frame = 0; frame < 2; ++frame) {
+        nt_mem_scratch_reset();
+        nt_pointer_t mouse = {0};
+        mouse.x = -100.0F;
+        mouse.y = -100.0F;
+        nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("xwidget"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
+              .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 1.0F)}) {}
+        nt_ui_end(s_fx.ctx);
+    }
+}
+
 void setUp(void) {
     /* Real headless ctx + renderer chain (no window/GLFW); also nt_mem_scratch_init for CLAY data. */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -308,6 +335,61 @@ static void test_click_xy_yup_flip_matches_string_id(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
+/* ---- TRANSFORMED widget: ui.click(id) targets the PROJECTED bounds center (read==id-write) ---- */
+
+/* A widget with a NON-IDENTITY 2D transform: ui.click(id) must resolve to the SAME projected position
+   ui.tree reports for that id — NOT the untransformed Clay layout center. Proves the W1 fix: a click by
+   id on a transformed widget lands where the read says it is. Two assertions: (1) the resolved device
+   point equals the ui.tree node bounds center mapped to device; (2) a begin+step round-trip confirms the
+   transform-aware hit-test actually hits the widget at that point. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_transformed_click_id_targets_projected_center(void) {
+    declare_xform_tree();
+
+    /* (1) read side: the ui.tree bounds center for xwidget (Y-up layout px), then the documented
+       Y-up->device map (identity hud viewport => device == flipped layout). */
+    cJSON *troot = parse_ok(nt_devapi_submit("{\"method\":\"ui.tree\",\"params\":{}}"));
+    cJSON *b = find_node_bounds(cJSON_GetObjectItemCaseSensitive(ok_result(troot), "nodes"), "xwidget");
+    TEST_ASSERT_NOT_NULL(b);
+    const float yup_cx = (float)cJSON_GetObjectItemCaseSensitive(b, "x")->valuedouble + ((float)cJSON_GetObjectItemCaseSensitive(b, "w")->valuedouble * 0.5F);
+    const float yup_cy = (float)cJSON_GetObjectItemCaseSensitive(b, "y")->valuedouble + ((float)cJSON_GetObjectItemCaseSensitive(b, "h")->valuedouble * 0.5F);
+    cJSON_Delete(troot);
+    const float expect_dev_x = yup_cx;            /* identity viewport: device x == layout x */
+    const float expect_dev_y = LAYOUT_H - yup_cy; /* Y-up -> Y-down flip, identity viewport */
+    /* The projected center MUST differ from the untransformed Clay center (else the test is vacuous). */
+    TEST_ASSERT_TRUE(near_eq(expect_dev_x, DEVICE_CENTER_X + XFORM_OX));
+    TEST_ASSERT_TRUE(near_eq(expect_dev_y, DEVICE_CENTER_Y + XFORM_OY));
+
+    /* (2) id-write side: ui.click(xwidget) injects exactly that projected device center. */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.click\",\"params\":{\"id\":\"xwidget\"}}")));
+    advance();
+    nt_pointer_t *slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(near_eq(slot->x, expect_dev_x));
+    TEST_ASSERT_TRUE(near_eq(slot->y, expect_dev_y));
+
+    /* Round-trip: the injected device point, device->layout, hits the widget through its transform-aware
+       hit-test (re-declare the transform this frame so tree_baked carries it for the hit). */
+    nt_ui_transform_t t = nt_ui_transform_defaults();
+    t.offset_x = XFORM_OX;
+    t.offset_y = XFORM_OY;
+    nt_mem_scratch_reset();
+    nt_pointer_t mouse = {0};
+    mouse.x = -100.0F;
+    mouse.y = -100.0F;
+    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("xwidget"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
+          .userData = (void *)NT_UI_DATA_XFORM(0U, &t, 1.0F)}) {}
+    const float device_pt[2] = {slot->x, slot->y};
+    float layout_pt[2];
+    nt_ui_screen_to_layout(s_fx.ctx, device_pt, layout_pt);
+    bool hit = nt_ui_test_hit(s_fx.ctx, nt_ui_id("xwidget"), layout_pt[0], layout_pt[1]);
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE(hit);
+}
+
 /* ---- SCALED ctx: ui.click lands through the ctx viewport (the scaled regression) ---- */
 
 /* ui.tree on the scaled ctx exposes the device viewport rect: offset + logical*scale. */
@@ -460,6 +542,7 @@ int main(void) {
     RUN_TEST(test_click_empty_id_bad_params);
     RUN_TEST(test_click_string_id_lands_at_device_center);
     RUN_TEST(test_click_xy_yup_flip_matches_string_id);
+    RUN_TEST(test_transformed_click_id_targets_projected_center);
     RUN_TEST(test_scaled_tree_exposes_viewport);
     RUN_TEST(test_unscaled_viewport_is_identity);
     RUN_TEST(test_scaled_click_string_id_lands_at_device_center);
