@@ -82,6 +82,19 @@ typedef struct {
     float fb_offset[2];
 } nt_ui_target_t;
 
+/* Per-widget custom per-vertex block — scratch-allocated and referenced by pointer
+ * from the payload ONLY for custom-attr widgets (radial, SDF), so a plain image keeps
+ * the payload small (the common case carries no inline 64 B attr array). Fed to
+ * nt_sprite_renderer_set_custom_attrs at emit. Untyped: the bound material's attr_map
+ * names the floats; the walker overwrites any attr the attr_map names a_layout /
+ * a_uvrect with bbox-derived values (name-bound, NOT a fixed slot), the rest baked
+ * verbatim. custom_attrs sized for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64). */
+typedef struct {
+    float custom_attrs[16];
+    uint8_t custom_bytes; /* > 0; the material declares this many per-vertex custom bytes. */
+    uint8_t geom_mode;    /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
+} nt_ui_image_custom_block_t;
+
 /* Pointed to by Clay_ImageElementConfig.imageData; must outlive the matching nt_ui_walk.
  * cornerRadius must be 0 (pre-bake into atlas). */
 typedef struct {
@@ -93,24 +106,18 @@ typedef struct {
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
     uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
-    /* custom_bytes == 0 = plain image; > 0 = the material declares per-vertex custom
-     * attrs and the walker fills any attr it names by NAME (see build_custom_block). */
-    uint8_t custom_bytes;
-    uint8_t geom_mode; /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
     /* Optional per-element sprite material override (radial reveal needs a custom
      * fs + extended layout). .id==0 = use the walker's bound base material. The
      * walker set_material's it only when it differs from the bound one; many
      * elements sharing one material batch to a single draw (set_material no-ops
      * on same .id). */
     nt_material_t material;
-    /* Per-widget custom per-vertex block fed to nt_sprite_renderer_set_custom_attrs
-     * when custom_bytes > 0. Untyped: the bound material's attr_map names the floats.
-     * The walker overwrites any attr the attr_map names a_layout / a_uvrect with
-     * bbox-derived values at emit (name-bound, NOT a fixed slot); the rest are baked
-     * verbatim. Sized for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64). */
-    float custom_attrs[16];
+    /* NULL = plain image (the common case). Non-NULL = custom-attr widget; the block
+     * (same frame-scratch lifetime as the payload) carries the per-vertex attrs. */
+    const nt_ui_image_custom_block_t *custom;
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 100, "nt_ui_image_payload_t stable ABI");
+/* Non-pointer prefix is 36 B; `custom` is pointer-aligned and adds sizeof(void*). */
+_Static_assert(sizeof(nt_ui_image_payload_t) == ((36U + (sizeof(void *) - 1U)) & ~(sizeof(void *) - 1U)) + sizeof(void *), "nt_ui_image_payload_t stable ABI (40 B wasm / 48 B native; was 100 B)");
 
 /* geom_mode: how the walker rasterizes the element's bbox when custom_bytes > 0.
  * REGION = the textured emit_region/emit_slice9 path (real atlas art, origin/flip/

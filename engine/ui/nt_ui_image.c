@@ -91,6 +91,13 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         NT_ASSERT(decl->userData == NULL && "nt_ui_image_custom: decl->userData must be NULL (data param controls)");
     }
 
+    /* Custom block lives in its own scratch alloc (same frame lifetime as the payload);
+     * the payload only carries a pointer, so plain images stay small. */
+    nt_ui_image_custom_block_t *blk = NT_MEM_SCRATCH_ALLOC(nt_ui_image_custom_block_t);
+    NT_ASSERT(blk != NULL && "nt_ui_image_custom: scratch alloc failed (block)");
+    *blk = (nt_ui_image_custom_block_t){.custom_bytes = img->custom_bytes, .geom_mode = img->geom_mode};
+    memcpy(blk->custom_attrs, img->custom_attrs, img->custom_bytes);
+
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(p != NULL && "nt_ui_image_custom: scratch alloc failed");
     *p = (nt_ui_image_payload_t){
@@ -101,12 +108,10 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .slice9_scale = img->slice9_scale,
         .flip_bits = img->flip_bits,
         .flags = img->flags,
-        .custom_bytes = img->custom_bytes,
-        .geom_mode = img->geom_mode,
         .material = img->material,
+        .custom = blk,
     };
     memcpy(p->slice9_override, img->slice9_lrtb, sizeof(p->slice9_override));
-    memcpy(p->custom_attrs, img->custom_attrs, img->custom_bytes);
 
     /* Transparency lives in opacity (element_data), not tint alpha. */
     const Clay_Color tint = nt_ui_unpack_tint(img->color_packed);

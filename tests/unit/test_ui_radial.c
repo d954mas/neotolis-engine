@@ -186,6 +186,7 @@ static void test_route_a_custom_does_not_batch(void) {
 
 /* File-scope so payloads/layer data outlive the walk. */
 static nt_ui_image_payload_t s_img_payloads[16];
+static nt_ui_image_custom_block_t s_img_blocks[16];
 static const nt_ui_element_data_t k_layer0 = {.layer = 0U};
 
 /* A flat-radial IMAGE payload: custom_bytes>0 + GEOMETRY mode routes it through the
@@ -206,11 +207,12 @@ static void make_image(int idx, float x, nt_resource_t atlas, uint32_t region_in
         .region_index = region_index,
         .slice9_scale = 1.0F,
         .material = material,
-        .custom_bytes = custom ? (uint8_t)sizeof k_radial_attrs : 0U,
-        .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
+        .custom = NULL,
     };
     if (custom) {
-        memcpy(s_img_payloads[idx].custom_attrs, k_radial_attrs, sizeof k_radial_attrs);
+        s_img_blocks[idx] = (nt_ui_image_custom_block_t){.custom_bytes = (uint8_t)sizeof k_radial_attrs, .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY};
+        memcpy(s_img_blocks[idx].custom_attrs, k_radial_attrs, sizeof k_radial_attrs);
+        s_img_payloads[idx].custom = &s_img_blocks[idx];
     }
     c->renderData.image.imageData = &s_img_payloads[idx];
     c->userData = (void *)&k_layer0;
@@ -282,6 +284,52 @@ static void test_route_b_zero_material_uses_base(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+}
+
+/* DRAW-CALL PARITY gate for the walker material cache (Part B). A run of plain
+ * same-base-material IMAGEs batches to ONE draw; the cache only SKIPS the redundant
+ * set_material — it must never change the draw count. */
+static void test_walker_material_cache_batches_plain(void) {
+    const uint32_t region = s_fx.atlas.white_region_idx;
+    /* Five plain images (material.id==0 → walker base) all share one material. */
+    for (int i = 0; i < 5; i++) {
+        make_image(i, (float)(i * 40), s_fx.atlas.handle, region, NT_MATERIAL_INVALID);
+    }
+    inject_frozen_cmds(5);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    /* One base material, no barrier between → one draw (cache skipped 4 set_materials). */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+}
+
+/* Cache-reset regression: a TEXT barrier between two same-base-material IMAGE runs
+ * closes the sprite cmd. The cache MUST reset there so the second run rebinds — else
+ * emit hits a closed cmd (no open cmd) or silently drops geometry. Two runs split by a
+ * barrier = TWO draws, not one. Proves last_sprite_mat_id is reset on the text barrier. */
+static void test_walker_material_cache_resets_on_text_barrier(void) {
+    const uint32_t region = s_fx.atlas.white_region_idx;
+    /* image(base) @0, TEXT @1, image(base) @2 — all layer 0, same z-segment order. */
+    make_image(0, 0.0F, s_fx.atlas.handle, region, NT_MATERIAL_INVALID);
+
+    Clay_RenderCommand *t = &s_test_cmds[1];
+    t->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
+    t->zIndex = 0;
+    t->boundingBox = (Clay_BoundingBox){.x = 40, .y = 0, .width = 32, .height = 16};
+    t->renderData.text.fontId = 0; /* fixture stub font: emit silently skips, barrier still flushes */
+    t->renderData.text.fontSize = 16;
+    t->renderData.text.textColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    t->renderData.text.stringContents.chars = "x";
+    t->renderData.text.stringContents.length = 1;
+    t->userData = (void *)&k_layer0;
+
+    make_image(2, 80.0F, s_fx.atlas.handle, region, NT_MATERIAL_INVALID);
+    inject_frozen_cmds(3);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* TEXT splits the two image runs → 2 sprite draws (cache correctly rebound run 2). */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
 /* ===== nt_ui_radial widget math + ABI + emit payload ===== */
@@ -737,6 +785,8 @@ int main(void) {
     RUN_TEST(test_route_b_shared_material_batches);
     RUN_TEST(test_route_b_distinct_material_switches);
     RUN_TEST(test_route_b_zero_material_uses_base);
+    RUN_TEST(test_walker_material_cache_batches_plain);
+    RUN_TEST(test_walker_material_cache_resets_on_text_barrier);
     RUN_TEST(test_radial_fill_to_angle);
     RUN_TEST(test_radial_two_angle_swap);
     RUN_TEST(test_radial_style_abi);
