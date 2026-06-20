@@ -38,19 +38,23 @@ typedef struct {
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
 /* Byte cap for a material's appended custom per-vertex attribute block (opt-in,
- * D-66-06). One FLOAT4 (a_radial: x=angle_start y=angle_end z=inner_radius_norm
- * w=aspect) = 16 B. Only custom-attr materials pay this; plain sprites keep the
- * locked 20 B vertex. Coordinate the exact float count with plans 66-03/04. */
+ * D-66-06). Headroom for two FLOAT4 blocks (a_radial vec4 + one future a_tint
+ * vec4) = 32 B; no material declares 32 B yet. Only custom-attr materials pay
+ * this; plain sprites keep the locked 20 B vertex. */
 #ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
-#define NT_SPRITE_CUSTOM_STRIDE_MAX 16
+#define NT_SPRITE_CUSTOM_STRIDE_MAX 32
 #endif
 
 /* ---- Init descriptor ---- */
 
 typedef struct {
-    uint16_t max_pipelines; /* default 16 */
-    uint32_t max_vertices;  /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_VERTICES */
-    uint32_t max_indices;   /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
+    uint16_t max_pipelines;       /* default 16 */
+    uint32_t max_vertices;        /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_VERTICES */
+    uint32_t max_indices;         /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
+    uint32_t custom_max_vertices; /* custom-attr staging cap; sizes the custom/interleave
+                                   * heap so plain-sprite games don't carry a big custom
+                                   * buffer. Radials/custom-attr widgets are few — kept
+                                   * far below max_vertices. Default 4096. */
 } nt_sprite_renderer_desc_t;
 
 static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
@@ -58,6 +62,7 @@ static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
         .max_pipelines = 16,
         .max_vertices = NT_SPRITE_RENDERER_MAX_VERTICES,
         .max_indices = NT_SPRITE_RENDERER_MAX_INDICES,
+        .custom_max_vertices = 4096,
     };
 }
 
