@@ -333,8 +333,11 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 #ifndef NT_UI_PROBE_TEXT_CAP
 #define NT_UI_PROBE_TEXT_CAP 64 /* owned text / label copy cap incl. NUL */
 #endif
+/* Probe node cap tracks the ctx Clay element-count knob, so a tree within a ctx's capacity never
+   truncates on count. A ctx whose RUNTIME desc.max_elements is raised above this compile-time default
+   still truncates (the static probe buffer is sized to this default) -> out_truncated flags it. */
 #ifndef NT_UI_PROBE_MAX_NODES
-#define NT_UI_PROBE_MAX_NODES 1024
+#define NT_UI_PROBE_MAX_NODES NT_UI_DEFAULT_MAX_ELEMENT_COUNT
 #endif
 
 /* Coarse role tag. Registered widgets resolve to their def->name; unregistered elements fall
