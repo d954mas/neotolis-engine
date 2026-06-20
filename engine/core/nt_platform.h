@@ -1,6 +1,8 @@
 #ifndef NT_PLATFORM_H
 #define NT_PLATFORM_H
 
+#include <stddef.h>
+
 /* Platform detection -- maps compiler defines to engine defines */
 #if defined(__EMSCRIPTEN__)
 #define NT_PLATFORM_WEB 1
@@ -17,5 +19,16 @@
 #else
 #define NT_DEBUG 1
 #endif
+
+/* Process memory probe (platform abstraction: never call the OS from a module).
+ * `used` = resident bytes (native RSS / web mallinfo uordblks).
+ * `reserved` = bytes committed by the allocator (web heap size); on native there
+ * is no cheap distinct reserve figure, so `reserved` mirrors `used`. */
+typedef struct {
+    size_t used;
+    size_t reserved;
+} nt_platform_mem_t;
+
+nt_platform_mem_t nt_platform_memory_usage(void);
 
 #endif /* NT_PLATFORM_H */
