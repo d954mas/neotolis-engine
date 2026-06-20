@@ -49,11 +49,15 @@ _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes
 
 typedef struct {
     uint16_t max_pipelines; /* default 16 */
+    uint32_t max_vertices;  /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_VERTICES */
+    uint32_t max_indices;   /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
 } nt_sprite_renderer_desc_t;
 
 static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
     return (nt_sprite_renderer_desc_t){
         .max_pipelines = 16,
+        .max_vertices = NT_SPRITE_RENDERER_MAX_VERTICES,
+        .max_indices = NT_SPRITE_RENDERER_MAX_INDICES,
     };
 }
 

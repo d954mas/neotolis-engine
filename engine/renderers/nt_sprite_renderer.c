@@ -3,6 +3,7 @@
 #include "core/nt_builtins.h"
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef __wasm_simd128__
@@ -14,6 +15,7 @@
 #include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "graphics/nt_gfx.h"
+#include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "render/nt_render_defs.h"
@@ -47,10 +49,12 @@ static struct {
     nt_sprite_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
     uint16_t count;
 
-    nt_buffer_t vbo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_VERTICES * 24 */
-    nt_buffer_t ibo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_INDICES * 2 (uint16 indices) */
-    nt_sprite_vertex_t vertices[NT_SPRITE_RENDERER_MAX_VERTICES];
-    uint16_t indices[NT_SPRITE_RENDERER_MAX_INDICES];
+    nt_buffer_t vbo; /* dynamic, sized for max_vertices * extended stride */
+    nt_buffer_t ibo; /* dynamic, sized for max_indices * 2 (uint16 indices) */
+    nt_sprite_vertex_t *vertices;
+    uint16_t *indices;
+    uint32_t max_vertices; /* runtime CPU staging caps (from desc) */
+    uint32_t max_indices;
     uint32_t vertex_count;
     uint32_t index_count;
 
@@ -60,7 +64,10 @@ static struct {
      * with vertices[] only when the bound material declares custom attrs. The
      * extended-stride GPU upload (base 20 B + custom block) is interleaved here
      * at flush; plain materials never touch it. */
-    uint8_t custom_vertices[NT_SPRITE_RENDERER_MAX_VERTICES * NT_SPRITE_CUSTOM_STRIDE_MAX];
+    uint8_t *custom_vertices;
+    /* Flush-time interleave scratch (base 20 B + custom block per vertex);
+     * replaces the former function-local static in flush. */
+    uint8_t *interleave;
     /* "Current" per-widget custom attr block (set via set_custom_attrs, baked
      * into every emitted vertex like color). cur_custom_bytes==0 → plain emit. */
     uint8_t cur_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX];
@@ -98,10 +105,21 @@ static struct {
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     NT_ASSERT(!s_sprite.initialized);
     nt_sprite_renderer_desc_t d = (desc != NULL) ? *desc : nt_sprite_renderer_desc_defaults();
+    /* 0 cap means "use compile-time default" — lets callers that only set
+     * max_pipelines keep working without restating the staging caps. */
+    if (d.max_vertices == 0) {
+        d.max_vertices = NT_SPRITE_RENDERER_MAX_VERTICES;
+    }
+    if (d.max_indices == 0) {
+        d.max_indices = NT_SPRITE_RENDERER_MAX_INDICES;
+    }
     NT_ASSERT(d.max_pipelines > 0 && d.max_pipelines <= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP);
+    NT_ASSERT(d.max_vertices <= 65536 && "sprite max_vertices must fit uint16 index range");
 
     memset(&s_sprite, 0, sizeof(s_sprite));
     s_sprite.max_pipelines = d.max_pipelines;
+    s_sprite.max_vertices = d.max_vertices;
+    s_sprite.max_indices = d.max_indices;
 
     /* Dynamic VBO and IBO. Pattern: nt_text_renderer.c init code. Sized for the
      * extended stride (base 20 B + custom block) so a custom-attr flush's
@@ -109,7 +127,7 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     s_sprite.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_DYNAMIC,
-        .size = NT_SPRITE_RENDERER_MAX_VERTICES * ((uint32_t)sizeof(nt_sprite_vertex_t) + NT_SPRITE_CUSTOM_STRIDE_MAX),
+        .size = d.max_vertices * ((uint32_t)sizeof(nt_sprite_vertex_t) + NT_SPRITE_CUSTOM_STRIDE_MAX),
         .label = "sprite_vbo",
     });
     NT_ASSERT(s_sprite.vbo.id != 0);
@@ -117,11 +135,30 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     s_sprite.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX,
         .usage = NT_USAGE_DYNAMIC,
-        .size = NT_SPRITE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t),
+        .size = d.max_indices * (uint32_t)sizeof(uint16_t),
         .index_type = NT_INDEX_UINT16,
         .label = "sprite_ibo",
     });
     NT_ASSERT(s_sprite.ibo.id != 0);
+
+    /* Heap-backed CPU staging (mirrors nt_mesh_renderer): vertices/indices plus
+     * the custom-attr byte buffer and the flush interleave scratch, both at the
+     * worst-case extended stride. */
+    s_sprite.vertices = (nt_sprite_vertex_t *)calloc(d.max_vertices, sizeof(nt_sprite_vertex_t));
+    s_sprite.indices = (uint16_t *)calloc(d.max_indices, sizeof(uint16_t));
+    s_sprite.custom_vertices = (uint8_t *)calloc(d.max_vertices, NT_SPRITE_CUSTOM_STRIDE_MAX);
+    s_sprite.interleave = (uint8_t *)calloc(d.max_vertices, (size_t)sizeof(nt_sprite_vertex_t) + NT_SPRITE_CUSTOM_STRIDE_MAX);
+    if (s_sprite.vertices == NULL || s_sprite.indices == NULL || s_sprite.custom_vertices == NULL || s_sprite.interleave == NULL) {
+        free(s_sprite.vertices);
+        free(s_sprite.indices);
+        free(s_sprite.custom_vertices);
+        free(s_sprite.interleave);
+        nt_gfx_destroy_buffer(s_sprite.vbo);
+        nt_gfx_destroy_buffer(s_sprite.ibo);
+        memset(&s_sprite, 0, sizeof(s_sprite));
+        NT_LOG_ERROR("failed to allocate sprite CPU staging");
+        return NT_ERR_INIT_FAILED;
+    }
 
     s_sprite.initialized = true;
     return NT_OK;
@@ -131,6 +168,15 @@ void nt_sprite_renderer_shutdown(void) {
     if (!s_sprite.initialized) {
         return;
     }
+    /* Free CPU staging first (final memset also zeros, but free before reset). */
+    free(s_sprite.vertices);
+    free(s_sprite.indices);
+    free(s_sprite.custom_vertices);
+    free(s_sprite.interleave);
+    s_sprite.vertices = NULL;
+    s_sprite.indices = NULL;
+    s_sprite.custom_vertices = NULL;
+    s_sprite.interleave = NULL;
     /* Destroy pipelines in cache */
     for (uint16_t i = 0; i < s_sprite.count; i++) {
         nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
@@ -147,8 +193,10 @@ void nt_sprite_renderer_restore_gpu(void) {
         return;
     }
     uint16_t saved_pip = s_sprite.max_pipelines;
+    uint32_t saved_max_v = s_sprite.max_vertices;
+    uint32_t saved_max_i = s_sprite.max_indices;
     nt_sprite_renderer_shutdown();
-    nt_sprite_renderer_desc_t desc = {.max_pipelines = saved_pip};
+    nt_sprite_renderer_desc_t desc = {.max_pipelines = saved_pip, .max_vertices = saved_max_v, .max_indices = saved_max_i};
     NT_ASSERT(nt_sprite_renderer_init(&desc) == NT_OK);
 }
 // #endregion
@@ -373,7 +421,7 @@ static inline void bake_custom_attrs(uint32_t base, uint32_t count) {
     if (s_sprite.cur_custom_bytes == 0) {
         return;
     }
-    NT_ASSERT(base + count <= NT_SPRITE_RENDERER_MAX_VERTICES && "custom-attr bake out of range at extended stride");
+    NT_ASSERT(base + count <= s_sprite.max_vertices && "custom-attr bake out of range at extended stride");
     for (uint32_t i = 0; i < count; i++) {
         uint8_t *dst = &s_sprite.custom_vertices[(size_t)(base + i) * NT_SPRITE_CUSTOM_STRIDE_MAX];
         memcpy(dst, s_sprite.cur_custom_attrs, s_sprite.cur_custom_bytes);
@@ -446,7 +494,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
 
     /* Snapshot+flush+reopen on staging overflow keeps the caller's open
      * cmd state across the chunk boundary. */
-    if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+    if (s_sprite.vertex_count + r->vertex_count > s_sprite.max_vertices || s_sprite.index_count + r->index_count > s_sprite.max_indices) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
@@ -633,7 +681,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         if (!ensure_current_cmd_page_texture(page_tex)) {
             return;
         }
-        if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+        if (s_sprite.vertex_count + 16U > s_sprite.max_vertices || s_sprite.index_count + 54U > s_sprite.max_indices) {
             NT_ASSERT(s_sprite.cmd_count > 0);
             nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
             nt_sprite_renderer_flush();
@@ -854,8 +902,8 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_geometry: atlas must be READY");
     NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_geometry: call nt_sprite_renderer_set_material first");
     NT_ASSERT(vertex_count > 0U && index_count > 0U && "nt_sprite_renderer_emit_geometry: empty geometry");
-    NT_ASSERT(vertex_count <= NT_SPRITE_RENDERER_MAX_VERTICES && "nt_sprite_renderer_emit_geometry: vertex_count exceeds staging capacity");
-    NT_ASSERT(index_count <= NT_SPRITE_RENDERER_MAX_INDICES && "nt_sprite_renderer_emit_geometry: index_count exceeds staging capacity");
+    NT_ASSERT(vertex_count <= s_sprite.max_vertices && "nt_sprite_renderer_emit_geometry: vertex_count exceeds staging capacity");
+    NT_ASSERT(index_count <= s_sprite.max_indices && "nt_sprite_renderer_emit_geometry: index_count exceeds staging capacity");
 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
@@ -869,7 +917,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 
     /* Overflow handling mirrors emit_region_resolved: snapshot the open
      * cmd, flush, reopen with the same state. */
-    if (s_sprite.vertex_count + vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+    if (s_sprite.vertex_count + vertex_count > s_sprite.max_vertices || s_sprite.index_count + index_count > s_sprite.max_indices) {
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
@@ -1092,7 +1140,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     // #endregion
 
     // #region emit_slice9_vertices
-    if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+    if (s_sprite.vertex_count + 16U > s_sprite.max_vertices || s_sprite.index_count + 54U > s_sprite.max_indices) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9 called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
@@ -1247,13 +1295,12 @@ void nt_sprite_renderer_flush(void) {
         nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
     } else {
         const uint32_t ext_stride = (uint32_t)NT_SPRITE_BASE_STRIDE + s_sprite.flush_custom_bytes;
-        static uint8_t s_interleave[NT_SPRITE_RENDERER_MAX_VERTICES * (NT_SPRITE_BASE_STRIDE + NT_SPRITE_CUSTOM_STRIDE_MAX)];
         for (uint32_t vi = 0; vi < s_sprite.vertex_count; vi++) {
-            uint8_t *dst = &s_interleave[(size_t)vi * ext_stride];
+            uint8_t *dst = &s_sprite.interleave[(size_t)vi * ext_stride];
             memcpy(dst, &s_sprite.vertices[vi], NT_SPRITE_BASE_STRIDE);
             memcpy(dst + NT_SPRITE_BASE_STRIDE, &s_sprite.custom_vertices[(size_t)vi * NT_SPRITE_CUSTOM_STRIDE_MAX], s_sprite.flush_custom_bytes);
         }
-        nt_gfx_orphan_buffer(s_sprite.vbo, s_interleave, s_sprite.vertex_count * ext_stride);
+        nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.interleave, s_sprite.vertex_count * ext_stride);
     }
     if (s_sprite.index_count > 0) {
         nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));
