@@ -38,10 +38,10 @@ void main() {
     // Wrap-aware angular wedge: lead/trail gate both sides so a wedge crossing 0 is
     // admitted once. Arc-perpendicular distance r*angle, in pixels via ppu, feeds the
     // same 1px box-filter so angular edges match the radial crispness.
-    float ang = atan(v_local.y, v_local.x);
+    float ang = atan(p.y, p.x); // aspect-corrected space (matches r) so the wedge aligns with the oval
     float sweep = mod(ang - angle_start, TAU);
     float total = mod(angle_end - angle_start, TAU);
-    bool full_turn = (angle_end - angle_start) >= TAU - 1e-4;
+    bool full_turn = abs(angle_end - angle_start) >= TAU - 1e-4; // |sweep|: a reverse (CCW) full turn is full too
     float lead = clamp(r * sweep * ppu + 0.5, 0.0, 1.0);
     float trail = clamp(r * (total - sweep) * ppu + 0.5, 0.0, 1.0);
     float wedge = full_turn ? 1.0 : (lead * trail);

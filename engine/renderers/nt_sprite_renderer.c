@@ -510,9 +510,11 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
     }
 
     /* Snapshot+flush+reopen on staging overflow keeps the caller's open
-     * cmd state across the chunk boundary. Custom-attr emits cap at
-     * custom_max_vertices (they pay the bigger stride in staging). */
-    const uint32_t vcap = (s_sprite.cur_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
+     * cmd state across the chunk boundary. Cap keyed on the bound MATERIAL's
+     * custom bytes (= cur_stride), NOT the per-emit block (consumed each emit):
+     * a forgotten set_custom_attrs still writes at the extended stride, so it
+     * must cap by custom_max_vertices or it overruns staging. */
+    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + r->vertex_count > vcap || s_sprite.index_count + r->index_count > s_sprite.max_indices) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
@@ -700,7 +702,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         if (!ensure_current_cmd_page_texture(page_tex)) {
             return;
         }
-        const uint32_t vcap = (s_sprite.cur_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
+        const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
         if (s_sprite.vertex_count + 16U > vcap || s_sprite.index_count + 54U > s_sprite.max_indices) {
             NT_ASSERT(s_sprite.cmd_count > 0);
             nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
@@ -938,12 +940,14 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     /* Overflow handling mirrors emit_region_resolved: snapshot the open
      * cmd, flush, reopen with the same state. Custom-attr emits cap at
      * custom_max_vertices (they pay the bigger stride in staging). */
-    const uint32_t vcap = (s_sprite.cur_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
+    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
     }
+    /* A single emit larger than the (post-flush empty) cap can't fit — fail fast instead of overrunning staging. */
+    NT_ASSERT(vertex_count <= vcap && index_count <= s_sprite.max_indices && "emit_geometry: single emit exceeds staging cap (raise custom_max_vertices / max_indices)");
 
     /* Sample at the region's UV centroid -- the corner of vertex 0 would
      * land at the texel boundary and bleed into neighbours under linear
@@ -1162,7 +1166,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     // #endregion
 
     // #region emit_slice9_vertices
-    const uint32_t vcap = (s_sprite.cur_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
+    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + 16U > vcap || s_sprite.index_count + 54U > s_sprite.max_indices) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9 called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
