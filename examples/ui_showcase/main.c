@@ -419,6 +419,7 @@ static uint32_t s_id_progress_crop, s_id_progress_vert; /* CROP + vertical progr
 static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / ALWAYS lists */
 static uint32_t s_id_scroll_horiz, s_id_scroll_xy;      /* horizontal-only / both-axes */
 static uint32_t s_id_stress_scroll;                     /* fixed-size scroll so the label cell can't overflow */
+static uint32_t s_id_tablist_scroll;                    /* vertical scroll around the left nav so the full tab list stays reachable */
 static uint32_t s_id_stage_scroll;                      /* vertical scroll around the stage content so tall tabs fit */
 static uint32_t s_id_props_scroll;                      /* vertical scroll around the props content for tall configs */
 static uint32_t s_id_props_il, s_id_props_ir, s_id_props_it, s_id_props_ib;
@@ -2199,6 +2200,7 @@ static void ensure_ids(void) {
     s_id_scroll_horiz = nt_ui_id("showcase/scroll_horiz");
     s_id_scroll_xy = nt_ui_id("showcase/scroll_xy");
     s_id_stress_scroll = nt_ui_id("showcase/stress_scroll");
+    s_id_tablist_scroll = nt_ui_id("showcase/tablist_scroll");
     s_id_stage_scroll = nt_ui_id("showcase/stage_scroll");
     s_id_props_scroll = nt_ui_id("showcase/props_scroll");
     s_id_props_il = nt_ui_id("showcase/props_il");
@@ -2313,8 +2315,13 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
           .backgroundColor = g_current->list_bg,
           .cornerRadius = CLAY_CORNER_RADIUS(10),
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
-        /* Text-only nav (icons NULL): the left rail stays clean/cohesive. icon_size stays 0 so no gutter. */
-        (void)nt_ui_tabbar(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tab_btn_base, s_tab_labels, NULL, TAB_COUNT, &s_active_tab, g_current->tabbar);
+        /* Scroll the nav: fixed-height tabs overflow a short window, so wrap them so all stay reachable. */
+        nt_ui_scroll_begin(ctx, NULL, s_id_tablist_scroll, g_current->scroll_always, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            /* Text-only nav (icons NULL): the left rail stays clean/cohesive. icon_size stays 0 so no gutter. */
+            (void)nt_ui_tabbar(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_tab_btn_base, s_tab_labels, NULL, TAB_COUNT, &s_active_tab, g_current->tabbar);
+        }
+        nt_ui_scroll_end(ctx);
     }
 }
 
@@ -2340,7 +2347,7 @@ static void declare_content(nt_ui_context_t *ctx) {
 
         /* Vertical scroll bounds the content to the card height; the inner column FITs (grows taller
          * than the viewport on tall tabs -> scrolls). */
-        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_always, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
         nt_ui_scroll_end(ctx);
     }
