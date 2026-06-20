@@ -25,25 +25,23 @@ void main() {
     vec2 p = v_local * vec2(1.0, aspect);
     float r = length(p);
 
-    // Radial ring band: smooth outer edge at r=1 and inner edge at r=inner.
-    float r_aa = fwidth(r);
-    float outer = 1.0 - smoothstep(1.0 - r_aa, 1.0 + r_aa, r);
-    float ring = (inner > 0.0) ? smoothstep(inner - r_aa, inner + r_aa, r) : 1.0;
+    // Edge coverage in PIXELS (mirrors slug_text.frag pixelsPerEm): a 1px linear
+    // box-filter centred on each edge, so AA stays crisp at any radius and never
+    // bleeds outward into a halo. ppu = pixels per r-unit.
+    float ppu = 1.0 / max(fwidth(r), 1e-6);
+    float outer = clamp((1.0 - r) * ppu + 0.5, 0.0, 1.0);
+    float ring = (inner > 0.0) ? clamp((r - inner) * ppu + 0.5, 0.0, 1.0) : 1.0;
     float radial_mask = outer * ring;
 
-    // Wrap-aware angular wedge (Pitfall 4): mod the CCW sweep start→fragment and
-    // start→end into [0,TAU); the fragment is inside when its sweep <= the total.
+    // Wrap-aware angular wedge: lead/trail gate both sides so a wedge crossing 0 is
+    // admitted once. Arc-perpendicular distance r*angle, in pixels via ppu, feeds the
+    // same 1px box-filter so angular edges match the radial crispness.
     float ang = atan(v_local.y, v_local.x);
     float sweep = mod(ang - angle_start, TAU);
     float total = mod(angle_end - angle_start, TAU);
-    // A full turn (end == start + TAU) collapses to total==0 under mod — treat it
-    // as the whole disc.
     bool full_turn = (angle_end - angle_start) >= TAU - 1e-4;
-    // Angular AA scaled by r so the soft edge is a uniform arc-length width along
-    // the radius (D-66-11 — no facets). Guard r→0 at the center.
-    float ang_aa = fwidth(sweep) + 1e-4;
-    float lead = smoothstep(-ang_aa, ang_aa, sweep);
-    float trail = smoothstep(-ang_aa, ang_aa, total - sweep);
+    float lead = clamp(r * sweep * ppu + 0.5, 0.0, 1.0);
+    float trail = clamp(r * (total - sweep) * ppu + 0.5, 0.0, 1.0);
     float wedge = full_turn ? 1.0 : (lead * trail);
 
     float a = radial_mask * wedge * v_color.a;

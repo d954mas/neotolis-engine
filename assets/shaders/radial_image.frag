@@ -39,17 +39,22 @@ void main() {
     vec2 p = v_local_uv * vec2(1.0, aspect);
     float r = length(p);
 
-    // Ring band: optional inner cut (0 = solid disc). Outer edge is implicit in
-    // the quad — a full textured tile keeps its corners (no SDF outer mask).
-    float ring = (inner > 0.0) ? step(inner, r) : 1.0;
+    // Pixel-space coverage (slug-style, like radial.frag): a 1px box-filter so the
+    // ring and reveal edges stay crisp at any size. ppu = pixels per local unit.
+    // Outer edge is the textured tile quad itself (no SDF outer mask).
+    float ppu = 1.0 / max(fwidth(r), 1e-6);
+    float ring = (inner > 0.0) ? clamp((r - inner) * ppu + 0.5, 0.0, 1.0) : 1.0;
 
-    // Wrap-aware angular wedge (Pitfall 4): mod the CCW sweep start→fragment and
-    // start→end into [0,TAU); inside when the fragment's sweep <= the total.
+    // Wrap-aware angular wedge: lead/trail gate both sides so a wedge crossing 0 is
+    // admitted once; arc-perpendicular distance r*angle in pixels feeds the same
+    // box-filter, so the swept/un-swept boundary is anti-aliased, not a hard step.
     float ang = atan(v_local_uv.y, v_local_uv.x);
     float sweep = mod(ang - angle_start, TAU);
     float total = mod(angle_end - angle_start, TAU);
     bool full_turn = (angle_end - angle_start) >= TAU - 1e-4;
-    bool in_wedge = full_turn || (sweep <= total);
+    float lead = clamp(r * sweep * ppu + 0.5, 0.0, 1.0);
+    float trail = clamp(r * (total - sweep) * ppu + 0.5, 0.0, 1.0);
+    float wedge_cov = full_turn ? 1.0 : (lead * trail);
 
     // Premultiply (Pitfall 5): texture is premultiplied; premultiply vertex color
     // too. Identical to sprite.frag.
@@ -77,8 +82,8 @@ void main() {
         reveal = vec4(tinted, lit.a);
     }
 
-    vec4 outc = in_wedge ? lit : reveal;
-    // Apply the ring cut: inner hole is fully transparent (0 inner = full tile).
+    vec4 outc = mix(reveal, lit, wedge_cov);
+    // Apply the ring cut: inner hole fades out over 1px (0 inner = full tile).
     outc *= ring;
 
     if (outc.a <= 0.0) {
