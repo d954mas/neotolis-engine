@@ -15,8 +15,11 @@ the bad_params paths over a real socket.
      on the synthetic click, observed via ui.element read-back (resolve -> inject -> settle -> react).
   4. read hud_btn's Y-up bounds from ui.tree, compute the center, and ui.click({x,y}) with those Y-up
      coords WITHOUT any bot-side flip — the click lands and the widget toggles, proving read==write.
-  5. ui.click("does_not_exist") is caught as bad_params (unknown id -> no crash/assert).
-  6. a non-finite-coord / over-cap-frames ui.drag is rejected as bad_params (coords/frames hardened).
+  5. select the SCALED "hud_scaled" ctx (non-identity viewport: 2x scale + letterbox margin), read
+     scaled_btn's Y-up bounds, ui.click({x,y}) with those layout coords, advance, and the widget toggles
+     — proving ui.click lands on a SCALED ctx (the layout->device map goes through the ctx viewport).
+  6. ui.click("does_not_exist") is caught as bad_params (unknown id -> no crash/assert).
+  7. a non-finite-coord / over-cap-frames ui.drag is rejected as bad_params (coords/frames hardened).
 
 ui.* are fire-and-forget/immediate (D-14): the down/up enqueue and apply only as the sim advances, so
 the UAT runs in manual mode and step()s between the click and the read-back. Unlike the input UAT there
@@ -78,19 +81,19 @@ def _find_node(tree, node_id):
     return None
 
 
-def _hud_btn_enabled(client: DevApiClient):
-    """Read hud_btn's current `enabled` via ui.element; asserts it is a bool."""
-    v = client.ui_element("hud_btn").get("node", {}).get("enabled")
-    assert isinstance(v, bool), f"ui.element(hud_btn).enabled is {v!r}, expected a bool"
+def _btn_enabled(client: DevApiClient, btn_id="hud_btn", ctx=None):
+    """Read a widget's current `enabled` via ui.element; asserts it is a bool."""
+    v = client.ui_element(btn_id, ctx=ctx).get("node", {}).get("enabled")
+    assert isinstance(v, bool), f"ui.element({btn_id}).enabled is {v!r}, expected a bool"
     return v
 
 
-def _click_until_toggled(client: DevApiClient, do_click, before) -> bool:
-    """Re-issue do_click() + step until hud_btn.enabled flips off `before`; True if it toggled."""
+def _click_until_toggled(client: DevApiClient, do_click, before, btn_id="hud_btn", ctx=None) -> bool:
+    """Re-issue do_click() + step until the widget's enabled flips off `before`; True if it toggled."""
     for _ in range(20):  # generous budget: down@0/up@1 apply across advancing frames (1-frame IM lag)
         do_click()           # enqueue down+up (fire-and-forget)
         client.step(count=4)  # advance: release+apply the down, then the up; the click lands
-        if _hud_btn_enabled(client) != before:
+        if _btn_enabled(client, btn_id, ctx) != before:
             return True
     return False
 
@@ -124,10 +127,10 @@ def run(client: DevApiClient) -> None:
     print(f"PASS[2/6] ui.tree declares the Y-up (origin bottom-left) contract + hud_btn bounds {bounds}.")
 
     # 3. ui.click("hud_btn") -> step -> the host toggles hud_btn.enabled (resolve->inject->settle->react).
-    before = _hud_btn_enabled(client)
+    before = _btn_enabled(client)
     toggled = _click_until_toggled(client, lambda: client.ui_click("hud_btn"), before)
     assert toggled, f"ui.click('hud_btn') did not toggle enabled off {before!r} after stepping (resolve->inject->react failed)"
-    print("PASS[3/6] ui.click('hud_btn') resolved -> injected -> settled -> the widget toggled (read-back confirms).")
+    print("PASS[3/7] ui.click('hud_btn') resolved -> injected -> settled -> the widget toggled (read-back confirms).")
 
     # 4. THE regression for the original bug: read hud_btn Y-up bounds from ui.tree, compute the center,
     #    and ui.click({x,y}) with those Y-up coords directly (NO bot-side flip). read==write -> it lands.
@@ -136,20 +139,38 @@ def run(client: DevApiClient) -> None:
     b = btn["bounds"]
     cx = b["x"] + (b["w"] * 0.5)
     cy = b["y"] + (b["h"] * 0.5)  # Y-up center, straight from the bounds — exactly what we feed back.
-    before = _hud_btn_enabled(client)
+    before = _btn_enabled(client)
     toggled = _click_until_toggled(client, lambda: client.ui_click({"x": cx, "y": cy}), before)
     assert toggled, f"ui.click({{x:{cx}, y:{cy}}}) (Y-up bounds center) did not toggle hud_btn — read-bounds != click-{{x,y}} (the flip bug)"
-    print(f"PASS[4/6] ui.click({{x:{cx:.1f}, y:{cy:.1f}}}) from Y-up bounds toggled hud_btn (read-bounds -> click-{{x,y}} lands, no bot flip).")
+    print(f"PASS[4/7] ui.click({{x:{cx:.1f}, y:{cy:.1f}}}) from Y-up bounds toggled hud_btn (read-bounds -> click-{{x,y}} lands, no bot flip).")
 
-    # 5. unknown id -> bad_params, never a crash/assert.
+    # 5. THE scaled regression: the "hud_scaled" ctx has a non-identity viewport (2x scale + letterbox
+    #    margin). Read scaled_btn's Y-up bounds, ui.click({x,y}) with those LAYOUT coords (no bot flip),
+    #    and the widget toggles — proving the layout->device map goes through the ctx viewport so a
+    #    SCALED ui.click lands. ui.tree also exposes the device viewport rect for the bot.
+    tree_scaled = client.ui_tree(ctx="hud_scaled")
+    vp = tree_scaled.get("viewport") or {}
+    for k in ("x", "y", "w", "h"):
+        assert k in vp, f"ui.tree(hud_scaled) viewport missing {k!r} (got {vp})"
+    sbtn = _find_node(tree_scaled, "scaled_btn")
+    assert sbtn is not None, "ui.tree(hud_scaled) did not contain the 'scaled_btn' node"
+    sb = sbtn["bounds"]
+    scx = sb["x"] + (sb["w"] * 0.5)
+    scy = sb["y"] + (sb["h"] * 0.5)
+    before = _btn_enabled(client, "scaled_btn", ctx="hud_scaled")
+    toggled = _click_until_toggled(client, lambda: client.ui_click({"x": scx, "y": scy}, ctx="hud_scaled"), before, "scaled_btn", "hud_scaled")
+    assert toggled, f"ui.click({{x:{scx}, y:{scy}}}, ctx=hud_scaled) did not toggle scaled_btn — the scaled layout->device map failed"
+    print(f"PASS[5/7] ui.click({{x:{scx:.1f}, y:{scy:.1f}}}, ctx=hud_scaled) toggled scaled_btn (scaled layout->device via the ctx viewport {vp}).")
+
+    # 6. unknown id -> bad_params, never a crash/assert.
     try:
         client.ui_click("does_not_exist")
         raise AssertionError("ui.click('does_not_exist') unexpectedly succeeded; expected bad_params")
     except DevApiResultError as exc:
         assert "bad_params" in str(exc), f"ui.click(unknown) raised {exc!r}, expected a bad_params error"
-    print("PASS[5/6] ui.click(unknown id) -> bad_params (no crash/assert on bot input).")
+    print("PASS[6/7] ui.click(unknown id) -> bad_params (no crash/assert on bot input).")
 
-    # 6. Non-finite coord and over-cap frames on ui.drag -> bad_params (untrusted coords/frames hardened).
+    # 7. Non-finite coord and over-cap frames on ui.drag -> bad_params (untrusted coords/frames hardened).
     # 1e39 is a VALID-JSON finite double that narrows to float +inf (FLT_MAX ~ 3.4e38) — it exercises
     # the host's parse_finite_coord isfinite() guard over the wire (a literal NaN/Infinity is not legal
     # JSON, so the realistic bot-supplied non-finite arrives as an overflowing finite number).
@@ -163,7 +184,7 @@ def run(client: DevApiClient) -> None:
         raise AssertionError("ui.drag with over-cap frames unexpectedly succeeded; expected bad_params")
     except DevApiResultError as exc:
         assert "bad_params" in str(exc), f"ui.drag(over-cap frames) raised {exc!r}, expected bad_params"
-    print("PASS[6/6] ui.drag(NaN coord / over-cap frames) -> bad_params (whole-or-nothing, never a partial inject).")
+    print("PASS[7/7] ui.drag(NaN coord / over-cap frames) -> bad_params (whole-or-nothing, never a partial inject).")
 
     # Restore a normal live state for the next session: back to RUN.
     client.set_mode("run")

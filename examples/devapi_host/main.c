@@ -9,6 +9,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h" /* NT_UI_BUTTON_DEF for the registered-widget role. */
+#include "ui/nt_ui_scale.h"  /* nt_ui_compute_scale + nt_ui_viewport_from_scale for the scaled ctx. */
 #include "window/nt_window.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -67,6 +68,16 @@ static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
 static nt_ui_context_t *s_hud_ctx;
 static bool s_hud_btn_on = true; /* the observable: a synthetic click on "hud_btn" toggles it. */
 
+/* A second, SCALED hud ("hud_scaled"): same layout fed through a non-trivial nt_ui_scale viewport
+   (LETTERBOX: 300x300 ref into the 800x600 fb -> 2x scale + a 100px horizontal margin). Proves a
+   ui.click lands on a SCALED ctx over the live socket — resolve_target maps layout->device via the
+   ctx viewport. "scaled_btn" is the togglable observable, mirroring "hud_btn". */
+#define SCALED_REF_W 300.0F
+#define SCALED_REF_H 300.0F
+static NT_UI_DECLARE_ARENA(s_hud_scaled_arena, HUD_ARENA_SIZE);
+static nt_ui_context_t *s_hud_scaled_ctx;
+static bool s_scaled_btn_on = true;
+
 /* Declare the hud tree once per frame. A click on "hud_btn" (real device or a synthetic ui.click,
    bot==human) flips s_hud_btn_on; the widget re-registers each frame with enabled=s_hud_btn_on so
    the toggle surfaces through the probe's `enabled` field. */
@@ -88,6 +99,28 @@ static void declare_hud(void) {
         s_hud_btn_on = !s_hud_btn_on;
     }
     nt_ui_end(s_hud_ctx);
+}
+
+/* Declare the scaled hud tree once per frame. Identical layout to the hud, but the ctx viewport is
+   overridden to the nt_ui_scale content rect so the ctx converts the raw device pointer device->layout
+   internally — a synthetic ui.click resolved layout->device by the devapi lands on the widget. The
+   viewport MUST be set after nt_ui_begin and before the first hit-test (here: step_interaction). */
+static void declare_hud_scaled(void) {
+    const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
+    const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
+    const nt_ui_scale_desc_t sdesc = {.ref_w = SCALED_REF_W, .ref_h = SCALED_REF_H, .mode = NT_UI_SCALE_LETTERBOX};
+    const nt_ui_scale_t scale = nt_ui_compute_scale(&sdesc, fb_w, fb_h);
+    /* begin with the LOGICAL dims (Clay layout space); the viewport bridges logical<->device. */
+    nt_ui_begin(s_hud_scaled_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
+    nt_ui_set_viewport(s_hud_scaled_ctx, nt_ui_viewport_from_scale(&scale));
+    CLAY({.id = CLAY_ID("scaled_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(20), .childGap = 12}}) {
+        CLAY({.id = CLAY_ID("scaled_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
+    }
+    nt_ui_widget_register(s_hud_scaled_ctx, nt_ui_id("scaled_btn"), &NT_UI_BUTTON_DEF, NULL, s_scaled_btn_on);
+    if (nt_ui_step_interaction(s_hud_scaled_ctx, nt_ui_id("scaled_btn")).clicked) {
+        s_scaled_btn_on = !s_scaled_btn_on;
+    }
+    nt_ui_end(s_hud_scaled_ctx);
 }
 
 /* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
@@ -120,6 +153,7 @@ static void frame(void) {
        nt_ui_end's baked tables. Scratch is reset each frame for the per-element CLAY data. */
     nt_mem_scratch_reset();
     declare_hud();
+    declare_hud_scaled();
 
     /* No real renderer here (the host issues no draw — nt_ui_walk is unnecessary for the probe). Swap
        only under the render flag so draw_calls stays 0 / render.* stays honest. */
@@ -180,6 +214,10 @@ int main(void) {
     NT_ASSERT(s_hud_ctx != NULL && "devapi_host: failed to create hud UI context");
     nt_devapi_ui_register_context("hud", s_hud_ctx);
 
+    s_hud_scaled_ctx = nt_ui_create_context(s_hud_scaled_arena, sizeof s_hud_scaled_arena, &ui_desc);
+    NT_ASSERT(s_hud_scaled_ctx != NULL && "devapi_host: failed to create scaled hud UI context");
+    nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
+
     uint16_t port = resolve_port();
     if (!nt_devapi_net_start(port)) {
         printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
@@ -204,6 +242,7 @@ int main(void) {
     nt_devapi_net_stop();
     nt_devapi_shutdown();
     nt_ui_destroy_context(s_hud_ctx);
+    nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();
     nt_mem_scratch_shutdown();
     nt_input_shutdown();
