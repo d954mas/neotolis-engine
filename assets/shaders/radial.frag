@@ -3,7 +3,7 @@ precision highp float;
 // Flat SDF arc/sector/ring/oval on a plain quad. No texture sample — the shape is
 // per-pixel. v_radial = {angle_start, angle_end, inner_radius_norm, aspect};
 // v_local is the [-1,1] quad-local coord. Mathematical convention: 0 = +X, CCW
-// positive. Crisp AA via fwidth/smoothstep, NO facets.
+// positive. Crisp AA via fwidth-derived 1px pixel coverage, NO facets.
 
 in vec2 v_texcoord;
 in vec4 v_color;
