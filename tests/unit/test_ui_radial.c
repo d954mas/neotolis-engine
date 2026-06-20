@@ -309,11 +309,10 @@ static void test_radial_two_angle_swap(void) {
 
 /* (d) style ABI guard present + defaults sane. */
 static void test_radial_style_abi(void) {
-    TEST_ASSERT_EQUAL_UINT32(16U, (uint32_t)sizeof(nt_ui_radial_style_t));
+    TEST_ASSERT_EQUAL_UINT32(12U, (uint32_t)sizeof(nt_ui_radial_style_t));
     nt_ui_radial_style_t d = nt_ui_radial_style_defaults();
     TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.color_packed);
     TEST_ASSERT_TRUE(approx(d.inner_radius_norm, 0.0F));
-    TEST_ASSERT_TRUE(approx(d.aa_softness, 1.0F));
     TEST_ASSERT_EQUAL_UINT32(0U, d.material.id);
 }
 

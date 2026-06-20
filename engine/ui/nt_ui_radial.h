@@ -22,22 +22,17 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 /* Visual-only style. color_packed is 0xAABBGGRR (0xFFFFFFFF = white). inner_radius_norm
- * [0,1) carves a ring (0 = full disc). aa_softness is RESERVED — not yet consumed by the
- * shader (the a_radial FLOAT4 payload is fully spent on angle_start/angle_end/inner_radius_norm/
- * aspect); kept for forward compatibility. The radial material carries the fs + extended layout. */
+ * [0,1) carves a ring (0 = full disc). The radial material carries the fs + extended layout. */
 typedef struct {
     uint32_t color_packed;   /* 0xAABBGGRR */
     float inner_radius_norm; /* [0,1); 0 = solid sector, >0 = ring */
-    float aa_softness;       /* RESERVED (not yet consumed); MUST be finite > 0 */
     nt_material_t material;  /* radial SDF material (attr_map a_radial @ loc 4); .id==0 invalid */
 } nt_ui_radial_style_t;
-_Static_assert(sizeof(nt_ui_radial_style_t) == 16, "nt_ui_radial_style_t stable ABI (16 B)");
+_Static_assert(sizeof(nt_ui_radial_style_t) == 12, "nt_ui_radial_style_t stable ABI (12 B)");
 
-/* Use instead of bare {0} — color_packed=0 renders fully transparent and aa_softness
- * must be positive. material stays .id==0 until the game assigns the radial material. */
-static inline nt_ui_radial_style_t nt_ui_radial_style_defaults(void) {
-    return (nt_ui_radial_style_t){.color_packed = 0xFFFFFFFFU, .inner_radius_norm = 0.0F, .aa_softness = 1.0F, .material = (nt_material_t){0}};
-}
+/* Use instead of bare {0} — color_packed=0 renders fully transparent. material stays
+ * .id==0 until the game assigns the radial material. */
+static inline nt_ui_radial_style_t nt_ui_radial_style_defaults(void) { return (nt_ui_radial_style_t){.color_packed = 0xFFFFFFFFU, .inner_radius_norm = 0.0F, .material = (nt_material_t){0}}; }
 
 /* fill→angle math, exposed for headless tests and reused by the widget. clamps
  * fill to [0,1] then maps angle_end = angle_start + fill*sweep_total. No trig —

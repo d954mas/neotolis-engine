@@ -33,7 +33,6 @@ void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float 
     NT_ASSERT(style->material.id != 0 && "nt_ui_radial: style.material must be a valid radial material");
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial: angles must be finite");
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial: inner_radius_norm must be finite in [0,1)");
-    NT_ASSERT(isfinite(style->aa_softness) && style->aa_softness > 0.0F && "nt_ui_radial: aa_softness must be finite > 0");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_radial: decl->id must be 0 (id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_radial: decl->image.imageData must be NULL (widget controls image)");
