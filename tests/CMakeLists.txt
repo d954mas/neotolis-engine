@@ -79,6 +79,20 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_log_stub COMMAND test_log_stub)
 
+    # --- Log sink + ring tests (OBS-01/02, L1 without devapi) ---
+    # Drives the REAL nt_log (nt_log_write must fan out to the attached ring sink).
+    # GNU-ld single-pass order: consumer (nt_log_ring) precedes provider (nt_log);
+    # nt_core/nt_hash trail last. nt_log already pulls nt_core for the assert handler.
+    add_executable(test_log_ring unit/test_log_ring.c)
+    target_link_libraries(test_log_ring PRIVATE nt_log_ring nt_log nt_hash nt_core unity)
+    target_compile_definitions(test_log_ring PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_set_warning_flags(test_log_ring)
+    nt_set_sanitizer_flags(test_log_ring)
+    set_target_properties(test_log_ring PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_log_ring COMMAND test_log_ring)
+
     # --- Log API tests (domain functions, macros, level filtering) ---
     add_executable(test_log_api unit/test_log_api.c)
     target_link_libraries(test_log_api PRIVATE nt_log unity)

@@ -22,3 +22,17 @@ nt_add_module(nt_log_stub LOG_DOMAIN "log_stub"
     nt_log.h
 )
 target_link_libraries(nt_log_stub PUBLIC nt_log_interface)
+
+# Reusable dev-only log-tail ring (OBS-01/02). One TU always compiles; the
+# 0/1 NT_LOG_RING_ENABLED define (PUBLIC so consumers see the same value)
+# selects real bodies vs zero-footprint no-op stubs for the release/OFF mirror.
+nt_add_module(nt_log_ring LOG_DOMAIN "log_ring"
+    nt_log_ring.c
+    nt_log_ring.h
+)
+target_link_libraries(nt_log_ring PUBLIC nt_log_interface)
+if(NT_LOG_RING_ENABLED)
+    target_compile_definitions(nt_log_ring PUBLIC NT_LOG_RING_ENABLED=1)
+else()
+    target_compile_definitions(nt_log_ring PUBLIC NT_LOG_RING_ENABLED=0)
+endif()
