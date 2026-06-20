@@ -130,6 +130,96 @@ static void test_stats_user_counters(void) {
     nt_debug_overlay_shutdown();
 }
 
+/* ---- Test 3b: count_f stores float without truncation + per-tag format (D-09) ---- */
+
+static void test_stats_count_f_no_truncation(void) {
+    nt_debug_overlay_init(NULL);
+
+    nt_debug_overlay_count("kills", 7);            /* int tag */
+    nt_debug_overlay_count_f("frame_ms", 16.667);  /* float tag */
+
+    char buf[512];
+    uint32_t n = nt_debug_overlay_format_lines(buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n > 0);
+    /* int counter prints as an integer (no decimal point on the value) */
+    TEST_ASSERT_NOT_NULL(strstr(buf, "kills: 7"));
+    TEST_ASSERT_NULL_MESSAGE(strstr(buf, "kills: 7.0"), "int counter must not render decimals");
+    /* float counter prints with decimals (no truncation to 16) */
+    TEST_ASSERT_NOT_NULL(strstr(buf, "frame_ms: 16.667"));
+
+    nt_debug_overlay_shutdown();
+}
+
+/* ---- Test 3c: re-writing a name flips its tag (last write wins, D-09) ---- */
+
+static void test_stats_count_tag_flip(void) {
+    nt_debug_overlay_init(NULL);
+
+    nt_debug_overlay_count("v", 5);   /* starts as int */
+    const char *name = NULL;
+    double value = 0.0;
+    bool is_float = true;
+    nt_debug_overlay_user_get(0, &name, &value, &is_float);
+    TEST_ASSERT_FALSE(is_float);
+    assert_float_within(0.0001F, 5.0F, (float)value, "int value reads back as 5.0");
+
+    nt_debug_overlay_count_f("v", 2.5); /* same name → flips to float */
+    nt_debug_overlay_user_get(0, &name, &value, &is_float);
+    TEST_ASSERT_TRUE(is_float);
+    assert_float_within(0.0001F, 2.5F, (float)value, "float value reads back as 2.5");
+    /* still a single counter — flipped in place, not appended */
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_debug_overlay_user_count());
+
+    nt_debug_overlay_shutdown();
+}
+
+/* ---- Test 3d: enumeration of a mixed int/float set (D-08) ---- */
+
+static void test_stats_user_enumeration(void) {
+    nt_debug_overlay_init(NULL);
+
+    nt_debug_overlay_count("a", 10);
+    nt_debug_overlay_count_f("b", 3.25);
+    nt_debug_overlay_count("c", 99);
+
+    TEST_ASSERT_EQUAL_UINT16(3U, nt_debug_overlay_user_count());
+
+    const char *name = NULL;
+    double value = 0.0;
+    bool is_float = true;
+
+    nt_debug_overlay_user_get(0, &name, &value, &is_float);
+    TEST_ASSERT_EQUAL_STRING("a", name);
+    assert_float_within(0.0001F, 10.0F, (float)value, "a == 10");
+    TEST_ASSERT_FALSE(is_float);
+
+    nt_debug_overlay_user_get(1, &name, &value, &is_float);
+    TEST_ASSERT_EQUAL_STRING("b", name);
+    assert_float_within(0.0001F, 3.25F, (float)value, "b == 3.25");
+    TEST_ASSERT_TRUE(is_float);
+
+    nt_debug_overlay_user_get(2, &name, &value, &is_float);
+    TEST_ASSERT_EQUAL_STRING("c", name);
+    assert_float_within(0.0001F, 99.0F, (float)value, "c == 99");
+    TEST_ASSERT_FALSE(is_float);
+
+    nt_debug_overlay_shutdown();
+}
+
+/* ---- Test 3e: enumeration index out of range asserts (D-08) ---- */
+
+static void test_stats_user_get_oob_assert(void) {
+    nt_debug_overlay_init(NULL);
+
+    nt_debug_overlay_count("only", 1);
+    const char *name = NULL;
+    double value = 0.0;
+    bool is_float = false;
+    EXPECT_ASSERT(nt_debug_overlay_user_get(1, &name, &value, &is_float));
+
+    nt_debug_overlay_shutdown();
+}
+
 /* ---- Test 4: user-counter capacity overflow asserts ---- */
 
 static void test_stats_user_counter_overflow_assert(void) {
@@ -258,6 +348,10 @@ int main(void) {
     RUN_TEST(test_stats_init_shutdown);
     RUN_TEST(test_stats_fps_rolling_avg);
     RUN_TEST(test_stats_user_counters);
+    RUN_TEST(test_stats_count_f_no_truncation);
+    RUN_TEST(test_stats_count_tag_flip);
+    RUN_TEST(test_stats_user_enumeration);
+    RUN_TEST(test_stats_user_get_oob_assert);
     RUN_TEST(test_stats_user_counter_overflow_assert);
     RUN_TEST(test_stats_format_lines_schema);
     RUN_TEST(test_stats_draw_calls_from_gfx);
