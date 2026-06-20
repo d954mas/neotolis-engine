@@ -1681,6 +1681,34 @@ static void render_radial_tint_row(nt_ui_context_t *ctx) {
     }
 }
 
+/* Two independent angles: each edge of the sector moves on its own. Shows CW, CCW,
+ * symmetric open from the top, a spinning fixed-width arc, and a pac-man mouth. */
+static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t *st) {
+    static const char *const labels[5] = {"clockwise", "counter-cw", "both sides", "spin arc", "mouth"};
+    static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}}};
+    static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
+    nt_ui_radial_style_t rs = nt_ui_radial_style_defaults();
+    rs.material = s_radial_material;
+    const float c = st->radial.cooldown;                             /* 0..1 looping */
+    const float top = 0.5F * NT_PI;                                  /* 12 o'clock */
+    const float tri = (c < 0.5F) ? (c * 2.0F) : (2.0F - (c * 2.0F)); /* 0..1..0 */
+    const float mouth = (0.05F + (0.4F * tri)) * NT_PI;
+    /* {start,end} per variant: CW fixes end + sweeps start back; CCW fixes start; both
+     * opens symmetrically; spin keeps a 90deg span rotating; mouth gaps at angle 0. */
+    const float starts[5] = {top - (c * RADIAL_TAU), top, top - (c * NT_PI), c * RADIAL_TAU, mouth};
+    const float ends[5] = {top, top + (c * RADIAL_TAU), top + (c * NT_PI), (c * RADIAL_TAU) + (0.5F * NT_PI), RADIAL_TAU - mouth};
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Two independent angles -- each edge moves on its own:", g_current->caption);
+    CLAY(row) {
+        for (int i = 0; i < 5; ++i) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                rs.color_packed = showcase_hue_abgr((float)i / 5.0F);
+                nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_IMG), starts[i], ends[i], &rs, &cell);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), labels[i], g_current->caption);
+            }
+        }
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
@@ -1728,6 +1756,10 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     if (hold.long_pressed) {
         st->radial.hold_fires++;
     }
+    // #endregion
+
+    /* #region 2b: two independent angles — both edges move on their own */
+    render_radial_two_angle_row(ctx, st);
     // #endregion
 
     /* #region 3: four reveal modes on the [0,1]-UV radial_art (swept = full color) */
