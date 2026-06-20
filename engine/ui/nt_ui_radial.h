@@ -1,17 +1,12 @@
 #ifndef NT_UI_RADIAL_H
 #define NT_UI_RADIAL_H
 
-/* Flat SDF arc/sector/ring/oval widget. The game owns fill/state, the style is
- * static-const safe. One SDF fragment shader rasterizes every v1 shape
- * on a plain quad — params enable/disable features. The widget rides the sprite
- * renderer's custom per-vertex attribute path + the walker per-element material
- * binding, so many radials sharing one material batch to a single draw.
- *
- * Angular convention is mathematical: 0 = +X axis, CCW positive. Two independent
- * angles drive the sweep: grow one edge, rotate the whole arc, or close from both
- * sides. There is NO CW/CCW flag — direction is implicit in the start/end order;
- * flip = swap the two angles. `fill` 0..1 is a thin convenience mapping to
- * angle_end from angle_start for cooldown timers and hold_progress. */
+/* Flat SDF arc/sector/ring/oval widget on the white pixel. The game owns fill/state;
+ * style is static-const safe. Rides the custom-attr image path so radials sharing one
+ * material batch to a single draw. Angular convention: 0 = +X, CCW+; swapping the two
+ * angles reverses the sweep (no CW/CCW flag).
+ * design + reveal/angle rationale: docs/neotolis_engine_spec_1.md
+ * "Radial widgets & the custom-attr image path" */
 
 #include <stdint.h>
 

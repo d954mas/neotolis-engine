@@ -82,13 +82,12 @@ typedef struct {
     float fb_offset[2];
 } nt_ui_target_t;
 
-/* Per-widget custom per-vertex block — scratch-allocated and referenced by pointer
- * from the payload ONLY for custom-attr widgets (radial, SDF), so a plain image keeps
- * the payload small (the common case carries no inline 64 B attr array). Fed to
- * nt_sprite_renderer_set_custom_attrs at emit. Untyped: the bound material's attr_map
- * names the floats; the walker overwrites any attr the attr_map names a_layout /
- * a_uvrect with bbox-derived values (name-bound, NOT a fixed slot), the rest baked
- * verbatim. custom_attrs sized for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64). */
+/* Per-widget custom per-vertex block — scratch-allocated, referenced by pointer only
+ * for custom-attr widgets so a plain image keeps the payload small. Untyped: the bound
+ * material's attr_map names the floats (walker injects a_layout/a_uvrect by name). Sized
+ * for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64).
+ * injection vocabulary: docs/neotolis_engine_spec_1.md
+ * "Radial widgets & the custom-attr image path" */
 typedef struct {
     float custom_attrs[16];
     uint8_t custom_bytes; /* > 0; the material declares this many per-vertex custom bytes. */
@@ -106,24 +105,19 @@ typedef struct {
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
     uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
-    /* Optional per-element sprite material override (radial reveal needs a custom
-     * fs + extended layout). .id==0 = use the walker's bound base material. The
-     * walker set_material's it only when it differs from the bound one; many
-     * elements sharing one material batch to a single draw (set_material no-ops
-     * on same .id). */
+    /* Optional per-element material override. .id==0 = use the walker's bound base
+     * material; re-bound only when .id differs, so same-material elements batch. */
     nt_material_t material;
-    /* NULL = plain image (the common case). Non-NULL = custom-attr widget; the block
-     * (same frame-scratch lifetime as the payload) carries the per-vertex attrs. */
+    /* NULL = plain image (common case). Non-NULL = custom-attr widget; the block
+     * (payload-lifetime scratch) carries the per-vertex attrs. */
     const nt_ui_image_custom_block_t *custom;
 } nt_ui_image_payload_t;
 /* Non-pointer prefix is 36 B; `custom` is pointer-aligned and adds sizeof(void*). */
 _Static_assert(sizeof(nt_ui_image_payload_t) == ((36U + (sizeof(void *) - 1U)) & ~(sizeof(void *) - 1U)) + sizeof(void *), "nt_ui_image_payload_t stable ABI (40 B wasm / 48 B native; was 100 B)");
 
-/* geom_mode: how the walker rasterizes the element's bbox when custom_bytes > 0.
- * REGION = the textured emit_region/emit_slice9 path (real atlas art, origin/flip/
- * slice9 honored). GEOMETRY = a clean 4-corner bbox quad (TL/TR/BR/BL) against the
- * white region via emit_geometry — required by SDF shaders that derive a local
- * [-1,1] coord from gl_VertexID&3 (the region's own winding would break that). */
+/* geom_mode: bbox rasterization when custom_bytes > 0. REGION = textured emit (real
+ * atlas art). GEOMETRY = clean white-region bbox quad for SDF shaders that derive a
+ * [-1,1] coord from gl_VertexID&3. See spec "Radial widgets & the custom-attr image path". */
 #define NT_UI_IMAGE_GEOM_REGION 0U
 #define NT_UI_IMAGE_GEOM_GEOMETRY 1U
 

@@ -1,30 +1,13 @@
 #ifndef NT_UI_RADIAL_IMAGE_H
 #define NT_UI_RADIAL_IMAGE_H
 
-/* Dedicated TEXTURED radial widget. Unlike nt_ui_radial (a flat SDF shape on the
- * white pixel), this textures a real atlas region and reveals the un-swept sector
- * via four reveal modes — the swept sector renders at full color. nt_ui_image is
- * left UNTOUCHED; this is a separate widget.
- *
- * It rides the sprite renderer's textured emit_region path through the custom
- * per-vertex attribute capability: the a_radial FLOAT4 (angle_start, angle_end,
- * inner_radius_norm, aspect) is baked into every vertex of the region quad, and
- * the walker binds the radial-image material (the per-element material) which
- * carries the SDF fs + reveal-mode params. aspect is bbox-derived at emit (the
- * walker overwrites the widget's placeholder with the real bbox w/h).
- *
- * Works with ANY rectangular atlas region — a full-bleed [0,1] texture OR a packed
- * sub-region. The walker bakes the region's atlas UV rect into a_uvrect; the reveal
- * fs normalizes v_texcoord into region-local [-1,1] so the wedge always centers on
- * the region, wherever it sits in the page.
- *
- * HARD constraint — slice9 unsupported: the UV is non-linear across slice9 patches,
- * so the ring/reveal would deform. The slice9 struct fields remain (ABI) but the
- * widget asserts they are unset. A real geometry-local coord is the future path.
- *
- * Angular convention is mathematical: 0 = +X axis, CCW positive. Two independent
- * angles drive the sweep; `fill` 0..1 is a thin convenience mapping to angle_end
- * for cooldown / hold_progress idioms. */
+/* Dedicated TEXTURED radial widget — textures a real atlas region and reveals the
+ * un-swept sector via four reveal modes (swept sector = full color). Separate from
+ * nt_ui_image; rides the custom-attr image path (REGION geom). Works with any
+ * rectangular region (full-bleed or packed). slice9 is rejected in v1 (UV non-linear
+ * across patches). Angular convention: 0 = +X, CCW+; swapping the angles reverses sweep.
+ * design + reveal modes + v1 limits: docs/neotolis_engine_spec_1.md
+ * "Radial widgets & the custom-attr image path" */
 
 #include <stdint.h>
 
@@ -45,14 +28,10 @@ typedef enum {
     NT_UI_RADIAL_REVEAL_TINT = 3,       /* un-swept -> mixed toward tint_color */
 } nt_ui_radial_reveal_mode_t;
 
-/* Visual-only style. Mirrors nt_ui_image_style_t's slice9/origin/flip fields for ABI
- * parity, but slice9 is REJECTED in v1 (region-only — see header note). mode + dim_factor are baked on
- * the MATERIAL at creation (u_reveal_mode), so N widgets sharing a material reveal in
- * the same MODE. The TINT, however, is PER-WIDGET (tint_color_packed + tint_strength
- * -> baked into a_tint), so many differently-tinted radials share ONE tint-mode
- * material and batch to one draw. The radial-image material (attr_map a_radial @ loc 4
- * + a_tint @ loc 5 + the u_reveal_mode param) is supplied by the game per reveal mode.
- * .id==0 invalid. */
+/* Visual-only style. Mirrors nt_ui_image_style_t slice9/origin/flip for ABI parity,
+ * but slice9 is rejected in v1. mode + dim_factor are baked on the material
+ * (u_reveal_mode); tint is per-widget (a_tint), so differently-tinted radials still
+ * share one material and batch. material .id==0 invalid. */
 typedef struct {
     uint32_t color_packed;      /* 0xAABBGGRR; 0xFFFFFFFF = no tint */
     float inner_radius_norm;    /* [0,1); 0 = solid sector, >0 = ring */
