@@ -60,4 +60,8 @@ void nt_entity_register_storage(const nt_comp_storage_reg_t *reg);
 
 uint16_t nt_entity_max(void);
 
+/* Enumeration accessor: live handle for slot `index` (1..nt_entity_max()), or
+ * NT_ENTITY_INVALID if the slot is dead/empty. Never reconstructs a stale handle. */
+nt_entity_t nt_entity_at_index(uint16_t index);
+
 #endif /* NT_ENTITY_H */
