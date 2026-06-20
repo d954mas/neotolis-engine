@@ -174,6 +174,14 @@ static nt_vertex_layout_t s_sprite_layout = {
 /* Base 20 B sprite vertex stride — custom attrs append after this offset. */
 #define NT_SPRITE_BASE_STRIDE 20
 
+/* Fail-early: a custom attr at a base location (pos/color/texcoord) silently
+ * corrupts the VAO — assert the requested location isn't already placed. */
+static void assert_attr_location_free(const nt_vertex_layout_t *layout, uint32_t location) {
+    for (uint8_t bi = 0; bi < layout->attr_count; bi++) {
+        NT_ASSERT(layout->attrs[bi].location != location && "sprite custom attr location collides with a base or earlier attr location");
+    }
+}
+
 /* Build the vertex layout for a material: the verbatim 20 B base, plus — when
  * the material declares custom attrs (attr_map_count>0) — each declared attr
  * appended after offset 20 as a FLOAT4, with its GL location pulled from the
@@ -188,6 +196,7 @@ static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info
     uint16_t offset = NT_SPRITE_BASE_STRIDE;
     for (uint8_t ai = 0; ai < mat_info->attr_map_count; ai++) {
         NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS && "sprite extended layout exceeds NT_GFX_MAX_VERTEX_ATTRS");
+        assert_attr_location_free(&layout, mat_info->attr_map_locations[ai]);
         layout.attrs[layout.attr_count].location = mat_info->attr_map_locations[ai];
         layout.attrs[layout.attr_count].format = NT_FORMAT_FLOAT4; /* v1 custom block is one vec4 (a_radial) */
         layout.attrs[layout.attr_count].offset = offset;
