@@ -229,6 +229,10 @@ typedef struct {
     float element_depth_bias_ndc;
     /* Per-depth modal z-band stride; 0 = default NT_UI_MODAL_ZBAND_STRIDE. */
     int16_t modal_zband_stride;
+    /* Per-id retained-state pool size; MUST be power-of-2. 0 = default NT_UI_STATE_SLOTS. */
+    uint32_t state_slots;
+    /* Linear-probe window for the state pool; 1..state_slots. 0 = default NT_UI_STATE_PROBE_MAX. */
+    uint32_t state_probe_max;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
@@ -237,6 +241,8 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
         .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
+        .state_slots = 0U,     /* 0 = compile-time NT_UI_STATE_SLOTS default */
+        .state_probe_max = 0U, /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
     };
 }
 

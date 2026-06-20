@@ -511,7 +511,6 @@ static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
 static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
 
 static int s_active_tab;
-static int s_prev_active_tab = -1; /* clear UI state on tab change — each tab is a screen */
 // #endregion
 
 // #region reusable focused-panel helper (game-side; built from existing nt_ui widgets)
@@ -2442,12 +2441,6 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
  * ROOT in frame(), not here, so its panel escapes this card's scissor. */
 static void declare_content(nt_ui_context_t *ctx) {
     NT_ASSERT(s_active_tab >= 0 && s_active_tab < TAB_COUNT && "active tab out of range");
-    /* Each tab is a screen: clear accumulated UI state on switch so the no-GC state pool
-     * (nt_ui_state, small probe window) can't overflow from 16 tabs' scrolls/tooltips/gestures. */
-    if (s_active_tab != s_prev_active_tab) {
-        nt_ui_state_clear_all(ctx);
-        s_prev_active_tab = s_active_tab;
-    }
     const showcase_entry_t *e = &g_tabs[s_active_tab];
 
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
@@ -2667,6 +2660,13 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
+        /* Low-rate occupancy log: surfaces the evicting state pool's live count without flooding. */
+        static uint32_t s_state_log_frame;
+        if (++s_state_log_frame >= 120U) {
+            s_state_log_frame = 0U;
+            nt_log_info("ui_state: %u/%u cells, %u evictions", nt_ui_state_used_slots(s_ctx), 512U, nt_ui_state_evictions(s_ctx));
+        }
+
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
         {
@@ -2738,6 +2738,10 @@ int main(int argc, char *argv[]) {
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     ui_desc.max_elements = UI_MAX_ELEMENTS; /* Stress tab worst case (6000 labels + rows). */
+    /* 16 tabs of scrolls/tooltips/gestures: 512 slots + 16-deep probe keeps the working set
+     * resident across tabs (eviction never triggers -> scrolls preserved on switch). */
+    ui_desc.state_slots = 512U;
+    ui_desc.state_probe_max = 16U;
     s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ctx != NULL && "ui_showcase: failed to create UI context");
 

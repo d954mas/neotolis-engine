@@ -1,11 +1,13 @@
 #ifndef NT_UI_STATE_H
 #define NT_UI_STATE_H
 
-/* Generic per-widget-id retained-state pool. Direct-mapped, linear-probe, NO
- * eviction: a cell dies only via clear / clear_all / context destroy, so a cell
- * the game stored a pointer in is never silently reclaimed (leak-safe escape hatch).
- * Returned pointer is NOT valid across frames — re-acquire by id each frame. Stores
- * view/interaction state only; logical values stay game-owned. */
+/* Generic per-widget-id retained-state pool. Direct-mapped, linear-probe, with
+ * stalest-slot eviction on probe-window exhaustion (mirrors nt_ui_anim): a full
+ * window evicts the cell least-recently touched this frame, never the one a
+ * widget just acquired. Returned pointer is NOT valid across frames — re-acquire
+ * by id each frame. Stores view/interaction state only; logical values stay
+ * game-owned. A cell holding a game-owned pointer can still be evicted under
+ * heavy collision — size/probe are descriptor-configurable to give headroom. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,6 +22,8 @@ static inline uint32_t nt_ui_derived_id(uint32_t base, uint32_t salt) {
     return (id != 0U) ? id : salt;
 }
 
+/* DEFAULT pool size/probe; runtime values live on the ctx (state_slots / state_probe_max)
+ * and are overridable per-context via nt_ui_create_desc_t. */
 #ifndef NT_UI_STATE_SLOTS
 #define NT_UI_STATE_SLOTS 256 /* power-of-2; slot = id & (N-1). 256 x 76B = ~19.5 KB per context */
 #endif
@@ -32,9 +36,10 @@ static inline uint32_t nt_ui_derived_id(uint32_t base, uint32_t salt) {
 _Static_assert((NT_UI_STATE_SLOTS & (NT_UI_STATE_SLOTS - 1)) == 0, "NT_UI_STATE_SLOTS must be power-of-2 (slot = id & (N-1))");
 
 typedef struct {
-    uint32_t id;   /* 0 = empty slot */
-    uint32_t size; /* re-acquire asserts size match */
-    uint32_t tag;  /* owner widget tag; re-acquire asserts match (cross-widget aliasing trap) */
+    uint32_t id;         /* 0 = empty slot */
+    uint32_t size;       /* re-acquire asserts size match */
+    uint32_t tag;        /* owner widget tag; re-acquire asserts match (cross-widget aliasing trap) */
+    uint16_t last_touch; /* low 16 bits of the frame tick; probe-exhaust evicts the stalest slot */
     uint8_t payload[NT_UI_STATE_PAYLOAD_MAX];
 } nt_ui_state_cell_t;
 
@@ -44,7 +49,9 @@ typedef struct {
 
 /* Get-or-create. Cell is ZEROED on create (zero must be a valid initial state). `tag`
  * identifies the owning widget — re-acquire asserts both size AND tag match, so two
- * widgets that hash to the same id trap instead of aliasing. Overflow / oversize assert. */
+ * widgets that hash to the same id trap instead of aliasing. On probe-window exhaustion
+ * the STALEST slot in the window is evicted (oldest last_touch, wrap-safe) — never a cell
+ * touched this frame; the eviction bumps the ctx eviction counter. Oversize asserts. */
 void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag);
 
 /* NULL if absent — no create, no assert on a miss. */
@@ -63,5 +70,8 @@ void nt_ui_state_clear_all(nt_ui_context_t *ctx);
 /* Occupancy for the inspector "UI memory" line. */
 uint32_t nt_ui_state_used_slots(const nt_ui_context_t *ctx);
 uint32_t nt_ui_state_used_bytes(const nt_ui_context_t *ctx); /* sum of live cell sizes */
+
+/* Monotonic; nonzero delta across frames means raise state_slots / state_probe_max. */
+uint32_t nt_ui_state_evictions(const nt_ui_context_t *ctx);
 
 #endif /* NT_UI_STATE_H */
