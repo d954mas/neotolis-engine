@@ -93,6 +93,18 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_log_ring COMMAND test_log_ring)
 
+    # --- Platform memory probe (D-10, L1 native RSS) ---
+    # nt_platform PUBLIC-links nt_core (+ psapi on Windows); nt_log_stub resolves
+    # nt_core's log interface. Consumer (test) precedes provider (nt_platform).
+    add_executable(test_platform_mem unit/test_platform_mem.c)
+    target_link_libraries(test_platform_mem PRIVATE nt_platform nt_log_stub unity)
+    nt_set_warning_flags(test_platform_mem)
+    nt_set_sanitizer_flags(test_platform_mem)
+    set_target_properties(test_platform_mem PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_platform_mem COMMAND test_platform_mem)
+
     # --- Log API tests (domain functions, macros, level filtering) ---
     add_executable(test_log_api unit/test_log_api.c)
     target_link_libraries(test_log_api PRIVATE nt_log unity)
