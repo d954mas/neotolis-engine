@@ -5,26 +5,27 @@ precision highp int;
 // at slot 0 and update + bind the frame UBO every frame before draw_list.
 #include "common/globals.glsl"
 
-// Base locations match nt_attr_location_t in engine/graphics/nt_gfx.h.
+// Base locations match nt_attr_location_t in engine/graphics/nt_gfx.h. The custom
+// attrs below are bound per-material by attr_map presence (NOT a flag) — a material
+// that omits one leaves its location unbound, reading the disabled-attr default.
 layout(location = 0) in vec3 a_position;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in vec2 a_texcoord;
-// Custom per-vertex attr (material attr_map a_radial @ loc 4): x=angle_start
-// y=angle_end z=inner_radius_norm w=aspect. Uniform across the widget's verts.
+// loc 4 (a_radial): x=angle_start y=angle_end z=inner_radius_norm w=0. Both materials.
 layout(location = 4) in vec4 a_radial;
-// RADIAL_IMAGE only (loc 5): rgb=reveal tint, w=tint_strength, both 0..1. The flat
-// radial material doesn't bind loc 5 → reads the disabled-attr default; its FS ignores v_tint.
+// loc 5 (a_tint): rgb=reveal tint, w=tint_strength, 0..1. radial_image only.
 layout(location = 5) in vec4 a_tint;
-// RADIAL_IMAGE only (loc 6): the region's min/max atlas UV {u0,v0,u1,v1}. The reveal fs
-// uses it to remap v_texcoord into region-local [-1,1] for any rectangular packed region.
-// Flat radial doesn't bind loc 6 → disabled-attr default; its FS ignores v_uvrect.
+// loc 6 (a_uvrect): region min/max atlas UV {u0,v0,u1,v1}. radial_image only.
 layout(location = 6) in vec4 a_uvrect;
+// loc 7 (a_layout): walker-injected x=aspect (w/h), yz=bbox px size, w=0. Both materials.
+layout(location = 7) in vec4 a_layout;
 
 out vec2 v_texcoord;
 out vec4 v_color;
 out vec4 v_radial;
 out vec4 v_tint;
 out vec4 v_uvrect;
+out vec4 v_layout;
 out vec2 v_local;
 
 void main() {
@@ -34,10 +35,11 @@ void main() {
     v_radial = a_radial;
     v_tint = a_tint;
     v_uvrect = a_uvrect;
+    v_layout = a_layout;
     // The widget emits a 4-corner quad TL/TR/BR/BL; derive the [-1,1] local coord
-    // from gl_VertexID so no extra per-vertex attribute is needed (the 16 B custom
-    // block is fully spent on a_radial). The 16-bit quad indices cycle 0..3 per
-    // widget, so gl_VertexID & 3 is the corner within each batched quad.
+    // from gl_VertexID so the flat-radial path needs no extra per-vertex coord attr.
+    // The 16-bit quad indices cycle 0..3 per widget, so gl_VertexID & 3 is the corner
+    // within each batched quad.
     int corner = gl_VertexID & 3;
     // 0:TL(-1,-1) 1:TR(+1,-1) 2:BR(+1,+1) 3:BL(-1,+1)
     float lx = (corner == 1 || corner == 2) ? 1.0 : -1.0;

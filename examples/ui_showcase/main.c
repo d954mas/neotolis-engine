@@ -2807,9 +2807,9 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_text",
     });
 
-    /* Base radial material (nt_ui_radial): the extended sprite layout (a_radial @ loc 4) + the flat
-     * SDF FS. No texture — the shape is per-pixel. Mirrors the s_sprite_material registration but
-     * declares the custom per-vertex attr so the renderer builds the extended (36B) vertex layout. */
+    /* Base radial material (nt_ui_radial): the extended sprite layout (a_radial @ loc 4 +
+     * a_layout @ loc 7, walker-filled by name) + the flat SDF FS. No texture — the shape is
+     * per-pixel. Declares the custom per-vertex attrs so the renderer builds the extended layout. */
     s_radial_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_radial_vs_handle,
         .fs = s_radial_fs_handle,
@@ -2818,14 +2818,15 @@ int main(int argc, char *argv[]) {
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
         .attr_map[0] = {.stream_name = "a_radial", .location = 4},
-        .attr_map_count = 1,
+        .attr_map[1] = {.stream_name = "a_layout", .location = 7},
+        .attr_map_count = 2,
         .label = "ui_showcase_radial",
     });
 
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
      * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
-     * tint color from one batch. attr_map declares all three custom attrs (a_radial + a_tint +
-     * a_uvrect @ loc 6 — the latter remaps the wedge into region-local space for any region). */
+     * tint color from one batch. attr_map declares all four custom attrs (a_radial + a_tint +
+     * a_uvrect @ loc 6 + a_layout @ loc 7; the walker fills a_uvrect + a_layout by name). */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
@@ -2840,7 +2841,8 @@ int main(int argc, char *argv[]) {
             .attr_map[0] = {.stream_name = "a_radial", .location = 4},
             .attr_map[1] = {.stream_name = "a_tint", .location = 5},
             .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
-            .attr_map_count = 3,
+            .attr_map[3] = {.stream_name = "a_layout", .location = 7},
+            .attr_map_count = 4,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
             .param_count = 1,
             .label = k_radial_image_labels[m],
@@ -2862,7 +2864,8 @@ int main(int argc, char *argv[]) {
         .attr_map[0] = {.stream_name = "a_radial", .location = 4},
         .attr_map[1] = {.stream_name = "a_tint", .location = 5},
         .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
-        .attr_map_count = 3,
+        .attr_map[3] = {.stream_name = "a_layout", .location = 7},
+        .attr_map_count = 4,
         .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
         .param_count = 1,
         .label = "ui_showcase_radial_img_packed",

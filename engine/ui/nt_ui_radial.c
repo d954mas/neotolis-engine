@@ -22,20 +22,20 @@ void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float 
         NT_ASSERT(decl->userData == NULL && "nt_ui_radial: decl->userData must be NULL (data param controls)");
     }
 
-    /* a_radial = {angle_start, angle_end, inner_radius_norm, aspect-placeholder};
-     * the walker overwrites .w with the real bbox w/h at emit (aspect_slot = 3). The
-     * flat radial rasterizes as a clean white-pixel bbox quad (GEOMETRY mode) — the
-     * SDF fs derives its local coord from gl_VertexID&3, so no region UV is needed
-     * (uvrect_slot = -1). ctx->atlas/white_region are the geometry's region. */
-    const float blk[4] = {angle_start, angle_end, style->inner_radius_norm, 1.0F};
+    /* Custom block, attr_map order [a_radial, a_layout]:
+     *   a_radial @ 0..3 = {angle_start, angle_end, inner_radius_norm, 0}
+     *   a_layout @ 4..7 = {0,0,0,0} placeholders — the walker fills a_layout by NAME
+     *                     (aspect = bbox w/h, bbox px size). The material must declare
+     *                     attr_map [a_radial, a_layout].
+     * Flat radial rasterizes as a clean white-pixel bbox quad (GEOMETRY mode) — the SDF
+     * fs derives its local coord from gl_VertexID&3, so no region UV is needed. */
+    const float blk[8] = {angle_start, angle_end, style->inner_radius_norm, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
     const nt_ui_image_custom_t img = {
         .atlas = ctx->atlas,
         .region_index = ctx->white_region,
         .material = style->material,
         .custom_attrs = blk,
         .custom_bytes = (uint8_t)sizeof blk,
-        .aspect_slot = 3,
-        .uvrect_slot = -1,
         .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
         .slice9_scale = 1.0F,
         .color_packed = style->color_packed,

@@ -21,6 +21,7 @@ in vec4 v_color;
 in vec4 v_radial;
 in vec4 v_tint;
 in vec4 v_uvrect;
+in vec4 v_layout;
 in vec2 v_local;
 
 out vec4 frag_color;
@@ -31,7 +32,7 @@ void main() {
     float angle_start = v_radial.x;
     float angle_end = v_radial.y;
     float inner = v_radial.z;
-    float aspect = v_radial.w;
+    float aspect = v_layout.x; // walker-injected bbox w/h (a_radial.w is now free)
 
     // Region-local UV → [-1,1] for the angular/ring test (image path reuses the
     // UV rather than gl_VertexID). v_texcoord is normalized against the region's

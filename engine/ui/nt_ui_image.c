@@ -84,13 +84,6 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const nt_material_info_t *mi = nt_material_get_info(img->material);
     NT_ASSERT(mi != NULL && mi->ready && "nt_ui_image_custom: material must be ready");
     NT_ASSERT((uint32_t)mi->attr_map_count * 16U == (uint32_t)img->custom_bytes && "nt_ui_image_custom: custom_bytes must equal material attr_map_count*16");
-    const int8_t float_count = (int8_t)(img->custom_bytes / sizeof(float));
-    if (img->aspect_slot >= 0) {
-        NT_ASSERT(img->aspect_slot < float_count && "nt_ui_image_custom: aspect_slot out of range");
-    }
-    if (img->uvrect_slot >= 0) {
-        NT_ASSERT(img->uvrect_slot + 4 <= float_count && "nt_ui_image_custom: uvrect_slot+4 out of range");
-    }
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_image_custom: decl->id must be 0 (id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image_custom: decl->image.imageData must be NULL (atlas+region controls image)");
@@ -109,8 +102,6 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .flip_bits = img->flip_bits,
         .flags = img->flags,
         .custom_bytes = img->custom_bytes,
-        .aspect_slot = img->aspect_slot,
-        .uvrect_slot = img->uvrect_slot,
         .geom_mode = img->geom_mode,
         .material = img->material,
     };

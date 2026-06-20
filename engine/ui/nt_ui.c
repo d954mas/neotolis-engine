@@ -3,6 +3,7 @@
 #include "atlas/nt_atlas.h"
 #include "core/nt_builtins.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -1062,40 +1063,75 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
 
+/* Float-offset of the attr named `name_hash` in the material's custom block, or -1
+ * if the material doesn't declare it. Block offset of attr i = i*4 floats (attr_map
+ * declaration order; build_sprite_layout appends each declared attr as a FLOAT4). The
+ * linear scan is fine: attr_map_count <= 8 and custom widgets are sparse. */
+static int custom_attr_float_offset(const nt_material_info_t *mi, uint32_t name_hash) {
+    for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
+        if (mi->attr_map_hashes[ai] == name_hash) {
+            return (int)ai * 4;
+        }
+    }
+    return -1;
+}
+
+/* Write a_uvrect = the region's min/max atlas UV in 0..1 at `off` — lets a custom-attr
+ * fs re-center over any rectangular packed sub-region (not just a full-bleed tile). */
+static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out, int off) {
+    nt_atlas_region_handles_t rh;
+    nt_atlas_get_region_handles(atlas, region_index, &rh);
+    float u0 = 1.0F;
+    float v0 = 1.0F;
+    float u1 = 0.0F;
+    float v1 = 0.0F;
+    for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
+        const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
+        const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
+        u0 = (u < u0) ? u : u0;
+        v0 = (v < v0) ? v : v0;
+        u1 = (u > u1) ? u : u1;
+        v1 = (v > v1) ? v : v1;
+    }
+    out[off] = u0;
+    out[off + 1] = v0;
+    out[off + 2] = u1;
+    out[off + 3] = v1;
+}
+
 /* Build the per-emit custom block from the payload + bbox: copy the widget's
- * custom_attrs, then overwrite the two walker-derived slots (bbox aspect, region
- * uvrect). One generic injection shared by both geom modes. Returns the float count. */
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const Clay_BoundingBox *bb, float out[12]) {
+ * custom_attrs verbatim, then fill any walker-derived attr the bound material NAMES
+ * (a_layout, a_uvrect) by its attr_map offset. attr_map is the single source of truth
+ * — no magic slot indices. One generic injection shared by both geom modes. Returns
+ * the float count. */
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const Clay_BoundingBox *bb, float out[16]) {
     NT_ASSERT(p->custom_bytes > 0 && p->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
     const uint8_t fcount = (uint8_t)(p->custom_bytes / sizeof(float));
     memcpy(out, p->custom_attrs, p->custom_bytes);
-    /* aspect is bbox-derived at emit so the shape stays correct under GROW/FIT/
-     * PERCENT/null-decl, not just FIXED w/h. Local-space (pre-3D-transform) ratio. */
-    if (p->aspect_slot >= 0) {
-        out[p->aspect_slot] = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
+
+    const nt_material_info_t *mi = nt_material_get_info(p->material);
+    NT_ASSERT(mi != NULL && mi->ready && "nt_ui custom: material must be ready");
+    /* Cache the injection-attr name hashes once (runtime hash; same fn the material used). */
+    static uint32_t s_hash_layout;
+    static uint32_t s_hash_uvrect;
+    if (s_hash_layout == 0U) {
+        s_hash_layout = nt_hash32_str("a_layout").value;
+        s_hash_uvrect = nt_hash32_str("a_uvrect").value;
     }
-    /* uvrect = the region's min/max atlas UV in 0..1 — lets a custom-attr fs
-     * re-center over any rectangular packed sub-region (not just a full-bleed tile). */
-    if (p->uvrect_slot >= 0) {
-        nt_atlas_region_handles_t rh;
-        nt_atlas_get_region_handles(p->atlas, p->region_index, &rh);
-        float u0 = 1.0F;
-        float v0 = 1.0F;
-        float u1 = 0.0F;
-        float v1 = 0.0F;
-        for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
-            const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
-            const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
-            u0 = (u < u0) ? u : u0;
-            v0 = (v < v0) ? v : v0;
-            u1 = (u > u1) ? u : u1;
-            v1 = (v > v1) ? v : v1;
-        }
-        const unsigned us = (unsigned char)p->uvrect_slot; /* >= 0 checked above */
-        out[us] = u0;
-        out[us + 1U] = v0;
-        out[us + 2U] = u1;
-        out[us + 3U] = v1;
+
+    /* a_layout = {aspect = w/h, bbox_width_px, bbox_height_px, 0}. Bbox-derived at emit
+     * so the shape stays correct under GROW/FIT/PERCENT/null-decl, not just FIXED w/h.
+     * px size opens rounded/outline/shadow/blur effects to wrappers. */
+    const int lo = custom_attr_float_offset(mi, s_hash_layout);
+    if (lo >= 0) {
+        out[lo] = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
+        out[lo + 1] = bb->width;
+        out[lo + 2] = bb->height;
+        out[lo + 3] = 0.0F;
+    }
+    const int uo = custom_attr_float_offset(mi, s_hash_uvrect);
+    if (uo >= 0) {
+        inject_uvrect(p->atlas, p->region_index, out, uo);
     }
     return fcount;
 }
@@ -1114,15 +1150,12 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const Clay_Bou
  * non-4-vertex geometry into that material, or sharing it with other geometry,
  * would break the corner derivation. */
 static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
-    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
-    NT_ASSERT(p != NULL && "nt_ui custom-geometry: imageData must point to nt_ui_image_payload_t");
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
     }
-    float blk[12];
-    const uint8_t fcount = build_custom_block(p, &bb, blk);
-    nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
+    /* Custom block (with name-bound a_layout/a_uvrect injected) is built ONCE by the
+     * dispatcher and already bound via set_custom_attrs — emit_geometry bakes it. */
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
@@ -1573,6 +1606,11 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * by geom_mode. GEOMETRY = clean white-pixel bbox quad (SDF gl_VertexID corner
          * derivation); REGION = the textured emit_region/emit_slice9 path. */
         if (ip != NULL && ip->custom_bytes > 0) {
+            /* Build the name-bound custom block ONCE (dedup across geom modes), bind it,
+             * then dispatch by geom_mode. Both emit paths bake the bound block per-vertex. */
+            float blk[16];
+            const uint8_t fcount = build_custom_block(ip, &c->boundingBox, blk);
+            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
             if (ip->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
                 const Clay_Color rt = local.renderData.image.backgroundColor;
                 const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
@@ -1580,13 +1618,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 emit_custom_geometry(ctx, &local, rcol, world_mat4);
                 return;
             }
-            /* REGION mode: bake the block, then let emit_image rasterize the textured
-             * region (origin/flip/slice9 honored). emit_image bakes the current custom
-             * attrs across all verts. */
-            const Clay_BoundingBox bb = c->boundingBox;
-            float blk[12];
-            const uint8_t fcount = build_custom_block(ip, &bb, blk);
-            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
+            /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
+             * honored), baking the bound block across all verts. */
         }
         emit_image(&local, world_mat4);
         return;

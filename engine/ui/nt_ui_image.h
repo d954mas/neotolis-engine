@@ -41,16 +41,29 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atla
  * Draws one atlas region with a per-vertex custom-attr material — the single public
  * path every custom-attr widget (radial, radial_image, future SDF/effect widgets)
  * rides. The walker has ONE generic custom-emit branch keyed on payload.custom_bytes;
- * there are NO per-widget flags or branches. The widget supplies the custom block and
- * the two walker-derived slot indices; the walker injects bbox aspect / region uvrect.
+ * there are NO per-widget flags or branches.
+ *
+ * Injection is NAME-BOUND: the material's attr_map is the single source of truth. The
+ * widget supplies its data block with ZERO placeholders where walker-derived attrs sit;
+ * the walker scans the attr_map and fills any attr it recognizes by name:
+ *   - a_layout vec4 = {aspect = bbox w/h, bbox_width_px, bbox_height_px, 0}
+ *   - a_uvrect vec4 = {u0, v0, u1, v1} = the region's min/max atlas UV
+ * Block float-offset of attr i = i*4 (attr_map declaration order; each attr is a FLOAT4).
+ * To add a new injected value: pick a new attr name, fill it in the walker, name it in a
+ * material's attr_map. No payload/API change.
+ *
+ * WALLS (what this path does NOT do):
+ *   - set_custom_attrs is UNIFORM across a widget's verts — no per-vertex data. A
+ *     composite widget (segmented bar, sparkline, minimap blips) is N separate calls.
+ *   - 16-float cap: 4 × vec4 at NT_SPRITE_CUSTOM_STRIDE_MAX (64 B).
+ *   - time / animation is NOT a walker injection — the wrapper writes it into
+ *     custom_attrs itself each frame.
+ *   - a 2nd texture is supplied via the material (textures[]), not this block.
  *
  * Contract:
- *   - material MUST resolve ready with attr_map_count > 0, and custom_bytes ==
+ *   - material MUST resolve ready with attr_map_count > 0, custom_bytes ==
  *     attr_map_count*16 (asserted) and <= NT_SPRITE_CUSTOM_STRIDE_MAX.
  *   - custom_attrs points to custom_bytes worth of floats, copied into the payload.
- *   - aspect_slot: float index the walker overwrites with bbox w/h (-1 = none).
- *   - uvrect_slot: first of 4 float indices the walker overwrites with the region's
- *     min/max atlas UV {u0,v0,u1,v1} (-1 = none).
  *   - geom_mode: NT_UI_IMAGE_GEOM_REGION (textured region emit, origin/flip/slice9
  *     honored) or NT_UI_IMAGE_GEOM_GEOMETRY (clean white-region bbox quad for SDF
  *     shaders that need gl_VertexID&3 corner derivation).
@@ -65,8 +78,6 @@ typedef struct {
     nt_material_t material;
     const float *custom_attrs;
     uint8_t custom_bytes;
-    int8_t aspect_slot;
-    int8_t uvrect_slot;
     uint8_t geom_mode; /* NT_UI_IMAGE_GEOM_REGION | NT_UI_IMAGE_GEOM_GEOMETRY */
     uint8_t flip_bits;
     uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
