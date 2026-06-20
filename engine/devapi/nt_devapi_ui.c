@@ -139,7 +139,8 @@ static nt_ui_probe_node_t s_probe_nodes[NT_UI_PROBE_MAX_NODES];
 /* The top-level coordinate-space metadata: EXPLICITLY declares the one ui.* contract — Y-up,
    origin bottom-left — that BOTH the read (bounds) AND the write ({x,y}) speak. width/height are the
    ctx LAYOUT dims (the SAME space the bounds + the resolve_target Y-flip use), NOT raw g_nt_window.fb_*
-   (those differ under nt_ui_scale, a latent mislabel). projection = 2D-affine vs 3D-raycast mode. */
+   (those differ under nt_ui_scale, a latent mislabel). projection = 2D-affine vs 3D-raycast mode; the
+   viewport block is emitted for 2D only (a 3D-raycast ctx has no device<->layout affine to report). */
 static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
     float lw = 0.0F;
     float lh = 0.0F;
@@ -150,7 +151,13 @@ static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
     devapi_add_number(result, "width", (double)lw);
     devapi_add_number(result, "height", (double)lh);
     devapi_add_number(result, "dpr", (double)g_nt_window.dpr);
-    devapi_add_string(result, "projection", nt_ui_context_uses_raycast(ctx) ? "3d" : "2d");
+    const bool raycast = nt_ui_context_uses_raycast(ctx);
+    devapi_add_string(result, "projection", raycast ? "3d" : "2d");
+    /* The viewport block is a 2D-affine device rect; under a 3D-raycast ctx it would be a meaningless
+       identity rect (no device<->layout affine exists), so OMIT it there — present only for 2D. */
+    if (raycast) {
+        return;
+    }
     /* Informational device viewport rect, recovered from the converters (no engine getter): the layout
        origin + the (lw,lh) corner map to the device content rect, so a remote bot can map layout<->screen
        itself. Identity (unscaled) -> {0,0,lw,lh}. */
@@ -470,10 +477,10 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.tree",
         .group = "ui",
-        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,origin,y_axis,width,height,dpr,projection,viewport} block; bounds are Y-up "
-                   "(origin bottom-left), same space ui.click({x,y}) takes",
+        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,origin,y_axis,width,height,dpr,projection,viewport?} block (viewport omitted "
+                   "when projection==3d); bounds are Y-up (origin bottom-left), same space ui.click({x,y}) takes",
         .params_shape = "{ctx?:string}",
-        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport:{x,y,w,h},nodes:[{id,parent,role,id_string,text,label,child_count,"
+        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},nodes:[{id,parent,role,id_string,text,label,child_count,"
                         "visible,enabled,bounds}]}",
         .frame_behavior = "any",
         .side_effects = "none",
@@ -483,7 +490,7 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
         .group = "ui",
         .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params); bounds Y-up (origin bottom-left)",
         .params_shape = "{id:string, ctx?:string}",
-        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport:{x,y,w,h},node:{id,parent,role,id_string,text,label,child_count,"
+        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},node:{id,parent,role,id_string,text,label,child_count,"
                         "visible,enabled,bounds}}",
         .frame_behavior = "any",
         .side_effects = "none",

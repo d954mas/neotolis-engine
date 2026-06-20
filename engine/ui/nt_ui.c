@@ -380,9 +380,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(pointers != NULL && "nt_ui_begin: pointers must be non-NULL");
     NT_ASSERT(count > 0U && count <= NT_INPUT_MAX_POINTERS && "nt_ui_begin: count must be 1..NT_INPUT_MAX_POINTERS");
-    /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
-    NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
-    NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
+    /* isfinite() rejects NaN + +-inf which `> 0.0F` alone lets through. Dims MUST be strictly positive:
+       the device->layout resolve divides by the viewport size derived from these, so 0 traps later at the
+       first hit-test — fail-early here with a clear message instead. Callers feeding fb dims guard 0 with
+       a fallback (see devapi_host), so no legitimate 0-dim begin exists. */
+    NT_ASSERT(isfinite(screen_w) && screen_w > 0.0F && "nt_ui_begin: screen_w must be finite and strictly positive");
+    NT_ASSERT(isfinite(screen_h) && screen_h > 0.0F && "nt_ui_begin: screen_h must be finite and strictly positive");
     NT_ASSERT(isfinite(dt) && dt >= 0.0F && "nt_ui_begin: dt must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
@@ -2983,6 +2986,9 @@ uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
     return ctx->test_last_walk_unlayered_count;
 }
 
+/* These expose Clay's RAW device-space pointer — NOT the layout-converted one the hit-test uses.
+   Under a scaled viewport device != layout, so a hit-decision reader must convert via the viewport
+   (nt_ui_screen_to_layout); do not treat this value as a layout coord. */
 float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_x: ctx must be non-NULL");
     return nt_ui_clay_priv_pointer_x(ctx->clay);
