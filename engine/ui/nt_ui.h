@@ -353,7 +353,8 @@ typedef enum nt_ui_probe_role_t {
 
 /* Flat node, NO Clay types. parent is emitted from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
  * bounds = {x, y, w, h} framebuffer px (Y-up). collect emits nodes incl. invisible/offscreen/disabled
- * so the bot decides what to filter; up to NT_UI_PROBE_MAX_NODES, then truncated (see collect). */
+ * so the bot decides what to filter; up to the caller's cap (NT_UI_PROBE_MAX_NODES static form; ctx
+ * max_elements arena form), then truncated (see collect). */
 #define NT_UI_PROBE_NO_PARENT 0U /* root nodes have id != 0, so 0 is an unambiguous "no parent" */
 
 typedef struct nt_ui_probe_node_t {
