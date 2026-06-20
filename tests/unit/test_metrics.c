@@ -2,6 +2,7 @@
  * Feeds KNOWN sample sets via the NT_TEST_ACCESS push hook so percentiles are
  * asserted deterministically without a real frame loop. */
 
+#include <math.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,10 @@
 /* clang-format on */
 
 #if NT_METRICS_ENABLED
+
+/* Unity's double/float asserts are compiled out in this config; compare with a
+ * tolerance via TEST_ASSERT_TRUE (matches test_nt_ui_probe's near_eq pattern). */
+static bool near(double a, double b) { return fabs(a - b) <= 1e-9; }
 
 void setUp(void) { nt_metrics_init(); }
 void tearDown(void) {}
@@ -28,8 +33,8 @@ static void test_ring_evicts_to_window(void) {
     nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &s);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_METRICS_WINDOW, s.samples);
     /* Oldest (0..4) evicted; window now holds 5..WINDOW+4 => max == WINDOW+4. */
-    TEST_ASSERT_EQUAL_DOUBLE((double)(NT_METRICS_WINDOW + 4), s.max);
-    TEST_ASSERT_EQUAL_DOUBLE(5.0, s.min);
+    TEST_ASSERT_TRUE(near(s.max, (double)(NT_METRICS_WINDOW + 4)));
+    TEST_ASSERT_TRUE(near(s.min, 5.0));
 }
 
 /* nt_metrics_reset() zeroes counts: the next stats read sees samples==0. */
