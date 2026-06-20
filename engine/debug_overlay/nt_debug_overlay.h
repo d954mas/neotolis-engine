@@ -44,8 +44,23 @@ void nt_debug_overlay_frame_end(void);
 /* Set or update a user counter by name. Linear-scan on flat array.
  * Name is hashed once per call (xxh64-ish via nt_hash64_str). Capacity is
  * configured at init; runtime cap-overflow trips NT_ASSERT (configuration bug,
- * raise capacity). */
+ * raise capacity). Tags the counter as an integer value. */
 void nt_debug_overlay_count(const char *name, uint64_t value);
+
+/* Float variant of nt_debug_overlay_count. Same lookup/store; tags the counter
+ * as a float value so it survives without truncation (e.g. frame time). Writing
+ * an existing name with the other variant flips its tag (last write wins). */
+void nt_debug_overlay_count_f(const char *name, double value);
+
+/* ---- User counter enumeration (D-08) ----
+ * nt_metrics reads all user counters generically by index. Enumeration order is
+ * the flat-array insertion order, stable across calls within a frame. */
+uint16_t nt_debug_overlay_user_count(void);
+
+/* Read counter `i` in [0, nt_debug_overlay_user_count()). Out-params may be NULL
+ * to skip. `value` is the stored measurement as a double (int counters widened),
+ * `is_float` reports the tag. `i` out of range trips NT_ASSERT (host-call bug). */
+void nt_debug_overlay_user_get(uint16_t i, const char **name, double *value, bool *is_float);
 
 /* ---- Read accessors ---- */
 

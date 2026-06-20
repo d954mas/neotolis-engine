@@ -135,8 +135,8 @@ static void test_stats_user_counters(void) {
 static void test_stats_count_f_no_truncation(void) {
     nt_debug_overlay_init(NULL);
 
-    nt_debug_overlay_count("kills", 7);            /* int tag */
-    nt_debug_overlay_count_f("frame_ms", 16.667);  /* float tag */
+    nt_debug_overlay_count("kills", 7);           /* int tag */
+    nt_debug_overlay_count_f("frame_ms", 16.667); /* float tag */
 
     char buf[512];
     uint32_t n = nt_debug_overlay_format_lines(buf, sizeof(buf));
@@ -155,7 +155,7 @@ static void test_stats_count_f_no_truncation(void) {
 static void test_stats_count_tag_flip(void) {
     nt_debug_overlay_init(NULL);
 
-    nt_debug_overlay_count("v", 5);   /* starts as int */
+    nt_debug_overlay_count("v", 5); /* starts as int */
     const char *name = NULL;
     double value = 0.0;
     bool is_float = true;

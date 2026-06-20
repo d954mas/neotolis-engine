@@ -24,13 +24,20 @@ static struct {
     uint32_t last_draw_calls;
     uint64_t frame_index;
 
-    /* User counters — flat parallel arrays */
+    /* User counters — flat parallel arrays. Value is a tagged int/float so a
+     * float channel (e.g. frame time) survives without truncation (D-09). */
     uint16_t user_capacity;
     uint16_t user_count;
     uint64_t user_name_hashes[NT_DEBUG_OVERLAY_MAX_USER_COUNTERS];
-    uint64_t user_values[NT_DEBUG_OVERLAY_MAX_USER_COUNTERS];
+    double user_values[NT_DEBUG_OVERLAY_MAX_USER_COUNTERS];
+    uint8_t user_tags[NT_DEBUG_OVERLAY_MAX_USER_COUNTERS];
     char user_names[NT_DEBUG_OVERLAY_MAX_USER_COUNTERS][NT_DEBUG_OVERLAY_USER_COUNTER_NAME_MAX];
 } s_overlay;
+
+enum {
+    NT_OVERLAY_VAL_INT = 0,
+    NT_OVERLAY_VAL_FLOAT = 1,
+};
 // #endregion
 
 // #region Lifecycle
@@ -111,19 +118,23 @@ uint32_t nt_debug_overlay_get_draw_calls(void) { return s_overlay.last_draw_call
 // #endregion
 
 // #region User counters
-void nt_debug_overlay_count(const char *name, uint64_t value) {
+/* Shared upsert: find by name-hash and overwrite value+tag (last write wins,
+ * tag may flip), else append a new slot. Cap-overflow is a config bug (assert). */
+static void overlay_count_set(const char *name, double value, uint8_t tag) {
     NT_ASSERT(s_overlay.initialized);
     NT_ASSERT(name != NULL);
     uint64_t h = nt_hash64_str(name).value;
     for (uint16_t i = 0; i < s_overlay.user_count; i++) {
         if (s_overlay.user_name_hashes[i] == h) {
             s_overlay.user_values[i] = value;
+            s_overlay.user_tags[i] = tag;
             return;
         }
     }
     NT_ASSERT(s_overlay.user_count < s_overlay.user_capacity && "nt_debug_overlay user-counter capacity exceeded; raise nt_debug_overlay_desc_t.user_counter_capacity");
     s_overlay.user_name_hashes[s_overlay.user_count] = h;
     s_overlay.user_values[s_overlay.user_count] = value;
+    s_overlay.user_tags[s_overlay.user_count] = tag;
     /* Stash readable name (truncated) for format_lines */
     size_t n = strlen(name);
     if (n >= NT_DEBUG_OVERLAY_USER_COUNTER_NAME_MAX) {
@@ -132,6 +143,26 @@ void nt_debug_overlay_count(const char *name, uint64_t value) {
     memcpy(s_overlay.user_names[s_overlay.user_count], name, n);
     s_overlay.user_names[s_overlay.user_count][n] = '\0';
     s_overlay.user_count++;
+}
+
+void nt_debug_overlay_count(const char *name, uint64_t value) { overlay_count_set(name, (double)value, NT_OVERLAY_VAL_INT); }
+
+void nt_debug_overlay_count_f(const char *name, double value) { overlay_count_set(name, value, NT_OVERLAY_VAL_FLOAT); }
+
+uint16_t nt_debug_overlay_user_count(void) { return s_overlay.user_count; }
+
+void nt_debug_overlay_user_get(uint16_t i, const char **name, double *value, bool *is_float) {
+    NT_ASSERT(s_overlay.initialized);
+    NT_ASSERT(i < s_overlay.user_count);
+    if (name != NULL) {
+        *name = s_overlay.user_names[i];
+    }
+    if (value != NULL) {
+        *value = s_overlay.user_values[i];
+    }
+    if (is_float != NULL) {
+        *is_float = (s_overlay.user_tags[i] == NT_OVERLAY_VAL_FLOAT);
+    }
 }
 // #endregion
 
@@ -158,9 +189,15 @@ uint32_t nt_debug_overlay_format_lines(char *buf, uint32_t size) {
         return size - 1;
     }
 
-    /* User counters in insertion order, one line each: "name: value" */
+    /* User counters in insertion order, one line each: "name: value".
+     * Int tag prints as an integer; float tag prints with decimals (D-09). */
     for (uint16_t i = 0; i < s_overlay.user_count; i++) {
-        int m = snprintf(buf + written, size - written, "%s: %llu\n", s_overlay.user_names[i], (unsigned long long)s_overlay.user_values[i]);
+        int m;
+        if (s_overlay.user_tags[i] == NT_OVERLAY_VAL_FLOAT) {
+            m = snprintf(buf + written, size - written, "%s: %.3f\n", s_overlay.user_names[i], s_overlay.user_values[i]);
+        } else {
+            m = snprintf(buf + written, size - written, "%s: %llu\n", s_overlay.user_names[i], (unsigned long long)(uint64_t)s_overlay.user_values[i]);
+        }
         if (m < 0) {
             break;
         }
