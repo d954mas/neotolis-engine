@@ -5,8 +5,12 @@
 #include "core/nt_core.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "devapi/nt_devapi_internal.h"
+#include "drawable_comp/nt_drawable_comp.h"
+#include "entity/nt_entity.h"
 #include "log/nt_log_ring.h"
 #include "metrics/nt_metrics.h"
+#include "resource/nt_resource.h"
+#include "transform_comp/nt_transform_comp.h"
 
 /* Observability command group: the log / perf / entity / resource namespaces (D-16). Every command
    is an IMMEDIATE read (D-15) — it serializes the Plan 01/03/04/05 L1 capabilities and returns on the
@@ -20,6 +24,12 @@
    (T-68-06-DOS). Mirrors the NT_DEVAPI_STEP_MAX fail-fast-ceiling style. Override per build with -D. */
 #ifndef NT_DEVAPI_OBS_LIMIT_MAX
 #define NT_DEVAPI_OBS_LIMIT_MAX 512
+#endif
+
+/* Upper bound on the entity.list working set (one pass collects the filtered live set so pagination
+   + total stay consistent). Sized to the default nt_entity max; raise via -D for larger scenes. */
+#ifndef NT_ENTITY_LIST_MAX
+#define NT_ENTITY_LIST_MAX 4096
 #endif
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
@@ -277,6 +287,274 @@ static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *
 }
 // #endregion
 
+// #region pagination
+/* Resolve optional {offset, limit} against `total`. limit is capped at NT_DEVAPI_OBS_LIMIT_MAX
+   (T-68-06-DOS). Bad offset/limit -> bad_params. On success *out_begin/*out_end bound the page
+   into [0, total]. */
+static bool resolve_page(const cJSON *params, uint32_t total, const char *who, uint32_t *out_begin, uint32_t *out_end, nt_devapi_error *err) {
+    uint32_t offset = 0;
+    const cJSON *jo = cJSON_GetObjectItemCaseSensitive(params, "offset");
+    if (jo != NULL) {
+        if (!cJSON_IsNumber(jo) || jo->valueint < 0) {
+            set_bad_params(err, who);
+            return false;
+        }
+        offset = (uint32_t)jo->valueint;
+    }
+    uint32_t limit = NT_DEVAPI_OBS_LIMIT_MAX;
+    const cJSON *jl = cJSON_GetObjectItemCaseSensitive(params, "limit");
+    if (jl != NULL) {
+        if (!cJSON_IsNumber(jl) || jl->valueint < 0) {
+            set_bad_params(err, who);
+            return false;
+        }
+        limit = (uint32_t)jl->valueint;
+        if (limit > NT_DEVAPI_OBS_LIMIT_MAX) {
+            limit = NT_DEVAPI_OBS_LIMIT_MAX; /* clamp, not reject — bot pages via total */
+        }
+    }
+    uint32_t begin = offset < total ? offset : total;
+    uint32_t end = begin + limit;
+    if (end > total) {
+        end = total;
+    }
+    *out_begin = begin;
+    *out_end = end;
+    return true;
+}
+// #endregion
+
+// #region entity.*
+/* entity.list{offset?, limit?, only_drawable?}: live entities with compact fields (no world_matrix,
+   D-12). Iterates 1..nt_entity_max() via nt_entity_at_index, skipping dead slots. Pagination over
+   the live set with `total`; optional only_drawable filter (D-13). Bad offset/limit -> bad_params. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)ud;
+    bool only_drawable = false;
+    const cJSON *jod = cJSON_GetObjectItemCaseSensitive(params, "only_drawable");
+    if (jod != NULL) {
+        if (!cJSON_IsBool(jod)) {
+            set_bad_params(err, "entity.list: only_drawable must be a bool");
+            return false;
+        }
+        only_drawable = cJSON_IsTrue(jod);
+    }
+
+    /* First pass: collect the filtered live set into a bounded index buffer so pagination + total
+       are consistent (the live set is small: nt_entity_max() <= 65535, no heap). */
+    static nt_entity_t s_live[NT_ENTITY_LIST_MAX];
+    uint16_t emax = nt_entity_max();
+    uint32_t total = 0;
+    for (uint16_t idx = 1; idx <= emax; idx++) {
+        nt_entity_t e = nt_entity_at_index(idx);
+        if (e.id == NT_ENTITY_INVALID.id) {
+            continue;
+        }
+        if (only_drawable && !nt_drawable_comp_has(e)) {
+            continue;
+        }
+        if (total < NT_ENTITY_LIST_MAX) {
+            s_live[total] = e;
+        }
+        total++;
+    }
+    if (total > NT_ENTITY_LIST_MAX) {
+        total = NT_ENTITY_LIST_MAX; /* bounded by the index buffer; emax already caps it */
+    }
+
+    uint32_t begin = 0;
+    uint32_t end = 0;
+    if (!resolve_page(params, total, "entity.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
+        return false;
+    }
+
+    devapi_add_number(result, "total", (double)total);
+    cJSON *arr = cJSON_AddArrayToObject(result, "entities");
+    NT_ASSERT(arr != NULL);
+    for (uint32_t i = begin; i < end; i++) {
+        nt_entity_t e = s_live[i];
+        cJSON *o = cJSON_CreateObject();
+        NT_ASSERT(o != NULL);
+        devapi_add_number(o, "id", (double)e.id);
+        devapi_add_number(o, "index", (double)nt_entity_index(e));
+        devapi_add_number(o, "generation", (double)nt_entity_generation(e));
+        devapi_add_bool(o, "alive", true);
+        devapi_add_bool(o, "enabled", nt_entity_is_enabled(e));
+
+        if (nt_transform_comp_has(e)) {
+            const float *pos = nt_transform_comp_position(e);
+            cJSON *p = cJSON_AddArrayToObject(o, "position");
+            NT_ASSERT(p != NULL);
+            for (int k = 0; k < 3; k++) {
+                cJSON_bool added = cJSON_AddItemToArray(p, cJSON_CreateNumber((double)pos[k]));
+                NT_ASSERT(added);
+                (void)added;
+            }
+        } else {
+            cJSON_AddNullToObject(o, "position");
+        }
+
+        if (nt_drawable_comp_has(e)) {
+            cJSON *d = cJSON_AddObjectToObject(o, "drawable");
+            NT_ASSERT(d != NULL);
+            const bool *vis = nt_drawable_comp_visible(e);
+            devapi_add_bool(d, "visible", vis != NULL && *vis);
+            const float *col = nt_drawable_comp_color(e);
+            cJSON *c = cJSON_AddArrayToObject(d, "color");
+            NT_ASSERT(c != NULL);
+            for (int k = 0; k < 4; k++) {
+                cJSON_bool added = cJSON_AddItemToArray(c, cJSON_CreateNumber(col != NULL ? (double)col[k] : 0.0));
+                NT_ASSERT(added);
+                (void)added;
+            }
+        } else {
+            cJSON_AddNullToObject(o, "drawable");
+        }
+
+        cJSON_bool added = cJSON_AddItemToArray(arr, o);
+        NT_ASSERT(added);
+        (void)added;
+    }
+    return true;
+}
+// #endregion
+
+// #region resource.*
+/* nt_pack_state_t token mapping (stable JSON). */
+static const char *pack_state_token(uint8_t state) {
+    switch (state) {
+    case NT_PACK_STATE_NONE:
+        return "none";
+    case NT_PACK_STATE_REQUESTED:
+        return "requested";
+    case NT_PACK_STATE_DOWNLOADING:
+        return "downloading";
+    case NT_PACK_STATE_LOADED:
+        return "loaded";
+    case NT_PACK_STATE_READY:
+        return "ready";
+    case NT_PACK_STATE_FAILED:
+        return "failed";
+    default:
+        return "unknown";
+    }
+}
+
+/* nt_asset_state_t token mapping. The enum is internal (nt_resource_internal.h must not cross the
+   boundary), so the numeric values are mapped here verbatim: 0=registered,1=failed,2=loading,3=ready. */
+static const char *asset_state_token(uint8_t state) {
+    switch (state) {
+    case 0:
+        return "registered";
+    case 1:
+        return "failed";
+    case 2:
+        return "loading";
+    case 3:
+        return "ready";
+    default:
+        return "unknown";
+    }
+}
+
+/* resource.list{offset?, limit?, pack_id?, include_assets?}: always packs[]; flat assets[] only when
+   include_assets true (D-14). Pagination over packs with `total`; optional pack_id filter (D-13).
+   State values mapped to stable tokens. Bad pack_id/offset/limit -> bad_params. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)ud;
+    bool include_assets = false;
+    const cJSON *jia = cJSON_GetObjectItemCaseSensitive(params, "include_assets");
+    if (jia != NULL) {
+        if (!cJSON_IsBool(jia)) {
+            set_bad_params(err, "resource.list: include_assets must be a bool");
+            return false;
+        }
+        include_assets = cJSON_IsTrue(jia);
+    }
+    bool filter_pack = false;
+    uint32_t pack_id = 0;
+    const cJSON *jpid = cJSON_GetObjectItemCaseSensitive(params, "pack_id");
+    if (jpid != NULL) {
+        if (!cJSON_IsNumber(jpid) || jpid->valuedouble < 0.0) {
+            set_bad_params(err, "resource.list: pack_id must be a non-negative number");
+            return false;
+        }
+        filter_pack = true;
+        pack_id = (uint32_t)jpid->valuedouble;
+    }
+
+    uint16_t pack_count = nt_resource_pack_count();
+    uint32_t total = filter_pack ? 0 : (uint32_t)pack_count;
+    if (filter_pack) {
+        for (uint16_t i = 0; i < pack_count; i++) {
+            nt_resource_pack_info_t info;
+            if (nt_resource_pack_info(i, &info) && info.id == pack_id) {
+                total++;
+            }
+        }
+    }
+
+    uint32_t begin = 0;
+    uint32_t end = 0;
+    if (!resolve_page(params, total, "resource.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
+        return false;
+    }
+
+    devapi_add_number(result, "total", (double)total);
+    cJSON *packs = cJSON_AddArrayToObject(result, "packs");
+    NT_ASSERT(packs != NULL);
+    uint32_t matched = 0; /* running index over the filtered pack set, for pagination */
+    for (uint16_t i = 0; i < pack_count; i++) {
+        nt_resource_pack_info_t info;
+        if (!nt_resource_pack_info(i, &info)) {
+            continue;
+        }
+        if (filter_pack && info.id != pack_id) {
+            continue;
+        }
+        if (matched < begin || matched >= end) {
+            matched++;
+            continue;
+        }
+        matched++;
+        cJSON *o = cJSON_CreateObject();
+        NT_ASSERT(o != NULL);
+        devapi_add_number(o, "id", (double)info.id);
+        devapi_add_string(o, "state", pack_state_token(info.state));
+        devapi_add_number(o, "priority", (double)info.priority);
+        devapi_add_number(o, "asset_count", (double)info.asset_count);
+        devapi_add_bool(o, "mounted", info.mounted != 0U);
+        cJSON_bool added = cJSON_AddItemToArray(packs, o);
+        NT_ASSERT(added);
+        (void)added;
+    }
+
+    if (include_assets) {
+        cJSON *assets = cJSON_AddArrayToObject(result, "assets");
+        NT_ASSERT(assets != NULL);
+        uint16_t asset_count = nt_resource_asset_count();
+        for (uint16_t i = 0; i < asset_count; i++) {
+            nt_resource_asset_info_t ai;
+            if (!nt_resource_asset_info(i, &ai)) {
+                continue;
+            }
+            cJSON *o = cJSON_CreateObject();
+            NT_ASSERT(o != NULL);
+            devapi_add_number(o, "resource_id", (double)ai.resource_id);
+            devapi_add_number(o, "type", (double)ai.type);
+            devapi_add_string(o, "state", asset_state_token(ai.state));
+            devapi_add_number(o, "pack", (double)ai.pack_index);
+            cJSON_bool added = cJSON_AddItemToArray(assets, o);
+            NT_ASSERT(added);
+            (void)added;
+        }
+    }
+    return true;
+}
+// #endregion
+
 static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "log.tail",
@@ -314,13 +592,28 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .frame_behavior = "any",
         .side_effects = "clears perf window",
     },
+    {
+        .method = "entity.list",
+        .group = "entity",
+        .summary = "live entities with compact fields (id/generation/enabled/position/drawable); paginated with total",
+        .params_shape = "{offset?:number, limit?:number, only_drawable?:bool}",
+        .result_shape = "{total:number,entities:[{id,index,generation,alive,enabled,position,drawable}]}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    },
+    {
+        .method = "resource.list",
+        .group = "resource",
+        .summary = "mounted packs (id/state/priority/asset_count); flat assets[] when include_assets; paginated with total",
+        .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
+        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id,type,state,pack}]}",
+        .frame_behavior = "any",
+        .side_effects = "none",
+    },
 };
 
 static const nt_devapi_handler_fn k_obs_handlers[] = {
-    cmd_log_tail,
-    cmd_perf_snapshot,
-    cmd_perf_stats,
-    cmd_perf_reset,
+    cmd_log_tail, cmd_perf_snapshot, cmd_perf_stats, cmd_perf_reset, cmd_entity_list, cmd_resource_list,
 };
 _Static_assert(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]) == sizeof(k_obs_handlers) / sizeof(k_obs_handlers[0]), "obs: descriptor/handler arrays must have equal length");
 
