@@ -285,7 +285,7 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
             set_bad_params(err, "ui: target id must be a non-empty string");
             return false;
         }
-        uint32_t uid = nt_ui_id(jt->valuestring); /* pre-checked non-empty: nt_ui_id asserts id!=0. */
+        uint32_t uid = nt_ui_id(jt->valuestring); /* non-empty pre-checked above; nt_ui_id asserts s!=NULL, not the hash. */
         uint32_t count = 0;
         nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count);
         const nt_ui_probe_node_t *hit = NULL;
@@ -297,6 +297,12 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         }
         if (hit == NULL) {
             set_bad_params(err, "ui: unknown or stale target id");
+            return false;
+        }
+        /* A behind-camera 3D node / collapsed element has a zero rect (visible=false); its center would
+           resolve to a screen corner, so fail loudly instead of clicking the wrong point. */
+        if (hit->bounds[2] <= 0.0F || hit->bounds[3] <= 0.0F) {
+            set_bad_params(err, "ui: target id is offscreen or behind camera");
             return false;
         }
         /* bounds are {x,y,w,h} Y-up layout px -> center, then the SAME Y-up->Y-down flip the {x,y}

@@ -297,6 +297,24 @@ static void test_click_unknown_id_bad_params(void) { assert_bad_params(nt_devapi
 
 static void test_click_empty_id_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.click\",\"params\":{\"id\":\"\"}}")); }
 
+/* A collapsed (zero-size) node has bounds {.,.,0,0}; ui.click(id) must reject it (bad_params) rather
+   than resolve its center to a screen corner — the behind-camera / collapsed-element guard. */
+static void declare_collapsed_tree(void) {
+    nt_mem_scratch_reset();
+    nt_pointer_t mouse = {0};
+    mouse.x = -100.0F;
+    mouse.y = -100.0F;
+    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("collapsed"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(0), CLAY_SIZING_FIXED(0)}}}) {}
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("collapsed"), &NT_UI_BUTTON_DEF, NULL, true);
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_click_collapsed_id_bad_params(void) {
+    declare_collapsed_tree();
+    assert_bad_params(nt_devapi_submit("{\"method\":\"ui.click\",\"params\":{\"id\":\"collapsed\"}}"));
+}
+
 /* String-id click resolves to the bbox CENTER in device (Y-down) space — the reference the {x,y}
    Y-up flip must match. Read it back from the injected pointer slot after an advance. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -549,6 +567,7 @@ int main(void) {
     RUN_TEST(test_click_string_id_queues_two);
     RUN_TEST(test_click_unknown_id_bad_params);
     RUN_TEST(test_click_empty_id_bad_params);
+    RUN_TEST(test_click_collapsed_id_bad_params);
     RUN_TEST(test_click_string_id_lands_at_device_center);
     RUN_TEST(test_click_xy_yup_flip_matches_string_id);
     RUN_TEST(test_transformed_click_id_targets_projected_center);
