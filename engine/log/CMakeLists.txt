@@ -14,7 +14,8 @@ nt_add_module(nt_log LOG_DOMAIN "log"
 target_link_libraries(nt_log PUBLIC nt_log_interface)
 
 # Real impl dedups nt_log_write_unique by xxHash64 of the message; the stub stays dep-free.
-target_link_libraries(nt_log PRIVATE nt_hash)
+# nt_core supplies nt_assert_handler for the NT_ASSERT in nt_log_add_sink (host-call invariant).
+target_link_libraries(nt_log PRIVATE nt_hash nt_core)
 
 nt_add_module(nt_log_stub LOG_DOMAIN "log_stub"
     stub/nt_log_stub.c

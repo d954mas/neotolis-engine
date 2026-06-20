@@ -21,6 +21,13 @@ typedef enum {
 /* --- Lifecycle --- */
 void nt_log_set_level(nt_log_level_t level);
 
+/* --- Sink hook (OBS-01) ---
+ * Receives the already-FORMATTED line (no fmt/va_list re-entry), so a sink never
+ * re-parses caller input. domain is "" (never NULL) when the call site had none.
+ * Bounded fixed registry, single-threaded (same assumption as NT_LOG_ONCE_). */
+typedef void (*nt_log_sink_fn)(nt_log_level_t level, const char *domain, const char *msg, void *user);
+void nt_log_add_sink(nt_log_sink_fn fn, void *user);
+
 /* --- Single log function --- */
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);
 

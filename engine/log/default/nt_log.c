@@ -1,4 +1,5 @@
 #include "log/nt_log.h"
+#include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include <stdarg.h>
 #include <stdint.h>
@@ -24,6 +25,22 @@ static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 
 void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
 
+/* Fixed BSS sink registry (D-01 "~4 slots", overridable -D). Tiny + always-compiled;
+   the dev-only gating lives in the attached sink (nt_log_ring), not here. */
+#ifndef NT_LOG_MAX_SINKS
+#define NT_LOG_MAX_SINKS 4
+#endif
+static nt_log_sink_fn s_sinks[NT_LOG_MAX_SINKS];
+static void *s_sink_user[NT_LOG_MAX_SINKS];
+static uint8_t s_sink_count;
+
+void nt_log_add_sink(nt_log_sink_fn fn, void *user) {
+    NT_ASSERT(fn != NULL && s_sink_count < NT_LOG_MAX_SINKS); /* host-call invariant, not bot input */
+    s_sinks[s_sink_count] = fn;
+    s_sink_user[s_sink_count] = user;
+    s_sink_count++;
+}
+
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     static const char *const level_names[] = {"INFO", "WARN", "ERROR"};
     if (s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
@@ -38,6 +55,11 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
         msg[sizeof(msg) - 4] = '.';
         msg[sizeof(msg) - 3] = '.';
         msg[sizeof(msg) - 2] = '.';
+    }
+
+    /* Fan out the final formatted line to registered sinks (single-threaded). */
+    for (uint8_t i = 0; i < s_sink_count; i++) {
+        s_sinks[i](level, domain ? domain : "", msg, s_sink_user[i]);
     }
 
 #ifdef __EMSCRIPTEN__
