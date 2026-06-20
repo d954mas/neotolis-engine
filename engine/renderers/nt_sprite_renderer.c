@@ -260,7 +260,7 @@ static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info
         NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS && "sprite extended layout exceeds NT_GFX_MAX_VERTEX_ATTRS");
         assert_attr_location_free(&layout, mat_info->attr_map_locations[ai]);
         layout.attrs[layout.attr_count].location = mat_info->attr_map_locations[ai];
-        layout.attrs[layout.attr_count].format = NT_FORMAT_FLOAT4; /* v1 custom block is one vec4 (a_radial) */
+        layout.attrs[layout.attr_count].format = NT_FORMAT_FLOAT4; /* each declared custom attr is one vec4 */
         layout.attrs[layout.attr_count].offset = offset;
         layout.attr_count++;
         offset += 16; /* FLOAT4 */
@@ -1260,7 +1260,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
     }
 
     s_sprite.last_draw_list_calls = 0;
-    s_sprite.cur_custom_bytes = 0; /* ECS sprite path emits no custom attrs (this plan) */
+    s_sprite.cur_custom_bytes = 0; /* ECS sprite path emits no custom attrs */
     nt_sprite_comp_view_t sv = nt_sprite_comp_view();
     nt_transform_comp_view_t tv = nt_transform_comp_view();
     nt_drawable_comp_view_t dv = nt_drawable_comp_view();

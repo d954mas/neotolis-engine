@@ -302,7 +302,7 @@ typedef struct {
 } events_params_t;
 
 /* Radial tab: a game-owned cooldown timer (ramps 0->1 then resets) drives the cooldown wedge;
- * the hold-to-confirm radial reads Phase-65 events hold_progress; the rest are static demos. */
+ * the hold-to-confirm radial reads the events hold_progress; the rest are static demos. */
 typedef struct {
     float cooldown;      /* 0..1, ramps over cooldown_secs then loops (drives nt_ui_radial_fill) */
     float cooldown_secs; /* full sweep duration */
@@ -485,7 +485,7 @@ static nt_resource_t s_radial_art_tex_handle;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 /* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
- * mode's u_reveal_mode param stays stable and same-mode radials batch to one draw (RESEARCH A4). */
+ * mode's u_reveal_mode param stays stable and same-mode radials batch to one draw. */
 static nt_material_t s_radial_material;
 static nt_material_t s_radial_image_material[4]; /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_atlas_region_ref_t s_radial_art_ref;
@@ -1612,7 +1612,7 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 /* Radial tab: the two radial widgets driven by game-owned feedback state.
- *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (Model D fill).
+ *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (game-owned fill).
  *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from the events hold_progress.
  *   3. FOUR REVEAL MODES     — nt_ui_radial_image (desat/dim/hide/tint) on the [0,1]-UV art.
  *   4. DENSE GRID            — N radials sharing ONE material => one batched draw;
@@ -1664,9 +1664,8 @@ static uint32_t showcase_hue_abgr(float h) {
     return 0xFF000000U | (bb << 16) | (gg << 8) | rr;
 }
 
-/* TINT reveal in three colors, all on ONE material: the tint is now PER-WIDGET
- * (tstyle.tint_color_packed -> a_tint), so red/green/blue radials batch to one draw —
- * contrast the old per-material tint that needed three materials. */
+/* TINT reveal in three colors, all on ONE material: tint is PER-WIDGET
+ * (tstyle.tint_color_packed -> a_tint), so red/green/blue radials batch to one draw. */
 static void render_radial_tint_row(nt_ui_context_t *ctx) {
     static const char *const tint_labels[3] = {"tint red", "tint green", "tint blue"};
     static const uint32_t tint_colors[3] = {0xFF2020E0U, 0xFF40E040U, 0xFFF06040U}; /* 0xAABBGGRR: red, green, blue */
@@ -2551,7 +2550,7 @@ static void frame(void) {
     }
 
     /* Radial cooldown: a game-owned timer ramps 0->1 over cooldown_secs then loops, driving the
-     * cooldown wedge + the four-mode radial-image reveal (Model D — the game owns the fill). */
+     * cooldown wedge + the four-mode radial-image reveal. */
     if (s_state.radial.cooldown_secs > 0.0F) {
         s_state.radial.cooldown += g_nt_app.dt / s_state.radial.cooldown_secs;
         while (s_state.radial.cooldown >= 1.0F) {

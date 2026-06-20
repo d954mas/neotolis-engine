@@ -1,8 +1,8 @@
 #ifndef NT_UI_RADIAL_H
 #define NT_UI_RADIAL_H
 
-/* Flat SDF arc/sector/ring/oval widget. Model-D: the game owns fill/state, the
- * style is static-const safe. One SDF fragment shader rasterizes every v1 shape
+/* Flat SDF arc/sector/ring/oval widget. The game owns fill/state, the style is
+ * static-const safe. One SDF fragment shader rasterizes every v1 shape
  * on a plain quad — params enable/disable features. The widget rides the sprite
  * renderer's custom per-vertex attribute path + the walker per-element material
  * binding, so many radials sharing one material batch to a single draw.

@@ -37,10 +37,10 @@ typedef struct {
 } nt_sprite_vertex_t;
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
-/* Byte cap for a material's appended custom per-vertex attribute block (opt-in,
- * D-66-06). Headroom for two FLOAT4 blocks (a_radial vec4 + one future a_tint
- * vec4) = 32 B; no material declares 32 B yet. Only custom-attr materials pay
- * this; plain sprites keep the locked 20 B vertex. */
+/* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
+ * Headroom for two FLOAT4 blocks (a_radial vec4 + one future a_tint vec4) = 32 B;
+ * no material declares 32 B yet. Only custom-attr materials pay this; plain
+ * sprites keep the locked 20 B vertex. */
 #ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
 #define NT_SPRITE_CUSTOM_STRIDE_MAX 32
 #endif
@@ -96,12 +96,13 @@ void nt_sprite_renderer_flush(void);
  * .ready == true. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
-/* Set the "current" custom per-vertex attribute block baked into every vertex
- * of subsequent emit calls (like color — the value is uniform across a widget's
- * verts, supplied by the caller, D-66-03/07). Only consumed when the bound
- * material declares attr_map_count>0; ignored for plain materials. Pass attrs
- * as a float block, bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. Both radial widgets
- * (geometry/quad and region/slice9) feed the same block through this setter.
+/* Set the "current" custom per-vertex attribute block baked into every vertex of
+ * the subsequent emits (like color — uniform across a widget's verts, caller-supplied).
+ * CONTRACT: when the bound material declares custom attrs (attr_map_count > 0), EACH emit
+ * must be preceded by this call with bytes == attr_map_count * 16 (one FLOAT4 per declared
+ * attr) — the exact custom block the material's vertex layout expects. A missing call or a
+ * wrong size is asserted (it would desync the upload stride from the pipeline). Plain
+ * materials (attr_map_count == 0) ignore the block. bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX.
  * Cleared on flush. */
 void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
 
@@ -164,8 +165,8 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Resolved vertex layout snapshot for a material (RND-66-01): stride + per-attr
- * GL location/offset. attr_count==3 for a plain material (base 20 B), 3+N for a
+/* Resolved vertex layout snapshot for a material: stride + per-attr GL
+ * location/offset. attr_count==3 for a plain material (base 20 B), 3+N for a
  * custom-attr material (extended stride). */
 typedef struct {
     uint32_t stride;
@@ -175,7 +176,7 @@ typedef struct {
 } nt_sprite_layout_info_t;
 void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out);
 /* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
- * emit (RND-66-03), from the byte-staging path. float_count floats written. */
+ * emit, from the byte-staging path. float_count floats written. */
 void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */
