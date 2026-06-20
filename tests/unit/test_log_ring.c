@@ -18,6 +18,8 @@
 #define NT_LOG_MAX_SINKS 4
 #endif
 
+#if NT_LOG_RING_ENABLED
+
 /* ---- Assert catching (setjmp/longjmp via hookable handler) ---- */
 
 static jmp_buf s_assert_jmp;
@@ -205,3 +207,25 @@ int main(void) {
     RUN_TEST(test_add_sink_overflow_asserts); /* keep LAST: permanently fills the sink registry */
     return UNITY_END();
 }
+
+#else /* NT_LOG_RING_ENABLED == 0 — OFF/release mirror: prove the no-op stub links + reads empty */
+
+void setUp(void) {}
+void tearDown(void) {}
+
+static void test_ring_offmirror_noop(void) {
+    nt_log_ring_init();
+    nt_log_ring_sink(NT_LOG_LEVEL_ERROR, "d", "ignored", NULL);
+    nt_log_ring_entry_t out[2];
+    TEST_ASSERT_EQUAL_UINT16(0, nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out));
+    nt_log_ring_clear();
+}
+
+int main(void) {
+    (void)setvbuf(stdout, NULL, _IONBF, 0);
+    UNITY_BEGIN();
+    RUN_TEST(test_ring_offmirror_noop);
+    return UNITY_END();
+}
+
+#endif /* NT_LOG_RING_ENABLED */
