@@ -1,11 +1,9 @@
 #include "ui/nt_ui_radial.h"
 
 #include <math.h>
-#include <string.h>
 
 #include "core/nt_assert.h"
-#include "memory/nt_mem_scratch.h"
-#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_clay_impl.h" /* nt_ui_internal_get_inframe_ctx */
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 
@@ -24,35 +22,25 @@ void nt_ui_radial(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float 
         NT_ASSERT(decl->userData == NULL && "nt_ui_radial: decl->userData must be NULL (data param controls)");
     }
 
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_radial: scratch alloc failed");
-    /* Walker emit_radial reads ctx->atlas/white_region directly; the payload mirrors
-     * them so the shared IMAGE asserts (non-zero atlas handle) hold. */
-    *p = (nt_ui_image_payload_t){
+    /* a_radial = {angle_start, angle_end, inner_radius_norm, aspect-placeholder};
+     * the walker overwrites .w with the real bbox w/h at emit (aspect_slot = 3). The
+     * flat radial rasterizes as a clean white-pixel bbox quad (GEOMETRY mode) — the
+     * SDF fs derives its local coord from gl_VertexID&3, so no region UV is needed
+     * (uvrect_slot = -1). ctx->atlas/white_region are the geometry's region. */
+    const float blk[4] = {angle_start, angle_end, style->inner_radius_norm, 1.0F};
+    const nt_ui_image_custom_t img = {
         .atlas = ctx->atlas,
         .region_index = ctx->white_region,
-        .slice9_scale = 1.0F,
-        .flags = (uint8_t)NT_UI_IMAGE_FLAG_RADIAL,
         .material = style->material,
-        /* radial.w (aspect) is a placeholder; the walker overwrites it with the
-         * real bbox w/h at emit (correct under any sizing). */
-        .radial = {angle_start, angle_end, style->inner_radius_norm, 1.0F},
+        .custom_attrs = blk,
+        .custom_bytes = (uint8_t)sizeof blk,
+        .aspect_slot = 3,
+        .uvrect_slot = -1,
+        .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
+        .slice9_scale = 1.0F,
+        .color_packed = style->color_packed,
     };
-
-    /* Transparency lives in opacity (element_data), not tint alpha. */
-    const Clay_Color tint = nt_ui_unpack_tint(style->color_packed);
-
-    Clay_ElementDeclaration final;
-    if (decl != NULL) {
-        final = *decl;
-    } else {
-        final = (Clay_ElementDeclaration){.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)}}};
-    }
-    final.image = (Clay_ImageElementConfig){.imageData = p};
-    final.backgroundColor = tint;
-    final.userData = (void *)data;
-
-    CLAY(final) { nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL); }
+    nt_ui_image_custom(ctx, data, &img, decl);
 }
 
 void nt_ui_radial_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, float angle_start, float fill, float sweep_total, const nt_ui_radial_style_t *style,

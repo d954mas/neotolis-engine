@@ -184,18 +184,32 @@ static void test_route_a_custom_does_not_batch(void) {
 static nt_ui_image_payload_t s_img_payloads[16];
 static const nt_ui_element_data_t k_layer0 = {.layer = 0U};
 
-/* A flat-radial IMAGE payload: the RADIAL flag routes it through emit_radial,
- * which bakes the 16 B a_radial block matching the radial material's attr_map —
- * so a custom-attr material is never bound to a plain (no-custom-attr) emit. The
- * batching semantics under test (one material .id = one draw) are unchanged. */
+/* A flat-radial IMAGE payload: custom_bytes>0 + GEOMETRY mode routes it through the
+ * walker's generic custom-emit branch (emit_custom_geometry), which bakes the 16 B
+ * a_radial block matching the radial material's attr_map — so a custom-attr material
+ * is never bound to a plain (no-custom-attr) emit. The batching semantics under test
+ * (one material .id = one draw) are unchanged. A .id==0 material is a plain image
+ * (custom_bytes 0). */
 static void make_image(int idx, float x, nt_resource_t atlas, uint32_t region_index, nt_material_t material) {
     Clay_RenderCommand *c = &s_test_cmds[idx];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
     c->zIndex = 0;
     c->boundingBox = (Clay_BoundingBox){.x = x, .y = 0, .width = 32, .height = 32};
     c->renderData.image.backgroundColor = (Clay_Color){0}; /* untinted */
-    const uint8_t flags = (material.id != 0) ? (uint8_t)NT_UI_IMAGE_FLAG_RADIAL : 0U;
-    s_img_payloads[idx] = (nt_ui_image_payload_t){.atlas = atlas, .region_index = region_index, .slice9_scale = 1.0F, .flags = flags, .material = material};
+    const bool custom = (material.id != 0);
+    s_img_payloads[idx] = (nt_ui_image_payload_t){
+        .atlas = atlas,
+        .region_index = region_index,
+        .slice9_scale = 1.0F,
+        .material = material,
+        .custom_bytes = custom ? (uint8_t)sizeof k_radial_attrs : 0U,
+        .aspect_slot = custom ? 3 : -1,
+        .uvrect_slot = -1,
+        .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
+    };
+    if (custom) {
+        memcpy(s_img_payloads[idx].custom_attrs, k_radial_attrs, sizeof k_radial_attrs);
+    }
     c->renderData.image.imageData = &s_img_payloads[idx];
     c->userData = (void *)&k_layer0;
 }
@@ -339,6 +353,50 @@ static void test_radial_emit_bakes_payload(void) {
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], end), "a_radial.y == angle_end");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[3], expect_aspect), "a_radial.w == aspect (w/h)");
+    }
+}
+
+/* Generic injection proof: nt_ui_image_custom with a 16 B block + aspect_slot=3 bakes
+ * {verbatim, verbatim, verbatim, bbox w/h} — the walker overwrites ONLY the aspect
+ * slot, leaving the other floats untouched. This is the path radial rides, exercised
+ * directly through the public custom API. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_image_custom_injects_aspect(void) {
+    const nt_material_t mat = make_radial_material();
+    const float block[4] = {7.0F, 8.0F, 9.0F, 0.0F /* aspect placeholder */};
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("custom_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(32)}}}) {
+        const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(32)}}};
+        const nt_ui_image_custom_t img = {
+            .atlas = s_fx.atlas.handle,
+            .region_index = s_fx.atlas.white_region_idx,
+            .material = mat,
+            .custom_attrs = block,
+            .custom_bytes = (uint8_t)sizeof block,
+            .aspect_slot = 3,
+            .uvrect_slot = -1,
+            .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
+            .slice9_scale = 1.0F,
+            .color_packed = 0xFFFFFFFFU,
+        };
+        nt_ui_image_custom(s_fx.ctx, NULL, &img, &decl);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    const float expect_aspect = 96.0F / 32.0F;
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 7.0F), "custom block float 0 verbatim");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 8.0F), "custom block float 1 verbatim");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 9.0F), "custom block float 2 verbatim");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], expect_aspect), "aspect_slot overwritten with bbox w/h");
     }
 }
 
@@ -587,6 +645,7 @@ int main(void) {
     RUN_TEST(test_radial_two_angle_swap);
     RUN_TEST(test_radial_style_abi);
     RUN_TEST(test_radial_emit_bakes_payload);
+    RUN_TEST(test_image_custom_injects_aspect);
     RUN_TEST(test_radial_fill_emit_payload);
     RUN_TEST(test_radial_image_region_bakes_payload);
     RUN_TEST(test_radial_image_reveal_mode_plumbed);

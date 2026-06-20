@@ -36,12 +36,6 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* This widget's payload flag bit on nt_ui_image_payload_t.flags. Distinct from
- * NT_UI_IMAGE_FLAG_RADIAL (the white-pixel flat radial): RADIAL_IMAGE routes the
- * walker through the TEXTURED emit_region/emit_slice9 path with the a_radial
- * block baked per-vert. nt_ui_image.h is untouched, so this lives here. */
-#define NT_UI_IMAGE_FLAG_RADIAL_IMAGE (1U << 3)
-
 /* Reveal mode applied to the UN-SWEPT (remaining) sector; the swept sector is
  * always full color. Encoded as u_reveal_mode.x in the material. */
 typedef enum {

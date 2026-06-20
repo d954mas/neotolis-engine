@@ -1,11 +1,9 @@
 #include "ui/nt_ui_radial_image.h"
 
 #include <math.h>
-#include <string.h>
 
 #include "core/nt_assert.h"
-#include "memory/nt_mem_scratch.h"
-#include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_clay_impl.h" /* nt_ui_internal_get_inframe_ctx */
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 
@@ -47,38 +45,35 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
     const Clay_Color tint_rgb = nt_ui_unpack_abgr(style->tint_color_packed);
 
-    nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
-    NT_ASSERT(p != NULL && "nt_ui_radial_image: scratch alloc failed");
-    *p = (nt_ui_image_payload_t){
+    /* 48 B custom block, byte-for-byte the walker's expected layout:
+     *   a_radial @ 0..3 = {angle_start, angle_end, inner_radius_norm, aspect-placeholder}
+     *   a_tint   @ 4..7 = {r, g, b, tint_strength} in 0..1
+     *   a_uvrect @ 8..11 = region min/max atlas UV placeholder
+     * The walker overwrites a_radial.w (aspect_slot = 3) with the real bbox w/h and
+     * a_uvrect (uvrect_slot = 8) with the region's UV bounds at emit. REGION mode =
+     * the textured emit_region/emit_slice9 path (origin/flip honored; slice9 asserted
+     * unset above). */
+    const float blk[12] = {
+        angle_start, angle_end, style->inner_radius_norm, 1.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F, 0.0F,
+    };
+    const nt_ui_image_custom_t img = {
         .atlas = region->atlas,
         .region_index = region->region,
+        .material = style->material,
+        .custom_attrs = blk,
+        .custom_bytes = (uint8_t)sizeof blk,
+        .aspect_slot = 3,
+        .uvrect_slot = 8,
+        .geom_mode = NT_UI_IMAGE_GEOM_REGION,
+        .flip_bits = style->flip_bits,
+        .flags = style->flags,
         .origin_x = style->origin_x,
         .origin_y = style->origin_y,
         .slice9_scale = style->slice9_scale,
-        .flip_bits = style->flip_bits,
-        .flags = (uint8_t)(style->flags | NT_UI_IMAGE_FLAG_RADIAL_IMAGE),
-        .material = style->material,
-        /* radial.w (aspect) is a placeholder; the walker overwrites it with the
-         * real bbox w/h at emit (correct under any sizing). */
-        .radial = {angle_start, angle_end, style->inner_radius_norm, 1.0F},
-        .tint = {tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength},
+        .color_packed = style->color_packed,
     };
-    memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
-
-    /* Transparency lives in opacity (element_data), not tint alpha. */
-    const Clay_Color tint = nt_ui_unpack_tint(style->color_packed);
-
-    Clay_ElementDeclaration final;
-    if (decl != NULL) {
-        final = *decl;
-    } else {
-        final = (Clay_ElementDeclaration){.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)}}};
-    }
-    final.image = (Clay_ImageElementConfig){.imageData = p};
-    final.backgroundColor = tint;
-    final.userData = (void *)data;
-
-    CLAY(final) { nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL); }
+    /* slice9 asserted unset (rectangular regions only); slice9_lrtb stays zero. */
+    nt_ui_image_custom(ctx, data, &img, decl);
 }
 
 void nt_ui_radial_image_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float fill, float sweep_total,

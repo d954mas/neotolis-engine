@@ -91,8 +91,20 @@ typedef struct {
     float origin_y;
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
-    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE | NT_UI_IMAGE_FLAG_RADIAL */
-    uint8_t _reserved[2];
+    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
+    /* ---- Generic custom-attr injection contract (widget ↔ walker) ----
+     * custom_bytes == 0  → plain image: the walker's textured path emits the region,
+     *                      custom_attrs/aspect_slot/uvrect_slot/geom_mode are ignored.
+     * custom_bytes  > 0  → the material declares per-vertex custom attrs. The walker
+     *                      copies custom_attrs[0..custom_bytes) into the per-emit block
+     *                      (one FLOAT4 per declared attr), fills the two walker-derived
+     *                      slots below, then bakes it across every vertex. custom_bytes
+     *                      MUST equal material.attr_map_count*16 (set_custom_attrs asserts)
+     *                      and be <= NT_SPRITE_CUSTOM_STRIDE_MAX. */
+    uint8_t custom_bytes;
+    int8_t aspect_slot; /* -1 = none; else float index where the walker writes bbox w/h */
+    int8_t uvrect_slot; /* -1 = none; else first of 4 float indices for the region uvrect */
+    uint8_t geom_mode;  /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
     /* Optional per-element sprite material override (radial reveal needs a custom
      * fs + extended layout). .id==0 = use the walker's bound base material. The
      * walker set_material's it only when it differs from the bound one; many
@@ -100,22 +112,21 @@ typedef struct {
      * on same .id). */
     nt_material_t material;
     /* Per-widget custom per-vertex block fed to nt_sprite_renderer_set_custom_attrs
-     * when NT_UI_IMAGE_FLAG_RADIAL is set: a_radial = {angle_start, angle_end,
-     * inner_radius_norm, aspect}. Baked into every vertex of the radial's bbox quad.
-     * Ignored for plain images. */
-    float radial[4];
-    /* RADIAL_IMAGE only: a_tint = {tint.r, tint.g, tint.b, tint_strength} in 0..1.
-     * Contiguous with radial+uvrect so the walker bakes all three as one 48 B custom
-     * block (&radial, sizeof radial+tint+uvrect). Lets many tint colors share ONE
-     * material. The flat radial path bakes only radial (16 B) and ignores this. */
-    float tint[4];
-    /* RADIAL_IMAGE only: a_uvrect = {u0, v0, u1, v1} = the region's min/max atlas UV
-     * in 0..1 (walker-baked from the region's atlas vertices). The reveal fs normalizes
-     * v_texcoord into region-local [-1,1] using this, so any rectangular packed sub-region
-     * centers the wedge correctly. Contiguous with tint for the one-block bake. */
-    float uvrect[4];
+     * when custom_bytes > 0. Untyped: the bound material's attr_map names the floats
+     * (e.g. a_radial @0..3 + a_tint @4..7 + a_uvrect @8..11). The walker overwrites
+     * aspect_slot/uvrect_slot floats with bbox-derived values at emit; the rest are
+     * baked verbatim. Sized for three FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX). */
+    float custom_attrs[12];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 84, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 88, "nt_ui_image_payload_t stable ABI");
+
+/* geom_mode: how the walker rasterizes the element's bbox when custom_bytes > 0.
+ * REGION = the textured emit_region/emit_slice9 path (real atlas art, origin/flip/
+ * slice9 honored). GEOMETRY = a clean 4-corner bbox quad (TL/TR/BR/BL) against the
+ * white region via emit_geometry — required by SDF shaders that derive a local
+ * [-1,1] coord from gl_VertexID&3 (the region's own winding would break that). */
+#define NT_UI_IMAGE_GEOM_REGION 0U
+#define NT_UI_IMAGE_GEOM_GEOMETRY 1U
 
 /* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {

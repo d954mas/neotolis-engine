@@ -35,7 +35,6 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
-#include "ui/nt_ui_radial_image.h" /* NT_UI_IMAGE_FLAG_RADIAL_IMAGE */
 #include "ui/nt_ui_state.h"
 
 // #region module_state
@@ -1063,31 +1062,67 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
 
-/* nt_ui_radial: a flat SDF bbox-quad against the white pixel. The radial material
- * (already bound by the dispatch) supplies the SDF fs + extended layout; the
- * per-widget a_radial FLOAT4 is baked into every vertex via set_custom_attrs.
- * The fs derives its [-1,1] local coord from gl_VertexID over the 4-corner quad
- * (emitted TL/TR/BR/BL), so no extra per-vertex attribute is needed (the 16 B
- * custom block is fully spent on a_radial). NO triangle fan — SDF does the shape
- * per-pixel.
+/* Build the per-emit custom block from the payload + bbox: copy the widget's
+ * custom_attrs, then overwrite the two walker-derived slots (bbox aspect, region
+ * uvrect). One generic injection shared by both geom modes. Returns the float count. */
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const Clay_BoundingBox *bb, float out[12]) {
+    NT_ASSERT(p->custom_bytes > 0 && p->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
+    const uint8_t fcount = (uint8_t)(p->custom_bytes / sizeof(float));
+    memcpy(out, p->custom_attrs, p->custom_bytes);
+    /* aspect is bbox-derived at emit so the shape stays correct under GROW/FIT/
+     * PERCENT/null-decl, not just FIXED w/h. Local-space (pre-3D-transform) ratio. */
+    if (p->aspect_slot >= 0) {
+        out[p->aspect_slot] = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
+    }
+    /* uvrect = the region's min/max atlas UV in 0..1 — lets a custom-attr fs
+     * re-center over any rectangular packed sub-region (not just a full-bleed tile). */
+    if (p->uvrect_slot >= 0) {
+        nt_atlas_region_handles_t rh;
+        nt_atlas_get_region_handles(p->atlas, p->region_index, &rh);
+        float u0 = 1.0F;
+        float v0 = 1.0F;
+        float u1 = 0.0F;
+        float v1 = 0.0F;
+        for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
+            const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
+            const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
+            u0 = (u < u0) ? u : u0;
+            v0 = (v < v0) ? v : v0;
+            u1 = (u > u1) ? u : u1;
+            v1 = (v > v1) ? v : v1;
+        }
+        const unsigned us = (unsigned char)p->uvrect_slot; /* >= 0 checked above */
+        out[us] = u0;
+        out[us + 1U] = v0;
+        out[us + 2U] = u1;
+        out[us + 3U] = v1;
+    }
+    return fcount;
+}
+
+/* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel. The bound
+ * custom-attr material (set by the dispatch) supplies the SDF fs + extended layout;
+ * the per-widget custom block is baked into every vertex via set_custom_attrs. The
+ * fs derives its [-1,1] local coord from gl_VertexID over the 4-corner quad (emitted
+ * TL/TR/BR/BL), so no extra per-vertex attribute is needed. NO triangle fan — the
+ * SDF does the shape per-pixel.
  *
- * INVARIANT (load-bearing): radial.frag's gl_VertexID&3 corner derivation requires
- * each radial quad's base vertex index to be a multiple of 4. This holds because
- * radials use a DISTINCT material — flushed on material change, which resets the
+ * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
+ * quad's base vertex index to be a multiple of 4. This holds because GEOMETRY-mode
+ * widgets use a DISTINCT material — flushed on material change, which resets the
  * staging vertex_count to 0 — and emit EXACTLY 4 verts per widget. Emitting
- * non-4-vertex geometry into the radial material, or sharing the radial material
- * with other geometry, would break the corner derivation. */
-static void emit_radial(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
+ * non-4-vertex geometry into that material, or sharing it with other geometry,
+ * would break the corner derivation. */
+static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
-    NT_ASSERT(p != NULL && "nt_ui RADIAL: imageData must point to nt_ui_image_payload_t");
+    NT_ASSERT(p != NULL && "nt_ui custom-geometry: imageData must point to nt_ui_image_payload_t");
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
     }
-    /* aspect (a_radial.w) is bbox-derived at emit so the angle test stays correct
-     * under GROW/FIT/PERCENT/null-decl, not just FIXED w/h. */
-    float radial[4] = {p->radial[0], p->radial[1], p->radial[2], bb.width / bb.height};
-    nt_sprite_renderer_set_custom_attrs(radial, (uint8_t)sizeof radial);
+    float blk[12];
+    const uint8_t fcount = build_custom_block(p, &bb, blk);
+    nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
@@ -1532,41 +1567,26 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
-        if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL)) {
-            const Clay_Color rt = local.renderData.image.backgroundColor;
-            const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
-            const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
-            emit_radial(ctx, &local, rcol, world_mat4);
-            return;
-        }
-        /* Textured radial (nt_ui_radial_image): the TEXTURED region emit with the
-         * per-widget a_radial block baked across all verts (the reveal fs reads
-         * it). emit_image bakes the current custom attrs. The radial material (set
-         * above) carries the reveal fs + u_reveal_mode params. */
-        if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL_IMAGE)) {
-            /* radial + tint + uvrect are contiguous: bake all three as one 48 B custom
-             * block (a_radial @ loc 4, a_tint @ loc 5, a_uvrect @ loc 6). Flat radial
-             * bakes only 16 B. aspect (a_radial.w) is bbox-derived at emit (correct
-             * under any sizing), overriding the widget's placeholder. uvrect is the
-             * region's min/max atlas UV — lets the reveal fs re-center the wedge over
-             * any rectangular packed sub-region (not just a full-bleed [0,1] tile). */
-            const Clay_BoundingBox bb = c->boundingBox;
-            nt_atlas_region_handles_t rh;
-            nt_atlas_get_region_handles(ip->atlas, ip->region_index, &rh);
-            float u0 = 1.0F;
-            float v0 = 1.0F;
-            float u1 = 0.0F;
-            float v1 = 0.0F;
-            for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
-                const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
-                const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
-                u0 = (u < u0) ? u : u0;
-                v0 = (v < v0) ? v : v0;
-                u1 = (u > u1) ? u : u1;
-                v1 = (v > v1) ? v : v1;
+        /* ONE generic custom-attr branch: no per-widget identity. custom_bytes > 0
+         * means the bound material declares per-vertex attrs; the walker bakes the
+         * widget's block (with bbox aspect / region uvrect injected) and dispatches
+         * by geom_mode. GEOMETRY = clean white-pixel bbox quad (SDF gl_VertexID corner
+         * derivation); REGION = the textured emit_region/emit_slice9 path. */
+        if (ip != NULL && ip->custom_bytes > 0) {
+            if (ip->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
+                const Clay_Color rt = local.renderData.image.backgroundColor;
+                const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
+                const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
+                emit_custom_geometry(ctx, &local, rcol, world_mat4);
+                return;
             }
-            float block[12] = {ip->radial[0], ip->radial[1], ip->radial[2], (bb.height > 0.0F) ? (bb.width / bb.height) : 1.0F, ip->tint[0], ip->tint[1], ip->tint[2], ip->tint[3], u0, v0, u1, v1};
-            nt_sprite_renderer_set_custom_attrs(block, (uint8_t)sizeof block);
+            /* REGION mode: bake the block, then let emit_image rasterize the textured
+             * region (origin/flip/slice9 honored). emit_image bakes the current custom
+             * attrs across all verts. */
+            const Clay_BoundingBox bb = c->boundingBox;
+            float blk[12];
+            const uint8_t fcount = build_custom_block(ip, &bb, blk);
+            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
         }
         emit_image(&local, world_mat4);
         return;
