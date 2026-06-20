@@ -71,6 +71,11 @@ static ui_walker_fixture_t s_fx;
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_scaled_arena[NT_UI_TEST_ARENA_SIZE];
 static nt_ui_context_t *s_scaled_ctx;
 
+/* A third ctx that is NEVER nt_ui_begin'd: begin_w stays 0, so the converters would trap. resolve_ctx
+   must reject it with bad_params BEFORE any coord conversion (the wire-input-crash regression). */
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_neverbegun_arena[NT_UI_TEST_ARENA_SIZE];
+static nt_ui_context_t *s_neverbegun_ctx;
+
 /* Declare the same known widget in the scaled ctx, overriding the per-frame identity viewport with a
    non-identity (offset + scale) one BEFORE the first hit-test (the lazy resolve window). */
 static void declare_scaled_tree(void) {
@@ -117,6 +122,12 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(s_scaled_ctx);
     nt_devapi_ui_register_context("hud_scaled", s_scaled_ctx);
 
+    /* Third ctx registered but DELIBERATELY never nt_ui_begin'd (begin_w == 0): the wire-input-crash
+       regression target. resolve_ctx must reject it before any converter runs. */
+    s_neverbegun_ctx = nt_ui_create_context(s_neverbegun_arena, sizeof s_neverbegun_arena, &scaled_desc);
+    TEST_ASSERT_NOT_NULL(s_neverbegun_ctx);
+    nt_devapi_ui_register_context("hud_neverbegun", s_neverbegun_ctx);
+
     /* Pin the window so the dpr metadata + any fb-derived basis is deterministic (the headless ctx
        layout size is LAYOUT_W/H from nt_ui_begin, independent of fb_*; dpr still reads g_nt_window). */
     g_nt_window.fb_width = (uint32_t)LAYOUT_W;
@@ -129,6 +140,8 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_devapi_shutdown();
+    nt_ui_destroy_context(s_neverbegun_ctx);
+    s_neverbegun_ctx = NULL;
     nt_ui_destroy_context(s_scaled_ctx);
     s_scaled_ctx = NULL;
     ui_walker_fixture_shutdown(&s_fx);
@@ -180,14 +193,15 @@ static bool near_eq(float a, float b) { return fabsf(a - b) <= 0.5F; }
 
 /* ---- ui.contexts ---- */
 
-/* The registered "hud" + "hud_scaled" context names surface in registration order. */
+/* The registered "hud" + "hud_scaled" + "hud_neverbegun" context names surface in registration order. */
 static void test_contexts_lists_registered(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"ui.contexts\",\"params\":{}}"));
     cJSON *arr = cJSON_GetObjectItemCaseSensitive(ok_result(root), "contexts");
     TEST_ASSERT_TRUE(cJSON_IsArray(arr));
-    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(arr));
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(arr));
     TEST_ASSERT_EQUAL_STRING("hud", cJSON_GetArrayItem(arr, 0)->valuestring);
     TEST_ASSERT_EQUAL_STRING("hud_scaled", cJSON_GetArrayItem(arr, 1)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("hud_neverbegun", cJSON_GetArrayItem(arr, 2)->valuestring);
     cJSON_Delete(root);
 }
 
@@ -366,6 +380,17 @@ static void test_scaled_click_xy_lands_at_device_center(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
+/* ---- never-begun ctx: wire input must bad_params, NOT trap (the wire-input-crash regression) ---- */
+
+/* ui.tree / ui.element / ui.click({x,y}) against a registered-but-never-begun ctx all reach the coord
+   converters (add_meta / resolve_target) which trap on begin_w==0. resolve_ctx must reject FIRST with
+   bad_params — proving no bot input on a pre-frame ctx can crash the host. */
+static void test_neverbegun_ctx_tree_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.tree\",\"params\":{\"ctx\":\"hud_neverbegun\"}}")); }
+
+static void test_neverbegun_ctx_element_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.element\",\"params\":{\"id\":\"widget\",\"ctx\":\"hud_neverbegun\"}}")); }
+
+static void test_neverbegun_ctx_click_xy_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.click\",\"params\":{\"ctx\":\"hud_neverbegun\",\"id\":{\"x\":10,\"y\":10}}}")); }
+
 /* ---- bad_params paths (never assert on wire input) ---- */
 
 static void test_unknown_ctx_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.tree\",\"params\":{\"ctx\":\"missing\"}}")); }
@@ -439,6 +464,9 @@ int main(void) {
     RUN_TEST(test_unscaled_viewport_is_identity);
     RUN_TEST(test_scaled_click_string_id_lands_at_device_center);
     RUN_TEST(test_scaled_click_xy_lands_at_device_center);
+    RUN_TEST(test_neverbegun_ctx_tree_bad_params);
+    RUN_TEST(test_neverbegun_ctx_element_bad_params);
+    RUN_TEST(test_neverbegun_ctx_click_xy_bad_params);
     RUN_TEST(test_unknown_ctx_bad_params);
     RUN_TEST(test_ctx_non_string_bad_params);
     RUN_TEST(test_click_xy_non_finite_bad_params);

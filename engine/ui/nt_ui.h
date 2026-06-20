@@ -238,6 +238,10 @@ bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx);
    a NULL clay (pre-first-frame). */
 void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *out_h);
 
+/* True once the ctx has completed at least one nt_ui_begin (begin_w > 0). Coordinate conversion +
+   bounds are only valid then — a never-begun ctx has degenerate (0) dims that trap the converters. */
+bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
+
 /* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
  * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
  * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the

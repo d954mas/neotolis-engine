@@ -102,21 +102,33 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
         set_bad_params(err, "ui: no UI context registered");
         return NULL;
     }
+    nt_ui_context_t *ctx = NULL;
     const cJSON *jc = cJSON_GetObjectItemCaseSensitive(params, "ctx");
     if (jc == NULL) {
-        return s_ui_ctx[0].ctx; /* default = sole/first */
-    }
-    if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
-        set_bad_params(err, "ui: ctx must be a string");
-        return NULL;
-    }
-    for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
-        if (strcmp(s_ui_ctx[i].name, jc->valuestring) == 0) {
-            return s_ui_ctx[i].ctx;
+        ctx = s_ui_ctx[0].ctx; /* default = sole/first */
+    } else {
+        if (!cJSON_IsString(jc) || jc->valuestring == NULL) {
+            set_bad_params(err, "ui: ctx must be a string");
+            return NULL;
+        }
+        for (uint32_t i = 0; i < s_ui_ctx_count; i++) {
+            if (strcmp(s_ui_ctx[i].name, jc->valuestring) == 0) {
+                ctx = s_ui_ctx[i].ctx;
+                break;
+            }
+        }
+        if (ctx == NULL) {
+            set_bad_params(err, "ui: unknown context");
+            return NULL;
         }
     }
-    set_bad_params(err, "ui: unknown context");
-    return NULL;
+    /* A ctx that has not completed a frame has degenerate (0) layout dims; the coord converters
+       (add_meta, resolve_target) trap on them. Reject pre-frame so NO bot input reaches the converter. */
+    if (!nt_ui_context_has_frame(ctx)) {
+        set_bad_params(err, "ui: context has not rendered a frame yet");
+        return NULL;
+    }
+    return ctx;
 }
 
 // #region ui reads

@@ -318,6 +318,11 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
     *out_w = nt_ui_clay_priv_layout_width(ctx->clay);
     *out_h = nt_ui_clay_priv_layout_height(ctx->clay);
 }
+
+bool nt_ui_context_has_frame(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_context_has_frame: ctx must be non-NULL");
+    return ctx->begin_w > 0.0F;
+}
 // #endregion
 
 // #region viewport

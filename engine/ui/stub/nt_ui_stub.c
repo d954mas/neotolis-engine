@@ -40,6 +40,12 @@ bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx) {
     return false;
 }
 
+/* Headless: the stub represents a ready ctx, so the converter/bounds gate is always open (true). */
+bool nt_ui_context_has_frame(const nt_ui_context_t *ctx) {
+    (void)ctx;
+    return true;
+}
+
 /* Headless: no Clay layout, so the coordinate-space dims are 0,0 (stub tests never inspect them). */
 void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *out_h) {
     (void)ctx;
