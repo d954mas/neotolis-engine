@@ -36,6 +36,7 @@
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
+#include "ui/nt_ui_state.h"
 #include "ui/nt_ui_tabbar.h"
 #include "ui/nt_ui_tooltip.h"
 #include "window/nt_window.h"
@@ -510,6 +511,7 @@ static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
 static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
 
 static int s_active_tab;
+static int s_prev_active_tab = -1; /* clear UI state on tab change — each tab is a screen */
 // #endregion
 
 // #region reusable focused-panel helper (game-side; built from existing nt_ui widgets)
@@ -2440,6 +2442,12 @@ static void declare_tab_list(nt_ui_context_t *ctx) {
  * ROOT in frame(), not here, so its panel escapes this card's scissor. */
 static void declare_content(nt_ui_context_t *ctx) {
     NT_ASSERT(s_active_tab >= 0 && s_active_tab < TAB_COUNT && "active tab out of range");
+    /* Each tab is a screen: clear accumulated UI state on switch so the no-GC state pool
+     * (nt_ui_state, small probe window) can't overflow from 16 tabs' scrolls/tooltips/gestures. */
+    if (s_active_tab != s_prev_active_tab) {
+        nt_ui_state_clear_all(ctx);
+        s_prev_active_tab = s_active_tab;
+    }
     const showcase_entry_t *e = &g_tabs[s_active_tab];
 
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
