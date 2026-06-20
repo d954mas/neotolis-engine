@@ -48,6 +48,13 @@ if(NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_INPUT)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT (ui.click/drag/scroll reuse the input group's inject scheduler).")
 endif()
 
+# The ui READ surface (ui.tree/ui.element) reads through nt_ui_probe_collect, which only has a real
+# impl under NT_UI_DEBUG_TOOLS (else a 0-node stub). Hard-fail so GROUP_UI can never compile to a
+# vacuously-passing probe (the false-green test_devapi_ui saw with DEBUG_TOOLS OFF).
+if(NT_DEVAPI_GROUP_UI AND NOT NT_UI_DEBUG_TOOLS)
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS (the ui probe is DEBUG_TOOLS-gated).")
+endif()
+
 # NT_INPUT_AUTOMATION_ENABLED is driven by (input OR ui): both groups need nt_input's inject symbols
 # (input directly, ui via the input scheduler's reuse wrappers), so the value must be set once when
 # EITHER is on. PUBLIC so it matches the consumer's nt_input.
