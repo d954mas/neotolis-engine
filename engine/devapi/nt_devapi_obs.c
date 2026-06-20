@@ -77,23 +77,51 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
     return true;
 }
 
+/* Parse the optional {n} count into [0, NT_LOG_RING_DEPTH]; absent -> full ring depth. Out of
+   range / wrong type -> bad_params. Split out of cmd_log_tail to keep that handler under the
+   clang-tidy-18 cognitive-complexity ceiling (mirrors parse_level). */
+static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
+    if (jn == NULL) {
+        *out = NT_LOG_RING_DEPTH;
+        return true;
+    }
+    if (!cJSON_IsNumber(jn)) {
+        set_bad_params(err, "log.tail: n must be a number");
+        return false;
+    }
+    int v = jn->valueint;
+    if (v < 0 || v > NT_LOG_RING_DEPTH) {
+        set_bad_params(err, "log.tail: n out of range [0, NT_LOG_RING_DEPTH]");
+        return false;
+    }
+    *out = (uint16_t)v;
+    return true;
+}
+
+/* Serialize one tail buffer into the entries array. Split out so cmd_log_tail stays under the
+   clang-tidy-18 cognitive-complexity ceiling. */
+static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint16_t got) {
+    cJSON *arr = cJSON_AddArrayToObject(result, "entries");
+    NT_ASSERT(arr != NULL);
+    for (uint16_t i = 0; i < got; i++) {
+        cJSON *e = cJSON_CreateObject();
+        NT_ASSERT(e != NULL);
+        devapi_add_string(e, "level", log_level_token(tail[i].level));
+        devapi_add_string(e, "domain", tail[i].domain);
+        devapi_add_string(e, "msg", tail[i].msg);
+        cJSON_bool added = cJSON_AddItemToArray(arr, e);
+        NT_ASSERT(added);
+        (void)added;
+    }
+}
+
 /* log.tail{n?, level?}: newest-first {level,domain,msg} entries, up to n, optionally filtered by
    min level. Reads the dev-only nt_log_ring (D-05). n out of range / level unknown -> bad_params. */
 static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     uint16_t n = NT_LOG_RING_DEPTH;
-    const cJSON *jn = cJSON_GetObjectItemCaseSensitive(params, "n");
-    if (jn != NULL) {
-        if (!cJSON_IsNumber(jn)) {
-            set_bad_params(err, "log.tail: n must be a number");
-            return false;
-        }
-        int v = jn->valueint;
-        if (v < 0 || v > NT_LOG_RING_DEPTH) {
-            set_bad_params(err, "log.tail: n out of range [0, NT_LOG_RING_DEPTH]");
-            return false;
-        }
-        n = (uint16_t)v;
+    if (!parse_tail_n(cJSON_GetObjectItemCaseSensitive(params, "n"), &n, err)) {
+        return false;
     }
     nt_log_level_t min_level = NT_LOG_LEVEL_INFO;
     if (!parse_level(cJSON_GetObjectItemCaseSensitive(params, "level"), &min_level, err)) {
@@ -103,19 +131,7 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
     /* Newest-first tail into a stack buffer (no heap; ring-depth bounded). */
     static nt_log_ring_entry_t s_tail[NT_LOG_RING_DEPTH];
     uint16_t got = nt_log_ring_tail(n, min_level, s_tail);
-
-    cJSON *arr = cJSON_AddArrayToObject(result, "entries");
-    NT_ASSERT(arr != NULL);
-    for (uint16_t i = 0; i < got; i++) {
-        cJSON *e = cJSON_CreateObject();
-        NT_ASSERT(e != NULL);
-        devapi_add_string(e, "level", log_level_token(s_tail[i].level));
-        devapi_add_string(e, "domain", s_tail[i].domain);
-        devapi_add_string(e, "msg", s_tail[i].msg);
-        cJSON_bool added = cJSON_AddItemToArray(arr, e);
-        NT_ASSERT(added);
-        (void)added;
-    }
+    add_log_entries(result, s_tail, got);
     return true;
 }
 // #endregion
