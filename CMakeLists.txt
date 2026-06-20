@@ -22,6 +22,10 @@ option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 # release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
 # (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path.
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
+# Dev-only perf collector (nt_metrics, OBS-07/08). OFF compiles real no-op bodies so
+# release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
+# (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path. Independent of NT_DEVAPI_ENABLED.
+option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)

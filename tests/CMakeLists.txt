@@ -14,7 +14,7 @@ if(NOT EMSCRIPTEN)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
-        nt_shape_renderer nt_mem_scratch
+        nt_shape_renderer nt_mem_scratch nt_metrics
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -104,6 +104,21 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_platform_mem COMMAND test_platform_mem)
+
+    # --- Perf collector (nt_metrics, OBS-07/08, L1 without devapi) ---
+    # nt_metrics_sample() references the overlay/gfx/scratch/platform getters, so
+    # those providers must link even though the test feeds known samples via the
+    # NT_TEST_ACCESS push hook. GNU-ld single-pass order: consumer (nt_metrics)
+    # precedes providers; nt_core/nt_log_stub trail last.
+    add_executable(test_metrics unit/test_metrics.c)
+    target_link_libraries(test_metrics PRIVATE
+        nt_metrics
+        nt_debug_overlay nt_text_renderer nt_font nt_material nt_resource
+        nt_gfx_stub nt_mem_scratch nt_platform nt_hash nt_pool
+        nt_http_stub nt_fs_stub nt_log_stub unity
+    )
+    target_compile_definitions(test_metrics PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_metrics)
 
     # --- Log API tests (domain functions, macros, level filtering) ---
     add_executable(test_log_api unit/test_log_api.c)

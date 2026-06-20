@@ -31,6 +31,7 @@ add_subdirectory(ui)
 add_subdirectory(clipboard)
 add_subdirectory(basisu)
 add_subdirectory(platform)
+add_subdirectory(metrics)
 # Master gate: subdir EXCLUDED at NT_DEVAPI_ENABLED=0 so release binaries
 # contain zero devapi object code (not an empty-TU pattern).
 if(NT_DEVAPI_ENABLED)
