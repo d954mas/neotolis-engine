@@ -24,6 +24,18 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
     }
     return 0U;
 }
+
+/* Headless: no arena scratch, no tree — empty result keeps stub-linked ui.* resolve paths running. */
+const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_context_t *ctx, uint32_t *out_count, bool *out_truncated) {
+    (void)ctx;
+    if (out_count != NULL) {
+        *out_count = 0U;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = false;
+    }
+    return NULL;
+}
 #endif
 
 /* FNV-1a over the bytes — deterministic, no Clay. Real id hashing lives in the impl; the stub only

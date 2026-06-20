@@ -1063,6 +1063,15 @@ uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out
     }
     return written;
 }
+
+/* Walks into the ctx-owned arena scratch (cap = max_elements). No count-truncation possible — *out_truncated
+ * signals only the DFS-depth limit. Returns the scratch pointer; reuses nt_ui_probe_collect (no second walk). */
+const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_context_t *ctx, uint32_t *out_count, bool *out_truncated) {
+    NT_ASSERT(ctx != NULL && "nt_ui_probe_collect_owned: ctx must be non-NULL");
+    NT_ASSERT(ctx->probe_scratch != NULL && "nt_ui_probe_collect_owned: ctx has no arena probe_scratch");
+    nt_ui_probe_collect(ctx, ctx->probe_scratch, ctx->probe_scratch_cap, out_count, out_truncated);
+    return ctx->probe_scratch;
+}
 // #endregion
 
 static const char *cdv_config_label(uint8_t type) {

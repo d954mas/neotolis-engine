@@ -405,6 +405,11 @@ struct nt_ui_context {
     uint32_t inspector_collapsed_cap;
     uint32_t inspector_collapsed_count;
 
+    /* Arena-allocated probe collect scratch, cap = max_elements: a node maps to at most one Clay
+     * element (chrome excluded), so the whole tree always fits — no count-truncation. */
+    nt_ui_probe_node_t *probe_scratch;
+    uint32_t probe_scratch_cap;
+
     nt_ui_inspector_metrics_t inspector_metrics;
     /* Optional overlay materials (typically depth_test=false); 0 = fall back to the game's sprite/text material. */
     nt_material_t inspector_sprite_material;

@@ -188,14 +188,16 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * widget_cap, NT_UI_CACHE_LINE);
     const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t probe_scratch_bytes = NT_ALIGN_UP(sizeof(nt_ui_probe_node_t) * desc->max_elements, NT_UI_CACHE_LINE);
 #else
     const size_t hit_layer_bytes = 0U;
     const size_t widget_registry_bytes = 0U;
     const size_t debug_zones_bytes = 0U;
     const size_t inspector_collapsed_bytes = 0U;
+    const size_t probe_scratch_bytes = 0U;
 #endif
     return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes +
-           (2U * interactive_bytes) + hit_layer_bytes + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + clay_bytes;
+           (2U * interactive_bytes) + hit_layer_bytes + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + probe_scratch_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -258,13 +260,16 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->widget_registry_mask = ctx->widget_registry_cap - 1U;
     ctx->debug_zone_cap = desc->max_elements;
     ctx->inspector_collapsed_cap = desc->max_elements;
+    ctx->probe_scratch_cap = desc->max_elements;
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap, NT_UI_CACHE_LINE);
     const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
     ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_interactive);
     ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_interactive + widget_registry_bytes);
     ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_interactive + widget_registry_bytes + debug_zones_bytes);
-    const size_t after_debug = after_interactive + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes;
+    ctx->probe_scratch = (nt_ui_probe_node_t *)((char *)arena + after_interactive + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes);
+    const size_t probe_scratch_bytes = NT_ALIGN_UP(sizeof(nt_ui_probe_node_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t after_debug = after_interactive + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + probe_scratch_bytes;
 #else
     const size_t after_debug = after_interactive;
 #endif

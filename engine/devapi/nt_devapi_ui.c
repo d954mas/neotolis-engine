@@ -131,10 +131,6 @@ static nt_ui_context_t *resolve_ctx(const cJSON *params, nt_devapi_error *err) {
 }
 
 // #region ui reads
-/* Bounded scratch for one collect. BSS (dev-only); ~1024 nodes * ~280B ~= 280KB — acceptable for a
-   dev tool, and keeps the handler off the stack / out of the hot path. */
-static nt_ui_probe_node_t s_probe_nodes[NT_UI_PROBE_MAX_NODES];
-
 /* Declares the one ui.* contract (Y-up, origin bottom-left) that both the read and the write speak.
    width/height are the ctx LAYOUT dims (the same space bounds + the resolve_target flip use), NOT raw
    g_nt_window.fb_* — those differ under nt_ui_scale. viewport block emitted for 2D only. */
@@ -197,9 +193,9 @@ static cJSON *node_to_json(const nt_ui_probe_node_t *n) {
     return obj;
 }
 
-/* ui.tree: IMMEDIATE read of the last completed frame's tree. Emits up to NT_UI_PROBE_MAX_NODES nodes
-   incl. invisible/offscreen/disabled carrying their flags (the bot filters, not the engine); the
-   top-level `truncated` flag tells the bot the snapshot was cut at the cap (nodes beyond are absent). */
+/* ui.tree: IMMEDIATE read of the last completed frame's tree. Emits the FULL tree (scratch sized to the
+   ctx's max_elements — no count-truncation) incl. invisible/offscreen/disabled carrying their flags (the
+   bot filters, not the engine); `truncated` now signals ONLY the internal DFS-depth limit, not a count cap. */
 static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     nt_ui_context_t *ctx = resolve_ctx(params, err);
@@ -208,13 +204,13 @@ static bool cmd_ui_tree(const cJSON *params, cJSON *result, nt_devapi_error *err
     }
     uint32_t count = 0;
     bool truncated = false;
-    nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count, &truncated);
+    const nt_ui_probe_node_t *nodes = nt_ui_probe_collect_owned(ctx, &count, &truncated);
     add_meta(result, ctx);
     devapi_add_bool(result, "truncated", truncated);
     cJSON *arr = cJSON_AddArrayToObject(result, "nodes");
     NT_ASSERT(arr != NULL);
     for (uint32_t i = 0; i < count; i++) {
-        cJSON_bool added = cJSON_AddItemToArray(arr, node_to_json(&s_probe_nodes[i]));
+        cJSON_bool added = cJSON_AddItemToArray(arr, node_to_json(&nodes[i]));
         NT_ASSERT(added);
         (void)added;
     }
@@ -237,19 +233,19 @@ static bool cmd_ui_element(const cJSON *params, cJSON *result, nt_devapi_error *
     uint32_t target = nt_ui_id(jid->valuestring);
     uint32_t count = 0;
     bool truncated = false;
-    nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count, &truncated);
+    const nt_ui_probe_node_t *nodes = nt_ui_probe_collect_owned(ctx, &count, &truncated);
     for (uint32_t i = 0; i < count; i++) {
-        if (s_probe_nodes[i].id == target) {
+        if (nodes[i].id == target) {
             add_meta(result, ctx);
             devapi_add_bool(result, "truncated", truncated);
-            cJSON_bool added = cJSON_AddItemToObject(result, "node", node_to_json(&s_probe_nodes[i]));
+            cJSON_bool added = cJSON_AddItemToObject(result, "node", node_to_json(&nodes[i]));
             NT_ASSERT(added);
             (void)added;
             return true;
         }
     }
-    /* A miss under a truncated snapshot may be a real widget past the cap, not a stale id — say so. */
-    set_bad_params(err, truncated ? "ui.element: id not found in the probe snapshot (truncated at cap)" : "ui.element: unknown or stale id");
+    /* A miss under a DFS-depth-truncated snapshot may be a real widget below the depth limit, not a stale id. */
+    set_bad_params(err, truncated ? "ui.element: id not found in the probe snapshot (truncated at DFS depth)" : "ui.element: unknown or stale id");
     return false;
 }
 
@@ -294,17 +290,17 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
         uint32_t uid = nt_ui_id(jt->valuestring); /* non-empty pre-checked above; nt_ui_id asserts s!=NULL, not the hash. */
         uint32_t count = 0;
         bool truncated = false;
-        nt_ui_probe_collect(ctx, s_probe_nodes, NT_UI_PROBE_MAX_NODES, &count, &truncated);
+        const nt_ui_probe_node_t *nodes = nt_ui_probe_collect_owned(ctx, &count, &truncated);
         const nt_ui_probe_node_t *hit = NULL;
         for (uint32_t i = 0; i < count; i++) {
-            if (s_probe_nodes[i].id == uid) {
-                hit = &s_probe_nodes[i];
+            if (nodes[i].id == uid) {
+                hit = &nodes[i];
                 break;
             }
         }
         if (hit == NULL) {
-            /* Past the cap the id may be a real widget the snapshot dropped — don't call it stale. */
-            set_bad_params(err, truncated ? "ui: target id not found in the probe snapshot (truncated at cap)" : "ui: unknown or stale target id");
+            /* Below the DFS-depth limit the id may be a real widget the snapshot dropped — don't call it stale. */
+            set_bad_params(err, truncated ? "ui: target id not found in the probe snapshot (truncated at DFS depth)" : "ui: unknown or stale target id");
             return false;
         }
         /* A behind-camera 3D node / collapsed element has a zero rect (visible=false); its center would
@@ -472,8 +468,9 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.tree",
         .group = "ui",
-        .summary = "IMMEDIATE read of the last completed frame's UI tree (up to NT_UI_PROBE_MAX_NODES nodes incl. invisible/disabled; `truncated` true when the cap cut it) + a "
-                   "{space,origin,y_axis,width,height,dpr,projection,viewport?} block (viewport omitted when projection==3d); bounds are Y-up (origin bottom-left), same space ui.click({x,y}) takes",
+        .summary = "IMMEDIATE read of the last completed frame's UI tree (FULL tree of the ctx incl. invisible/disabled; `truncated` true only when the internal DFS-depth limit cut it, never "
+                   "an element-count cap) + a {space,origin,y_axis,width,height,dpr,projection,viewport?} block (viewport omitted when projection==3d); bounds are Y-up (origin bottom-left), same "
+                   "space ui.click({x,y}) takes",
         .params_shape = "{ctx?:string}",
         .result_shape =
             "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport?:{x,y,w,h},truncated:bool,nodes:[{id,parent,role,id_string,text,label,"

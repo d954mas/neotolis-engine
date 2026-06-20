@@ -333,9 +333,9 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 #ifndef NT_UI_PROBE_TEXT_CAP
 #define NT_UI_PROBE_TEXT_CAP 64 /* owned text / label copy cap incl. NUL */
 #endif
-/* Probe node cap tracks the ctx Clay element-count knob, so a tree within a ctx's capacity never
-   truncates on count. A ctx whose RUNTIME desc.max_elements is raised above this compile-time default
-   still truncates (the static probe buffer is sized to this default) -> out_truncated flags it. */
+/* Fallback cap for the caller-buffer nt_ui_probe_collect form (tests / general callers). The devapi
+   path uses nt_ui_probe_collect_owned, whose arena scratch is sized to the ctx RUNTIME max_elements, so
+   it never count-truncates regardless of this compile-time default. */
 #ifndef NT_UI_PROBE_MAX_NODES
 #define NT_UI_PROBE_MAX_NODES NT_UI_DEFAULT_MAX_ELEMENT_COUNT
 #endif
@@ -378,6 +378,12 @@ typedef struct nt_ui_probe_node_t {
  * node limit or the internal DFS-stack limit was hit, so the tree is partial. Returns the count.
  * ctx must have completed nt_ui_end. Stops at `cap`; never writes past out[cap-1]. */
 uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated);
+
+/* Owned-scratch collect: walks into the ctx's arena probe_scratch (cap = max_elements) and returns it.
+ * Because the scratch tracks the ctx element budget, a within-capacity tree never count-truncates —
+ * *out_truncated then reflects ONLY the internal DFS-stack depth limit, not an element-count cap.
+ * The returned pointer is owned by the ctx and stays valid until the next collect on this ctx. */
+const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_context_t *ctx, uint32_t *out_count, bool *out_truncated);
 #else
 static inline uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated) {
     (void)ctx;
@@ -390,6 +396,17 @@ static inline uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_pro
         *out_truncated = false;
     }
     return 0U;
+}
+
+static inline const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_context_t *ctx, uint32_t *out_count, bool *out_truncated) {
+    (void)ctx;
+    if (out_count != NULL) {
+        *out_count = 0U;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = false;
+    }
+    return NULL;
 }
 #endif
 // #endregion

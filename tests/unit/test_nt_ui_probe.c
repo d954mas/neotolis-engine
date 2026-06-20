@@ -461,6 +461,49 @@ static void test_project_3d_behind_camera_flag(void) {
     TEST_ASSERT_TRUE(node->bounds[3] >= 0.0F);
 }
 
+/* Rebuild the fixture ctx with a chosen max_elements (mirror probe_setup_3d_ctx rebind/rebind). */
+static void probe_setup_ctx_max_elements(uint32_t max_elements) {
+    nt_ui_destroy_context(s_fx.ctx);
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.max_elements = max_elements;
+    s_fx.ctx = nt_ui_create_context(s_arena, sizeof s_arena, &desc);
+    TEST_ASSERT_NOT_NULL(s_fx.ctx);
+    nt_ui_set_font(s_fx.ctx, 0U, s_fx.stub_font);
+    nt_ui_set_atlas_white_region(s_fx.ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
+    nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
+    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material);
+}
+
+/* Owned-scratch collect: scratch cap tracks the ctx RUNTIME max_elements (not the 1024 compile default),
+ * so a within-budget tree comes back in full with truncated==false — no element-count cap. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): TEST_ASSERT macros inflate the count; the body is linear asserts
+static void test_collect_owned_tracks_max_elements(void) {
+    const uint32_t small_max = 64U; /* well below NT_UI_PROBE_MAX_NODES (1024) — proves runtime, not compile-time, sizing */
+    probe_setup_ctx_max_elements(small_max);
+    TEST_ASSERT_EQUAL_UINT32(small_max, s_fx.ctx->probe_scratch_cap);
+    TEST_ASSERT_NOT_NULL(s_fx.ctx->probe_scratch);
+
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
+        CLAY({.id = CLAY_ID("child_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
+        CLAY({.id = CLAY_ID("child_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+
+    uint32_t count = 0;
+    bool truncated = true;
+    const nt_ui_probe_node_t *nodes = nt_ui_probe_collect_owned(s_fx.ctx, &count, &truncated);
+    TEST_ASSERT_NOT_NULL(nodes);
+    TEST_ASSERT_EQUAL_PTR(s_fx.ctx->probe_scratch, nodes); /* returns the ctx-owned scratch */
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(3U, count);        /* panel + 2 children, all present */
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(small_max, count);    /* node count <= element budget (chrome excluded) */
+    TEST_ASSERT_FALSE(truncated);                          /* full tree fits the max_elements-sized scratch */
+    TEST_ASSERT_NOT_NULL(find_node(nodes, count, nt_ui_id("panel")));
+    TEST_ASSERT_NOT_NULL(find_node(nodes, count, nt_ui_id("child_a")));
+    TEST_ASSERT_NOT_NULL(find_node(nodes, count, nt_ui_id("child_b")));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_enabled_false_with_inspector_off);
@@ -480,6 +523,7 @@ int main(void) {
     RUN_TEST(test_project_2d_affine_translation);
     RUN_TEST(test_project_3d_ortho_aabb);
     RUN_TEST(test_project_3d_behind_camera_flag);
+    RUN_TEST(test_collect_owned_tracks_max_elements);
     return UNITY_END();
 }
 
