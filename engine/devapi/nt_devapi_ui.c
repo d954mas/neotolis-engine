@@ -30,6 +30,9 @@ static uint32_t s_ui_ctx_count;
    is a flat append + dup scan. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx) {
+    /* Must register AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init
+       registration would be silently wiped. Fail loud (explicit-over-implicit). */
+    NT_ASSERT(nt_devapi_initialized() && "ui: nt_devapi_ui_register_context must be called AFTER nt_devapi_init() (init clears the host ctx table)");
     NT_ASSERT(name != NULL && "ui: context name must be non-NULL");
     NT_ASSERT(ctx != NULL && "ui: context must be non-NULL");
     NT_ASSERT(s_ui_ctx_count < NT_DEVAPI_UI_CONTEXT_MAX && "ui: context table full (raise NT_DEVAPI_UI_CONTEXT_MAX)");

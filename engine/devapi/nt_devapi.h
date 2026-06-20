@@ -39,8 +39,10 @@ const char *nt_devapi_poll_response(void);
 
 #ifdef NT_DEVAPI_GROUP_UI
 /* Host-facing: register a UI context under a name so the `ui` group can resolve it.
-   `name` and `ctx` are stored BY REFERENCE (no copy): both must stay valid and pointer-stable for
-   the devapi's lifetime. Trusted in-process call: overflow / duplicate name asserts (not bot input). */
+   Call AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init registration is
+   silently wiped (asserts when NT_ASSERT is on). `name` and `ctx` are stored BY REFERENCE (no copy):
+   both must stay valid and pointer-stable for the devapi's lifetime. Trusted in-process call:
+   pre-init / overflow / duplicate name asserts (not bot input). */
 typedef struct nt_ui_context nt_ui_context_t;
 void nt_devapi_ui_register_context(const char *name, nt_ui_context_t *ctx);
 #endif

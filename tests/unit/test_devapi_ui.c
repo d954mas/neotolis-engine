@@ -16,6 +16,7 @@
 #include "devapi/nt_devapi_net.h"      /* nt_devapi_update — drives the shared inject schedule on a sim-advance */
 #include "input/nt_input.h"            /* g_nt_input + the reserved inject pointer id, for the Y-up flip read-back */
 #include "memory/nt_mem_scratch.h"     /* CLAY per-element data backing; reset between frames */
+#include "test_helpers/nt_assert_trap.h" /* NT_TEST_EXPECT_ASSERT: the pre-init register death-test */
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -227,6 +228,16 @@ static void test_contexts_lists_registered(void) {
     TEST_ASSERT_EQUAL_STRING("hud_scaled", cJSON_GetArrayItem(arr, 1)->valuestring);
     TEST_ASSERT_EQUAL_STRING("hud_neverbegun", cJSON_GetArrayItem(arr, 2)->valuestring);
     cJSON_Delete(root);
+}
+
+/* ---- registration order: register BEFORE init traps (init clears the host ctx table) ---- */
+
+/* The fixture inits in setUp; drop back to the pre-init state, assert a register traps (it would
+   otherwise be silently wiped at the next init), then re-init so tearDown's shutdown stays balanced. */
+static void test_register_context_before_init_traps(void) {
+    nt_devapi_shutdown(); /* -> nt_devapi_initialized() false */
+    NT_TEST_EXPECT_ASSERT(nt_devapi_ui_register_context("premature", s_fx.ctx));
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* re-arm for the balanced tearDown shutdown */
 }
 
 /* ---- ui.tree: metadata + Y-up bounds ---- */
@@ -569,6 +580,7 @@ static void test_drag_over_reserve_no_partial_inject(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_contexts_lists_registered);
+    RUN_TEST(test_register_context_before_init_traps);
     RUN_TEST(test_tree_meta_and_yup_bounds);
     RUN_TEST(test_element_by_id_ok);
     RUN_TEST(test_element_unknown_id_bad_params);
