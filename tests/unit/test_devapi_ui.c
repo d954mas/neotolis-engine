@@ -526,6 +526,10 @@ static void test_drag_frames_fractional_bad_params(void) { assert_bad_params(nt_
 
 static void test_drag_frames_negative_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":\"widget\",\"to\":\"widget\",\"frames\":-3}}")); }
 
+/* frames==0 -> bad_params: a 0-frame drag emits no MOVE, so the inject up would release at `from`
+   (its current position) and silently drop `to`. frames>=1 is required to reach `to`. */
+static void test_drag_frames_zero_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.drag\",\"params\":{\"from\":\"widget\",\"to\":\"widget\",\"frames\":0}}")); }
+
 /* frames over the per-command DoS cap -> bad_params, no partial inject. */
 static void test_drag_frames_over_cap_bad_params(void) {
     char req[192];
@@ -592,6 +596,7 @@ int main(void) {
     RUN_TEST(test_click_hold_bool_bad_params);
     RUN_TEST(test_drag_frames_fractional_bad_params);
     RUN_TEST(test_drag_frames_negative_bad_params);
+    RUN_TEST(test_drag_frames_zero_bad_params);
     RUN_TEST(test_drag_frames_over_cap_bad_params);
     RUN_TEST(test_drag_at_cap_reserves_whole);
     RUN_TEST(test_drag_over_reserve_no_partial_inject);

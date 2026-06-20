@@ -436,9 +436,16 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
             set_bad_params(err, "ui.drag: frames must be a number");
             return false;
         }
-        if (!parse_frame_count(frj, "ui.drag: frames must be an integer in [0, 65535]", &frames, err)) {
+        if (!parse_frame_count(frj, "ui.drag: frames must be an integer in [1, 65535]", &frames, err)) {
             return false;
         }
+    }
+    /* A 0-frame drag emits no MOVE, so the inject UP (which releases at the pointer's CURRENT position,
+       not at `to`) would land back at `from` — `to` silently ignored. frames>=1 gives the instant
+       from->to->up drag, so nothing is lost by requiring it. */
+    if (frames == 0U) {
+        set_bad_params(err, "ui.drag: frames must be >= 1 (a 0-frame drag cannot reach `to`)");
+        return false;
     }
     if (frames > NT_DEVAPI_UI_DRAG_FRAMES_MAX) {
         set_bad_params(err, "ui.drag: frames exceeds the per-command cap");
@@ -453,7 +460,7 @@ static bool cmd_ui_drag(const cJSON *params, cJSON *result, nt_devapi_error *err
     const uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     nt_devapi_input_sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, 0);
     for (uint16_t i = 1; i <= frames; i++) {
-        float t = (float)i / (float)frames; /* frames >= 1 here: a 0-frame drag emits no MOVE. */
+        float t = (float)i / (float)frames; /* frames >= 1 enforced above, so the divisor is never 0. */
         float mx = fx + ((tx - fx) * t);
         float my = fy + ((ty - fy) * t);
         nt_devapi_input_sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, (uint8_t)NT_POINTER_MOUSE, 1U, i);
@@ -520,8 +527,9 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.drag",
         .group = "ui",
-        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; fire-and-forget)",
-        .params_shape = "{from:string|{x,y}, to:string|{x,y}, frames?:number, ctx?:string}",
+        .summary = "resolve from/to (id|Y-up {x,y}, origin bottom-left) -> down@from + frames interpolated moves + up@to (explicit points, NO interpolation owner; frames in [1, "
+                   "NT_DEVAPI_UI_DRAG_FRAMES_MAX], a 0-frame drag cannot reach `to`; fire-and-forget)",
+        .params_shape = "{from:string|{x,y}, to:string|{x,y}, frames?:number (>=1), ctx?:string}",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
         .side_effects = "enqueues an ordered multi-frame synthetic drag",
