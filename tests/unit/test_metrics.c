@@ -56,11 +56,90 @@ static void test_channels_independent(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, s.samples);
 }
 
+/* ---- Task 2: on-query aggregates (nearest-rank percentiles + lows + budget) ---- */
+
+/* KNOWN set 1..100 => avg 50.5, min 1, max 100, p50=50, p95=95, p99=99 (nearest-rank). */
+static void test_percentiles_known_set(void) {
+    for (int v = 1; v <= 100; v++) {
+        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)v);
+    }
+    nt_metrics_stats_t s;
+    nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &s);
+    TEST_ASSERT_EQUAL_UINT32(100U, s.samples);
+    TEST_ASSERT_TRUE(near(s.avg, 50.5));
+    TEST_ASSERT_TRUE(near(s.min, 1.0));
+    TEST_ASSERT_TRUE(near(s.max, 100.0));
+    TEST_ASSERT_TRUE(near(s.median, 50.0)); /* idx ceil(0.50*100)-1 = 49 -> value 50 */
+    TEST_ASSERT_TRUE(near(s.p95, 95.0));    /* idx 94 -> value 95 */
+    TEST_ASSERT_TRUE(near(s.p99, 99.0));    /* idx 98 -> value 99 */
+}
+
+/* Empty window: samples==0, aggregates zeroed (L2 emits null). */
+static void test_empty_window(void) {
+    nt_metrics_stats_t s;
+    nt_metrics_channel_stats(NT_METRICS_GPU_MS, &s);
+    TEST_ASSERT_EQUAL_UINT32(0U, s.samples);
+    TEST_ASSERT_TRUE(near(s.avg, 0.0));
+    TEST_ASSERT_TRUE(near(s.max, 0.0));
+}
+
+/* Single sample: every percentile == that value; avg==min==max==value. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_single_sample(void) {
+    nt_metrics_test_push(NT_METRICS_CPU_MS, 42.0);
+    nt_metrics_stats_t s;
+    nt_metrics_channel_stats(NT_METRICS_CPU_MS, &s);
+    TEST_ASSERT_EQUAL_UINT32(1U, s.samples);
+    TEST_ASSERT_TRUE(near(s.avg, 42.0));
+    TEST_ASSERT_TRUE(near(s.min, 42.0));
+    TEST_ASSERT_TRUE(near(s.max, 42.0));
+    TEST_ASSERT_TRUE(near(s.median, 42.0));
+    TEST_ASSERT_TRUE(near(s.p95, 42.0));
+    TEST_ASSERT_TRUE(near(s.p99, 42.0));
+    TEST_ASSERT_TRUE(near(s.p99_9, 42.0));
+}
+
+/* fps-lows derived from frame_ms: feed 1..100ms => p99=99 => 1%-low = 1000/99. */
+static void test_fps_lows(void) {
+    for (int v = 1; v <= 100; v++) {
+        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)v);
+    }
+    TEST_ASSERT_TRUE(near(nt_metrics_fps_low_1pct(), 1000.0 / 99.0));
+    /* p99.9 collapses to max (100) at n=100 (A4): 0.1%-low = 1000/100 = 10. */
+    TEST_ASSERT_TRUE(near(nt_metrics_fps_low_01pct(), 10.0));
+}
+
+/* fps-lows guard divide-by-zero on an empty window. */
+static void test_fps_lows_empty(void) {
+    TEST_ASSERT_TRUE(near(nt_metrics_fps_low_1pct(), 0.0));
+    TEST_ASSERT_TRUE(near(nt_metrics_fps_low_01pct(), 0.0));
+}
+
+/* over_budget_pct: 1..100ms, budget 90 => 10 samples (91..100) over => 10%. */
+static void test_over_budget_pct(void) {
+    for (int v = 1; v <= 100; v++) {
+        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)v);
+    }
+    TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(90.0), 10.0));
+    TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(100.0), 0.0)); /* strictly greater */
+    TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(0.0), 100.0));
+}
+
+/* over_budget_pct on an empty window returns 0 (no divide-by-zero). */
+static void test_over_budget_empty(void) { TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(16.0), 0.0)); }
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ring_evicts_to_window);
     RUN_TEST(test_reset_clears_window);
     RUN_TEST(test_channels_independent);
+    RUN_TEST(test_percentiles_known_set);
+    RUN_TEST(test_empty_window);
+    RUN_TEST(test_single_sample);
+    RUN_TEST(test_fps_lows);
+    RUN_TEST(test_fps_lows_empty);
+    RUN_TEST(test_over_budget_pct);
+    RUN_TEST(test_over_budget_empty);
     return UNITY_END();
 }
 
