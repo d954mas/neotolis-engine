@@ -81,8 +81,8 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
-    /* Radial (Phase 66): shared extended-layout VS (a_radial @ loc 4) + the flat SDF FS
-     * (nt_ui_radial) + the textured reveal FS (nt_ui_radial_image). First real compile of these. */
+    /* Radial: shared extended-layout VS (a_radial @ loc 4) + the flat SDF FS
+     * (nt_ui_radial) + the textured reveal FS (nt_ui_radial_image). */
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);

@@ -1,17 +1,7 @@
-/* walker → custom-material binding for radial emits.
- *
- * The walker binds ONE ctx->sprite_material per pass; radials need a per-element
- * material override on the image path. Two binding routes are covered:
- *
- * Route A (prototype): a CUSTOM-command handler binds the radial material and
- * runs a custom-attr emit. Proves the renderer hook end-to-end through the walker,
- * but CUSTOM is a hard barrier (is_segmentable false) so it flushes per radial —
- * it does NOT meet the thousands-in-one-draw scale target. Superseded by Route B.
- *
- * Route B (shipped): an optional material handle on nt_ui_image_payload_t; the
- * walker image dispatch binds it via set_material (auto-flush on .id change) when
- * it differs from the bound base. N radials sharing ONE radial material batch to
- * one flush + one draw. */
+/* walker → custom-material binding for radial emits. The walker binds ONE
+ * ctx->sprite_material per pass; radials need a per-element material override on
+ * the image path. Covers two binding routes: Route A (a CUSTOM-command handler)
+ * and Route B (an optional material handle on nt_ui_image_payload_t). */
 
 #include <math.h>
 #include <stdalign.h>

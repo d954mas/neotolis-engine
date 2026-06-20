@@ -323,12 +323,12 @@ static nt_material_t create_test_material(void) {
     return mat;
 }
 
-/* ---- Helper: material declaring a custom per-vertex attr_map (RND-66-01/02) ----
+/* ---- Helper: material declaring a custom per-vertex attr_map ----
  *
  * Shares ONE vs/fs pair across calls so the only pipeline-key axis that varies
- * is the vertex layout — this isolates the layout discriminator (RND-66-02): a
- * base material and an attr_map material that differ ONLY in attr_map must still
- * resolve to two distinct pipelines, proving the layout is folded into the key.
+ * is the vertex layout — this isolates the layout discriminator: a base material
+ * and an attr_map material that differ ONLY in attr_map must still resolve to two
+ * distinct pipelines, proving the layout is folded into the key.
  *
  * loc==0 → no attr_map (plain 20B base). loc>0 → one custom FLOAT4 attr
  * "a_radial" bound to that GL location. */
@@ -629,9 +629,9 @@ void test_sprite_renderer_polygon_emit(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ==== Phase 66: radial custom per-vertex attribute capability ==== */
+/* ==== radial custom per-vertex attribute capability ==== */
 
-/* RND-66-01: a material declaring attr_map_count>0 builds an EXTENDED layout:
+/* A material declaring attr_map_count>0 builds an EXTENDED layout:
  * the verbatim 20B base (pos@0/tex@12/color@16) PLUS the declared custom attr
  * appended at offset 20, with its GL location pulled from attr_map (NOT
  * hardcoded). A plain material keeps the verbatim 20B base. */
@@ -666,7 +666,7 @@ void test_sprite_renderer_extended_layout_from_attr_map(void) {
     TEST_ASSERT_EQUAL_UINT32(4, ext_layout.locations[3]);
 }
 
-/* RND-66-02 (Pitfall 1): a base material and an attr_map material that share
+/* A base material and an attr_map material that share
  * vs/fs/state and differ ONLY in their vertex layout must resolve to TWO
  * distinct pipelines — proving the layout discriminator is folded into the
  * cache key (the base must never alias the extended pipeline). */
@@ -686,7 +686,7 @@ void test_sprite_renderer_layout_in_pipeline_key(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
-/* RND-66-03: the custom-attr emit path bakes the per-widget float block into
+/* The custom-attr emit path bakes the per-widget float block into
  * EVERY vertex it emits (like color), into a separate byte-staging buffer at
  * the extended stride — read back via the radial test accessor. */
 void test_sprite_renderer_custom_attr_emit_bakes_per_vertex(void) {
