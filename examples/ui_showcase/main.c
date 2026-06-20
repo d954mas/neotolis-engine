@@ -1677,8 +1677,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                 nt_ui_radial_image_style_t istyle = nt_ui_radial_image_style_defaults();
                 istyle.material = s_radial_image_material[m];
-                istyle.mode = (uint8_t)m;
-                /* Sweep starts at the top and reveals clockwise as the cooldown fills. */
+                /* Reveal look (mode + dim + tint) is baked on the per-mode material at creation. */
                 nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_radial_art_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), mode_labels[m], g_current->caption);
             }
@@ -2693,10 +2692,9 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_radial",
     });
 
-    /* One radial-image material per reveal mode (RESEARCH A4): each pins its u_reveal_mode so
-     * same-mode radials keep one stable param and batch to one draw. The widget overwrites the
-     * param per call from the style, so the initial value is just a placeholder; the per-mode
-     * material identity is what groups the batch. All sample the full-bleed radial_art texture. */
+    /* One radial-image material per reveal mode: each bakes its reveal look (u_reveal_mode +
+     * u_reveal_tint) at creation, so the widget style carries no reveal state and same-mode
+     * radials batch to one draw. All sample the full-bleed radial_art texture. */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
@@ -2711,7 +2709,7 @@ int main(int argc, char *argv[]) {
             .attr_map[0] = {.stream_name = "a_radial", .location = 4},
             .attr_map_count = 1,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
-            .params[1] = {.name = NT_UI_RADIAL_IMAGE_PARAM_TINT, .value = {1.0F, 0.85F, 0.2F, 0.6F}},
+            .params[1] = {.name = NT_UI_RADIAL_IMAGE_PARAM_TINT, .value = {0.502F, 0.502F, 0.502F, 0.6F}},
             .param_count = 2,
             .label = k_radial_image_labels[m],
         });

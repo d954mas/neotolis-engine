@@ -383,8 +383,9 @@ static void test_radial_fill_emit_payload(void) {
 /* ===== WGT-66-05: nt_ui_radial_image — textured reveal widget ===== */
 
 /* Radial-IMAGE material: a_radial @ loc 4 (extended layout) PLUS a u_reveal_mode
- * vec4 param so the reveal-mode plumbing is observable via nt_material_get_info. */
-static nt_material_t make_radial_image_material(void) {
+ * vec4 param baked at creation so the reveal-mode look is observable via
+ * nt_material_get_info. */
+static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t mode) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "ri_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "ri_fs"});
 
@@ -419,7 +420,7 @@ static nt_material_t make_radial_image_material(void) {
     desc.attr_map[0].location = 4;
     desc.attr_map_count = 1;
     desc.params[0].name = NT_UI_RADIAL_IMAGE_PARAM_MODE;
-    desc.params[0].value[0] = -1.0F; /* sentinel: widget must overwrite */
+    desc.params[0].value[0] = (float)mode; /* reveal look baked at creation */
     desc.param_count = 1;
     desc.label = "radial_image_test_material";
 
@@ -427,6 +428,9 @@ static nt_material_t make_radial_image_material(void) {
     nt_material_step();
     return mat;
 }
+
+/* Default test material: DESATURATE mode baked at creation. */
+static nt_material_t make_radial_image_material(void) { return make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_DESATURATE); }
 
 /* Read back the u_reveal_mode param's .x from the material info (-1 if absent). */
 static float reveal_mode_param_x(nt_material_t mat) {
@@ -505,30 +509,30 @@ static void test_radial_image_slice9_bakes_payload(void) {
     }
 }
 
-/* (c) reveal mode plumbed to the material as u_reveal_mode.x = mode. */
+/* (c) reveal mode is a MATERIAL-level look baked at creation (u_reveal_mode.x ==
+ * mode); the widget no longer writes it. A walk does not mutate the param. */
 static void test_radial_image_reveal_mode_plumbed(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
-    style.material = make_radial_image_material();
-    style.mode = (uint8_t)NT_UI_RADIAL_REVEAL_HIDE; /* == 2 */
+    style.material = make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_HIDE); /* == 2 */
 
-    /* Before the walk the sentinel is -1 (widget must overwrite). */
-    TEST_ASSERT_TRUE(approx(reveal_mode_param_x(style.material), -1.0F));
+    /* The material carries the baked mode before any walk. */
+    TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "material carries baked u_reveal_mode.x");
 
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     radial_image_walk(&ref, &style, 40.0F, 40.0F);
 
-    TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "u_reveal_mode.x == reveal mode");
+    /* The walk must NOT overwrite the material-level reveal look. */
+    TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "walk leaves material u_reveal_mode.x intact");
 }
 
 /* (d) style ABI guard + defaults sane + all four reveal modes distinct. */
 static void test_radial_image_style_abi(void) {
-    TEST_ASSERT_EQUAL_UINT32(48U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
+    TEST_ASSERT_EQUAL_UINT32(36U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
     nt_ui_radial_image_style_t d = nt_ui_radial_image_style_defaults();
     TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.color_packed);
     TEST_ASSERT_TRUE(approx(d.slice9_scale, 1.0F));
     TEST_ASSERT_EQUAL_UINT32(0U, d.material.id);
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_RADIAL_REVEAL_DESATURATE, d.mode);
-    /* Four distinct reveal modes. */
+    /* Four distinct reveal modes (material-level look). */
     TEST_ASSERT_EQUAL_INT(0, (int)NT_UI_RADIAL_REVEAL_DESATURATE);
     TEST_ASSERT_EQUAL_INT(1, (int)NT_UI_RADIAL_REVEAL_DIM);
     TEST_ASSERT_EQUAL_INT(2, (int)NT_UI_RADIAL_REVEAL_HIDE);

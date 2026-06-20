@@ -25,22 +25,6 @@ static float radial_image_aspect(const Clay_ElementDeclaration *decl) {
     return 1.0F;
 }
 
-/* Push the reveal-mode params onto the material so the fs composites the un-swept
- * sector. Per-material in v1: many radials sharing one mode share one material and
- * one batch (RESEARCH A4). u_reveal_mode = {mode, dim_factor, 0, 0}; u_reveal_tint
- * = {r, g, b, strength} in 0..1. Skipped if the material lacks the param. */
-static void radial_image_set_reveal_params(const nt_ui_radial_image_style_t *style) {
-    const float mode_params[4] = {(float)style->mode, style->dim_factor, 0.0F, 0.0F};
-    if (nt_material_has_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_MODE)) {
-        nt_material_set_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_MODE, mode_params);
-    }
-    if (nt_material_has_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_TINT)) {
-        const Clay_Color t = nt_ui_unpack_abgr(style->tint_color_packed);
-        const float tint_params[4] = {t.r / 255.0F, t.g / 255.0F, t.b / 255.0F, style->tint_strength};
-        nt_material_set_param(style->material, NT_UI_RADIAL_IMAGE_PARAM_TINT, tint_params);
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float angle_end, const nt_ui_radial_image_style_t *style,
                         const Clay_ElementDeclaration *decl) {
@@ -49,11 +33,8 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(style != NULL && "nt_ui_radial_image: style must be non-NULL");
     NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_radial_image: invalid atlas handle");
     NT_ASSERT(style->material.id != 0 && "nt_ui_radial_image: style.material must be a valid radial-image material");
-    NT_ASSERT(style->mode <= (uint8_t)NT_UI_RADIAL_REVEAL_TINT && "nt_ui_radial_image: mode out of range");
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
-    NT_ASSERT(isfinite(style->dim_factor) && style->dim_factor >= 0.0F && "nt_ui_radial_image: dim_factor must be finite >= 0");
-    NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
@@ -71,8 +52,6 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     if (region->region == NT_ATLAS_INVALID_REGION) {
         return;
     }
-
-    radial_image_set_reveal_params(style);
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(p != NULL && "nt_ui_radial_image: scratch alloc failed");
