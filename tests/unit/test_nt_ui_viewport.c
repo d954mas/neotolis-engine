@@ -6,6 +6,7 @@
  *   2. A non-trivial LETTERBOX-like viewport maps a device pointer onto the widget at the matching
  *      LAYOUT position (the hot-resolve hits it).
  *   3. nt_ui_screen_to_layout / _layout_to_screen round-trip; default is identity.
+ *   4. An ANISOTROPIC viewport (per-axis scale differs) hits + round-trips — a w/h transposition fails.
  *
  * Asymmetric known geometry (160x48 @ (100,200) in 800x600) so an axis swap / flip is visible. */
 
@@ -41,6 +42,13 @@ static ui_walker_fixture_t s_fx;
 #define VP_OFF_Y 30.0F
 #define VP_SCALE 1.5F
 
+/* ANISOTROPIC (STRETCH-like) viewport: DIFFERENT device-per-layout scale per axis so a w/h-vs-h/w
+   transposition is visible. Genuinely anisotropic: x scale 2.0 != y scale 0.5. */
+#define ANISO_OFF_X 40.0F
+#define ANISO_OFF_Y 30.0F
+#define ANISO_SCALE_X 2.0F
+#define ANISO_SCALE_Y 0.5F
+
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -65,6 +73,10 @@ static void declare_btn_element(void) {
 }
 
 static nt_ui_viewport_t letterbox_vp(void) { return (nt_ui_viewport_t){.x = VP_OFF_X, .y = VP_OFF_Y, .w = SCREEN_W * VP_SCALE, .h = SCREEN_H * VP_SCALE}; }
+
+/* w/SCREEN_W (=2.0) != h/SCREEN_H (=0.5): a per-axis-scale converter that transposed w<->h would map
+   the device pointer to the WRONG layout coord, missing the widget (the non-vacuous guard below). */
+static nt_ui_viewport_t aniso_vp(void) { return (nt_ui_viewport_t){.x = ANISO_OFF_X, .y = ANISO_OFF_Y, .w = SCREEN_W * ANISO_SCALE_X, .h = SCREEN_H * ANISO_SCALE_Y}; }
 
 /* Warm + step frame so btn enters the interactive registry; optionally set a viewport first.
  * Front-most arbitration reads the PREVIOUS frame's registry, so the widget reacts only from the
@@ -162,8 +174,65 @@ static void test_converters_roundtrip_and_default_identity(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- 4: ANISOTROPIC viewport — per-axis scale differs, so an axis transposition is visible ---- */
+
+static void warm_btn_frame_aniso(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1);
+    nt_ui_set_viewport(s_fx.ctx, aniso_vp());
+    declare_btn_element();
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+}
+
+static nt_ui_interaction_t query_btn_frame_aniso(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1);
+    nt_ui_set_viewport(s_fx.ctx, aniso_vp());
+    declare_btn_element();
+    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_end(s_fx.ctx);
+    return in;
+}
+
+/* A device pointer at the widget's per-axis-mapped center hits; the converter round-trips. Both the
+   hit and the round-trip would FAIL if the converter used one axis' scale for both (axis transposition):
+   device = offset + layout * scale_PER_AXIS, with scale_x (2.0) != scale_y (0.5). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_anisotropic_viewport_device_pointer_hits(void) {
+    /* Per-axis device coord of the widget's layout center. A transposed converter (using scale_y on x
+       or scale_x on y) lands far off: dev_cx with scale_y would be 40 + 180*0.5 = 130, vs the widget's
+       device extent starting near 40+100*2=240 — a clear miss. */
+    const float dev_cx = ANISO_OFF_X + (BTN_CX * ANISO_SCALE_X);
+    const float dev_cy = ANISO_OFF_Y + (BTN_CY * ANISO_SCALE_Y);
+
+    nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
+    warm_btn_frame_aniso(&f1);
+    nt_pointer_t f2 = make_pointer(dev_cx, dev_cy, true, true);
+    nt_ui_interaction_t in = query_btn_frame_aniso(&f2);
+    TEST_ASSERT_TRUE(in.hovered);
+    TEST_ASSERT_TRUE(in.pressed_now);
+    /* Reported pos is LAYOUT space (device converted back per axis). */
+    TEST_ASSERT_TRUE(float_near(in.pos[0], BTN_CX, 0.5F));
+    TEST_ASSERT_TRUE(float_near(in.pos[1], BTN_CY, 0.5F));
+
+    /* layout -> screen -> layout round-trip under the anisotropic viewport. */
+    nt_pointer_t p = make_pointer(0.0F, 0.0F, false, false);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &p, 1);
+    nt_ui_set_viewport(s_fx.ctx, aniso_vp());
+    const float layout_in[2] = {BTN_CX, BTN_CY};
+    float screen[2];
+    float layout_back[2];
+    nt_ui_layout_to_screen(s_fx.ctx, layout_in, screen);
+    /* Forward maps PER AXIS to the expected device coord (transposition -> different value -> fails). */
+    TEST_ASSERT_TRUE(float_near(screen[0], dev_cx, 0.01F));
+    TEST_ASSERT_TRUE(float_near(screen[1], dev_cy, 0.01F));
+    nt_ui_screen_to_layout(s_fx.ctx, screen, layout_back);
+    TEST_ASSERT_TRUE(float_near(layout_back[0], BTN_CX, 0.01F));
+    TEST_ASSERT_TRUE(float_near(layout_back[1], BTN_CY, 0.01F));
+    nt_ui_end(s_fx.ctx);
+}
+
 #if NT_UI_DEBUG_TOOLS
-/* ---- 4: the inspector consumes the LAYOUT-space pointer under a scaled viewport ----
+/* ---- 5: the inspector consumes the LAYOUT-space pointer under a scaled viewport ----
  * Geometry chosen so RAW vs LAYOUT flips BOTH inspector paths (would PASS on the layout path,
  * FAIL on the raw path):
  *   - widget layout center x = 300 (left of the 400-wide sidebar, panel edge at logical x=400)
@@ -220,6 +289,7 @@ int main(void) {
     RUN_TEST(test_scaled_viewport_device_pointer_hits);
     RUN_TEST(test_scaled_viewport_outside_misses);
     RUN_TEST(test_converters_roundtrip_and_default_identity);
+    RUN_TEST(test_anisotropic_viewport_device_pointer_hits);
 #if NT_UI_DEBUG_TOOLS
     RUN_TEST(test_scaled_inspector_uses_layout_pointer);
 #endif

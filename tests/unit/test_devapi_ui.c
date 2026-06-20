@@ -460,6 +460,20 @@ static void test_scaled_click_xy_lands_at_device_center(void) {
     TEST_ASSERT_TRUE(near_eq(slot->x, SCALED_DEVICE_CENTER_X));
     TEST_ASSERT_TRUE(near_eq(slot->y, SCALED_DEVICE_CENTER_Y));
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+    /* Round-trip proof (mirrors the string-id scaled case): the injected DEVICE coord, converted back
+       to layout via the ctx viewport, actually hit-tests onto the widget — not just a number returned. */
+    nt_mem_scratch_reset();
+    nt_pointer_t mouse = {0};
+    mouse.x = -100.0F;
+    mouse.y = -100.0F;
+    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
+    const float device_pt[2] = {slot->x, slot->y};
+    float layout_pt[2];
+    nt_ui_screen_to_layout(s_scaled_ctx, device_pt, layout_pt);
+    bool hit = nt_ui_test_hit(s_scaled_ctx, nt_ui_id("widget"), layout_pt[0], layout_pt[1]);
+    nt_ui_end(s_scaled_ctx);
+    TEST_ASSERT_TRUE(hit);
 }
 
 /* ---- never-begun ctx: wire input must bad_params, NOT trap (the wire-input-crash regression) ---- */

@@ -225,9 +225,10 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Inject a pointer move on the default mouse slot (reserved id) unless id/type given.
 
-        x/y are Y-up (origin bottom-left), framebuffer px — the SAME convention as ui.* and ui_tree
-        bounds (input.* uses the device framebuffer height as the basis; ui.* uses its ctx layout
-        height). One consistent axis across both groups.
+        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.* uses the device framebuffer as
+        its basis. This is NOT the same basis as ui.* {x,y} / ui_tree bounds, which are ctx-LAYOUT px:
+        the two coincide only when dpr==1 AND the ctx begin-dims equal the framebuffer (no nt_ui_scale,
+        no HiDPI). Under a scaled/HiDPI ctx, feed ui.click({x,y}) ctx-layout coords, NOT input.* fb coords.
         """
         params: Dict[str, Any] = {"x": x, "y": y}
         if id is not None:
@@ -246,7 +247,8 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Inject a pointer down+up (2 atomic entries) on the mouse slot.
 
-        x/y are Y-up (origin bottom-left), framebuffer px — consistent with ui.* and ui_tree bounds.
+        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis, which differs
+        from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND begin-dims==fb.
         Default is a 1-frame hold (down@0 + up@1) — a realistic click held across one frame.
         Pass hold=0 for an instant same-frame click (down+up collapsed into one frame). `hold`
         is omitted from the request when None so the host-side default of 1 is the single
@@ -272,8 +274,8 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """The pointer primitive: action down/move/up on a given id (default mouse type).
 
-        x/y are Y-up (origin bottom-left), framebuffer px — the SAME convention as ui.* and ui_tree
-        bounds.
+        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis, which differs
+        from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND begin-dims==fb.
         """
         params: Dict[str, Any] = {"action": action, "id": id}
         if x is not None:
@@ -291,8 +293,9 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Scroll the mouse slot (notches).
 
-        x/y (when given) are Y-up (origin bottom-left), framebuffer px — consistent with ui.* and
-        ui_tree bounds. dx/dy are notch deltas (content-scroll sign), NOT spatial coords, so no axis
+        x/y (when given) are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis,
+        which differs from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND
+        begin-dims==fb. dx/dy are notch deltas (content-scroll sign), NOT spatial coords, so no axis
         flip applies to them. With x and y, the scroll is self-contained — a move to (x,y) then the
         wheel, so it lands at (x,y) regardless of prior state. Without x/y it applies at the mouse
         slot's apply-time position (move first, or it is a no-op if no slot exists).
@@ -313,8 +316,9 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Inject down@0 + a move per point (frame_stride apart) + up; NO interpolation.
 
-        Each point's x/y is Y-up (origin bottom-left), framebuffer px — consistent with ui.* and
-        ui_tree bounds.
+        Each point's x/y is Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis,
+        which differs from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND
+        begin-dims==fb.
         """
         params: Dict[str, Any] = {"id": id, "points": points}
         if type is not None:
