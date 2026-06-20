@@ -89,15 +89,35 @@ set(NT_UI_SOURCES
     nt_ui_inspector.h
 )
 
+# Header-only interface carries nt_ui.h's include root (the engine/ root resolves font/input/
+# material/resource headers it pulls); a consumer that only needs the probe API decls (e.g. the
+# devapi ui group, or a stub-linked test) depends on this rather than the heavy nt_ui impl chain.
+nt_declare_interface(nt_ui)
+
 nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
 
 # Propagate to consumers via target_link_libraries — public headers use
-# #if NT_UI_DEBUG_TOOLS. Always defined 0/1 to be -Wundef-safe.
+# #if NT_UI_DEBUG_TOOLS. Always defined 0/1 to be -Wundef-safe. Attached to the interface too so
+# the probe decl-vs-stub switch is identical whether a consumer links the impl or just the headers.
 if(NT_UI_DEBUG_TOOLS)
     target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=1)
+    target_compile_definitions(nt_ui_interface INTERFACE NT_UI_DEBUG_TOOLS=1)
 else()
     target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=0)
+    target_compile_definitions(nt_ui_interface INTERFACE NT_UI_DEBUG_TOOLS=0)
 endif()
+target_link_libraries(nt_ui PUBLIC nt_ui_interface)
+
+# Stub impl for headless / stub-linked tests: the probe symbols the devapi ui group resolves
+# (nt_ui_probe_collect / _owned / nt_ui_get_bbox / ...) without Clay or the renderer chain.
+# Forces NT_UI_DEBUG_TOOLS=1 so the probe decls are in scope. Deliberately does NOT link
+# nt_ui_interface: that carries the GLOBAL DEBUG_TOOLS value, which collides with the forced =1 under a
+# DEBUG_TOOLS=OFF build (-Wmacro-redefined). nt_add_module already gives the engine-root include.
+nt_add_module(nt_ui_stub LOG_DOMAIN "ui_stub"
+    stub/nt_ui_stub.c
+)
+target_link_libraries(nt_ui_stub PUBLIC nt_core)
+target_compile_definitions(nt_ui_stub PUBLIC NT_UI_DEBUG_TOOLS=1)
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
 # public surface: nt_ui wraps lifecycle (context, walker, themes) but

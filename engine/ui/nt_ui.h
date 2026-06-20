@@ -35,13 +35,14 @@
  * sizes all layout-bound storage:
  *   - Clay arena (sized via Clay's own formula)
  *   - tree/hit baked-xform + index arrays (production)
- *   - debug_zones, widget_registry, inspector_collapsed_ids (DEBUG_TOOLS only)
+ *   - debug_zones, widget_registry, inspector_collapsed_ids, probe_scratch (DEBUG_TOOLS only)
  *
  * Memory cost per ctx (production / production+debug; post-3D-refactor, mat4 baked storage):
- *   max_elements=1024  → ~210 KB / ~350 KB
- *   max_elements=4096  → ~820 KB / ~1.4 MB
- *   max_elements=8192  → ~1.7 MB / ~2.7 MB
- * tree_baked + hit_baked grow at 160 B/element (vs 64 B pre-refactor): mat4(64) + opacity(4) + pad(12) × 2 arrays.
+ *   max_elements=1024  → ~210 KB / ~650 KB
+ *   max_elements=4096  → ~820 KB / ~2.6 MB
+ *   max_elements=8192  → ~1.7 MB / ~5.1 MB
+ * The DEBUG_TOOLS delta is now dominated by probe_scratch (~290 B/element — owned-string POD nodes sized
+ * to max_elements so the devapi reads the FULL tree). tree_baked + hit_baked grow at 160 B/element.
  *
  * Override the default via game's compile defs:
  *   target_compile_definitions(my_game PRIVATE NT_UI_DEFAULT_MAX_ELEMENT_COUNT=4096)
@@ -228,6 +229,20 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc);
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_ui_create_desc_t *desc);
 void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
+/* The ctx's 3D-mode flag (the create-desc use_raycast_input). Lets read-only consumers (e.g. the
+   probe / devapi) report a 2D-vs-3D projection tag without reaching into the opaque ctx. */
+bool nt_ui_context_uses_raycast(const nt_ui_context_t *ctx);
+
+/* The ctx's last-frame Clay LAYOUT dimensions — the SAME space the probe bounds + the Y-up flip use
+   (nt_ui_scale apps make these differ from raw g_nt_window.fb_*). Read-only consumers (probe / devapi
+   coord metadata) report THESE as the coordinate-space dims so read==write stays exact. Writes 0,0 on
+   a NULL clay (pre-first-frame). */
+void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *out_h);
+
+/* True once the ctx has completed at least one nt_ui_begin (begin_w > 0). Coordinate conversion +
+   bounds are only valid then — a never-begun ctx has degenerate (0) dims that trap the converters. */
+bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
+
 /* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
  * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
  * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the
@@ -250,7 +265,26 @@ void nt_ui_set_element_depth_bias(nt_ui_context_t *ctx, float ndc_per_element);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-/* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. */
+/* Device->layout viewport, the ctx's single device<->layout mapping.
+ *   (x, y) — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
+ *   (w, h) — device-space size of that content rect (logical_dim * scale), must be > 0. */
+typedef struct {
+    float x, y, w, h;
+} nt_ui_viewport_t;
+
+/* Overrides this frame's viewport (begin reset it to the identity {0,0,screen_w,screen_h}).
+ * Call AFTER nt_ui_begin and BEFORE the first hit-test resolve (step/query/pointer_hot) — same
+ * lazy window as nt_ui_set_view_proj. Scaled apps feed nt_ui_viewport_from_scale here. */
+void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
+
+/* Bidirectional device<->layout converters through the ctx viewport (cglm vec2 = float[2], passed
+ * float[16]-style so the public header stays cglm-free). screen = device px; layout = Clay px.
+ * No Y-flip (device and Clay layout are both Y-down). */
+void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]);
+void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]);
+
+/* pointers[0..count) drive multitouch under α-semantics — see nt_ui_capture_t doc. pointers carry
+ * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve. */
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
 void nt_ui_end(nt_ui_context_t *ctx);
 
@@ -260,7 +294,7 @@ void nt_ui_end(nt_ui_context_t *ctx);
  *   static const nt_ui_widget_def_t INV_SLOT_DEF = {
  *       .name = "inv_slot", .pill_color = 0xFFB060A0,
  *   };
- *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL); */
+ *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL, true); */
 typedef struct nt_ui_widget_def_t {
     const char *name;    /* shown in inspector pill; e.g. "button" */
     uint32_t pill_color; /* 0xAABBGGRR */
@@ -272,13 +306,14 @@ _Static_assert(sizeof(nt_ui_widget_def_t) == (sizeof(void *) == 8 ? 16 : 12), "n
 /* `pad_lrtb` (optional) is the touch-target inflation; pass NULL for none.
  * Storage is direct-mapped, replace-on-collision (observability-only). */
 #if NT_UI_DEBUG_TOOLS
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], bool enabled);
 #else
-static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+static inline void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], bool enabled) {
     (void)ctx;
     (void)id;
     (void)def;
     (void)pad_lrtb;
+    (void)enabled;
 }
 #endif
 
@@ -287,6 +322,96 @@ const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32
 
 /* Returns false (out untouched) when the id is unregistered or has no recorded padding. */
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
+
+// #region probe
+/* Flat POD tree extraction for a bot / smoke-test. Clay-free by contract: no Clay type may appear
+ * in the node struct or the collect signature. id_string is COPIED into a node-owned fixed-cap
+ * buffer on collect (the borrowed Clay pointer dies at the next nt_ui_begin). DEBUG_TOOLS-gated. */
+
+#ifndef NT_UI_PROBE_ID_CAP
+#define NT_UI_PROBE_ID_CAP 64 /* owned id_string copy cap incl. NUL */
+#endif
+#ifndef NT_UI_PROBE_TEXT_CAP
+#define NT_UI_PROBE_TEXT_CAP 64 /* owned text / label copy cap incl. NUL */
+#endif
+/* Fallback cap for the caller-buffer nt_ui_probe_collect form (tests / general callers). The devapi
+   path uses nt_ui_probe_collect_owned, whose arena scratch is sized to the ctx RUNTIME max_elements, so
+   it never count-truncates regardless of this compile-time default. */
+#ifndef NT_UI_PROBE_MAX_NODES
+#define NT_UI_PROBE_MAX_NODES NT_UI_DEFAULT_MAX_ELEMENT_COUNT
+#endif
+
+/* Coarse role tag. Registered widgets resolve to their def->name; unregistered elements fall
+ * back to the Clay config-mask kind (box/text/image/floating). */
+typedef enum nt_ui_probe_role_t {
+    NT_UI_PROBE_ROLE_BOX = 0, /* default / unregistered container */
+    NT_UI_PROBE_ROLE_TEXT,
+    NT_UI_PROBE_ROLE_IMAGE,
+    NT_UI_PROBE_ROLE_FLOATING,
+    NT_UI_PROBE_ROLE_WIDGET, /* a registered widget; name carries the specific kind (def->name) */
+} nt_ui_probe_role_t;
+
+/* Flat node, NO Clay types. parent is emitted from the DFS stack (NT_UI_PROBE_NO_PARENT for roots);
+ * bounds = {x, y, w, h} framebuffer px (Y-up). collect emits nodes incl. invisible/offscreen/disabled
+ * so the bot decides what to filter; up to the caller's cap (NT_UI_PROBE_MAX_NODES static form; ctx
+ * max_elements arena form), then truncated (see collect). */
+#define NT_UI_PROBE_NO_PARENT 0U /* root nodes have id != 0, so 0 is an unambiguous "no parent" */
+
+typedef struct nt_ui_probe_node_t {
+    uint32_t id;     /* Clay element id */
+    uint32_t parent; /* parent id, or NT_UI_PROBE_NO_PARENT for a root */
+    nt_ui_probe_role_t role;
+    char id_string[NT_UI_PROBE_ID_CAP]; /* owned copy, NUL-terminated */
+    char text[NT_UI_PROBE_TEXT_CAP];    /* own text content (text leaves only), NUL-terminated */
+    char label[NT_UI_PROBE_TEXT_CAP];   /* first text-child caption, distinct from text */
+    char role_name[NT_UI_PROBE_ID_CAP]; /* registered def->name when role==WIDGET, else "" */
+    float bounds[4];                    /* x, y, w, h in framebuffer px (Y-up) */
+    uint16_t id_string_len;
+    uint16_t text_len;
+    uint16_t label_len;
+    uint16_t child_count; /* number of direct children emitted in this collect */
+    bool visible;         /* !offscreen AND not ancestor-clipped AND composed opacity > threshold */
+    bool enabled;         /* per-id slot signal; unregistered -> true */
+} nt_ui_probe_node_t;
+
+#if NT_UI_DEBUG_TOOLS
+/* Collects the LAST completed frame's tree into `out` (up to `cap` nodes). Writes the node count to
+ * *out_count (nullable). Sets *out_truncated (nullable) true when the walk stopped early — the `cap`
+ * node limit or the internal DFS-stack limit was hit, so the tree is partial. Returns the count.
+ * ctx must have completed nt_ui_end. Stops at `cap`; never writes past out[cap-1]. */
+uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated);
+
+/* Owned-scratch collect: walks into the ctx's arena probe_scratch (cap = max_elements) and returns it.
+ * Because the scratch tracks the ctx element budget, a within-capacity tree never count-truncates —
+ * *out_truncated then reflects ONLY the internal DFS-stack depth limit, not an element-count cap.
+ * The returned pointer is owned by the ctx and stays valid until the next collect on this ctx. */
+const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_context_t *ctx, uint32_t *out_count, bool *out_truncated);
+#else
+static inline uint32_t nt_ui_probe_collect(const nt_ui_context_t *ctx, nt_ui_probe_node_t *out, uint32_t cap, uint32_t *out_count, bool *out_truncated) {
+    (void)ctx;
+    (void)out;
+    (void)cap;
+    if (out_count != NULL) {
+        *out_count = 0U;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = false;
+    }
+    return 0U;
+}
+
+static inline const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_context_t *ctx, uint32_t *out_count, bool *out_truncated) {
+    (void)ctx;
+    if (out_count != NULL) {
+        *out_count = 0U;
+    }
+    if (out_truncated != NULL) {
+        *out_truncated = false;
+    }
+    return NULL;
+}
+#endif
+// #endregion
 
 /* Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are hard barriers. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);

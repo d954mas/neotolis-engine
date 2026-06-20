@@ -403,9 +403,10 @@ jobs:
       - name: Smoke test builder (debug)
         run: ./build/tools/builder/native-debug/builder
 
-      # devapi ON so the 5 devapi test targets (gated by if(NT_DEVAPI_ENABLED)) build + run.
+      # devapi + ui group ON so the devapi test targets (incl. the ui.* tests) build + run.
+      # GROUP_UI is opt-in (default OFF), so enable it explicitly here.
       - name: Configure native debug tests (FULL asserts, devapi ON)
-        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON
+        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON
 
       - name: Build native debug tests
         run: cmake --build --preset native-debug-test
@@ -493,10 +494,11 @@ jobs:
           bash scripts/check_no_real_impl_links.sh
           bash scripts/check_link_failure_loud.sh
 
-      # devapi ON so its TUs are in compile_commands.json. tidy.sh lints every .c, but devapi
-      # uses CMake subdir-exclusion, so at the default (off) it would lint them with wrong flags.
+      # devapi + ui group ON so all devapi TUs (incl. nt_devapi_ui.c) are in compile_commands.json.
+      # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
+      # GROUP_UI opt-in off) they would be linted with wrong flags or missing.
       - name: Configure
-        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON
+        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug

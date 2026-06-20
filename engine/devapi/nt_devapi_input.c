@@ -6,8 +6,9 @@
 #include "devapi/nt_devapi_internal.h"
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h"
+#include "window/nt_window.h" /* g_nt_window.fb_height — the height basis for the input.* Y flip. */
 
-/* L2 veneer over the L1 inject API: range-check bot input -> bad_params, never assert. */
+/* Veneer over the core inject API: range-check bot input -> bad_params, never assert. */
 
 #ifdef NT_DEVAPI_GROUP_INPUT
 
@@ -53,8 +54,8 @@ typedef struct {
 static sched_entry_t s_sched[NT_DEVAPI_INPUT_SCHED_MAX];
 static uint32_t s_sched_count;
 
-/* Whole-or-nothing reserve mirrors the old L1 inject_reserve: a multi-event command gets all N
-   slots or none, so a near-full schedule can never accept a DOWN and reject its UP. */
+/* Whole-or-nothing reserve: a multi-event command gets all N slots or none, so a near-full
+   schedule can never accept a DOWN and reject its UP. */
 static sched_entry_t *sched_reserve(uint32_t n) {
     if (n > NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count) {
         return NULL;
@@ -122,6 +123,17 @@ static bool sched_wheel(float dx, float dy, uint16_t at_frame) {
     e->u.wheel.dy = dy;
     return true;
 }
+
+/* Cross-group reuse wrappers (the ui group delegates here so there is ONE scheduler on the immediate
+   buffer — see nt_devapi_internal.h). Thin pass-throughs to the static scheduler; whole-or-nothing
+   semantics are the caller's (preflight can_reserve(N) then issue N sched_* calls, single-threaded). */
+bool nt_devapi_input_sched_can_reserve(uint32_t n) { return sched_can_reserve(n); }
+
+bool nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
+    return sched_pointer(kind, id, x, y, pressure, type, buttons_mask, at_frame);
+}
+
+bool nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) { return sched_wheel(dx, dy, at_frame); }
 
 /* down@0 + up@hold (2 entries): the tap/click hold primitive. */
 static bool sched_tap(nt_key_t key, uint16_t hold_frames) {
@@ -215,7 +227,7 @@ void nt_devapi_input_update(void) {
 
 void nt_devapi_input_reset(void) {
     /* Clears ONLY devapi-owned transient state (schedule + advance clock). Applied input is
-       game-owned (a bot is indistinguishable from a human at L1), so it is NOT released here. */
+       game-owned (a bot is indistinguishable from a human at the inject layer), so it is NOT released here. */
     s_sched_count = 0;
     s_last_frame = g_nt_app.frame; /* re-seed so the next update compares against the real frame. */
 }
@@ -327,6 +339,10 @@ static bool parse_finite_coord(const cJSON *nj, const char *cmd, float *out, nt_
     return true;
 }
 
+/* The ONE Y-up -> device flip for input.*. Basis is g_nt_window.fb_height (device space), distinct
+   from ui.*'s ctx LAYOUT height — different basis by design, not a bug. */
+static float flip_y_up_to_device(float y_up) { return (float)g_nt_window.fb_height - y_up; }
+
 // #region input.*
 static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -409,6 +425,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
         if (!parse_finite_coord(xj, "input.pointer: x must be a finite number for down/move", &x, err) || !parse_finite_coord(yj, "input.pointer: y must be a finite number for down/move", &y, err)) {
             return false;
         }
+        y = flip_y_up_to_device(y);
     }
     uint8_t type;
     if (!pointer_type_from_name(cJSON_GetObjectItemCaseSensitive(params, "type"), &type)) {
@@ -444,6 +461,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!parse_finite_coord(xj, "input.move: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.move: y must be a finite number", &y, err)) {
         return false;
     }
+    y = flip_y_up_to_device(y);
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
@@ -478,6 +496,7 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     if (!parse_finite_coord(xj, "input.click: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.click: y must be a finite number", &y, err)) {
         return false;
     }
+    y = flip_y_up_to_device(y);
     uint32_t id = NT_INPUT_INJECT_POINTER_ID_BASE;
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
     if (idj != NULL) {
@@ -531,6 +550,8 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
 /* Without x/y the wheel applies at the slot's apply-time position (no submit-time g_nt_input read). */
 static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
+    /* dx/dy are notch deltas (content-scroll sign, see nt_pointer_t.wheel_dy), NOT spatial coords —
+       the Y-up flip applies only to the positioned (x,y) below, never to the wheel delta. */
     float dx = 0.0F;
     float dy = 0.0F;
     const cJSON *dxj = cJSON_GetObjectItemCaseSensitive(params, "dx");
@@ -550,6 +571,7 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!parse_finite_coord(xj, "input.wheel: x must be a finite number", &x, err) || !parse_finite_coord(yj, "input.wheel: y must be a finite number", &y, err)) {
             return false;
         }
+        y = flip_y_up_to_device(y); /* positioned scroll: Y-up in -> device Y-down for the MOVE entry. */
         /* whole-or-nothing: reserve MOVE + wheel together (see sched_reserve). */
         if (!sched_can_reserve(2U)) {
             set_bad_params(err, "input.wheel: inject schedule overflow");
@@ -635,7 +657,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     /* down@0 carrying first point, a move per SUBSEQUENT point at its frame offset, up after the last. */
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
-    float fy = (float)cJSON_GetArrayItem(first, 1)->valuedouble;
+    float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
     if (!sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0)) {
         set_bad_params(err, "input.gesture: inject schedule overflow");
         return false;
@@ -648,7 +670,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
             continue; /* DOWN already applied point[0] @0 -- skip the redundant same-frame MOVE. */
         }
         float mx = (float)cJSON_GetArrayItem(p, 0)->valuedouble;
-        float my = (float)cJSON_GetArrayItem(p, 1)->valuedouble;
+        float my = flip_y_up_to_device((float)cJSON_GetArrayItem(p, 1)->valuedouble); /* Y-up point. */
         /* Compute the offset in int64 so the narrowing source is self-evidently within the
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
@@ -841,8 +863,8 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.pointer",
         .group = "input",
-        .summary = "the pointer primitive: action down/move/up on a given id (default mouse type)",
-        .params_shape = "{action:string, id:number, x?:number, y?:number, type?:string, buttons?:number}",
+        .summary = "the pointer primitive: action down/move/up on a given id (default mouse type); x/y are Y-up (origin bottom-left), framebuffer px — same convention as ui.*",
+        .params_shape = "{action:string, id:number, x?:number, y?:number, type?:string, buttons?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
         .side_effects = "enqueues a synthetic pointer event",
@@ -850,8 +872,8 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.move",
         .group = "input",
-        .summary = "sugar: pointer move on the default mouse slot (reserved id)",
-        .params_shape = "{x:number, y:number, id?:number, type?:string}",
+        .summary = "sugar: pointer move on the default mouse slot (reserved id); x/y are Y-up (origin bottom-left), framebuffer px",
+        .params_shape = "{x:number, y:number, id?:number, type?:string}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
         .side_effects = "enqueues a synthetic pointer move",
@@ -859,8 +881,8 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.click",
         .group = "input",
-        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse slot; hold default 1 frame, 0 = same-frame",
-        .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}",
+        .summary = "sugar: pointer down@0 + up@hold (2 entries) on the mouse slot; hold default 1 frame, 0 = same-frame; x/y are Y-up (origin bottom-left), framebuffer px",
+        .params_shape = "{x:number, y:number, button?:number, id?:number, hold?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
         .side_effects = "enqueues a synthetic pointer down+up",
@@ -868,8 +890,9 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.wheel",
         .group = "input",
-        .summary = "scroll the mouse slot (notches); with x/y scrolls AT (x,y), else at the slot's apply-time position (no slot -> no-op)",
-        .params_shape = "{dx?:number, dy?:number, x?:number, y?:number}",
+        .summary = "scroll the mouse slot (notches); with x/y scrolls AT (x,y), else at the slot's apply-time position (no slot -> no-op); x/y are Y-up (origin bottom-left), framebuffer px; "
+                   "dx/dy are notch deltas (not coords)",
+        .params_shape = "{dx?:number, dy?:number, x?:number, y?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{ok:bool}",
         .frame_behavior = "any",
         .side_effects = "enqueues a synthetic wheel event (with x/y, a preceding move)",
@@ -877,8 +900,8 @@ static const nt_devapi_command_desc k_input_cmds[] = {
     {
         .method = "input.gesture",
         .group = "input",
-        .summary = "sugar: down@0 + a move per point (frame_stride apart) + up; NO interpolation",
-        .params_shape = "{id:number, type?:string, points:[[x,y]], frame_stride?:number}",
+        .summary = "sugar: down@0 + a move per point (frame_stride apart) + up; NO interpolation; each point's x/y is Y-up (origin bottom-left), framebuffer px",
+        .params_shape = "{id:number, type?:string, points:[[x,y]], frame_stride?:number}, origin:bottom-left, y_axis:up, space:framebuffer-px",
         .result_shape = "{queued:number}",
         .frame_behavior = "any",
         .side_effects = "enqueues an ordered multi-frame pointer gesture",

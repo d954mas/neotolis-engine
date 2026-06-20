@@ -25,7 +25,8 @@ typedef struct {
     uint32_t id;                   /* 0 = slot empty */
     const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
     uint8_t has_padding;
-    uint8_t _pad[3];
+    uint8_t enabled; /* 1 = enabled (default); written every frame at register */
+    uint8_t _pad[2];
     int16_t hit_padding_lrtb[4];
 } nt_ui_widget_slot_t;
 
@@ -184,6 +185,21 @@ struct nt_ui_context {
     nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
     uint32_t frame_pointer_count;
     float frame_dt;
+    /* frame_pointers hold RAW device coords until the lazy hot resolve converts them to layout
+     * space via `viewport` (once per frame, gated by frame_pointers_converted). begin defaults the
+     * viewport to identity {0,0,screen_w,screen_h}; nt_ui_set_viewport overrides it before resolve. */
+    bool frame_pointers_converted;
+    nt_ui_viewport_t viewport;
+    /* begin dims (= screen_w/h) — the layout size the device<->layout conversion divides by. Stored so
+     * the conversion is self-contained (no g_nt_window, no Clay read). */
+    float begin_w, begin_h;
+#if NT_UI_DEBUG_TOOLS
+    /* Prev-frame viewport + dims. The inspector's pointer-over is tested against LAST frame's solved tree
+     * (Clay_BeginLayout wipes the roots), so the device->layout convert must use the viewport that laid
+     * out THAT tree — not this frame's (set later via nt_ui_set_viewport). */
+    nt_ui_viewport_t prev_viewport;
+    float prev_begin_w, prev_begin_h;
+#endif
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
@@ -389,6 +405,11 @@ struct nt_ui_context {
     uint32_t inspector_collapsed_cap;
     uint32_t inspector_collapsed_count;
 
+    /* Arena-allocated probe collect scratch, cap = max_elements: a node maps to at most one Clay
+     * element (chrome excluded), so the whole tree always fits — no count-truncation. */
+    nt_ui_probe_node_t *probe_scratch;
+    uint32_t probe_scratch_cap;
+
     nt_ui_inspector_metrics_t inspector_metrics;
     /* Optional overlay materials (typically depth_test=false); 0 = fall back to the game's sprite/text material. */
     nt_material_t inspector_sprite_material;
@@ -451,8 +472,17 @@ typedef struct nt_ui_inspector_element_info {
 
 nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
 
+/* Probe reads the per-id `enabled` slot signal. Registered id -> the slot byte; unregistered /
+ * non-interactive id -> true (default). Always compiled; independent of inspector/recording. */
+bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id);
+
 /* Caller (nt_ui_end) must run inside the Clay current-ctx scope. */
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
+
+/* Idempotent once-per-frame device->layout conversion of frame_pointers via ctx->viewport. The hot
+ * resolve calls it; other-TU pointer consumers (scroll wheel, menu) call it too so they read layout
+ * coords regardless of whether a widget stepped first. No-op after the first call each frame. */
+void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
@@ -468,7 +498,7 @@ const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *
  * elements are tree-selectable, not scene-hover-pickable. 0 = none. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
 
-void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y);
+void nt_ui_internal_project_layout_to_world(const float m[16], float vy, float vh, float x, float y, float *out_x, float *out_y);
 
 void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color);
 

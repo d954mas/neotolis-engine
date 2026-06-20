@@ -290,7 +290,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     row_decl.userData = (void *)row_data;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(row_decl);
-    nt_ui_widget_register(ctx, id, def, NULL);
+    nt_ui_widget_register(ctx, id, def, NULL, enabled);
     // #endregion
     // #region ordered children (text-side first, then box; or box, then text)
     cb_emit_args_t args = {

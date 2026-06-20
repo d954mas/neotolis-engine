@@ -74,7 +74,7 @@ static void test_registry_register_lookup(void) {
     /* Empty by default. */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     /* Register one. */
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL, true);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     /* Different id, same bucket NOT guaranteed -- but distinct lookups return NULL. */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("bar")));
@@ -85,7 +85,7 @@ static void test_registry_register_lookup(void) {
 static void test_registry_resets_each_begin(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL, true);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     nt_ui_end(s_fx.ctx);
 
@@ -102,8 +102,8 @@ static void test_registry_collision_linear_probe(void) {
     /* Synthesize two ids landing in the same bucket: id_b = id_a + cap → same id & mask. */
     const uint32_t base_id = nt_ui_id("collide_a");
     const uint32_t collide_id = base_id + s_fx.ctx->widget_registry_cap;
-    nt_ui_widget_register(s_fx.ctx, base_id, &NT_UI_BUTTON_DEF, NULL);
-    nt_ui_widget_register(s_fx.ctx, collide_id, &NT_UI_IMAGE_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, base_id, &NT_UI_BUTTON_DEF, NULL, true);
+    nt_ui_widget_register(s_fx.ctx, collide_id, &NT_UI_IMAGE_DEF, NULL, true);
     /* Linear probe resolves both — no replacement. */
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, base_id));
     TEST_ASSERT_EQUAL_PTR(&NT_UI_IMAGE_DEF, nt_ui_widget_lookup(s_fx.ctx, collide_id));
@@ -114,7 +114,7 @@ static void test_registry_collision_linear_probe(void) {
 static void test_registry_id_zero_dropped(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, 0U, &NT_UI_BUTTON_DEF, NULL); /* must not assert */
+    nt_ui_widget_register(s_fx.ctx, 0U, &NT_UI_BUTTON_DEF, NULL, true); /* must not assert */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, 0U));
     nt_ui_end(s_fx.ctx);
 }
@@ -129,8 +129,8 @@ static const nt_ui_widget_def_t TEST_GAME_INV_SLOT_DEF = {
 static void test_registry_engine_and_game_defs_coexist(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_btn"), &NT_UI_BUTTON_DEF, NULL);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_slot"), &TEST_GAME_INV_SLOT_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_btn"), &NT_UI_BUTTON_DEF, NULL, true);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_slot"), &TEST_GAME_INV_SLOT_DEF, NULL, true);
 
     const nt_ui_widget_def_t *btn = nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("a_btn"));
     const nt_ui_widget_def_t *slot = nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("a_slot"));
@@ -152,9 +152,9 @@ static void test_registry_engine_and_game_defs_coexist(void) {
 static void test_registry_duplicate_id_traps(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_BUTTON_DEF, NULL, true);
     /* Second register of the SAME id this frame must fire NT_ASSERT. */
-    NT_TEST_EXPECT_ASSERT(nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_IMAGE_DEF, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_IMAGE_DEF, NULL, true));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -497,7 +497,7 @@ static void test_widget_register_padded_roundtrip(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     const int16_t pad[4] = {12, 14, 16, 18};
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("btn_padded"), &NT_UI_BUTTON_DEF, pad);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("btn_padded"), &NT_UI_BUTTON_DEF, pad, true);
     /* Def still resolves through lookup. */
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn_padded")));
     /* Padding is recovered exactly. */
@@ -515,7 +515,7 @@ static void test_widget_register_padded_roundtrip(void) {
 static void test_widget_unpadded_no_hit_padding(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), &NT_UI_IMAGE_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), &NT_UI_IMAGE_DEF, NULL, true);
     int16_t out[4] = {99, 99, 99, 99};
     TEST_ASSERT_FALSE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("img"), out));
     /* out untouched on miss (documented contract). */
@@ -1136,7 +1136,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     /* Project top-left through accum + Y-flip; must differ from axis-aligned. */
     float proj_x = 0.0F;
     float proj_y = 0.0F;
-    nt_ui_internal_project_layout_to_world(z, 0.0F, screen_h, z->visual_l, z->visual_t, &proj_x, &proj_y);
+    nt_ui_internal_project_layout_to_world(z->m, 0.0F, screen_h, z->visual_l, z->visual_t, &proj_x, &proj_y);
     const float flat_x = z->visual_l;
     const float flat_y = screen_h - z->visual_t;
     const float dx = fabsf(proj_x - flat_x);
@@ -1306,7 +1306,7 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     CLAY({.id = CLAY_ID("widget_floater"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = panel_x, .y = panel_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(panel_h)}}}) {
-        nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL);
+        nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL, true);
         /* Anonymous nested child fills the parent. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
     }
@@ -1319,7 +1319,7 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     CLAY({.id = CLAY_ID("widget_floater"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = panel_x, .y = panel_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(panel_h)}}}) {
-        nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL);
+        nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL, true);
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
     }
     nt_ui_end(s_fx.ctx);

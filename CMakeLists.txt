@@ -27,10 +27,15 @@ option(NT_DEVAPI_GROUP_INPUT "Build the devapi input.* group (synthetic input in
 option(NT_DEVAPI_GROUP_CORE "Build the devapi core group (ping / engine.info / view)." ON)
 option(NT_DEVAPI_GROUP_TIME "Build the devapi time.*/render.*/frame.* group." ON)
 option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / command.describe / features)." ON)
+# The ui group reads nt_ui_probe_collect (gated by NT_UI_DEBUG_TOOLS) and delegates writes to the input
+# scheduler (NT_DEVAPI_GROUP_INPUT). Default OFF (opt-in, "use only what you need") so a plain
+# -DNT_DEVAPI_ENABLED build stays lean and does not pull in UI debug tools; enable it explicitly,
+# together with NT_UI_DEBUG_TOOLS + NT_DEVAPI_GROUP_INPUT (a hard CMake guard enforces both).
+option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over the nt_ui probe)." OFF)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)
-    foreach(_grp CORE TIME INPUT DISCOVERY)
+    foreach(_grp CORE TIME INPUT DISCOVERY UI)
         if(NT_DEVAPI_GROUP_${_grp})
             message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
                 "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "

@@ -81,7 +81,7 @@ void nt_ui_progress(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(track_decl);
-    nt_ui_widget_register(ctx, id, &NT_UI_PROGRESS_DEF, NULL);
+    nt_ui_widget_register(ctx, id, &NT_UI_PROGRESS_DEF, NULL, true);
 
     /* Fill child via the shared helper; the eased ratio drives the reveal. No-art skip. */
     if (style->fill.atlas.id != 0U && style->fill.region != NT_ATLAS_INVALID_REGION) {

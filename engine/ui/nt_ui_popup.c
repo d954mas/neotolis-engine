@@ -303,7 +303,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     const nt_ui_widget_def_t *reg_def = (ext != NULL && ext->def != NULL) ? ext->def : &NT_UI_POPUP_DEF;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel_decl);
-    nt_ui_widget_register(ctx, id, reg_def, NULL);
+    nt_ui_widget_register(ctx, id, reg_def, NULL, true);
     // #endregion
 
     if (out_src != NULL) {

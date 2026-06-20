@@ -2368,8 +2368,9 @@ static void frame(void) {
 
         ensure_ids();
 
-        const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
+        /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
+        nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
 
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
