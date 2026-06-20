@@ -193,6 +193,14 @@ struct nt_ui_context {
     /* begin dims (= screen_w/h) — the layout size the device<->layout conversion divides by. Stored so
      * the conversion is self-contained (no g_nt_window, no Clay read). */
     float begin_w, begin_h;
+#if NT_UI_DEBUG_TOOLS
+    /* Prev-frame viewport + dims. The inspector feeds Clay_SetPointerState at begin, tested against LAST
+     * frame's solved tree (Clay_BeginLayout wipes the roots), so the device->layout convert must use the
+     * viewport that laid out THAT tree — not this frame's (set later via nt_ui_set_viewport). 1-frame lag
+     * on a resize, consistent with every other prev-frame-bbox hit-test here. */
+    nt_ui_viewport_t prev_viewport;
+    float prev_begin_w, prev_begin_h;
+#endif
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];

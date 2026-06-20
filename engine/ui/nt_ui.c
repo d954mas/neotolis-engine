@@ -401,6 +401,21 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->frame_pointer_count = count;
     ctx->frame_dt = dt;
     ctx->frame_pointers_converted = false;
+#if NT_UI_DEBUG_TOOLS
+    /* Snapshot LAST frame's viewport before the identity reset below: the inspector's Clay_SetPointerState
+     * (further down) is tested against last frame's tree, so it must convert with last frame's viewport.
+     * Frame 1 has no prior tree; a degenerate (zero-size) prev viewport falls back to this frame's
+     * identity so the convert stays valid (result is moot — pointerOverIds is empty frame 1). */
+    if (ctx->viewport.w > 0.0F && ctx->viewport.h > 0.0F && ctx->begin_w > 0.0F && ctx->begin_h > 0.0F) {
+        ctx->prev_viewport = ctx->viewport;
+        ctx->prev_begin_w = ctx->begin_w;
+        ctx->prev_begin_h = ctx->begin_h;
+    } else {
+        ctx->prev_viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h};
+        ctx->prev_begin_w = screen_w;
+        ctx->prev_begin_h = screen_h;
+    }
+#endif
     /* Default viewport = identity device==layout (no set_viewport => unscaled apps unchanged). */
     ctx->begin_w = screen_w;
     ctx->begin_h = screen_h;
@@ -482,20 +497,32 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const nt_pointer_t *primary = &pointers[0];
 
 #if NT_UI_DEBUG_TOOLS
-    /* Pure coord check — frame-1 safe, no layout solve required. Single-touch contract: only
-     * pointer 0 gates the inspector sidebar (a debug tool is not driven multi-touch). */
-    ctx->inspector_pointer_consumed = false;
-    if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
-        ctx->inspector_pointer_consumed = true;
+    /* The inspector consumes the LAYOUT-space pointer. Clay's pointer-over is tested against LAST frame's
+     * solved tree (the BeginLayout below wipes the roots), laid out with last frame's viewport — so the
+     * gate + Clay feed convert with prev_*. nt_ui_internal_ensure_pointers_layout re-gates with THIS
+     * frame's viewport once nt_ui_set_viewport has run (before any step/query/scroll reads the flag). */
+    float insp_screen[2] = {primary->x, primary->y};
+    float insp_layout[2] = {primary->x, primary->y};
+    if (ctx->prev_viewport.w > 0.0F && ctx->prev_viewport.h > 0.0F && ctx->prev_begin_w > 0.0F && ctx->prev_begin_h > 0.0F) {
+        nt_ui_screen_to_layout_vp(&ctx->prev_viewport, ctx->prev_begin_w, ctx->prev_begin_h, insp_screen, insp_layout);
     }
+    /* Initial gate value (frame-1 safe, no layout solve): layout x vs the LOGICAL panel edge. */
+    ctx->inspector_pointer_consumed = ctx->inspector_active && (insp_layout[0] >= (screen_w - ctx->inspector_metrics.panel_width));
+    const float clay_pointer_x = insp_layout[0];
+    const float clay_pointer_y = insp_layout[1];
+#else
+    const float clay_pointer_x = primary->x;
+    const float clay_pointer_y = primary->y;
 #endif
 
     /* nt_ui_inspector replaces Clay's built-in debug view. */
     Clay_SetDebugModeEnabled(false);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
-    /* Clay v0.14 has no right/middle/wheel buttons; left only. */
-    Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
+    /* Clay v0.14 has no right/middle/wheel buttons; left only. Clay's pointer-over consumer is the
+     * inspector only; under DEBUG_TOOLS feed the layout-space pointer so a scaled ctx hover-picks
+     * the right zone. Identity viewport => layout==device, so unscaled feeds the raw value unchanged. */
+    Clay_SetPointerState((Clay_Vector2){.x = clay_pointer_x, .y = clay_pointer_y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
     /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed,
      * so drag-scrolling stays off. Still REQUIRED every frame: it runs Clay's clip/scroll-container GC.
@@ -2353,6 +2380,9 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
     nt_ui_interaction_t out = {0};
 
 #if NT_UI_DEBUG_TOOLS
+    /* Force the device->layout conversion FIRST so the inspector gate below is evaluated in layout
+     * space (a scaled ctx fed the raw device pointer at begin, which over-claims the sidebar). */
+    nt_ui_internal_ensure_pointers_layout(ctx);
     /* Sidebar consumes the pointer; widgets behind it report no interaction. */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
@@ -2442,6 +2472,15 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
         p->dx *= inv_sx; /* delta carries only the scale (no offset) */
         p->dy *= inv_sy;
     }
+#if NT_UI_DEBUG_TOOLS
+    /* Re-gate the inspector sidebar with THIS frame's viewport now it is known: begin gated using the
+     * PREV-frame viewport (1-frame lag, off only on a resize). frame_pointers[0] is now layout-space; the
+     * panel sits at logical x = begin_w - panel_width, so compare the converted pointer.x against it. */
+    if (ctx->frame_pointer_count > 0U) {
+        const nt_pointer_t *primary = &ctx->frame_pointers[0];
+        ctx->inspector_pointer_consumed = ctx->inspector_active && (primary->x >= (ctx->begin_w - ctx->inspector_metrics.panel_width));
+    }
+#endif
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

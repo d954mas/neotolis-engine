@@ -20,6 +20,8 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_inspector.h"
+#include "ui/nt_ui_internal.h"
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -160,11 +162,66 @@ static void test_converters_roundtrip_and_default_identity(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+#if NT_UI_DEBUG_TOOLS
+/* ---- 4: the inspector consumes the LAYOUT-space pointer under a scaled viewport ----
+ * Geometry chosen so RAW vs LAYOUT flips BOTH inspector paths (would PASS on the layout path,
+ * FAIL on the raw path):
+ *   - widget layout center x = 300 (left of the 400-wide sidebar, panel edge at logical x=400)
+ *   - device center x = VP_OFF_X + 300*VP_SCALE = 490 (>= 400, i.e. OVER the panel in raw coords)
+ * Raw path: gate would consume the pointer (490 >= 400) AND Clay would hover-pick at device 490
+ * (a miss vs the widget's layout rect 220..380) -> highlight != widget. Layout path: gate stays
+ * open (300 < 400) and the hover-pick lands on the widget -> highlight == widget. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scaled_inspector_uses_layout_pointer(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float ins_btn_w = 160.0F;
+    const float ins_btn_h = 48.0F;
+    const float ins_cx = 300.0F; /* layout center x: left of the sidebar (panel edge at 400) */
+    const float ins_cy = 224.0F;
+    const float ins_btn_x = ins_cx - (ins_btn_w * 0.5F); /* 220: rect spans layout 220..380 */
+    const float ins_btn_y = ins_cy - (ins_btn_h * 0.5F);
+    const float dev_cx = VP_OFF_X + (ins_cx * VP_SCALE); /* 490: over the panel in raw device coords */
+    const float dev_cy = VP_OFF_Y + (ins_cy * VP_SCALE);
+
+    /* Frame 1: declare widget on the scaled ctx so frame 2's pointer-over tests against this tree. */
+    nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &f1, 1);
+    nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
+    CLAY({.id = CLAY_ID("insp_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(ins_btn_w), CLAY_SIZING_FIXED(ins_btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: same device pointer. The gate is recomputed in layout space at the hot resolve, so a
+     * step here forces the conversion before reading the consumed flag. */
+    nt_pointer_t f2 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &f2, 1);
+    nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
+    CLAY({.id = CLAY_ID("insp_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(ins_btn_w), CLAY_SIZING_FIXED(ins_btn_h)}}}) {
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("insp_target"));
+    }
+    /* Layout-space gate: device 490 maps to layout 300 (< 400) -> NOT over the sidebar, so normal
+     * interaction is not spuriously suppressed (the raw 490 >= 400 path would consume it). */
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    nt_ui_end(s_fx.ctx);
+
+    /* Hover-pick consumed the layout pointer (300,224) -> lands on the widget. The raw device point
+     * (490,366) would miss the widget's layout rect, so this assert fails on the raw-pointer path. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("insp_target"), s_fx.ctx->inspector_highlight_id);
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_viewport_identity_hit);
     RUN_TEST(test_scaled_viewport_device_pointer_hits);
     RUN_TEST(test_scaled_viewport_outside_misses);
     RUN_TEST(test_converters_roundtrip_and_default_identity);
+#if NT_UI_DEBUG_TOOLS
+    RUN_TEST(test_scaled_inspector_uses_layout_pointer);
+#endif
     return UNITY_END();
 }
