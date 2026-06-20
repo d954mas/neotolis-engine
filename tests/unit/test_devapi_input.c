@@ -1,4 +1,4 @@
-/* L2 devapi input.* group via submit() (no socket). Scheduling: write g_nt_app.frame, call
+/* devapi input.* group via submit() (no socket). Scheduling: write g_nt_app.frame, call
    nt_devapi_update() (releases due entries only on a real sim-advance), then nt_input_poll(). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
@@ -12,12 +12,21 @@
 #include "devapi/nt_devapi_net.h" /* nt_devapi_update — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h" /* inject API: fill the buffer to probe whole-or-nothing */
+#include "window/nt_window.h"        /* g_nt_window.fb_height — the basis for the input.* Y-up flip */
 #include "unity.h"
 /* clang-format on */
+
+/* Fixed framebuffer height so the input.* Y-up -> device flip is deterministic in the harness
+   (the stub window never sizes itself). Device Y = TEST_FB_HEIGHT - Y-up. */
+#define TEST_FB_HEIGHT 600U
+
+/* The one input.* flip the handlers apply: a Y-up input coord lands at this device Y in the slot. */
+#define EXPECT_DEVICE_Y(y_up) ((float)TEST_FB_HEIGHT - (float)(y_up))
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* re-registers input -> resets the schedule */
     nt_input_init();                            /* clean immediate buffer + key/pointer state */
+    g_nt_window.fb_height = TEST_FB_HEIGHT;     /* deterministic basis for the Y-up flip */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -424,7 +433,8 @@ static void test_sched_gesture_ordered_across_frames(void) {
 }
 
 /* input.move on the default mouse slot applies its position on the next advancing tick (by value,
-   not just queued count) — exercises sched_release_one's NT_INJECT_POINTER_MOVE branch at L2. */
+   not just queued count) — exercises sched_release_one's NT_INJECT_POINTER_MOVE branch.
+   The input.* {x,y} is Y-up: y=34 must land at device Y = fb_height-34, locking the one flip. */
 static void test_sched_move_applies_on_advance(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":12,\"y\":34}}")));
     advance();
@@ -437,11 +447,33 @@ static void test_sched_move_applies_on_advance(void) {
     }
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_TRUE(slot->x >= 11.999F && slot->x <= 12.001F);
-    TEST_ASSERT_TRUE(slot->y >= 33.999F && slot->y <= 34.001F);
+    float ey = EXPECT_DEVICE_Y(34); /* Y-up 34 -> device fb_height-34. */
+    TEST_ASSERT_TRUE(slot->y >= ey - 0.001F && slot->y <= ey + 0.001F);
+}
+
+/* The input.* Y-up contract, locked end to end: a click at Y-up (10, 20) lands the pressed mouse
+   slot at device (10, fb_height-20) — read==write with ui.*'s Y-up convention, differing only in the
+   height basis (input = framebuffer px). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_input_yup_flip_lands_at_device_y(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":10,\"y\":20}}")));
+    advance(); /* down@0 applies: the slot is created + pressed at the flipped device position. */
+    nt_pointer_t *slot = NULL;
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].active && g_nt_input.pointers[i].id == NT_INPUT_INJECT_POINTER_ID_BASE) {
+            slot = &g_nt_input.pointers[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(slot->x >= 9.999F && slot->x <= 10.001F); /* x passes through unflipped. */
+    float ey = EXPECT_DEVICE_Y(20);                            /* y is Y-up -> device fb_height-20. */
+    TEST_ASSERT_TRUE(slot->y >= ey - 0.001F && slot->y <= ey + 0.001F);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
 /* input.wheel lands on the mouse slot after an advance: a move creates the slot, the wheel delta
-   accumulates onto it — exercises sched_release_one's NT_INJECT_WHEEL branch at L2 by value. */
+   accumulates onto it — exercises sched_release_one's NT_INJECT_WHEEL branch by value. */
 static void test_sched_wheel_applies_on_advance(void) {
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.move\",\"params\":{\"x\":5,\"y\":5}}")));
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.wheel\",\"params\":{\"dy\":3}}")));
@@ -473,7 +505,8 @@ static void test_sched_wheel_with_coords_scrolls_at_xy(void) {
     }
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_TRUE(slot->x >= 39.999F && slot->x <= 40.001F);
-    TEST_ASSERT_TRUE(slot->y >= 49.999F && slot->y <= 50.001F);
+    float ey = EXPECT_DEVICE_Y(50); /* positioned wheel y=50 is Y-up -> device fb_height-50. */
+    TEST_ASSERT_TRUE(slot->y >= ey - 0.001F && slot->y <= ey + 0.001F);
     TEST_ASSERT_TRUE(slot->wheel_dy >= 1.999F && slot->wheel_dy <= 2.001F);
 }
 
@@ -493,7 +526,8 @@ static void test_sched_wheel_no_coords_applies_at_moved_position(void) {
     }
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_TRUE(slot->x >= 59.999F && slot->x <= 60.001F);
-    TEST_ASSERT_TRUE(slot->y >= 69.999F && slot->y <= 70.001F);
+    float ey = EXPECT_DEVICE_Y(70); /* the prior input.move y=70 is Y-up -> device fb_height-70. */
+    TEST_ASSERT_TRUE(slot->y >= ey - 0.001F && slot->y <= ey + 0.001F);
     TEST_ASSERT_TRUE(slot->wheel_dy >= 3.999F && slot->wheel_dy <= 4.001F);
 }
 
@@ -551,7 +585,7 @@ static void test_input_state_unknown_key_bad_params(void) { assert_bad_params(nt
 
 static void test_input_state_bad_pop_text_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":1}}")); }
 
-/* L2: the drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
+/* The drain-race, machine-observable: inject A -> input.state reads down==false (stale, no
    advance yet) -> advance -> input.state reads down==true. */
 static void test_input_state_observes_injected_key(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"key\":\"A\"}}")); /* pre: not yet polled */
@@ -608,7 +642,8 @@ static void test_input_button_applies_at_pending_move_position(void) {
     }
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_TRUE(slot->x >= 99.999F && slot->x <= 100.001F);
-    TEST_ASSERT_TRUE(slot->y >= 99.999F && slot->y <= 100.001F);
+    float ey = EXPECT_DEVICE_Y(100); /* the queued input.move y=100 is Y-up -> device fb_height-100. */
+    TEST_ASSERT_TRUE(slot->y >= ey - 0.001F && slot->y <= ey + 0.001F);
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
@@ -632,9 +667,46 @@ static void test_input_gesture_single_point_applied_once(void) {
     }
     TEST_ASSERT_NOT_NULL(slot);
     TEST_ASSERT_TRUE(slot->x >= 6.999F && slot->x <= 7.001F);
-    TEST_ASSERT_TRUE(slot->y >= 6.999F && slot->y <= 7.001F);
+    float ey = EXPECT_DEVICE_Y(7); /* gesture point y=7 is Y-up -> device fb_height-7. */
+    TEST_ASSERT_TRUE(slot->y >= ey - 0.001F && slot->y <= ey + 0.001F);
     TEST_ASSERT_TRUE(slot->dx >= -0.001F && slot->dx <= 0.001F); /* no move@0 -> no delta */
     TEST_ASSERT_TRUE(slot->dy >= -0.001F && slot->dy <= 0.001F);
+}
+
+/* ---- single unified scheduler: a FULL schedule drains in one tick without a buffer overflow ---- */
+
+/* Locks the inject-buffer over-subscription fix: there is ONE scheduler (the input group's), capped
+   <= the 256-slot immediate buffer, so filling it completely with frame-0-due entries and advancing
+   ONE tick releases ALL of them with no sched_tick trap (the buffer can always hold a full schedule).
+   The ui group delegates to THIS scheduler, so two sibling groups can never over-subscribe the buffer
+   by construction. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_sched_full_drains_in_one_tick(void) {
+    nt_devapi_input_reset();                                                                                 /* clean schedule + seeded advance clock. */
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.state\",\"params\":{\"pop_text\":true}}"))); /* clear any stale ring */
+    /* Fill the WHOLE schedule with NT_DEVAPI_INPUT_SCHED_MAX frame-0-due key-down entries. */
+    fill_schedule_leaving(0U);
+    /* One more 1-entry command must now overflow (schedule full) -> whole-or-nothing reject. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}"));
+    /* One advance releases ALL due entries into the 256-slot immediate buffer; sched_tick must NOT
+       trap (NT_ASSERT(ok)) — the single cap <= the buffer guarantees room for the whole schedule. */
+    advance();
+    /* All released + applied: the key set by fill_schedule_leaving (NT_KEY_A) is down, and the
+       schedule is now empty so a fresh 1-entry command succeeds again. */
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}")));
+}
+
+/* Over-reserving the schedule is whole-or-nothing: a command that needs more entries than the cap
+   can ever fit is rejected as bad_params with NO partial inject (no orphan DOWN without its UP).
+   A full schedule + a 2-entry click proves the preflight rejects before writing anything. */
+static void test_sched_over_reserve_whole_or_nothing(void) {
+    nt_devapi_input_reset();
+    fill_schedule_leaving(1U); /* exactly 1 free slot */
+    /* A click needs 2 entries -> rejects whole; the 1 free slot must survive intact. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.click\",\"params\":{\"x\":1,\"y\":2}}"));
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"B\"}}"))); /* the free slot survived */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"C\"}}"));      /* now full -> proves click wrote nothing */
 }
 
 /* ---- command.describe ---- */
@@ -708,6 +780,7 @@ int main(void) {
     RUN_TEST(test_sched_click_default_hold);
     RUN_TEST(test_sched_gesture_ordered_across_frames);
     RUN_TEST(test_sched_move_applies_on_advance);
+    RUN_TEST(test_input_yup_flip_lands_at_device_y);
     RUN_TEST(test_sched_wheel_applies_on_advance);
     RUN_TEST(test_sched_wheel_with_coords_scrolls_at_xy);
     RUN_TEST(test_sched_wheel_no_coords_applies_at_moved_position);
@@ -717,6 +790,8 @@ int main(void) {
     RUN_TEST(test_input_button_move_branch_updates_mask);
     RUN_TEST(test_input_button_applies_at_pending_move_position);
     RUN_TEST(test_input_gesture_single_point_applied_once);
+    RUN_TEST(test_sched_full_drains_in_one_tick);
+    RUN_TEST(test_sched_over_reserve_whole_or_nothing);
     RUN_TEST(test_input_state_pop_text_drains_codepoints);
     RUN_TEST(test_input_state_registers);
     RUN_TEST(test_input_state_describe);

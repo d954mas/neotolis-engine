@@ -49,7 +49,7 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
                  }));
 
     /* CLAY_TEXT doesn't push on the open stack — use last_emitted_element_id. */
-    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL);
+    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL, true);
 }
 
 void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, float font_size_override) {

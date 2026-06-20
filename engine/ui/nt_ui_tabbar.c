@@ -240,7 +240,7 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
 
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(decl);
-    nt_ui_widget_register(ctx, tab_id, &NT_UI_TABBAR_DEF, NULL);
+    nt_ui_widget_register(ctx, tab_id, &NT_UI_TABBAR_DEF, NULL, true);
 
     /* Click is harvested in tab_end (one mutating step per id); the tab element stays OPEN for content. */
     ctx->pending_tab.id = tab_id;

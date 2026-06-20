@@ -255,7 +255,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 {z->layout_l, z->layout_b},
             };
             for (uint32_t k = 0; k < 4U; ++k) {
-                nt_ui_internal_project_layout_to_world(z, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
+                nt_ui_internal_project_layout_to_world(z->m, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
             }
             nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, pad_corners, 0x6033FFFFU);
             nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, pad_corners, 1.0F, 0xFF00FFFFU);
@@ -267,7 +267,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             {z->visual_l, z->visual_b},
         };
         for (uint32_t k = 0; k < 4U; ++k) {
-            nt_ui_internal_project_layout_to_world(z, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
+            nt_ui_internal_project_layout_to_world(z->m, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
         }
         nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, vis_corners, 0x641C42A8U);
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, 0xFFFFFFFFU);

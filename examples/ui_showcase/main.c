@@ -454,10 +454,11 @@ static bool s_ids_ready;
 
 // #region engine state
 /* Stress tab emits up to 6000 labels + ~500 row containers; size the UI arena + Clay element cap
- * for that worst case. nt_ui_min_arena_size(7168) in the DEBUG_TOOLS build is ~8.02 MB (Clay arena +
- * pow2 widget registry dominate), so a 9 MB arena clears the create-context assert with headroom. */
+ * for that worst case. nt_ui_min_arena_size(7168) in the DEBUG_TOOLS build is ~10.1 MB (Clay arena +
+ * pow2 widget registry + probe-scratch + state pool dominate), so a 12 MB arena clears the
+ * create-context assert with headroom. */
 #define UI_MAX_ELEMENTS ((uint32_t)7168U)
-#define UI_ARENA_SIZE ((size_t)9U * 1024U * 1024U)
+#define UI_ARENA_SIZE ((size_t)12U * 1024U * 1024U)
 #define SCRATCH_ARENA_SIZE ((size_t)512U * 1024U)
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
@@ -2644,8 +2645,9 @@ static void frame(void) {
 
         ensure_ids();
 
-        const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
+        /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
+        nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
 
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},

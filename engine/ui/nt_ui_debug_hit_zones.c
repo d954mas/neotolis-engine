@@ -61,11 +61,11 @@ static uint32_t color_for_state(uint16_t flags) {
 
 // #region zone helpers
 /* Composed affine + walker Y-flip into world space. Extracts the 2D affine subset (top-left 2×2 +
- * col3) from the recorded mat4 — accurate for 2D ctx + planar 3D widgets; rotation_x/y/offset_z
- * widgets get a 2D-projection approximation for the highlight outline. */
-void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y) {
-    const float wx = (z->m[0] * x) + (z->m[4] * y) + z->m[12];
-    const float wy = (z->m[1] * x) + (z->m[5] * y) + z->m[13];
+ * col3) from the column-major mat4 `m` (debug_zone.m or tree_baked.m — same layout) — accurate for
+ * 2D ctx + planar 3D widgets; rotation_x/y/offset_z widgets get a 2D-projection approximation. */
+void nt_ui_internal_project_layout_to_world(const float m[16], float vy, float vh, float x, float y, float *out_x, float *out_y) {
+    const float wx = (m[0] * x) + (m[4] * y) + m[12];
+    const float wy = (m[1] * x) + (m[5] * y) + m[13];
     *out_x = wx;
     *out_y = vy + vh - wy;
 }
@@ -256,12 +256,12 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
         }
 
         for (uint32_t k = 0; k < 4U; ++k) {
-            nt_ui_internal_project_layout_to_world(z, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
+            nt_ui_internal_project_layout_to_world(z->m, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
         }
         nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, pad_corners, fill);
 
         for (uint32_t k = 0; k < 4U; ++k) {
-            nt_ui_internal_project_layout_to_world(z, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
+            nt_ui_internal_project_layout_to_world(z->m, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
         }
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, DEBUG_OUTLINE_COLOR);
 

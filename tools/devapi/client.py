@@ -223,7 +223,13 @@ class DevApiClient:
     def move(
         self, x: float, y: float, id: Optional[int] = None, type: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Inject a pointer move on the default mouse slot (reserved id) unless id/type given."""
+        """Inject a pointer move on the default mouse slot (reserved id) unless id/type given.
+
+        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.* uses the device framebuffer as
+        its basis. This is NOT the same basis as ui.* {x,y} / ui_tree bounds, which are ctx-LAYOUT px:
+        the two coincide only when dpr==1 AND the ctx begin-dims equal the framebuffer (no nt_ui_scale,
+        no HiDPI). Under a scaled/HiDPI ctx, feed ui.click({x,y}) ctx-layout coords, NOT input.* fb coords.
+        """
         params: Dict[str, Any] = {"x": x, "y": y}
         if id is not None:
             params["id"] = id
@@ -241,6 +247,8 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Inject a pointer down+up (2 atomic entries) on the mouse slot.
 
+        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis, which differs
+        from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND begin-dims==fb.
         Default is a 1-frame hold (down@0 + up@1) — a realistic click held across one frame.
         Pass hold=0 for an instant same-frame click (down+up collapsed into one frame). `hold`
         is omitted from the request when None so the host-side default of 1 is the single
@@ -264,7 +272,11 @@ class DevApiClient:
         type: Optional[str] = None,
         buttons: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """The pointer primitive: action down/move/up on a given id (default mouse type)."""
+        """The pointer primitive: action down/move/up on a given id (default mouse type).
+
+        x/y are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis, which differs
+        from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND begin-dims==fb.
+        """
         params: Dict[str, Any] = {"action": action, "id": id}
         if x is not None:
             params["x"] = x
@@ -281,9 +293,12 @@ class DevApiClient:
     ) -> Dict[str, Any]:
         """Scroll the mouse slot (notches).
 
-        With x and y, the scroll is self-contained — a move to (x,y) then the wheel, so it lands at
-        (x,y) regardless of prior state. Without x/y it applies at the mouse slot's apply-time
-        position (move first, or it is a no-op if no slot exists).
+        x/y (when given) are Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis,
+        which differs from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND
+        begin-dims==fb. dx/dy are notch deltas (content-scroll sign), NOT spatial coords, so no axis
+        flip applies to them. With x and y, the scroll is self-contained — a move to (x,y) then the
+        wheel, so it lands at (x,y) regardless of prior state. Without x/y it applies at the mouse
+        slot's apply-time position (move first, or it is a no-op if no slot exists).
         """
         params: Dict[str, Any] = {"dx": dx, "dy": dy}
         if x is not None:
@@ -299,7 +314,12 @@ class DevApiClient:
         type: Optional[str] = None,
         frame_stride: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Inject down@0 + a move per point (frame_stride apart) + up; NO interpolation."""
+        """Inject down@0 + a move per point (frame_stride apart) + up; NO interpolation.
+
+        Each point's x/y is Y-up (origin bottom-left) in FRAMEBUFFER px — input.*'s device-fb basis,
+        which differs from ui.* {x,y} / ui_tree bounds (ctx-LAYOUT px); they coincide only at dpr==1 AND
+        begin-dims==fb.
+        """
         params: Dict[str, Any] = {"id": id, "points": points}
         if type is not None:
             params["type"] = type
@@ -336,6 +356,84 @@ class DevApiClient:
         if pop_text:
             params["pop_text"] = True
         return self.result("input.state", params)
+
+    # #endregion
+
+    # #region ui.* wrappers — reads return the result dict; writes are fire-and-forget (result() confirms ok).
+    def ui_tree(self, ctx: Optional[str] = None) -> Dict[str, Any]:
+        """IMMEDIATE read of the last completed frame's UI tree.
+
+        Returns the result dict: a {space, origin, y_axis, width, height, dpr, projection} metadata
+        block plus `nodes` (ALL nodes incl. invisible/disabled — the bot filters). Bounds are Y-up
+        (origin bottom-left) — the SAME space ui_click/drag/scroll {x,y} take, so a bot may feed
+        bounds straight back with no flip. `ctx` selects a registered context by name (omitted ->
+        the host's sole/first).
+        """
+        params: Dict[str, Any] = {}
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.tree", params)
+
+    def ui_element(self, id: str, ctx: Optional[str] = None) -> Dict[str, Any]:
+        """Read one UI node by developer string id (unknown/stale id raises DevApiResultError)."""
+        params: Dict[str, Any] = {"id": id}
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.element", params)
+
+    def ui_contexts(self) -> Dict[str, Any]:
+        """List the host-registered UI context names (result dict carries `contexts`)."""
+        return self.result("ui.contexts", {})
+
+    def ui_click(
+        self, id: Any, hold: Optional[int] = None, ctx: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Resolve `id` (a string id, or an {"x":..,"y":..} dict) -> bbox center -> synthetic click.
+
+        {x,y} are Y-up (origin bottom-left), the SAME space as ui_tree bounds — feed a node's bounds
+        center straight in with no flip. Fire-and-forget: the down+up enqueue, applied only once the
+        sim advances — pair with step()/wait_frames() before reading the widget back. `hold` is the
+        down->up frame gap (omitted -> host default of 1).
+        """
+        params: Dict[str, Any] = {"id": id}
+        if hold is not None:
+            params["hold"] = hold
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.click", params)
+
+    def ui_scroll(
+        self,
+        id: Any,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        ctx: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resolve `id` (string id or Y-up {x,y}, origin bottom-left) -> element center -> synthetic wheel(dx,dy) notches."""
+        params: Dict[str, Any] = {"id": id, "dx": dx, "dy": dy}
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.scroll", params)
+
+    def ui_drag(
+        self,
+        from_: Any,
+        to: Any,
+        frames: Optional[int] = None,
+        ctx: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Synthetic drag from `from_` to `to` (each a string id or Y-up {x,y}, origin bottom-left).
+
+        {x,y} are Y-up — the SAME space as ui_tree bounds (no bot-side flip). `frames` interpolated
+        move points are emitted between down@from and up@to (omitted -> host default).
+        Fire-and-forget — advance the sim to apply.
+        """
+        params: Dict[str, Any] = {"from": from_, "to": to}
+        if frames is not None:
+            params["frames"] = frames
+        if ctx is not None:
+            params["ctx"] = ctx
+        return self.result("ui.drag", params)
 
     # #endregion
 
