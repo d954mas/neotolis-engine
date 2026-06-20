@@ -168,6 +168,13 @@ void nt_devapi_input_reset(void);
 void nt_devapi_register_ui(void);
 #endif
 
+/* Observability group registrar (per-group #ifdef). Defined in nt_devapi_obs.c, invoked from
+   nt_devapi_init under the same compile gate. The obs group is pure immediate reads (D-15) — it
+   registers NO tick/reset hook. */
+#ifdef NT_DEVAPI_GROUP_OBS
+void nt_devapi_register_obs(void);
+#endif
+
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
    nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_GROUP_DISCOVERY

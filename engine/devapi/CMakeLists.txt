@@ -82,6 +82,19 @@ if(NT_DEVAPI_GROUP_UI)
     target_link_libraries(nt_devapi PRIVATE nt_ui_interface nt_window_interface)
 endif()
 
+# Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads over the Plan 01/03/04/05 L1
+# capabilities. Links the dev-only ring + metrics collector + the overlay/entity/resource readers.
+# GNU-ld single-pass order: nt_devapi (consumer) is listed first on the exe link line; these provider
+# libs trail it, with nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
+if(NT_DEVAPI_GROUP_OBS)
+    target_sources(nt_devapi PRIVATE nt_devapi_obs.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_OBS=1)
+    target_link_libraries(nt_devapi PRIVATE
+        nt_log_ring nt_metrics nt_debug_overlay
+        nt_entity nt_transform_comp nt_drawable_comp nt_resource
+    )
+endif()
+
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 
 # nt_devapi_net -- native loopback TCP transport. Separate target so a core-only consumer pulls no

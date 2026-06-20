@@ -289,7 +289,7 @@ static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *
 
 // #region pagination
 /* Resolve optional {offset, limit} against `total`. limit is capped at NT_DEVAPI_OBS_LIMIT_MAX
-   (T-68-06-DOS). Bad offset/limit -> bad_params. On success *out_begin/*out_end bound the page
+   (T-68-06-DOS). Bad offset/limit -> bad_params. On success out_begin..out_end bound the page
    into [0, total]. */
 static bool resolve_page(const cJSON *params, uint32_t total, const char *who, uint32_t *out_begin, uint32_t *out_end, nt_devapi_error *err) {
     uint32_t offset = 0;
