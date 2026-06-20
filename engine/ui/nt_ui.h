@@ -101,11 +101,16 @@ typedef struct {
     nt_material_t material;
     /* Per-widget custom per-vertex block fed to nt_sprite_renderer_set_custom_attrs
      * when NT_UI_IMAGE_FLAG_RADIAL is set: a_radial = {angle_start, angle_end,
-     * inner_radius_norm, aspect}. Baked into every vertex of the radial's bbox quad
-     * (D-66-09/D-66-08). Ignored for plain images. */
+     * inner_radius_norm, aspect}. Baked into every vertex of the radial's bbox quad.
+     * Ignored for plain images. */
     float radial[4];
+    /* RADIAL_IMAGE only: a_tint = {tint.r, tint.g, tint.b, tint_strength} in 0..1.
+     * Contiguous with radial so the walker bakes both as one 32 B custom block
+     * (&radial, sizeof radial + sizeof tint). Lets many tint colors share ONE
+     * material. The flat radial path bakes only radial (16 B) and ignores this. */
+    float tint[4];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 52, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 68, "nt_ui_image_payload_t stable ABI");
 
 /* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {

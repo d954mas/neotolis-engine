@@ -12,10 +12,14 @@ layout(location = 3) in vec2 a_texcoord;
 // Custom per-vertex attr (material attr_map a_radial @ loc 4): x=angle_start
 // y=angle_end z=inner_radius_norm w=aspect. Uniform across the widget's verts.
 layout(location = 4) in vec4 a_radial;
+// RADIAL_IMAGE only (loc 5): rgb=reveal tint, w=tint_strength, both 0..1. The flat
+// radial material doesn't bind loc 5 → reads the disabled-attr default; its FS ignores v_tint.
+layout(location = 5) in vec4 a_tint;
 
 out vec2 v_texcoord;
 out vec4 v_color;
 out vec4 v_radial;
+out vec4 v_tint;
 out vec2 v_local;
 
 void main() {
@@ -23,6 +27,7 @@ void main() {
     v_texcoord = a_texcoord;
     v_color = a_color;
     v_radial = a_radial;
+    v_tint = a_tint;
     // The widget emits a 4-corner quad TL/TR/BR/BL; derive the [-1,1] local coord
     // from gl_VertexID so no extra per-vertex attribute is needed (the 16 B custom
     // block is fully spent on a_radial). The 16-bit quad indices cycle 0..3 per

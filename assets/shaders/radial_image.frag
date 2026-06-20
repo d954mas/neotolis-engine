@@ -9,16 +9,18 @@ precision highp float;
 // (v_local_uv = v_texcoord*2-1) — no extra per-vertex attr on the image path.
 // NOTE: this assumes the region UV spans [0,1] over the quad; a sub-region atlas
 // tile re-centers the wedge (unsupported in v1).
+//
+// TINT is per-vertex (a_tint via v_tint): rgb=target color, w=mix strength. Many
+// tint colors share ONE material. mode + dim_factor stay material-level (u_reveal_mode).
 
 uniform sampler2D u_texture;
 // .x = reveal mode (0 DESATURATE / 1 DIM / 2 HIDE / 3 TINT), .y = dim_factor.
 uniform vec4 u_reveal_mode;
-// .rgb = TINT target color (0..1), .a = TINT mix strength (0..1).
-uniform vec4 u_reveal_tint;
 
 in vec2 v_texcoord;
 in vec4 v_color;
 in vec4 v_radial;
+in vec4 v_tint;
 in vec2 v_local;
 
 out vec4 frag_color;
@@ -76,8 +78,8 @@ void main() {
         // HIDE: fully hidden (alpha 0 → discarded below).
         reveal = vec4(0.0);
     } else {
-        // TINT: mix RGB toward the tint color (premultiplied by alpha), keep alpha.
-        vec3 tinted = mix(lit.rgb, u_reveal_tint.rgb * lit.a, u_reveal_tint.a);
+        // TINT: mix RGB toward the per-vertex tint color (premultiplied by alpha), keep alpha.
+        vec3 tinted = mix(lit.rgb, v_tint.rgb * lit.a, v_tint.a);
         reveal = vec4(tinted, lit.a);
     }
 

@@ -46,30 +46,32 @@ typedef enum {
 } nt_ui_radial_reveal_mode_t;
 
 /* Visual-only style. Mirrors nt_ui_image_style_t's slice9/origin/flip fields so a
- * textured radial supports polygon + slice9 regions. The reveal look (mode +
- * dim_factor + tint) is NOT here — it is baked onto the MATERIAL at creation via
- * the u_reveal_mode / u_reveal_tint params (one material per look). The widget
- * style carries no reveal state, so N widgets sharing a material in one batch all
- * reveal identically. The radial-image material (attr_map a_radial @ loc 4 + the
- * u_reveal_mode / u_reveal_tint params) is supplied by the game per reveal look
- * (one material per look -> one batch per look). .id==0 invalid. */
+ * textured radial supports polygon + slice9 regions. mode + dim_factor are baked on
+ * the MATERIAL at creation (u_reveal_mode), so N widgets sharing a material reveal in
+ * the same MODE. The TINT, however, is PER-WIDGET (tint_color_packed + tint_strength
+ * -> baked into a_tint), so many differently-tinted radials share ONE tint-mode
+ * material and batch to one draw. The radial-image material (attr_map a_radial @ loc 4
+ * + a_tint @ loc 5 + the u_reveal_mode param) is supplied by the game per reveal mode.
+ * .id==0 invalid. */
 typedef struct {
-    uint32_t color_packed;   /* 0xAABBGGRR; 0xFFFFFFFF = no tint */
-    float inner_radius_norm; /* [0,1); 0 = solid sector, >0 = ring */
-    uint16_t slice9_lrtb[4]; /* {0,0,0,0} + no flag = atlas default */
-    float origin_x;          /* 0..1; only used when ORIGIN_OVERRIDE set */
-    float origin_y;          /* 0..1; only used when ORIGIN_OVERRIDE set */
-    float slice9_scale;      /* MUST be finite > 0 (helper asserts) */
-    nt_material_t material;  /* radial-image material; .id==0 invalid */
-    uint8_t flip_bits;       /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
-    uint8_t flags;           /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
+    uint32_t color_packed;      /* 0xAABBGGRR; 0xFFFFFFFF = no tint */
+    float inner_radius_norm;    /* [0,1); 0 = solid sector, >0 = ring */
+    uint16_t slice9_lrtb[4];    /* {0,0,0,0} + no flag = atlas default */
+    float origin_x;             /* 0..1; only used when ORIGIN_OVERRIDE set */
+    float origin_y;             /* 0..1; only used when ORIGIN_OVERRIDE set */
+    float slice9_scale;         /* MUST be finite > 0 (helper asserts) */
+    nt_material_t material;     /* radial-image material; .id==0 invalid */
+    uint32_t tint_color_packed; /* 0xAABBGGRR; TINT mode target color (per-widget) */
+    float tint_strength;        /* [0,1]; TINT mix strength (per-widget) */
+    uint8_t flip_bits;          /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
+    uint8_t flags;              /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
     uint8_t _reserved[2];
 } nt_ui_radial_image_style_t;
-_Static_assert(sizeof(nt_ui_radial_image_style_t) == 36, "nt_ui_radial_image_style_t stable ABI (36 B)");
+_Static_assert(sizeof(nt_ui_radial_image_style_t) == 44, "nt_ui_radial_image_style_t stable ABI (44 B)");
 
 /* Use instead of bare {0} — color_packed=0 renders fully transparent, slice9_scale
  * must be positive. material stays .id==0 until the game assigns the radial-image
- * material for the chosen reveal look. */
+ * material for the chosen reveal mode. tint defaults to white @ 0.6 strength. */
 static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void) {
     return (nt_ui_radial_image_style_t){
         .color_packed = 0xFFFFFFFFU,
@@ -78,14 +80,15 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
         .origin_y = 0.5F,
         .slice9_scale = 1.0F,
         .material = (nt_material_t){0},
+        .tint_color_packed = 0xFFFFFFFFU, /* white */
+        .tint_strength = 0.6F,
     };
 }
 
-/* Material param names the shader reads, set once on the material by the game at
- * creation (one material per reveal look). u_reveal_mode = {mode, dim_factor, 0, 0};
- * u_reveal_tint = {r, g, b, tint_strength} in 0..1. */
+/* Material param the shader reads, set once on the material by the game at creation
+ * (one material per reveal mode). u_reveal_mode = {mode, dim_factor, 0, 0}. TINT is
+ * per-widget (style->tint_color_packed/tint_strength -> a_tint), not a material param. */
 #define NT_UI_RADIAL_IMAGE_PARAM_MODE "u_reveal_mode"
-#define NT_UI_RADIAL_IMAGE_PARAM_TINT "u_reveal_tint"
 
 /* Two-angle form. angle_start/angle_end in radians, mathematical convention
  * (0=+X, CCW+). region is by-pointer: resolved lazily, memoized into *region; an

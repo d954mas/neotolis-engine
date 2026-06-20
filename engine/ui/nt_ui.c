@@ -1527,7 +1527,9 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * custom attrs (plan-01). The radial material (set above) carries the
          * reveal fs + u_reveal_mode params. */
         if (ip != NULL && (ip->flags & NT_UI_IMAGE_FLAG_RADIAL_IMAGE)) {
-            nt_sprite_renderer_set_custom_attrs(ip->radial, (uint8_t)sizeof ip->radial);
+            /* radial + tint are contiguous: bake both as one 32 B custom block
+             * (a_radial @ loc 4, a_tint @ loc 5). Flat radial bakes only 16 B. */
+            nt_sprite_renderer_set_custom_attrs(ip->radial, (uint8_t)(sizeof ip->radial + sizeof ip->tint));
         }
         emit_image(&local, world_mat4);
         return;

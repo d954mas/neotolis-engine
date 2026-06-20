@@ -508,11 +508,15 @@ static void test_radial_image_slice9_bakes_payload(void) {
     }
 }
 
-/* (c) reveal mode is a MATERIAL-level look baked at creation (u_reveal_mode.x ==
- * mode); the widget no longer writes it. A walk does not mutate the param. */
+/* (c) mode stays a MATERIAL-level look (u_reveal_mode.x == mode), but the TINT is now
+ * PER-WIDGET: tint_color_packed + tint_strength bake into the a_tint block (floats 4..7
+ * of the 32 B custom block). Verify both: material mode intact + per-vertex tint baked. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_radial_image_reveal_mode_plumbed(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_HIDE); /* == 2 */
+    style.tint_color_packed = 0xFF0080FFU;                                      /* 0xAABBGGRR: r=255, g=128, b=0 -> orange */
+    style.tint_strength = 0.75F;
 
     /* The material carries the baked mode before any walk. */
     TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "material carries baked u_reveal_mode.x");
@@ -520,17 +524,30 @@ static void test_radial_image_reveal_mode_plumbed(void) {
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     radial_image_walk(&ref, &style, 40.0F, 40.0F);
 
-    /* The walk must NOT overwrite the material-level reveal look. */
+    /* The walk must NOT overwrite the material-level reveal mode. */
     TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "walk leaves material u_reveal_mode.x intact");
+
+    /* a_tint (floats 4..7 of the custom block) baked per-vertex: rgb 0..1 + strength. */
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[8] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[4], 1.0F), "a_tint.r == 255/255");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[5], 128.0F / 255.0F), "a_tint.g == 128/255");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[6], 0.0F), "a_tint.b == 0/255");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[7], 0.75F), "a_tint.w == tint_strength");
+    }
 }
 
 /* (d) style ABI guard + defaults sane + all four reveal modes distinct. */
 static void test_radial_image_style_abi(void) {
-    TEST_ASSERT_EQUAL_UINT32(36U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
+    TEST_ASSERT_EQUAL_UINT32(44U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
     nt_ui_radial_image_style_t d = nt_ui_radial_image_style_defaults();
     TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.color_packed);
     TEST_ASSERT_TRUE(approx(d.slice9_scale, 1.0F));
     TEST_ASSERT_EQUAL_UINT32(0U, d.material.id);
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.tint_color_packed);
+    TEST_ASSERT_TRUE(approx(d.tint_strength, 0.6F));
     /* Four distinct reveal modes (material-level look). */
     TEST_ASSERT_EQUAL_INT(0, (int)NT_UI_RADIAL_REVEAL_DESATURATE);
     TEST_ASSERT_EQUAL_INT(1, (int)NT_UI_RADIAL_REVEAL_DIM);

@@ -36,6 +36,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
+    NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }
@@ -53,6 +54,9 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         return;
     }
 
+    /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
+    const Clay_Color tint_rgb = nt_ui_unpack_abgr(style->tint_color_packed);
+
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(p != NULL && "nt_ui_radial_image: scratch alloc failed");
     *p = (nt_ui_image_payload_t){
@@ -65,6 +69,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .flags = (uint8_t)(style->flags | NT_UI_IMAGE_FLAG_RADIAL_IMAGE),
         .material = style->material,
         .radial = {angle_start, angle_end, style->inner_radius_norm, radial_image_aspect(decl)},
+        .tint = {tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength},
     };
     memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 
