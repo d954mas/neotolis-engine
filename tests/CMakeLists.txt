@@ -334,6 +334,9 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths; flaky under
+    # parallel ctest (CPU contention skews the sub-ms timing), clean serially. Run alone.
+    set_tests_properties(test_resource PROPERTIES RUN_SERIAL TRUE)
 
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
