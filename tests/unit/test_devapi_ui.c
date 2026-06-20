@@ -57,6 +57,35 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
+/* A second, SCALED ctx (letterbox-like: offset + 2x scale) registered as "hud_scaled". Proves
+   ui.click on a non-identity ctx viewport lands: resolve_target maps the LAYOUT coord through the ctx
+   viewport (nt_ui_layout_to_screen) so the injected pointer is a real DEVICE coord. layout 800x600 ->
+   device content rect {SCALED_VP_X, SCALED_VP_Y, 800*SCALE, 600*SCALE}. */
+#define SCALED_VP_X 100.0F
+#define SCALED_VP_Y 50.0F
+#define SCALED_SCALE 2.0F
+/* Expected layout->device map: device = vp.offset + layout * scale (vp.w/lw == vp.h/lh == SCALE). */
+#define SCALED_DEVICE_CENTER_X (SCALED_VP_X + (DEVICE_CENTER_X * SCALED_SCALE))
+#define SCALED_DEVICE_CENTER_Y (SCALED_VP_Y + (DEVICE_CENTER_Y * SCALED_SCALE))
+
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_scaled_arena[NT_UI_TEST_ARENA_SIZE];
+static nt_ui_context_t *s_scaled_ctx;
+
+/* Declare the same known widget in the scaled ctx, overriding the per-frame identity viewport with a
+   non-identity (offset + scale) one BEFORE the first hit-test (the lazy resolve window). */
+static void declare_scaled_tree(void) {
+    nt_mem_scratch_reset();
+    nt_pointer_t mouse = {0};
+    mouse.x = -100.0F;
+    mouse.y = -100.0F;
+    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
+    CLAY({.id = CLAY_ID("widget"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
+    }
+    nt_ui_widget_register(s_scaled_ctx, nt_ui_id("widget"), &NT_UI_BUTTON_DEF, NULL, true);
+    nt_ui_end(s_scaled_ctx);
+}
+
 /* Declare the known tree for one frame so the probe + get_bbox see it the NEXT read. ui.tree/element
    read the LAST completed frame, and nt_ui_get_bbox reads the immediately-preceding frame's bbox, so
    every test re-declares before asserting. */
@@ -82,6 +111,12 @@ void setUp(void) {
     nt_input_init();
     nt_devapi_ui_register_context("hud", s_fx.ctx);
 
+    /* Bare second ctx (no atlas/material — probe + bbox + viewport need no walk) registered scaled. */
+    const nt_ui_create_desc_t scaled_desc = nt_ui_create_desc_defaults();
+    s_scaled_ctx = nt_ui_create_context(s_scaled_arena, sizeof s_scaled_arena, &scaled_desc);
+    TEST_ASSERT_NOT_NULL(s_scaled_ctx);
+    nt_devapi_ui_register_context("hud_scaled", s_scaled_ctx);
+
     /* Pin the window so the dpr metadata + any fb-derived basis is deterministic (the headless ctx
        layout size is LAYOUT_W/H from nt_ui_begin, independent of fb_*; dpr still reads g_nt_window). */
     g_nt_window.fb_width = (uint32_t)LAYOUT_W;
@@ -89,10 +124,13 @@ void setUp(void) {
     g_nt_window.dpr = 1.0F;
 
     declare_tree();
+    declare_scaled_tree();
 }
 
 void tearDown(void) {
     nt_devapi_shutdown();
+    nt_ui_destroy_context(s_scaled_ctx);
+    s_scaled_ctx = NULL;
     ui_walker_fixture_shutdown(&s_fx);
 }
 
@@ -142,13 +180,14 @@ static bool near_eq(float a, float b) { return fabsf(a - b) <= 0.5F; }
 
 /* ---- ui.contexts ---- */
 
-/* The registered "hud" context name surfaces. */
+/* The registered "hud" + "hud_scaled" context names surface in registration order. */
 static void test_contexts_lists_registered(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"ui.contexts\",\"params\":{}}"));
     cJSON *arr = cJSON_GetObjectItemCaseSensitive(ok_result(root), "contexts");
     TEST_ASSERT_TRUE(cJSON_IsArray(arr));
-    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(arr));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(arr));
     TEST_ASSERT_EQUAL_STRING("hud", cJSON_GetArrayItem(arr, 0)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("hud_scaled", cJSON_GetArrayItem(arr, 1)->valuestring);
     cJSON_Delete(root);
 }
 
@@ -255,6 +294,78 @@ static void test_click_xy_yup_flip_matches_string_id(void) {
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
+/* ---- SCALED ctx: ui.click lands through the ctx viewport (the scaled regression) ---- */
+
+/* ui.tree on the scaled ctx exposes the device viewport rect: offset + logical*scale. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scaled_tree_exposes_viewport(void) {
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"ui.tree\",\"params\":{\"ctx\":\"hud_scaled\"}}"));
+    cJSON *vp = cJSON_GetObjectItemCaseSensitive(ok_result(root), "viewport");
+    TEST_ASSERT_NOT_NULL(vp);
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "x")->valuedouble, SCALED_VP_X));
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "y")->valuedouble, SCALED_VP_Y));
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "w")->valuedouble, LAYOUT_W * SCALED_SCALE));
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "h")->valuedouble, LAYOUT_H * SCALED_SCALE));
+    cJSON_Delete(root);
+}
+
+/* The unscaled hud's viewport is the identity {0,0,layout_w,layout_h} (device==layout). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_unscaled_viewport_is_identity(void) {
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"ui.tree\",\"params\":{}}"));
+    cJSON *vp = cJSON_GetObjectItemCaseSensitive(ok_result(root), "viewport");
+    TEST_ASSERT_NOT_NULL(vp);
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "x")->valuedouble, 0.0F));
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "y")->valuedouble, 0.0F));
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "w")->valuedouble, LAYOUT_W));
+    TEST_ASSERT_TRUE(near_eq((float)cJSON_GetObjectItemCaseSensitive(vp, "h")->valuedouble, LAYOUT_H));
+    cJSON_Delete(root);
+}
+
+/* String-id ui.click on the scaled ctx injects the bbox center mapped LAYOUT->DEVICE through the
+   viewport — NOT the raw layout center (that is the scaled bug this proves fixed). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scaled_click_string_id_lands_at_device_center(void) {
+    cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"ui.click\",\"params\":{\"id\":\"widget\",\"ctx\":\"hud_scaled\"}}")));
+    advance();
+    nt_pointer_t *slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(near_eq(slot->x, SCALED_DEVICE_CENTER_X));
+    TEST_ASSERT_TRUE(near_eq(slot->y, SCALED_DEVICE_CENTER_Y));
+    /* Round-trip proof: the injected DEVICE coord, converted back to layout via the ctx viewport,
+       hit-tests onto the widget. begin reset the viewport to identity, so re-apply the scaled viewport
+       before converting the test point device->layout, exactly mirroring the live hit-test path. */
+    nt_mem_scratch_reset();
+    nt_pointer_t mouse = {0};
+    mouse.x = -100.0F;
+    mouse.y = -100.0F;
+    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1);
+    nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
+    const float device_pt[2] = {slot->x, slot->y};
+    float layout_pt[2];
+    nt_ui_screen_to_layout(s_scaled_ctx, device_pt, layout_pt);
+    bool hit = nt_ui_test_hit(s_scaled_ctx, nt_ui_id("widget"), layout_pt[0], layout_pt[1]);
+    nt_ui_end(s_scaled_ctx);
+    TEST_ASSERT_TRUE(hit);
+}
+
+/* {x,y} (Y-up) ui.click on the scaled ctx: the documented Y-up flip THEN the viewport map -> the SAME
+   scaled device center as the string-id path (read-bounds==write, scaled). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scaled_click_xy_lands_at_device_center(void) {
+    const float yup_cx = DEVICE_CENTER_X;
+    const float yup_cy = YUP_Y + (BBOX_H * 0.5F);
+    char req[192];
+    (void)snprintf(req, sizeof req, "{\"method\":\"ui.click\",\"params\":{\"ctx\":\"hud_scaled\",\"id\":{\"x\":%.1f,\"y\":%.1f}}}", (double)yup_cx, (double)yup_cy);
+    cJSON_Delete(parse_ok(nt_devapi_submit(req)));
+    advance();
+    nt_pointer_t *slot = inject_slot();
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_TRUE(near_eq(slot->x, SCALED_DEVICE_CENTER_X));
+    TEST_ASSERT_TRUE(near_eq(slot->y, SCALED_DEVICE_CENTER_Y));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
 /* ---- bad_params paths (never assert on wire input) ---- */
 
 static void test_unknown_ctx_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"ui.tree\",\"params\":{\"ctx\":\"missing\"}}")); }
@@ -324,6 +435,10 @@ int main(void) {
     RUN_TEST(test_click_empty_id_bad_params);
     RUN_TEST(test_click_string_id_lands_at_device_center);
     RUN_TEST(test_click_xy_yup_flip_matches_string_id);
+    RUN_TEST(test_scaled_tree_exposes_viewport);
+    RUN_TEST(test_unscaled_viewport_is_identity);
+    RUN_TEST(test_scaled_click_string_id_lands_at_device_center);
+    RUN_TEST(test_scaled_click_xy_lands_at_device_center);
     RUN_TEST(test_unknown_ctx_bad_params);
     RUN_TEST(test_ctx_non_string_bad_params);
     RUN_TEST(test_click_xy_non_finite_bad_params);

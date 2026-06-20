@@ -139,6 +139,21 @@ static void add_meta(cJSON *result, const nt_ui_context_t *ctx) {
     devapi_add_number(result, "height", (double)lh);
     devapi_add_number(result, "dpr", (double)g_nt_window.dpr);
     devapi_add_string(result, "projection", nt_ui_context_uses_raycast(ctx) ? "3d" : "2d");
+    /* Informational device viewport rect, recovered from the converters (no engine getter): the layout
+       origin + the (lw,lh) corner map to the device content rect, so a remote bot can map layout<->screen
+       itself. Identity (unscaled) -> {0,0,lw,lh}. */
+    const float origin_layout[2] = {0.0F, 0.0F};
+    const float corner_layout[2] = {lw, lh};
+    float origin_dev[2];
+    float corner_dev[2];
+    nt_ui_layout_to_screen(ctx, origin_layout, origin_dev);
+    nt_ui_layout_to_screen(ctx, corner_layout, corner_dev);
+    cJSON *vp = cJSON_AddObjectToObject(result, "viewport");
+    NT_ASSERT(vp != NULL);
+    devapi_add_number(vp, "x", (double)origin_dev[0]);
+    devapi_add_number(vp, "y", (double)origin_dev[1]);
+    devapi_add_number(vp, "w", (double)(corner_dev[0] - origin_dev[0]));
+    devapi_add_number(vp, "h", (double)(corner_dev[1] - origin_dev[1]));
 }
 
 /* Serialize one probe node into a fresh JSON object. bounds = {x,y,w,h} in the declared ui space
@@ -243,17 +258,17 @@ static bool cmd_ui_contexts(const cJSON *params, cJSON *result, nt_devapi_error 
 #endif
 _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "ui.drag frames+2 must fit the input scheduler");
 
-/* Resolve a target field to a DEVICE/Clay-space (Y-down, top-left) pixel center for the inject path:
+/* Resolve a target field to a DEVICE-space (Y-down, top-left) pixel center for the inject path:
    EITHER a string id (nt_ui_id -> nt_ui_get_bbox, miss/empty -> bad_params, never assert) OR an {x,y}
    object (isfinite-checked). The user-facing ui.* contract is Y-up (origin bottom-left), declared in
-   ui.tree/element metadata; the ONE documented flip from that Y-up space to the device Y-down the
-   pointer needs lives HERE.
-     - {x,y}: interpreted as Y-up in the declared space -> flipped (out_y = layout_h - in_y) using the
-       SAME layout height the metadata + probe bounds use, so read(bounds)==write({x,y}) is exact.
-     - string id: nt_ui_get_bbox returns Clay Y-down; it never exposes Y-up to the user, so NO flip.
-   BOTH forms resolve into the ctx LAYOUT space and inject assuming the ctx viewport == full framebuffer
-   (layout==device, e.g. the hud). For an nt_ui_scale app NEITHER is correct yet: the ctx must carry its
-   viewport so layout->device is inverted here (follow-up). Not a silent bug — the space is declared above.
+   ui.tree/element metadata; the ONE documented Y-up->Y-down flip lives HERE, then the resulting LAYOUT
+   coord is mapped LAYOUT->DEVICE through the ctx viewport (nt_ui_layout_to_screen) so the injected
+   pointer is a real device coord — the ctx converts it back to layout for hit-test on nt_ui_begin.
+     - {x,y}: interpreted as Y-up in the declared space -> flipped (layout_y = layout_h - in_y) using the
+       SAME layout height the metadata + probe bounds use -> layout->device.
+     - string id: nt_ui_get_bbox returns Clay Y-down layout center; NO flip -> layout->device.
+   For an unscaled ctx the viewport is identity so device==layout (the hud is byte-identical); for an
+   nt_ui_scale ctx the viewport inverts the scale+letterbox so a scaled ui.click lands correctly.
    `key` names the field ("id"/"from"/"to") for the error messages. */
 static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t *ctx, float *out_x, float *out_y, nt_devapi_error *err) {
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
@@ -268,22 +283,30 @@ static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t
             set_bad_params(err, "ui: unknown or stale target id");
             return false;
         }
-        *out_x = bb.x + (bb.width * 0.5F);
-        *out_y = bb.y + (bb.height * 0.5F);
+        const float layout[2] = {bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F)};
+        float device[2];
+        nt_ui_layout_to_screen(ctx, layout, device);
+        *out_x = device[0];
+        *out_y = device[1];
         return true;
     }
     if (cJSON_IsObject(jt)) {
         const cJSON *jx = cJSON_GetObjectItemCaseSensitive(jt, "x");
         const cJSON *jy = cJSON_GetObjectItemCaseSensitive(jt, "y");
+        float in_x = 0.0F;
         float in_y = 0.0F;
-        if (!parse_finite_coord(jx, "ui: target x must be a finite number", out_x, err) || !parse_finite_coord(jy, "ui: target y must be a finite number", &in_y, err)) {
+        if (!parse_finite_coord(jx, "ui: target x must be a finite number", &in_x, err) || !parse_finite_coord(jy, "ui: target y must be a finite number", &in_y, err)) {
             return false;
         }
-        /* The sole, documented Y-up -> device Y-down flip; same layout height as the probe bounds. */
+        /* The sole documented Y-up -> layout Y-down flip; same layout height as the probe bounds. */
         float lw = 0.0F;
         float lh = 0.0F;
         nt_ui_context_layout_size(ctx, &lw, &lh);
-        *out_y = lh - in_y;
+        const float layout[2] = {in_x, lh - in_y};
+        float device[2];
+        nt_ui_layout_to_screen(ctx, layout, device);
+        *out_x = device[0];
+        *out_y = device[1];
         return true;
     }
     set_bad_params(err, "ui: target must be a string id or an {x,y} object");
@@ -414,11 +437,11 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
     {
         .method = "ui.tree",
         .group = "ui",
-        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,origin,y_axis,width,height,dpr,projection} block; bounds are Y-up (origin "
-                   "bottom-left), same space ui.click({x,y}) takes",
+        .summary = "IMMEDIATE read of the last completed frame's UI tree (ALL nodes incl. invisible/disabled) + a {space,origin,y_axis,width,height,dpr,projection,viewport} block; bounds are Y-up "
+                   "(origin bottom-left), same space ui.click({x,y}) takes",
         .params_shape = "{ctx?:string}",
-        .result_shape =
-            "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,nodes:[{id,parent,role,id_string,text,label,child_count,visible,enabled,bounds}]}",
+        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport:{x,y,w,h},nodes:[{id,parent,role,id_string,text,label,child_count,"
+                        "visible,enabled,bounds}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
@@ -427,8 +450,8 @@ static const nt_devapi_command_desc k_ui_cmds[] = {
         .group = "ui",
         .summary = "one UI node resolved by developer string id (unknown/stale id -> bad_params); bounds Y-up (origin bottom-left)",
         .params_shape = "{id:string, ctx?:string}",
-        .result_shape =
-            "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,node:{id,parent,role,id_string,text,label,child_count,visible,enabled,bounds}}",
+        .result_shape = "{space:string,origin:string,y_axis:string,width:number,height:number,dpr:number,projection:string,viewport:{x,y,w,h},node:{id,parent,role,id_string,text,label,child_count,"
+                        "visible,enabled,bounds}}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
