@@ -473,12 +473,12 @@ static nt_resource_t s_sprite_fs_handle;
 static nt_resource_t s_text_vs_handle;
 static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
-/* Radial (Phase 66): shared extended-layout VS + flat SDF FS + textured reveal FS. */
+/* Radial: shared extended-layout VS + flat SDF FS + textured reveal FS. */
 static nt_resource_t s_radial_vs_handle;
 static nt_resource_t s_radial_fs_handle;
 static nt_resource_t s_radial_image_fs_handle;
 /* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
- * over the quad, so the wedge stays centered (carried flag from plans 03/04). */
+ * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
 static nt_resource_t s_radial_art_tex_handle;
 
@@ -1611,13 +1611,13 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
-/* Radial tab (Phase 66): the two radial widgets driven by game-owned feedback state.
+/* Radial tab: the two radial widgets driven by game-owned feedback state.
  *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (Model D fill).
- *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from Phase-65 events hold_progress.
+ *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from the events hold_progress.
  *   3. FOUR REVEAL MODES     — nt_ui_radial_image (desat/dim/hide/tint) on the [0,1]-UV art.
- *   4. DENSE GRID            — N radials sharing ONE material => one batched draw (D-66-07);
+ *   4. DENSE GRID            — N radials sharing ONE material => one batched draw;
  *      the header's draw-call readout proves the count does NOT scale with radial count.
- * The flat radials carve a ring (inner_radius_norm) + an oval variant to exercise WGT-66-04. */
+ * The flat radials carve a ring (inner_radius_norm) + an oval variant. */
 #define RADIAL_TAU (2.0F * NT_PI)
 #define RADIAL_GRID_COLS 12
 #define RADIAL_GRID_ROWS 8
@@ -1796,7 +1796,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     render_radial_tint_row(ctx);
     // #endregion
 
-    /* #region 4: dense batched grid — N radials, one material, one draw (D-66-07) */
+    /* #region 4: dense batched grid — N radials, one material, one draw */
     (void)snprintf(buf, sizeof buf, "Dense grid: %d radials sharing ONE material -> watch the header draw-call count stay flat.", RADIAL_GRID_COLS * RADIAL_GRID_ROWS);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     static const Clay_ElementDeclaration grid_decl = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4}};
@@ -2769,7 +2769,7 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
-    /* Radial (Phase 66) shaders + the dedicated radial-art atlas + its full-bleed texture. */
+    /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
     s_radial_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
     s_radial_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_image_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
