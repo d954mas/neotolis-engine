@@ -485,6 +485,7 @@ static nt_material_t s_text_material;
  * mode's u_reveal_mode param stays stable and same-mode radials batch to one draw (RESEARCH A4). */
 static nt_material_t s_radial_material;
 static nt_material_t s_radial_image_material[4]; /* indexed by nt_ui_radial_reveal_mode_t */
+static nt_material_t s_radial_tint_rgb[3];       /* TINT reveal in red/green/blue: one material per tint color */
 static nt_atlas_region_ref_t s_radial_art_ref;
 static nt_font_t s_font;
 
@@ -1620,6 +1621,67 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 #define RADIAL_GRID_ROWS 8
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — four side-by-side demos, not deep nesting
+/* HSV(h,1,1) -> 0xAABBGGRR. The dense grid colors each radial per-widget through this
+ * (standard sprite color rides v_color), so many distinct colors still batch to one draw. */
+static uint32_t showcase_hue_abgr(float h) {
+    const float x = h * 6.0F;
+    const int i = (int)x;
+    const float f = x - (float)i;
+    float r = 0.0F;
+    float g = 0.0F;
+    float b = 0.0F;
+    switch (i % 6) {
+    case 0:
+        r = 1.0F;
+        g = f;
+        break;
+    case 1:
+        r = 1.0F - f;
+        g = 1.0F;
+        break;
+    case 2:
+        g = 1.0F;
+        b = f;
+        break;
+    case 3:
+        g = 1.0F - f;
+        b = 1.0F;
+        break;
+    case 4:
+        r = f;
+        b = 1.0F;
+        break;
+    default:
+        r = 1.0F;
+        b = 1.0F - f;
+        break;
+    }
+    const uint32_t rr = (uint32_t)((r * 255.0F) + 0.5F);
+    const uint32_t gg = (uint32_t)((g * 255.0F) + 0.5F);
+    const uint32_t bb = (uint32_t)((b * 255.0F) + 0.5F);
+    return 0xFF000000U | (bb << 16) | (gg << 8) | rr;
+}
+
+/* TINT reveal in three colors: one material per tint (the reveal tint is a per-material
+ * param), contrasting the per-widget color_packed the dense grid uses. */
+static void render_radial_tint_row(nt_ui_context_t *ctx) {
+    static const char *const tint_labels[3] = {"tint red", "tint green", "tint blue"};
+    static const Clay_ElementDeclaration timg_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}};
+    static const Clay_ElementDeclaration trow_decl = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "TINT reveal in three colors (un-swept sector mixed toward red / green / blue):", g_current->caption);
+    CLAY(trow_decl) {
+        for (int t = 0; t < 3; ++t) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                nt_ui_radial_image_style_t tstyle = nt_ui_radial_image_style_defaults();
+                tstyle.material = s_radial_tint_rgb[t];
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_radial_art_ref, 0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), tint_labels[t], g_current->caption);
+            }
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
     /* The radial material(s) load with the pack; until ready, skip the tab body (no-art early-out). */
@@ -1685,6 +1747,10 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+    /* #region 3b: TINT reveal in three colors (extracted to keep render_radial simple) */
+    render_radial_tint_row(ctx);
+    // #endregion
+
     /* #region 4: dense batched grid — N radials, one material, one draw (D-66-07) */
     (void)snprintf(buf, sizeof buf, "Dense grid: %d radials sharing ONE material -> watch the header draw-call count stay flat.", RADIAL_GRID_COLS * RADIAL_GRID_ROWS);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
@@ -1702,6 +1768,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
                     if (f > 1.0F) {
                         f -= 1.0F;
                     }
+                    rstyle.color_packed = showcase_hue_abgr(phase);
                     nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, f, RADIAL_TAU, &rstyle, &cell_decl);
                 }
             }
@@ -2609,7 +2676,7 @@ int main(int argc, char *argv[]) {
     nt_atlas_init();
 
     /* sprite + text + base radial + 4 radial-image reveal-mode materials = 7. */
-    nt_material_init(&(nt_material_desc_t){.max_materials = 8});
+    nt_material_init(&(nt_material_desc_t){.max_materials = 12});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
@@ -2709,9 +2776,36 @@ int main(int argc, char *argv[]) {
             .attr_map[0] = {.stream_name = "a_radial", .location = 4},
             .attr_map_count = 1,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
-            .params[1] = {.name = NT_UI_RADIAL_IMAGE_PARAM_TINT, .value = {0.502F, 0.502F, 0.502F, 0.6F}},
+            .params[1] = {.name = NT_UI_RADIAL_IMAGE_PARAM_TINT, .value = {1.0F, 0.75F, 0.2F, 0.85F}}, /* gold so the TINT cell reads as a tint, not gray */
             .param_count = 2,
             .label = k_radial_image_labels[m],
+        });
+    }
+
+    /* Three TINT materials in distinct colors. The reveal tint is a per-material param, so each
+     * color is its own material — contrast the dense grid, which colors per widget via color_packed. */
+    static const float k_tint_rgb[3][4] = {
+        {1.0F, 0.18F, 0.18F, 0.85F}, /* red */
+        {0.18F, 1.0F, 0.30F, 0.85F}, /* green */
+        {0.25F, 0.45F, 1.0F, 0.85F}, /* blue */
+    };
+    static const char *const k_tint_mat_labels[3] = {"ui_showcase_radial_tint_r", "ui_showcase_radial_tint_g", "ui_showcase_radial_tint_b"};
+    for (int t = 0; t < 3; ++t) {
+        s_radial_tint_rgb[t] = nt_material_create(&(nt_material_create_desc_t){
+            .vs = s_radial_vs_handle,
+            .fs = s_radial_image_fs_handle,
+            .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
+            .texture_count = 1,
+            .blend_mode = NT_BLEND_MODE_ALPHA,
+            .depth_test = false,
+            .depth_write = false,
+            .cull_mode = NT_CULL_NONE,
+            .attr_map[0] = {.stream_name = "a_radial", .location = 4},
+            .attr_map_count = 1,
+            .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_TINT, 0.4F, 0.0F, 0.0F}},
+            .params[1] = {.name = NT_UI_RADIAL_IMAGE_PARAM_TINT, .value = {k_tint_rgb[t][0], k_tint_rgb[t][1], k_tint_rgb[t][2], k_tint_rgb[t][3]}},
+            .param_count = 2,
+            .label = k_tint_mat_labels[t],
         });
     }
 
