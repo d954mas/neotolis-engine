@@ -250,11 +250,10 @@ _Static_assert(NT_DEVAPI_UI_DRAG_FRAMES_MAX + 2 <= NT_DEVAPI_INPUT_SCHED_MAX, "u
    pointer needs lives HERE.
      - {x,y}: interpreted as Y-up in the declared space -> flipped (out_y = layout_h - in_y) using the
        SAME layout height the metadata + probe bounds use, so read(bounds)==write({x,y}) is exact.
-       Assumes layout==device (unscaled ctx, e.g. the hud); for an nt_ui_scale app the device<->layout
-       mapping is app-owned and NOT inverted here — use the string-id form (resolves through the live
-       ctx) for scaled UIs. Documented limitation, not a silent bug.
-     - string id: nt_ui_get_bbox already returns Clay/device Y-down; it never exposes Y-up to the user,
-       so it goes through with NO flip.
+     - string id: nt_ui_get_bbox returns Clay Y-down; it never exposes Y-up to the user, so NO flip.
+   BOTH forms resolve into the ctx LAYOUT space and inject assuming the ctx viewport == full framebuffer
+   (layout==device, e.g. the hud). For an nt_ui_scale app NEITHER is correct yet: the ctx must carry its
+   viewport so layout->device is inverted here (follow-up). Not a silent bug — the space is declared above.
    `key` names the field ("id"/"from"/"to") for the error messages. */
 static bool resolve_target(const cJSON *params, const char *key, nt_ui_context_t *ctx, float *out_x, float *out_y, nt_devapi_error *err) {
     const cJSON *jt = cJSON_GetObjectItemCaseSensitive(params, key);
