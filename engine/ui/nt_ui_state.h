@@ -70,6 +70,7 @@ void nt_ui_state_clear_all(nt_ui_context_t *ctx);
 /* Occupancy for the inspector "UI memory" line. */
 uint32_t nt_ui_state_used_slots(const nt_ui_context_t *ctx);
 uint32_t nt_ui_state_used_bytes(const nt_ui_context_t *ctx); /* sum of live cell sizes */
+uint32_t nt_ui_state_slots(const nt_ui_context_t *ctx);      /* configured pool size */
 
 /* Monotonic; nonzero delta across frames means raise state_slots / state_probe_max. */
 uint32_t nt_ui_state_evictions(const nt_ui_context_t *ctx);

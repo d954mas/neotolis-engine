@@ -145,3 +145,8 @@ uint32_t nt_ui_state_evictions(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_state_evictions: ctx must be non-NULL");
     return ctx->state_evictions;
 }
+
+uint32_t nt_ui_state_slots(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_state_slots: ctx must be non-NULL");
+    return ctx->state_slots;
+}
