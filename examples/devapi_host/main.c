@@ -3,10 +3,14 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_net.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
+#include "log/nt_log_ring.h"
 #include "memory/nt_mem_scratch.h"
+#include "metrics/nt_metrics.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h" /* NT_UI_BUTTON_DEF for the registered-widget role. */
 #include "ui/nt_ui_scale.h"  /* nt_ui_compute_scale + nt_ui_viewport_from_scale for the scaled ctx. */
@@ -137,6 +141,7 @@ static void recover_on_disconnect(void) {
 }
 
 static void frame(void) {
+    nt_debug_overlay_frame_begin();
     nt_window_poll();
     /* Order matters: nt_devapi_update first runs net_poll (a command may enqueue into the
        devapi input schedule), then ticks that schedule and — only on a real sim-advance — releases
@@ -159,6 +164,18 @@ static void frame(void) {
     if (nt_app_render_enabled()) {
         nt_window_swap_buffers();
     }
+
+    /* User counters so perf.snapshot/perf.stats have a user channel to observe: a monotonic int
+       counter + the last frame's cpu_ms as a float. */
+    static uint64_t s_frame_counter = 0;
+    s_frame_counter++;
+    nt_debug_overlay_count("frames", s_frame_counter);
+    nt_debug_overlay_count_f("frame_ms", (double)nt_debug_overlay_get_cpu_ms());
+
+    nt_debug_overlay_frame_end();
+    /* D-07: sample IMMEDIATELY after frame_end so the metrics window reads this frame's fresh
+       overlay getters (fps/cpu_ms/draw_calls) before the next frame mutates them. */
+    nt_metrics_sample();
 
     /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
        timeouts catch a hung host). A frame-count cap would also kill long stability sims. */
@@ -184,6 +201,14 @@ int main(void) {
     /* vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
+
+    /* Observability wiring (D-07): the overlay measures cpu/fps/draw_calls per frame, nt_metrics
+       windows them, and the log ring captures every nt_log_write for log.tail. The obs devapi group
+       self-registers under NT_DEVAPI_GROUP_OBS — no host register call needed. */
+    nt_debug_overlay_init(NULL);
+    nt_log_ring_init();
+    nt_log_add_sink(nt_log_ring_sink, NULL);
+    nt_metrics_init();
 
     /* devapi wiring (game-layer consumer; no engine edits). */
     if (nt_devapi_init() != NT_OK) {
@@ -227,6 +252,8 @@ int main(void) {
         return 1;
     }
     printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
+    /* Seed the log ring so log.tail has at least one entry the moment a bot connects. */
+    nt_log_info("devapi_host listening on 127.0.0.1:%u", port);
 
     /* Opt-in pre-loop gate so a bot can hand over setup before frame 0.
        Bounded; the host does NOT require a client to start. */
@@ -240,6 +267,7 @@ int main(void) {
 
     nt_devapi_net_stop();
     nt_devapi_shutdown();
+    nt_debug_overlay_shutdown();
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();
