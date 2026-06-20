@@ -97,13 +97,14 @@ void nt_sprite_renderer_flush(void);
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Set the "current" custom per-vertex attribute block baked into every vertex of
- * the subsequent emits (like color — uniform across a widget's verts, caller-supplied).
+ * the next emit (like color — uniform across a widget's verts, caller-supplied).
  * CONTRACT: when the bound material declares custom attrs (attr_map_count > 0), EACH emit
  * must be preceded by this call with bytes == attr_map_count * 16 (one FLOAT4 per declared
  * attr) — the exact custom block the material's vertex layout expects. A missing call or a
  * wrong size is asserted (it would desync the upload stride from the pipeline). Plain
  * materials (attr_map_count == 0) ignore the block. bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX.
- * Cleared on flush. */
+ * The block is CONSUMED (cleared) by each emit — re-call this before the next emit
+ * (the per-emit contract above already requires it). */
 void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
 
 /* Emit one atlas region at one mat4 transform.

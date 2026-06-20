@@ -452,6 +452,9 @@ static inline void bake_custom_attrs(uint32_t base, uint32_t count) {
     if (s_sprite.cur_custom_bytes > s_sprite.flush_custom_bytes) {
         s_sprite.flush_custom_bytes = s_sprite.cur_custom_bytes;
     }
+    /* Each emit CONSUMES its block: the next emit that forgets set_custom_attrs
+     * then trips the material-stride assert instead of silently reusing this one. */
+    s_sprite.cur_custom_bytes = 0;
 }
 
 void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes) {
