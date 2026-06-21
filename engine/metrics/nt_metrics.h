@@ -3,22 +3,21 @@
 
 #include "core/nt_types.h"
 
-/* Layer-1 perf collector (D-06/07, OBS-07/08). A bounded, no-heap, dev-only
- * per-frame sampler: nt_metrics_sample() reads existing sources once and stores
- * one double per channel into fixed BSS rings; windowed aggregates compute on
- * query off the hot path via a sorted scratch copy. The L2 perf.* devapi group
- * (Plan 06) wraps this; the channel set + stats field names/widths below are the
- * stable serialization contract.
+/* Layer-1 perf collector. A bounded, no-heap, dev-only per-frame sampler:
+ * nt_metrics_sample() reads existing sources once and stores one double per channel
+ * into fixed BSS rings; windowed aggregates compute on query off the hot path via a
+ * sorted scratch copy. The L2 perf.* devapi group wraps this; the channel set +
+ * stats field names/widths below are the stable serialization contract.
  *
  * Dev-only: NT_METRICS_ENABLED=0 (release/OFF mirror) compiles real no-op bodies,
  * so the collector ships zero footprint in release. Default ON in debug. The gate
- * is independent of NT_DEVAPI_ENABLED (D-06). */
+ * is independent of NT_DEVAPI_ENABLED. */
 #ifndef NT_METRICS_ENABLED
 #define NT_METRICS_ENABLED 1
 #endif
 
 /* Window depth per channel ring. 256 keeps the BSS footprint small; note p99.9
- * collapses to max below ~1000 samples (nearest-rank math, A4) — raise to 1024
+ * collapses to max below ~1000 samples (nearest-rank math) — raise to 1024
  * via -DNT_METRICS_WINDOW=1024 if a distinct 0.1%-low is needed. */
 #ifndef NT_METRICS_WINDOW
 #define NT_METRICS_WINDOW 256
@@ -34,7 +33,7 @@
 #define NT_METRICS_USER_NAME_MAX 32
 #endif
 
-/* Fixed channels (D-07). Sampled every frame from existing engine sources.
+/* Fixed channels. Sampled every frame from existing engine sources.
  * NT_METRICS_CHANNEL_COUNT bounds the fixed-channel arrays; user channels are
  * keyed separately by name. */
 typedef enum {
@@ -49,7 +48,7 @@ typedef enum {
     NT_METRICS_CHANNEL_COUNT,
 } nt_metrics_channel_t;
 
-/* On-query windowed aggregates for one channel (OBS-08). When `samples == 0` the
+/* On-query windowed aggregates for one channel. When `samples == 0` the
  * caller treats the numeric fields as null (the L2 handler emits JSON null) — the
  * struct still zero-fills them. percentiles are nearest-rank over the live window. */
 typedef struct {
@@ -68,13 +67,14 @@ typedef struct {
 /* Zero all channel rings + user channels. */
 void nt_metrics_init(void);
 
-/* Clear the window (counts -> 0) without tearing down state (D-11 perf.reset). */
+/* Clear the window (counts -> 0) without tearing down state (backs perf.reset). */
 void nt_metrics_reset(void);
 
 /* ---- Per-frame sample (hot path: heap-free) ----
  * Reads the fixed sources once (overlay getters, gfx draw_calls, scratch hwm/used,
  * nt_platform memory) and every overlay user counter, writing one double per channel
- * into its ring. Call EXPLICITLY right after nt_debug_overlay_frame_end() (D-07). */
+ * into its ring. Call EXPLICITLY right after nt_debug_overlay_frame_end() so the
+ * overlay getters are fresh for this frame. */
 void nt_metrics_sample(void);
 
 /* ---- On-query aggregates (off hot path) ---- */
@@ -84,7 +84,7 @@ void nt_metrics_sample(void);
  * zeroed aggregates; n==1 => every percentile == that value. */
 void nt_metrics_channel_stats(nt_metrics_channel_t channel, nt_metrics_stats_t *out);
 
-/* fps-low helpers derived from the frame_ms channel (OBS-08).
+/* fps-low helpers derived from the frame_ms channel.
  * 1%-low fps  = 1000.0 / p99(frame_ms)   (guarded: 0 when p99 <= 0)
  * 0.1%-low    = 1000.0 / p99.9(frame_ms) (guarded: 0 when p99.9 <= 0) */
 double nt_metrics_fps_low_1pct(void);

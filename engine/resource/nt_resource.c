@@ -1317,7 +1317,7 @@ nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id) {
     return (nt_pack_state_t)s_resource.packs[idx].pack_state;
 }
 
-/* ---- Enumeration accessors (D-14): emit compact POD over the internal store ---- */
+/* ---- Enumeration accessors: emit compact POD over the internal store ---- */
 
 uint16_t nt_resource_pack_count(void) {
     uint16_t count = 0;

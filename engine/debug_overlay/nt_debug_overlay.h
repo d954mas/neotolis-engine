@@ -52,7 +52,7 @@ void nt_debug_overlay_count(const char *name, uint64_t value);
  * an existing name with the other variant flips its tag (last write wins). */
 void nt_debug_overlay_count_f(const char *name, double value);
 
-/* ---- User counter enumeration (D-08) ----
+/* ---- User counter enumeration ----
  * nt_metrics reads all user counters generically by index. Enumeration order is
  * the flat-array insertion order, stable across calls within a frame. */
 uint16_t nt_debug_overlay_user_count(void);

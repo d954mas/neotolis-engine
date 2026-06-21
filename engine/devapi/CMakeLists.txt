@@ -92,8 +92,8 @@ if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED))
         "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON (or NT_UI_DEBUG_TOOLS=ON, which defaults both).")
 endif()
 
-# Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads over the Plan 01/03/04/05 L1
-# capabilities. Links the dev-only ring + metrics collector + the overlay/entity/resource readers.
+# Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads over the L1 capabilities.
+# Links the dev-only ring + metrics collector + the overlay/entity/resource readers.
 # GNU-ld single-pass order: nt_devapi (consumer) is listed first on the exe link line; these provider
 # libs trail it, with nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
 if(NT_DEVAPI_GROUP_OBS)

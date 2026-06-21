@@ -25,7 +25,7 @@ static struct {
     uint64_t frame_index;
 
     /* User counters — flat parallel arrays. Value is a tagged int/float so a
-     * float channel (e.g. frame time) survives without truncation (D-09). */
+     * float channel (e.g. frame time) survives without truncation. */
     uint16_t user_capacity;
     uint16_t user_count;
     uint64_t user_name_hashes[NT_DEBUG_OVERLAY_MAX_USER_COUNTERS];
@@ -190,7 +190,7 @@ uint32_t nt_debug_overlay_format_lines(char *buf, uint32_t size) {
     }
 
     /* User counters in insertion order, one line each: "name: value".
-     * Int tag prints as an integer; float tag prints with decimals (D-09). */
+     * Int tag prints as an integer; float tag prints with decimals. */
     for (uint16_t i = 0; i < s_overlay.user_count; i++) {
         int m;
         if (s_overlay.user_tags[i] == NT_OVERLAY_VAL_FLOAT) {

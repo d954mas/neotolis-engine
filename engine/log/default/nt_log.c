@@ -25,7 +25,7 @@ static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 
 void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
 
-/* Fixed BSS sink registry (D-01 "~4 slots", overridable -D). Tiny + always-compiled;
+/* Fixed BSS sink registry (~4 slots, overridable -D). Tiny + always-compiled;
    the dev-only gating lives in the attached sink (nt_log_ring), not here. */
 #ifndef NT_LOG_MAX_SINKS
 #define NT_LOG_MAX_SINKS 4

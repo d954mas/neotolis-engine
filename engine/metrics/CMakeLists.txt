@@ -1,4 +1,4 @@
-# nt_metrics -- Layer-1 perf collector (D-06, OBS-07/08).
+# nt_metrics -- Layer-1 perf collector.
 # One TU always compiles; the 0/1 NT_METRICS_ENABLED define (PUBLIC so consumers
 # see the same value) selects real bodies vs zero-footprint no-op stubs for the
 # release/OFF mirror. Independent of NT_DEVAPI_ENABLED.

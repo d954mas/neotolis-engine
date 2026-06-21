@@ -24,7 +24,7 @@ void nt_log_ring_sink(nt_log_level_t level, const char *domain, const char *msg,
     nt_log_ring_entry_t *e = &s_ring.entries[s_ring.head];
     e->level = level;
 
-    /* Copy both — never store the caller's pointer (T-68-01-CPY). domain is "" (not NULL)
+    /* Copy both — never store the caller's pointer. domain is "" (not NULL)
        per the sink contract, but guard anyway. snprintf always NUL-terminates + truncates. */
     (void)snprintf(e->domain, sizeof(e->domain), "%s", (domain != NULL) ? domain : "");
     (void)snprintf(e->msg, sizeof(e->msg), "%s", (msg != NULL) ? msg : "");

@@ -14,16 +14,15 @@
 #include "resource/nt_resource.h"
 #include "transform_comp/nt_transform_comp.h"
 
-/* Observability command group: the log / perf / entity / resource namespaces (D-16). Every command
-   is an IMMEDIATE read (D-15) — it serializes the Plan 01/03/04/05 L1 capabilities and returns on the
-   same call; nothing in this group ever defers the response (OBS-06 reload dropped). Bot input is
-   range/type-checked -> bad_params; only host-call invariants assert. Compiles out entirely when
-   NT_DEVAPI_GROUP_OBS is absent. */
+/* Observability command group: the log / perf / entity / resource namespaces. Every command
+   is an IMMEDIATE read — it serializes the L1 capabilities and returns on the same call; nothing
+   in this group ever defers the response. Bot input is range/type-checked -> bad_params; only
+   host-call invariants assert. Compiles out entirely when NT_DEVAPI_GROUP_OBS is absent. */
 
 #ifdef NT_DEVAPI_GROUP_OBS
 
-/* Pagination cap shared by entity.list / resource.list: oversized `limit` -> huge payload DoS
-   (T-68-06-DOS). Mirrors the NT_DEVAPI_STEP_MAX fail-fast-ceiling style. Override per build with -D. */
+/* Pagination cap shared by entity.list / resource.list: oversized `limit` -> huge payload DoS.
+   Mirrors the NT_DEVAPI_STEP_MAX fail-fast-ceiling style. Override per build with -D. */
 #ifndef NT_DEVAPI_OBS_LIMIT_MAX
 #define NT_DEVAPI_OBS_LIMIT_MAX 512
 #endif
@@ -102,7 +101,7 @@ static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint
 }
 
 /* log.tail{n?, level?}: newest-first {level,domain,msg} entries, up to n, optionally filtered by
-   min level. Reads the dev-only nt_log_ring (D-05). n out of range / level unknown -> bad_params. */
+   min level. Reads the dev-only nt_log_ring. n out of range / level unknown -> bad_params. */
 static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     uint16_t n = NT_LOG_RING_DEPTH;
@@ -126,7 +125,7 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
 
 // #region perf.*
 /* perf.snapshot: IMMEDIATE current-frame view from the LIVE overlay getters (NOT the metrics
-   window). gpu_ms maps -1.0F (timer unsupported) to JSON null (D-11). user_counters enumerates the
+   window). gpu_ms maps -1.0F (timer unsupported) to JSON null. user_counters enumerates the
    overlay counters. */
 static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
@@ -168,7 +167,7 @@ static const char *const k_channel_names[NT_METRICS_CHANNEL_COUNT] = {
 };
 
 /* Serialize one channel's windowed aggregates. Empty window (samples==0) emits null aggregates
-   (Open Q3 RESOLVED schema): {samples:0, avg:null, ...}. */
+   schema: {samples:0, avg:null, ...}. */
 static void add_channel_stats(cJSON *parent, const char *name, const nt_metrics_stats_t *st) {
     cJSON *o = cJSON_AddObjectToObject(parent, name);
     NT_ASSERT(o != NULL);
@@ -228,7 +227,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
                 }
             }
             if (found < 0) {
-                /* Unknown channel: bad_params listing valid channels (T-68-06-CHAN). */
+                /* Unknown channel: bad_params listing valid channels. */
                 set_bad_params(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_total, scratch_hwm, scratch_used, pool_occupancy)");
                 return false;
             }
@@ -283,7 +282,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
     return true;
 }
 
-/* perf.reset: clear the metrics window without tearing down state (D-11). */
+/* perf.reset: clear the metrics window without tearing down state. */
 static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -296,7 +295,7 @@ static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *
 
 // #region pagination
 /* Resolve optional {offset, limit} against `total`. limit is capped at NT_DEVAPI_OBS_LIMIT_MAX
-   (T-68-06-DOS). Bad offset/limit -> bad_params. On success out_begin..out_end bound the page
+   Bad offset/limit -> bad_params. On success out_begin..out_end bound the page
    into [0, total]. */
 static bool resolve_page(const cJSON *params, uint32_t total, const char *who, uint32_t *out_begin, uint32_t *out_end, nt_devapi_error *err) {
     uint32_t offset = 0;
@@ -387,11 +386,10 @@ static bool entity_slot_matches(uint16_t idx, bool only_drawable, nt_entity_t *o
     return true;
 }
 
-/* entity.list{offset?, limit?, only_drawable?}: live entities with compact fields (no world_matrix,
-   D-12). Two heap-free passes over 1..nt_entity_max() via nt_entity_at_index: pass 1 counts the
-   honest filtered total, pass 2 emits the [begin,end) page resolved against it — so the whole live
-   range is pageable, not just a fixed prefix. Optional only_drawable filter. Bad offset/limit ->
-   bad_params. */
+/* entity.list{offset?, limit?, only_drawable?}: live entities with compact fields (no world matrix).
+   Two heap-free passes over 1..nt_entity_max() via nt_entity_at_index: pass 1 counts the honest
+   filtered total, pass 2 emits the [begin,end) page resolved against it — so the whole live range is
+   pageable, not just a fixed prefix. Optional only_drawable filter. Bad offset/limit -> bad_params. */
 static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     bool only_drawable = false;
@@ -553,7 +551,7 @@ static void add_assets_section(cJSON *result, bool filter_pack, uint16_t filter_
 }
 
 /* resource.list{offset?, limit?, pack_id?, include_assets?}: always packs[]; flat assets[] only when
-   include_assets true (D-14). Pagination over packs with `total`; optional pack_id filter (D-13).
+   include_assets true. Pagination over packs with `total`; optional pack_id filter.
    When pack_id filters, assets[] is restricted to that pack too. State values mapped to stable
    tokens. Bad pack_id/offset/limit -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

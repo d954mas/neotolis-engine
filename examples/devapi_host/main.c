@@ -174,7 +174,7 @@ static void frame(void) {
     nt_debug_overlay_count_f("cpu_ms", (double)nt_debug_overlay_get_cpu_ms());
 
     nt_debug_overlay_frame_end();
-    /* D-07: sample IMMEDIATELY after frame_end so the metrics window reads this frame's fresh
+    /* Sample IMMEDIATELY after frame_end so the metrics window reads this frame's fresh
        overlay getters (fps/cpu_ms/draw_calls) before the next frame mutates them. */
     nt_metrics_sample();
 
@@ -203,7 +203,7 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 
-    /* Observability wiring (D-07): the overlay measures cpu/fps/draw_calls per frame, nt_metrics
+    /* Observability wiring: the overlay measures cpu/fps/draw_calls per frame, nt_metrics
        windows them, and the log ring captures every nt_log_write for log.tail. The obs devapi group
        self-registers under NT_DEVAPI_GROUP_OBS — no host register call needed. */
     nt_debug_overlay_init(NULL);

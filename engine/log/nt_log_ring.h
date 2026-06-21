@@ -4,9 +4,9 @@
 #include "log/nt_log.h"
 #include <stdint.h>
 
-/* Reusable dev-only log-tail ring (D-03/D-04). A host attaches nt_log_ring_sink via
+/* Reusable dev-only log-tail ring. A host attaches nt_log_ring_sink via
  * nt_log_add_sink; every nt_log_write then COPIES {level, domain, msg} into a bounded
- * ring. The devapi log.tail command (Plan 06) reads it. L1-testable without devapi.
+ * ring. The devapi log.tail command reads it. L1-testable without devapi.
  *
  * Dev-only: NT_LOG_RING_ENABLED=0 (release/OFF mirror) compiles real no-op bodies, so
  * the ring ships zero footprint in release. Default ON in debug. */
@@ -28,7 +28,7 @@
 #endif
 
 /* POD entry the L2 reader serializes without touching ring internals.
- * domain/msg are owned copies (never borrowed caller pointers — T-68-01-CPY). */
+ * domain/msg are owned copies (never borrowed caller pointers). */
 typedef struct {
     nt_log_level_t level;
     char domain[NT_LOG_RING_DOMAIN_SIZE];
