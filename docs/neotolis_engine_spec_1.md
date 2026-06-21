@@ -3076,3 +3076,96 @@ with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
   clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the
   bbox lets the same shape render as an oval.
+
+# 32. Rich text (`nt_ui_rich_text`)
+
+Styled, wrapped, inline-illustrated text under **one** measured Clay block. Two
+authoring fronts produce the same run-list: a **code-first** push/pop builder and
+a **runtime markup parser**. The design rationale lives here; the headers
+(`nt_ui_rich_text.h`, `nt_ui_rich_tagset.h`, `nt_ui_rich_fx.h`) carry the
+caller-facing contract.
+
+## 32.1 The runtime parser is a CONTENT parser, not an asset parser
+
+The working principles forbid **asset-format parsers at runtime** — the builder
+packs source formats (PNG, TTF, glTF) into binaries offline so the runtime loads
+prebuilt data with no parsing. `nt_ui_rich_text_markup` does **not** violate this.
+
+The markup string (`"<b>HP</b> <color=gold><img=heart/></color>"`) is a
+**content** string, not an asset. It is the exact peer of a `printf` format
+string or a localized UI string the game already passes at runtime — short, game-
+authored display text, parsed into the same run-list the code-first builder
+emits. There is no file format, no versioned binary, no offline-bakeable source
+being re-parsed; the parser only routes display content the game produces this
+frame. It DRIVES the shared builder (`begin` / `push_*` / `text_n` / `image` /
+`pop` / `end`), so a markup string and the equivalent builder calls produce a
+byte-identical run-list — one composition path, two front ends (D-67-02).
+
+## 32.2 Design: flat run-list → solver → one FIXED block
+
+- **Run-list (SoA, frame scratch).** The builder appends runs into a flat
+  per-call run-list in frame scratch (no heap; `#define` caps assert on overflow).
+  A new run starts only when the **composed style** (color / scale / font variant
+  / effect / image-material) changes — adjacent same-style text coalesces.
+- **Solver.** A word-wrap + baseline solver resolves every atom (glyph, image,
+  object) to a box at a container width, stacking lines on a per-line max
+  baseline. Horizontal alignment (L/C/R) offsets each line.
+- **One Clay FIXED block.** The solved total size feeds a single
+  `CLAY_SIZING_FIXED` Clay element (D-67-03); text emits during that element's
+  custom-walk via `NT_UI_CUSTOM_TYPE_RICH_TEXT`. Keeping text under one measured
+  block is what lets the whole paragraph wrap and align as a unit.
+
+## 32.3 Inline images ride the custom-attr sprite path
+
+An `<img>` atom is a **floating child** of the FIXED block, positioned at the
+solver's solved `(x, y)`, emitted through the existing `nt_ui_image_custom`
+(`geom_mode = REGION`) — the same Phase-31 custom-attr sprite path the radial
+widgets use. The 48 B block is `{a_tint, a_uvrect, a_layout}`: `a_tint` is the
+run's **lossless** float4 tint (a `<color>` around an `<img>` survives at full
+precision, not the u8 vertex-color path); `a_uvrect` / `a_layout` are walker-
+filled by name. Images resolve **by atlas + region name** — the atlas IS the
+registry (see §32.5, D-67-13).
+
+## 32.4 Effects (visual-only) and links
+
+- **Per-atom effects** are a pure deterministic curve `fn(atom_idx, kind,
+  base_xy, base_wh, base_color, time, hovered) → {offset, color, scale, visible}`
+  evaluated at emit and folded into the existing position / tint / scale (no 5th
+  custom attr). They are **visual-only**: the solver layout never re-flows. The
+  animation clock is **passed in by the game** (`time`) — there is no engine
+  global frame clock (RESEARCH Pitfall 4). A stock catalogue
+  (wave / shake / rainbow / pulse / fade_in) is registered piecemeal by name.
+- **Links** (`<link=id>`): the widget hit-tests its **own** solver rects against
+  the pointer (offset by the block's prev-frame bbox origin) and reports
+  `{hovered_link, clicked_link}` — there is **no extra Clay element per link**.
+  Link hover gates effects (an effect sees `hovered == true` only for the hovered
+  link's atoms). The Model-D game reacts to the reported click.
+- **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
+  a box via `measure_fn` (text wraps around it); the widget calls the game's
+  `draw_fn(user_data, x, y, w, h)` at the solved box. The engine never draws the
+  object (renderer-agnostic, D-67-05).
+
+## 32.5 Spec ↔ #184-proposal divergences (per AGENTS.md)
+
+The shipped feature deliberately diverges from the original #184 proposal on five
+points; flagged here so code and spec do not silently drift:
+
+- **D-67-13 — name-based image resolve replaces `register_image_tag`.** #184
+  proposed a per-image-tag registration call. Shipped: `<img=region/>` resolves by
+  atlas + region NAME (`nt_atlas_ref` → `nt_atlas_resolve_ref`); the atlas IS the
+  registry, no per-image registration. The tagset only carries an atlas **alias**
+  (`<img=alias:region/>`), a font family, a named color, an effect id, and an
+  object tag.
+- **D-67-17 — effects are per-ATOM, not #184's per-glyph/TEXT-only.** An effect
+  attaches to ANY run kind via `effect_id` and applies to TEXT (per-glyph),
+  IMAGE (a_tint + quad), AND OBJECT (draw box) — the "text + gold icon wave
+  together" case. The per-glyph explode is preserved for TEXT as a quality path,
+  but the effect model is per-atom across kinds.
+- **D-67-21 — alignment is per-block,** not per-run: one `nt_rich_align_t`
+  (L/C/R) offsets each solved line; there is no per-run horizontal alignment.
+- **D-67-22 — image vertical alignment is a `valign` enum**
+  (`baseline / middle / top / bottom`) on the image atom, not a free pixel
+  offset only.
+- **D-67-23 — the FIXED block reuses `nt_ui_get_bbox`** for its prev-frame origin
+  (the link hit-test + the `container_w <= 0` width fallback) rather than adding a
+  new block-origin getter; the block therefore carries `decl.id`.

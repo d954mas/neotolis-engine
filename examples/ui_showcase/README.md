@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (16 entries)
+## Tabs (17 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -46,21 +46,28 @@ lighten and writes the index on click).
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
-12. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+12. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
+    block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
+    the code-first push/pop builder AND the runtime `<markup>` parser. Demos
+    multi-run color/bold/(synth)italic text, inline icons (lossless per-image
+    tint), a **wave** effect moving text + a gold icon together, a **typewriter**
+    (`fade_in` stagger off the game clock), and a clickable **link**; see the
+    **Rich Text controls** + **Rich Text visual-QA protocol** below.
+13. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
     (`nt_ui_combo_preview_begin`/`end`).
-13. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+14. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-14. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+15. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
     `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
     rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
     nested **submenu**, and a custom `activatable=false` row whose inner button owns
     the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-15. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+16. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
-16. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+17. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -152,6 +159,54 @@ regression. Build + run the native showcase, open the **Radial** tab, and confir
    stays at roughly the same count as without the grid); FPS stays stable.
 7. **Dark/Light parity** — press **T**; both palettes render the radial tab correctly.
 8. *(Optional)* load the wasm-debug build in a browser and confirm the radials render (WebGL2 parity).
+
+## Rich Text controls (Rich Text tab)
+
+Rich text is **Model D**: the game owns the content (the builder calls or the markup
+string), the effect **clock** (`time`, accumulated from frame `dt` — there is no engine
+global clock), and the link reaction. The widget lays out + draws one measured block and
+reports the link hover/click back. The tab renders the **same content twice** — once via
+the code-first builder, once via the runtime markup parser — to prove byte-identical output.
+
+| Element | Behavior |
+|---------|----------|
+| **Code-first builder** block | `nt_ui_rich_begin` / `push_color` / `push_bold` / `push_italic` / `push_effect` / `text_n` / `image` / `link` / `end` — explicit real values (font / abgr color / atlas ref) |
+| **Runtime markup** block | `nt_ui_rich_text_markup` parses `"<b>…</b> <color=gold><img=gold/></color> <link=N>…</link>"`; a tagset registers the `gold` color, the `wave` effect, and the icons atlas alias |
+| **Inline icons** | the gold + heart icons sit baseline-aligned (`valign=middle`) beside the text; the run's `<color>` rides the **lossless** per-image `a_tint` |
+| **Bold / italic** | `<b>` selects the bold font variant (falls back to Regular here — the demo font ships one face); `<i>` **synth-shears** (the variant is absent), the D-67-16 fallback |
+| **wave** effect | the gold word + the gold icon wave **together** (per-atom effect across kinds, the D-67-17 driving case), driven by the game `time` clock |
+| **Typewriter** | the `fade_in` stock effect staggers each glyph's reveal off the same clock; it loops every ~4 s so the reveal replays |
+| **Link** | hover `[Accept quest]` brightens it; clicking ticks the click counter (Model-D reaction); the readout shows the hovered / last-clicked id |
+
+## Rich Text visual-QA protocol
+
+The GL surface is **not reliably headless-capturable** here, so rich text is verified by the
+**user's eyes** at the BLOCKING visual-QA gate — there is no automated screenshot regression.
+Build + run the native showcase, open the **Rich Text** tab, and confirm:
+
+1. **Multi-style text** — each run renders with the correct per-run color / scale; the crimson
+   "Crimson Drake", the gold "100 gold", and the body text are visibly distinct and on one
+   wrapped paragraph.
+2. **Inline-icon baseline alignment** — the gold + heart icons sit on the text baseline
+   (`valign=middle`), neither floating above the cap height nor clipping below the descenders;
+   the gold icon carries its lossless tint.
+3. **Bold / italic coverage** — `<i>(urgent)</i>` shows a clean synthetic-italic **shear** (the
+   demo font has no italic face); `<b>` is heavier where a bold face exists (here it falls back
+   to Regular — no faux-bold smear).
+4. **wave moves text + icon together** — under `<wave>` the gold word AND the gold icon ride the
+   same vertical wave in phase-shifted lockstep (the per-atom-across-kinds case); the layout does
+   NOT re-flow (effects are visual-only).
+5. **Typewriter reveal** — the third line reveals glyph-by-glyph and replays on the ~4 s loop;
+   no glyph pops in at full alpha out of order.
+6. **Link hover + click** — hovering `[Accept quest]` brightens it; clicking ticks the `clicks`
+   readout and latches the `last clicked` id (Model D).
+7. **Both fronts identical** — the builder block (1) and the markup block (2) render the SAME
+   styled paragraph; any divergence is a parser bug.
+8. **Wrap at the container width** — narrow the window; the paragraph re-flows at the ~560 px
+   block width with NO atom escaping the box, and lines stack on a correct max baseline.
+9. **Dark/Light parity** — press **T**; both palettes restyle the rich-text tab (the body color
+   tracks the palette).
+10. *(Optional)* load the wasm-debug build in a browser and confirm the rich text renders (WebGL2 parity).
 
 ## Visual-QA protocol
 
