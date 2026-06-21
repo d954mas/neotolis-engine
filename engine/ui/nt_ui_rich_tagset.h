@@ -64,7 +64,7 @@ typedef struct {
 } nt_ui_rich_tagset_object_t;
 
 /* ---- The registry object (plain owned struct; NOT on nt_ui_context, D-67-09) ---- */
-typedef struct {
+typedef struct nt_ui_rich_tagset {
     nt_ui_rich_tagset_font_t fonts[NT_UI_RICH_TAGSET_MAX_FONTS];
     uint32_t font_count;
     nt_ui_rich_tagset_atlas_t atlases[NT_UI_RICH_TAGSET_MAX_ATLASES];
