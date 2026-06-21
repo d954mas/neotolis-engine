@@ -55,11 +55,13 @@ void tearDown(void) {
     nt_gfx_shutdown();
 }
 
+#if NT_METRICS_ENABLED
 /* Push one frame with the given scalars (gpu < 0 => N/A). */
 static void push_frame(float frame_ms, float cpu_ms, float gpu_ms, uint32_t draws) {
     nt_metrics_frame_t f = {.frame_ms = frame_ms, .cpu_ms = cpu_ms, .gpu_ms = gpu_ms, .draw_calls = draws};
     nt_metrics_sample(&f);
 }
+#endif
 
 /* ---- Test 1: init + shutdown round-trip ---- */
 
@@ -89,7 +91,11 @@ static void test_stats_format_lines_schema(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 3: format reflects the last-frame cpu/gpu/draws from nt_metrics ---- */
+#if NT_METRICS_ENABLED
+/* ---- Test 3: format reflects the last-frame cpu/gpu/draws from nt_metrics ----
+   The format tests below need real nt_metrics bodies; the OFF mirror (NT_METRICS_ENABLED=0) has no-op
+   stubs (fps 0 / gpu sentinel / no counters), so they are gated out there — the init/shutdown, schema
+   (labels present), and draw-bind tests stay live in both configs. */
 
 static void test_stats_format_reflects_last_frame(void) {
     nt_debug_overlay_init(NULL);
@@ -159,6 +165,7 @@ static void test_stats_user_counter_uint64_exact(void) {
 
     nt_debug_overlay_shutdown();
 }
+#endif /* NT_METRICS_ENABLED */
 
 /* ---- Test 7: Pitfall 9 — explicit set_material AND set_font on draw ----
  * nt_debug_overlay_draw must call BOTH setters every time even when the material/font id matches the
@@ -196,10 +203,12 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stats_init_shutdown);
     RUN_TEST(test_stats_format_lines_schema);
+#if NT_METRICS_ENABLED
     RUN_TEST(test_stats_format_reflects_last_frame);
     RUN_TEST(test_stats_format_reflects_fps);
     RUN_TEST(test_stats_user_counters);
     RUN_TEST(test_stats_user_counter_uint64_exact);
+#endif
     RUN_TEST(test_stats_draw_pitfall9_explicit_set_calls);
     return UNITY_END();
 }
