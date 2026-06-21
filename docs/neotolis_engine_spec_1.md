@@ -2689,6 +2689,27 @@ A bot reads and drives UI through the devapi `ui.*` command group — a thin L2 
 | `ui.scroll` | `{id\|{x,y}, dx?, dy?, ctx?}` | `{queued}` | resolve target → center → synthetic move there + wheel(`dx`,`dy`) notches |
 | `ui.drag` | `{from, to, frames?, ctx?}` | `{queued}` | resolve `from`/`to` → down@from + `frames` interpolated moves + up@to (handler expands the path; `frames` ≥ 1 and DoS-capped — a 0-frame drag emits no move so the inject up lands at `from`, not `to`, and is rejected `bad_params`) |
 
+## 24.9 Observability (devapi `log.*` / `perf.*` / `entity.*` / `resource.*`)
+
+A bot inspects engine state through the devapi **obs** command group — a thin L2 veneer that serializes the dev-only log ring, the `nt_metrics` perf collector, the debug overlay, and the entity/resource enumeration accessors. Every obs command is a **pure immediate read**: it serializes the live L1 state on the same `submit` call and returns synchronously — **nothing in this group ever defers** (no `frame.wait`-style continuation), so all are `frame_behavior: any` with no side effect except `perf.reset`. Untrusted bot input is range/type-checked and returns `bad_params`; only host-call invariants assert.
+
+**The command group:**
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `log.tail` | `{n?, level?}` | `{entries:[{level,domain,msg}]}` | **READ** newest-first ring entries, up to `n` (integer `[0, NT_LOG_RING_DEPTH]`, default full depth), optionally filtered to `level` ≥ `info\|warn\|error` |
+| `perf.snapshot` | `{}` | `{fps,frame_ms,cpu_ms,gpu_ms\|null,draw_calls,user_counters:object}` | **READ** the live current-frame overlay view; `gpu_ms` is JSON `null` when the GPU timer is unsupported |
+| `perf.stats` | `{channels?, budget_ms?}` | `{channels:object,user_channels:object,fps_low_1pct,fps_low_01pct,over_budget_pct,budget_ms}` | **READ** windowed `nt_metrics` aggregates (`samples`/`avg`/`min`/`max`/`median`/`p95`/`p99`/`p99_9`; null aggregates when `samples:0`) per requested-or-all fixed channels + user channels; `budget_ms` (finite, > 0, default 16.67) drives `over_budget_pct` and is echoed back |
+| `perf.reset` | `{}` | `{reset:true}` | clear the metrics window (counts → 0) without tearing down state |
+| `entity.list` | `{offset?, limit?, only_drawable?}` | `{total,entities:[{id,index,generation,alive,enabled,position,drawable}]}` | **READ** live entities with compact fields (no world matrix); fully paginated against the honest `total` (two heap-free passes — the whole live range is pageable); optional `only_drawable` filter |
+| `resource.list` | `{offset?, limit?, pack_id?, include_assets?}` | `{total,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id,type,state,pack}],asset_total?,assets_truncated?}` | **READ** mounted packs (paginated with `total`); a flat `assets[]` only when `include_assets`. `pack_id` filters **both** packs and assets. `resource_id` is a `0x`-hex string (a 64-bit hash can't round-trip through a JSON double); the flat `assets[]` is DoS-capped, with `asset_total`/`assets_truncated` reporting the honest scope vs the emitted prefix |
+
+`offset`/`limit` (and `n`, `pack_id`) are parsed **exactly**: a non-finite, fractional, or out-of-range number is `bad_params`, never silently truncated.
+
+**OFF semantics — dev-only, compiled out.** The whole obs group is gated by `NT_DEVAPI_GROUP_OBS` (default **OFF**, opt-in). When off, `nt_devapi_obs.c` is not compiled, the commands are **absent** from the registry (a `log.tail`/`perf.stats`/… request returns `unknown_method`), and the discovery surface does not list them. As with all of devapi it also vanishes entirely when `NT_DEVAPI_ENABLED` is OFF.
+
+**Build deps are hard, not silent.** A CMake `FATAL_ERROR` guard (mirroring the `ui` group's DEBUG_TOOLS guard) requires `NT_DEVAPI_GROUP_OBS` to be built with **both** `NT_LOG_RING_ENABLED` **and** `NT_METRICS_ENABLED` ON — those carry the real log-ring and metrics bodies the group reads. With either dep OFF the group would link no-op stubs (an always-empty `log.tail`, a zero `perf.stats`) — a vacuously-passing false green — so configure fails fast instead. `NT_UI_DEBUG_TOOLS=ON` defaults both deps on.
+
 ---
 
 # 25. Engine/Game Boundary
