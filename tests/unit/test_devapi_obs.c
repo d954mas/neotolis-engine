@@ -149,6 +149,9 @@ static void test_log_tail_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":-1}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":\"x\"}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"level\":\"bogus\"}}"));
+    /* strict numeric parse: fractional and non-finite are rejected, not truncated. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":2.5}}"));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":1e400}}"));
 }
 
 /* ---- perf.snapshot ---- */
@@ -310,6 +313,8 @@ static void test_entity_list_pagination_and_bad_params(void) {
 
     assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"offset\":-1}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"limit\":-3}}"));
+    /* strict numeric parse: fractional offset/limit rejected, not truncated. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"offset\":1.5}}"));
 }
 
 /* ---- resource.list ---- */
@@ -340,6 +345,8 @@ static void test_resource_list_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"pack_id\":-1}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"offset\":-1}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"include_assets\":\"yes\"}}"));
+    /* strict numeric parse: fractional pack_id rejected, not truncated. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"pack_id\":1.5}}"));
 }
 
 /* SER-2: resource_id is a 64-bit hash; a JSON double drops the low bits above 2^53, so it can't
