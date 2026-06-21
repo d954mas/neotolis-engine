@@ -23,7 +23,7 @@ static bool near(double a, double b) { return fabs(a - b) <= 1e-9; }
 void setUp(void) { nt_metrics_init(); }
 void tearDown(void) {}
 
-/* ---- Task 1: ring + sample + reset ---- */
+/* ---- ring + sample + reset ---- */
 
 /* After WINDOW+5 pushes a channel holds exactly WINDOW samples (oldest evicted). */
 static void test_ring_evicts_to_window(void) {
@@ -57,7 +57,7 @@ static void test_channels_independent(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, s.samples);
 }
 
-/* ---- Task 2: on-query aggregates (nearest-rank percentiles + lows + budget) ---- */
+/* ---- on-query aggregates (nearest-rank percentiles + lows + budget) ---- */
 
 /* KNOWN set 1..100 => avg 50.5, min 1, max 100, p50=50, p95=95, p99=99 (nearest-rank). */
 static void test_percentiles_known_set(void) {

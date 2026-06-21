@@ -152,7 +152,7 @@ def check_perf_snapshot(client: DevApiClient) -> None:
     assert snap["gpu_ms"] is None, f"perf.snapshot.gpu_ms is {snap['gpu_ms']!r}, expected null (no GPU timer)"
     uc = snap["user_counters"]
     assert isinstance(uc, dict), f"perf.snapshot.user_counters is {uc!r}, expected an object"
-    # The host (Task 1) exercises a count("frames") + count_f("cpu_ms") every frame.
+    # The host exercises a count("frames") + count_f("cpu_ms") every frame.
     assert "frames" in uc, f"perf.snapshot.user_counters missing the host 'frames' counter (got {sorted(uc)})"
     # The host writes count_f("cpu_ms") every frame too, so it is an unconditional contract.
     assert "cpu_ms" in uc, f"perf.snapshot.user_counters missing the host 'cpu_ms' counter (got {sorted(uc)})"

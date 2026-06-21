@@ -11,7 +11,7 @@ void test_memory_usage_used_nonzero_on_native(void) {
     nt_platform_mem_t mem = nt_platform_memory_usage();
     TEST_ASSERT_GREATER_THAN_size_t(0U, mem.used);
 #else
-    TEST_IGNORE_MESSAGE("nonzero-used is a native-only assertion (web mem is Phase 70)");
+    TEST_IGNORE_MESSAGE("nonzero-used is a native-only assertion (web mem comes later)");
 #endif
 }
 
