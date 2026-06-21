@@ -41,6 +41,21 @@ void nt_log_add_sink(nt_log_sink_fn fn, void *user) {
     s_sink_count++;
 }
 
+/* Append a "..." marker to a truncated msg WITHOUT leaving a split multibyte sequence — the line is
+   later stored verbatim in the log ring and serialized as a JSON string, where cJSON rejects invalid
+   UTF-8. Walk back over any trailing UTF-8 continuation bytes (0b10xxxxxx) so the marker lands on a
+   codepoint boundary. buf must hold at least 4 bytes (NT_LOG_BUF_SIZE is 512). */
+static void append_truncation_marker(char *buf, size_t cap) {
+    size_t end = cap - 4; /* room for "..." + NUL */
+    while (end > 0 && ((unsigned char)buf[end - 1] & 0xC0U) == 0x80U) {
+        end--;
+    }
+    buf[end] = '.';
+    buf[end + 1] = '.';
+    buf[end + 2] = '.';
+    buf[end + 3] = '\0';
+}
+
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     static const char *const level_names[] = {"INFO", "WARN", "ERROR"};
     if (s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
@@ -51,10 +66,10 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
     va_start(args, fmt);
     int written = vsnprintf(msg, sizeof(msg), fmt, args);
     va_end(args);
-    if (written >= (int)sizeof(msg)) {
-        msg[sizeof(msg) - 4] = '.';
-        msg[sizeof(msg) - 3] = '.';
-        msg[sizeof(msg) - 2] = '.';
+    if (written < 0) {
+        msg[0] = '\0'; /* encoding error: forward an empty (NUL-terminated) line, never garbage */
+    } else if (written >= (int)sizeof(msg)) {
+        append_truncation_marker(msg, sizeof(msg));
     }
 
     /* Fan out the final formatted line to registered sinks (single-threaded). */
