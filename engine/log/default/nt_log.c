@@ -35,10 +35,35 @@ static void *s_sink_user[NT_LOG_MAX_SINKS];
 static uint8_t s_sink_count;
 
 void nt_log_add_sink(nt_log_sink_fn fn, void *user) {
-    NT_ASSERT(fn != NULL && s_sink_count < NT_LOG_MAX_SINKS); /* host-call invariant, not bot input */
+    NT_ASSERT(fn != NULL); /* host-call invariant, not bot input */
+    /* Idempotent: re-registering the exact (fn,user) pair is a no-op, so callers can attach a sink
+       across re-inits without leaking duplicate slots (each would fan out the same line twice). */
+    for (uint8_t i = 0; i < s_sink_count; i++) {
+        if (s_sinks[i] == fn && s_sink_user[i] == user) {
+            return;
+        }
+    }
+    NT_ASSERT(s_sink_count < NT_LOG_MAX_SINKS); /* registry full is a host-call invariant */
     s_sinks[s_sink_count] = fn;
     s_sink_user[s_sink_count] = user;
     s_sink_count++;
+}
+
+void nt_log_remove_sink(nt_log_sink_fn fn, void *user) {
+    NT_ASSERT(fn != NULL); /* host-call invariant, not bot input */
+    for (uint8_t i = 0; i < s_sink_count; i++) {
+        if (s_sinks[i] == fn && s_sink_user[i] == user) {
+            /* Compact the tail down so the array stays dense (order is irrelevant to fan-out). */
+            for (uint8_t j = i + 1U; j < s_sink_count; j++) {
+                s_sinks[j - 1U] = s_sinks[j];
+                s_sink_user[j - 1U] = s_sink_user[j];
+            }
+            s_sink_count--;
+            s_sinks[s_sink_count] = NULL;
+            s_sink_user[s_sink_count] = NULL;
+            return;
+        }
+    }
 }
 
 /* Append a "..." marker to a truncated msg WITHOUT leaving a split multibyte sequence — the line is
