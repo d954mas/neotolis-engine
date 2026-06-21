@@ -8,11 +8,13 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "hash/nt_hash.h"
 #include "memory/nt_mem_scratch.h"
 #include "renderers/nt_text_renderer.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_image.h" /* nt_ui_image_custom (inline-image emit path) */
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
 /* Default px font size the public widget feeds the solver when a run carries no per-run
@@ -345,6 +347,323 @@ void nt_ui_rich_end(nt_ui_context_t *ctx) {
      * to end-of-call and is discarded (the run-list already captured each run's
      * composed style). Run-list finalized; the solver/emit (plans 04-07) consume it.
      * The spike (test-only) runs via nt_ui_rich_test_solve; scratch frees on reset. */
+}
+// #endregion
+
+// #region PARSER
+/* Runtime markup parser (D-67-02): tokenizes an angular `<tag>...</tag>` + self-closing
+ * `<img=region/>` string and DRIVES the shared code-first builder (begin / push_* / text_n / image /
+ * pop / end) -- so the run-list is identical to the equivalent builder calls by construction, never a
+ * second composition path.
+ *
+ * Discretion decisions (D-67 Claude's Discretion; recorded in the plan summary):
+ *  - Escaping: a backslash escapes the next byte -- `\<` emits a literal '<', `\\` a literal '\'.
+ *  - Case: tag NAMES are case-insensitive (`<B>` == `<b>`, `<COLOR=...>` == `<color=...>`).
+ *    Tag VALUES (hex digits, names hashed for the tagset) are case-sensitive to the hash.
+ *  - Whitespace: preserved verbatim (the solver owns wrap; no collapse).
+ *
+ * Malformed markup fires NT_ASSERT (builder-validates spirit). Every scan loop is bounded by the
+ * input `len` so a non-terminating `<` cannot OOB or loop (MARK-67-05). */
+
+#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap (T-67-06-02) */
+
+/* The intrinsic tag a `<name ...>` open maps to; CLOSE/IMG handled separately. */
+typedef enum {
+    RICH_TAG_BOLD,
+    RICH_TAG_ITALIC,
+    RICH_TAG_COLOR,
+    RICH_TAG_SCALE,
+    RICH_TAG_FONT,
+    RICH_TAG_LINK,
+    RICH_TAG_EFFECT, /* <fx=name> via the tagset; pushes effect_id */
+    RICH_TAG_NONE,
+} rich_tag_kind_t;
+
+/* ASCII lower-case (tag names are case-insensitive; values are not). */
+static char rich_lc(char c) {
+    if (c >= 'A' && c <= 'Z') {
+        return (char)((unsigned char)c | 0x20U); /* set bit 5 -> lower-case for ASCII letters */
+    }
+    return c;
+}
+
+/* Case-insensitive compare of [s,s+n) against a NUL-terminated lower-case literal. */
+static bool rich_name_eq(const char *s, uint32_t n, const char *lit) {
+    uint32_t i = 0;
+    for (; i < n; i++) {
+        if (lit[i] == '\0' || rich_lc(s[i]) != lit[i]) {
+            return false;
+        }
+    }
+    return lit[i] == '\0';
+}
+
+/* One hex nibble; 0xFF on a non-hex char. */
+static uint8_t rich_hex_nibble(char c) {
+    if (c >= '0' && c <= '9') {
+        return (uint8_t)(c - '0');
+    }
+    const char l = rich_lc(c);
+    if (l >= 'a' && l <= 'f') {
+        return (uint8_t)(l - 'a' + 10);
+    }
+    return 0xFFU;
+}
+
+/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Asserts on malformed. */
+static uint32_t rich_parse_hex_color(const char *s, uint32_t n) {
+    NT_ASSERT(n == 7U && s[0] == '#' && "rich markup: <color=#hex> must be #RRGGBB");
+    uint32_t rgb = 0;
+    for (uint32_t i = 1; i < 7U; i++) {
+        const uint8_t nib = rich_hex_nibble(s[i]);
+        NT_ASSERT(nib != 0xFFU && "rich markup: malformed hex in <color=#..>");
+        rgb = (rgb << 4) | nib;
+    }
+    const uint8_t r = (uint8_t)((rgb >> 16) & 0xFFU);
+    const uint8_t g = (uint8_t)((rgb >> 8) & 0xFFU);
+    const uint8_t b = (uint8_t)(rgb & 0xFFU);
+    return ((uint32_t)0xFFU << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r; /* AABBGGRR */
+}
+
+/* Parse a decimal/float value [s,s+n) (e.g. "1.5"); asserts on a non-numeric body. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + NT_ASSERT validation branches
+static float rich_parse_float(const char *s, uint32_t n) {
+    NT_ASSERT(n > 0U && "rich markup: empty numeric value");
+    float sign = 1.0F;
+    uint32_t i = 0;
+    if (s[0] == '-') {
+        sign = -1.0F;
+        i = 1;
+    }
+    float whole = 0.0F;
+    bool any = false;
+    for (; i < n && s[i] != '.'; i++) {
+        NT_ASSERT(s[i] >= '0' && s[i] <= '9' && "rich markup: non-numeric in value");
+        whole = (whole * 10.0F) + (float)(s[i] - '0');
+        any = true;
+    }
+    float frac = 0.0F;
+    float scale = 1.0F;
+    if (i < n && s[i] == '.') {
+        for (i++; i < n; i++) {
+            NT_ASSERT(s[i] >= '0' && s[i] <= '9' && "rich markup: non-numeric fraction");
+            scale *= 0.1F;
+            frac += (float)(s[i] - '0') * scale;
+            any = true;
+        }
+    }
+    NT_ASSERT(any && "rich markup: numeric value had no digits");
+    return sign * (whole + frac);
+}
+
+/* Map an open-tag NAME (the part before '=' or '>') to its intrinsic kind. */
+static rich_tag_kind_t rich_tag_kind(const char *name, uint32_t n) {
+    if (rich_name_eq(name, n, "b")) {
+        return RICH_TAG_BOLD;
+    }
+    if (rich_name_eq(name, n, "i")) {
+        return RICH_TAG_ITALIC;
+    }
+    if (rich_name_eq(name, n, "color")) {
+        return RICH_TAG_COLOR;
+    }
+    if (rich_name_eq(name, n, "scale")) {
+        return RICH_TAG_SCALE;
+    }
+    if (rich_name_eq(name, n, "font")) {
+        return RICH_TAG_FONT;
+    }
+    if (rich_name_eq(name, n, "link")) {
+        return RICH_TAG_LINK;
+    }
+    if (rich_name_eq(name, n, "fx")) {
+        return RICH_TAG_EFFECT;
+    }
+    return RICH_TAG_NONE;
+}
+
+typedef struct {
+    rich_tag_kind_t open_stack[NT_UI_RICH_PARSE_TAG_DEPTH];
+    uint32_t depth;
+} rich_tag_stack_t;
+
+/* Apply a self-closing `<img=...>`: `<img=region/>` -> default atlas; `<img=alias:region/>` ->
+ * the tagset alias's atlas. The region name is always resolved by name (the atlas IS the registry). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + NT_ASSERT validation branches
+static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *val, uint32_t vlen) {
+    NT_ASSERT(vlen > 0U && "rich markup: <img=...> needs a region");
+    /* Split on a single ':' -> alias:region. */
+    uint32_t colon = vlen;
+    for (uint32_t i = 0; i < vlen; i++) {
+        if (val[i] == ':') {
+            colon = i;
+            break;
+        }
+    }
+    nt_resource_t atlas = base->default_atlas.atlas;
+    const char *region = val;
+    uint32_t region_len = vlen;
+    if (colon < vlen) {
+        NT_ASSERT(tagset != NULL && "rich markup: <img=alias:..> needs a tagset");
+        const uint64_t alias_hash = nt_hash64((const void *)val, colon).value;
+        NT_ASSERT(nt_ui_rich_tagset_lookup_atlas(tagset, alias_hash, &atlas) && "rich markup: unknown <img> atlas alias");
+        region = val + colon + 1;
+        region_len = vlen - colon - 1;
+        NT_ASSERT(region_len > 0U && "rich markup: <img=alias:region/> empty region");
+    }
+    const uint64_t region_hash = nt_hash64((const void *)region, region_len).value;
+    nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+}
+
+/* Dispatch one OPEN tag `<name=value>` (value may be empty) onto the builder + tag stack. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- tag-kind switch + per-tag NT_ASSERT validation branches
+static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, const nt_ui_rich_tagset_t *tagset, const char *name, uint32_t nlen, const char *val, uint32_t vlen) {
+    const rich_tag_kind_t kind = rich_tag_kind(name, nlen);
+    NT_ASSERT(kind != RICH_TAG_NONE && "rich markup: unknown tag");
+    switch (kind) {
+    case RICH_TAG_BOLD:
+        nt_ui_rich_push_bold(ctx);
+        break;
+    case RICH_TAG_ITALIC:
+        nt_ui_rich_push_italic(ctx);
+        break;
+    case RICH_TAG_COLOR:
+        NT_ASSERT(vlen > 0U && "rich markup: <color=..> needs a value");
+        if (val[0] == '#') {
+            nt_ui_rich_push_color(ctx, rich_parse_hex_color(val, vlen));
+        } else {
+            NT_ASSERT(tagset != NULL && "rich markup: named <color> needs a tagset");
+            uint32_t abgr = 0;
+            NT_ASSERT(nt_ui_rich_tagset_lookup_color(tagset, nt_hash64((const void *)val, vlen).value, &abgr) && "rich markup: unknown color name");
+            nt_ui_rich_push_color(ctx, abgr);
+        }
+        break;
+    case RICH_TAG_SCALE:
+        nt_ui_rich_push_scale(ctx, rich_parse_float(val, vlen));
+        break;
+    case RICH_TAG_FONT: {
+        NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <font=name> needs a tagset");
+        nt_font_t fam[4];
+        NT_ASSERT(nt_ui_rich_tagset_lookup_font(tagset, nt_hash64((const void *)val, vlen).value, fam) && "rich markup: unknown font name");
+        nt_ui_rich_push_font(ctx, fam);
+        break;
+    }
+    case RICH_TAG_LINK:
+        NT_ASSERT(vlen > 0U && "rich markup: <link=id> needs an id");
+        nt_ui_rich_link(ctx, nt_hash32(val, vlen).value);
+        break;
+    case RICH_TAG_EFFECT: {
+        NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <fx=name> needs a tagset");
+        uint8_t effect_id = 0;
+        NT_ASSERT(nt_ui_rich_tagset_lookup_effect(tagset, nt_hash64((const void *)val, vlen).value, &effect_id) && "rich markup: unknown effect name");
+        nt_ui_rich_push_effect(ctx, effect_id);
+        break;
+    }
+    case RICH_TAG_NONE:
+    default:
+        NT_ASSERT(false && "rich markup: unreachable tag kind");
+        break;
+    }
+    /* link is a pending property, not a stack push -- closed by </link> clearing the pending id. */
+    NT_ASSERT(ts_stack->depth < NT_UI_RICH_PARSE_TAG_DEPTH && "rich markup: tag nesting too deep");
+    ts_stack->open_stack[ts_stack->depth++] = kind;
+}
+
+/* Dispatch one CLOSE tag `</name>` -- must match the innermost open tag. */
+static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, const char *name, uint32_t nlen) {
+    const rich_tag_kind_t kind = rich_tag_kind(name, nlen);
+    NT_ASSERT(kind != RICH_TAG_NONE && "rich markup: unknown close tag");
+    NT_ASSERT(ts_stack->depth > 0U && "rich markup: close tag with no open");
+    const rich_tag_kind_t top = ts_stack->open_stack[--ts_stack->depth];
+    NT_ASSERT(top == kind && "rich markup: mismatched close tag");
+    if (kind == RICH_TAG_LINK) {
+        nt_ui_rich_link(ctx, 0U); /* clear the pending link id */
+    } else {
+        nt_ui_rich_pop(ctx); /* style-stack pop */
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- the tokenizer: text/tag/escape branches + bounded scans
+void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *markup, size_t len) {
+    NT_ASSERT(ctx != NULL && "nt_ui_rich_parse: NULL ctx");
+    NT_ASSERT(markup != NULL || len == 0U);
+
+    nt_ui_rich_begin(ctx, base);
+    rich_tag_stack_t ts_stack;
+    ts_stack.depth = 0;
+
+    /* Literal-text run accumulator: a flush point at every tag boundary or escape resolve. */
+    char text_buf[NT_UI_RICH_MAX_TEXT_BYTES];
+    uint32_t text_n = 0;
+
+    size_t i = 0;
+    while (i < len) {
+        const char c = markup[i];
+        if (c == '\\' && (i + 1U) < len) {
+            /* Escape: the next byte is literal (\< -> '<', \\ -> '\'). */
+            NT_ASSERT(text_n < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
+            text_buf[text_n++] = markup[i + 1U];
+            i += 2U;
+            continue;
+        }
+        if (c != '<') {
+            NT_ASSERT(text_n < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
+            text_buf[text_n++] = c;
+            i++;
+            continue;
+        }
+        /* A '<' begins a tag. Flush any pending literal text first. */
+        if (text_n > 0U) {
+            nt_ui_rich_text_n(ctx, text_buf, text_n);
+            text_n = 0;
+        }
+        /* Find the matching '>' (bounded by len -> a non-terminating '<' asserts, never loops). */
+        size_t close = i + 1U;
+        while (close < len && markup[close] != '>') {
+            close++;
+        }
+        NT_ASSERT(close < len && "rich markup: unterminated tag (no '>')");
+
+        const char *body = markup + i + 1U; /* between '<' and '>' */
+        uint32_t blen = (uint32_t)(close - (i + 1U));
+        NT_ASSERT(blen > 0U && "rich markup: empty tag <>");
+
+        const bool is_close = (body[0] == '/');
+        const bool self_close = (blen >= 1U && body[blen - 1U] == '/');
+        if (is_close) {
+            const char *name = body + 1;
+            const uint32_t nlen = blen - 1U;
+            rich_close_tag(ctx, &ts_stack, name, nlen);
+        } else {
+            /* Trim a trailing '/' for self-closing tags. */
+            uint32_t eff = self_close ? (blen - 1U) : blen;
+            /* Split name=value. */
+            uint32_t eq = eff;
+            for (uint32_t k = 0; k < eff; k++) {
+                if (body[k] == '=') {
+                    eq = k;
+                    break;
+                }
+            }
+            const char *name = body;
+            const uint32_t nlen = eq;
+            const char *val = (eq < eff) ? (body + eq + 1U) : body;
+            const uint32_t vlen = (eq < eff) ? (eff - eq - 1U) : 0U;
+            if (self_close) {
+                NT_ASSERT(rich_name_eq(name, nlen, "img") && "rich markup: only <img=.../> self-closes");
+                rich_parse_img(ctx, tagset, base, val, vlen);
+            } else {
+                rich_open_tag(ctx, &ts_stack, tagset, name, nlen, val, vlen);
+            }
+        }
+        i = close + 1U;
+    }
+    /* Flush the trailing literal text. */
+    if (text_n > 0U) {
+        nt_ui_rich_text_n(ctx, text_buf, text_n);
+    }
+    NT_ASSERT(ts_stack.depth == 0U && "rich markup: unclosed tag(s) at end of string");
+    nt_ui_rich_end(ctx);
 }
 // #endregion
 
@@ -853,6 +1172,20 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     rich_declare_fixed_block(ctx, st, data);
 }
 
+void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *style, const char *markup, size_t len,
+                            float container_w, nt_rich_align_t align, float time) {
+    NT_ASSERT(ctx != NULL && "nt_ui_rich_text_markup: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_rich_text_markup: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(style != NULL && "nt_ui_rich_text_markup: style must be non-NULL");
+    (void)time; /* per-atom effects (D-67-18) land in plan 07 */
+
+    nt_ui_rich_parse(ctx, tagset, style, markup, len); /* parse opens its own begin/end */
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    st->image_material = style->image_material;
+    rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
+    rich_declare_fixed_block(ctx, st, data);
+}
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 uint32_t nt_ui_rich_test_run_count(nt_ui_context_t *ctx) { return rich_state(ctx)->run_count; }
@@ -874,6 +1207,36 @@ nt_font_t nt_ui_rich_test_run_font(nt_ui_context_t *ctx, uint32_t run) {
     NT_ASSERT(run < st->run_count);
     bool synth = false;
     return rich_resolve_font(&st->styles[st->runs[run].style_idx], &synth);
+}
+
+nt_rich_atom_kind_t nt_ui_rich_test_run_kind(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->runs[run].kind;
+}
+
+uint32_t nt_ui_rich_test_run_link(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->runs[run].link_id;
+}
+
+uint32_t nt_ui_rich_test_run_text_len(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return (st->runs[run].kind == NT_RICH_ATOM_TEXT) ? st->runs[run].text_len : 0U;
+}
+
+const char *nt_ui_rich_test_run_text(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->text + st->runs[run].text_off;
+}
+
+nt_atlas_region_ref_t nt_ui_rich_test_run_image_ref(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->runs[run].image_ref;
 }
 
 void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size) { rich_solve(ctx, rich_state(ctx), 0U, container_w, font_size, NT_RICH_ALIGN_LEFT); }

@@ -17,6 +17,7 @@
 #include "ui/nt_ui.h"             /* nt_ui_element_data_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
+typedef struct nt_ui_rich_tagset nt_ui_rich_tagset_t; /* parser vocabulary; defined in nt_ui_rich_tagset.h */
 
 /* ---- Run-list caps (frame-scratch, ASSERT on overflow; D-67-01) ---- */
 #ifndef NT_UI_RICH_MAX_RUNS
@@ -113,6 +114,28 @@ void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id);
 void nt_ui_rich_pop(nt_ui_context_t *ctx);
 void nt_ui_rich_end(nt_ui_context_t *ctx);
 
+/* ---- Runtime markup parser (D-67-02; the SECOND authoring front) ---- */
+/* Parses an angular `<tag>...</tag>` + self-closing `<img=region/>` markup string into the
+ * SAME run-list as the equivalent code-first builder calls, by DRIVING the shared builder
+ * (begin / push_* / text_n / image / pop / end) -- no second composition path. A markup string and the
+ * equivalent builder sequence produce a byte-identical run-list (MARK-67-04).
+ *
+ * CORE tags are intrinsic (no registration, D-67-08): `<b>` `<i>` `<color=#hex>` `<scale=N>`
+ * `<font=name>` `<link=id>` and self-closing `<img=region/>` / `<img=alias:region/>`. Names
+ * (`<font=name>`, `<color=name>`, `<img=alias:...>`) resolve via the passed tagset; `<color=#hex>`
+ * is intrinsic hex; `<img=region/>` resolves against base->default_atlas.
+ *
+ * Malformed markup fires NT_ASSERT (builder-validates spirit). The tokenizer scan is bounded by
+ * `len` so adversarial input cannot OOB or loop (MARK-67-05). `tagset` may be NULL when the markup
+ * uses only intrinsic tags. The parser opens/closes its own begin/end on ctx. */
+void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *markup, size_t len);
+
+/* Convenience entry: parse the markup, then solve + emit it as a wrapped block (parse -> the
+ * public widget pipeline). Mirrors nt_ui_rich_text's signature with a markup string in place of
+ * the code-first builder calls. */
+void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *style, const char *markup, size_t len,
+                            float container_w, nt_rich_align_t align, float time);
+
 /* ---- Public widget (full impl across plans 04-07) ---- */
 /* Emits the built run-list as a wrapped, baseline-aligned rich-text block under a
  * FIXED Clay element. `time` feeds per-atom effects (game owns the clock, D-67-18). */
@@ -125,6 +148,13 @@ uint32_t nt_ui_rich_test_run_count(nt_ui_context_t *ctx);
 nt_ui_rich_style_t nt_ui_rich_test_run_style(nt_ui_context_t *ctx, uint32_t run);
 uint8_t nt_ui_rich_test_run_flags(nt_ui_context_t *ctx, uint32_t run);
 nt_font_t nt_ui_rich_test_run_font(nt_ui_context_t *ctx, uint32_t run);
+
+/* Run kind / link / TEXT bytes / IMAGE ref probes -- the builder==parser byte-identity gate. */
+nt_rich_atom_kind_t nt_ui_rich_test_run_kind(nt_ui_context_t *ctx, uint32_t run);
+uint32_t nt_ui_rich_test_run_link(nt_ui_context_t *ctx, uint32_t run);
+uint32_t nt_ui_rich_test_run_text_len(nt_ui_context_t *ctx, uint32_t run);
+const char *nt_ui_rich_test_run_text(nt_ui_context_t *ctx, uint32_t run); /* NOT null-terminated; use with run_text_len */
+nt_atlas_region_ref_t nt_ui_rich_test_run_image_ref(nt_ui_context_t *ctx, uint32_t run);
 
 /* Solver-spike probes (plan-03 gate). Positions resolved by nt_ui_rich_test_solve. */
 typedef struct {
