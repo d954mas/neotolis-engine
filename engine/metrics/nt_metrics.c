@@ -6,6 +6,7 @@
 #include "core/nt_platform.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "memory/nt_mem_scratch.h"
 
 #include <math.h>
@@ -24,8 +25,11 @@ typedef struct {
 static struct {
     nt_metrics_ring_t fixed[NT_METRICS_CHANNEL_COUNT];
 
-    /* User channels keyed by overlay-counter name. Insertion-ordered, capped. */
+    /* User channels keyed by the FULL 64-bit name hash (matches the overlay's nt_hash64_str keying,
+       nt_debug_overlay.c) so two counters sharing the first 31 chars do not alias into one ring. The
+       truncated name copy is kept only for serialization. Insertion-ordered, capped. */
     nt_metrics_ring_t user[NT_METRICS_MAX_USER_CHANNELS];
+    uint64_t user_hashes[NT_METRICS_MAX_USER_CHANNELS];
     char user_names[NT_METRICS_MAX_USER_CHANNELS][NT_METRICS_USER_NAME_MAX];
     uint16_t user_count;
 } s_metrics;
@@ -124,8 +128,9 @@ void nt_metrics_reset(void) {
    (drop the counter — a dev-only collector overflow is non-fatal here, the overlay
    itself caps counters via NT_ASSERT at write time). */
 static nt_metrics_ring_t *user_ring_for(const char *name) {
+    uint64_t h = nt_hash64_str(name).value;
     for (uint16_t i = 0; i < s_metrics.user_count; i++) {
-        if (strcmp(s_metrics.user_names[i], name) == 0) {
+        if (s_metrics.user_hashes[i] == h) {
             return &s_metrics.user[i];
         }
     }
@@ -133,6 +138,7 @@ static nt_metrics_ring_t *user_ring_for(const char *name) {
         return NULL;
     }
     uint16_t i = s_metrics.user_count++;
+    s_metrics.user_hashes[i] = h;
     (void)snprintf(s_metrics.user_names[i], NT_METRICS_USER_NAME_MAX, "%s", name);
     return &s_metrics.user[i];
 }
@@ -140,8 +146,13 @@ static nt_metrics_ring_t *user_ring_for(const char *name) {
 void nt_metrics_sample(void) {
     ring_push(&s_metrics.fixed[NT_METRICS_FRAME_MS], (double)(1000.0F / fmaxf(nt_debug_overlay_get_fps(), 1e-6F)));
     ring_push(&s_metrics.fixed[NT_METRICS_CPU_MS], (double)nt_debug_overlay_get_cpu_ms());
-    /* gpu_ms: store the raw -1.0 sentinel when absent; aggregates are best-effort. */
-    ring_push(&s_metrics.fixed[NT_METRICS_GPU_MS], (double)nt_debug_overlay_get_gpu_ms());
+    /* gpu_ms: only sample when a real timer is present. The -1.0F sentinel (timer unsupported) must
+       NOT enter the window, else perf.stats would report avg/min/max:-1 — contradicting
+       perf.snapshot's gpu_ms:null contract. An all-sentinel host leaves the window empty (samples:0). */
+    float gpu = nt_debug_overlay_get_gpu_ms();
+    if (gpu >= 0.0F) {
+        ring_push(&s_metrics.fixed[NT_METRICS_GPU_MS], (double)gpu);
+    }
     ring_push(&s_metrics.fixed[NT_METRICS_DRAW_CALLS], (double)nt_gfx_get_frame_draw_calls());
     ring_push(&s_metrics.fixed[NT_METRICS_MEM_TOTAL], (double)nt_platform_memory_usage().used);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_HWM], (double)nt_mem_scratch_high_water_mark());

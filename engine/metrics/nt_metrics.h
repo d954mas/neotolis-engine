@@ -40,7 +40,7 @@
 typedef enum {
     NT_METRICS_FRAME_MS = 0,
     NT_METRICS_CPU_MS,
-    NT_METRICS_GPU_MS, /* best-effort: stores the raw -1.0 sentinel when absent */
+    NT_METRICS_GPU_MS, /* sampled only when a real timer is present; -1.0F sentinel never enters the window (empty => samples:0) */
     NT_METRICS_DRAW_CALLS,
     NT_METRICS_MEM_TOTAL,
     NT_METRICS_SCRATCH_HWM,

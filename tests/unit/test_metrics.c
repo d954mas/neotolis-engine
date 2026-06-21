@@ -9,6 +9,7 @@
 
 /* clang-format off */
 #include "core/nt_assert.h"
+#include "debug_overlay/nt_debug_overlay.h"
 #include "metrics/nt_metrics.h"
 #include "unity.h"
 /* clang-format on */
@@ -128,6 +129,26 @@ static void test_over_budget_pct(void) {
 /* over_budget_pct on an empty window returns 0 (no divide-by-zero). */
 static void test_over_budget_empty(void) { TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(16.0), 0.0)); }
 
+/* ---- CR-01: gpu_ms -1.0 sentinel must never enter the window ----
+   nt_metrics_sample() reads nt_debug_overlay_get_gpu_ms(); on a host with no GPU timer that is the
+   -1.0F sentinel, which must be filtered so perf.stats reports samples:0 (matching perf.snapshot's
+   gpu_ms:null) instead of a confident avg/min/max:-1. */
+static void test_gpu_sentinel_not_sampled(void) {
+    nt_debug_overlay_init(NULL); /* fresh overlay: last_gpu_ms defaults to the -1.0F sentinel */
+    nt_metrics_init();
+    for (int i = 0; i < 5; i++) {
+        nt_metrics_sample();
+    }
+    nt_metrics_stats_t gpu;
+    nt_metrics_channel_stats(NT_METRICS_GPU_MS, &gpu);
+    TEST_ASSERT_EQUAL_UINT32(0U, gpu.samples); /* sentinel filtered -> empty window */
+    /* Sibling channels DID sample, proving the loop ran (not a no-op). */
+    nt_metrics_stats_t cpu;
+    nt_metrics_channel_stats(NT_METRICS_CPU_MS, &cpu);
+    TEST_ASSERT_EQUAL_UINT32(5U, cpu.samples);
+    nt_debug_overlay_shutdown();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ring_evicts_to_window);
@@ -140,6 +161,7 @@ int main(void) {
     RUN_TEST(test_fps_lows_empty);
     RUN_TEST(test_over_budget_pct);
     RUN_TEST(test_over_budget_empty);
+    RUN_TEST(test_gpu_sentinel_not_sampled);
     return UNITY_END();
 }
 

@@ -16,6 +16,7 @@ nt_add_module(nt_metrics LOG_DOMAIN "metrics"
 target_link_libraries(nt_metrics PUBLIC
     nt_core
     nt_gfx_interface
+    nt_hash
 )
 
 if(NT_METRICS_ENABLED)
