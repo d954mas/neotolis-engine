@@ -582,9 +582,10 @@ nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_u
  * hovered/clicked here won't include hit padding (the latched gesture fields are unaffected). */
 nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id);
 
-/* App-wide gesture constants: the double-click window (secs) and the move radius (px) past
- * which a hold is treated as a drag (cancels long-press / resets hold_progress). Asserts each is finite
- * and >= 0 (fail-early, no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
+/* App-wide gesture constants: the double-click window (secs) and the move radius (px) within
+ * which a second press still counts as a double-click. Hold/long-press is NOT cancelled by
+ * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (fail-early,
+ * no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z

@@ -2879,20 +2879,19 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
         g->long_fired = 0U;
     }
 
-    if (e->held && g->press_live != 0U && long_press_secs > 0.0F) {
-        const float dx = pos_x - g->origin_x;
-        const float dy = pos_y - g->origin_y;
-        const bool moved = (dx * dx + dy * dy) > (radius * radius);
-        if (moved) {
-            g->press_live = 0U; /* a drag cancels the long-press candidate AND resets hold_progress */
-        } else if (g->long_fired == 0U && (g->clock - g->press_clock) >= long_press_secs) {
-            e->long_pressed = true;
-            g->long_fired = 1U; /* one-shot per hold */
-        }
+    /* Leaving the widget's hitbox (still pressed but no longer hovered) cancels the hold;
+     * an in-box jitter does NOT — the candidate tracks the hitbox, not a move radius
+     * (move_radius_px now gates double-click only). */
+    if (g->press_live != 0U && e->pressed && !e->held) {
+        g->press_live = 0U; /* dragged outside the hitbox -> reset long-press candidate + hold_progress */
+    }
+    if (e->held && g->press_live != 0U && long_press_secs > 0.0F && g->long_fired == 0U && (g->clock - g->press_clock) >= long_press_secs) {
+        e->long_pressed = true;
+        g->long_fired = 1U; /* one-shot per hold */
     }
 
     /* Linear hold_progress: only while the press candidate is live AND over the widget. press_live==0
-     * (drag-cancel / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
+     * (left hitbox / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
     if (g->press_live != 0U && e->held && long_press_secs > 0.0F) {
         e->hold_progress = nt_ui_clampf((g->clock - g->press_clock) / long_press_secs, 0.0F, 1.0F);
     }

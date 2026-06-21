@@ -6,7 +6,7 @@
  * Coverage:
  *   capture parity: nt_ui_events(cfg=NULL) == nt_ui_step_interaction for the same sequence.
  *   zero-alloc gate: cfg==NULL grows nt_ui_state_used_slots by zero.
- *   hold_progress ramp 0..1, one-shot long_pressed, drag-cancel reset, query idempotence. */
+ *   hold_progress ramp 0..1, one-shot long_pressed, leave-hitbox cancel, query idempotence. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -208,33 +208,57 @@ static void test_events_hold_progress_ramp_and_one_shot_long_press(void) {
     TEST_ASSERT_TRUE(float_near(e4.hold_progress, 1.0F, 0.001F));
 }
 
-/* ---- drag past move_radius_px mid-hold resets hold_progress and suppresses long_pressed ---- */
+/* ---- an in-box jitter past the old move_radius does NOT cancel the hold (it tracks the hitbox) ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_events_drag_cancel_resets_progress(void) {
+static void test_events_inbox_jitter_keeps_hold(void) {
     const float lp = 1.0F;
     const nt_ui_events_cfg_t cfg = {.long_press_secs = lp, .double_click = false};
 
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
     warm_btn_frame(&f1);
 
-    /* Press inside. */
+    /* Press inside, hold to 0.5s. */
     nt_pointer_t fp = make_pointer(BTN_CX, BTN_CY, true, true, false);
     (void)events_btn_frame(&fp, 0.0F, &cfg);
-
-    /* Hold to 0.5s — progress building. */
     nt_pointer_t fh = make_pointer(BTN_CX, BTN_CY, true, false, false);
     nt_ui_events_t e_mid = events_btn_frame(&fh, 0.5F, &cfg);
     TEST_ASSERT_TRUE(e_mid.hold_progress > 0.0F);
 
-    /* Drag a long way (well past move_radius) while still over the widget center?  Move within the
-     * widget but past the radius from the press origin: shift +40px (default radius 16). press_live
-     * drops -> progress resets to 0. Keep pointer inside the bbox so held stays true. */
-    nt_pointer_t fd = make_pointer(BTN_CX + 40.0F, BTN_CY, true, false, false);
-    nt_ui_events_t e_drag = events_btn_frame(&fd, 0.2F, &cfg);
-    TEST_ASSERT_TRUE(float_near(e_drag.hold_progress, 0.0F, 0.001F));
+    /* Jitter +40px (well past the old 16px radius) but STILL inside the bbox -> hold KEEPS rising. */
+    nt_pointer_t fj = make_pointer(BTN_CX + 40.0F, BTN_CY, true, false, false);
+    nt_ui_events_t e_jit = events_btn_frame(&fj, 0.2F, &cfg);
+    TEST_ASSERT_TRUE(e_jit.held);
+    TEST_ASSERT_TRUE(e_jit.hold_progress > e_mid.hold_progress);
 
-    /* Continue holding well past long_press_secs — long_pressed must NEVER fire (candidate cancelled). */
-    nt_ui_events_t e_after = events_btn_frame(&fd, 1.5F, &cfg);
+    /* Cross long_press_secs while jittering in-box -> long_pressed DOES fire. */
+    nt_ui_events_t e_lp = events_btn_frame(&fj, 0.5F, &cfg);
+    TEST_ASSERT_TRUE(e_lp.long_pressed);
+}
+
+/* ---- leaving the hitbox (still pressed) cancels the hold: progress resets, long_pressed never fires ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_events_leave_hitbox_cancels_hold(void) {
+    const float lp = 1.0F;
+    const nt_ui_events_cfg_t cfg = {.long_press_secs = lp, .double_click = false};
+
+    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&f1);
+
+    /* Press inside, hold to 0.5s. */
+    nt_pointer_t fp = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)events_btn_frame(&fp, 0.0F, &cfg);
+    nt_pointer_t fh = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    nt_ui_events_t e_mid = events_btn_frame(&fh, 0.5F, &cfg);
+    TEST_ASSERT_TRUE(e_mid.hold_progress > 0.0F);
+
+    /* Drag OUTSIDE the bbox, still pressed -> held drops -> hold cancels, progress resets. */
+    nt_pointer_t fo = make_pointer(BTN_X + BTN_W + 50.0F, BTN_CY, true, false, false);
+    nt_ui_events_t e_out = events_btn_frame(&fo, 0.2F, &cfg);
+    TEST_ASSERT_FALSE(e_out.held);
+    TEST_ASSERT_TRUE(float_near(e_out.hold_progress, 0.0F, 0.001F));
+
+    /* Keep holding past long_press_secs -> long_pressed must NEVER fire (candidate cancelled). */
+    nt_ui_events_t e_after = events_btn_frame(&fo, 1.5F, &cfg);
     TEST_ASSERT_FALSE(e_after.long_pressed);
     TEST_ASSERT_TRUE(float_near(e_after.hold_progress, 0.0F, 0.001F));
 }
@@ -380,7 +404,8 @@ int main(void) {
     RUN_TEST(test_events_cfg_no_gesture_zero_alloc);
     RUN_TEST(test_events_gesture_cfg_allocs_one_cell);
     RUN_TEST(test_events_hold_progress_ramp_and_one_shot_long_press);
-    RUN_TEST(test_events_drag_cancel_resets_progress);
+    RUN_TEST(test_events_inbox_jitter_keeps_hold);
+    RUN_TEST(test_events_leave_hitbox_cancels_hold);
     RUN_TEST(test_query_events_idempotent);
     RUN_TEST(test_query_events_surfaces_gestures_after_mutating_step);
     RUN_TEST(test_query_events_no_stale_latch_across_frames);
