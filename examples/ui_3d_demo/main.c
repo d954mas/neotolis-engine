@@ -744,7 +744,6 @@ static void draw_hud(float fb_w, float fb_h) {
 // #endregion
 
 // #region frame
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 /* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
 static float ui3d_poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
@@ -755,6 +754,7 @@ static float ui3d_poll_gpu_ms(void) {
     return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     /* The app measures the frame and pushes it into nt_metrics (the perf source of truth); the HUD
        reads it back. frame_ms is the wall delta between frame starts; cpu_ms brackets the work. */

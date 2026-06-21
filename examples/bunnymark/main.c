@@ -243,7 +243,6 @@ static void spawn_n_defold(uint32_t n) {
 
 /* ---- Frame callback ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 /* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
 static float bunnymark_poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
@@ -254,6 +253,7 @@ static float bunnymark_poll_gpu_ms(void) {
     return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     /* The app measures the frame and pushes it into nt_metrics (the perf source of truth); the overlay
        + perf.* read it. frame_ms is the wall delta between frame starts; cpu_ms brackets the work. */
