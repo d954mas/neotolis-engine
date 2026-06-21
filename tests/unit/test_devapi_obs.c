@@ -9,7 +9,6 @@
 #include <string.h>
 
 /* clang-format off */
-#include "debug_overlay/nt_debug_overlay.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "hash/nt_hash.h"
@@ -23,9 +22,9 @@
 /* clang-format on */
 
 void setUp(void) {
-    /* L1 modules the obs handlers read. Overlay + metrics + log ring are dev-only sources; entity +
-       components + resource back entity.list / resource.list. */
-    nt_debug_overlay_init(NULL);
+    /* L1 modules the obs handlers read. nt_metrics (perf source of truth) + log ring are dev-only
+       sources; entity + components + resource back entity.list / resource.list. perf.* reads
+       nt_metrics directly now (no overlay). */
     nt_metrics_init();
     nt_log_ring_init();
     /* nt_log_add_sink is idempotent: re-attaching the same (fn,user) across tests is a no-op,
@@ -51,7 +50,12 @@ void tearDown(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_log_ring_clear();
-    nt_debug_overlay_shutdown();
+}
+
+/* Push one frame into nt_metrics with the given scalars (gpu < 0 => snapshot null / empty window). */
+static void push_metrics_frame(float frame_ms, float cpu_ms, float gpu_ms, uint32_t draws) {
+    nt_metrics_frame_t f = {.frame_ms = frame_ms, .cpu_ms = cpu_ms, .gpu_ms = gpu_ms, .draw_calls = draws};
+    nt_metrics_sample(&f);
 }
 
 /* ---- helpers ---- */
@@ -173,8 +177,8 @@ static void test_perf_snapshot_keys_and_gpu_null(void) {
 }
 
 static void test_perf_snapshot_user_counters(void) {
-    nt_debug_overlay_count("enemies", 7U);
-    nt_debug_overlay_count_f("frame_avg", 16.5);
+    nt_metrics_count("enemies", 7U);
+    nt_metrics_count_f("frame_avg", 16.5);
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
     cJSON *uc = cJSON_GetObjectItemCaseSensitive(result_of(root), "user_counters");
@@ -185,16 +189,16 @@ static void test_perf_snapshot_user_counters(void) {
 
 /* ---- perf.stats ---- */
 
-/* test_perf_stats_channel_shape + test_perf_reset_ok feed a known sample set via nt_metrics_test_push,
-   which only exists when the real collector is compiled in. The OFF mirror (NT_METRICS_ENABLED=0) has
-   no-op metrics + no test hook, so guard those two; perf.stats empty-window/bad_params + perf.snapshot
-   stay live in both configs. */
+/* test_perf_stats_channel_shape + test_perf_reset_ok feed a known sample set via nt_metrics_sample,
+   which only does real work when the collector is compiled in. The OFF mirror (NT_METRICS_ENABLED=0)
+   has no-op metrics, so guard those two; perf.stats empty-window/bad_params + perf.snapshot stay live
+   in both configs. */
 #if NT_METRICS_ENABLED
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_perf_stats_channel_shape(void) {
-    /* Feed a known set into the frame_ms channel so the aggregates are populated. */
+    /* Feed a known frame_ms set (1..10ms) through the real sample path so the aggregates populate. */
     for (int i = 1; i <= 10; i++) {
-        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)i);
+        push_metrics_frame((float)i, 0.0F, -1.0F, 0U);
     }
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"frame_ms\"]}}"));
     cJSON *r = result_of(root);
@@ -212,12 +216,12 @@ static void test_perf_stats_channel_shape(void) {
     cJSON_Delete(root);
 }
 
-/* After real per-frame sampling on a host with no GPU timer (overlay gpu_ms == -1.0F sentinel),
-   perf.stats gpu_ms must be samples:0 + null aggregates — matching perf.snapshot's gpu_ms:null, not a
-   confident avg:-1. setUp() inits the overlay (last_gpu_ms defaults to the sentinel). */
+/* After per-frame sampling on a host with no GPU timer (the host pushes gpu_ms < 0), perf.stats
+   gpu_ms must be samples:0 + null aggregates — matching perf.snapshot's gpu_ms:null, not a confident
+   avg:-1. cpu_ms still samples, proving the frames ran. */
 static void test_perf_stats_gpu_sentinel_null(void) {
     for (int i = 0; i < 5; i++) {
-        nt_metrics_sample();
+        push_metrics_frame(16.0F, 8.0F, -1.0F, 0U);
     }
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"gpu_ms\",\"cpu_ms\"]}}"));
     cJSON *channels = cJSON_GetObjectItemCaseSensitive(result_of(root), "channels");
@@ -249,7 +253,7 @@ static void test_perf_stats_bad_params(void) {
 
 #if NT_METRICS_ENABLED
 static void test_perf_reset_ok(void) {
-    nt_metrics_test_push(NT_METRICS_FRAME_MS, 5.0);
+    push_metrics_frame(5.0F, 0.0F, -1.0F, 0U);
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.reset\"}"));
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result_of(root), "reset")));
     cJSON_Delete(root);
@@ -474,13 +478,13 @@ static void test_log_sink_idempotent_add_and_remove(void) {
 }
 #endif /* NT_LOG_RING_ENABLED */
 
-/* perf.snapshot frame_ms is wall-clock (1000/fps), distinct from cpu_ms. Inject known
-   frames via the overlay test hook so a re-introduced frame_ms==cpu_ms alias is caught. The hook sets
-   cpu_ms = last dt*1000 and pushes dt into the fps ring; two unequal dts make the fps-average wall time
-   differ from the last cpu_ms. setUp() already inited the overlay (no re-init: init asserts !inited). */
+/* perf.snapshot frame_ms is the real last frame time from nt_metrics_last(), distinct from cpu_ms.
+   Push frames where frame_ms != cpu_ms so a re-introduced frame_ms==cpu_ms alias is caught; fps is the
+   rolling avg (> 0 once the window has a sample). */
+#if NT_METRICS_ENABLED
 static void test_perf_snapshot_frame_ms_distinct_from_cpu(void) {
-    nt_debug_overlay_test_inject_frame(0.005F); /* 5ms  */
-    nt_debug_overlay_test_inject_frame(0.020F); /* 20ms -> cpu_ms == 20ms; fps averages both samples */
+    push_metrics_frame(16.0F, 5.0F, -1.0F, 0U);  /* frame_ms 16, cpu 5 */
+    push_metrics_frame(20.0F, 12.0F, -1.0F, 0U); /* last: frame_ms 20, cpu 12 */
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
     cJSON *r = result_of(root);
@@ -488,12 +492,14 @@ static void test_perf_snapshot_frame_ms_distinct_from_cpu(void) {
     double frame_ms = cJSON_GetObjectItemCaseSensitive(r, "frame_ms")->valuedouble;
     double cpu_ms = cJSON_GetObjectItemCaseSensitive(r, "cpu_ms")->valuedouble;
     TEST_ASSERT_TRUE(fps > 0.0);
-    /* frame_ms == 1000/fps (the wall-clock contract), within fp tolerance. */
-    TEST_ASSERT_TRUE(frame_ms > 0.0 && (frame_ms - 1000.0 / fps) < 1e-6 && (1000.0 / fps - frame_ms) < 1e-6);
-    /* fps-average wall time (~8ms) != last cpu_ms (20ms): proves frame_ms is not an alias of cpu_ms. */
+    /* frame_ms is the LAST pushed frame_ms (20), not the cpu_ms (12). */
+    TEST_ASSERT_TRUE((frame_ms - 20.0) < 1e-4 && (20.0 - frame_ms) < 1e-4);
+    TEST_ASSERT_TRUE((cpu_ms - 12.0) < 1e-4 && (12.0 - cpu_ms) < 1e-4);
+    /* distinct: frame_ms (20) != cpu_ms (12). */
     TEST_ASSERT_TRUE((frame_ms - cpu_ms) > 1e-6 || (cpu_ms - frame_ms) > 1e-6);
     cJSON_Delete(root);
 }
+#endif /* NT_METRICS_ENABLED */
 
 int main(void) {
     UNITY_BEGIN();
@@ -526,6 +532,8 @@ int main(void) {
 #if NT_LOG_RING_ENABLED
     RUN_TEST(test_log_sink_idempotent_add_and_remove);
 #endif
+#if NT_METRICS_ENABLED
     RUN_TEST(test_perf_snapshot_frame_ms_distinct_from_cpu);
+#endif
     return UNITY_END();
 }

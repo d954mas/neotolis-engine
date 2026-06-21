@@ -1,6 +1,6 @@
-/* L1 CTest for the nt_metrics perf collector, no devapi.
- * Feeds KNOWN sample sets via the NT_TEST_ACCESS push hook so percentiles are
- * asserted deterministically without a real frame loop. */
+/* L1 CTest for the nt_metrics perf collector (now the perf source of truth), no devapi.
+ * Drives the REAL public paths: nt_metrics_count/_f for user counters and nt_metrics_sample(frame)
+ * for the fixed channels, so percentiles/skip-guards/fps are asserted as the host would see them. */
 
 #include <math.h>
 #include <setjmp.h>
@@ -9,52 +9,61 @@
 
 /* clang-format off */
 #include "core/nt_assert.h"
-#include "debug_overlay/nt_debug_overlay.h"
 #include "metrics/nt_metrics.h"
 #include "unity.h"
 /* clang-format on */
 
 #if NT_METRICS_ENABLED
 
-/* Unity's double/float asserts are compiled out in this config; compare with a
- * tolerance via TEST_ASSERT_TRUE (matches test_nt_ui_probe's near_eq pattern). */
+/* Unity's double/float asserts are compiled out in this config; compare with a tolerance. */
 static bool near(double a, double b) { return fabs(a - b) <= 1e-9; }
 
 void setUp(void) { nt_metrics_init(); }
 void tearDown(void) {}
 
+/* Push one frame carrying a given frame_ms; the other scalars are inert defaults (gpu -1 sentinel so
+   it never enters the gpu window). Lets a test feed a KNOWN frame_ms set through the real sample path. */
+static void push_frame_ms(double frame_ms) {
+    nt_metrics_frame_t f = {.frame_ms = (float)frame_ms, .cpu_ms = 0.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&f);
+}
+
 /* ---- ring + sample + reset ---- */
 
-/* After WINDOW+5 pushes a channel holds exactly WINDOW samples (oldest evicted). */
+/* After WINDOW+5 frames a channel holds exactly WINDOW samples (oldest evicted). */
 static void test_ring_evicts_to_window(void) {
     for (int i = 0; i < NT_METRICS_WINDOW + 5; i++) {
-        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)i);
+        push_frame_ms((double)(i + 1)); /* 1..WINDOW+5 (skip 0: <= 0 is gated) */
     }
     nt_metrics_stats_t s;
     nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &s);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_METRICS_WINDOW, s.samples);
-    /* Oldest (0..4) evicted; window now holds 5..WINDOW+4 => max == WINDOW+4. */
-    TEST_ASSERT_TRUE(near(s.max, (double)(NT_METRICS_WINDOW + 4)));
-    TEST_ASSERT_TRUE(near(s.min, 5.0));
+    /* Pushed 1..WINDOW+5; oldest 5 evicted => window holds 6..WINDOW+5. */
+    TEST_ASSERT_TRUE(near(s.max, (double)(NT_METRICS_WINDOW + 5)));
+    TEST_ASSERT_TRUE(near(s.min, 6.0));
 }
 
 /* nt_metrics_reset() zeroes counts: the next stats read sees samples==0. */
 static void test_reset_clears_window(void) {
     for (int i = 0; i < 10; i++) {
-        nt_metrics_test_push(NT_METRICS_CPU_MS, 1.0);
+        push_frame_ms(1.0);
     }
     nt_metrics_reset();
     nt_metrics_stats_t s;
-    nt_metrics_channel_stats(NT_METRICS_CPU_MS, &s);
+    nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &s);
     TEST_ASSERT_EQUAL_UINT32(0U, s.samples);
 }
 
-/* Channels are independent: pushing one does not bleed into another. */
+/* Channels are independent: a frame with gpu sentinel leaves gpu empty while cpu fills. */
 static void test_channels_independent(void) {
-    nt_metrics_test_push(NT_METRICS_FRAME_MS, 16.0);
-    nt_metrics_stats_t s;
-    nt_metrics_channel_stats(NT_METRICS_DRAW_CALLS, &s);
-    TEST_ASSERT_EQUAL_UINT32(0U, s.samples);
+    nt_metrics_frame_t f = {.frame_ms = 16.0F, .cpu_ms = 8.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&f);
+    nt_metrics_stats_t gpu;
+    nt_metrics_channel_stats(NT_METRICS_GPU_MS, &gpu);
+    TEST_ASSERT_EQUAL_UINT32(0U, gpu.samples);
+    nt_metrics_stats_t cpu;
+    nt_metrics_channel_stats(NT_METRICS_CPU_MS, &cpu);
+    TEST_ASSERT_EQUAL_UINT32(1U, cpu.samples);
 }
 
 /* ---- on-query aggregates (nearest-rank percentiles + lows + budget) ---- */
@@ -62,7 +71,7 @@ static void test_channels_independent(void) {
 /* KNOWN set 1..100 => avg 50.5, min 1, max 100, p50=50, p95=95, p99=99 (nearest-rank). */
 static void test_percentiles_known_set(void) {
     for (int v = 1; v <= 100; v++) {
-        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)v);
+        push_frame_ms((double)v);
     }
     nt_metrics_stats_t s;
     nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &s);
@@ -84,29 +93,13 @@ static void test_empty_window(void) {
     TEST_ASSERT_TRUE(near(s.max, 0.0));
 }
 
-/* Single sample: every percentile == that value; avg==min==max==value. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_single_sample(void) {
-    nt_metrics_test_push(NT_METRICS_CPU_MS, 42.0);
-    nt_metrics_stats_t s;
-    nt_metrics_channel_stats(NT_METRICS_CPU_MS, &s);
-    TEST_ASSERT_EQUAL_UINT32(1U, s.samples);
-    TEST_ASSERT_TRUE(near(s.avg, 42.0));
-    TEST_ASSERT_TRUE(near(s.min, 42.0));
-    TEST_ASSERT_TRUE(near(s.max, 42.0));
-    TEST_ASSERT_TRUE(near(s.median, 42.0));
-    TEST_ASSERT_TRUE(near(s.p95, 42.0));
-    TEST_ASSERT_TRUE(near(s.p99, 42.0));
-    TEST_ASSERT_TRUE(near(s.p99_9, 42.0));
-}
-
 /* fps-lows derived from frame_ms: feed 1..100ms => p99=99 => 1%-low = 1000/99. */
 static void test_fps_lows(void) {
     for (int v = 1; v <= 100; v++) {
-        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)v);
+        push_frame_ms((double)v);
     }
     TEST_ASSERT_TRUE(near(nt_metrics_fps_low_1pct(), 1000.0 / 99.0));
-    /* p99.9 collapses to max (100) at n=100 (A4): 0.1%-low = 1000/100 = 10. */
+    /* p99.9 collapses to max (100) at n=100: 0.1%-low = 1000/100 = 10. */
     TEST_ASSERT_TRUE(near(nt_metrics_fps_low_01pct(), 10.0));
 }
 
@@ -119,7 +112,7 @@ static void test_fps_lows_empty(void) {
 /* over_budget_pct: 1..100ms, budget 90 => 10 samples (91..100) over => 10%. */
 static void test_over_budget_pct(void) {
     for (int v = 1; v <= 100; v++) {
-        nt_metrics_test_push(NT_METRICS_FRAME_MS, (double)v);
+        push_frame_ms((double)v);
     }
     TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(90.0), 10.0));
     TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(100.0), 0.0)); /* strictly greater */
@@ -129,70 +122,164 @@ static void test_over_budget_pct(void) {
 /* over_budget_pct on an empty window returns 0 (no divide-by-zero). */
 static void test_over_budget_empty(void) { TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(16.0), 0.0)); }
 
-/* ---- gpu_ms -1.0 sentinel must never enter the window ----
-   nt_metrics_sample() reads nt_debug_overlay_get_gpu_ms(); on a host with no GPU timer that is the
-   -1.0F sentinel, which must be filtered so perf.stats reports samples:0 (matching perf.snapshot's
-   gpu_ms:null) instead of a confident avg/min/max:-1. */
+/* ---- skip guards in nt_metrics_sample ---- */
+
+/* gpu_ms < 0 sentinel must never enter the window (matches perf.snapshot's gpu_ms:null), while
+   sibling channels still sample — proving the loop ran. */
 static void test_gpu_sentinel_not_sampled(void) {
-    nt_debug_overlay_init(NULL); /* fresh overlay: last_gpu_ms defaults to the -1.0F sentinel */
-    nt_metrics_init();
     for (int i = 0; i < 5; i++) {
-        nt_metrics_sample();
+        nt_metrics_frame_t f = {.frame_ms = 16.0F, .cpu_ms = 8.0F, .gpu_ms = -1.0F};
+        nt_metrics_sample(&f);
     }
     nt_metrics_stats_t gpu;
     nt_metrics_channel_stats(NT_METRICS_GPU_MS, &gpu);
-    TEST_ASSERT_EQUAL_UINT32(0U, gpu.samples); /* sentinel filtered -> empty window */
-    /* Sibling channels DID sample, proving the loop ran (not a no-op). */
+    TEST_ASSERT_EQUAL_UINT32(0U, gpu.samples);
     nt_metrics_stats_t cpu;
     nt_metrics_channel_stats(NT_METRICS_CPU_MS, &cpu);
     TEST_ASSERT_EQUAL_UINT32(5U, cpu.samples);
-    nt_debug_overlay_shutdown();
 }
 
-/* ---- user channels key by the FULL name hash, not a truncated strcmp ----
-   Two names sharing a >= 31-char prefix but differing AFTER it must land in two distinct rings. The
-   metrics test hook pushes by full name (the overlay path truncates names to 32, masking this). */
-static void test_user_channels_long_prefix_distinct(void) {
-    /* 31 shared chars, then a distinguishing suffix. */
-    const char *a = "physics_substep_accumulator_msA";
-    const char *b = "physics_substep_accumulator_msB";
-    nt_metrics_test_push_user(a, 1.0);
-    nt_metrics_test_push_user(b, 2.0);
-    nt_metrics_test_push_user(a, 1.0);
-
-    TEST_ASSERT_EQUAL_UINT16(2U, nt_metrics_user_count());
-    /* Each ring holds only its own values: A got 2 pushes of 1.0, B got 1 push of 2.0. */
-    nt_metrics_stats_t sa;
-    nt_metrics_stats_t sb;
-    for (uint16_t i = 0; i < nt_metrics_user_count(); i++) {
-        const char *name = nt_metrics_user_name(i);
-        if (strcmp(name, a) == 0) {
-            nt_metrics_user_stats(i, &sa);
-            TEST_ASSERT_EQUAL_UINT32(2U, sa.samples);
-            TEST_ASSERT_TRUE(near(sa.avg, 1.0));
-        } else {
-            TEST_ASSERT_EQUAL_STRING(b, name);
-            nt_metrics_user_stats(i, &sb);
-            TEST_ASSERT_EQUAL_UINT32(1U, sb.samples);
-            TEST_ASSERT_TRUE(near(sb.avg, 2.0));
-        }
-    }
+/* A real gpu sample (>= 0) DOES enter the window. */
+static void test_gpu_real_sampled(void) {
+    nt_metrics_frame_t f = {.frame_ms = 16.0F, .cpu_ms = 8.0F, .gpu_ms = 4.0F};
+    nt_metrics_sample(&f);
+    nt_metrics_stats_t gpu;
+    nt_metrics_channel_stats(NT_METRICS_GPU_MS, &gpu);
+    TEST_ASSERT_EQUAL_UINT32(1U, gpu.samples);
+    TEST_ASSERT_TRUE(near(gpu.avg, 4.0));
 }
 
-/* ---- a fresh overlay with no recorded frames has fps==0; nt_metrics_sample() must NOT push
-   1000/fps (== ~1e9 ms) into FRAME_MS — that single outlier would poison the whole window. ---- */
-static void test_frame_ms_skips_zero_fps_frame(void) {
-    nt_debug_overlay_init(NULL); /* fresh: fps_count==0 -> get_fps()==0 */
-    nt_metrics_init();
-    nt_metrics_sample();
+/* frame_ms <= 0 / non-finite is the first-frame/garbage dt: it must NOT enter FRAME_MS (a 0 dt would
+   poison fps), while cpu still samples. */
+static void test_frame_ms_skips_nonpositive_and_nonfinite(void) {
+    nt_metrics_frame_t z = {.frame_ms = 0.0F, .cpu_ms = 8.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&z); /* 0 -> skipped */
+    nt_metrics_frame_t neg = {.frame_ms = -1.0F, .cpu_ms = 8.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&neg); /* < 0 -> skipped */
+    nt_metrics_frame_t inf = {.frame_ms = INFINITY, .cpu_ms = 8.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&inf); /* non-finite -> skipped */
+    nt_metrics_frame_t nan_f = {.frame_ms = NAN, .cpu_ms = 8.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&nan_f); /* non-finite -> skipped */
+
     nt_metrics_stats_t frame;
     nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &frame);
-    TEST_ASSERT_EQUAL_UINT32(0U, frame.samples); /* no 1e9 poison: the frame is skipped, window empty */
-    /* CPU still sampled, proving the call ran (only the fps==0 frame_ms push is gated). */
+    TEST_ASSERT_EQUAL_UINT32(0U, frame.samples); /* all four frame_ms skipped */
     nt_metrics_stats_t cpu;
     nt_metrics_channel_stats(NT_METRICS_CPU_MS, &cpu);
-    TEST_ASSERT_EQUAL_UINT32(1U, cpu.samples);
-    nt_debug_overlay_shutdown();
+    TEST_ASSERT_EQUAL_UINT32(4U, cpu.samples); /* cpu sampled every frame */
+}
+
+/* ---- rolling fps ---- */
+
+/* fps is the rolling avg over the frame_ms window: 60 frames at 16.667ms => ~60 fps; an empty
+   window => 0. */
+static void test_fps_rolling_avg(void) {
+    TEST_ASSERT_TRUE(near((double)nt_metrics_fps(), 0.0)); /* empty window */
+    for (int i = 0; i < 60; i++) {
+        push_frame_ms(1000.0 / 60.0);
+    }
+    TEST_ASSERT_TRUE(fabs((double)nt_metrics_fps() - 60.0) < 0.5);
+    /* Replace the window with 30 fps frames -> avg moves to ~30. */
+    for (int i = 0; i < NT_METRICS_WINDOW; i++) {
+        push_frame_ms(1000.0 / 30.0);
+    }
+    TEST_ASSERT_TRUE(fabs((double)nt_metrics_fps() - 30.0) < 0.5);
+}
+
+/* ---- last-frame snapshot ---- */
+
+/* nt_metrics_last returns the last pushed frame verbatim (the perf.snapshot view). */
+static void test_last_frame_snapshot(void) {
+    nt_metrics_frame_t f = {.frame_ms = 12.5F, .cpu_ms = 7.25F, .gpu_ms = 3.5F, .draw_calls = 42U, .mem_used = 1234U, .scratch_hwm = 99U, .scratch_used = 11U};
+    nt_metrics_sample(&f);
+    nt_metrics_frame_t last;
+    nt_metrics_last(&last);
+    TEST_ASSERT_TRUE(near((double)last.frame_ms, 12.5));
+    TEST_ASSERT_TRUE(near((double)last.cpu_ms, 7.25));
+    TEST_ASSERT_TRUE(near((double)last.gpu_ms, 3.5));
+    TEST_ASSERT_EQUAL_UINT32(42U, last.draw_calls);
+}
+
+/* ---- user counters: full-name hash keying (P1-A) via the REAL public path ---- */
+
+/* Two names sharing a 31-char prefix but differing AFTER it must land in two distinct counters —
+   keyed by the full 64-bit name hash, not a truncated strcmp. Driven through nt_metrics_count, the
+   real host path (no test hook). */
+static void test_user_counters_long_prefix_distinct(void) {
+    const char *a = "physics_substep_accumulator_msA"; /* 31 chars */
+    const char *b = "physics_substep_accumulator_msB";
+    nt_metrics_count(a, 10U);
+    nt_metrics_count(b, 20U);
+    TEST_ASSERT_EQUAL_UINT16(2U, nt_metrics_user_count());
+
+    bool saw_a = false;
+    bool saw_b = false;
+    for (uint16_t i = 0; i < nt_metrics_user_count(); i++) {
+        const char *name = NULL;
+        uint64_t u = 0;
+        double f = 0.0;
+        bool is_float = true;
+        nt_metrics_user_get(i, &name, &u, &f, &is_float);
+        TEST_ASSERT_FALSE(is_float);
+        if (strcmp(name, a) == 0) {
+            saw_a = true;
+            TEST_ASSERT_EQUAL_UINT64(10U, u);
+        } else {
+            TEST_ASSERT_EQUAL_STRING(b, name);
+            saw_b = true;
+            TEST_ASSERT_EQUAL_UINT64(20U, u);
+        }
+    }
+    TEST_ASSERT_TRUE(saw_a && saw_b);
+}
+
+/* ---- exact uint64 round-trip past 2^53 (P2-A) ---- */
+
+/* An int counter above 2^53 must survive nt_metrics_user_get EXACTLY (a double would lose the low
+   bits). Prove the union keeps full uint64 precision. */
+static void test_user_counter_uint64_exact(void) {
+    const uint64_t big = (1ULL << 53) + 1ULL; /* not representable as a double */
+    nt_metrics_count("huge", big);
+    const char *name = NULL;
+    uint64_t u = 0;
+    double f = 0.0;
+    bool is_float = true;
+    nt_metrics_user_get(0, &name, &u, &f, &is_float);
+    TEST_ASSERT_EQUAL_STRING("huge", name);
+    TEST_ASSERT_FALSE(is_float);
+    TEST_ASSERT_EQUAL_UINT64(big, u); /* exact: no double squash */
+}
+
+/* count_f keeps the double; re-writing a name flips its tag (last write wins). */
+static void test_user_counter_float_and_tag_flip(void) {
+    nt_metrics_count("v", 5U); /* int */
+    const char *name = NULL;
+    uint64_t u = 0;
+    double f = 0.0;
+    bool is_float = true;
+    nt_metrics_user_get(0, &name, &u, &f, &is_float);
+    TEST_ASSERT_FALSE(is_float);
+    TEST_ASSERT_EQUAL_UINT64(5U, u);
+
+    nt_metrics_count_f("v", 2.5); /* same name -> flips to float, single counter */
+    nt_metrics_user_get(0, &name, &u, &f, &is_float);
+    TEST_ASSERT_TRUE(is_float);
+    TEST_ASSERT_TRUE(near(f, 2.5));
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_metrics_user_count());
+}
+
+/* user counter values flow into a windowed ring on each sample (backs perf.stats user_channels). */
+static void test_user_counter_windowed(void) {
+    nt_metrics_count_f("frame_ms", 10.0);
+    nt_metrics_frame_t fr = {.frame_ms = 16.0F, .gpu_ms = -1.0F};
+    nt_metrics_sample(&fr);
+    nt_metrics_count_f("frame_ms", 20.0);
+    nt_metrics_sample(&fr);
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_metrics_user_count());
+    nt_metrics_stats_t s;
+    nt_metrics_user_stats(0, &s);
+    TEST_ASSERT_EQUAL_UINT32(2U, s.samples);
+    TEST_ASSERT_TRUE(near(s.avg, 15.0)); /* (10 + 20) / 2 */
 }
 
 int main(void) {
@@ -202,14 +289,19 @@ int main(void) {
     RUN_TEST(test_channels_independent);
     RUN_TEST(test_percentiles_known_set);
     RUN_TEST(test_empty_window);
-    RUN_TEST(test_single_sample);
     RUN_TEST(test_fps_lows);
     RUN_TEST(test_fps_lows_empty);
     RUN_TEST(test_over_budget_pct);
     RUN_TEST(test_over_budget_empty);
     RUN_TEST(test_gpu_sentinel_not_sampled);
-    RUN_TEST(test_user_channels_long_prefix_distinct);
-    RUN_TEST(test_frame_ms_skips_zero_fps_frame);
+    RUN_TEST(test_gpu_real_sampled);
+    RUN_TEST(test_frame_ms_skips_nonpositive_and_nonfinite);
+    RUN_TEST(test_fps_rolling_avg);
+    RUN_TEST(test_last_frame_snapshot);
+    RUN_TEST(test_user_counters_long_prefix_distinct);
+    RUN_TEST(test_user_counter_uint64_exact);
+    RUN_TEST(test_user_counter_float_and_tag_flip);
+    RUN_TEST(test_user_counter_windowed);
     return UNITY_END();
 }
 

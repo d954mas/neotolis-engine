@@ -106,16 +106,13 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_platform_mem COMMAND test_platform_mem)
 
     # --- Perf collector (nt_metrics, L1 without devapi) ---
-    # nt_metrics_sample() references the overlay/gfx/scratch/platform getters, so
-    # those providers must link even though the test feeds known samples via the
-    # NT_TEST_ACCESS push hook. GNU-ld single-pass order: consumer (nt_metrics)
-    # precedes providers; nt_core/nt_log_stub trail last.
+    # nt_metrics is the perf source of truth now: the host pushes nt_metrics_frame_t + sets user
+    # counters, and the test drives those same public paths — so it links nt_metrics + nt_hash only,
+    # no overlay/gfx/scratch/platform providers. GNU-ld order: consumer (nt_metrics) before nt_hash;
+    # nt_core/nt_log_stub trail last.
     add_executable(test_metrics unit/test_metrics.c)
     target_link_libraries(test_metrics PRIVATE
-        nt_metrics
-        nt_debug_overlay nt_text_renderer nt_font nt_material nt_resource
-        nt_gfx_stub nt_mem_scratch nt_platform nt_hash nt_pool
-        nt_http_stub nt_fs_stub nt_log_stub unity
+        nt_metrics nt_hash nt_log_stub unity
     )
     target_compile_definitions(test_metrics PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_metrics)
@@ -538,16 +535,16 @@ if(NOT EMSCRIPTEN)
         # obs-referenced L1 libs (the dev ring + metrics collector + overlay + entity/components +
         # resource) so the handlers read live state; nt_gfx_stub satisfies the overlay/resource gfx
         # symbols, nt_http_stub/nt_fs_stub the resource loader. Consumer-before-provider link order:
-        # nt_devapi first, the obs libs next, nt_core / nt_log_stub trailing last (GNU-ld single pass).
-        # NT_TEST_ACCESS (directory-wide) exposes nt_metrics_test_push so perf.stats can be fed a known
-        # sample set. The REAL nt_log is linked (not nt_log_stub) so nt_log_write fans out to the
-        # registered nt_log_ring sink — the obs test feeds the ring via real log writes.
+        # nt_devapi first, the obs libs next, nt_core / nt_log trailing last (GNU-ld single pass).
+        # perf.* reads nt_metrics directly now (no overlay), and the test feeds nt_metrics via the
+        # public count + sample paths — so no nt_debug_overlay/text_renderer/font/material deps. The
+        # REAL nt_log is linked (not nt_log_stub) so nt_log_write fans out to the registered
+        # nt_log_ring sink — the obs test feeds the ring via real log writes.
         if(NT_DEVAPI_GROUP_OBS)
             add_executable(test_devapi_obs unit/test_devapi_obs.c)
             target_link_libraries(test_devapi_obs PRIVATE
                 nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
-                nt_log_ring
-                nt_metrics nt_debug_overlay nt_text_renderer nt_font nt_material
+                nt_log_ring nt_metrics
                 nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
                 nt_resource nt_mem_scratch nt_platform nt_pool nt_math nt_shared
                 nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
@@ -634,10 +631,12 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_element_data)
 
-    # --- Debug overlay module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
+    # --- Debug overlay module tests (overlay as nt_metrics consumer + Pitfall 9 draw bind) ---
+    # The overlay reads nt_metrics for the HUD, so the test feeds nt_metrics (count + sample); the
+    # draw test still needs the text_renderer/gfx bind chain.
     add_executable(test_debug_overlay unit/test_debug_overlay.c)
     target_link_libraries(test_debug_overlay PRIVATE
-        nt_debug_overlay nt_text_renderer nt_font nt_material nt_resource
+        nt_debug_overlay nt_metrics nt_text_renderer nt_font nt_material nt_resource
         nt_gfx_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
     )
     target_compile_definitions(test_debug_overlay PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -678,11 +677,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_sprite_renderer_emit_region)
 
     # Shared list of libs every nt_ui test binary links against. Stub gfx
-    # backend; nt_debug_overlay included for walker tests that record draw_calls /
-    # element_count via the public getter forwards.
+    # backend; nt_debug_overlay (+ nt_metrics, the perf source of truth it consumes) included for
+    # walker tests that publish draw_calls / element_count into nt_metrics and read the HUD back.
     set(_nt_ui_test_libs
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay nt_gfx_stub nt_core
+        nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay nt_metrics nt_gfx_stub nt_core
         nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
 
