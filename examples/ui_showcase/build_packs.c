@@ -283,6 +283,60 @@ int main(int argc, char *argv[]) {
     nt_builder_end_atlas(ctx);
     // #endregion
 
+    // #region atlas: rich-text inline icons (named regions for <img=name/> by-name resolve)
+    /* Inline rich-text images resolve by atlas+region NAME (D-67-13, the atlas IS the registry).
+     * A dedicated small icon atlas with named regions ("heart","gold") feeds both the rich-text
+     * demo tab and the no-GL emit test's by-name resolve. Procedural full-bleed sprites (opaque,
+     * no padding/margin/extrude) keep the regions' UV near [0,1] so the inline image stays crisp. */
+    nt_atlas_opts_t icons_atlas_opts = nt_atlas_opts_defaults();
+    icons_atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
+    icons_atlas_opts.allow_transform = false;
+    icons_atlas_opts.padding = 0;
+    icons_atlas_opts.margin = 0;
+    icons_atlas_opts.extrude = 0;
+    icons_atlas_opts.power_of_two = false;
+    icons_atlas_opts.premultiplied = true;
+    icons_atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    icons_atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    icons_atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    icons_atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    icons_atlas_opts.gen_mipmaps = false;
+
+    nt_builder_begin_atlas(ctx, "ui_showcase_icons", &icons_atlas_opts);
+
+    /* Two 16x16 fully-opaque solid-color icons: "heart" (red) + "gold" (amber). Solid color so
+     * nothing trims; the demo tints them via a_tint to prove the lossless per-image tint path. */
+    enum { ICON_DIM = 16 };
+    static uint8_t icon_heart[ICON_DIM * ICON_DIM * 4];
+    static uint8_t icon_gold[ICON_DIM * ICON_DIM * 4];
+    for (int i = 0; i < ICON_DIM * ICON_DIM; ++i) {
+        uint8_t *h = &icon_heart[(size_t)i * 4U];
+        h[0] = 220;
+        h[1] = 40;
+        h[2] = 60;
+        h[3] = 255;
+        uint8_t *g = &icon_gold[(size_t)i * 4U];
+        g[0] = 250;
+        g[1] = 200;
+        g[2] = 60;
+        g[3] = 255;
+    }
+    nt_atlas_sprite_opts_t icon_heart_opts = nt_atlas_sprite_opts_defaults();
+    icon_heart_opts.name = "heart";
+    icon_heart_opts.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
+    icon_heart_opts.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
+    nt_builder_atlas_add_raw(ctx, icon_heart, ICON_DIM, ICON_DIM, &icon_heart_opts);
+
+    nt_atlas_sprite_opts_t icon_gold_opts = nt_atlas_sprite_opts_defaults();
+    icon_gold_opts.name = "gold";
+    icon_gold_opts.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
+    icon_gold_opts.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
+    nt_builder_atlas_add_raw(ctx, icon_gold, ICON_DIM, ICON_DIM, &icon_gold_opts);
+    (void)printf("  Atlas 'ui_showcase_icons': heart + gold %dx%d (inline rich-text icons)\n", ICON_DIM, ICON_DIM);
+
+    nt_builder_end_atlas(ctx);
+    // #endregion
+
     // #region font: ASCII Latin + Cyrillic (demo-only)
     nt_builder_add_font(ctx, FONT_PATH,
                         &(nt_font_opts_t){
