@@ -1301,12 +1301,13 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
  * -- never a per-run Clay element. The custom data routes the walk back to our self-emit.
  * Inline IMAGE atoms are declared as FLOATING children of this block (positioned at the solved
  * (x,y)); their textured sprite emit rides nt_ui_image_custom (RICH-67-05). */
-static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, const nt_ui_element_data_t *data) {
+static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
     nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
     NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
     *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_RICH_TEXT, .data = st};
 
     Clay_ElementDeclaration decl = {0};
+    decl.id = (Clay_ElementId){.id = id}; /* the block carries `id` so nt_ui_get_bbox resolves it (width fallback + link origin) */
     decl.layout.sizing.width = CLAY_SIZING_FIXED(st->total_w);
     decl.layout.sizing.height = CLAY_SIZING_FIXED(st->total_h);
     decl.custom = (Clay_CustomElementConfig){.customData = cd};
@@ -1384,7 +1385,7 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     st->time = time; /* game-owned animation clock (D-67-18); no global frame clock */
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
     rich_resolve_links(ctx, st, id); /* hover gates effects -> must precede emit */
-    rich_declare_fixed_block(ctx, st, data);
+    rich_declare_fixed_block(ctx, st, id, data);
     if (out != NULL) {
         out->hovered_link = st->hovered_link;
         out->clicked_link = st->clicked_link;
@@ -1403,7 +1404,7 @@ void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_eleme
     st->time = time;
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
     rich_resolve_links(ctx, st, id);
-    rich_declare_fixed_block(ctx, st, data);
+    rich_declare_fixed_block(ctx, st, id, data);
     if (out != NULL) {
         out->hovered_link = st->hovered_link;
         out->clicked_link = st->clicked_link;
