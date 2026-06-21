@@ -28,12 +28,6 @@
 #define NT_DEVAPI_OBS_LIMIT_MAX 512
 #endif
 
-/* Upper bound on the entity.list working set (one pass collects the filtered live set so pagination
-   + total stay consistent). Sized to the default nt_entity max; raise via -D for larger scenes. */
-#ifndef NT_ENTITY_LIST_MAX
-#define NT_ENTITY_LIST_MAX 4096
-#endif
-
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
@@ -87,17 +81,7 @@ static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
         *out = NT_LOG_RING_DEPTH;
         return true;
     }
-    if (!cJSON_IsNumber(jn)) {
-        set_bad_params(err, "log.tail: n must be a number");
-        return false;
-    }
-    int v = jn->valueint;
-    if (v < 0 || v > NT_LOG_RING_DEPTH) {
-        set_bad_params(err, "log.tail: n out of range [0, NT_LOG_RING_DEPTH]");
-        return false;
-    }
-    *out = (uint16_t)v;
-    return true;
+    return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, set_bad_params, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
 }
 
 /* Serialize one tail buffer into the entries array. Split out so cmd_log_tail stays under the
@@ -317,21 +301,15 @@ static bool cmd_perf_reset(const cJSON *params, cJSON *result, nt_devapi_error *
 static bool resolve_page(const cJSON *params, uint32_t total, const char *who, uint32_t *out_begin, uint32_t *out_end, nt_devapi_error *err) {
     uint32_t offset = 0;
     const cJSON *jo = cJSON_GetObjectItemCaseSensitive(params, "offset");
-    if (jo != NULL) {
-        if (!cJSON_IsNumber(jo) || jo->valueint < 0) {
-            set_bad_params(err, who);
-            return false;
-        }
-        offset = (uint32_t)jo->valueint;
+    if (jo != NULL && !nt_devapi_parse_u32_param_exact(jo, UINT32_MAX, err, set_bad_params, who, &offset)) {
+        return false;
     }
     uint32_t limit = NT_DEVAPI_OBS_LIMIT_MAX;
     const cJSON *jl = cJSON_GetObjectItemCaseSensitive(params, "limit");
     if (jl != NULL) {
-        if (!cJSON_IsNumber(jl) || jl->valueint < 0) {
-            set_bad_params(err, who);
+        if (!nt_devapi_parse_u32_param_exact(jl, UINT32_MAX, err, set_bad_params, who, &limit)) {
             return false;
         }
-        limit = (uint32_t)jl->valueint;
         if (limit > NT_DEVAPI_OBS_LIMIT_MAX) {
             limit = NT_DEVAPI_OBS_LIMIT_MAX; /* clamp, not reject — bot pages via total */
         }
@@ -348,10 +326,72 @@ static bool resolve_page(const cJSON *params, uint32_t total, const char *who, u
 // #endregion
 
 // #region entity.*
+/* Serialize one entity's compact view (id/index/generation/alive/enabled + optional position +
+   drawable) into the entities array. Split out so cmd_entity_list stays under the clang-tidy-18
+   cognitive-complexity ceiling and the two-pass loop body stays simple. */
+static void add_entity_entry(cJSON *arr, nt_entity_t e) {
+    cJSON *o = cJSON_CreateObject();
+    NT_ASSERT(o != NULL);
+    devapi_add_number(o, "id", (double)e.id);
+    devapi_add_number(o, "index", (double)nt_entity_index(e));
+    devapi_add_number(o, "generation", (double)nt_entity_generation(e));
+    devapi_add_bool(o, "alive", true);
+    devapi_add_bool(o, "enabled", nt_entity_is_enabled(e));
+
+    if (nt_transform_comp_has(e)) {
+        const float *pos = nt_transform_comp_position(e);
+        cJSON *p = cJSON_AddArrayToObject(o, "position");
+        NT_ASSERT(p != NULL);
+        for (int k = 0; k < 3; k++) {
+            cJSON_bool added = cJSON_AddItemToArray(p, cJSON_CreateNumber((double)pos[k]));
+            NT_ASSERT(added);
+            (void)added;
+        }
+    } else {
+        cJSON_AddNullToObject(o, "position");
+    }
+
+    if (nt_drawable_comp_has(e)) {
+        cJSON *d = cJSON_AddObjectToObject(o, "drawable");
+        NT_ASSERT(d != NULL);
+        const bool *vis = nt_drawable_comp_visible(e);
+        devapi_add_bool(d, "visible", vis != NULL && *vis);
+        const float *col = nt_drawable_comp_color(e);
+        cJSON *c = cJSON_AddArrayToObject(d, "color");
+        NT_ASSERT(c != NULL);
+        for (int k = 0; k < 4; k++) {
+            cJSON_bool added = cJSON_AddItemToArray(c, cJSON_CreateNumber(col != NULL ? (double)col[k] : 0.0));
+            NT_ASSERT(added);
+            (void)added;
+        }
+    } else {
+        cJSON_AddNullToObject(o, "drawable");
+    }
+
+    cJSON_bool added = cJSON_AddItemToArray(arr, o);
+    NT_ASSERT(added);
+    (void)added;
+}
+
+/* True if the live slot at `idx` (1..nt_entity_max()) passes the only_drawable filter; writes the
+   resolved handle to *out. False for a dead slot or a filtered-out entity. */
+static bool entity_slot_matches(uint16_t idx, bool only_drawable, nt_entity_t *out) {
+    nt_entity_t e = nt_entity_at_index(idx);
+    if (e.id == NT_ENTITY_INVALID.id) {
+        return false;
+    }
+    if (only_drawable && !nt_drawable_comp_has(e)) {
+        return false;
+    }
+    *out = e;
+    return true;
+}
+
 /* entity.list{offset?, limit?, only_drawable?}: live entities with compact fields (no world_matrix,
-   D-12). Iterates 1..nt_entity_max() via nt_entity_at_index, skipping dead slots. Pagination over
-   the live set with `total`; optional only_drawable filter (D-13). Bad offset/limit -> bad_params. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+   D-12). Two heap-free passes over 1..nt_entity_max() via nt_entity_at_index: pass 1 counts the
+   honest filtered total, pass 2 emits the [begin,end) page resolved against it — so the whole live
+   range is pageable, not just a fixed prefix. Optional only_drawable filter. Bad offset/limit ->
+   bad_params. */
 static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     bool only_drawable = false;
@@ -364,86 +404,38 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
         only_drawable = cJSON_IsTrue(jod);
     }
 
-    /* First pass: collect the filtered live set into a bounded index buffer so pagination stays
-       consistent. `total` is the HONEST count of all matching live entities — it is NOT clamped to the
-       buffer size, so a paginating bot can detect the tail. The working set caps at NT_ENTITY_LIST_MAX;
-       when the real count exceeds it we surface truncated:true (the buffered prefix is still pageable).
-       Single-threaded, non-re-entrant dispatch (see invariant note above s_live). No heap. */
-    /* INVARIANT: obs handlers must NEVER recurse into nt_devapi_submit — this static working buffer is
-       shared across the single-threaded, non-re-entrant dispatch and would be clobbered mid-serialize. */
-    static nt_entity_t s_live[NT_ENTITY_LIST_MAX];
     uint16_t emax = nt_entity_max();
-    uint32_t total = 0;
-    uint32_t stored = 0;
-    for (uint16_t idx = 1; idx <= emax; idx++) {
-        nt_entity_t e = nt_entity_at_index(idx);
-        if (e.id == NT_ENTITY_INVALID.id) {
-            continue;
-        }
-        if (only_drawable && !nt_drawable_comp_has(e)) {
-            continue;
-        }
-        if (stored < NT_ENTITY_LIST_MAX) {
-            s_live[stored++] = e;
-        }
-        total++;
-    }
-    bool truncated = total > stored;
 
-    /* Page only over what fits in the buffer (stored); total stays honest above. */
+    /* Pass 1: honest count of all matching live entities (no working buffer, no cap). */
+    uint32_t total = 0;
+    for (uint16_t idx = 1; idx <= emax; idx++) {
+        nt_entity_t e;
+        if (entity_slot_matches(idx, only_drawable, &e)) {
+            total++;
+        }
+    }
+
     uint32_t begin = 0;
     uint32_t end = 0;
-    if (!resolve_page(params, stored, "entity.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
+    if (!resolve_page(params, total, "entity.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
         return false;
     }
 
     devapi_add_number(result, "total", (double)total);
-    devapi_add_bool(result, "truncated", truncated);
     cJSON *arr = cJSON_AddArrayToObject(result, "entities");
     NT_ASSERT(arr != NULL);
-    for (uint32_t i = begin; i < end; i++) {
-        nt_entity_t e = s_live[i];
-        cJSON *o = cJSON_CreateObject();
-        NT_ASSERT(o != NULL);
-        devapi_add_number(o, "id", (double)e.id);
-        devapi_add_number(o, "index", (double)nt_entity_index(e));
-        devapi_add_number(o, "generation", (double)nt_entity_generation(e));
-        devapi_add_bool(o, "alive", true);
-        devapi_add_bool(o, "enabled", nt_entity_is_enabled(e));
 
-        if (nt_transform_comp_has(e)) {
-            const float *pos = nt_transform_comp_position(e);
-            cJSON *p = cJSON_AddArrayToObject(o, "position");
-            NT_ASSERT(p != NULL);
-            for (int k = 0; k < 3; k++) {
-                cJSON_bool added = cJSON_AddItemToArray(p, cJSON_CreateNumber((double)pos[k]));
-                NT_ASSERT(added);
-                (void)added;
-            }
-        } else {
-            cJSON_AddNullToObject(o, "position");
+    /* Pass 2: emit only entities whose running matched-index falls in [begin, end). */
+    uint32_t matched = 0;
+    for (uint16_t idx = 1; idx <= emax; idx++) {
+        nt_entity_t e;
+        if (!entity_slot_matches(idx, only_drawable, &e)) {
+            continue;
         }
-
-        if (nt_drawable_comp_has(e)) {
-            cJSON *d = cJSON_AddObjectToObject(o, "drawable");
-            NT_ASSERT(d != NULL);
-            const bool *vis = nt_drawable_comp_visible(e);
-            devapi_add_bool(d, "visible", vis != NULL && *vis);
-            const float *col = nt_drawable_comp_color(e);
-            cJSON *c = cJSON_AddArrayToObject(d, "color");
-            NT_ASSERT(c != NULL);
-            for (int k = 0; k < 4; k++) {
-                cJSON_bool added = cJSON_AddItemToArray(c, cJSON_CreateNumber(col != NULL ? (double)col[k] : 0.0));
-                NT_ASSERT(added);
-                (void)added;
-            }
-        } else {
-            cJSON_AddNullToObject(o, "drawable");
+        if (matched >= begin && matched < end) {
+            add_entity_entry(arr, e);
         }
-
-        cJSON_bool added = cJSON_AddItemToArray(arr, o);
-        NT_ASSERT(added);
-        (void)added;
+        matched++;
     }
     return true;
 }
@@ -487,9 +479,83 @@ static const char *asset_state_token(uint8_t state) {
     }
 }
 
+/* Parse the optional {pack_id} filter. Absent -> filter off. On a value, resolve it to the raw
+   packs[] slot index (NtAssetMeta.pack_index space) so the asset filter can match exactly; an
+   unmounted/unknown pack_id leaves filter on with no matching slot (empty result, not an error). */
+static bool resolve_pack_filter(const cJSON *params, bool *out_filter, uint16_t *out_slot, uint32_t *out_id, nt_devapi_error *err) {
+    *out_filter = false;
+    *out_slot = UINT16_MAX; /* sentinel: no mounted pack matches (UINT16_MAX is never a real slot) */
+    *out_id = 0;
+    const cJSON *jpid = cJSON_GetObjectItemCaseSensitive(params, "pack_id");
+    if (jpid == NULL) {
+        return true;
+    }
+    uint32_t pack_id = 0;
+    if (!nt_devapi_parse_u32_param_exact(jpid, UINT32_MAX, err, set_bad_params, "resource.list: pack_id must be a non-negative integer", &pack_id)) {
+        return false;
+    }
+    *out_filter = true;
+    *out_id = pack_id;
+    uint16_t pack_count = nt_resource_pack_count();
+    for (uint16_t i = 0; i < pack_count; i++) {
+        nt_resource_pack_info_t info;
+        if (nt_resource_pack_info(i, &info) && info.id == pack_id) {
+            *out_slot = info.pack_index; /* raw slot — matches the asset's pack_index */
+            break;
+        }
+    }
+    return true;
+}
+
+/* Serialize one asset entry into the assets array. Split out so cmd_resource_list stays under the
+   clang-tidy-18 cognitive-complexity ceiling. */
+static void add_asset_entry(cJSON *assets, const nt_resource_asset_info_t *ai) {
+    cJSON *o = cJSON_CreateObject();
+    NT_ASSERT(o != NULL);
+    /* 64-bit hash as a 0x-hex string: a JSON double loses the low bits above 2^53, so the id
+       could not round-trip. entity/pack ids stay numbers (uint32, exact in a double). */
+    char rid_hex[19]; /* "0x" + 16 hex + NUL */
+    (void)snprintf(rid_hex, sizeof(rid_hex), "0x%016" PRIx64, ai->resource_id);
+    devapi_add_string(o, "resource_id", rid_hex);
+    devapi_add_number(o, "type", (double)ai->type);
+    devapi_add_string(o, "state", asset_state_token(ai->state));
+    devapi_add_number(o, "pack", (double)ai->pack_index);
+    cJSON_bool added = cJSON_AddItemToArray(assets, o);
+    NT_ASSERT(added);
+    (void)added;
+}
+
+/* Emit the flat assets[] for the (optionally pack-filtered) scope. asset_total is the HONEST count
+   for the filtered scope; the emitted prefix is bounded at NT_DEVAPI_OBS_LIMIT_MAX (DoS cap) and
+   assets_truncated flags when more match than were emitted. */
+static void add_assets_section(cJSON *result, bool filter_pack, uint16_t filter_slot) {
+    cJSON *assets = cJSON_AddArrayToObject(result, "assets");
+    NT_ASSERT(assets != NULL);
+    uint16_t asset_count = nt_resource_asset_count();
+    uint32_t emitted = 0;
+    uint32_t scoped_total = 0;
+    for (uint16_t i = 0; i < asset_count; i++) {
+        nt_resource_asset_info_t ai;
+        if (!nt_resource_asset_info(i, &ai)) {
+            continue;
+        }
+        if (filter_pack && ai.pack_index != filter_slot) {
+            continue;
+        }
+        scoped_total++;
+        if (emitted < NT_DEVAPI_OBS_LIMIT_MAX) {
+            add_asset_entry(assets, &ai);
+            emitted++;
+        }
+    }
+    devapi_add_number(result, "asset_total", (double)scoped_total);
+    devapi_add_bool(result, "assets_truncated", scoped_total > emitted);
+}
+
 /* resource.list{offset?, limit?, pack_id?, include_assets?}: always packs[]; flat assets[] only when
    include_assets true (D-14). Pagination over packs with `total`; optional pack_id filter (D-13).
-   State values mapped to stable tokens. Bad pack_id/offset/limit -> bad_params. */
+   When pack_id filters, assets[] is restricted to that pack too. State values mapped to stable
+   tokens. Bad pack_id/offset/limit -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
@@ -503,15 +569,10 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
         include_assets = cJSON_IsTrue(jia);
     }
     bool filter_pack = false;
+    uint16_t filter_slot = UINT16_MAX;
     uint32_t pack_id = 0;
-    const cJSON *jpid = cJSON_GetObjectItemCaseSensitive(params, "pack_id");
-    if (jpid != NULL) {
-        if (!cJSON_IsNumber(jpid) || jpid->valuedouble < 0.0) {
-            set_bad_params(err, "resource.list: pack_id must be a non-negative number");
-            return false;
-        }
-        filter_pack = true;
-        pack_id = (uint32_t)jpid->valuedouble;
+    if (!resolve_pack_filter(params, &filter_pack, &filter_slot, &pack_id, err)) {
+        return false;
     }
 
     uint16_t pack_count = nt_resource_pack_count();
@@ -561,35 +622,7 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
     }
 
     if (include_assets) {
-        cJSON *assets = cJSON_AddArrayToObject(result, "assets");
-        NT_ASSERT(assets != NULL);
-        uint16_t asset_count = nt_resource_asset_count();
-        /* Bound the flat assets[] at the same DoS ceiling packs use (T-68-06-DOS): without this an
-           include_assets request emits up to NT_RESOURCE_MAX_ASSETS objects regardless of limit. Emit at
-           most NT_DEVAPI_OBS_LIMIT_MAX and flag assets_truncated when more exist. */
-        uint32_t emitted = 0;
-        for (uint16_t i = 0; i < asset_count && emitted < NT_DEVAPI_OBS_LIMIT_MAX; i++) {
-            nt_resource_asset_info_t ai;
-            if (!nt_resource_asset_info(i, &ai)) {
-                continue;
-            }
-            cJSON *o = cJSON_CreateObject();
-            NT_ASSERT(o != NULL);
-            /* 64-bit hash as a 0x-hex string: a JSON double loses the low bits above 2^53, so the id
-               could not round-trip. entity/pack ids stay numbers (uint32, exact in a double). */
-            char rid_hex[19]; /* "0x" + 16 hex + NUL */
-            (void)snprintf(rid_hex, sizeof(rid_hex), "0x%016" PRIx64, ai.resource_id);
-            devapi_add_string(o, "resource_id", rid_hex);
-            devapi_add_number(o, "type", (double)ai.type);
-            devapi_add_string(o, "state", asset_state_token(ai.state));
-            devapi_add_number(o, "pack", (double)ai.pack_index);
-            cJSON_bool added = cJSON_AddItemToArray(assets, o);
-            NT_ASSERT(added);
-            (void)added;
-            emitted++;
-        }
-        devapi_add_number(result, "asset_total", (double)asset_count);
-        devapi_add_bool(result, "assets_truncated", asset_count > emitted);
+        add_assets_section(result, filter_pack, filter_slot);
     }
     return true;
 }
@@ -635,16 +668,16 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "entity.list",
         .group = "entity",
-        .summary = "live entities with compact fields (id/generation/enabled/position/drawable); paginated with honest total + truncated flag",
+        .summary = "live entities with compact fields (id/generation/enabled/position/drawable); fully paginated with honest total",
         .params_shape = "{offset?:number, limit?:number, only_drawable?:bool}",
-        .result_shape = "{total:number,truncated:bool,entities:[{id,index,generation,alive,enabled,position,drawable}]}",
+        .result_shape = "{total:number,entities:[{id,index,generation,alive,enabled,position,drawable}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
     {
         .method = "resource.list",
         .group = "resource",
-        .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped) when include_assets; paginated with total",
+        .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped, pack_id-filtered) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
         .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id:string,type,state,pack}],asset_total?:number,assets_truncated?:bool}",
         .frame_behavior = "any",

@@ -28,13 +28,9 @@ void setUp(void) {
     nt_debug_overlay_init(NULL);
     nt_metrics_init();
     nt_log_ring_init();
-    /* nt_log sinks are process-global with no remove API (host-call registry); register the ring
-       sink exactly once across the whole run, then clear the ring per test via nt_log_ring_init. */
-    static bool s_sink_attached = false;
-    if (!s_sink_attached) {
-        nt_log_add_sink(nt_log_ring_sink, NULL);
-        s_sink_attached = true;
-    }
+    /* nt_log_add_sink is idempotent (F5): re-attaching the same (fn,user) across tests is a no-op,
+       so this stays a single live sink with no static-flag workaround. */
+    nt_log_add_sink(nt_log_ring_sink, NULL);
 
     nt_entity_desc_t edesc = nt_entity_desc_defaults();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_entity_init(&edesc));
@@ -279,8 +275,8 @@ static void test_entity_list_total_and_fields(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\"}"));
     cJSON *r = result_of(root);
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint);
-    /* WR-04: truncated is always present; false when the live set fits the working buffer. */
-    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(r, "truncated")));
+    /* truncated is gone (F4): entity.list is fully paginated against the honest total. */
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(r, "truncated"));
     cJSON *entities = cJSON_GetObjectItemCaseSensitive(r, "entities");
     TEST_ASSERT_TRUE(cJSON_IsArray(entities));
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(entities));
@@ -399,6 +395,78 @@ static void test_resource_list_assets_cap_trips(void) {
     cJSON_Delete(root);
 }
 
+/* F1: resource.list{pack_id} must filter the flat assets[] to that pack, not emit assets for ALL
+   packs. Mount two virtual packs with distinct asset counts, then assert a pack_id-filtered
+   include_assets request returns only pack A's assets and asset_total == pack A's count. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_resource_list_pack_id_filters_assets(void) {
+    nt_hash32_t pid_a = nt_hash32_str("filter_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("filter_pack_b");
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_create_pack(pid_a, 0));
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_create_pack(pid_b, 0));
+
+    const int count_a = 3;
+    const int count_b = 5;
+    for (int i = 0; i < count_a; i++) {
+        nt_hash64_t rid = {0xA000000000000000ULL + (uint64_t)i};
+        TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_register(pid_a, rid, 0U, (uint32_t)(i + 1)));
+    }
+    for (int i = 0; i < count_b; i++) {
+        nt_hash64_t rid = {0xB000000000000000ULL + (uint64_t)i};
+        TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_register(pid_b, rid, 0U, (uint32_t)(100 + i)));
+    }
+
+    /* Resolve pack A's raw slot index so we can assert each returned asset's "pack" field matches it. */
+    uint16_t slot_a = UINT16_MAX;
+    uint16_t pack_count = nt_resource_pack_count();
+    for (uint16_t i = 0; i < pack_count; i++) {
+        nt_resource_pack_info_t info;
+        if (nt_resource_pack_info(i, &info) && info.id == pid_a.value) {
+            slot_a = info.pack_index;
+        }
+    }
+    TEST_ASSERT_NOT_EQUAL(UINT16_MAX, slot_a);
+
+    char req[128];
+    (void)snprintf(req, sizeof(req), "{\"method\":\"resource.list\",\"params\":{\"pack_id\":%u,\"include_assets\":true}}", pid_a.value);
+    cJSON *root = parse_ok(nt_devapi_submit(req));
+    cJSON *r = result_of(root);
+    cJSON *assets = cJSON_GetObjectItemCaseSensitive(r, "assets");
+    TEST_ASSERT_TRUE(cJSON_IsArray(assets));
+    TEST_ASSERT_EQUAL_INT(count_a, cJSON_GetArraySize(assets));
+    TEST_ASSERT_EQUAL_INT(count_a, cJSON_GetObjectItemCaseSensitive(r, "asset_total")->valueint);
+    cJSON *a = NULL;
+    cJSON_ArrayForEach(a, assets) { TEST_ASSERT_EQUAL_INT(slot_a, cJSON_GetObjectItemCaseSensitive(a, "pack")->valueint); }
+    cJSON_Delete(root);
+}
+
+/* F5: nt_log_add_sink is idempotent and nt_log_remove_sink unregisters. Double-add yields one live
+   sink (one fan-out per write); after remove the sink stops receiving. Uses the log ring as the
+   observable sink so a single nt_log_write that lands once == one ring entry. */
+#if NT_LOG_RING_ENABLED
+static void test_log_sink_idempotent_add_and_remove(void) {
+    /* setUp already attached nt_log_ring_sink once; a redundant add must NOT create a second slot. */
+    nt_log_add_sink(nt_log_ring_sink, NULL);
+    nt_log_ring_clear();
+    nt_log_write(NT_LOG_LEVEL_INFO, "obs", "dedup-line");
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":16}}"));
+    cJSON *entries = cJSON_GetObjectItemCaseSensitive(result_of(root), "entries");
+    /* one sink -> exactly one ring entry for the single write (a duplicate slot would double it). */
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(entries));
+    cJSON_Delete(root);
+
+    /* remove -> the sink stops capturing; re-add for the next test (tearDown doesn't touch sinks). */
+    nt_log_remove_sink(nt_log_ring_sink, NULL);
+    nt_log_ring_clear();
+    nt_log_write(NT_LOG_LEVEL_INFO, "obs", "after-remove");
+    cJSON *root2 = parse_ok(nt_devapi_submit("{\"method\":\"log.tail\",\"params\":{\"n\":16}}"));
+    cJSON *entries2 = cJSON_GetObjectItemCaseSensitive(result_of(root2), "entries");
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(entries2));
+    cJSON_Delete(root2);
+    nt_log_add_sink(nt_log_ring_sink, NULL);
+}
+#endif /* NT_LOG_RING_ENABLED */
+
 /* TST-5 (WR-01): perf.snapshot frame_ms is wall-clock (1000/fps), distinct from cpu_ms. Inject known
    frames via the overlay test hook so a re-introduced frame_ms==cpu_ms alias is caught. The hook sets
    cpu_ms = last dt*1000 and pushes dt into the fps ring; two unequal dts make the fps-average wall time
@@ -447,6 +515,10 @@ int main(void) {
     RUN_TEST(test_resource_list_bad_params);
     RUN_TEST(test_resource_list_resource_id_hex_string);
     RUN_TEST(test_resource_list_assets_cap_trips);
+    RUN_TEST(test_resource_list_pack_id_filters_assets);
+#if NT_LOG_RING_ENABLED
+    RUN_TEST(test_log_sink_idempotent_add_and_remove);
+#endif
     RUN_TEST(test_perf_snapshot_frame_ms_distinct_from_cpu);
     return UNITY_END();
 }

@@ -1349,6 +1349,7 @@ bool nt_resource_pack_info(uint16_t i, nt_resource_pack_info_t *out) {
             }
             *out = (nt_resource_pack_info_t){
                 .id = pack->pack_id,
+                .pack_index = slot, /* raw packs[] slot — matches NtAssetMeta.pack_index space */
                 .asset_count = asset_count,
                 .priority = pack->priority,
                 .state = pack->pack_state,

@@ -213,8 +213,8 @@ def check_entity_list(client: DevApiClient) -> None:
     assert isinstance(total, int) and total >= 0, f"entity.list.total is {total!r}, expected a non-negative int"
     assert isinstance(entities, list), f"entity.list.entities is {entities!r}, expected a list"
     assert len(entities) <= 8, f"entity.list returned {len(entities)} entities, exceeds limit=8"
-    # WR-04: total stays honest; truncated flags when the live set exceeds the working buffer.
-    assert isinstance(res.get("truncated"), bool), f"entity.list.truncated is {res.get('truncated')!r}, expected a bool"
+    # entity.list is fully paginated against the honest total; there is no truncated flag (F4).
+    assert "truncated" not in res, f"entity.list still returned a truncated flag: {res.get('truncated')!r}"
     try:
         client.result("entity.list", {"offset": -1})
         raise AssertionError("entity.list(offset=-1) unexpectedly succeeded; expected bad_params")

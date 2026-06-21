@@ -205,6 +205,7 @@ void nt_resource_dump_pack(nt_hash32_t pack_id);
 
 typedef struct {
     uint32_t id;          /* nt_hash32 value of pack name/path */
+    uint16_t pack_index;  /* raw packs[] slot index — same index space as nt_resource_asset_info_t.pack_index */
     uint16_t asset_count; /* registered assets belonging to this pack */
     int16_t priority;     /* higher wins on conflict, signed */
     uint8_t state;        /* nt_pack_state_t value */
