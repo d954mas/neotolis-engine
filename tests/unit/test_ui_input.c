@@ -107,6 +107,18 @@ static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx
     return NULL;
 }
 
+/* The field-root RECTANGLE render command (the full-field-width flat bg rect), or NULL. The caret and
+ * selection rects are narrow floats; the field bg is the one whose width matches IN_W. */
+static const Clay_RenderCommand *find_field_bg_rect(const nt_ui_context_t *ctx) {
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->boundingBox.width >= IN_W - 1.0F) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
 /* One frame with a single field. Feeds the given pointer; returns the change flag. */
 static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap, bool enabled, bool *submitted) {
     bool changed = false;
@@ -1107,6 +1119,54 @@ static void test_offscreen_clip_scissor_balanced(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ends, starts, "offscreen clip must emit balanced SCISSOR_START/END");
 }
 
+/* ---- Test 38: state_speed > 0 cross-fades the bg between skin states (mid-transition color sits
+ * strictly between the idle and focused bg for at least one frame); state_speed == 0 snaps instantly. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_eases_bg_color(void) {
+    char buf[8] = {0};
+    /* Idle bg = 0x20 grey, focused bg = 0x30 grey (defaults). A cross-fade lands strictly between. */
+    const float idle_r = (float)0x20;
+    const float focused_r = (float)0x30;
+
+    /* --- state_speed == 0 (default): focusing snaps the bg to the focused color the same frame. --- */
+    {
+        const uint32_t id = nt_ui_id("snap");
+        s_style.state_speed = 0.0F;
+        warmup_focus(id, buf, sizeof buf); /* leaves the field focused */
+        TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+        (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+        const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL_MESSAGE(rc, "field must emit a flat bg RECTANGLE");
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)focused_r, (int)rc->renderData.rectangle.backgroundColor.r, "state_speed==0 must snap bg to the focused skin");
+    }
+
+    /* --- state_speed > 0: the slot retains the idle color, so focusing eases toward focused; the first
+     * post-focus frame's bg is strictly between idle and focused. --- */
+    {
+        const uint32_t id = nt_ui_id("ease");
+        char eb[8] = {0};
+        s_style.state_speed = 10.0F; /* k = 10 * 0.016 = 0.16 per frame -> partial step, not a full snap */
+
+        /* Render unfocused frames so the cross-fade anim slot is created + settled at the idle bg. */
+        (void)field_frame(&IDLE_PTR, id, eb, sizeof eb, true, NULL);
+        (void)field_frame(&IDLE_PTR, id, eb, sizeof eb, true, NULL);
+        const Clay_RenderCommand *r_idle = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(r_idle);
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)idle_r, (int)r_idle->renderData.rectangle.backgroundColor.r, "settled unfocused bg must be the idle skin color");
+
+        /* Press to focus: the slot now eases from idle toward focused. */
+        nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+        (void)field_frame(&press, id, eb, sizeof eb, true, NULL);
+        TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+        const Clay_RenderCommand *r_mid = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(r_mid);
+        const float mid_r = r_mid->renderData.rectangle.backgroundColor.r;
+        TEST_ASSERT_TRUE_MESSAGE(mid_r > idle_r && mid_r < focused_r, "state_speed>0 must cross-fade bg strictly between idle and focused for >=1 frame");
+    }
+
+    s_style.state_speed = 0.0F; /* restore the default for any later test sharing s_style */
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -1186,6 +1246,7 @@ int main(void) {
     RUN_TEST(test_tab_skips_disabled_field);
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
+    RUN_TEST(test_state_speed_eases_bg_color);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

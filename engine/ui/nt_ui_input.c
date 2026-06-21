@@ -8,6 +8,7 @@
 #include "font/nt_font.h"
 #include "input/nt_input.h"
 #include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
@@ -61,6 +62,9 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
 /* Per-field retained cell: caret byte-offset into the game buffer, horizontal scroll px so the
  * caret stays visible, and the accumulated blink phase. The STRING stays game-owned. */
 #define NT_UI_INPUT_STATE_SALT 0x10D70001U
+/* Distinct salt for the bg/border cross-fade anim slot so it never collides with a game's own
+ * nt_ui_anim on the field id, nor with the input state-pool slot. */
+#define NT_UI_INPUT_ANIM_SALT 0x10D70002U
 typedef struct {
     uint32_t caret;      /* caret byte offset (the active selection end); always on a codepoint boundary */
     uint32_t anchor;     /* selection anchor byte offset; anchor == caret = empty selection */
@@ -1021,6 +1025,7 @@ static void scroll_step(input_frame_t *f) {
 
 /* Compose + emit: the field root (flat bg / sprite bg / border per the resolved skin), the content-clip
  * child, the selection highlight, the text or placeholder, and the blinking caret. Pure render — no edit. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_field(input_frame_t *f) {
     nt_ui_context_t *ctx = f->ctx;
     const nt_ui_element_data_t *data = f->data;
@@ -1045,20 +1050,60 @@ static void emit_field(input_frame_t *f) {
     root.userData = (void *)nt_ui_make_element_data(layer, user);
     /* Pick the per-state skin (disabled > focused > hover > idle); the bg/border below all read from it. */
     const nt_ui_input_skin_t *skin = resolve_skin(style, enabled, focused, f->in.hovered);
-    if (skin->bg_color != 0U) {
-        root.backgroundColor = nt_ui_unpack_abgr(skin->bg_color);
-    }
+
     /* Optional sprite background: when bg_art resolves the field draws the sprite (9-slice if the region
-     * has baked borders) and bg_color above becomes its TINT (zero = untinted) -- the same .image +
-     * backgroundColor convention as nt_ui_panel/button. Unset/unresolved = the flat bg_color rect above. */
+     * has baked borders) and bg_color becomes its TINT (zero = untinted) -- the same .image +
+     * backgroundColor convention as nt_ui_panel/button. Unset/unresolved = the flat bg_color rect. The
+     * sprite art SNAPS across states (button precedent, D-67-26); only the flat color cross-fades. */
     nt_ui_image_payload_t *bg_art_p = make_bg_payload(skin->bg_art);
     if (bg_art_p != NULL) {
         root.image = (Clay_ImageElementConfig){.imageData = bg_art_p};
     }
-    if (style->border_width > 0.0F && skin->border_color != 0U) {
-        root.border = (Clay_BorderElementConfig){
-            .color = nt_ui_unpack_abgr(skin->border_color),
-            .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
+
+    const bool has_bg = (skin->bg_color != 0U);
+    const bool has_border = (style->border_width > 0.0F && skin->border_color != 0U);
+    if (style->state_speed > 0.0F && bg_art_p == NULL) {
+        /* Eased cross-fade (flat-color path only): the anim slot retains the previous frame's resolved
+         * channels, so a skin-state change ramps bg/border from the old color to the new over state_speed.
+         * Pack the 8 resolved channels (bg RGBA + border RGBA) into the slot's free float lanes; tint_t
+         * carries an unused 0 (the lerp is direct per-channel, not a from/to scalar). */
+        const Clay_Color bg_t = has_bg ? nt_ui_unpack_abgr(skin->bg_color) : (Clay_Color){0};
+        const Clay_Color bd_t = has_border ? nt_ui_unpack_abgr(skin->border_color) : (Clay_Color){0};
+        /* Lane map (nt_ui_anim_target_t constraints: scale_xyz > 0, opacity/tint_t in [0,1], off/rot finite):
+         * bg RGB -> off_xyz, bg A/255 -> opacity; border RGB -> rot_xyz, border A/255 -> tint_t. scale = 1
+         * (unused, satisfies the > 0 assert). The slot retains last frame's channels so the lerp cross-fades. */
+        nt_ui_anim_target_t tgt;
+        memset(&tgt, 0, sizeof tgt); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
+        tgt.scale_x = 1.0F;
+        tgt.scale_y = 1.0F;
+        tgt.scale_z = 1.0F;
+        tgt.off_x = bg_t.r;
+        tgt.off_y = bg_t.g;
+        tgt.off_z = bg_t.b;
+        tgt.opacity = bg_t.a / 255.0F;
+        tgt.rot_x = bd_t.r;
+        tgt.rot_y = bd_t.g;
+        tgt.rot_z = bd_t.b;
+        tgt.tint_t = bd_t.a / 255.0F;
+        const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, nt_ui_derived_id(id, NT_UI_INPUT_ANIM_SALT), &tgt, style->state_speed, 0.0F);
+        if (has_bg) {
+            root.backgroundColor = (Clay_Color){.r = a->off_x, .g = a->off_y, .b = a->off_z, .a = a->opacity * 255.0F};
+        }
+        if (has_border) {
+            root.border = (Clay_BorderElementConfig){
+                .color = (Clay_Color){.r = a->rot_x, .g = a->rot_y, .b = a->rot_z, .a = a->tint_t * 255.0F},
+                .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
+        }
+    } else {
+        /* state_speed == 0 (default) or sprite-bg: instant snap = the exact pre-#221 behavior. */
+        if (has_bg) {
+            root.backgroundColor = nt_ui_unpack_abgr(skin->bg_color);
+        }
+        if (has_border) {
+            root.border = (Clay_BorderElementConfig){
+                .color = nt_ui_unpack_abgr(skin->border_color),
+                .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
+        }
     }
     /* Horizontal inset only: pad_x positions the text origin + bounds the clip. Vertical padding is 0 on
      * purpose — the single line is vertically CENTERED and the text/caret float clip to this box on BOTH
