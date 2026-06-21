@@ -16,6 +16,15 @@ void devapi_add_string(cJSON *obj, const char *key, const char *value);
 void devapi_add_number(cJSON *obj, const char *key, double value);
 void devapi_add_bool(cJSON *obj, const char *key, bool value);
 
+/* Strict unsigned-integer param parsers. cJSON stores numbers as a double, so valueint truncates
+   and a blind (uint*)valuedouble cast on an out-of-range/NaN/Inf double is UB. These require a
+   finite, integer-valued number in [0, max]; on any violation they set_bad_params(err, message)
+   and return false, else write the parsed value to *out. The error-setter is passed in so a caller
+   in any group can route the rejection through its own nt_devapi_error without this layer naming it. */
+typedef void (*nt_devapi_bad_params_fn)(nt_devapi_error *err, const char *message);
+bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint32_t *out);
+bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint16_t *out);
+
 /* One registered command. The 7 descriptor strings are strdup-owned copies
    freed at shutdown; handler + user_data are stored verbatim. */
 typedef struct nt_devapi_slot {

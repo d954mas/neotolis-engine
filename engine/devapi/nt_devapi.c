@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,6 +116,42 @@ void devapi_add_bool(cJSON *obj, const char *key, bool value) {
     cJSON *item = cJSON_AddBoolToObject(obj, key, value);
     NT_ASSERT(item != NULL);
     (void)item;
+}
+
+/* Shared strict check: the node must be a finite, integer-valued number in [0, max_d]. On success
+   writes the validated double to *out_d and returns true; on any violation routes through set_bad
+   and returns false. Reading valueint truncates and casting an out-of-range/NaN/Inf double to an
+   unsigned is UB, so the range/finiteness/integer checks happen here on the double before any cast. */
+static bool parse_number_exact(const cJSON *node, double max_d, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, double *out_d) {
+    if (!cJSON_IsNumber(node)) {
+        set_bad(err, message);
+        return false;
+    }
+    double d = node->valuedouble;
+    if (!isfinite(d) || d != floor(d) || d < 0.0 || d > max_d) {
+        set_bad(err, message);
+        return false;
+    }
+    *out_d = d;
+    return true;
+}
+
+bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint32_t *out) {
+    double d = 0.0;
+    if (!parse_number_exact(node, (double)max, err, set_bad, message, &d)) {
+        return false;
+    }
+    *out = (uint32_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
+    return true;
+}
+
+bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint16_t *out) {
+    double d = 0.0;
+    if (!parse_number_exact(node, (double)max, err, set_bad, message, &d)) {
+        return false;
+    }
+    *out = (uint16_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
+    return true;
 }
 
 /* Build an owned {ok:false,error} entry. code/message are copied by cJSON, not owned. */
