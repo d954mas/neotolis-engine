@@ -285,9 +285,11 @@ void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measur
 void nt_ui_rich_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(st->stack_depth == 1 && "rich push without matching pop");
-    /* Run-list finalized; the solver/emit (plans 04-07) consume it. The spike
-     * (test-only) runs via nt_ui_rich_test_solve. Frame scratch frees on reset. */
+    NT_ASSERT(st->stack_depth >= 1 && "rich style stack corrupted");
+    /* Unbalanced pushes are fine -- a push not matched by a pop just stays active
+     * to end-of-call and is discarded (the run-list already captured each run's
+     * composed style). Run-list finalized; the solver/emit (plans 04-07) consume it.
+     * The spike (test-only) runs via nt_ui_rich_test_solve; scratch frees on reset. */
 }
 // #endregion
 
