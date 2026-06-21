@@ -18,11 +18,11 @@ set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected in
 # The 0/1 define is attached PUBLIC to the nt_ui target inside engine/ui/CMakeLists.txt
 # so external consumers see the same value via target_link_libraries.
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
-# Dev-only log-tail ring (nt_log_ring, OBS-01/02). OFF compiles real no-op bodies so
+# Dev-only log-tail ring (nt_log_ring). OFF compiles real no-op bodies so
 # release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
 # (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path.
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
-# Dev-only perf collector (nt_metrics, OBS-07/08). OFF compiles real no-op bodies so
+# Dev-only perf collector (nt_metrics). OFF compiles real no-op bodies so
 # release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
 # (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path. Independent of NT_DEVAPI_ENABLED.
 option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})

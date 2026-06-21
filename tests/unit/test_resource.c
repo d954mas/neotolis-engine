@@ -2322,7 +2322,7 @@ void test_on_resolve_fires_on_invalidate(void) {
     (void)remove("build/test_inv_resolve.ntpack");
 }
 
-/* ---- Enumeration accessors (D-14) ----
+/* ---- Enumeration accessors ----
  * These exercise ONLY public POD types from nt_resource.h (no NtPackMeta /
  * NtAssetMeta crosses the boundary). */
 
@@ -2549,7 +2549,7 @@ int main(void) {
     RUN_TEST(test_on_resolve_fires_on_priority_change);
     RUN_TEST(test_on_resolve_fires_on_invalidate);
 
-    /* Enumeration accessors (D-14) */
+    /* Enumeration accessors */
     RUN_TEST(test_pack_count_zero_when_empty);
     RUN_TEST(test_pack_enumeration_matches_mounted);
     RUN_TEST(test_pack_info_out_of_range_returns_false);

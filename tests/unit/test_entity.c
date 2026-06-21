@@ -136,7 +136,7 @@ void test_entity_slot_zero_reserved(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT16(1, index);
 }
 
-/* ---- at_index enumeration accessor (D-12) ---- */
+/* ---- at_index enumeration accessor ---- */
 
 void test_entity_at_index_reproduces_live_set(void) {
     /* Create 5, destroy #2 and #4, iterate slots: 1,3,5 live; rest invalid. */

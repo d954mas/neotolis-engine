@@ -5,7 +5,7 @@ void setUp(void) { /* no fixture: the probe is a pure read */ }
 
 void tearDown(void) { /* no teardown */ }
 
-/* D-10: on a native build the test process has a real resident set. */
+/* On a native build the test process has a real resident set. */
 void test_memory_usage_used_nonzero_on_native(void) {
 #if defined(NT_PLATFORM_NATIVE) || defined(NT_PLATFORM_WIN)
     nt_platform_mem_t mem = nt_platform_memory_usage();

@@ -1,5 +1,5 @@
 /* L2 devapi obs group (log.* / perf.* / entity.* / resource.*) via submit() (no socket): each
-   command is an IMMEDIATE read of the Plan 01/03/04/05 L1 capabilities. Asserts the serialized
+   command is an IMMEDIATE read of the L1 capabilities. Asserts the serialized
    shapes (log.tail entries, perf.snapshot keys + gpu_ms null, perf.stats per-channel aggregates,
    entity.list pagination + total, resource.list packs/assets) and every bad_params path. */
 
@@ -28,7 +28,7 @@ void setUp(void) {
     nt_debug_overlay_init(NULL);
     nt_metrics_init();
     nt_log_ring_init();
-    /* nt_log_add_sink is idempotent (F5): re-attaching the same (fn,user) across tests is a no-op,
+    /* nt_log_add_sink is idempotent: re-attaching the same (fn,user) across tests is a no-op,
        so this stays a single live sink with no static-flag workaround. */
     nt_log_add_sink(nt_log_ring_sink, NULL);
 
@@ -212,7 +212,7 @@ static void test_perf_stats_channel_shape(void) {
     cJSON_Delete(root);
 }
 
-/* CR-01: after real per-frame sampling on a host with no GPU timer (overlay gpu_ms == -1.0F sentinel),
+/* After real per-frame sampling on a host with no GPU timer (overlay gpu_ms == -1.0F sentinel),
    perf.stats gpu_ms must be samples:0 + null aggregates — matching perf.snapshot's gpu_ms:null, not a
    confident avg:-1. setUp() inits the overlay (last_gpu_ms defaults to the sentinel). */
 static void test_perf_stats_gpu_sentinel_null(void) {
@@ -232,7 +232,7 @@ static void test_perf_stats_gpu_sentinel_null(void) {
 #endif /* NT_METRICS_ENABLED */
 
 static void test_perf_stats_empty_window_null_aggregates(void) {
-    /* No samples pushed -> samples:0 + null aggregates (Open Q3 schema). */
+    /* No samples pushed -> samples:0 + null aggregates. */
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"cpu_ms\"]}}"));
     cJSON *cm = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(result_of(root), "channels"), "cpu_ms");
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItemCaseSensitive(cm, "samples")->valueint);
@@ -278,7 +278,7 @@ static void test_entity_list_total_and_fields(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\"}"));
     cJSON *r = result_of(root);
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint);
-    /* truncated is gone (F4): entity.list is fully paginated against the honest total. */
+    /* entity.list is fully paginated against the honest total. */
     TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(r, "truncated"));
     cJSON *entities = cJSON_GetObjectItemCaseSensitive(r, "entities");
     TEST_ASSERT_TRUE(cJSON_IsArray(entities));
@@ -335,7 +335,7 @@ static void test_resource_list_include_assets_flat(void) {
     cJSON *assets = cJSON_GetObjectItemCaseSensitive(r, "assets");
     TEST_ASSERT_NOT_NULL(assets);
     TEST_ASSERT_TRUE(cJSON_IsArray(assets));
-    /* WR-05: the flat assets[] is bounded (DoS cap); asset_total + assets_truncated report the cap. */
+    /* The flat assets[] is bounded (DoS cap); asset_total + assets_truncated report the cap. */
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "asset_total")));
     TEST_ASSERT_TRUE(cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(r, "assets_truncated")));
     cJSON_Delete(root);
@@ -349,7 +349,7 @@ static void test_resource_list_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"pack_id\":1.5}}"));
 }
 
-/* SER-2: resource_id is a 64-bit hash; a JSON double drops the low bits above 2^53, so it can't
+/* resource_id is a 64-bit hash; a JSON double drops the low bits above 2^53, so it can't
    round-trip. It must serialize as a 0x-hex string. Register an asset whose id sets bits above 2^53
    and that would alias a neighbouring value when squashed through a double, then assert the exact hex. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -376,7 +376,7 @@ static void test_resource_list_resource_id_hex_string(void) {
     cJSON_Delete(root);
 }
 
-/* TST-4 (WR-05): the flat assets[] is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX. Register more than the
+/* The flat assets[] is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX. Register more than the
    cap, then assert the returned array length == cap, assets_truncated == true, and asset_total is the
    HONEST real count (not clamped). The entity-cap true-branch needs a 4096-entity working set or a
    per-lib -D override (cap is PRIVATE to nt_devapi), so it is left to the override path; the assets
@@ -402,7 +402,7 @@ static void test_resource_list_assets_cap_trips(void) {
     cJSON_Delete(root);
 }
 
-/* F1: resource.list{pack_id} must filter the flat assets[] to that pack, not emit assets for ALL
+/* resource.list{pack_id} must filter the flat assets[] to that pack, not emit assets for ALL
    packs. Mount two virtual packs with distinct asset counts, then assert a pack_id-filtered
    include_assets request returns only pack A's assets and asset_total == pack A's count. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -447,7 +447,7 @@ static void test_resource_list_pack_id_filters_assets(void) {
     cJSON_Delete(root);
 }
 
-/* F5: nt_log_add_sink is idempotent and nt_log_remove_sink unregisters. Double-add yields one live
+/* nt_log_add_sink is idempotent and nt_log_remove_sink unregisters. Double-add yields one live
    sink (one fan-out per write); after remove the sink stops receiving. Uses the log ring as the
    observable sink so a single nt_log_write that lands once == one ring entry. */
 #if NT_LOG_RING_ENABLED
@@ -474,7 +474,7 @@ static void test_log_sink_idempotent_add_and_remove(void) {
 }
 #endif /* NT_LOG_RING_ENABLED */
 
-/* TST-5 (WR-01): perf.snapshot frame_ms is wall-clock (1000/fps), distinct from cpu_ms. Inject known
+/* perf.snapshot frame_ms is wall-clock (1000/fps), distinct from cpu_ms. Inject known
    frames via the overlay test hook so a re-introduced frame_ms==cpu_ms alias is caught. The hook sets
    cpu_ms = last dt*1000 and pushes dt into the fps ring; two unequal dts make the fps-average wall time
    differ from the last cpu_ms. setUp() already inited the overlay (no re-init: init asserts !inited). */

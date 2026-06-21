@@ -176,7 +176,7 @@ static void test_ring_clear(void) {
     TEST_ASSERT_EQUAL_UINT16(0, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out));
 }
 
-/* ---- TST-2: oversize message truncation lands on a UTF-8 codepoint boundary (HOT-1) ----
+/* ---- oversize message truncation lands on a UTF-8 codepoint boundary ----
    nt_log_write truncates a >NT_LOG_BUF_SIZE (512) message and appends "...". The stored ring line is
    serialized as a JSON string; cJSON rejects invalid UTF-8, so the marker must never orphan a split
    multibyte sequence. */
@@ -229,7 +229,7 @@ static void test_truncation_marker_ascii(void) {
 
 /* Multibyte overflow: a >512-byte line of repeated "é" (0xC3 0xA9) truncates mid-sequence; the stored
    line must stay valid UTF-8 (no trailing continuation byte, no orphaned lead byte before the marker).
-   FAILS against the old continuation-only walk-back, PASSES after the HOT-1 lead-byte strip. */
+   FAILS against the old continuation-only walk-back, PASSES after the lead-byte strip. */
 static void test_truncation_marker_utf8_boundary(void) {
     /* 400 * 2 bytes = 800 bytes > 512: truncation point lands inside an "é" for at least one offset. */
     char big[1024];

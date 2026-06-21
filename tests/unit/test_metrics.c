@@ -1,4 +1,4 @@
-/* L1 CTest for the nt_metrics perf collector (OBS-07/08), no devapi.
+/* L1 CTest for the nt_metrics perf collector, no devapi.
  * Feeds KNOWN sample sets via the NT_TEST_ACCESS push hook so percentiles are
  * asserted deterministically without a real frame loop. */
 
@@ -129,7 +129,7 @@ static void test_over_budget_pct(void) {
 /* over_budget_pct on an empty window returns 0 (no divide-by-zero). */
 static void test_over_budget_empty(void) { TEST_ASSERT_TRUE(near(nt_metrics_over_budget_pct(16.0), 0.0)); }
 
-/* ---- CR-01: gpu_ms -1.0 sentinel must never enter the window ----
+/* ---- gpu_ms -1.0 sentinel must never enter the window ----
    nt_metrics_sample() reads nt_debug_overlay_get_gpu_ms(); on a host with no GPU timer that is the
    -1.0F sentinel, which must be filtered so perf.stats reports samples:0 (matching perf.snapshot's
    gpu_ms:null) instead of a confident avg/min/max:-1. */
@@ -149,7 +149,7 @@ static void test_gpu_sentinel_not_sampled(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- TST-1 (WR-03): user channels key by the FULL name hash, not a truncated strcmp ----
+/* ---- user channels key by the FULL name hash, not a truncated strcmp ----
    Two names sharing a >= 31-char prefix but differing AFTER it must land in two distinct rings. The
    metrics test hook pushes by full name (the overlay path truncates names to 32, masking this). */
 static void test_user_channels_long_prefix_distinct(void) {
@@ -179,7 +179,7 @@ static void test_user_channels_long_prefix_distinct(void) {
     }
 }
 
-/* ---- HOT-2: a fresh overlay with no recorded frames has fps==0; nt_metrics_sample() must NOT push
+/* ---- a fresh overlay with no recorded frames has fps==0; nt_metrics_sample() must NOT push
    1000/fps (== ~1e9 ms) into FRAME_MS — that single outlier would poison the whole window. ---- */
 static void test_frame_ms_skips_zero_fps_frame(void) {
     nt_debug_overlay_init(NULL); /* fresh: fps_count==0 -> get_fps()==0 */

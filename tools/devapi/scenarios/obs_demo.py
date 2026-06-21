@@ -48,7 +48,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", 
 # small enough to stay well under the host's per-step safety cap.
 SAMPLE_FRAMES = 200
 
-# The aggregate fields every populated channel/window must expose (Open Q3 schema).
+# The aggregate fields every populated channel/window must expose.
 STATS_FIELDS = ("samples", "avg", "min", "max", "median", "p95", "p99", "p99_9")
 
 
@@ -163,7 +163,7 @@ def check_perf_stats(client: DevApiClient) -> None:
     """3. perf.reset -> stepped run -> perf.stats: the windowed aggregate schema populates."""
     client.set_mode("manual")
     client.result("perf.reset")
-    client.step(count=SAMPLE_FRAMES)  # fill the rings with real per-frame samples (D-07 sample order)
+    client.step(count=SAMPLE_FRAMES)  # fill the rings with real per-frame samples
 
     stats = client.result("perf.stats", {"budget_ms": 16.67})
     channels = stats.get("channels")
@@ -213,7 +213,7 @@ def check_entity_list(client: DevApiClient) -> None:
     assert isinstance(total, int) and total >= 0, f"entity.list.total is {total!r}, expected a non-negative int"
     assert isinstance(entities, list), f"entity.list.entities is {entities!r}, expected a list"
     assert len(entities) <= 8, f"entity.list returned {len(entities)} entities, exceeds limit=8"
-    # entity.list is fully paginated against the honest total; there is no truncated flag (F4).
+    # entity.list is fully paginated against the honest total; there is no truncated flag.
     assert "truncated" not in res, f"entity.list still returned a truncated flag: {res.get('truncated')!r}"
     try:
         client.result("entity.list", {"offset": -1})
@@ -232,7 +232,7 @@ def check_resource_list(client: DevApiClient) -> None:
     with_assets = client.result("resource.list", {"include_assets": True})
     assert isinstance(with_assets.get("packs"), list), "resource.list(include_assets).packs missing"
     assert isinstance(with_assets.get("assets"), list), "resource.list(include_assets) did not return a flat assets[]"
-    # WR-05: the flat assets[] is DoS-capped; asset_total + assets_truncated report the real count vs cap.
+    # The flat assets[] is DoS-capped; asset_total + assets_truncated report the real count vs cap.
     assert isinstance(with_assets.get("asset_total"), int), f"resource.list.asset_total is {with_assets.get('asset_total')!r}, expected an int"
     assert isinstance(with_assets.get("assets_truncated"), bool), f"resource.list.assets_truncated is {with_assets.get('assets_truncated')!r}, expected a bool"
     print(

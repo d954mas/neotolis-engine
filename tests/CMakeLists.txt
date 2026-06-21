@@ -79,7 +79,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_log_stub COMMAND test_log_stub)
 
-    # --- Log sink + ring tests (OBS-01/02, L1 without devapi) ---
+    # --- Log sink + ring tests (L1 without devapi) ---
     # Drives the REAL nt_log (nt_log_write must fan out to the attached ring sink).
     # GNU-ld single-pass order: consumer (nt_log_ring) precedes provider (nt_log);
     # nt_core/nt_hash trail last. nt_log already pulls nt_core for the assert handler.
@@ -93,7 +93,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_log_ring COMMAND test_log_ring)
 
-    # --- Platform memory probe (D-10, L1 native RSS) ---
+    # --- Platform memory probe (L1 native RSS) ---
     # nt_platform PUBLIC-links nt_core (+ psapi on Windows); nt_log_stub resolves
     # nt_core's log interface. Consumer (test) precedes provider (nt_platform).
     add_executable(test_platform_mem unit/test_platform_mem.c)
@@ -105,7 +105,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_platform_mem COMMAND test_platform_mem)
 
-    # --- Perf collector (nt_metrics, OBS-07/08, L1 without devapi) ---
+    # --- Perf collector (nt_metrics, L1 without devapi) ---
     # nt_metrics_sample() references the overlay/gfx/scratch/platform getters, so
     # those providers must link even though the test feeds known samples via the
     # NT_TEST_ACCESS push hook. GNU-ld single-pass order: consumer (nt_metrics)

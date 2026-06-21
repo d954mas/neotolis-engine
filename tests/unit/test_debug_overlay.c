@@ -130,7 +130,7 @@ static void test_stats_user_counters(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 3b: count_f stores float without truncation + per-tag format (D-09) ---- */
+/* ---- Test 3b: count_f stores float without truncation + per-tag format ---- */
 
 static void test_stats_count_f_no_truncation(void) {
     nt_debug_overlay_init(NULL);
@@ -150,7 +150,7 @@ static void test_stats_count_f_no_truncation(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 3c: re-writing a name flips its tag (last write wins, D-09) ---- */
+/* ---- Test 3c: re-writing a name flips its tag (last write wins) ---- */
 
 static void test_stats_count_tag_flip(void) {
     nt_debug_overlay_init(NULL);
@@ -173,7 +173,7 @@ static void test_stats_count_tag_flip(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 3d: enumeration of a mixed int/float set (D-08) ---- */
+/* ---- Test 3d: enumeration of a mixed int/float set ---- */
 
 static void test_stats_user_enumeration(void) {
     nt_debug_overlay_init(NULL);
@@ -206,7 +206,7 @@ static void test_stats_user_enumeration(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 3e: enumeration index out of range asserts (D-08) ---- */
+/* ---- Test 3e: enumeration index out of range asserts ---- */
 
 static void test_stats_user_get_oob_assert(void) {
     nt_debug_overlay_init(NULL);
