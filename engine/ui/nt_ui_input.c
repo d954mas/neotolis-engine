@@ -663,43 +663,41 @@ static const nt_ui_input_skin_t *resolve_skin(const nt_ui_input_style_t *style, 
 
 // #endregion
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props,
-                      const nt_ui_input_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted) {
-    // #region entry asserts
-    NT_ASSERT(ctx != NULL && "nt_ui_input_text: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_input_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
-    NT_ASSERT(props != NULL && "nt_ui_input_text: props must be non-NULL");
-    NT_ASSERT(style != NULL && "nt_ui_input_text: style must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_input_text: id 0 is the no-widget sentinel");
-    NT_ASSERT(buffer != NULL && "nt_ui_input_text: buffer must be non-NULL (game owns the string)");
-    NT_ASSERT(buffer_size > 0U && "nt_ui_input_text: buffer_size must be > 0 (room for the NUL)");
-    NT_ASSERT(style->text.font_id < NT_UI_MAX_FONTS && "nt_ui_input_text: style.text.font_id out of range");
-    NT_ASSERT(isfinite(style->caret_width) && style->caret_width > 0.0F && "nt_ui_input_text: style.caret_width must be finite > 0");
-    NT_ASSERT(style->text.font_size > 0.0F && "nt_ui_input_text: style.text.font_size must be > 0");
-    if (decl != NULL) {
-        NT_ASSERT(decl->id.id == 0U && "nt_ui_input_text: decl->id must be 0 (id is the explicit param)");
-        NT_ASSERT(decl->userData == NULL && "nt_ui_input_text: decl->userData must be NULL (data param controls)");
-    }
-    if (data != NULL) {
-        NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U && "nt_ui_input_text: data->flags must not set HAS_TRANSFORM/HAS_OPACITY");
-    }
-    // #endregion
+// #region input_text step helpers
+/* Shared per-frame working set threaded through the four step helpers below (focus_step/edit_step/
+ * scroll_step/emit_field). Pointer-passed so the helpers stay static (inlined, one TU) without an
+ * unwieldy parameter list. The const inputs (ctx/data/style/props/buffer...) plus the live state slot
+ * `st` and the derived per-frame locals (font, line_h, cur_len, focused, in, bb, claimed_now). */
+typedef struct {
+    nt_ui_context_t *ctx;
+    const nt_ui_element_data_t *data;
+    uint8_t text_layer;
+    uint32_t id;
+    char *buffer;
+    size_t buffer_size;
+    const nt_ui_input_props_t *props;
+    const nt_ui_input_style_t *style;
+    const Clay_ElementDeclaration *decl;
+    bool enabled;
+    /* derived/live */
+    nt_ui_input_state_t *st;
+    nt_font_t font;
+    float line_h;
+    uint32_t cur_len;
+    nt_ui_events_t in;
+    nt_ui_bbox_t bb;
+    bool focused;
+    bool claimed_now;
+} input_frame_t;
 
-    if (out_submitted != NULL) {
-        *out_submitted = false;
-    }
-    const uint8_t layer = (data != NULL) ? data->layer : 0U;
-    void *user = (data != NULL) ? data->user_data : NULL;
-    nt_font_t font = ctx->fonts[style->text.font_id];
-    /* Font line box (ascent-descent) at the field's font size: the single line, caret and selection are
-     * all this tall and vertically centered in the content box, so descenders fit and the caret matches. */
-    const nt_font_metrics_t fm = nt_font_get_metrics(font);
-    const float line_h = (fm.units_per_em > 0) ? ((float)(fm.ascent - fm.descent) * (style->text.font_size / (float)fm.units_per_em)) : style->text.font_size;
-
-    /* The string is game-owned; the engine assumes a valid NUL-terminated buffer. */
-    NT_ASSERT(memchr(buffer, '\0', buffer_size) != NULL && "nt_ui_input_text: buffer must be NUL-terminated within buffer_size");
-    uint32_t cur_len = (uint32_t)strlen(buffer);
+/* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
+ * Resolves f->st, f->in, f->bb, f->claimed_now, f->focused for the rest of the frame. */
+static void focus_step(input_frame_t *f) {
+    nt_ui_context_t *ctx = f->ctx;
+    const uint32_t id = f->id;
+    char *buffer = f->buffer;
+    const nt_ui_input_props_t *props = f->props;
+    const nt_ui_input_style_t *style = f->style;
 
     // #region focus-order bookkeeping (Tab wrap target)
     if (ctx->focus_first_id == 0U) {
@@ -709,17 +707,21 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
      * claimed_now suppresses this field's OWN Tab handling so the still-pressed Tab key does not
      * immediately re-advance focus off the field that just received it. Only an ENABLED field claims:
      * a disabled field must leave the seek intact so Tab skips it to the next enabled field. */
-    bool claimed_now = false;
-    if (enabled && ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
+    f->claimed_now = false;
+    if (f->enabled && ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
-        claimed_now = true;
+        f->claimed_now = true;
         apply_keyboard_hint(props->keyboard, props->password); /* Tab into the field also surfaces the keyboard */
     }
     // #endregion
 
     // #region interaction + focus capture
+    const bool enabled = f->enabled;
+    const uint32_t cur_len = f->cur_len;
+    nt_font_t font = f->font;
     nt_ui_input_state_t *st = (nt_ui_input_state_t *)nt_ui_state(ctx, input_state_id(id), (uint32_t)sizeof(nt_ui_input_state_t), NT_UI_STATE_TAG('i', 'n', 'p', 't'));
+    f->st = st;
     /* Contract: the game must not rewrite a FOCUSED field's buffer CONTENT mid-edit. Only length
      * changes are clamped here; a content rewrite that lands the caret mid-codepoint is undefined. */
     if (st->caret > cur_len) {
@@ -802,13 +804,29 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     if (ctx->focused_input_id == id) {
         ctx->focused_input_seen = 1U;
     }
-    const bool focused = enabled && (ctx->focused_input_id == id);
+    f->in = in;
+    f->bb = bb;
+    f->focused = enabled && (ctx->focused_input_id == id);
     // #endregion
+}
 
-    bool changed = false;
-    bool submitted = false;
-
-    if (focused) {
+/* The focused edit pipeline: drain the typed-char ring, then run the physical editing keys
+ * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
+ * No-op when the field is not focused. Sets the changed/submitted out-flags; cur_len re-derived in f->cur_len. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
+    if (!f->focused) {
+        return;
+    }
+    nt_ui_context_t *ctx = f->ctx;
+    const uint32_t id = f->id;
+    char *buffer = f->buffer;
+    const size_t buffer_size = f->buffer_size;
+    const nt_ui_input_props_t *props = f->props;
+    nt_ui_input_state_t *st = f->st;
+    uint32_t cur_len = f->cur_len;
+    const bool claimed_now = f->claimed_now;
+    {
         // #region drain typed chars (FIFO from the input ring)
         uint32_t cp = 0U;
         while (nt_input_pop_char(&cp)) {
@@ -821,11 +839,11 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
                 selection_span(st, &lo, &hi);
-                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->caret = delete_range(buffer, lo, hi, cur_len, changed);
                 st->anchor = st->caret;
                 cur_len = (uint32_t)strlen(buffer);
             }
-            st->caret = insert_codepoint(buffer, buffer_size, props->max_length, st->caret, cur_len, cp, &changed);
+            st->caret = insert_codepoint(buffer, buffer_size, props->max_length, st->caret, cur_len, cp, changed);
             st->anchor = st->caret;
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
@@ -841,10 +859,10 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
                 selection_span(st, &lo, &hi);
-                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->caret = delete_range(buffer, lo, hi, cur_len, changed);
                 st->anchor = st->caret;
             } else {
-                st->caret = delete_left(buffer, st->caret, cur_len, &changed);
+                st->caret = delete_left(buffer, st->caret, cur_len, changed);
                 st->anchor = st->caret;
             }
             cur_len = (uint32_t)strlen(buffer);
@@ -855,10 +873,10 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
                 selection_span(st, &lo, &hi);
-                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->caret = delete_range(buffer, lo, hi, cur_len, changed);
                 st->anchor = st->caret;
             } else {
-                delete_right(buffer, st->caret, cur_len, &changed);
+                delete_right(buffer, st->caret, cur_len, changed);
             }
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
@@ -924,20 +942,20 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
                 selection_span(st, &lo, &hi);
-                st->caret = delete_range(buffer, lo, hi, cur_len, &changed);
+                st->caret = delete_range(buffer, lo, hi, cur_len, changed);
                 st->anchor = st->caret;
                 cur_len = (uint32_t)strlen(buffer);
                 st->blink = 0.0F;
             }
         }
         if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_V)) {
-            st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, &changed);
+            st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
         // #endregion
         if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
-            submitted = true;
+            *submitted = true;
         }
         if (nt_input_key_is_pressed(NT_KEY_TAB) && !claimed_now) {
             /* Advance focus to the next field declared this frame; wrap to the first. claimed_now
@@ -950,9 +968,24 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         }
         // #endregion
     }
+    f->cur_len = cur_len;
+}
+
+/* Keep the caret visible: compute the inner content width and slide st->scroll_x so the caret's right
+ * edge stays inside it (FIXED width from decl, else the prev-frame bbox for a GROW/responsive field).
+ * Also accumulates the blink phase while focused. */
+static void scroll_step(input_frame_t *f) {
+    nt_ui_context_t *ctx = f->ctx;
+    const nt_ui_input_style_t *style = f->style;
+    const nt_ui_input_props_t *props = f->props;
+    const Clay_ElementDeclaration *decl = f->decl;
+    char *buffer = f->buffer;
+    nt_ui_input_state_t *st = f->st;
+    nt_font_t font = f->font;
+    const nt_ui_bbox_t bb = f->bb;
 
     /* Blink phase accumulates only while focused; reset on any edit/caret move above. */
-    if (focused) {
+    if (f->focused) {
         st->blink += ctx->frame_dt;
     }
 
@@ -984,13 +1017,34 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
         st->scroll_x = 0.0F;
     }
     // #endregion
+}
+
+/* Compose + emit: the field root (flat bg / sprite bg / border per the resolved skin), the content-clip
+ * child, the selection highlight, the text or placeholder, and the blinking caret. Pure render — no edit. */
+static void emit_field(input_frame_t *f) {
+    nt_ui_context_t *ctx = f->ctx;
+    const nt_ui_element_data_t *data = f->data;
+    const uint8_t text_layer = f->text_layer;
+    const uint32_t id = f->id;
+    char *buffer = f->buffer;
+    const nt_ui_input_props_t *props = f->props;
+    const nt_ui_input_style_t *style = f->style;
+    const Clay_ElementDeclaration *decl = f->decl;
+    const bool enabled = f->enabled;
+    nt_ui_input_state_t *st = f->st;
+    nt_font_t font = f->font;
+    const float line_h = f->line_h;
+    const uint32_t cur_len = f->cur_len;
+    const bool focused = f->focused;
+    const uint8_t layer = (data != NULL) ? data->layer : 0U;
+    void *user = (data != NULL) ? data->user_data : NULL;
 
     // #region compose (bg rect + text/placeholder + caret)
     Clay_ElementDeclaration root = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     root.id = (Clay_ElementId){.id = id};
     root.userData = (void *)nt_ui_make_element_data(layer, user);
     /* Pick the per-state skin (disabled > focused > hover > idle); the bg/border below all read from it. */
-    const nt_ui_input_skin_t *skin = resolve_skin(style, enabled, focused, in.hovered);
+    const nt_ui_input_skin_t *skin = resolve_skin(style, enabled, focused, f->in.hovered);
     if (skin->bg_color != 0U) {
         root.backgroundColor = nt_ui_unpack_abgr(skin->bg_color);
     }
@@ -1067,6 +1121,69 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     nt_ui_clay_priv_close_element(); /* content clip */
     nt_ui_clay_priv_close_element(); /* root */
     // #endregion
+}
+// #endregion
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props,
+                      const nt_ui_input_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_submitted) {
+    // #region entry asserts
+    NT_ASSERT(ctx != NULL && "nt_ui_input_text: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_input_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(props != NULL && "nt_ui_input_text: props must be non-NULL");
+    NT_ASSERT(style != NULL && "nt_ui_input_text: style must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_input_text: id 0 is the no-widget sentinel");
+    NT_ASSERT(buffer != NULL && "nt_ui_input_text: buffer must be non-NULL (game owns the string)");
+    NT_ASSERT(buffer_size > 0U && "nt_ui_input_text: buffer_size must be > 0 (room for the NUL)");
+    NT_ASSERT(style->text.font_id < NT_UI_MAX_FONTS && "nt_ui_input_text: style.text.font_id out of range");
+    NT_ASSERT(isfinite(style->caret_width) && style->caret_width > 0.0F && "nt_ui_input_text: style.caret_width must be finite > 0");
+    NT_ASSERT(style->text.font_size > 0.0F && "nt_ui_input_text: style.text.font_size must be > 0");
+    if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_input_text: decl->id must be 0 (id is the explicit param)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_input_text: decl->userData must be NULL (data param controls)");
+    }
+    if (data != NULL) {
+        NT_ASSERT((data->flags & (NT_UI_ELEM_FLAG_HAS_TRANSFORM | NT_UI_ELEM_FLAG_HAS_OPACITY)) == 0U && "nt_ui_input_text: data->flags must not set HAS_TRANSFORM/HAS_OPACITY");
+    }
+    // #endregion
+
+    if (out_submitted != NULL) {
+        *out_submitted = false;
+    }
+    nt_font_t font = ctx->fonts[style->text.font_id];
+    /* Font line box (ascent-descent) at the field's font size: the single line, caret and selection are
+     * all this tall and vertically centered in the content box, so descenders fit and the caret matches. */
+    const nt_font_metrics_t fm = nt_font_get_metrics(font);
+    const float line_h = (fm.units_per_em > 0) ? ((float)(fm.ascent - fm.descent) * (style->text.font_size / (float)fm.units_per_em)) : style->text.font_size;
+
+    /* The string is game-owned; the engine assumes a valid NUL-terminated buffer. */
+    NT_ASSERT(memchr(buffer, '\0', buffer_size) != NULL && "nt_ui_input_text: buffer must be NUL-terminated within buffer_size");
+
+    /* Thin orchestrator over the four static step helpers (focus → edit → scroll → emit); the per-frame
+     * working set is threaded through the input_frame_t. ABI + semantics unchanged from the inline body. */
+    input_frame_t f;
+    memset(&f, 0, sizeof f); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
+    f.ctx = ctx;
+    f.data = data;
+    f.text_layer = text_layer;
+    f.id = id;
+    f.buffer = buffer;
+    f.buffer_size = buffer_size;
+    f.props = props;
+    f.style = style;
+    f.decl = decl;
+    f.enabled = enabled;
+    f.font = font;
+    f.line_h = line_h;
+    f.cur_len = (uint32_t)strlen(buffer);
+
+    focus_step(&f);
+
+    bool changed = false;
+    bool submitted = false;
+    edit_step(&f, &changed, &submitted);
+    scroll_step(&f);
+    emit_field(&f);
 
     if (out_submitted != NULL) {
         *out_submitted = submitted;
