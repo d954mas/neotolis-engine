@@ -1,4 +1,4 @@
-/* L1 CTest for the nt_log sink hook + nt_log_ring (OBS-01/02), no devapi.
+/* L1 CTest for the nt_log sink hook + nt_log_ring, no devapi.
  * Drives the REAL nt_log impl: attach nt_log_ring_sink via nt_log_add_sink,
  * call nt_log_write, then read the ring back via nt_log_ring_tail. */
 
@@ -13,7 +13,7 @@
 #include "unity.h"
 /* clang-format on */
 
-/* Mirror nt_log.c's private cap (D-01 default 4, -D overridable) for the boundary test. */
+/* Mirror nt_log.c's private cap (default 4, -D overridable) for the boundary test. */
 #ifndef NT_LOG_MAX_SINKS
 #define NT_LOG_MAX_SINKS 4
 #endif
@@ -251,8 +251,27 @@ static void test_truncation_marker_utf8_boundary(void) {
     TEST_ASSERT_EQUAL_STRING("...", out[0].msg + len - 3);
 }
 
+/* ---- Test 6b: idempotent add + remove ----
+ * Re-adding the same (fn,user) pair is a no-op (one ring entry per write, not two); after
+ * nt_log_remove_sink the ring stops capturing. Re-attaches at the end so later tests keep the sink. */
+static void test_add_sink_idempotent_and_remove(void) {
+    /* setUp already attached (nt_log_ring_sink, NULL); a redundant add must not duplicate it. */
+    nt_log_add_sink(nt_log_ring_sink, NULL);
+    nt_log_ring_clear();
+    nt_log_write(NT_LOG_LEVEL_INFO, "d", "once");
+    nt_log_ring_entry_t out[4];
+    TEST_ASSERT_EQUAL_UINT16(1, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out)); /* one sink -> one entry */
+
+    nt_log_remove_sink(nt_log_ring_sink, NULL);
+    nt_log_ring_clear();
+    nt_log_write(NT_LOG_LEVEL_INFO, "d", "after-remove");
+    TEST_ASSERT_EQUAL_UINT16(0, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out)); /* removed -> nothing */
+
+    nt_log_add_sink(nt_log_ring_sink, NULL); /* restore for subsequent tests */
+}
+
 /* ---- Test 7: nt_log_add_sink overflow is a host-call assert (4-sink boundary) ----
- * The ring sink already consumed one slot; fill the rest, then a final add asserts. */
+ * The ring sink already consumed one slot; fill the rest with distinct pairs, then a final add asserts. */
 
 static void noop_sink(nt_log_level_t level, const char *domain, const char *msg, void *user) {
     (void)level;
@@ -261,13 +280,17 @@ static void noop_sink(nt_log_level_t level, const char *domain, const char *msg,
     (void)user;
 }
 
+/* Distinct user tags so each add is a unique (fn,user) pair — nt_log_add_sink is idempotent on a
+   repeated pair, so the same (noop_sink,NULL) added N times would take ONE slot, never overflow. */
+static int s_sink_user_tags[NT_LOG_MAX_SINKS + 1];
+
 static void test_add_sink_overflow_asserts(void) {
-    /* One slot is taken by the ring sink (setUp). Fill remaining slots to the cap. */
+    /* One slot is taken by the ring sink (setUp). Fill remaining slots with distinct pairs. */
     for (int i = 1; i < NT_LOG_MAX_SINKS; i++) {
-        nt_log_add_sink(noop_sink, NULL);
+        nt_log_add_sink(noop_sink, &s_sink_user_tags[i]);
     }
-    /* The next add exceeds NT_LOG_MAX_SINKS — host-call invariant fires. */
-    EXPECT_ASSERT(nt_log_add_sink(noop_sink, NULL));
+    /* The next distinct add exceeds NT_LOG_MAX_SINKS — host-call invariant fires. */
+    EXPECT_ASSERT(nt_log_add_sink(noop_sink, &s_sink_user_tags[NT_LOG_MAX_SINKS]));
 }
 
 int main(void) {
@@ -281,6 +304,7 @@ int main(void) {
     RUN_TEST(test_ring_clear);
     RUN_TEST(test_truncation_marker_ascii);
     RUN_TEST(test_truncation_marker_utf8_boundary);
+    RUN_TEST(test_add_sink_idempotent_and_remove);
     RUN_TEST(test_add_sink_overflow_asserts); /* keep LAST: permanently fills the sink registry */
     return UNITY_END();
 }
