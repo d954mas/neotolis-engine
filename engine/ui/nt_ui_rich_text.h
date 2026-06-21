@@ -134,12 +134,19 @@ typedef struct {
     uint32_t line;
 } nt_ui_rich_test_atom_t;
 
-/* Spike solver entry: font_size feeds the deterministic measure (advance = size/2/char
- * under nt_font_test_set_metrics); the resolved per-atom boxes land in the atoms probe. */
+/* Solver entry: font_size feeds the deterministic measure (advance = size/2/char
+ * under nt_font_test_set_metrics); the resolved per-atom boxes land in the atoms probe.
+ * The bare form is LEFT-aligned, id 0 (explicit container_w only) -- plan-03 cases. */
 void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size);
+/* Full form: id feeds the two-pass nt_ui_get_bbox fallback when container_w<=0; align
+ * selects the per-line L/C/R offset. */
+void nt_ui_rich_test_solve_ex(nt_ui_context_t *ctx, uint32_t id, float container_w, float font_size, nt_rich_align_t align);
 uint32_t nt_ui_rich_test_line_count(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_atom_count(nt_ui_context_t *ctx);
 nt_ui_rich_test_atom_t nt_ui_rich_test_atom(nt_ui_context_t *ctx, uint32_t atom);
+/* Solved total size that feeds the ONE Clay CLAY_SIZING_FIXED block (D-67-03). */
+float nt_ui_rich_test_total_w(nt_ui_context_t *ctx);
+float nt_ui_rich_test_total_h(nt_ui_context_t *ctx);
 #endif
 // #endregion
 

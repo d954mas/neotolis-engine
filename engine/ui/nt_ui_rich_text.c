@@ -9,6 +9,13 @@
 #include "core/nt_assert.h"
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_internal.h"
+#include "utf8/nt_utf8.h"
+
+/* Default px font size the public widget feeds the solver when a run carries no per-run
+ * size (size lives in the style scale multiplier, D-67-11; absolute <size> is deferred). */
+#ifndef NT_UI_RICH_DEFAULT_FONT_SIZE
+#define NT_UI_RICH_DEFAULT_FONT_SIZE 16.0F
+#endif
 
 // #region data-model
 /* Frame-scratch run-list SoA. Parallel arrays bump-allocated by nt_ui_rich_begin;
@@ -36,6 +43,37 @@ typedef struct {
     void *object_user;
 } nt_ui_rich_run_t;
 
+/* A solved, positioned atom (the solver's output, consumed by emit). TEXT atoms keep a
+ * byte range into the shared buffer + the run's resolved font/size/color so emit can
+ * draw_n the exact span; IMAGE/OBJECT reserve their box (emit lands in plans 05/07). */
+typedef struct {
+    nt_rich_atom_kind_t kind;
+    float x;
+    float y;
+    float w;
+    float h;
+    uint32_t line;
+    /* TEXT placement context. */
+    nt_font_t font;
+    float size;        /* px (font_size * style scale) */
+    uint32_t color;    /* AABBGGRR */
+    uint32_t text_off; /* byte range into st->text */
+    uint32_t text_len;
+    uint8_t flags; /* NT_UI_RICH_RUN_SYNTH_ITALIC -> shear at emit */
+    /* IMAGE/OBJECT box context. */
+    uint16_t run_idx; /* back-reference for the image/object emit (plans 05/07) */
+    uint32_t link_id; /* 0 = not a link */
+} nt_ui_rich_solved_atom_t;
+
+/* One <link>-marked run's hitbox rect (populated by the solver, consumed in plan 07). */
+typedef struct {
+    uint32_t link_id;
+    float x;
+    float y;
+    float w;
+    float h;
+} nt_ui_rich_link_rect_t;
+
 typedef struct {
     /* Run list. */
     nt_ui_rich_run_t *runs;
@@ -52,13 +90,15 @@ typedef struct {
     /* Pending link id applied to the next emitted run(s); 0 = none. */
     uint32_t pending_link;
 
-#ifdef NT_TEST_ACCESS
-    /* Solver-spike output (plan-03 gate). The spike works on word-/atom-granular
-     * units, not per-glyph, so a small cap is plenty for the gate cases. */
-    nt_ui_rich_test_atom_t atoms[64];
-    uint32_t atom_count;
+    /* ---- Solver output (frame scratch; consumed by emit + the test probes) ---- */
+    nt_ui_rich_solved_atom_t *solved; /* NT_UI_RICH_MAX_GLYPHS cap */
+    uint32_t solved_count;
     uint32_t line_count;
-#endif
+    nt_ui_rich_link_rect_t *links; /* NT_UI_RICH_MAX_LINKS cap */
+    uint32_t link_count;
+    float total_w;
+    float total_h;
+    bool solved_ready; /* solver ran for this call (emit re-walk safe, read-only) */
 } nt_ui_rich_state_t;
 
 static nt_ui_rich_state_t *rich_state(nt_ui_context_t *ctx) {
@@ -175,6 +215,8 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     st->runs = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_run_t, NT_UI_RICH_MAX_RUNS);
     st->styles = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_style_t, NT_UI_RICH_MAX_STYLES);
     st->text = NT_MEM_SCRATCH_ALLOC_ARRAY(char, NT_UI_RICH_MAX_TEXT_BYTES);
+    /* solved[]/links[] are sized to the actual content at solve time (content-proportional,
+     * not the full glyph cap) -- keeps the per-call scratch footprint tiny for a label. */
 
     st->stack[0] = base ? *base : nt_ui_rich_style_defaults();
     st->stack_depth = 1;
@@ -293,58 +335,117 @@ void nt_ui_rich_end(nt_ui_context_t *ctx) {
 }
 // #endregion
 
-void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time) {
-    /* Full word-wrap + baseline + emit lands across plans 04-07. Declared here so
-     * consumers compile against the stable signature; the spike proves the math. */
-    (void)ctx;
-    (void)id;
-    (void)data;
-    (void)style;
-    (void)container_w;
-    (void)align;
-    (void)time;
-}
+// #region SOLVER
+/* Full word-wrap + baseline solver (generalizes the plan-03 spike). Two passes over an
+ * ATOM stream (the wrap unit, not runs -- a word can span runs): PASS 1 greedy break with
+ * break-anywhere overflow for over-long words; PASS 2 per-line max ascent/descent + L/C/R
+ * align offset + per-atom baseline placement. Scratch-only, NO heap. The solved atoms feed
+ * both emit (TEXT in this plan; IMAGE/OBJECT in plans 05/07) and the test probes. */
 
-#ifdef NT_TEST_ACCESS
-// #region SOLVER (prototype)
-/* Wave-1 spike: mixed-run x-advance + asymmetric-icon baseline + a forced greedy
- * wrap, on deterministic metrics (no GL). Plan 04 generalizes this (alignment,
- * link rects, break-anywhere over-long words, OBJECT atoms, the real text/image
- * emit). Scratch-only, no heap. */
-
+/* Internal layout atom: the unit of wrap/position. TEXT runs decompose into word atoms
+ * (a trailing space stays with the word -> a break opportunity after); an over-long word
+ * splits into break-anywhere chunks. IMAGE/OBJECT are one unbreakable atom each. */
 typedef struct {
     nt_rich_atom_kind_t kind;
     float advance; /* x cost on the line */
-    float w;       /* box width (image) / text run width */
-    float h;       /* box height (image) / line-box height (text) */
-    float asc;     /* px above baseline this atom demands */
-    float desc;    /* px below baseline this atom demands */
+    float w;       /* box width */
+    float h;       /* box height (text line-box / image box) */
+    float asc;     /* px above baseline demanded */
+    float desc;    /* px below baseline demanded */
     nt_rich_valign_t valign;
     float offset_y;
     bool breakable_before; /* a break opportunity exists before this atom */
-} spike_atom_t;
+    uint32_t line;
+    /* TEXT placement context (for emit). */
+    nt_font_t font;
+    float size;
+    uint32_t color;
+    uint32_t text_off;
+    uint32_t text_len;
+    uint8_t flags;
+    uint16_t run_idx;
+    uint32_t link_id;
+} rich_atom_t;
 
-/* x_height proxy (Open Q3): half the text ascent. Deterministic; only needs to be
- * a stable non-ascent reference so middle != baseline placement. */
-static float spike_x_height(float ascent_px) { return ascent_px * 0.5F; }
+/* x_height proxy (Open Q3): half the text ascent. Stable non-ascent reference so the
+ * middle valign differs from baseline. */
+static float rich_x_height(float ascent_px) { return ascent_px * 0.5F; }
 
-static void spike_text_metrics(nt_font_t font, float size, float *out_asc, float *out_desc) {
+static void rich_text_metrics(nt_font_t font, float size, float *out_asc, float *out_desc) {
     const nt_font_metrics_t m = nt_font_get_metrics(font);
     if (m.units_per_em == 0U) {
         *out_asc = size;
         *out_desc = 0.0F;
         return;
     }
-    const float px = size / (float)m.units_per_em;
+    const float px = size / (float)m.units_per_em; /* same conversion as nt_ui_input.c:698 */
     *out_asc = (float)m.ascent * px;
     *out_desc = -(float)m.descent * px;
 }
 
-/* Build the atom stream from the run-list. TEXT runs split into word atoms (space
- * kept with the preceding word -> a break opportunity after each space); IMAGE runs
- * are one unbreakable atom sized from the region source px * scale. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- spike word-split, generalized in plan 04
-static uint32_t spike_build_atoms(nt_ui_rich_state_t *st, float font_size, spike_atom_t *out, uint32_t cap) {
+/* Append one TEXT chunk atom [off,off+len) measured under font/size. */
+static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, float t_asc, float t_desc, uint32_t off,
+                                uint32_t len, float advance, bool breakable_before, uint16_t run_idx) {
+    NT_ASSERT(*n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
+    rich_atom_t *a = &out[(*n)++];
+    memset(a, 0, sizeof *a);
+    a->kind = NT_RICH_ATOM_TEXT;
+    a->advance = advance;
+    a->w = advance;
+    a->h = t_asc + t_desc;
+    a->asc = t_asc;
+    a->desc = t_desc;
+    a->breakable_before = breakable_before;
+    a->font = font;
+    a->size = size;
+    a->color = color;
+    a->text_off = off;
+    a->text_len = len;
+    a->flags = run->flags;
+    a->run_idx = run_idx;
+    a->link_id = run->link_id;
+}
+
+/* Split an over-long word (advance > container_w) at UTF-8 codepoint boundaries into chunks
+ * each <= container_w, so no atom escapes the box (break-anywhere; CSS overflow-wrap:anywhere).
+ * Returns the number of chunk atoms appended. */
+static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, float t_asc, float t_desc, const char *text,
+                                uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable) {
+    uint32_t chunk_start = word_off;
+    uint32_t i = word_off;
+    const uint32_t word_end = word_off + word_len;
+    uint32_t cp = 0;
+    uint32_t last_boundary = word_off; /* last codepoint boundary that still fit */
+    bool emitted = false;
+    while (i < word_end) {
+        uint32_t state = NT_UTF8_ACCEPT;
+        do {
+            nt_utf8_decode(&state, &cp, (uint8_t)text[i]);
+            i++;
+        } while (i < word_end && state != NT_UTF8_ACCEPT && state != NT_UTF8_REJECT);
+        const float w = nt_font_measure_n(font, text + chunk_start, i - chunk_start, size, 0.0F).width;
+        if (w > container_w && last_boundary > chunk_start) {
+            /* Commit the chunk up to the previous boundary; restart the new chunk here. */
+            const uint32_t clen = last_boundary - chunk_start;
+            const float cw = nt_font_measure_n(font, text + chunk_start, clen, size, 0.0F).width;
+            rich_push_text_atom(out, n, cap, run, font, size, color, t_asc, t_desc, chunk_start, clen, cw, emitted ? true : first_breakable, run_idx);
+            emitted = true;
+            chunk_start = last_boundary;
+        }
+        last_boundary = i;
+    }
+    /* Trailing chunk (or the whole word if it never exceeded). */
+    if (chunk_start < word_end) {
+        const uint32_t clen = word_end - chunk_start;
+        const float cw = nt_font_measure_n(font, text + chunk_start, clen, size, 0.0F).width;
+        rich_push_text_atom(out, n, cap, run, font, size, color, t_asc, t_desc, chunk_start, clen, cw, emitted ? true : first_breakable, run_idx);
+    }
+}
+
+/* Build the atom stream from the run-list. TEXT runs split into word atoms; an over-long
+ * word break-anywhere-splits against container_w; IMAGE atoms are one unbreakable box. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- word-split + overflow policy
+static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float container_w, rich_atom_t *out, uint32_t cap) {
     uint32_t n = 0;
     for (uint32_t ri = 0; ri < st->run_count; ri++) {
         const nt_ui_rich_run_t *run = &st->runs[ri];
@@ -356,56 +457,52 @@ static uint32_t spike_build_atoms(nt_ui_rich_state_t *st, float font_size, spike
             const nt_font_t font = rich_resolve_font(style, &synth);
             float t_asc = 0.0F;
             float t_desc = 0.0F;
-            spike_text_metrics(font, size, &t_asc, &t_desc);
+            rich_text_metrics(font, size, &t_asc, &t_desc);
 
-            const char *base = st->text + run->text_off;
-            uint32_t i = 0;
-            const uint32_t len = run->text_len;
-            while (i < len) {
+            uint32_t i = run->text_off;
+            const uint32_t end = run->text_off + run->text_len;
+            while (i < end) {
                 const uint32_t word_start = i;
-                while (i < len && base[i] != ' ') {
+                while (i < end && st->text[i] != ' ') {
                     i++;
                 }
-                while (i < len && base[i] == ' ') {
+                while (i < end && st->text[i] == ' ') {
                     i++; /* trailing spaces belong to this word atom */
                 }
                 const uint32_t word_len = i - word_start;
-                NT_ASSERT(n < cap && "spike atom overflow");
-                spike_atom_t *a = &out[n++];
-                memset(a, 0, sizeof *a);
-                a->kind = NT_RICH_ATOM_TEXT;
-                a->advance = nt_font_measure_n(font, base + word_start, word_len, size, 0.0F).width;
-                a->w = a->advance;
-                a->h = t_asc + t_desc;
-                a->asc = t_asc;
-                a->desc = t_desc;
-                a->breakable_before = (n > 1); /* break opportunity between words */
+                const float advance = nt_font_measure_n(font, st->text + word_start, word_len, size, 0.0F).width;
+                const bool breakable = (n > 0U);
+                /* OVERFLOW POLICY: a single word wider than the box breaks anywhere. */
+                if (advance > container_w && container_w > 0.0F) {
+                    rich_break_anywhere(out, &n, cap, run, font, size, style->color_abgr, t_asc, t_desc, st->text, word_start, word_len, container_w, (uint16_t)ri, breakable);
+                } else {
+                    rich_push_text_atom(out, &n, cap, run, font, size, style->color_abgr, t_asc, t_desc, word_start, word_len, advance, breakable, (uint16_t)ri);
+                }
             }
         } else if (run->kind == NT_RICH_ATOM_IMAGE) {
             const nt_texture_region_t *reg = nt_atlas_get_region(run->image_ref.atlas, run->image_ref.region);
             const float src_w = (reg != NULL) ? (float)reg->source_w : 1.0F;
             const float src_h = (reg != NULL) ? (float)reg->source_h : 1.0F;
-            const float bw = src_w * run->image_scale;
-            const float bh = src_h * run->image_scale;
-
-            NT_ASSERT(n < cap && "spike atom overflow");
-            spike_atom_t *a = &out[n++];
+            NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
+            rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
             a->kind = NT_RICH_ATOM_IMAGE;
-            a->advance = bw;
-            a->w = bw;
-            a->h = bh;
+            a->advance = src_w * run->image_scale;
+            a->w = a->advance;
+            a->h = src_h * run->image_scale;
             a->valign = run->image_valign;
             a->offset_y = run->image_offset_y;
             a->breakable_before = true; /* image: break opportunity on both sides */
+            a->run_idx = (uint16_t)ri;
+            a->link_id = run->link_id;
         }
-        /* OBJECT atoms: generalized in plan 07; the spike does not place them. */
+        /* OBJECT atoms: emit/measure callbacks generalized in plan 07; not placed here. */
     }
     return n;
 }
 
 /* PASS 1: greedy line break. Writes each atom's line index; returns line count. */
-static uint32_t spike_break_lines(const spike_atom_t *atoms, uint32_t na, float container_w, uint32_t *line_of) {
+static uint32_t rich_break_lines(rich_atom_t *atoms, uint32_t na, float container_w) {
     float line_w = 0.0F;
     uint32_t line = 0;
     for (uint32_t i = 0; i < na; i++) {
@@ -414,93 +511,182 @@ static uint32_t spike_break_lines(const spike_atom_t *atoms, uint32_t na, float 
             line++; /* break BEFORE this atom (greedy) */
             line_w = 0.0F;
         }
-        line_of[i] = line;
+        atoms[i].line = line;
         line_w += aw;
     }
     return (na > 0U) ? (line + 1U) : 0U;
 }
 
 /* An IMAGE atom's ascent/descent demand for the line, given the line's text ascent. */
-static void spike_image_metrics(const spike_atom_t *a, float text_asc, float *io_asc, float *io_desc) {
+static void rich_image_metrics(const rich_atom_t *a, float text_asc, float *io_asc, float *io_desc) {
     const float h = a->h;
     if (a->valign == NT_RICH_VALIGN_MIDDLE) {
-        const float xh = spike_x_height(text_asc > 0.0F ? text_asc : h);
+        const float xh = rich_x_height(text_asc > 0.0F ? text_asc : h);
         const float asc = (h * 0.5F) + (xh * 0.5F);
         const float desc = (h * 0.5F) - (xh * 0.5F);
         *io_asc = (asc > *io_asc) ? asc : *io_asc;
         *io_desc = (desc > *io_desc) ? desc : *io_desc;
-    } else { /* BASELINE: whole box above the baseline */
+    } else { /* BASELINE/TOP/BOTTOM: whole box above the baseline (D-67-22 max line height) */
         *io_asc = (h > *io_asc) ? h : *io_asc;
     }
 }
 
-/* Per-line max ascent/descent over the line's atoms. Text drives x_height. */
-static void spike_line_metrics(const spike_atom_t *atoms, uint32_t na, const uint32_t *line_of, uint32_t L, float *out_asc, float *out_desc) {
+/* Per-line max ascent/descent over the line's atoms + the line's pixel width. */
+static void rich_line_metrics(const rich_atom_t *atoms, uint32_t na, uint32_t L, float *out_asc, float *out_desc, float *out_w) {
     float text_asc = 0.0F;
     *out_asc = 0.0F;
     *out_desc = 0.0F;
+    *out_w = 0.0F;
     for (uint32_t i = 0; i < na; i++) {
-        if (line_of[i] == L && atoms[i].kind == NT_RICH_ATOM_TEXT) {
+        if (atoms[i].line == L && atoms[i].kind == NT_RICH_ATOM_TEXT) {
             text_asc = (atoms[i].asc > text_asc) ? atoms[i].asc : text_asc;
             *out_asc = (atoms[i].asc > *out_asc) ? atoms[i].asc : *out_asc;
             *out_desc = (atoms[i].desc > *out_desc) ? atoms[i].desc : *out_desc;
         }
     }
     for (uint32_t i = 0; i < na; i++) {
-        if (line_of[i] == L && atoms[i].kind == NT_RICH_ATOM_IMAGE) {
-            spike_image_metrics(&atoms[i], text_asc, out_asc, out_desc);
+        if (atoms[i].line == L && atoms[i].kind == NT_RICH_ATOM_IMAGE) {
+            rich_image_metrics(&atoms[i], text_asc, out_asc, out_desc);
+        }
+    }
+    for (uint32_t i = 0; i < na; i++) {
+        if (atoms[i].line == L) {
+            *out_w += atoms[i].advance;
         }
     }
 }
 
-static float spike_atom_y(const spike_atom_t *a, float baseline_y, float line_asc) {
+static float rich_atom_y(const rich_atom_t *a, float baseline_y, float pen_y, float line_h, float line_asc) {
     if (a->kind == NT_RICH_ATOM_TEXT) {
         return baseline_y - a->asc; /* top of the glyph box */
     }
-    if (a->valign == NT_RICH_VALIGN_MIDDLE) {
-        const float xh = spike_x_height(line_asc);
+    switch (a->valign) {
+    case NT_RICH_VALIGN_MIDDLE: {
+        const float xh = rich_x_height(line_asc);
         return baseline_y - ((a->h * 0.5F) + (xh * 0.5F)) + a->offset_y;
     }
-    return baseline_y - a->h + a->offset_y; /* BASELINE */
+    case NT_RICH_VALIGN_TOP:
+        return pen_y + a->offset_y;
+    case NT_RICH_VALIGN_BOTTOM:
+        return pen_y + line_h - a->h + a->offset_y;
+    case NT_RICH_VALIGN_BASELINE:
+    default:
+        return baseline_y - a->h + a->offset_y;
+    }
 }
 
-void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size) {
-    nt_ui_rich_state_t *st = rich_state(ctx);
+/* Horizontal align offset for a line of the given width (D-67-21). */
+static float rich_align_ox(nt_rich_align_t align, float container_w, float line_w) {
+    if (align == NT_RICH_ALIGN_CENTER) {
+        return (container_w - line_w) * 0.5F;
+    }
+    if (align == NT_RICH_ALIGN_RIGHT) {
+        return container_w - line_w;
+    }
+    return 0.0F;
+}
 
-    spike_atom_t atoms[64];
-    uint32_t line_of[64];
-    const uint32_t na = spike_build_atoms(st, font_size, atoms, 64U);
-    st->line_count = spike_break_lines(atoms, na, container_w, line_of);
+/* Resolve the layout width: explicit container_w is primary; container_w<=0 falls back to
+ * the prev-frame nt_ui_get_bbox (D-67-23, the menu's two-pass trick -- no new getter). The
+ * first frame (not found) uses the full screen width, then settles. A degenerate <=0 width
+ * clamps to a minimum so the wrap loop never spins (T-67-04-02). */
+static float rich_resolve_width(nt_ui_context_t *ctx, uint32_t id, float container_w) {
+    float w = container_w;
+    if (w <= 0.0F) {
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
+        w = bb.found ? bb.width : ctx->begin_w; /* first frame: full screen width, then settles */
+    }
+    if (!(w > 1.0F)) {
+        w = 1.0F; /* never 0/negative -> the greedy break would loop */
+    }
+    return w;
+}
 
+/* The full solve: width resolve -> atom build -> greedy wrap -> per-line baseline + align.
+ * Writes st->solved[], st->line_count, st->links[], st->total_w/h. NO heap (scratch atoms). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- two-pass solve, regioned
+static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, float container_w, float font_size, nt_rich_align_t align) {
+    const float box_w = rich_resolve_width(ctx, id, container_w);
+
+    /* Content-proportional upper bound: break-anywhere splits to at most one atom per text
+     * byte, plus one box atom per image/object run. Cap at NT_UI_RICH_MAX_GLYPHS (T-67-04-01). */
+    uint32_t atom_cap = st->text_len + st->run_count + 1U;
+    if (atom_cap > NT_UI_RICH_MAX_GLYPHS) {
+        atom_cap = NT_UI_RICH_MAX_GLYPHS;
+    }
+    rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
+    st->solved = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_solved_atom_t, atom_cap);
+    st->links = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
+    const uint32_t na = rich_build_atoms(st, font_size, box_w, atoms, atom_cap);
+    st->line_count = rich_break_lines(atoms, na, box_w);
+
+    st->solved_count = 0;
+    st->link_count = 0;
     float pen_y = 0.0F;
-    st->atom_count = 0;
+    float max_line_w = 0.0F;
     for (uint32_t L = 0; L < st->line_count; L++) {
         float asc = 0.0F;
         float desc = 0.0F;
-        spike_line_metrics(atoms, na, line_of, L, &asc, &desc);
+        float line_w = 0.0F;
+        rich_line_metrics(atoms, na, L, &asc, &desc, &line_w);
+        const float line_h = asc + desc;
         const float baseline_y = pen_y + asc;
+        const float ox = rich_align_ox(align, box_w, line_w);
+        max_line_w = (line_w > max_line_w) ? line_w : max_line_w;
 
-        float pen_x = 0.0F;
+        float pen_x = ox;
         for (uint32_t i = 0; i < na; i++) {
-            if (line_of[i] != L) {
+            if (atoms[i].line != L) {
                 continue;
             }
-            NT_ASSERT(st->atom_count < (uint32_t)(sizeof st->atoms / sizeof st->atoms[0]));
-            nt_ui_rich_test_atom_t *probe = &st->atoms[st->atom_count++];
-            probe->kind = atoms[i].kind;
-            probe->x = pen_x;
-            probe->y = spike_atom_y(&atoms[i], baseline_y, asc);
-            probe->w = atoms[i].w;
-            probe->h = atoms[i].h;
-            probe->line = L;
-            pen_x += atoms[i].advance;
+            const rich_atom_t *a = &atoms[i];
+            NT_ASSERT(st->solved_count < na && "rich solved-atom overflow");
+            nt_ui_rich_solved_atom_t *s = &st->solved[st->solved_count++];
+            s->kind = a->kind;
+            s->x = pen_x;
+            s->y = rich_atom_y(a, baseline_y, pen_y, line_h, asc);
+            s->w = a->w;
+            s->h = a->h;
+            s->line = L;
+            s->font = a->font;
+            s->size = a->size;
+            s->color = a->color;
+            s->text_off = a->text_off;
+            s->text_len = a->text_len;
+            s->flags = a->flags;
+            s->run_idx = a->run_idx;
+            s->link_id = a->link_id;
+            if (a->link_id != 0U) {
+                NT_ASSERT(st->link_count < NT_UI_RICH_MAX_LINKS && "rich link-rect overflow");
+                nt_ui_rich_link_rect_t *lr = &st->links[st->link_count++];
+                lr->link_id = a->link_id;
+                lr->x = pen_x;
+                lr->y = pen_y;
+                lr->w = a->w;
+                lr->h = line_h;
+            }
+            pen_x += a->advance;
         }
-        pen_y += asc + desc;
+        pen_y += line_h;
     }
+    /* The FIXED block hosts the container width (explicit) or the max line width (grow). */
+    st->total_w = (container_w > 0.0F) ? box_w : max_line_w;
+    st->total_h = pen_y;
+    st->solved_ready = true;
 }
 // #endregion
 
+void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time) {
+    /* Task 2 wires the Clay FIXED block + the TEXT emit; this plan-04 body lands there. */
+    (void)data;
+    (void)style;
+    (void)time;
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
+}
+
 // #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_ui_rich_test_run_count(nt_ui_context_t *ctx) { return rich_state(ctx)->run_count; }
 
 nt_ui_rich_style_t nt_ui_rich_test_run_style(nt_ui_context_t *ctx, uint32_t run) {
@@ -522,13 +708,28 @@ nt_font_t nt_ui_rich_test_run_font(nt_ui_context_t *ctx, uint32_t run) {
     return rich_resolve_font(&st->styles[st->runs[run].style_idx], &synth);
 }
 
+void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size) { rich_solve(ctx, rich_state(ctx), 0U, container_w, font_size, NT_RICH_ALIGN_LEFT); }
+
+void nt_ui_rich_test_solve_ex(nt_ui_context_t *ctx, uint32_t id, float container_w, float font_size, nt_rich_align_t align) { rich_solve(ctx, rich_state(ctx), id, container_w, font_size, align); }
+
 uint32_t nt_ui_rich_test_line_count(nt_ui_context_t *ctx) { return rich_state(ctx)->line_count; }
-uint32_t nt_ui_rich_test_atom_count(nt_ui_context_t *ctx) { return rich_state(ctx)->atom_count; }
+uint32_t nt_ui_rich_test_atom_count(nt_ui_context_t *ctx) { return rich_state(ctx)->solved_count; }
 
 nt_ui_rich_test_atom_t nt_ui_rich_test_atom(nt_ui_context_t *ctx, uint32_t atom) {
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(atom < st->atom_count);
-    return st->atoms[atom];
+    NT_ASSERT(atom < st->solved_count);
+    const nt_ui_rich_solved_atom_t *s = &st->solved[atom];
+    nt_ui_rich_test_atom_t probe;
+    probe.kind = s->kind;
+    probe.x = s->x;
+    probe.y = s->y;
+    probe.w = s->w;
+    probe.h = s->h;
+    probe.line = s->line;
+    return probe;
 }
+
+float nt_ui_rich_test_total_w(nt_ui_context_t *ctx) { return rich_state(ctx)->total_w; }
+float nt_ui_rich_test_total_h(nt_ui_context_t *ctx) { return rich_state(ctx)->total_h; }
 #endif
 // #endregion
