@@ -251,6 +251,29 @@ static void test_truncation_marker_utf8_boundary(void) {
     TEST_ASSERT_EQUAL_STRING("...", out[0].msg + len - 3);
 }
 
+/* nt_log_write_unique must apply the SAME UTF-8-safe truncation as nt_log_write BEFORE it hashes +
+   forwards — else a >512-byte multibyte line stores a split sequence in the ring (invalid UTF-8 that
+   cJSON later rejects). Write a >512-byte repeated-"é" line through the unique path and assert the
+   stored ring msg is valid UTF-8 with the "..." marker. */
+static void test_unique_truncation_marker_utf8_boundary(void) {
+    char big[1024];
+    size_t w = 0;
+    for (int i = 0; i < 400; i++) {
+        big[w++] = (char)0xC3;
+        big[w++] = (char)0xA9;
+    }
+    big[w] = '\0';
+    TEST_ASSERT_TRUE(nt_log_write_unique(NT_LOG_LEVEL_INFO, "d", "%s", big)); /* first sight -> logs */
+
+    nt_log_ring_entry_t out[2];
+    uint16_t got = nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out);
+    TEST_ASSERT_EQUAL_UINT16(1, got);
+    TEST_ASSERT_TRUE_MESSAGE(is_valid_utf8(out[0].msg), "unique-path truncated UTF-8 log line is invalid (orphaned lead/continuation byte)");
+    size_t len = strlen(out[0].msg);
+    TEST_ASSERT_TRUE(len >= 3);
+    TEST_ASSERT_EQUAL_STRING("...", out[0].msg + len - 3);
+}
+
 /* ---- Test 6b: idempotent add + remove ----
  * Re-adding the same (fn,user) pair is a no-op (one ring entry per write, not two); after
  * nt_log_remove_sink the ring stops capturing. Re-attaches at the end so later tests keep the sink. */
@@ -304,6 +327,7 @@ int main(void) {
     RUN_TEST(test_ring_clear);
     RUN_TEST(test_truncation_marker_ascii);
     RUN_TEST(test_truncation_marker_utf8_boundary);
+    RUN_TEST(test_unique_truncation_marker_utf8_boundary);
     RUN_TEST(test_add_sink_idempotent_and_remove);
     RUN_TEST(test_add_sink_overflow_asserts); /* keep LAST: permanently fills the sink registry */
     return UNITY_END();

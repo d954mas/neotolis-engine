@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/console.h>
@@ -160,7 +161,13 @@ bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *f
     if (written < 0) {
         return false;
     }
-    const size_t len = (written < (int)sizeof(msg)) ? (size_t)written : sizeof(msg) - 1;
+    /* Apply the same UTF-8-safe truncation nt_log_write does, BEFORE the dedup hash + forward, so a
+       >buf message stores valid UTF-8 in the ring (cJSON rejects a split multibyte sequence) and two
+       messages differing only past the cut still hash identically (both truncate to the same marker). */
+    if (written >= (int)sizeof(msg)) {
+        append_truncation_marker(msg, sizeof(msg));
+    }
+    const size_t len = strlen(msg);
     const uint64_t h = nt_hash64(msg, (uint32_t)len).value;
     for (uint32_t i = 0; i < s_unique_count; i++) {
         if (s_unique_hashes[i] == h) {
