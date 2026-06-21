@@ -144,7 +144,12 @@ static nt_metrics_ring_t *user_ring_for(const char *name) {
 }
 
 void nt_metrics_sample(void) {
-    ring_push(&s_metrics.fixed[NT_METRICS_FRAME_MS], (double)(1000.0F / fmaxf(nt_debug_overlay_get_fps(), 1e-6F)));
+    /* fps==0 means no frame recorded yet (overlay fps_count==0); pushing 1000/0 would poison the
+       window with a ~1e9 ms outlier for the whole window. Skip like the gpu -1.0F sentinel below. */
+    float fps = nt_debug_overlay_get_fps();
+    if (fps > 0.0F) {
+        ring_push(&s_metrics.fixed[NT_METRICS_FRAME_MS], (double)(1000.0F / fps));
+    }
     ring_push(&s_metrics.fixed[NT_METRICS_CPU_MS], (double)nt_debug_overlay_get_cpu_ms());
     /* gpu_ms: only sample when a real timer is present. The -1.0F sentinel (timer unsupported) must
        NOT enter the window, else perf.stats would report avg/min/max:-1 — contradicting
@@ -232,6 +237,15 @@ void nt_metrics_user_stats(uint16_t i, nt_metrics_stats_t *out) {
 void nt_metrics_test_push(nt_metrics_channel_t channel, double value) {
     NT_ASSERT(channel >= 0 && channel < NT_METRICS_CHANNEL_COUNT);
     ring_push(&s_metrics.fixed[channel], value);
+}
+
+/* Push into a user channel by FULL name (find-or-append by hash), bypassing the overlay's 32-char
+   name truncation so a test can prove the metrics ring keys by full hash, not a truncated strcmp. */
+void nt_metrics_test_push_user(const char *name, double value) {
+    nt_metrics_ring_t *r = user_ring_for(name);
+    if (r != NULL) {
+        ring_push(r, value);
+    }
 }
 #endif
 

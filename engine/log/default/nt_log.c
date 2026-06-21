@@ -43,11 +43,16 @@ void nt_log_add_sink(nt_log_sink_fn fn, void *user) {
 
 /* Append a "..." marker to a truncated msg WITHOUT leaving a split multibyte sequence — the line is
    later stored verbatim in the log ring and serialized as a JSON string, where cJSON rejects invalid
-   UTF-8. Walk back over any trailing UTF-8 continuation bytes (0b10xxxxxx) so the marker lands on a
-   codepoint boundary. buf must hold at least 4 bytes (NT_LOG_BUF_SIZE is 512). */
+   UTF-8. Walk back over any trailing UTF-8 continuation bytes (0b10xxxxxx), then drop a now-orphaned
+   lead byte (>= 0xC0) whose continuation bytes were cut — both leave the marker on a codepoint
+   boundary. buf must hold at least 4 bytes (NT_LOG_BUF_SIZE is 512). */
 static void append_truncation_marker(char *buf, size_t cap) {
     size_t end = cap - 4; /* room for "..." + NUL */
     while (end > 0 && ((unsigned char)buf[end - 1] & 0xC0U) == 0x80U) {
+        end--;
+    }
+    /* A trailing lead byte here lost its continuation bytes to truncation -> orphan; drop it too. */
+    if (end > 0 && (unsigned char)buf[end - 1] >= 0xC0U) {
         end--;
     }
     buf[end] = '.';
