@@ -11,6 +11,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "renderers/nt_text_renderer.h"
 #include "ui/nt_ui_clay_impl.h"
+#include "ui/nt_ui_image.h" /* nt_ui_image_custom (inline-image emit path) */
 #include "ui/nt_ui_internal.h"
 #include "utf8/nt_utf8.h"
 
@@ -104,6 +105,13 @@ typedef struct {
     float total_h;
     bool solved_ready;        /* solver ran for this call (emit re-walk safe, read-only) */
     uint32_t emit_span_count; /* draw_n spans the last emit produced (probe) */
+
+    /* ---- Inline-image emit (RICH-67-05) ---- */
+    nt_material_t image_material; /* base-style inline-image material (.id==0 -> no images) */
+    uint32_t image_emit_count;    /* IMAGE atoms declared as Clay children this call (probe) */
+    uint32_t image_block_bytes;   /* size of the last inline-image custom block (probe) */
+    uint32_t image_region;        /* by-name resolved region index of the first IMAGE atom (probe) */
+    float image_y;                /* solved y of the first IMAGE atom (probe) */
 } nt_ui_rich_state_t;
 
 static nt_ui_rich_state_t *rich_state(nt_ui_context_t *ctx) {
@@ -170,7 +178,7 @@ static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_
 /* Member-wise equality -- the struct has a float field (scale), so memcmp on the
  * object representation is undefined for dedup (tidy bugprone-suspicious-memory-comparison). */
 static bool rich_style_eq(const nt_ui_rich_style_t *a, const nt_ui_rich_style_t *b) {
-    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->variant != b->variant || a->effect_id != b->effect_id) {
+    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->variant != b->variant || a->effect_id != b->effect_id || a->image_material.id != b->image_material.id) {
         return false;
     }
     for (uint32_t i = 0; i < 4U; i++) {
@@ -485,7 +493,11 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
                 }
             }
         } else if (run->kind == NT_RICH_ATOM_IMAGE) {
-            const nt_texture_region_t *reg = nt_atlas_get_region(run->image_ref.atlas, run->image_ref.region);
+            /* By-name resolve (D-67-13): the atlas IS the registry. Resolve-and-memoize writes
+             * the region index back into the run's ref so emit reuses it (no per-image registry). */
+            nt_atlas_resolve_ref(&st->runs[ri].image_ref);
+            const uint32_t reg_idx = run->image_ref.region;
+            const nt_texture_region_t *reg = (reg_idx != NT_ATLAS_INVALID_REGION) ? nt_atlas_get_region(run->image_ref.atlas, reg_idx) : NULL;
             const float src_w = (reg != NULL) ? (float)reg->source_w : 1.0F;
             const float src_h = (reg != NULL) ? (float)reg->source_h : 1.0F;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
@@ -497,7 +509,8 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             a->h = src_h * run->image_scale;
             a->valign = run->image_valign;
             a->offset_y = run->image_offset_y;
-            a->breakable_before = true; /* image: break opportunity on both sides */
+            a->color = style->color_abgr; /* the run's tint -> the inline image's lossless a_tint */
+            a->breakable_before = true;   /* image: break opportunity on both sides */
             a->run_idx = (uint16_t)ri;
             a->link_id = run->link_id;
         }
@@ -678,6 +691,17 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     /* The FIXED block hosts the container width (explicit) or the max line width (grow). */
     st->total_w = (container_w > 0.0F) ? box_w : max_line_w;
     st->total_h = pen_y;
+
+    /* Probe: record the first IMAGE atom's by-name-resolved region + solved y (RICH-67-05). */
+    st->image_region = NT_ATLAS_INVALID_REGION;
+    st->image_y = 0.0F;
+    for (uint32_t i = 0; i < st->solved_count; i++) {
+        if (st->solved[i].kind == NT_RICH_ATOM_IMAGE) {
+            st->image_region = st->runs[st->solved[i].run_idx].image_ref.region;
+            st->image_y = st->solved[i].y;
+            break;
+        }
+    }
     st->solved_ready = true;
 }
 // #endregion
@@ -737,9 +761,61 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
 }
 // #endregion
 
+// #region image-emit
+/* Inline IMAGE atoms ride the EXISTING Phase-66 custom-attr sprite path (nt_ui_image_custom,
+ * D-67-14) -- exactly as nt_ui_radial.c does, but geom_mode REGION (real atlas region) with
+ * the 48 B {a_tint, a_uvrect, a_layout} block: a_tint = the run's lossless float4 tint, a_uvrect
+ * + a_layout walker-filled by name. Each image is a FLOATING child of the FIXED block, attached
+ * at the block's top-left and offset to the solver's solved (x,y) -- so wrap/baseline stay the
+ * solver's, and the image batches on the shared rich_image material. */
+static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s) {
+    const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
+    if (run->image_ref.region == NT_ATLAS_INVALID_REGION || run->image_ref.atlas.id == 0U) {
+        return; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
+    }
+
+    /* Block in attr_map order {a_tint, a_uvrect, a_layout}: a_tint carries the run's lossless
+     * tint float4; a_uvrect/a_layout are {0} placeholders the walker fills by name. */
+    float blk[12];
+    memset(blk, 0, sizeof blk);
+    rich_unpack_color(s->color, 1.0F, &blk[0]); /* a_tint @ 0..3 (lossless; opacity rides element_data) */
+    st->image_block_bytes = (uint32_t)sizeof blk;
+
+    static const char *const attr_names[] = {"a_tint", "a_uvrect", "a_layout", NULL};
+    const nt_ui_image_custom_t img = {
+        .atlas = run->image_ref.atlas,
+        .region_index = run->image_ref.region,
+        .material = st->image_material,
+        .custom_attrs = blk,
+        .custom_bytes = (uint8_t)sizeof blk,
+        .attr_names = attr_names,
+        .geom_mode = NT_UI_IMAGE_GEOM_REGION,
+        .slice9_scale = 1.0F,
+        .color_packed = 0xFFFFFFFFU, /* tint lives in a_tint, not color_packed */
+    };
+
+    /* Position at the solved (x,y): a floating child attached to the FIXED block's top-left,
+     * slid by the solver offset. The transform offset is render-only (no layout effect). */
+    nt_ui_transform_t tt = nt_ui_transform_defaults();
+    tt.offset_x = s->x;
+    tt.offset_y = s->y;
+    nt_ui_element_data_t *idata = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    NT_ASSERT(idata != NULL && "nt_ui_rich_text: scratch alloc failed (image data)");
+    *idata = (nt_ui_element_data_t){.user_data = NULL, .layer = 0U, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
+
+    const Clay_ElementDeclaration decl = {
+        .layout = {.sizing = {CLAY_SIZING_FIXED(s->w), CLAY_SIZING_FIXED(s->h)}},
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+    };
+    nt_ui_image_custom(ctx, idata, &img, &decl);
+    st->image_emit_count++;
+}
+
 /* Declare the ONE measured Clay element hosting the solved run-list (D-67-03, Architecture A)
- * -- never a per-run Clay element. The custom data routes the walk back to our self-emit. */
-static void rich_declare_fixed_block(nt_ui_rich_state_t *st, const nt_ui_element_data_t *data) {
+ * -- never a per-run Clay element. The custom data routes the walk back to our self-emit.
+ * Inline IMAGE atoms are declared as FLOATING children of this block (positioned at the solved
+ * (x,y)); their textured sprite emit rides nt_ui_image_custom (RICH-67-05). */
+static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, const nt_ui_element_data_t *data) {
     nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
     NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
     *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_RICH_TEXT, .data = st};
@@ -751,8 +827,19 @@ static void rich_declare_fixed_block(nt_ui_rich_state_t *st, const nt_ui_element
     decl.userData = (void *)data;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(decl);
+    /* Inline images: FLOATING children declared inside the FIXED block scope. Only when the base
+     * style supplies a material (otherwise images are skipped -- text-only stays a single block). */
+    st->image_emit_count = 0;
+    if (st->image_material.id != 0U) {
+        for (uint32_t i = 0; i < st->solved_count; i++) {
+            if (st->solved[i].kind == NT_RICH_ATOM_IMAGE) {
+                rich_declare_inline_image(ctx, st, &st->solved[i]);
+            }
+        }
+    }
     nt_ui_clay_priv_close_element();
 }
+// #endregion
 
 void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time) {
     NT_ASSERT(ctx != NULL && "nt_ui_rich_text: ctx must be non-NULL");
@@ -761,8 +848,9 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     (void)time; /* per-atom effects (D-67-18) land in plan 07 */
 
     nt_ui_rich_state_t *st = rich_state(ctx);
+    st->image_material = style->image_material;
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
-    rich_declare_fixed_block(st, data);
+    rich_declare_fixed_block(ctx, st, data);
 }
 
 // #region test_access
@@ -813,5 +901,10 @@ float nt_ui_rich_test_total_w(nt_ui_context_t *ctx) { return rich_state(ctx)->to
 float nt_ui_rich_test_total_h(nt_ui_context_t *ctx) { return rich_state(ctx)->total_h; }
 
 uint32_t nt_ui_rich_test_emit_span_count(nt_ui_context_t *ctx) { return rich_state(ctx)->emit_span_count; }
+
+uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx) { return rich_state(ctx)->image_emit_count; }
+uint32_t nt_ui_rich_test_image_block_bytes(nt_ui_context_t *ctx) { return rich_state(ctx)->image_block_bytes; }
+uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx) { return rich_state(ctx)->image_region; }
+float nt_ui_rich_test_image_y(nt_ui_context_t *ctx) { return rich_state(ctx)->image_y; }
 #endif
 // #endregion

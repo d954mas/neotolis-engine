@@ -11,9 +11,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
-#include "font/nt_font.h"   /* nt_font_t */
-#include "ui/nt_ui.h"       /* nt_ui_element_data_t */
+#include "atlas/nt_atlas.h"       /* nt_atlas_region_ref_t */
+#include "font/nt_font.h"         /* nt_font_t */
+#include "material/nt_material.h" /* nt_material_t (inline-image custom-attr path) */
+#include "ui/nt_ui.h"             /* nt_ui_element_data_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -77,9 +78,10 @@ typedef struct {
     float scale;                         /* 36: accumulated x multiplier (D-67-11) */
     uint8_t variant;                     /* 40: NT_UI_RICH_VARIANT_* -> selects font_id[] */
     uint8_t effect_id;                   /* 41: stock effect catalog index; 0 = none */
-    uint8_t _pad[6];                     /* 42: explicit tail pad to the 8-byte-aligned 48 */
+    uint8_t _pad[2];                     /* 42: alignment pad to the 4-byte material handle */
+    nt_material_t image_material;        /* 44: inline-image custom-attr material (D-67-14/15); .id==0 = no inline images */
 } nt_ui_rich_style_t;
-_Static_assert(sizeof(nt_ui_rich_style_t) == 48, "nt_ui_rich_style_t stable ABI (16 ref + 4 font + u32 + f32 + 8 tail)");
+_Static_assert(sizeof(nt_ui_rich_style_t) == 48, "nt_ui_rich_style_t stable ABI (16 ref + 4 font + u32 + f32 + variant/effect + material)");
 
 /* Use instead of bare {0} -- color_abgr=0 renders fully transparent. */
 nt_ui_rich_style_t nt_ui_rich_style_defaults(void);
@@ -149,6 +151,13 @@ float nt_ui_rich_test_total_w(nt_ui_context_t *ctx);
 float nt_ui_rich_test_total_h(nt_ui_context_t *ctx);
 /* draw_n spans the last walk's rich-text emit produced (== solved TEXT line-fragments). */
 uint32_t nt_ui_rich_test_emit_span_count(nt_ui_context_t *ctx);
+
+/* Inline-image emit probes (RICH-67-05). The solver records the first IMAGE atom's resolved
+ * region + custom-block size + solved y; the emit counter tracks images declared this call. */
+uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx);
+uint32_t nt_ui_rich_test_image_block_bytes(nt_ui_context_t *ctx);
+uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx);
+float nt_ui_rich_test_image_y(nt_ui_context_t *ctx);
 #endif
 // #endregion
 
