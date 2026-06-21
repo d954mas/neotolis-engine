@@ -147,6 +147,8 @@ nt_ui_rich_test_atom_t nt_ui_rich_test_atom(nt_ui_context_t *ctx, uint32_t atom)
 /* Solved total size that feeds the ONE Clay CLAY_SIZING_FIXED block (D-67-03). */
 float nt_ui_rich_test_total_w(nt_ui_context_t *ctx);
 float nt_ui_rich_test_total_h(nt_ui_context_t *ctx);
+/* draw_n spans the last walk's rich-text emit produced (== solved TEXT line-fragments). */
+uint32_t nt_ui_rich_test_emit_span_count(nt_ui_context_t *ctx);
 #endif
 // #endregion
 

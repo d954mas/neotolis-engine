@@ -1532,11 +1532,20 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     nt_text_renderer_flush();
     /* Handler binds its OWN material; reset the cache so the next dispatch rebinds. */
     sprite_bind_barrier(bind);
+
+    nt_ui_custom_frame_t frame;
+    frame.clay_cmd = (const void *)c;
+    memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
+    frame.opacity = opacity;
+
+    /* Rich-text self-emits its solved text spans through the text renderer (D-67-03: ONE
+     * measured FIXED block hosts the wrapped run-list); the game handler owns every other
+     * CUSTOM element. */
+    if (cd->type == NT_UI_CUSTOM_TYPE_RICH_TEXT) {
+        nt_ui_rich_internal_emit_custom(&frame, cd->data);
+        return;
+    }
     if (ctx->custom_fn != NULL) {
-        nt_ui_custom_frame_t frame;
-        frame.clay_cmd = (const void *)c;
-        memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
-        frame.opacity = opacity;
         ctx->custom_fn(&frame, ctx->custom_user);
     }
 }

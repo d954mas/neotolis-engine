@@ -518,6 +518,12 @@ void nt_ui_internal_emit_filled_quad_m(nt_resource_t atlas, uint32_t region, con
 
 void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, const float model[16], uint32_t color);
 
+/* Rich-text CUSTOM self-emit: the walker dispatches a NT_UI_CUSTOM_TYPE_RICH_TEXT command here
+ * (data = the solved nt_ui_rich_state_t parked on ctx->pending_rich). Iterates the solved TEXT
+ * atoms and emits each line-fragment as one nt_text_renderer_draw_n span positioned off the
+ * FIXED block's LAYOUT bbox + world_mat4. Read-only on the state (re-walk safe, UI-06). */
+void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data);
+
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
 

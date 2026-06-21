@@ -6,8 +6,11 @@
 
 #include <string.h>
 
+#include "clay.h"
 #include "core/nt_assert.h"
 #include "memory/nt_mem_scratch.h"
+#include "renderers/nt_text_renderer.h"
+#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 #include "utf8/nt_utf8.h"
 
@@ -49,9 +52,10 @@ typedef struct {
 typedef struct {
     nt_rich_atom_kind_t kind;
     float x;
-    float y;
+    float y; /* glyph-box top (TEXT) / box top (IMAGE), local Y-down */
     float w;
     float h;
+    float asc; /* TEXT ascent px: baseline = y + asc (emit feeds draw_n the baseline) */
     uint32_t line;
     /* TEXT placement context. */
     nt_font_t font;
@@ -98,7 +102,8 @@ typedef struct {
     uint32_t link_count;
     float total_w;
     float total_h;
-    bool solved_ready; /* solver ran for this call (emit re-walk safe, read-only) */
+    bool solved_ready;        /* solver ran for this call (emit re-walk safe, read-only) */
+    uint32_t emit_span_count; /* draw_n spans the last emit produced (probe) */
 } nt_ui_rich_state_t;
 
 static nt_ui_rich_state_t *rich_state(nt_ui_context_t *ctx) {
@@ -647,6 +652,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             s->y = rich_atom_y(a, baseline_y, pen_y, line_h, asc);
             s->w = a->w;
             s->h = a->h;
+            s->asc = a->asc;
             s->line = L;
             s->font = a->font;
             s->size = a->size;
@@ -676,13 +682,87 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
 }
 // #endregion
 
+// #region emit
+/* Unpack a packed AABBGGRR color into a normalized RGBA float4 (text renderer order). */
+static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
+    out[0] = (float)(abgr & 0xFFU) / 255.0F;
+    out[1] = (float)((abgr >> 8) & 0xFFU) / 255.0F;
+    out[2] = (float)((abgr >> 16) & 0xFFU) / 255.0F;
+    out[3] = ((float)((abgr >> 24) & 0xFFU) / 255.0F) * opacity;
+}
+
+/* Build the per-span model mat4 for draw_n: LAYOUT pen (ox,oy) -> world via world_mat4,
+ * with the text-renderer Y-up <-> Clay Y-down sign flip on col1 (mirrors emit_text in
+ * nt_ui.c). `shear` applies synthetic italic for a run that requested italic with no italic
+ * family member (D-67-04/16): in text-local Y-up space, x' = x + k*y leans glyphs right
+ * above the baseline -- fold k*col0 into col1. */
+static void rich_span_model(const float world[16], float ox, float oy, bool shear, float out[16]) {
+    const float sign_y = -1.0F;
+    const float k = shear ? 0.2F : 0.0F; /* synthetic-italic shear factor */
+    for (int rr = 0; rr < 4; ++rr) {
+        const float col0 = world[rr];     /* text-local +x */
+        const float col1 = world[4 + rr]; /* text-local +y (pre Y-flip) */
+        out[rr] = col0;
+        out[4 + rr] = (sign_y * col1) + (k * col0); /* Y-flip + shear lean */
+        out[8 + rr] = world[8 + rr];
+        out[12 + rr] = (ox * world[rr]) + (oy * world[4 + rr]) + world[12 + rr];
+    }
+}
+
+void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
+    nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
+    NT_ASSERT(st != NULL && "rich emit: NULL state");
+    if (!st->solved_ready) {
+        return;
+    }
+    const Clay_RenderCommand *c = (const Clay_RenderCommand *)frame->clay_cmd;
+    const float box_x = c->boundingBox.x; /* FIXED block origin in LAYOUT (Y-down) */
+    const float box_y = c->boundingBox.y;
+
+    st->emit_span_count = 0;
+    for (uint32_t i = 0; i < st->solved_count; i++) {
+        const nt_ui_rich_solved_atom_t *s = &st->solved[i];
+        if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U) {
+            continue; /* IMAGE/OBJECT emit lands in plans 05/07 (boxes already reserved) */
+        }
+        nt_text_renderer_set_font(s->font);
+        const float baseline_y = box_y + s->y + s->asc; /* solved y is glyph-box top */
+        float model[16];
+        rich_span_model(frame->world_mat4, box_x + s->x, baseline_y, (s->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U, model);
+        float color[4];
+        rich_unpack_color(s->color, frame->opacity, color);
+        nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, color, 0.0F, 0.0F);
+        st->emit_span_count++;
+    }
+}
+// #endregion
+
+/* Declare the ONE measured Clay element hosting the solved run-list (D-67-03, Architecture A)
+ * -- never a per-run Clay element. The custom data routes the walk back to our self-emit. */
+static void rich_declare_fixed_block(nt_ui_rich_state_t *st, const nt_ui_element_data_t *data) {
+    nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
+    NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
+    *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_RICH_TEXT, .data = st};
+
+    Clay_ElementDeclaration decl = {0};
+    decl.layout.sizing.width = CLAY_SIZING_FIXED(st->total_w);
+    decl.layout.sizing.height = CLAY_SIZING_FIXED(st->total_h);
+    decl.custom = (Clay_CustomElementConfig){.customData = cd};
+    decl.userData = (void *)data;
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(decl);
+    nt_ui_clay_priv_close_element();
+}
+
 void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time) {
-    /* Task 2 wires the Clay FIXED block + the TEXT emit; this plan-04 body lands there. */
-    (void)data;
-    (void)style;
-    (void)time;
+    NT_ASSERT(ctx != NULL && "nt_ui_rich_text: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_rich_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(style != NULL && "nt_ui_rich_text: style must be non-NULL");
+    (void)time; /* per-atom effects (D-67-18) land in plan 07 */
+
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
+    rich_declare_fixed_block(st, data);
 }
 
 // #region test_access
@@ -731,5 +811,7 @@ nt_ui_rich_test_atom_t nt_ui_rich_test_atom(nt_ui_context_t *ctx, uint32_t atom)
 
 float nt_ui_rich_test_total_w(nt_ui_context_t *ctx) { return rich_state(ctx)->total_w; }
 float nt_ui_rich_test_total_h(nt_ui_context_t *ctx) { return rich_state(ctx)->total_h; }
+
+uint32_t nt_ui_rich_test_emit_span_count(nt_ui_context_t *ctx) { return rich_state(ctx)->emit_span_count; }
 #endif
 // #endregion

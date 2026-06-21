@@ -127,8 +127,9 @@ typedef struct {
     void *data;
 } nt_ui_custom_data_t;
 
-#define NT_UI_CUSTOM_TYPE_NONE 0 /* engine anchor: skip, bbox only */
-#define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
+#define NT_UI_CUSTOM_TYPE_NONE 0      /* engine anchor: skip, bbox only */
+#define NT_UI_CUSTOM_TYPE_GAME 1      /* game handler */
+#define NT_UI_CUSTOM_TYPE_RICH_TEXT 2 /* rich-text widget self-emit (solved span draw_n) */
 
 /* Frame snapshot passed to the CUSTOM handler.
  *   clay_cmd   — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
