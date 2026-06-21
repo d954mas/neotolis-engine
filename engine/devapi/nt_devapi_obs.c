@@ -5,7 +5,6 @@
 
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
-#include "debug_overlay/nt_debug_overlay.h"
 #include "devapi/nt_devapi_internal.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -124,37 +123,38 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
 // #endregion
 
 // #region perf.*
-/* perf.snapshot: IMMEDIATE current-frame view from the LIVE overlay getters (NOT the metrics
-   window). gpu_ms maps -1.0F (timer unsupported) to JSON null. user_counters enumerates the
-   overlay counters. */
+/* perf.snapshot: IMMEDIATE current-frame view from nt_metrics' last-pushed frame (NOT the windowed
+   aggregates). fps is the rolling avg; frame_ms is the real last frame time (distinct from cpu_ms);
+   gpu_ms maps the < 0 sentinel (timer unsupported) to JSON null. user_counters enumerates the
+   nt_metrics user counters with their EXACT stored value. */
 static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
     (void)ud;
-    float fps = nt_debug_overlay_get_fps();
-    devapi_add_number(result, "fps", (double)fps);
-    /* frame_ms is wall-clock frame time (1000/fps), distinct from cpu_ms. Guard fps<=0 the same way
-       nt_metrics_sample does (1000/max(fps,1e-6)) so an unfilled fps ring yields a large-but-finite value. */
-    devapi_add_number(result, "frame_ms", 1000.0 / (double)fmaxf(fps, 1e-6F));
-    devapi_add_number(result, "cpu_ms", (double)nt_debug_overlay_get_cpu_ms());
-    float gpu = nt_debug_overlay_get_gpu_ms();
-    if (gpu < 0.0F) {
+    nt_metrics_frame_t last;
+    nt_metrics_last(&last);
+    devapi_add_number(result, "fps", (double)nt_metrics_fps());
+    /* frame_ms is the real last frame time, distinct from cpu_ms. */
+    devapi_add_number(result, "frame_ms", (double)last.frame_ms);
+    devapi_add_number(result, "cpu_ms", (double)last.cpu_ms);
+    if (last.gpu_ms < 0.0F) {
         cJSON_AddNullToObject(result, "gpu_ms");
     } else {
-        devapi_add_number(result, "gpu_ms", (double)gpu);
+        devapi_add_number(result, "gpu_ms", (double)last.gpu_ms);
     }
-    devapi_add_number(result, "draw_calls", (double)nt_debug_overlay_get_draw_calls());
+    devapi_add_number(result, "draw_calls", (double)last.draw_calls);
 
     cJSON *uc = cJSON_AddObjectToObject(result, "user_counters");
     NT_ASSERT(uc != NULL);
-    uint16_t un = nt_debug_overlay_user_count();
+    uint16_t un = nt_metrics_user_count();
     for (uint16_t i = 0; i < un; i++) {
         const char *name = NULL;
-        double value = 0.0;
+        uint64_t u = 0;
+        double f = 0.0;
         bool is_float = false;
-        nt_debug_overlay_user_get(i, &name, &value, &is_float);
+        nt_metrics_user_get(i, &name, &u, &f, &is_float);
         if (name != NULL) {
-            devapi_add_number(uc, name, value);
+            devapi_add_number(uc, name, is_float ? f : (double)u);
         }
     }
     return true;
@@ -191,7 +191,7 @@ static void add_channel_stats(cJSON *parent, const char *name, const nt_metrics_
     devapi_add_number(o, "p99_9", st->p99_9);
 }
 
-/* perf.stats{channels?, budget_ms?}: windowed aggregates from nt_metrics (NOT the live overlay).
+/* perf.stats{channels?, budget_ms?}: windowed aggregates from nt_metrics (NOT the last-frame snapshot).
    Per requested (or all) fixed channels + user channels + fps-lows + over_budget_pct. Unknown
    channel / bad budget_ms -> bad_params (never assert). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -645,7 +645,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "perf.snapshot",
         .group = "perf",
-        .summary = "immediate current-frame perf view from the live overlay (gpu_ms null when unsupported)",
+        .summary = "immediate current-frame perf view from nt_metrics' last frame (gpu_ms null when unsupported)",
         .params_shape = "{}",
         .result_shape = "{fps:number,frame_ms:number,cpu_ms:number,gpu_ms:number|null,draw_calls:number,user_counters:object}",
         .frame_behavior = "any",
