@@ -134,7 +134,9 @@ typedef struct {
     uint32_t line;
 } nt_ui_rich_test_atom_t;
 
-void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w);
+/* Spike solver entry: font_size feeds the deterministic measure (advance = size/2/char
+ * under nt_font_test_set_metrics); the resolved per-atom boxes land in the atoms probe. */
+void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size);
 uint32_t nt_ui_rich_test_line_count(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_atom_count(nt_ui_context_t *ctx);
 nt_ui_rich_test_atom_t nt_ui_rich_test_atom(nt_ui_context_t *ctx, uint32_t atom);
