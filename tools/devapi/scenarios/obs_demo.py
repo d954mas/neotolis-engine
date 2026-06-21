@@ -9,7 +9,7 @@ unit/build gates cover the handlers in isolation; this UAT covers the live-host 
 
   1. log.tail{n,level}            — last-N {level,domain,msg} array shape + the level filter.
   2. perf.snapshot                — keys present; gpu_ms is null on this host (no GPU timer, D-11);
-                                    user_counters carries the host's "frames"/"frame_ms" counters.
+                                    user_counters carries the host's "frames"/"cpu_ms" counters.
   3. perf.reset -> stepped run    — manual-step a window of frames so the metrics rings fill, then
      -> perf.stats               perf.stats populates the per-channel aggregate schema
                                     (samples>0, avg/median/p95/p99/p99_9 present); a bad budget_ms
@@ -152,7 +152,7 @@ def check_perf_snapshot(client: DevApiClient) -> None:
     assert snap["gpu_ms"] is None, f"perf.snapshot.gpu_ms is {snap['gpu_ms']!r}, expected null (no GPU timer, D-11)"
     uc = snap["user_counters"]
     assert isinstance(uc, dict), f"perf.snapshot.user_counters is {uc!r}, expected an object"
-    # The host (Task 1) exercises a count("frames") + count_f("frame_ms") every frame.
+    # The host (Task 1) exercises a count("frames") + count_f("cpu_ms") every frame.
     assert "frames" in uc, f"perf.snapshot.user_counters missing the host 'frames' counter (got {sorted(uc)})"
     print(f"PASS[2/5] perf.snapshot: keys present, gpu_ms is null (D-11), user_counters={sorted(uc)}.")
 
@@ -170,11 +170,11 @@ def check_perf_stats(client: DevApiClient) -> None:
     _assert_stats_shape(channels, "frame_ms", require_samples=True)
     for top in ("user_channels", "fps_low_1pct", "fps_low_01pct", "over_budget_pct", "budget_ms"):
         assert top in stats, f"perf.stats missing top-level key {top!r} (got {sorted(stats)})"
-    # The host's count_f("frame_ms") -> a user channel; assert its aggregate schema too.
+    # The host's count_f("cpu_ms") -> a user channel; assert its aggregate schema too.
     user = stats["user_channels"]
     assert isinstance(user, dict), f"perf.stats.user_channels is {user!r}, expected an object"
-    if "frame_ms" in user:
-        _assert_stats_shape(user, "frame_ms", require_samples=True)
+    if "cpu_ms" in user:
+        _assert_stats_shape(user, "cpu_ms", require_samples=True)
 
     fm = channels["frame_ms"]
     print(
@@ -210,6 +210,8 @@ def check_entity_list(client: DevApiClient) -> None:
     assert isinstance(total, int) and total >= 0, f"entity.list.total is {total!r}, expected a non-negative int"
     assert isinstance(entities, list), f"entity.list.entities is {entities!r}, expected a list"
     assert len(entities) <= 8, f"entity.list returned {len(entities)} entities, exceeds limit=8"
+    # WR-04: total stays honest; truncated flags when the live set exceeds the working buffer.
+    assert isinstance(res.get("truncated"), bool), f"entity.list.truncated is {res.get('truncated')!r}, expected a bool"
     try:
         client.result("entity.list", {"offset": -1})
         raise AssertionError("entity.list(offset=-1) unexpectedly succeeded; expected bad_params")
@@ -227,6 +229,9 @@ def check_resource_list(client: DevApiClient) -> None:
     with_assets = client.result("resource.list", {"include_assets": True})
     assert isinstance(with_assets.get("packs"), list), "resource.list(include_assets).packs missing"
     assert isinstance(with_assets.get("assets"), list), "resource.list(include_assets) did not return a flat assets[]"
+    # WR-05: the flat assets[] is DoS-capped; asset_total + assets_truncated report the real count vs cap.
+    assert isinstance(with_assets.get("asset_total"), int), f"resource.list.asset_total is {with_assets.get('asset_total')!r}, expected an int"
+    assert isinstance(with_assets.get("assets_truncated"), bool), f"resource.list.assets_truncated is {with_assets.get('assets_truncated')!r}, expected a bool"
     print(
         f"PASS[5/5] resource.list: packs[] always (total={base['total']}); "
         f"assets[] flat only with include_assets ({len(with_assets['assets'])} assets)."

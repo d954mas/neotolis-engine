@@ -166,11 +166,12 @@ static void frame(void) {
     }
 
     /* User counters so perf.snapshot/perf.stats have a user channel to observe: a monotonic int
-       counter + the last frame's cpu_ms as a float. */
+       counter + the last frame's cpu_ms as a float. Named "cpu_ms" (not "frame_ms") since the host has
+       no separate wall-clock source here — the value IS cpu_ms, so the demo counter must say so. */
     static uint64_t s_frame_counter = 0;
     s_frame_counter++;
     nt_debug_overlay_count("frames", s_frame_counter);
-    nt_debug_overlay_count_f("frame_ms", (double)nt_debug_overlay_get_cpu_ms());
+    nt_debug_overlay_count_f("cpu_ms", (double)nt_debug_overlay_get_cpu_ms());
 
     nt_debug_overlay_frame_end();
     /* D-07: sample IMMEDIATELY after frame_end so the metrics window reads this frame's fresh
