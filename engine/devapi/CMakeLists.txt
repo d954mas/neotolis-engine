@@ -82,6 +82,16 @@ if(NT_DEVAPI_GROUP_UI)
     target_link_libraries(nt_devapi PRIVATE nt_ui_interface nt_window_interface)
 endif()
 
+# The obs READ surface (log.tail / perf.stats) serializes the dev-only nt_log_ring + nt_metrics. With
+# either dep OFF those compile to no-op stubs (empty log.tail, zero perf.stats) — a vacuously-passing
+# "false green". Hard-fail so GROUP_OBS can never link the stub bodies; enable both deps with it.
+if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED))
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_OBS requires NT_LOG_RING_ENABLED and NT_METRICS_ENABLED "
+        "(the obs group reads the dev-only log ring + metrics collector; with either dep OFF it would "
+        "link no-op stubs — empty log.tail / zero perf.stats — a false green). Enable both, e.g. "
+        "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON (or NT_UI_DEBUG_TOOLS=ON, which defaults both).")
+endif()
+
 # Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads over the Plan 01/03/04/05 L1
 # capabilities. Links the dev-only ring + metrics collector + the overlay/entity/resource readers.
 # GNU-ld single-pass order: nt_devapi (consumer) is listed first on the exe link line; these provider
