@@ -3,14 +3,17 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
+#include "core/nt_platform.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_net.h"
+#include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "log/nt_log_ring.h"
 #include "memory/nt_mem_scratch.h"
 #include "metrics/nt_metrics.h"
+#include "time/nt_time.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h" /* NT_UI_BUTTON_DEF for the registered-widget role. */
 #include "ui/nt_ui_scale.h"  /* nt_ui_compute_scale + nt_ui_viewport_from_scale for the scaled ctx. */
@@ -140,8 +143,27 @@ static void recover_on_disconnect(void) {
     was_connected = now;
 }
 
+/* Poll the gfx "frame" GPU timer segment; returns ms, or -1 when no timer is available (drain ready
+   results 1-2 frames old, keep the freshest). The host owns this measurement now (was the overlay's). */
+static float poll_gpu_ms(void) {
+    uint64_t gpu_ns = 0;
+    bool ready = false;
+    while (nt_gfx_poll_segment_time_ns("frame", &gpu_ns)) {
+        ready = true;
+    }
+    return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
+}
+
 static void frame(void) {
-    nt_debug_overlay_frame_begin();
+    /* The host owns the loop, so it measures the frame: frame_ms is the wall delta between frame
+       starts; cpu_ms brackets the work below; gpu/draw/mem/scratch are read at frame end. nt_metrics
+       stores + aggregates — it reads no clock itself. */
+    static double s_last_begin = 0.0;
+    double now = nt_time_now();
+    float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
+    s_last_begin = now;
+    double cpu_begin = now;
+
     nt_window_poll();
     /* Order matters: nt_devapi_update first runs net_poll (a command may enqueue into the
        devapi input schedule), then ticks that schedule and — only on a real sim-advance — releases
@@ -165,18 +187,29 @@ static void frame(void) {
         nt_window_swap_buffers();
     }
 
+    /* cpu_ms = time spent in this frame's work (frame begin -> here). */
+    float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
+
     /* User counters so perf.snapshot/perf.stats have a user channel to observe: a monotonic int
-       counter + the last frame's cpu_ms as a float. Named "cpu_ms" (not "frame_ms") since the host has
-       no separate wall-clock source here — the value IS cpu_ms, so the demo counter must say so. */
+       counter + this frame's cpu_ms as a float. The host sets these directly on nt_metrics now. */
     static uint64_t s_frame_counter = 0;
     s_frame_counter++;
-    nt_debug_overlay_count("frames", s_frame_counter);
-    nt_debug_overlay_count_f("cpu_ms", (double)nt_debug_overlay_get_cpu_ms());
+    nt_metrics_count("frames", s_frame_counter);
+    nt_metrics_count_f("cpu_ms", (double)cpu_ms);
 
-    nt_debug_overlay_frame_end();
-    /* Sample IMMEDIATELY after frame_end so the metrics window reads this frame's fresh
-       overlay getters (fps/cpu_ms/draw_calls) before the next frame mutates them. */
-    nt_metrics_sample();
+    /* The host fills the per-frame scalars it measured + read, then pushes one sample into nt_metrics
+       (which derives fps + windows + the snapshot view). */
+    nt_platform_mem_t mem = nt_platform_memory_usage();
+    nt_metrics_frame_t mf = {
+        .frame_ms = frame_ms,
+        .cpu_ms = cpu_ms,
+        .gpu_ms = poll_gpu_ms(),
+        .draw_calls = nt_gfx_get_frame_draw_calls(),
+        .mem_used = mem.used,
+        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
+        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+    };
+    nt_metrics_sample(&mf);
 
     /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
        timeouts catch a hung host). A frame-count cap would also kill long stability sims. */
@@ -203,9 +236,10 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 
-    /* Observability wiring: the overlay measures cpu/fps/draw_calls per frame, nt_metrics
-       windows them, and the log ring captures every nt_log_write for log.tail. The obs devapi group
-       self-registers under NT_DEVAPI_GROUP_OBS — no host register call needed. */
+    /* Observability wiring: the host measures the frame and pushes it into nt_metrics (the L1 perf
+       source of truth), which derives fps + windows + the snapshot view; the overlay is a pure
+       consumer that reads nt_metrics for its HUD, and the log ring captures every nt_log_write for
+       log.tail. The obs devapi group self-registers under NT_DEVAPI_GROUP_OBS — no host register call. */
     nt_debug_overlay_init(NULL);
     nt_log_ring_init();
     nt_log_add_sink(nt_log_ring_sink, NULL);

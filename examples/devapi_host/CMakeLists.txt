@@ -14,9 +14,10 @@ target_link_libraries(devapi_host PRIVATE
     nt_ui
     nt_sprite_renderer nt_text_renderer nt_material nt_font nt_atlas nt_resource
     nt_http nt_fs
-    # Obs L1 capabilities the host wires directly: the overlay measures the frame, nt_metrics
-    # windows it, nt_log_ring captures logs. Consumers (main.c + nt_devapi's obs group) are listed
-    # above; these providers trail them. nt_gfx (the overlay sample's draw_calls source) is last.
+    # Obs L1 capabilities the host wires directly: the host measures the frame and pushes it into
+    # nt_metrics (the perf source of truth), the overlay consumes nt_metrics for its HUD, nt_log_ring
+    # captures logs. Consumers (main.c + nt_devapi's obs group) are listed above; these providers trail
+    # them. nt_gfx (the host's draw_calls + GPU-timer source) and nt_platform (memory probe) are last.
     nt_debug_overlay nt_metrics nt_log_ring
     nt_platform
     nt_gfx)
