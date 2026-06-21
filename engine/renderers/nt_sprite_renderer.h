@@ -37,15 +37,32 @@ typedef struct {
 } nt_sprite_vertex_t;
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
+/* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
+ * Headroom for four FLOAT4 blocks (a_radial + a_tint + a_uvrect + a_layout) = 64 B,
+ * spent in full by the radial-image material. Only custom-attr materials pay this;
+ * plain sprites keep the locked 20 B vertex. */
+#ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
+#define NT_SPRITE_CUSTOM_STRIDE_MAX 64
+#endif
+
 /* ---- Init descriptor ---- */
 
 typedef struct {
-    uint16_t max_pipelines; /* default 16 */
+    uint16_t max_pipelines;       /* default 16 */
+    uint32_t max_vertices;        /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_VERTICES */
+    uint32_t max_indices;         /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
+    uint32_t custom_max_vertices; /* custom-attr staging cap; sizes the custom/interleave
+                                   * heap so plain-sprite games don't carry a big custom
+                                   * buffer. Radials/custom-attr widgets are few — kept
+                                   * far below max_vertices. Default 4096. */
 } nt_sprite_renderer_desc_t;
 
 static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
     return (nt_sprite_renderer_desc_t){
         .max_pipelines = 16,
+        .max_vertices = NT_SPRITE_RENDERER_MAX_VERTICES,
+        .max_indices = NT_SPRITE_RENDERER_MAX_INDICES,
+        .custom_max_vertices = 4096,
     };
 }
 
@@ -78,6 +95,13 @@ void nt_sprite_renderer_flush(void);
  * Same-handle reentry is a no-op. Asserts the material resolves with
  * .ready == true. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
+
+/* Set the custom per-vertex attr block baked into every vertex of the next emit
+ * (like color — uniform across the widget's verts). When the bound material declares
+ * custom attrs (attr_map_count > 0), EACH emit must be preceded by this call with
+ * bytes == attr_map_count*16 (asserted; wrong size desyncs the upload stride). Plain
+ * materials ignore it. bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. Consumed (cleared) per emit. */
+void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
 
 /* Emit one atlas region at one mat4 transform.
  *
@@ -138,6 +162,19 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
+/* Resolved vertex layout snapshot for a material: stride + per-attr GL
+ * location/offset. attr_count==3 for a plain material (base 20 B), 3+N for a
+ * custom-attr material (extended stride). */
+typedef struct {
+    uint32_t stride;
+    uint32_t attr_count;
+    uint32_t locations[16]; /* NT_GFX_MAX_VERTEX_ATTRS */
+    uint32_t offsets[16];
+} nt_sprite_layout_info_t;
+void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out);
+/* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
+ * emit, from the byte-staging path. float_count floats written. */
+void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);

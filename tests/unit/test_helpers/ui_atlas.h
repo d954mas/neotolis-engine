@@ -11,10 +11,19 @@
 extern "C" {
 #endif
 
+/* Min/max atlas UV (0..1) of the packed sub-region (index 2). Tests assert the
+ * walker-baked a_uvrect against these. Raw u16: u in [0.25,0.5], v in [0.5,0.75]. */
+#define MINIMAL_UI_ATLAS_PACKED_U0 (0x4000 / 65535.0F)
+#define MINIMAL_UI_ATLAS_PACKED_V0 (0x8000 / 65535.0F)
+#define MINIMAL_UI_ATLAS_PACKED_U1 (0x8000 / 65535.0F)
+#define MINIMAL_UI_ATLAS_PACKED_V1 (0xC000 / 65535.0F)
+
 /* Mounts a virtual pack with a synthetic atlas blob and parses it
  * through the full atlas activator, yielding a real READY resource
- * handle with a 1x1 white region at index 0 (4 verts) and a 6-vertex
- * polygon region at index 1 (for polygon-hull preservation tests).
+ * handle with a 1x1 white region at index 0 (4 verts), a 6-vertex
+ * polygon region at index 1 (for polygon-hull preservation tests), and
+ * a 4-vert PACKED sub-region at index 2 whose atlas UV does NOT span
+ * [0,1] (for region-local radial-image reveal tests).
  *
  * Caller must have init'd nt_hash, nt_gfx, nt_resource, nt_atlas before
  * calling create. Lifetime: valid until destroy.
@@ -25,6 +34,7 @@ typedef struct {
     nt_resource_t handle;
     uint32_t white_region_idx;   /* always 0 */
     uint32_t polygon_region_idx; /* always 1 */
+    uint32_t packed_region_idx;  /* always 2 — non-[0,1] UV sub-region */
 
     /* Implementation-private. Do not access directly. */
     void *_pack_blob;

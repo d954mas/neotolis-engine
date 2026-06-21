@@ -82,6 +82,18 @@ typedef struct {
     float fb_offset[2];
 } nt_ui_target_t;
 
+/* Per-widget custom per-vertex block — scratch-allocated, referenced by pointer only
+ * for custom-attr widgets so a plain image keeps the payload small. Untyped: the bound
+ * material's attr_map names the floats (walker injects a_layout/a_uvrect by name). Sized
+ * for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64).
+ * injection vocabulary: docs/neotolis_engine_spec_1.md
+ * "Radial widgets & the custom-attr image path" */
+typedef struct {
+    float custom_attrs[16];
+    uint8_t custom_bytes; /* > 0; the material declares this many per-vertex custom bytes. */
+    uint8_t geom_mode;    /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
+} nt_ui_image_custom_block_t;
+
 /* Pointed to by Clay_ImageElementConfig.imageData; must outlive the matching nt_ui_walk.
  * cornerRadius must be 0 (pre-bake into atlas). */
 typedef struct {
@@ -93,9 +105,21 @@ typedef struct {
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
     uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
-    uint8_t _reserved[2];
+    /* Optional per-element material override. .id==0 = use the walker's bound base
+     * material; re-bound only when .id differs, so same-material elements batch. */
+    nt_material_t material;
+    /* NULL = plain image (common case). Non-NULL = custom-attr widget; the block
+     * (payload-lifetime scratch) carries the per-vertex attrs. */
+    const nt_ui_image_custom_block_t *custom;
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 32, "nt_ui_image_payload_t stable ABI");
+/* Non-pointer prefix is 36 B; `custom` is pointer-aligned and adds sizeof(void*). */
+_Static_assert(sizeof(nt_ui_image_payload_t) == ((36U + (sizeof(void *) - 1U)) & ~(sizeof(void *) - 1U)) + sizeof(void *), "nt_ui_image_payload_t stable ABI (40 B wasm / 48 B native; was 100 B)");
+
+/* geom_mode: bbox rasterization when custom_bytes > 0. REGION = textured emit (real
+ * atlas art). GEOMETRY = clean white-region bbox quad for SDF shaders that derive a
+ * [-1,1] coord from gl_VertexID&3. See spec "Radial widgets & the custom-attr image path". */
+#define NT_UI_IMAGE_GEOM_REGION 0U
+#define NT_UI_IMAGE_GEOM_GEOMETRY 1U
 
 /* Typed wrapper for Clay CUSTOM element data. Allocate from nt_mem_scratch (frame arena). */
 typedef struct {
@@ -214,6 +238,10 @@ typedef struct {
     float element_depth_bias_ndc;
     /* Per-depth modal z-band stride; 0 = default NT_UI_MODAL_ZBAND_STRIDE. */
     int16_t modal_zband_stride;
+    /* Per-id retained-state pool size; MUST be power-of-2. 0 = default NT_UI_STATE_SLOTS. */
+    uint32_t state_slots;
+    /* Linear-probe window for the state pool; 1..state_slots. 0 = default NT_UI_STATE_PROBE_MAX. */
+    uint32_t state_probe_max;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
@@ -222,6 +250,8 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
         .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
+        .state_slots = 0U,     /* 0 = compile-time NT_UI_STATE_SLOTS default */
+        .state_probe_max = 0U, /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
     };
 }
 
@@ -552,9 +582,10 @@ nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_u
  * hovered/clicked here won't include hit padding (the latched gesture fields are unaffected). */
 nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id);
 
-/* App-wide gesture constants: the double-click window (secs) and the move radius (px) past
- * which a hold is treated as a drag (cancels long-press / resets hold_progress). Asserts each is finite
- * and >= 0 (fail-early, no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
+/* App-wide gesture constants: the double-click window (secs) and the move radius (px) within
+ * which a second press still counts as a double-click. Hold/long-press is NOT cancelled by
+ * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (fail-early,
+ * no silent clamp). Defaults: NT_UI_GESTURE_DBL_WINDOW_SECS / _MOVE_RADIUS_PX. */
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z

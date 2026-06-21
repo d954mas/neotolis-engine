@@ -334,6 +334,9 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths; flaky under
+    # parallel ctest (CPU contention skews the sub-ms timing), clean serially. Run alone.
+    set_tests_properties(test_resource PROPERTIES RUN_SERIAL TRUE)
 
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
@@ -528,6 +531,9 @@ if(NOT EMSCRIPTEN)
     )
     nt_setup_test_target(test_sprite_renderer)
 
+    # test_ui_radial registers in the nt_ui walker-test group below: it needs the
+    # shared ui_walker_fixture + full UI libs.
+
     # --- nt_mem_scratch tests ---
     add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_mem_scratch PRIVATE
@@ -674,6 +680,7 @@ if(NOT EMSCRIPTEN)
         test_ui_dropdown
         test_ui_tabbar
         test_ui_tooltip
+        test_ui_radial
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
     # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub

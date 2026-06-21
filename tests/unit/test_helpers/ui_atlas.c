@@ -22,9 +22,10 @@
  *
  *   NtAtlasHeader     (28 bytes)
  *   page resource id  (8 bytes)
- *   NtAtlasRegion[2]  (region 0 = 4-vert white quad, region 1 = 6-vert hull)
- *   NtAtlasVertex[10]
- *   uint16[18]        (6 indices for white + 12 for hull)
+ *   NtAtlasRegion[3]  (region 0 = 4-vert white quad, region 1 = 6-vert hull,
+ *                      region 2 = 4-vert PACKED sub-region with non-[0,1] UV)
+ *   NtAtlasVertex[14]
+ *   uint16[24]        (6 white + 12 hull + 6 packed)
  *
  * Mounts the blob as a real virtual pack so nt_resource_is_ready returns
  * true and nt_atlas_get_region resolves through the regular activator
@@ -32,10 +33,17 @@
  * texture so the sprite renderer's nt_resource_get(page_resource) returns
  * a non-zero texture id. */
 
-#define UI_ATLAS_REGION_COUNT 2u
+#define UI_ATLAS_REGION_COUNT 3u
 #define UI_ATLAS_PAGE_COUNT 1u
-#define UI_ATLAS_VERTEX_COUNT 10u
-#define UI_ATLAS_INDEX_COUNT 18u
+#define UI_ATLAS_VERTEX_COUNT 14u
+#define UI_ATLAS_INDEX_COUNT 24u
+
+/* Packed sub-region UV bounds (raw u16): u in [0.25,0.5], v in [0.5,0.75].
+ * Tests read these back from the walker-baked a_uvrect. */
+#define UI_ATLAS_PACKED_U0 0x4000u
+#define UI_ATLAS_PACKED_V0 0x8000u
+#define UI_ATLAS_PACKED_U1 0x8000u
+#define UI_ATLAS_PACKED_V1 0xC000u
 
 #define UI_ATLAS_HEADER_SIZE 28u
 #define UI_ATLAS_PAGE_IDS_SIZE (UI_ATLAS_PAGE_COUNT * 8u)
@@ -119,7 +127,28 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
     };
     memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE + 48U, &region1, sizeof region1);
 
-    /* ---- Vertices: 4 white + 6 polygon-hull ---- */
+    /* ---- Region 2: 4-vert PACKED quad — atlas UV does NOT span [0,1] ---- */
+    NtAtlasRegion region2 = {
+        .name_hash = 0x5041434B45445551ULL, /* "PACKEDUQ" */
+        .source_w = 8,
+        .source_h = 8,
+        .trim_offset_x = 0,
+        .trim_offset_y = 0,
+        .origin_x = 0.5F,
+        .origin_y = 0.5F,
+        .vertex_start = 10,
+        .index_start = 18,
+        .vertex_count = 4,
+        .page_index = 0,
+        .transform = 0,
+        .index_count = 6,
+        .flags = NT_ATLAS_REGION_FLAG_QUAD_012023,
+        .slice9_lrtb = {0, 0, 0, 0},
+        ._reserved2 = {0},
+    };
+    memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE + 96U, &region2, sizeof region2);
+
+    /* ---- Vertices: 4 white + 6 polygon-hull + 4 packed ---- */
     NtAtlasVertex verts[UI_ATLAS_VERTEX_COUNT] = {
         /* white quad (trim-local 0..1, atlas UV 0..0xFFFF) */
         {0, 0, 0, 0},
@@ -133,6 +162,11 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         {16, 16, 0xFFFF, 0xFFFF},
         {8, 16, 0x8000, 0xFFFF},
         {0, 8, 0, 0x8000},
+        /* packed sub-region quad: atlas UV in [0.25,0.5]x[0.5,0.75] (non-[0,1]) */
+        {0, 0, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V0},
+        {8, 0, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V0},
+        {8, 8, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V1},
+        {0, 8, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V1},
     };
     memcpy(out_blob + UI_ATLAS_VERTEX_OFFSET, verts, sizeof verts);
 
@@ -158,6 +192,13 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         0,
         4,
         5,
+        /* packed quad: 0,1,2 + 0,2,3 */
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
     };
     memcpy(out_blob + UI_ATLAS_INDEX_OFFSET, indices, sizeof indices);
 }
@@ -242,6 +283,7 @@ minimal_ui_atlas_t minimal_ui_atlas_create(void) {
     out.handle = atlas;
     out.white_region_idx = 0;
     out.polygon_region_idx = 1;
+    out.packed_region_idx = 2;
     return out;
 }
 

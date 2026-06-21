@@ -76,12 +76,17 @@ int main(int argc, char *argv[]) {
     nt_builder_set_threads_auto(ctx);
     // #endregion
 
-    // #region shaders (sprite for UI rects + Slug for text)
+    // #region shaders (sprite for UI rects + Slug for text + radial SDF widgets)
     nt_builder_add_shader(ctx, "assets/shaders/sprite.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 4 (sprite + slug_text)\n");
+    /* Radial: shared extended-layout VS (a_radial @ loc 4) + the flat SDF FS
+     * (nt_ui_radial) + the textured reveal FS (nt_ui_radial_image). */
+    nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
+    nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 7 (sprite + slug_text + radial vs/fs + radial_image fs)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel
@@ -224,6 +229,56 @@ int main(int argc, char *argv[]) {
     opts.name = "caret";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/caret.png", &opts);
     (void)printf("  Atlas icons (tintable): chevron_down 16x16, arrow_right 12x12, caret 14x10\n");
+
+    nt_builder_end_atlas(ctx);
+    // #endregion
+
+    // #region atlas: radial-image art (single full-bleed sprite -> UV spans [0,1])
+    /* The reveal now centers on ANY rectangular region (region-local UV via a_uvrect), so a
+     * packed sub-region works too — the showcase proves that on the shared atlas's bunny. This
+     * DEDICATED full-bleed single-sprite atlas (no padding/margin/extrude, non-POT, RECT,
+     * fully-OPAQUE so the trimmer strips nothing) is kept for the A/B [0,1]-UV reference cell. */
+    nt_atlas_opts_t radial_opts = nt_atlas_opts_defaults();
+    radial_opts.shape = NT_ATLAS_SHAPE_RECT;
+    radial_opts.allow_transform = false;
+    radial_opts.padding = 0;
+    radial_opts.margin = 0;
+    radial_opts.extrude = 0;
+    radial_opts.power_of_two = false; /* tight page == sprite dims -> UV [0,1] */
+    radial_opts.premultiplied = true;
+    radial_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    radial_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    radial_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    radial_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    radial_opts.gen_mipmaps = false;
+
+    nt_builder_begin_atlas(ctx, "ui_showcase_radial_art", &radial_opts);
+
+    /* Procedural 128x128 opaque test image: a 2-axis color gradient with a darker grid
+     * overlay so the four reveal modes (desaturate/dim/hide/tint) and the swept boundary
+     * are all clearly legible. Fully opaque (alpha 255) so nothing is trimmed. */
+    enum { RADIAL_ART_DIM = 128 };
+    static uint8_t radial_art[RADIAL_ART_DIM * RADIAL_ART_DIM * 4];
+    for (int y = 0; y < RADIAL_ART_DIM; ++y) {
+        for (int x = 0; x < RADIAL_ART_DIM; ++x) {
+            uint8_t *px = &radial_art[(((size_t)y * RADIAL_ART_DIM) + (size_t)x) * 4U];
+            uint8_t rr = (uint8_t)((x * 255) / (RADIAL_ART_DIM - 1));
+            uint8_t gg = (uint8_t)((y * 255) / (RADIAL_ART_DIM - 1));
+            uint8_t bb = (uint8_t)(255 - ((x * 255) / (RADIAL_ART_DIM - 1)));
+            /* 16px grid lines darken the swatch so reveal composites read clearly. */
+            bool grid = ((x % 16) == 0) || ((y % 16) == 0);
+            px[0] = grid ? (uint8_t)(rr / 3) : rr;
+            px[1] = grid ? (uint8_t)(gg / 3) : gg;
+            px[2] = grid ? (uint8_t)(bb / 3) : bb;
+            px[3] = 255;
+        }
+    }
+    nt_atlas_sprite_opts_t radial_sprite = nt_atlas_sprite_opts_defaults();
+    radial_sprite.name = "radial_art";
+    radial_sprite.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
+    radial_sprite.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
+    nt_builder_atlas_add_raw(ctx, radial_art, RADIAL_ART_DIM, RADIAL_ART_DIM, &radial_sprite);
+    (void)printf("  Atlas 'ui_showcase_radial_art': radial_art %dx%d (full-bleed, UV [0,1])\n", RADIAL_ART_DIM, RADIAL_ART_DIM);
 
     nt_builder_end_atlas(ctx);
     // #endregion

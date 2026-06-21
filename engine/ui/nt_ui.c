@@ -3,6 +3,7 @@
 #include "atlas/nt_atlas.h"
 #include "core/nt_builtins.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -182,6 +183,9 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t hit_gen_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_generation) * desc->max_elements, NT_UI_CACHE_LINE);
     /* Double-buffered interactive registry (always-on). */
     const size_t interactive_bytes = NT_ALIGN_UP(sizeof(nt_ui_interactive_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    /* Per-id retained-state pool (always-on); cap = resolved state_slots. */
+    const uint32_t state_slots = desc->state_slots ? desc->state_slots : (uint32_t)NT_UI_STATE_SLOTS;
+    const size_t state_pool_bytes = NT_ALIGN_UP(sizeof(nt_ui_state_cell_t) * state_slots, NT_UI_CACHE_LINE);
 #if NT_UI_DEBUG_TOOLS
     const size_t hit_layer_bytes = NT_ALIGN_UP(sizeof(*((nt_ui_context_t *)0)->hit_layer) * desc->max_elements, NT_UI_CACHE_LINE);
     const uint32_t widget_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
@@ -197,7 +201,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t probe_scratch_bytes = 0U;
 #endif
     return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + tree_baked_bytes + tree_root_bytes + tree_dfs_bytes + hit_baked_bytes + hit_clip_bytes + hit_gen_bytes +
-           (2U * interactive_bytes) + hit_layer_bytes + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + probe_scratch_bytes + clay_bytes;
+           (2U * interactive_bytes) + state_pool_bytes + hit_layer_bytes + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + probe_scratch_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -255,6 +259,18 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->interactive_prev = (nt_ui_interactive_t *)((char *)arena + after_tree);
     ctx->interactive_cur = (nt_ui_interactive_t *)((char *)arena + after_tree + interactive_bytes);
     const size_t after_interactive = after_tree + (2U * interactive_bytes);
+
+    /* Per-id retained-state pool: resolve desc overrides, assert pow2 + valid probe, carve + zero. */
+    const uint32_t state_slots = desc->state_slots ? desc->state_slots : (uint32_t)NT_UI_STATE_SLOTS;
+    const uint32_t state_probe_max = desc->state_probe_max ? desc->state_probe_max : (uint32_t)NT_UI_STATE_PROBE_MAX;
+    NT_ASSERT((state_slots & (state_slots - 1U)) == 0U && "nt_ui_create_context: state_slots must be power-of-2 (slot = id & (N-1))");
+    NT_ASSERT(state_probe_max >= 1U && state_probe_max <= state_slots && "nt_ui_create_context: state_probe_max must be in [1, state_slots]");
+    const size_t state_pool_bytes = NT_ALIGN_UP(sizeof(nt_ui_state_cell_t) * state_slots, NT_UI_CACHE_LINE);
+    ctx->state_pool = (nt_ui_state_cell_t *)((char *)arena + after_interactive);
+    ctx->state_slots = state_slots;
+    ctx->state_probe_max = state_probe_max;
+    memset(ctx->state_pool, 0, sizeof(nt_ui_state_cell_t) * state_slots);
+    const size_t after_state = after_interactive + state_pool_bytes;
 #if NT_UI_DEBUG_TOOLS
     ctx->widget_registry_cap = nt_ui_next_pow2_u32(desc->max_elements * 2U);
     ctx->widget_registry_mask = ctx->widget_registry_cap - 1U;
@@ -264,14 +280,14 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t widget_registry_bytes = NT_ALIGN_UP(sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap, NT_UI_CACHE_LINE);
     const size_t debug_zones_bytes = NT_ALIGN_UP(sizeof(nt_ui_debug_zone_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t inspector_collapsed_bytes = NT_ALIGN_UP(sizeof(uint32_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_interactive);
-    ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_interactive + widget_registry_bytes);
-    ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_interactive + widget_registry_bytes + debug_zones_bytes);
-    ctx->probe_scratch = (nt_ui_probe_node_t *)((char *)arena + after_interactive + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes);
+    ctx->widget_registry = (nt_ui_widget_slot_t *)((char *)arena + after_state);
+    ctx->debug_zones = (nt_ui_debug_zone_t *)((char *)arena + after_state + widget_registry_bytes);
+    ctx->inspector_collapsed_ids = (uint32_t *)((char *)arena + after_state + widget_registry_bytes + debug_zones_bytes);
+    ctx->probe_scratch = (nt_ui_probe_node_t *)((char *)arena + after_state + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes);
     const size_t probe_scratch_bytes = NT_ALIGN_UP(sizeof(nt_ui_probe_node_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    const size_t after_debug = after_interactive + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + probe_scratch_bytes;
+    const size_t after_debug = after_state + widget_registry_bytes + debug_zones_bytes + inspector_collapsed_bytes + probe_scratch_bytes;
 #else
-    const size_t after_debug = after_interactive;
+    const size_t after_debug = after_state;
 #endif
     void *clay_mem = (char *)arena + after_debug;
     const size_t clay_size = arena_size - after_debug;
@@ -1165,6 +1181,95 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     const float origin_y = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : r->origin_y;
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
+
+/* Float-offset (i*4) of attr `name_hash` in the block, or -1 if absent.
+ * Linear scan: attr_map_count <= 8. */
+static int custom_attr_float_offset(const nt_material_info_t *mi, uint32_t name_hash) {
+    for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
+        if (mi->attr_map_hashes[ai] == name_hash) {
+            return (int)ai * 4;
+        }
+    }
+    return -1;
+}
+
+/* Write a_uvrect = region min/max atlas UV (0..1) at `off` so a custom-attr fs
+ * can re-center over any rectangular packed sub-region. */
+static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out, int off) {
+    nt_atlas_region_handles_t rh;
+    nt_atlas_get_region_handles(atlas, region_index, &rh);
+    float u0 = 1.0F;
+    float v0 = 1.0F;
+    float u1 = 0.0F;
+    float v1 = 0.0F;
+    for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
+        const float u = (float)rh.raw_vertices[vi].atlas_u / 65535.0F;
+        const float v = (float)rh.raw_vertices[vi].atlas_v / 65535.0F;
+        u0 = (u < u0) ? u : u0;
+        v0 = (v < v0) ? v : v0;
+        u1 = (u > u1) ? u : u1;
+        v1 = (v > v1) ? v : v1;
+    }
+    out[off] = u0;
+    out[off + 1] = v0;
+    out[off + 2] = u1;
+    out[off + 3] = v1;
+}
+
+/* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
+ * by attr_map offset (attr_map = single source of truth, no magic slots). Returns
+ * float count. */
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]) {
+    NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
+    const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
+    memcpy(out, blk->custom_attrs, blk->custom_bytes);
+
+    const nt_material_info_t *mi = nt_material_get_info(p->material);
+    NT_ASSERT(mi != NULL && mi->ready && "nt_ui custom: material must be ready");
+    /* Cache the injection-attr name hashes once (runtime hash; same fn the material used). */
+    static uint32_t s_hash_layout;
+    static uint32_t s_hash_uvrect;
+    if (s_hash_layout == 0U) {
+        s_hash_layout = nt_hash32_str("a_layout").value;
+        s_hash_uvrect = nt_hash32_str("a_uvrect").value;
+    }
+
+    /* a_layout = {aspect = w/h, bbox_width_px, bbox_height_px, 0}. Bbox-derived at emit
+     * so the shape stays correct under GROW/FIT/PERCENT/null-decl, not just FIXED w/h.
+     * px size opens rounded/outline/shadow/blur effects to wrappers. */
+    const int lo = custom_attr_float_offset(mi, s_hash_layout);
+    if (lo >= 0) {
+        out[lo] = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
+        out[lo + 1] = bb->width;
+        out[lo + 2] = bb->height;
+        out[lo + 3] = 0.0F;
+    }
+    const int uo = custom_attr_float_offset(mi, s_hash_uvrect);
+    if (uo >= 0) {
+        inject_uvrect(p->atlas, p->region_index, out, uo);
+    }
+    return fcount;
+}
+
+/* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
+ *
+ * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
+ * quad's base vertex index to be a multiple of 4. This holds because GEOMETRY-mode
+ * widgets use a DISTINCT material — flushed on material change, which resets the
+ * staging vertex_count to 0 — and emit EXACTLY 4 verts per widget. Emitting
+ * non-4-vertex geometry into that material, or sharing it with other geometry,
+ * would break the corner derivation. */
+static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
+    const Clay_BoundingBox bb = c->boundingBox;
+    if (bb.width <= 0.0F || bb.height <= 0.0F) {
+        return;
+    }
+    /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
+     * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
+    const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
+}
 // #endregion
 
 // #region helper_emit_text
@@ -1234,6 +1339,20 @@ typedef struct {
     scissor_rect_t rect;
 } clip_cache_entry_t;
 
+/* Sprite-pipeline bind state. dirty — a barrier closed the open cmd → next dispatch
+ * rebinds. last_mat_id — skip redundant set_material across a same-material run; the
+ * no-op holds only while a cmd is open, so a barrier resets it to 0. */
+typedef struct {
+    bool dirty;
+    uint32_t last_mat_id;
+} nt_ui_sprite_bind_t;
+
+/* Mark a barrier: cmd closed (flush) → force the next dispatch to rebind. */
+static inline void sprite_bind_barrier(nt_ui_sprite_bind_t *b) {
+    b->dirty = true;
+    b->last_mat_id = 0U;
+}
+
 /* DIRECT mode: viewport is GL physical, Y-flip inside the viewport rect.
  * SCALED mode: viewport is logical; scale+shift to physical, Y-flip against fb height. */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
@@ -1261,8 +1380,7 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty, clip_cache_entry_t *clip_cache,
-                         int *clip_cache_len) {
+static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, nt_ui_sprite_bind_t *bind, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
     /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
     if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
@@ -1341,7 +1459,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     /* Flush BEFORE scissor switch so staging keeps prior clip. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
-    *sprite_pipeline_dirty = true;
+    sprite_bind_barrier(bind);
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
@@ -1349,11 +1467,11 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     nt_gfx_set_scissor_enabled(true);
 }
 
-static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, nt_ui_sprite_bind_t *bind) {
     NT_ASSERT(*depth > 0 && "scissor underflow");
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
-    *sprite_pipeline_dirty = true;
+    sprite_bind_barrier(bind);
     (*depth)--;
     if (*depth == 0) {
         nt_gfx_set_scissor_enabled(false);
@@ -1404,7 +1522,7 @@ typedef struct {
 } nt_ui_walk_counters_t;
 
 /* type=NONE = engine anchor (skip silently); type=GAME = invoke handler. */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16], float opacity, bool *sprite_pipeline_dirty) {
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16], float opacity, nt_ui_sprite_bind_t *bind) {
     const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)c->renderData.custom.customData;
     NT_ASSERT(cd != NULL && "CUSTOM command must have nt_ui_custom_data_t");
     if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
@@ -1412,7 +1530,8 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     }
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
-    *sprite_pipeline_dirty = true;
+    /* Handler binds its OWN material; reset the cache so the next dispatch rebinds. */
+    sprite_bind_barrier(bind);
     if (ctx->custom_fn != NULL) {
         nt_ui_custom_frame_t frame;
         frame.clay_cmd = (const void *)c;
@@ -1480,14 +1599,20 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 }
 #endif
 
-/* Drain pending text, lazy-rebind sprite if a prior text/scissor/custom closed it. */
-static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) {
+/* desired = ctx->sprite_material or a per-element override (radial reveal). Skip
+ * set_material (does get_info+validation even on its no-op) across a same-material run;
+ * a barrier (dirty) or material switch rebinds. The text flush is a DIFFERENT (TEXT)
+ * pipeline — it never closes the sprite cmd, so can't invalidate the cache. */
+static inline void prep_sprite_dispatch_mat(nt_material_t desired, nt_ui_sprite_bind_t *bind) {
     nt_text_renderer_flush();
-    if (*sprite_pipeline_dirty) {
-        nt_sprite_renderer_set_material(ctx->sprite_material);
-        *sprite_pipeline_dirty = false;
+    if (desired.id != bind->last_mat_id || bind->dirty) {
+        nt_sprite_renderer_set_material(desired);
+        bind->last_mat_id = desired.id;
     }
+    bind->dirty = false;
 }
+
+static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, nt_ui_sprite_bind_t *bind) { prep_sprite_dispatch_mat(ctx->sprite_material, bind); }
 
 static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
     out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
@@ -1528,7 +1653,7 @@ static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierar
  * mapping, and the custom handler / sprite renderer composes view_proj × world_mat4 as needed.
  * The closed-form below assumes ws->m is affine (row3 = (0,0,0,1)) — guaranteed by compose_transform_level. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
+static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, nt_ui_sprite_bind_t *bind,
                              nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters, bool force_screen_space, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
@@ -1553,7 +1678,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
         counters->rect_command_count++;
-        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
+        prep_sprite_dispatch(ctx, bind);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
         col = apply_opacity(col, ws->accum_opacity);
@@ -1562,7 +1687,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         counters->border_command_count++;
-        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
+        prep_sprite_dispatch(ctx, bind);
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.border.color.a = (float)lrintf(local.renderData.border.color.a * ws->accum_opacity);
@@ -1572,7 +1697,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         counters->text_command_count++;
         nt_sprite_renderer_flush();
-        *sprite_pipeline_dirty = true;
+        sprite_bind_barrier(bind);
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
@@ -1581,7 +1706,12 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         counters->image_command_count++;
-        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
+        /* Per-element material override (radial reveal): .id==0 = base material.
+         * Routed through prep so a shared override batches and the base<->override
+         * boundary flushes exactly once. */
+        const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+        const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
+        prep_sprite_dispatch_mat(img_mat, bind);
         Clay_RenderCommand local = *c;
         if (ws->accum_opacity < 1.0F) {
             Clay_Color tint = local.renderData.image.backgroundColor;
@@ -1594,6 +1724,22 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
+        /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
+         * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
+        if (ip != NULL && ip->custom != NULL) {
+            float blk[16];
+            const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, blk);
+            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
+            if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
+                const Clay_Color rt = local.renderData.image.backgroundColor;
+                const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
+                const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
+                emit_custom_geometry(ctx, &local, rcol, world_mat4);
+                return;
+            }
+            /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
+             * honored), baking the bound block across all verts. */
+        }
         emit_image(&local, world_mat4);
         return;
     }
@@ -1601,7 +1747,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         if (force_screen_space) {
-            scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty, clip_cache, clip_cache_len);
+            scissor_push(&local, scissor_stack, depth, target, bind, clip_cache, clip_cache_len);
             if ((uint32_t)*depth > counters->max_scissor_depth) {
                 counters->max_scissor_depth = (uint32_t)*depth;
             }
@@ -1633,18 +1779,18 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         /* scissor_push reads Clay-Y-down and flips internally — convert back. */
         const float clay_top_y = vy + vh - mx_y;
         local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = clay_top_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
-        scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty, clip_cache, clip_cache_len);
+        scissor_push(&local, scissor_stack, depth, target, bind, clip_cache, clip_cache_len);
         if ((uint32_t)*depth > counters->max_scissor_depth) {
             counters->max_scissor_depth = (uint32_t)*depth;
         }
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
-        scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
+        scissor_pop(scissor_stack, depth, target, bind);
         return;
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
         /* Handler owns the transform math (LAYOUT bbox + world_mat4 + opacity passed through). */
-        emit_custom(ctx, c, world_mat4, ws->accum_opacity, sprite_pipeline_dirty);
+        emit_custom(ctx, c, world_mat4, ws->accum_opacity, bind);
         return;
     }
 }
@@ -1770,7 +1916,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    bool sprite_pipeline_dirty = false;
+    /* Seed the cache with the just-bound base material so the first base-material
+     * dispatch correctly no-ops (cmd already open); dirty=false matches that open cmd. */
+    nt_ui_sprite_bind_t bind = {.dirty = false, .last_mat_id = ctx->sprite_material.id};
     // #endregion
 
     // #region segment-scan + layer-dispatch
@@ -1800,7 +1948,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         }
         if (!is_segmentable(c->commandType)) {
             if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
-                dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
+                dispatch_command(ctx, c, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                 ++i;
                 continue;
             }
@@ -1815,7 +1963,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             memcpy(ws.m, b.m, sizeof ws.m);
             ws.accum_opacity = b.opacity;
             ws.hierarchy_depth = b.hierarchy_depth;
-            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
             ++i;
             continue;
         }
@@ -1863,7 +2011,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
                         memcpy(ws.m, b.m, sizeof ws.m);
                         ws.accum_opacity = b.opacity;
                         ws.hierarchy_depth = b.hierarchy_depth;
-                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                     }
                 }
             }
@@ -2731,20 +2879,19 @@ static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_e
         g->long_fired = 0U;
     }
 
-    if (e->held && g->press_live != 0U && long_press_secs > 0.0F) {
-        const float dx = pos_x - g->origin_x;
-        const float dy = pos_y - g->origin_y;
-        const bool moved = (dx * dx + dy * dy) > (radius * radius);
-        if (moved) {
-            g->press_live = 0U; /* a drag cancels the long-press candidate AND resets hold_progress */
-        } else if (g->long_fired == 0U && (g->clock - g->press_clock) >= long_press_secs) {
-            e->long_pressed = true;
-            g->long_fired = 1U; /* one-shot per hold */
-        }
+    /* Leaving the widget's hitbox (still pressed but no longer hovered) cancels the hold;
+     * an in-box jitter does NOT — the candidate tracks the hitbox, not a move radius
+     * (move_radius_px now gates double-click only). */
+    if (g->press_live != 0U && e->pressed && !e->held) {
+        g->press_live = 0U; /* dragged outside the hitbox -> reset long-press candidate + hold_progress */
+    }
+    if (e->held && g->press_live != 0U && long_press_secs > 0.0F && g->long_fired == 0U && (g->clock - g->press_clock) >= long_press_secs) {
+        e->long_pressed = true;
+        g->long_fired = 1U; /* one-shot per hold */
     }
 
     /* Linear hold_progress: only while the press candidate is live AND over the widget. press_live==0
-     * (drag-cancel / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
+     * (left hitbox / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
     if (g->press_live != 0U && e->held && long_press_secs > 0.0F) {
         e->hold_progress = nt_ui_clampf((g->clock - g->press_clock) / long_press_secs, 0.0F, 1.0F);
     }

@@ -13,10 +13,11 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
 
     /* Two passes over the window: clear() leaves holes mid-chain, so the id must be searched
      * in the FULL window before claiming an earlier hole (else one id lands in two cells). */
-    const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
+    const uint32_t mask = ctx->state_slots - 1U;
+    const uint32_t base = id & mask;
     nt_ui_state_cell_t *first_empty = NULL;
-    for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
-        nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
+    for (uint32_t k = 0; k < ctx->state_probe_max; ++k) {
+        nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & mask];
         if (c->id == id) {
             NT_ASSERT(c->size == size && "nt_ui_state: id reused with a different size (two widgets colliding on one id?)");
             NT_ASSERT(c->tag == tag && "nt_ui_state: id reused by a different widget tag (two widgets colliding on one id)");
@@ -33,8 +34,8 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
         memset(first_empty->payload, 0, sizeof first_empty->payload);
         return first_empty->payload;
     }
-    /* No eviction: the game clears on screen close or raises NT_UI_STATE_SLOTS. */
-    NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise NT_UI_STATE_SLOTS");
+    /* No eviction: the game clears on screen close or raises state_slots / state_probe_max. */
+    NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise state_slots/state_probe_max");
     return NULL;
 }
 
@@ -44,9 +45,10 @@ void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id) {
         return NULL;
     }
     /* Full-window scan — clear() leaves holes mid-chain, an early empty does NOT mean absent. */
-    const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
-    for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
-        nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
+    const uint32_t mask = ctx->state_slots - 1U;
+    const uint32_t base = id & mask;
+    for (uint32_t k = 0; k < ctx->state_probe_max; ++k) {
+        nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & mask];
         if (c->id == id) {
             return c->payload;
         }
@@ -59,9 +61,10 @@ bool nt_ui_state_has_tag(const nt_ui_context_t *ctx, uint32_t id, uint32_t tag) 
     if (id == 0U) {
         return false;
     }
-    const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
-    for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
-        const nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
+    const uint32_t mask = ctx->state_slots - 1U;
+    const uint32_t base = id & mask;
+    for (uint32_t k = 0; k < ctx->state_probe_max; ++k) {
+        const nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & mask];
         if (c->id == id) {
             return c->tag == tag;
         }
@@ -74,9 +77,10 @@ void nt_ui_state_clear(nt_ui_context_t *ctx, uint32_t id) {
     if (id == 0U) {
         return; /* no-op */
     }
-    const uint32_t base = id & (uint32_t)(NT_UI_STATE_SLOTS - 1);
-    for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
-        nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & (uint32_t)(NT_UI_STATE_SLOTS - 1)];
+    const uint32_t mask = ctx->state_slots - 1U;
+    const uint32_t base = id & mask;
+    for (uint32_t k = 0; k < ctx->state_probe_max; ++k) {
+        nt_ui_state_cell_t *c = &ctx->state_pool[(base + k) & mask];
         if (c->id == id) {
             /* Leave payload bytes — next create zeroes them. */
             c->id = 0U;
@@ -89,7 +93,7 @@ void nt_ui_state_clear(nt_ui_context_t *ctx, uint32_t id) {
 
 void nt_ui_state_clear_all(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_state_clear_all: ctx must be non-NULL");
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_STATE_SLOTS; ++i) {
+    for (uint32_t i = 0; i < ctx->state_slots; ++i) {
         ctx->state_pool[i].id = 0U;
         ctx->state_pool[i].size = 0U;
         ctx->state_pool[i].tag = 0U;
@@ -99,7 +103,7 @@ void nt_ui_state_clear_all(nt_ui_context_t *ctx) {
 uint32_t nt_ui_state_used_slots(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_state_used_slots: ctx must be non-NULL");
     uint32_t n = 0;
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_STATE_SLOTS; ++i) {
+    for (uint32_t i = 0; i < ctx->state_slots; ++i) {
         if (ctx->state_pool[i].id != 0U) {
             ++n;
         }
@@ -110,10 +114,15 @@ uint32_t nt_ui_state_used_slots(const nt_ui_context_t *ctx) {
 uint32_t nt_ui_state_used_bytes(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_state_used_bytes: ctx must be non-NULL");
     uint32_t bytes = 0;
-    for (uint32_t i = 0; i < (uint32_t)NT_UI_STATE_SLOTS; ++i) {
+    for (uint32_t i = 0; i < ctx->state_slots; ++i) {
         if (ctx->state_pool[i].id != 0U) {
             bytes += ctx->state_pool[i].size;
         }
     }
     return bytes;
+}
+
+uint32_t nt_ui_state_slots(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_state_slots: ctx must be non-NULL");
+    return ctx->state_slots;
 }

@@ -156,13 +156,15 @@ static void test_assert_id_zero(void) { NT_TEST_EXPECT_ASSERT((void)nt_ui_state(
 static void test_assert_oversize(void) { NT_TEST_EXPECT_ASSERT((void)nt_ui_state(s_fx.ctx, 0xBBBBU, NT_UI_STATE_PAYLOAD_MAX + 1U, T_TAG)); }
 
 /* Fill the probe chain for one base bucket, then one more create -> overflow assert
- * (no LRU eviction). PROBE_MAX+1 ids that all hash to the same base. */
+ * (NON-evicting, fail-fast). state_probe_max + 1 ids that all hash to the same base. */
 static void test_assert_probe_overflow(void) {
     const uint32_t base = 3U;
-    for (uint32_t k = 0; k < NT_UI_STATE_PROBE_MAX; ++k) {
-        (void)nt_ui_state(s_fx.ctx, base + (k * NT_UI_STATE_SLOTS), 8U, T_TAG);
+    const uint32_t slots = s_fx.ctx->state_slots;
+    const uint32_t probe = s_fx.ctx->state_probe_max;
+    for (uint32_t k = 0; k < probe; ++k) {
+        (void)nt_ui_state(s_fx.ctx, base + (k * slots), 8U, T_TAG);
     }
-    const uint32_t one_too_many = base + (NT_UI_STATE_PROBE_MAX * NT_UI_STATE_SLOTS);
+    const uint32_t one_too_many = base + (probe * slots);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_state(s_fx.ctx, one_too_many, 8U, T_TAG));
 }
 

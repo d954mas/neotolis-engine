@@ -323,6 +323,61 @@ static nt_material_t create_test_material(void) {
     return mat;
 }
 
+/* ---- Helper: material declaring a custom per-vertex attr_map ----
+ *
+ * Shares ONE vs/fs pair across calls so the only pipeline-key axis that varies
+ * is the vertex layout — this isolates the layout discriminator: a base material
+ * and an attr_map material that differ ONLY in attr_map must still resolve to two
+ * distinct pipelines, proving the layout is folded into the key.
+ *
+ * loc==0 → no attr_map (plain 20B base). loc>0 → one custom FLOAT4 attr
+ * "a_radial" bound to that GL location. */
+/* Shared shader handles for the radial helper — reset to {0} in setUp each test
+ * (subsystems are re-init'd per test, so cached handles cannot persist). */
+static nt_resource_t s_radial_shared_vs;
+static nt_resource_t s_radial_shared_fs;
+
+static nt_material_t create_radial_test_material(const char *stream_name, uint8_t loc) {
+    if (s_radial_shared_vs.id == 0) {
+        nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "radial_vs"});
+        nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "radial_fs"});
+        char vs_name[64];
+        char fs_name[64];
+        char pack_name[64];
+        (void)snprintf(vs_name, sizeof(vs_name), "radial_shared_vs_%u", s_vpack_counter);
+        (void)snprintf(fs_name, sizeof(fs_name), "radial_shared_fs_%u", s_vpack_counter);
+        (void)snprintf(pack_name, sizeof(pack_name), "radial_shared_pack_%u", s_vpack_counter++);
+        nt_hash32_t pid = nt_hash32_str(pack_name);
+        nt_hash64_t vs_rid = nt_hash64_str(vs_name);
+        nt_hash64_t fs_rid = nt_hash64_str(fs_name);
+        nt_resource_create_pack(pid, 0);
+        nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id);
+        nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id);
+        s_radial_shared_vs = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
+        s_radial_shared_fs = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
+        nt_resource_step();
+    }
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.vs = s_radial_shared_vs;
+    desc.fs = s_radial_shared_fs;
+    desc.depth_test = false;
+    desc.depth_write = false;
+    desc.cull_mode = NT_CULL_NONE;
+    desc.color_mode = NT_COLOR_MODE_NONE;
+    desc.label = "radial_test_material";
+    if (loc != 0) {
+        desc.attr_map[0].stream_name = stream_name;
+        desc.attr_map[0].location = loc;
+        desc.attr_map_count = 1;
+    }
+
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+    return mat;
+}
+
 /* ---- Helper: build a fully-equipped sprite entity ---- */
 
 static nt_entity_t create_sprite_entity(nt_resource_t atlas, uint64_t region_hash, nt_material_t mat) {
@@ -356,6 +411,8 @@ void setUp(void) {
     memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_atlas_res = NT_RESOURCE_INVALID;
     s_vpack_counter = 0;
+    s_radial_shared_vs = NT_RESOURCE_INVALID;
+    s_radial_shared_fs = NT_RESOURCE_INVALID;
 
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
@@ -570,6 +627,96 @@ void test_sprite_renderer_polygon_emit(void) {
     TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(12, nt_sprite_renderer_test_last_emit_index_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+}
+
+/* ==== radial custom per-vertex attribute capability ==== */
+
+/* A material declaring attr_map_count>0 builds an EXTENDED layout:
+ * the verbatim 20B base (pos@0/tex@12/color@16) PLUS the declared custom attr
+ * appended at offset 20, with its GL location pulled from attr_map (NOT
+ * hardcoded). A plain material keeps the verbatim 20B base. */
+void test_sprite_renderer_extended_layout_from_attr_map(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xA6ULL);
+
+    /* Plain material — base 20B layout, 3 attrs. */
+    nt_material_t mat_base = create_radial_test_material(NULL, 0);
+    nt_sprite_renderer_set_material(mat_base);
+    nt_sprite_layout_info_t base_layout;
+    nt_sprite_renderer_test_layout(mat_base, &base_layout);
+    TEST_ASSERT_EQUAL_UINT32(20, base_layout.stride);
+    TEST_ASSERT_EQUAL_UINT32(3, base_layout.attr_count);
+
+    /* Custom-attr material — extended layout: base 3 attrs + a_radial @ loc 4. */
+    nt_material_t mat_radial = create_radial_test_material("a_radial", 4);
+    nt_sprite_renderer_set_material(mat_radial);
+    nt_sprite_layout_info_t ext_layout;
+    nt_sprite_renderer_test_layout(mat_radial, &ext_layout);
+
+    TEST_ASSERT_EQUAL_UINT32(4, ext_layout.attr_count);
+    TEST_ASSERT_EQUAL_UINT32(36, ext_layout.stride);
+    /* Base attrs unchanged: position @0, texcoord @12, color @16. */
+    TEST_ASSERT_EQUAL_UINT32(0, ext_layout.offsets[0]);
+    TEST_ASSERT_EQUAL_UINT32(12, ext_layout.offsets[1]);
+    TEST_ASSERT_EQUAL_UINT32(16, ext_layout.offsets[2]);
+    /* Custom attr appended at offset 20, location from attr_map (==4). */
+    TEST_ASSERT_EQUAL_UINT32(20, ext_layout.offsets[3]);
+    TEST_ASSERT_EQUAL_UINT32(4, ext_layout.locations[3]);
+}
+
+/* A base material and an attr_map material that share
+ * vs/fs/state and differ ONLY in their vertex layout must resolve to TWO
+ * distinct pipelines — proving the layout discriminator is folded into the
+ * cache key (the base must never alias the extended pipeline). */
+void test_sprite_renderer_layout_in_pipeline_key(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xA7ULL);
+
+    nt_material_t mat_base = create_radial_test_material(NULL, 0);
+    nt_material_t mat_radial = create_radial_test_material("a_radial", 4);
+
+    nt_sprite_renderer_set_material(mat_base);
+    nt_sprite_renderer_set_material(mat_radial);
+
+    /* Same vs/fs/state, different layout → must NOT collide. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
+}
+
+/* The custom-attr emit path bakes the per-widget float block into
+ * EVERY vertex it emits (like color), into a separate byte-staging buffer at
+ * the extended stride — read back via the radial test accessor. */
+void test_sprite_renderer_custom_attr_emit_bakes_per_vertex(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xA8ULL);
+    nt_material_t mat_radial = create_radial_test_material("a_radial", 4);
+
+    nt_sprite_renderer_set_material(mat_radial);
+
+    const float radial[4] = {1.5F, 2.25F, 0.5F, 1.75F};
+    nt_sprite_renderer_set_custom_attrs(radial, (uint8_t)sizeof(radial));
+
+    /* Emit a quad against the white/rect region — 4 verts, 6 indices. */
+    const float positions[4][2] = {{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}};
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    uint32_t region_index = nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH);
+    nt_sprite_renderer_emit_geometry(s_atlas_res, region_index, positions, 4, idx, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU);
+
+    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
+    /* Unity is built with UNITY_EXCLUDE_FLOAT — these are exact bit-copies of
+     * the input block, so an exact float compare via fabsf tolerance is fine. */
+    for (uint32_t v = 0; v < 4; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        for (uint8_t c = 0; c < 4; c++) {
+            TEST_ASSERT_TRUE_MESSAGE(fabsf(out[c] - radial[c]) < 1e-6F, "radial attr not baked per-vertex");
+        }
+    }
 }
 
 /* ---- Test: FLIP_X / FLIP_Y mirror around the region pivot ---- */
@@ -947,6 +1094,9 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_key_atlas_change);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
+    RUN_TEST(test_sprite_renderer_extended_layout_from_attr_map);
+    RUN_TEST(test_sprite_renderer_layout_in_pipeline_key);
+    RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);

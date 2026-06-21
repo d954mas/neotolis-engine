@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (15 entries)
+## Tabs (16 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -40,21 +40,27 @@ lighten and writes the index on click).
 10. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
     `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
-11. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+11. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
+    looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
+    `hold_progress`, ring + oval shape variants, the **four reveal modes**
+    (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
+    batched grid** that proves N radials sharing one material stay one draw call;
+    see the **Radial controls** + **Radial visual-QA protocol** below.
+12. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
     (`nt_ui_combo_preview_begin`/`end`).
-12. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+13. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-13. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+14. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
     `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
     rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
     nested **submenu**, and a custom `activatable=false` row whose inner button owns
     the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-14. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+15. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
-15. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+16. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -112,6 +118,40 @@ These tabs wire the interaction events + app-widgets. All widget state is
 | **Menu** — hover "More", travel diagonally into the submenu | the **submenu stays open** while the cursor aims at it, even crossing a sibling (mouse-aim triangle) |
 | **Menu** — open near the right / bottom border | per-level **edge-flip** keeps each level on screen |
 | **Menu** — Esc / click outside / arrows + Enter | Esc closes the deepest level; outside-click dismisses the whole chain; arrows navigate, Enter activates a leaf / opens a parent |
+
+## Radial controls (Radial tab)
+
+The radial widgets are **Model D**: the game owns the `fill` (a looping cooldown timer or the
+events `hold_progress`); the engine draws an SDF arc/sector/ring/oval per pixel (crisp AA, no
+vertex-pie facets) and bakes the angles into a per-vertex custom attribute so many radials batch.
+
+| Element | Behavior |
+|---------|----------|
+| **Cooldown** disc + ring | a looping timer ramps `fill` 0→1 over ~3 s; `nt_ui_radial_fill` sweeps a full turn from the top |
+| **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
+| **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
+| **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
+| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched, D-66-07) |
+
+## Radial visual-QA protocol
+
+The GL surface is **not reliably headless-capturable** here, so the radial widgets are verified
+by the **user's eyes** at the BLOCKING visual-QA gate — there is no automated screenshot
+regression. Build + run the native showcase, open the **Radial** tab, and confirm:
+
+1. **Arc/sector crispness + AA** — at the small grid cells AND the large discs the arc edge is
+   smooth, NOT a Defold-style vertex-pie of flat facets; the AA width reads consistent along the radius.
+2. **Oval shape** — the 140×80 oval sector has the correct aspect, no distortion at the angular edges.
+3. **Two-angle animation + seam** — drive the cooldown + hold radials; the 0°/360° boundary crosses
+   each quadrant with NO hairline seam or flicker as `fill` sweeps.
+4. **Four reveal modes** — desaturate / dim / hide / tint each apply ONLY to the un-swept sector;
+   the swept sector stays full color; no premultiply halos at the swept boundary.
+5. **Cooldown + hold feel** — the cooldown wedge sweeps smoothly and loops; the hold radial fills
+   with `hold_progress` and confirms (the confirm counter ticks) at the long-press threshold.
+6. **Batched scale** — the header `draw calls` readout does NOT scale with the 96-cell grid (it
+   stays at roughly the same count as without the grid); FPS stays stable.
+7. **Dark/Light parity** — press **T**; both palettes render the radial tab correctly.
+8. *(Optional)* load the wasm-debug build in a browser and confirm the radials render (WebGL2 parity).
 
 ## Visual-QA protocol
 
