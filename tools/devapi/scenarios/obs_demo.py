@@ -3,12 +3,12 @@
 
 Exercises the obs command group (log / perf / entity / resource) end-to-end against a REAL running
 examples/devapi_host over loopback TCP — the layer only a live socket proves: the host's per-frame
-nt_metrics_sample() (D-07) feeds a real window, the log ring captures real nt_log_write output, and
+nt_metrics_sample() feeds a real window, the log ring captures real nt_log_write output, and
 the L2 handlers serialize the live L1 capabilities + reject bad bot params over the wire. The
 unit/build gates cover the handlers in isolation; this UAT covers the live-host round trip.
 
   1. log.tail{n,level}            — last-N {level,domain,msg} array shape + the level filter.
-  2. perf.snapshot                — keys present; gpu_ms is null on this host (no GPU timer, D-11);
+  2. perf.snapshot                — keys present; gpu_ms is null on this host (no GPU timer);
                                     user_counters carries the host's "frames"/"cpu_ms" counters.
   3. perf.reset -> stepped run    — manual-step a window of frames so the metrics rings fill, then
      -> perf.stats               perf.stats populates the per-channel aggregate schema
@@ -144,19 +144,19 @@ def check_log_tail(client: DevApiClient) -> None:
 
 
 def check_perf_snapshot(client: DevApiClient) -> None:
-    """2. perf.snapshot exposes the live overlay view; gpu_ms is null on this host (D-11)."""
+    """2. perf.snapshot exposes the live overlay view; gpu_ms is null on this host (no GPU timer)."""
     snap = client.result("perf.snapshot")
     for k in ("fps", "frame_ms", "cpu_ms", "draw_calls", "user_counters"):
         assert k in snap, f"perf.snapshot missing key {k!r} (got {sorted(snap)})"
     assert "gpu_ms" in snap, "perf.snapshot missing the gpu_ms key"
-    assert snap["gpu_ms"] is None, f"perf.snapshot.gpu_ms is {snap['gpu_ms']!r}, expected null (no GPU timer, D-11)"
+    assert snap["gpu_ms"] is None, f"perf.snapshot.gpu_ms is {snap['gpu_ms']!r}, expected null (no GPU timer)"
     uc = snap["user_counters"]
     assert isinstance(uc, dict), f"perf.snapshot.user_counters is {uc!r}, expected an object"
     # The host (Task 1) exercises a count("frames") + count_f("cpu_ms") every frame.
     assert "frames" in uc, f"perf.snapshot.user_counters missing the host 'frames' counter (got {sorted(uc)})"
     # The host writes count_f("cpu_ms") every frame too, so it is an unconditional contract.
     assert "cpu_ms" in uc, f"perf.snapshot.user_counters missing the host 'cpu_ms' counter (got {sorted(uc)})"
-    print(f"PASS[2/5] perf.snapshot: keys present, gpu_ms is null (D-11), user_counters={sorted(uc)}.")
+    print(f"PASS[2/5] perf.snapshot: keys present, gpu_ms is null, user_counters={sorted(uc)}.")
 
 
 def check_perf_stats(client: DevApiClient) -> None:
