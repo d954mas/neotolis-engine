@@ -112,5 +112,12 @@ if(EMSCRIPTEN)
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"
+        # emcc honors only ONE -sEXPORTED_RUNTIME_METHODS / -sEXPORTED_FUNCTIONS on the CLI; the per-module
+        # INTERFACE += from nt_http (HEAPU8) and nt_clipboard (stringToNewUTF8,UTF8ToString + _free) collide
+        # and BOTH get dropped -> the clipboard paste listener aborts on Module["stringToNewUTF8"]/_free.
+        # Consolidate the full set here in one authoritative flag each so the web paste path works.
+        # UTF8ToString also feeds window.__nt; _malloc/_free back stringToNewUTF8 + the listener's free.
+        "SHELL:-sEXPORTED_RUNTIME_METHODS=ccall,HEAPU8,stringToNewUTF8,UTF8ToString"
+        "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
     )
 endif()

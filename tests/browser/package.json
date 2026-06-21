@@ -1,0 +1,12 @@
+{
+  "name": "neotolis-browser-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Headless-browser smoke tests driving the real ui_showcase web build (input keydown + clipboard paste).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.0"
+  }
+}

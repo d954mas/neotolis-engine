@@ -55,6 +55,10 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt smoke-test hooks */
+#endif
+
 #include "clay.h"
 // #endregion
 
@@ -2508,6 +2512,58 @@ static void declare_props_panel(nt_ui_context_t *ctx) {
 }
 // #endregion
 
+// #region web test hooks (window.__nt) -- web build only, never compiled native
+#ifdef __EMSCRIPTEN__
+/* Headless-browser smoke test surface (tests/browser/input.spec.ts). Exposes the bare minimum the
+ * Playwright test needs to drive the REAL keydown/paste path and read genuine state -- the input
+ * field's game-owned buffer + the walker text-command count + the field's on-canvas CSS rect (so the
+ * test clicks the real widget to focus it). Test-only; leaks no engine internals. */
+static int s_nt_ready;         /* set after the first rendered frame */
+static float s_nt_field_css_x; /* Cyrillic field center, CSS px (canvas-relative) */
+static float s_nt_field_css_y;
+static int s_nt_field_visible; /* the field was laid out this frame (Input tab active) */
+
+EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
+
+/* Pointer to the Cyrillic field's game-owned buffer (UTF-8, NUL-terminated). JS decodes it. */
+EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.input.cyrillic; }
+
+/* Walker text-command count from the last frame -- proves the typed text reached the render path. */
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
+
+EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
+EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
+EMSCRIPTEN_KEEPALIVE int nt_test_field_visible(void) { return s_nt_field_visible; }
+
+/* Select the Input tab (so the field is laid out + clickable). Index resolved by render fn, not pinned. */
+EMSCRIPTEN_KEEPALIVE void nt_test_open_input_tab(void) {
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        if (g_tabs[i].render == render_input) {
+            s_active_tab = i;
+            return;
+        }
+    }
+}
+
+/* clang-format off */
+/* Decode the field buffer pointer with the module-internal UTF8ToString (in EM_JS scope), so the test
+ * needs no -sEXPORTED_RUNTIME_METHODS export. The C getters are KEEPALIVE (auto-exported as _name). */
+EM_JS(void, nt_test_install_hooks, (void), {
+    window.__nt = {
+        get ready() { return Module['_nt_test_ready']() !== 0; },
+        input_buffer: function() { return UTF8ToString(Module['_nt_test_input_buffer']()); },
+        walk_text_cmd_count: function() { return Module['_nt_test_walk_text_cmd_count']() >>> 0; },
+        open_input_tab: function() { Module['_nt_test_open_input_tab'](); },
+        field_visible: function() { return Module['_nt_test_field_visible']() !== 0; },
+        field_css: function() {
+            return { x: Module['_nt_test_field_css_x'](), y: Module['_nt_test_field_css_y']() };
+        }
+    };
+})
+/* clang-format on */
+#endif /* __EMSCRIPTEN__ */
+// #endregion
+
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
@@ -2675,6 +2731,25 @@ static void frame(void) {
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
+
+#ifdef __EMSCRIPTEN__
+        /* Web smoke-test surface: map the Cyrillic field's logical bbox -> canvas CSS px so the
+         * Playwright test clicks the real widget (driving the genuine pointerdown->focus path). UI
+         * logical -> framebuffer px (offset + ui*scale) -> CSS px (/dpr). Clay bbox + fb are both
+         * Y-down, matching nt_input_web's css->fb map (no Y-flip). */
+        {
+            const nt_ui_bbox_t fb = nt_ui_get_bbox(s_ctx, s_id_input_cyrillic);
+            s_nt_field_visible = fb.found ? 1 : 0;
+            if (fb.found) {
+                const float dpr = (g_nt_window.dpr > 0.0F) ? g_nt_window.dpr : 1.0F;
+                const float cx_fb = scale.offset_x + (fb.x + fb.width * 0.5F) * scale.scale_x;
+                const float cy_fb = scale.offset_y + (fb.y + fb.height * 0.5F) * scale.scale_y;
+                s_nt_field_css_x = cx_fb / dpr;
+                s_nt_field_css_y = cy_fb / dpr;
+            }
+            s_nt_ready = 1;
+        }
+#endif
 
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
@@ -2891,6 +2966,10 @@ int main(int argc, char *argv[]) {
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
+#endif
+
+#ifdef __EMSCRIPTEN__
+    nt_test_install_hooks(); /* window.__nt smoke-test surface (test-only) */
 #endif
 
     nt_log_info("ui_showcase: starting (T=palette, D=inspector, Esc unfocus/quit)");
