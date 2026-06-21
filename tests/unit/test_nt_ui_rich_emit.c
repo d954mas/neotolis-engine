@@ -26,6 +26,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_rich_fx.h"
 #include "ui/nt_ui_rich_text.h"
 #include "unity.h"
 
@@ -111,7 +112,7 @@ static void frame_two_run_text(float container_w, nt_rich_align_t align) {
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_text_n(s_fx.ctx, "world", 5);
         nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich").id, NULL, &base, container_w, align, 0.0F);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich").id, NULL, &base, container_w, align, 0.0F, NULL);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -157,7 +158,7 @@ static void test_single_style_one_span_per_line(void) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "onerun", 6);
         nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich2").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich2").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -178,7 +179,7 @@ static void test_double_walk_is_deterministic(void) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "alpha beta", 10);
         nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich3").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich3").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -231,7 +232,7 @@ static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign
             nt_ui_rich_pop(s_fx.ctx);
         }
         nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_img").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_img").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -306,6 +307,113 @@ static void test_inline_image_valign_y(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(y_top, 0.0F), "TOP-aligned image sits at the line top (pen_y=0 on line 0)");
 }
 
+/* ===== Per-atom effects (FX-67-01/02) ===== */
+
+/* The wave fn's documented curve constants (mirror nt_ui_rich_fx.c). */
+#define FX_WAVE_AMP 3.0F
+#define FX_WAVE_SPEED 6.0F
+#define FX_WAVE_PHASE 0.5F
+
+/* (9) the stock wave fn returns the deterministic offset.y == A*sin(t*SPEED + idx*PHASE).
+ * Tests the fn ABI directly (headless, no walk) -- the contract the emit path folds in. */
+static void test_fx_wave_deterministic(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.25F;
+    const uint32_t idx = 3U;
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    const float expect = FX_WAVE_AMP * sinf((t * FX_WAVE_SPEED) + ((float)idx * FX_WAVE_PHASE));
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, expect), "wave offset.y == A*sin(t*SPEED + idx*PHASE)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F), "wave has no x shift");
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "wave keeps the atom visible");
+    /* At time 0 the curve is its t=0 value (headless-deterministic). */
+    const nt_ui_rich_fx_result_t z = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false);
+    TEST_ASSERT_TRUE_MESSAGE(approx(z.offset_y, FX_WAVE_AMP * sinf((float)idx * FX_WAVE_PHASE)), "wave t=0 is deterministic");
+}
+
+/* fade_in returns alpha 0 + visible=false before its window opens; alpha ramps after. */
+static void test_fx_fade_in_visibility(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    /* atom 0 at time 0: window just opening -> alpha 0 -> not visible. */
+    const nt_ui_rich_fx_result_t r0 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false);
+    TEST_ASSERT_FALSE_MESSAGE(r0.visible, "fade_in at t=0 alpha 0 -> atom skipped");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r0.color[3], 0.0F), "fade_in alpha 0 at t=0");
+    /* later: fully faded in -> visible, alpha 1. */
+    const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false);
+    TEST_ASSERT_TRUE_MESSAGE(r1.visible, "fade_in fully open -> visible");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r1.color[3], 1.0F), "fade_in alpha 1 when fully open");
+}
+
+/* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
+ * carries the effect_id; emit folds the wave offset into the image quad + the tint into a_tint. */
+static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time, nt_ui_rich_fx_fn fn_for_image) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = img_mat;
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_effect(s_fx.ctx, effect_id); /* effect on TEXT + IMAGE together (D-67-17) */
+        nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " B", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_fx").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, time, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    (void)fn_for_image;
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (11) an effect on an IMAGE run shifts the image quad (vs no effect) AND the line/box layout
+ * is identical with vs without the effect (visual-only, D-67-19). */
+static void test_fx_image_shifts_quad_visual_only(void) {
+    const nt_material_t mat = make_rich_image_material();
+
+    /* No effect: record the image quad's first-vertex y + the solved total height. */
+    frame_effected_image(mat, 0U, 0.0F, NULL);
+    float pos_noeff[3] = {0};
+    nt_sprite_renderer_test_last_emit_position(0U, pos_noeff);
+    const float total_h_noeff = nt_ui_rich_test_total_h(s_fx.ctx);
+    const float img_y_noeff = nt_ui_rich_test_image_y(s_fx.ctx);
+
+    /* Wave effect at a time whose offset.y is clearly non-zero. The image atom's fx_idx is its
+     * solved index; the quad shifts by the wave offset, but the SOLVED box y is unchanged. */
+    frame_effected_image(mat, NT_UI_RICH_FX_ID_WAVE, 0.4F, NULL);
+    float pos_eff[3] = {0};
+    nt_sprite_renderer_test_last_emit_position(0U, pos_eff);
+    const float total_h_eff = nt_ui_rich_test_total_h(s_fx.ctx);
+    const float img_y_eff = nt_ui_rich_test_image_y(s_fx.ctx);
+
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(pos_eff[1] - pos_noeff[1]) > 0.1F, "wave effect shifts the image quad y");
+    /* Visual-only: the solved layout (total height + the image's SOLVED box y) is identical. */
+    TEST_ASSERT_TRUE_MESSAGE(approx(total_h_eff, total_h_noeff), "effect does not change the solved block height (visual-only)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(img_y_eff, img_y_noeff), "effect does not change the image's solved box y (visual-only)");
+}
+
+/* (12) fade_in with alpha 0 (time 0) skips the image atom emit entirely (zero sprite verts);
+ * the layout is unchanged regardless. */
+static void test_fx_fade_in_skips_image(void) {
+    const nt_material_t mat = make_rich_image_material();
+
+    /* time 0: every atom's fade window is closed -> the image is skipped. */
+    frame_effected_image(mat, NT_UI_RICH_FX_ID_FADE_IN, 0.0F, NULL);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "fade_in t=0 skips the image atom emit");
+    /* The image's solved box is still reserved (layout unchanged) -- the solver placed it. */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_total_h(s_fx.ctx) > 0.0F, "layout still solved with the box reserved");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -316,5 +424,9 @@ int main(void) {
     RUN_TEST(test_inline_image_a_tint_lossless);
     RUN_TEST(test_inline_image_resolves_by_name);
     RUN_TEST(test_inline_image_valign_y);
+    RUN_TEST(test_fx_wave_deterministic);
+    RUN_TEST(test_fx_fade_in_visibility);
+    RUN_TEST(test_fx_image_shifts_quad_visual_only);
+    RUN_TEST(test_fx_fade_in_skips_image);
     return UNITY_END();
 }

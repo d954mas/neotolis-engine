@@ -114,6 +114,15 @@ void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id);
 void nt_ui_rich_pop(nt_ui_context_t *ctx);
 void nt_ui_rich_end(nt_ui_context_t *ctx);
 
+/* ---- Link interaction result (FX-67-03, Model D) ---- */
+/* The widget hit-tests its `<link=id>` solver rects itself (NO extra Clay element) and reports
+ * the link under the pointer + the link clicked this frame. 0 = none. Link hover gates effects
+ * (an effect reads `hovered==true` only for the hovered link's atoms). */
+typedef struct {
+    uint32_t hovered_link; /* link id under the pointer this frame (0 = none) */
+    uint32_t clicked_link; /* link id clicked (released over its rect) this frame (0 = none) */
+} nt_ui_rich_result_t;
+
 /* ---- Runtime markup parser (D-67-02; the SECOND authoring front) ---- */
 /* Parses an angular `<tag>...</tag>` + self-closing `<img=region/>` markup string into the
  * SAME run-list as the equivalent code-first builder calls, by DRIVING the shared builder
@@ -134,12 +143,14 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
  * public widget pipeline). Mirrors nt_ui_rich_text's signature with a markup string in place of
  * the code-first builder calls. */
 void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *style, const char *markup, size_t len,
-                            float container_w, nt_rich_align_t align, float time);
+                            float container_w, nt_rich_align_t align, float time, nt_ui_rich_result_t *out);
 
 /* ---- Public widget (full impl across plans 04-07) ---- */
 /* Emits the built run-list as a wrapped, baseline-aligned rich-text block under a
- * FIXED Clay element. `time` feeds per-atom effects (game owns the clock, D-67-18). */
-void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time);
+ * FIXED Clay element. `time` feeds per-atom effects (game owns the clock, D-67-18). `out` (NULL-able)
+ * receives the link hover/click result; link hover gates the per-atom effects. */
+void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time,
+                     nt_ui_rich_result_t *out);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
@@ -188,6 +199,13 @@ uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_image_block_bytes(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx);
 float nt_ui_rich_test_image_y(nt_ui_context_t *ctx);
+
+/* Link/effect probes (FX-67-01..04). The link hover/click the last call resolved + per-link rects. */
+uint32_t nt_ui_rich_test_hovered_link(nt_ui_context_t *ctx);
+uint32_t nt_ui_rich_test_clicked_link(nt_ui_context_t *ctx);
+uint32_t nt_ui_rich_test_link_rect_count(nt_ui_context_t *ctx);
+/* The solver effect_id carried by a solved atom (0 = none) -- proves effects ride the solved stream. */
+uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom);
 #endif
 // #endregion
 
