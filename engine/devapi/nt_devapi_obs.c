@@ -128,7 +128,9 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
         return false;
     }
 
-    /* Newest-first tail into a stack buffer (no heap; ring-depth bounded). */
+    /* Newest-first tail into a static buffer (no heap; ring-depth bounded).
+       INVARIANT: obs handlers must NEVER recurse into nt_devapi_submit — this static is shared across
+       the single-threaded, non-re-entrant dispatch and would be clobbered mid-serialize on recursion. */
     static nt_log_ring_entry_t s_tail[NT_LOG_RING_DEPTH];
     uint16_t got = nt_log_ring_tail(n, min_level, s_tail);
     add_log_entries(result, s_tail, got);
@@ -144,8 +146,11 @@ static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_erro
     (void)params;
     (void)err;
     (void)ud;
-    devapi_add_number(result, "fps", (double)nt_debug_overlay_get_fps());
-    devapi_add_number(result, "frame_ms", (double)nt_debug_overlay_get_cpu_ms());
+    float fps = nt_debug_overlay_get_fps();
+    devapi_add_number(result, "fps", (double)fps);
+    /* frame_ms is wall-clock frame time (1000/fps), distinct from cpu_ms. Guard fps<=0 the same way
+       nt_metrics_sample does (1000/max(fps,1e-6)) so an unfilled fps ring yields a large-but-finite value. */
+    devapi_add_number(result, "frame_ms", 1000.0 / (double)fmaxf(fps, 1e-6F));
     devapi_add_number(result, "cpu_ms", (double)nt_debug_overlay_get_cpu_ms());
     float gpu = nt_debug_overlay_get_gpu_ms();
     if (gpu < 0.0F) {
@@ -357,11 +362,17 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
         only_drawable = cJSON_IsTrue(jod);
     }
 
-    /* First pass: collect the filtered live set into a bounded index buffer so pagination + total
-       are consistent (the live set is small: nt_entity_max() <= 65535, no heap). */
+    /* First pass: collect the filtered live set into a bounded index buffer so pagination stays
+       consistent. `total` is the HONEST count of all matching live entities — it is NOT clamped to the
+       buffer size, so a paginating bot can detect the tail. The working set caps at NT_ENTITY_LIST_MAX;
+       when the real count exceeds it we surface truncated:true (the buffered prefix is still pageable).
+       Single-threaded, non-re-entrant dispatch (see invariant note above s_live). No heap. */
+    /* INVARIANT: obs handlers must NEVER recurse into nt_devapi_submit — this static working buffer is
+       shared across the single-threaded, non-re-entrant dispatch and would be clobbered mid-serialize. */
     static nt_entity_t s_live[NT_ENTITY_LIST_MAX];
     uint16_t emax = nt_entity_max();
     uint32_t total = 0;
+    uint32_t stored = 0;
     for (uint16_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e = nt_entity_at_index(idx);
         if (e.id == NT_ENTITY_INVALID.id) {
@@ -370,22 +381,22 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
         if (only_drawable && !nt_drawable_comp_has(e)) {
             continue;
         }
-        if (total < NT_ENTITY_LIST_MAX) {
-            s_live[total] = e;
+        if (stored < NT_ENTITY_LIST_MAX) {
+            s_live[stored++] = e;
         }
         total++;
     }
-    if (total > NT_ENTITY_LIST_MAX) {
-        total = NT_ENTITY_LIST_MAX; /* bounded by the index buffer; emax already caps it */
-    }
+    bool truncated = total > stored;
 
+    /* Page only over what fits in the buffer (stored); total stays honest above. */
     uint32_t begin = 0;
     uint32_t end = 0;
-    if (!resolve_page(params, total, "entity.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
+    if (!resolve_page(params, stored, "entity.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
         return false;
     }
 
     devapi_add_number(result, "total", (double)total);
+    devapi_add_bool(result, "truncated", truncated);
     cJSON *arr = cJSON_AddArrayToObject(result, "entities");
     NT_ASSERT(arr != NULL);
     for (uint32_t i = begin; i < end; i++) {
@@ -551,7 +562,11 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
         cJSON *assets = cJSON_AddArrayToObject(result, "assets");
         NT_ASSERT(assets != NULL);
         uint16_t asset_count = nt_resource_asset_count();
-        for (uint16_t i = 0; i < asset_count; i++) {
+        /* Bound the flat assets[] at the same DoS ceiling packs use (T-68-06-DOS): without this an
+           include_assets request emits up to NT_RESOURCE_MAX_ASSETS objects regardless of limit. Emit at
+           most NT_DEVAPI_OBS_LIMIT_MAX and flag assets_truncated when more exist. */
+        uint32_t emitted = 0;
+        for (uint16_t i = 0; i < asset_count && emitted < NT_DEVAPI_OBS_LIMIT_MAX; i++) {
             nt_resource_asset_info_t ai;
             if (!nt_resource_asset_info(i, &ai)) {
                 continue;
@@ -565,7 +580,10 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
             cJSON_bool added = cJSON_AddItemToArray(assets, o);
             NT_ASSERT(added);
             (void)added;
+            emitted++;
         }
+        devapi_add_number(result, "asset_total", (double)asset_count);
+        devapi_add_bool(result, "assets_truncated", asset_count > emitted);
     }
     return true;
 }
@@ -611,18 +629,18 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "entity.list",
         .group = "entity",
-        .summary = "live entities with compact fields (id/generation/enabled/position/drawable); paginated with total",
+        .summary = "live entities with compact fields (id/generation/enabled/position/drawable); paginated with honest total + truncated flag",
         .params_shape = "{offset?:number, limit?:number, only_drawable?:bool}",
-        .result_shape = "{total:number,entities:[{id,index,generation,alive,enabled,position,drawable}]}",
+        .result_shape = "{total:number,truncated:bool,entities:[{id,index,generation,alive,enabled,position,drawable}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
     {
         .method = "resource.list",
         .group = "resource",
-        .summary = "mounted packs (id/state/priority/asset_count); flat assets[] when include_assets; paginated with total",
+        .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
-        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id,type,state,pack}]}",
+        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id,type,state,pack}],asset_total?:number,assets_truncated?:bool}",
         .frame_behavior = "any",
         .side_effects = "none",
     },

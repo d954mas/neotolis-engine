@@ -211,6 +211,24 @@ static void test_perf_stats_channel_shape(void) {
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "over_budget_pct")));
     cJSON_Delete(root);
 }
+
+/* CR-01: after real per-frame sampling on a host with no GPU timer (overlay gpu_ms == -1.0F sentinel),
+   perf.stats gpu_ms must be samples:0 + null aggregates — matching perf.snapshot's gpu_ms:null, not a
+   confident avg:-1. setUp() inits the overlay (last_gpu_ms defaults to the sentinel). */
+static void test_perf_stats_gpu_sentinel_null(void) {
+    for (int i = 0; i < 5; i++) {
+        nt_metrics_sample();
+    }
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"gpu_ms\",\"cpu_ms\"]}}"));
+    cJSON *channels = cJSON_GetObjectItemCaseSensitive(result_of(root), "channels");
+    cJSON *gpu = cJSON_GetObjectItemCaseSensitive(channels, "gpu_ms");
+    TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItemCaseSensitive(gpu, "samples")->valueint);
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(gpu, "avg")));
+    /* cpu_ms DID sample, proving the frames ran (gpu was filtered, not the whole loop). */
+    cJSON *cpu = cJSON_GetObjectItemCaseSensitive(channels, "cpu_ms");
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItemCaseSensitive(cpu, "samples")->valueint);
+    cJSON_Delete(root);
+}
 #endif /* NT_METRICS_ENABLED */
 
 static void test_perf_stats_empty_window_null_aggregates(void) {
@@ -260,6 +278,8 @@ static void test_entity_list_total_and_fields(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\"}"));
     cJSON *r = result_of(root);
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint);
+    /* WR-04: truncated is always present; false when the live set fits the working buffer. */
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(r, "truncated")));
     cJSON *entities = cJSON_GetObjectItemCaseSensitive(r, "entities");
     TEST_ASSERT_TRUE(cJSON_IsArray(entities));
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(entities));
@@ -309,9 +329,13 @@ static void test_resource_list_packs(void) {
 
 static void test_resource_list_include_assets_flat(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"include_assets\":true}}"));
-    cJSON *assets = cJSON_GetObjectItemCaseSensitive(result_of(root), "assets");
+    cJSON *r = result_of(root);
+    cJSON *assets = cJSON_GetObjectItemCaseSensitive(r, "assets");
     TEST_ASSERT_NOT_NULL(assets);
     TEST_ASSERT_TRUE(cJSON_IsArray(assets));
+    /* WR-05: the flat assets[] is bounded (DoS cap); asset_total + assets_truncated report the cap. */
+    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "asset_total")));
+    TEST_ASSERT_TRUE(cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(r, "assets_truncated")));
     cJSON_Delete(root);
 }
 
@@ -333,6 +357,7 @@ int main(void) {
     RUN_TEST(test_perf_snapshot_user_counters);
 #if NT_METRICS_ENABLED
     RUN_TEST(test_perf_stats_channel_shape);
+    RUN_TEST(test_perf_stats_gpu_sentinel_null);
 #endif
     RUN_TEST(test_perf_stats_empty_window_null_aggregates);
     RUN_TEST(test_perf_stats_bad_params);
