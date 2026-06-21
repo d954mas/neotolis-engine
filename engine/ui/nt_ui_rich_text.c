@@ -583,6 +583,28 @@ static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, con
     }
 }
 
+/* Assert a literal text segment is well-formed UTF-8 (T-67-06-04): a localized/interpolated
+ * string with a corrupt byte sequence traps at parse rather than feeding raw bytes downstream.
+ * Bounded by n -- a trailing incomplete sequence (state != ACCEPT at the end) also asserts. */
+static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t cp = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        nt_utf8_decode(&state, &cp, (uint8_t)buf[i]);
+        NT_ASSERT(state != NT_UTF8_REJECT && "rich markup: invalid UTF-8 in text");
+    }
+    NT_ASSERT(state == NT_UTF8_ACCEPT && "rich markup: truncated UTF-8 sequence in text");
+}
+
+/* Flush the accumulated literal text run, validating UTF-8 first. */
+static void rich_flush_text(nt_ui_context_t *ctx, const char *buf, uint32_t *n) {
+    if (*n > 0U) {
+        rich_assert_valid_utf8(buf, *n);
+        nt_ui_rich_text_n(ctx, buf, *n);
+        *n = 0;
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- the tokenizer: text/tag/escape branches + bounded scans
 void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *markup, size_t len) {
     NT_ASSERT(ctx != NULL && "nt_ui_rich_parse: NULL ctx");
@@ -613,10 +635,7 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
             continue;
         }
         /* A '<' begins a tag. Flush any pending literal text first. */
-        if (text_n > 0U) {
-            nt_ui_rich_text_n(ctx, text_buf, text_n);
-            text_n = 0;
-        }
+        rich_flush_text(ctx, text_buf, &text_n);
         /* Find the matching '>' (bounded by len -> a non-terminating '<' asserts, never loops). */
         size_t close = i + 1U;
         while (close < len && markup[close] != '>') {
@@ -659,9 +678,7 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
         i = close + 1U;
     }
     /* Flush the trailing literal text. */
-    if (text_n > 0U) {
-        nt_ui_rich_text_n(ctx, text_buf, text_n);
-    }
+    rich_flush_text(ctx, text_buf, &text_n);
     NT_ASSERT(ts_stack.depth == 0U && "rich markup: unclosed tag(s) at end of string");
     nt_ui_rich_end(ctx);
 }

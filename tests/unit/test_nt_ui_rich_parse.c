@@ -100,11 +100,99 @@ static void test_tagset_reset(void) {
     TEST_ASSERT_FALSE(nt_ui_rich_tagset_lookup_color(&ts, h("gold"), &color));
 }
 
+/* ---- parser malformed-markup death tests (MARK-67-01) ---- */
+static void parse_lit(const char *m) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m));
+}
+
+/* (5) unclosed tag at end of string -> NT_ASSERT. */
+static void test_parse_unclosed_tag_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<b>HP")); }
+
+/* (6) mismatched close (<b>..</i>) -> NT_ASSERT. */
+static void test_parse_mismatched_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<b>HP</i>")); }
+
+/* (7) unknown CORE-shaped tag -> NT_ASSERT. */
+static void test_parse_unknown_tag_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<bogus>x</bogus>")); }
+
+/* (8) malformed hex in <color=#..> -> NT_ASSERT. */
+static void test_parse_bad_hex_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<color=#zzz>x</color>")); }
+
+/* (9) a close tag with no matching open -> NT_ASSERT. */
+static void test_parse_orphan_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("HP</b>")); }
+
+/* (10) over-deep nesting beyond the tag-stack depth cap -> NT_ASSERT before overflow. */
+static void test_parse_over_deep_nesting_asserts(void) {
+    char buf[256];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < 40U; i++) { /* 40 > NT_UI_RICH_PARSE_TAG_DEPTH (32) */
+        buf[n++] = '<';
+        buf[n++] = 'b';
+        buf[n++] = '>';
+    }
+    buf[n] = '\0';
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n));
+}
+
+/* ---- bounded-scan robustness (MARK-67-05) ---- */
+
+/* (11) a pathological non-terminating '<' string asserts on the unterminated tag and does NOT
+ * loop forever or read past `len` -- the test completing proves the scan is bounded. */
+static void test_parse_non_terminating_bounded(void) {
+    char buf[64];
+    memset(buf, '<', sizeof buf); /* "<<<<...<" -- no '>' anywhere */
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, sizeof buf));
+}
+
+/* (12) the scan respects `len`: a '<' at the very end with bytes BEYOND len must not be read.
+ * We pass a len that stops before any '>' so the parser asserts on the bounded buffer, never
+ * scanning into the trailing (out-of-range) bytes. */
+static void test_parse_len_bounded(void) {
+    /* The full buffer is well-formed, but we lie about the length: only "<b" is in-bounds. */
+    const char *full = "<b>ok</b>";
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, full, 2U)); /* only "<b" visible -> unterminated */
+}
+
+/* (13) a literal-< escape (\<) emits a real '<' in the text, not a tag start. */
+static void test_parse_escape_literal_lt(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    const char *m = "a\\<b"; /* a, literal '<', b */
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_rich_test_run_text_len(s_fx.ctx, 0));
+    const char *t = nt_ui_rich_test_run_text(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_MEMORY("a<b", t, 3);
+}
+
+/* (14) invalid UTF-8 in a literal text segment -> NT_ASSERT (T-67-06-04). */
+static void test_parse_invalid_utf8_asserts(void) {
+    const char bad[] = {'h', 'i', (char)0xFF, 'x'}; /* 0xFF is never valid UTF-8 */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tagset_font_register_lookup);
     RUN_TEST(test_tagset_color_atlas_effect);
     RUN_TEST(test_tagset_override_in_place);
     RUN_TEST(test_tagset_reset);
+    RUN_TEST(test_parse_unclosed_tag_asserts);
+    RUN_TEST(test_parse_mismatched_close_asserts);
+    RUN_TEST(test_parse_unknown_tag_asserts);
+    RUN_TEST(test_parse_bad_hex_asserts);
+    RUN_TEST(test_parse_orphan_close_asserts);
+    RUN_TEST(test_parse_over_deep_nesting_asserts);
+    RUN_TEST(test_parse_non_terminating_bounded);
+    RUN_TEST(test_parse_len_bounded);
+    RUN_TEST(test_parse_escape_literal_lt);
+    RUN_TEST(test_parse_invalid_utf8_asserts);
     return UNITY_END();
 }
