@@ -12,6 +12,7 @@
 #include "debug_overlay/nt_debug_overlay.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "log/nt_log_ring.h"
 #include "metrics/nt_metrics.h"
@@ -345,6 +346,80 @@ static void test_resource_list_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"include_assets\":\"yes\"}}"));
 }
 
+/* SER-2: resource_id is a 64-bit hash; a JSON double drops the low bits above 2^53, so it can't
+   round-trip. It must serialize as a 0x-hex string. Register an asset whose id sets bits above 2^53
+   and that would alias a neighbouring value when squashed through a double, then assert the exact hex. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_resource_list_resource_id_hex_string(void) {
+    nt_hash32_t pid = nt_hash32_str("ser2_pack");
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_create_pack(pid, 0));
+    /* 0xFEEDFACECAFEBEEF: > 2^53, low bits would be lost as a JSON double. */
+    nt_hash64_t rid = {0xFEEDFACECAFEBEEFULL};
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_register(pid, rid, 0U, 1U));
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"include_assets\":true}}"));
+    cJSON *assets = cJSON_GetObjectItemCaseSensitive(result_of(root), "assets");
+    TEST_ASSERT_TRUE(cJSON_IsArray(assets));
+    bool found = false;
+    cJSON *a = NULL;
+    cJSON_ArrayForEach(a, assets) {
+        cJSON *rid_j = cJSON_GetObjectItemCaseSensitive(a, "resource_id");
+        TEST_ASSERT_TRUE(cJSON_IsString(rid_j)); /* string, never a number */
+        if (strcmp(rid_j->valuestring, "0xfeedfacecafebeef") == 0) {
+            found = true;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found, "resource_id not serialized as the exact 0x-hex string (low bits lost?)");
+    cJSON_Delete(root);
+}
+
+/* TST-4 (WR-05): the flat assets[] is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX. Register more than the
+   cap, then assert the returned array length == cap, assets_truncated == true, and asset_total is the
+   HONEST real count (not clamped). The entity-cap true-branch needs a 4096-entity working set or a
+   per-lib -D override (cap is PRIVATE to nt_devapi), so it is left to the override path; the assets
+   cap is exercised here directly since NT_RESOURCE_MAX_ASSETS (2048) > the 512 cap. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_resource_list_assets_cap_trips(void) {
+    enum { OBS_LIMIT_MAX = 512 }; /* mirrors nt_devapi_obs.c NT_DEVAPI_OBS_LIMIT_MAX default */
+    const int n = OBS_LIMIT_MAX + 1;
+    nt_hash32_t pid = nt_hash32_str("cap_pack");
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_create_pack(pid, 0));
+    for (int i = 0; i < n; i++) {
+        nt_hash64_t rid = {0x1000000000000000ULL + (uint64_t)i}; /* distinct, non-zero, hi-bit */
+        TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_register(pid, rid, 0U, (uint32_t)(i + 1)));
+    }
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"resource.list\",\"params\":{\"include_assets\":true}}"));
+    cJSON *r = result_of(root);
+    cJSON *assets = cJSON_GetObjectItemCaseSensitive(r, "assets");
+    TEST_ASSERT_TRUE(cJSON_IsArray(assets));
+    TEST_ASSERT_EQUAL_INT(OBS_LIMIT_MAX, cJSON_GetArraySize(assets)); /* emitted prefix == cap */
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(r, "assets_truncated")));
+    TEST_ASSERT_EQUAL_INT(n, cJSON_GetObjectItemCaseSensitive(r, "asset_total")->valueint); /* honest total */
+    cJSON_Delete(root);
+}
+
+/* TST-5 (WR-01): perf.snapshot frame_ms is wall-clock (1000/fps), distinct from cpu_ms. Inject known
+   frames via the overlay test hook so a re-introduced frame_ms==cpu_ms alias is caught. The hook sets
+   cpu_ms = last dt*1000 and pushes dt into the fps ring; two unequal dts make the fps-average wall time
+   differ from the last cpu_ms. setUp() already inited the overlay (no re-init: init asserts !inited). */
+static void test_perf_snapshot_frame_ms_distinct_from_cpu(void) {
+    nt_debug_overlay_test_inject_frame(0.005F); /* 5ms  */
+    nt_debug_overlay_test_inject_frame(0.020F); /* 20ms -> cpu_ms == 20ms; fps averages both samples */
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
+    cJSON *r = result_of(root);
+    double fps = cJSON_GetObjectItemCaseSensitive(r, "fps")->valuedouble;
+    double frame_ms = cJSON_GetObjectItemCaseSensitive(r, "frame_ms")->valuedouble;
+    double cpu_ms = cJSON_GetObjectItemCaseSensitive(r, "cpu_ms")->valuedouble;
+    TEST_ASSERT_TRUE(fps > 0.0);
+    /* frame_ms == 1000/fps (the wall-clock contract), within fp tolerance. */
+    TEST_ASSERT_TRUE(frame_ms > 0.0 && (frame_ms - 1000.0 / fps) < 1e-6 && (1000.0 / fps - frame_ms) < 1e-6);
+    /* fps-average wall time (~8ms) != last cpu_ms (20ms): proves frame_ms is not an alias of cpu_ms. */
+    TEST_ASSERT_TRUE((frame_ms - cpu_ms) > 1e-6 || (cpu_ms - frame_ms) > 1e-6);
+    cJSON_Delete(root);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_discovery_lists_obs_commands);
@@ -370,5 +445,8 @@ int main(void) {
     RUN_TEST(test_resource_list_packs);
     RUN_TEST(test_resource_list_include_assets_flat);
     RUN_TEST(test_resource_list_bad_params);
+    RUN_TEST(test_resource_list_resource_id_hex_string);
+    RUN_TEST(test_resource_list_assets_cap_trips);
+    RUN_TEST(test_perf_snapshot_frame_ms_distinct_from_cpu);
     return UNITY_END();
 }

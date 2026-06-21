@@ -154,6 +154,8 @@ def check_perf_snapshot(client: DevApiClient) -> None:
     assert isinstance(uc, dict), f"perf.snapshot.user_counters is {uc!r}, expected an object"
     # The host (Task 1) exercises a count("frames") + count_f("cpu_ms") every frame.
     assert "frames" in uc, f"perf.snapshot.user_counters missing the host 'frames' counter (got {sorted(uc)})"
+    # The host writes count_f("cpu_ms") every frame too, so it is an unconditional contract.
+    assert "cpu_ms" in uc, f"perf.snapshot.user_counters missing the host 'cpu_ms' counter (got {sorted(uc)})"
     print(f"PASS[2/5] perf.snapshot: keys present, gpu_ms is null (D-11), user_counters={sorted(uc)}.")
 
 
@@ -170,11 +172,12 @@ def check_perf_stats(client: DevApiClient) -> None:
     _assert_stats_shape(channels, "frame_ms", require_samples=True)
     for top in ("user_channels", "fps_low_1pct", "fps_low_01pct", "over_budget_pct", "budget_ms"):
         assert top in stats, f"perf.stats missing top-level key {top!r} (got {sorted(stats)})"
-    # The host's count_f("cpu_ms") -> a user channel; assert its aggregate schema too.
+    # The host's count_f("cpu_ms") -> a user channel every frame; assert its aggregate schema too. This
+    # is an unconditional contract, not a best-effort check (the host writes cpu_ms on every frame).
     user = stats["user_channels"]
     assert isinstance(user, dict), f"perf.stats.user_channels is {user!r}, expected an object"
-    if "cpu_ms" in user:
-        _assert_stats_shape(user, "cpu_ms", require_samples=True)
+    assert "cpu_ms" in user, f"perf.stats.user_channels missing the host 'cpu_ms' channel (got {sorted(user)})"
+    _assert_stats_shape(user, "cpu_ms", require_samples=True)
 
     fm = channels["frame_ms"]
     print(

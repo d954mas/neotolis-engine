@@ -1,4 +1,6 @@
+#include <inttypes.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -573,7 +575,11 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
             }
             cJSON *o = cJSON_CreateObject();
             NT_ASSERT(o != NULL);
-            devapi_add_number(o, "resource_id", (double)ai.resource_id);
+            /* 64-bit hash as a 0x-hex string: a JSON double loses the low bits above 2^53, so the id
+               could not round-trip. entity/pack ids stay numbers (uint32, exact in a double). */
+            char rid_hex[19]; /* "0x" + 16 hex + NUL */
+            (void)snprintf(rid_hex, sizeof(rid_hex), "0x%016" PRIx64, ai.resource_id);
+            devapi_add_string(o, "resource_id", rid_hex);
             devapi_add_number(o, "type", (double)ai.type);
             devapi_add_string(o, "state", asset_state_token(ai.state));
             devapi_add_number(o, "pack", (double)ai.pack_index);
@@ -613,7 +619,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .group = "perf",
         .summary = "windowed perf aggregates per channel (avg/median/p95/p99/p99_9) + fps-lows + over_budget_pct",
         .params_shape = "{channels?:[string], budget_ms?:number}",
-        .result_shape = "{channels:object,user_channels:object,fps_low_1pct:number,fps_low_01pct:number,over_budget_pct:number}",
+        .result_shape = "{channels:object,user_channels:object,fps_low_1pct:number,fps_low_01pct:number,over_budget_pct:number,budget_ms:number}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
@@ -640,7 +646,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .group = "resource",
         .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
-        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id,type,state,pack}],asset_total?:number,assets_truncated?:bool}",
+        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id:string,type,state,pack}],asset_total?:number,assets_truncated?:bool}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
