@@ -86,7 +86,10 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 7 (sprite + slug_text + radial vs/fs + radial_image fs)\n");
+    /* Rich-text inline image: textured sprite * the per-vertex a_tint (lossless run <color>);
+     * reuses sprite_radial.vert for its a_tint @ loc 5 attr (a_radial stays unused). */
+    nt_builder_add_shader(ctx, "assets/shaders/rich_image.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 8 (sprite + slug_text + radial vs/fs + radial_image fs + rich_image fs)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel
