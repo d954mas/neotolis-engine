@@ -8,14 +8,11 @@ nt_add_module(nt_metrics LOG_DOMAIN "metrics"
     nt_metrics.h
 )
 
-# Reads existing sources: overlay getters, gfx draw_calls, scratch hwm/used,
-# nt_platform memory. nt_add_module already gives the engine/ include root, so the
-# headers resolve from nt_core alone; nt_gfx_interface adds gfx's include path.
-# The actual getter symbols resolve at exe/test link time (the app picks the impls),
-# mirroring nt_window's "header-here, symbol-at-exe-link" contract.
+# Pure storage + math: the host pushes raw per-frame scalars (nt_metrics_frame_t) and
+# sets user counters; nt_metrics references no other engine module. Only nt_core (types
+# + assert) and nt_hash (full-name keying) — no exe-link-time provider contract.
 target_link_libraries(nt_metrics PUBLIC
     nt_core
-    nt_gfx_interface
     nt_hash
 )
 

@@ -3,11 +3,12 @@
 
 #include "core/nt_types.h"
 
-/* Layer-1 perf collector. A bounded, no-heap, dev-only per-frame sampler:
- * nt_metrics_sample() reads existing sources once and stores one double per channel
- * into fixed BSS rings; windowed aggregates compute on query off the hot path via a
- * sorted scratch copy. The L2 perf.* devapi group wraps this; the channel set +
- * stats field names/widths below are the stable serialization contract.
+/* Layer-1 perf SOURCE OF TRUTH. A bounded, no-heap, dev-only collector the host
+ * pushes raw per-frame scalars into (nt_metrics_sample) and sets user counters on
+ * (nt_metrics_count*). It derives rolling fps + windowed aggregates and stores the
+ * last-pushed frame. nt_debug_overlay and the devapi perf.* group are pure CONSUMERS
+ * that read from here. nt_metrics reads NO clock and NO other engine module — the
+ * host owns measurement, this owns storage + math.
  *
  * Dev-only: NT_METRICS_ENABLED=0 (release/OFF mirror) compiles real no-op bodies,
  * so the collector ships zero footprint in release. Default ON in debug. The gate
@@ -23,8 +24,7 @@
 #define NT_METRICS_WINDOW 256
 #endif
 
-/* Max user channels mirrored from overlay counters. Matches the overlay's
- * NT_DEBUG_OVERLAY_MAX_USER_COUNTERS so every counter has a ring. */
+/* Max distinct user counters. Each carries one windowed ring + the last exact value. */
 #ifndef NT_METRICS_MAX_USER_CHANNELS
 #define NT_METRICS_MAX_USER_CHANNELS 16
 #endif
@@ -33,13 +33,13 @@
 #define NT_METRICS_USER_NAME_MAX 32
 #endif
 
-/* Fixed channels. Sampled every frame from existing engine sources.
+/* Fixed channels. Pushed every frame from the host's nt_metrics_frame_t.
  * NT_METRICS_CHANNEL_COUNT bounds the fixed-channel arrays; user channels are
- * keyed separately by name. */
+ * keyed separately by name hash. */
 typedef enum {
     NT_METRICS_FRAME_MS = 0,
     NT_METRICS_CPU_MS,
-    NT_METRICS_GPU_MS, /* sampled only when a real timer is present; -1.0F sentinel never enters the window (empty => samples:0) */
+    NT_METRICS_GPU_MS, /* pushed only when the host's gpu_ms >= 0; the < 0 sentinel never enters the window (empty => samples:0) */
     NT_METRICS_DRAW_CALLS,
     NT_METRICS_MEM_TOTAL,
     NT_METRICS_SCRATCH_HWM,
@@ -62,20 +62,49 @@ typedef struct {
     double p99_9;
 } nt_metrics_stats_t;
 
+/* Raw per-frame data the host pushes once per frame. The host owns all measurement
+ * (its own clock for frame_ms/cpu_ms, gfx for gpu_ms/draw_calls, platform/scratch
+ * for memory) — nt_metrics only stores + aggregates. */
+typedef struct {
+    float frame_ms;        /* host loop dt in ms; derives fps + the frame_ms channel; skipped if non-finite or <= 0 */
+    float cpu_ms;          /* host-measured CPU frame time */
+    float gpu_ms;          /* < 0 sentinel => gpu channel skipped (timer unsupported) */
+    uint32_t draw_calls;   /* last frame's draw-call count */
+    uint64_t mem_used;     /* platform memory in use */
+    uint32_t scratch_hwm;  /* scratch high-water mark */
+    uint32_t scratch_used; /* scratch in use this frame */
+} nt_metrics_frame_t;
+
 /* ---- Lifecycle ---- */
 
-/* Zero all channel rings + user channels. */
+/* Zero all channel rings + user counters + the last-frame snapshot. */
 void nt_metrics_init(void);
 
 /* Clear the window (counts -> 0) without tearing down state (backs perf.reset). */
 void nt_metrics_reset(void);
 
+/* ---- User counters (this module owns them; the host sets them) ----
+ * Keyed by the FULL 64-bit name hash so two counters sharing a 31-char prefix do not
+ * alias. The exact value is kept (uint64 counts keep full precision past 2^53, floats
+ * keep double) and also pushed into a windowed ring for perf.stats. Last write wins;
+ * re-writing a name with the other variant flips its tag. */
+void nt_metrics_count(const char *name, uint64_t value);
+void nt_metrics_count_f(const char *name, double value);
+
 /* ---- Per-frame sample (hot path: heap-free) ----
- * Reads the fixed sources once (overlay getters, gfx draw_calls, scratch hwm/used,
- * nt_platform memory) and every overlay user counter, writing one double per channel
- * into its ring. Call EXPLICITLY right after nt_debug_overlay_frame_end() so the
- * overlay getters are fresh for this frame. */
-void nt_metrics_sample(void);
+ * Pushes the fixed-channel rings from *f (with the frame_ms <= 0/non-finite and the
+ * gpu < 0 skip guards), samples every user counter's ring from its stored exact value,
+ * and records *f as the last-frame snapshot for nt_metrics_last(). */
+void nt_metrics_sample(const nt_metrics_frame_t *f);
+
+/* ---- Read side for consumers (overlay + perf.snapshot) ---- */
+
+/* Rolling-average fps derived from the frame_ms window; 0 on an empty window. */
+float nt_metrics_fps(void);
+
+/* The last frame pushed via nt_metrics_sample(), for the immediate perf.snapshot view.
+ * Zero-filled (and gpu_ms = -1 sentinel) before the first sample. */
+void nt_metrics_last(nt_metrics_frame_t *out);
 
 /* ---- On-query aggregates (off hot path) ---- */
 
@@ -95,26 +124,20 @@ double nt_metrics_fps_low_01pct(void);
  * this computes for any finite budget. */
 double nt_metrics_over_budget_pct(double budget_ms);
 
-/* ---- User-channel enumeration (mirrors overlay counters into rings) ---- */
+/* ---- User-counter enumeration ---- */
 
-/* Count of distinct user channels currently sampled (<= NT_METRICS_MAX_USER_CHANNELS). */
+/* Count of distinct user counters currently stored (<= NT_METRICS_MAX_USER_CHANNELS). */
 uint16_t nt_metrics_user_count(void);
 
-/* Name of user channel `i`, or NULL if `i` is out of range. Stable within a frame. */
+/* Name of user counter `i`, or NULL if `i` is out of range. Stable within a frame. */
 const char *nt_metrics_user_name(uint16_t i);
 
-/* Windowed aggregates for user channel `i` into *out. Out-of-range `i` => samples:0. */
-void nt_metrics_user_stats(uint16_t i, nt_metrics_stats_t *out);
+/* Read counter `i`'s EXACT last value. Out-params may be NULL to skip. For an int
+ * counter `*u` is the exact uint64 and `*is_float` false; for a float counter `*f`
+ * is the exact double and `*is_float` true. `i` out of range writes nothing. */
+void nt_metrics_user_get(uint16_t i, const char **name, uint64_t *u, double *f, bool *is_float);
 
-// #region test_access
-/* Push a raw value into a fixed channel's ring without a real frame loop, so unit
- * tests feed KNOWN sample sets and assert percentiles deterministically. */
-#ifdef NT_TEST_ACCESS
-void nt_metrics_test_push(nt_metrics_channel_t channel, double value);
-/* Push into a user channel by FULL name (no overlay truncation) so a test can prove user channels
-   key by the full 64-bit name hash, not a truncated strcmp. */
-void nt_metrics_test_push_user(const char *name, double value);
-#endif
-// #endregion
+/* Windowed aggregates for user counter `i` into *out. Out-of-range `i` => samples:0. */
+void nt_metrics_user_stats(uint16_t i, nt_metrics_stats_t *out);
 
 #endif /* NT_METRICS_H */
