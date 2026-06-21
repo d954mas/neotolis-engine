@@ -45,8 +45,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
     const Clay_Color tint_rgb = nt_ui_unpack_abgr(style->tint_color_packed);
 
-    /* attr_map order [a_radial, a_tint, a_uvrect, a_layout]; a_uvrect/a_layout filled by
-     * name at emit. REGION = textured emit path (origin/flip; slice9 asserted unset). */
+    /* a_uvrect/a_layout are walker-injected by name at emit; REGION = textured path. */
     const float blk[16] = {
         angle_start, angle_end, style->inner_radius_norm, 0.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
     };
@@ -66,7 +65,6 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .slice9_scale = style->slice9_scale,
         .color_packed = style->color_packed,
     };
-    /* slice9 asserted unset (rectangular regions only); slice9_lrtb stays zero. */
     nt_ui_image_custom(ctx, data, &img, decl);
 }
 

@@ -4,10 +4,10 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "hash/nt_hash.h" /* nt_hash32_str — attr-name validation */
+#include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
-#include "renderers/nt_sprite_renderer.h" /* NT_SPRITE_CUSTOM_STRIDE_MAX */
+#include "renderers/nt_sprite_renderer.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"

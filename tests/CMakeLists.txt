@@ -531,9 +531,8 @@ if(NOT EMSCRIPTEN)
     )
     nt_setup_test_target(test_sprite_renderer)
 
-    # test_ui_radial is registered with the nt_ui walker-test group below: the
-    # radial walker-route test (INT-66-06) drives nt_ui_walk over CUSTOM/IMAGE
-    # radial elements, so it needs the shared ui_walker_fixture + full UI libs.
+    # test_ui_radial registers in the nt_ui walker-test group below: it needs the
+    # shared ui_walker_fixture + full UI libs.
 
     # --- nt_mem_scratch tests ---
     add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)

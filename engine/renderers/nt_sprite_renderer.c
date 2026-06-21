@@ -54,11 +54,9 @@ static struct {
 
     nt_buffer_t vbo; /* dynamic, sized for the worst single flush (staging_size) */
     nt_buffer_t ibo; /* dynamic, sized for max_indices * 2 (uint16 indices) */
-    /* One variable-stride CPU staging buffer (mesh-renderer style). Each vertex i
-     * of the current batch lives at staging + i*cur_stride: the base 20 B written
-     * as nt_sprite_vertex_t, the custom block (if any) memcpy'd at +20. flush
-     * uploads it directly — no interleave pass. Sized for the worst single flush:
-     * max(max_vertices*20, custom_max_vertices*(20+48)). */
+    /* One variable-stride CPU staging buffer: vertex i at staging + i*cur_stride,
+     * custom block at +20. Sized for the worst single flush:
+     * max(max_vertices*20, custom_max_vertices*(20+NT_SPRITE_CUSTOM_STRIDE_MAX)). */
     uint8_t *staging;
     uint16_t *indices;
     uint32_t staging_size; /* byte capacity of staging (worst single flush) */
@@ -67,9 +65,8 @@ static struct {
     uint32_t custom_max_vertices; /* custom flush caps here (custom verts are bigger) */
     uint32_t vertex_count;
     uint32_t index_count;
-    /* Byte stride of the CURRENT flush's batch: NT_SPRITE_BASE_STRIDE +
-     * cur_material_custom_bytes (20 plain, 20+16/20+48 custom). Set in open_cmd
-     * when a material binds; the whole open batch uses it. */
+    /* Byte stride of the current batch = 20 + cur_material_custom_bytes. Set per-flush
+     * in open_cmd, so the plain path stays a constant 20. */
     uint32_t cur_stride;
     /* "Current" per-widget custom attr block (set via set_custom_attrs, baked
      * into every emitted vertex like color). cur_custom_bytes==0 → plain emit. */
@@ -125,8 +122,6 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     /* Custom flush indexes into indices[] too, so cmv must not exceed the base
      * caps. */
     NT_ASSERT(d.custom_max_vertices <= d.max_vertices && "sprite custom_max_vertices must not exceed max_vertices");
-    /* Largest fixed single emit is slice9 = 16 verts; a smaller cap overruns custom
-     * staging at the extended stride. emit_geometry guards its own arbitrary count. */
     NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
 
     memset(&s_sprite, 0, sizeof(s_sprite));
@@ -512,11 +507,8 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
         return;
     }
 
-    /* Snapshot+flush+reopen on staging overflow keeps the caller's open
-     * cmd state across the chunk boundary. Cap keyed on the bound MATERIAL's
-     * custom bytes (= cur_stride), NOT the per-emit block (consumed each emit):
-     * a forgotten set_custom_attrs still writes at the extended stride, so it
-     * must cap by custom_max_vertices or it overruns staging. */
+    /* Cap by the bound MATERIAL's stride, not the per-emit block: a forgotten
+     * set_custom_attrs still emits at the extended stride. */
     const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + r->vertex_count > vcap || s_sprite.index_count + r->index_count > s_sprite.max_indices) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
@@ -940,9 +932,8 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
         return;
     }
 
-    /* Overflow handling mirrors emit_region_resolved: snapshot the open
-     * cmd, flush, reopen with the same state. Custom-attr emits cap at
-     * custom_max_vertices (they pay the bigger stride in staging). */
+    /* Cap by the bound MATERIAL's stride, not the per-emit block: a forgotten
+     * set_custom_attrs still emits at the extended stride. */
     const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
@@ -1314,11 +1305,7 @@ void nt_sprite_renderer_flush(void) {
      * mutating the bound VBO in place, so the GPU can keep consuming the
      * previous frame's draws while we stage the next one.
      *
-     * staging is already interleaved by construction (each emit wrote base +
-     * custom block contiguously at i*cur_stride), so the upload is uniform for
-     * both plain (stride 20) and custom (stride 20+16/20+48) — no interleave
-     * pass. The overflow guards cap a plain batch at max_vertices and a custom
-     * batch at custom_max_vertices, so vertex_count*cur_stride <= staging_size. */
+     * staging is already interleaved at i*cur_stride, so flush uploads it directly. */
     NT_ASSERT((size_t)s_sprite.vertex_count * s_sprite.cur_stride <= s_sprite.staging_size && "sprite flush exceeds staging byte capacity");
     nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.staging, s_sprite.vertex_count * s_sprite.cur_stride);
     if (s_sprite.index_count > 0) {

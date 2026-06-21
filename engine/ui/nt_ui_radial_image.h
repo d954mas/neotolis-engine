@@ -73,7 +73,9 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
  * (0=+X, CCW+). region is by-pointer: resolved lazily, memoized into *region; an
  * unresolved/no-art ref skips the emit. data may be NULL. decl may be NULL
  * (GROW/GROW); the widget owns image/backgroundColor/userData. Must be called
- * between nt_ui_begin and nt_ui_end on the active ctx. */
+ * between nt_ui_begin and nt_ui_end on the active ctx. Sweep caveat as
+ * nt_ui_radial.h: a negative fill*sweep_total puts end before start -> the
+ * complementary span, not a short reverse arc. */
 void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float angle_end, const nt_ui_radial_image_style_t *style,
                         const Clay_ElementDeclaration *decl);
 

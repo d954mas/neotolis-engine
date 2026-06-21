@@ -1182,10 +1182,8 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
 }
 
-/* Float-offset of the attr named `name_hash` in the material's custom block, or -1
- * if the material doesn't declare it. Block offset of attr i = i*4 floats (attr_map
- * declaration order; build_sprite_layout appends each declared attr as a FLOAT4). The
- * linear scan is fine: attr_map_count <= 8 and custom widgets are sparse. */
+/* Float-offset (i*4) of attr `name_hash` in the block, or -1 if absent.
+ * Linear scan: attr_map_count <= 8. */
 static int custom_attr_float_offset(const nt_material_info_t *mi, uint32_t name_hash) {
     for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
         if (mi->attr_map_hashes[ai] == name_hash) {
@@ -1195,8 +1193,8 @@ static int custom_attr_float_offset(const nt_material_info_t *mi, uint32_t name_
     return -1;
 }
 
-/* Write a_uvrect = the region's min/max atlas UV in 0..1 at `off` — lets a custom-attr
- * fs re-center over any rectangular packed sub-region (not just a full-bleed tile). */
+/* Write a_uvrect = region min/max atlas UV (0..1) at `off` so a custom-attr fs
+ * can re-center over any rectangular packed sub-region. */
 static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out, int off) {
     nt_atlas_region_handles_t rh;
     nt_atlas_get_region_handles(atlas, region_index, &rh);
@@ -1218,11 +1216,9 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out
     out[off + 3] = v1;
 }
 
-/* Build the per-emit custom block from the payload + bbox: copy the widget's
- * custom_attrs verbatim, then fill any walker-derived attr the bound material NAMES
- * (a_layout, a_uvrect) by its attr_map offset. attr_map is the single source of truth
- * — no magic slot indices. One generic injection shared by both geom modes. Returns
- * the float count. */
+/* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
+ * by attr_map offset (attr_map = single source of truth, no magic slots). Returns
+ * float count. */
 static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]) {
     NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
     const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
@@ -1255,12 +1251,7 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     return fcount;
 }
 
-/* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel. The bound
- * custom-attr material (set by the dispatch) supplies the SDF fs + extended layout;
- * the per-widget custom block is baked into every vertex via set_custom_attrs. The
- * fs derives its [-1,1] local coord from gl_VertexID over the 4-corner quad (emitted
- * TL/TR/BR/BL), so no extra per-vertex attribute is needed. NO triangle fan — the
- * SDF does the shape per-pixel.
+/* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
  *
  * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
  * quad's base vertex index to be a multiple of 4. This holds because GEOMETRY-mode
@@ -1273,8 +1264,6 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
     }
-    /* Custom block (with name-bound a_layout/a_uvrect injected) is built ONCE by the
-     * dispatcher and already bound via set_custom_attrs — emit_geometry bakes it. */
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
@@ -1350,9 +1339,9 @@ typedef struct {
     scissor_rect_t rect;
 } clip_cache_entry_t;
 
-/* Sprite-pipeline bind state. dirty — a barrier closed the open cmd; next dispatch must
- * rebind. last_mat_id — skip redundant set_material across a same-material run; reset to 0
- * at every flush/barrier (the same-id no-op holds only while a cmd is open). */
+/* Sprite-pipeline bind state. dirty — a barrier closed the open cmd → next dispatch
+ * rebinds. last_mat_id — skip redundant set_material across a same-material run; the
+ * no-op holds only while a cmd is open, so a barrier resets it to 0. */
 typedef struct {
     bool dirty;
     uint32_t last_mat_id;
