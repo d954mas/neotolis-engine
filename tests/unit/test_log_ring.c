@@ -176,6 +176,81 @@ static void test_ring_clear(void) {
     TEST_ASSERT_EQUAL_UINT16(0, nt_log_ring_tail(4, NT_LOG_LEVEL_INFO, out));
 }
 
+/* ---- TST-2: oversize message truncation lands on a UTF-8 codepoint boundary (HOT-1) ----
+   nt_log_write truncates a >NT_LOG_BUF_SIZE (512) message and appends "...". The stored ring line is
+   serialized as a JSON string; cJSON rejects invalid UTF-8, so the marker must never orphan a split
+   multibyte sequence. */
+
+/* A NUL-terminated string is valid UTF-8 iff every multibyte sequence is complete + well-formed. We
+   only need to prove the truncation tail is clean: walk the whole string and reject any sequence that
+   runs past the end or carries a malformed continuation. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool is_valid_utf8(const char *s) {
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p != 0U) {
+        unsigned char c = *p;
+        int extra;
+        if (c < 0x80U) {
+            extra = 0;
+        } else if ((c & 0xE0U) == 0xC0U) {
+            extra = 1;
+        } else if ((c & 0xF0U) == 0xE0U) {
+            extra = 2;
+        } else if ((c & 0xF8U) == 0xF0U) {
+            extra = 3;
+        } else {
+            return false; /* stray continuation byte or invalid lead */
+        }
+        p++;
+        for (int i = 0; i < extra; i++) {
+            if ((*p & 0xC0U) != 0x80U) {
+                return false; /* missing/short continuation -> orphaned lead byte */
+            }
+            p++;
+        }
+    }
+    return true;
+}
+
+/* ASCII overflow: a >512-byte line gets the "..." marker (truncation fires). */
+static void test_truncation_marker_ascii(void) {
+    char big[1024];
+    memset(big, 'a', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    nt_log_write(NT_LOG_LEVEL_INFO, "d", "%s", big);
+
+    nt_log_ring_entry_t out[2];
+    uint16_t got = nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out);
+    TEST_ASSERT_EQUAL_UINT16(1, got);
+    size_t len = strlen(out[0].msg);
+    TEST_ASSERT_TRUE(len >= 3);
+    TEST_ASSERT_EQUAL_STRING("...", out[0].msg + len - 3);
+}
+
+/* Multibyte overflow: a >512-byte line of repeated "é" (0xC3 0xA9) truncates mid-sequence; the stored
+   line must stay valid UTF-8 (no trailing continuation byte, no orphaned lead byte before the marker).
+   FAILS against the old continuation-only walk-back, PASSES after the HOT-1 lead-byte strip. */
+static void test_truncation_marker_utf8_boundary(void) {
+    /* 400 * 2 bytes = 800 bytes > 512: truncation point lands inside an "é" for at least one offset. */
+    char big[1024];
+    size_t w = 0;
+    for (int i = 0; i < 400; i++) {
+        big[w++] = (char)0xC3;
+        big[w++] = (char)0xA9;
+    }
+    big[w] = '\0';
+    nt_log_write(NT_LOG_LEVEL_INFO, "d", "%s", big);
+
+    nt_log_ring_entry_t out[2];
+    uint16_t got = nt_log_ring_tail(2, NT_LOG_LEVEL_INFO, out);
+    TEST_ASSERT_EQUAL_UINT16(1, got);
+    TEST_ASSERT_TRUE_MESSAGE(is_valid_utf8(out[0].msg), "truncated UTF-8 log line is invalid (orphaned lead/continuation byte)");
+    /* Marker still present. */
+    size_t len = strlen(out[0].msg);
+    TEST_ASSERT_TRUE(len >= 3);
+    TEST_ASSERT_EQUAL_STRING("...", out[0].msg + len - 3);
+}
+
 /* ---- Test 7: nt_log_add_sink overflow is a host-call assert (4-sink boundary) ----
  * The ring sink already consumed one slot; fill the rest, then a final add asserts. */
 
@@ -204,6 +279,8 @@ int main(void) {
     RUN_TEST(test_ring_tail_caps_n);
     RUN_TEST(test_ring_level_filter);
     RUN_TEST(test_ring_clear);
+    RUN_TEST(test_truncation_marker_ascii);
+    RUN_TEST(test_truncation_marker_utf8_boundary);
     RUN_TEST(test_add_sink_overflow_asserts); /* keep LAST: permanently fills the sink registry */
     return UNITY_END();
 }

@@ -111,6 +111,9 @@ void nt_metrics_user_stats(uint16_t i, nt_metrics_stats_t *out);
  * tests feed KNOWN sample sets and assert percentiles deterministically. */
 #ifdef NT_TEST_ACCESS
 void nt_metrics_test_push(nt_metrics_channel_t channel, double value);
+/* Push into a user channel by FULL name (no overlay truncation) so a test can prove user channels
+   key by the full 64-bit name hash, not a truncated strcmp. */
+void nt_metrics_test_push_user(const char *name, double value);
 #endif
 // #endregion
 

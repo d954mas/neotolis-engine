@@ -149,6 +149,52 @@ static void test_gpu_sentinel_not_sampled(void) {
     nt_debug_overlay_shutdown();
 }
 
+/* ---- TST-1 (WR-03): user channels key by the FULL name hash, not a truncated strcmp ----
+   Two names sharing a >= 31-char prefix but differing AFTER it must land in two distinct rings. The
+   metrics test hook pushes by full name (the overlay path truncates names to 32, masking this). */
+static void test_user_channels_long_prefix_distinct(void) {
+    /* 31 shared chars, then a distinguishing suffix. */
+    const char *a = "physics_substep_accumulator_msA";
+    const char *b = "physics_substep_accumulator_msB";
+    nt_metrics_test_push_user(a, 1.0);
+    nt_metrics_test_push_user(b, 2.0);
+    nt_metrics_test_push_user(a, 1.0);
+
+    TEST_ASSERT_EQUAL_UINT16(2U, nt_metrics_user_count());
+    /* Each ring holds only its own values: A got 2 pushes of 1.0, B got 1 push of 2.0. */
+    nt_metrics_stats_t sa;
+    nt_metrics_stats_t sb;
+    for (uint16_t i = 0; i < nt_metrics_user_count(); i++) {
+        const char *name = nt_metrics_user_name(i);
+        if (strcmp(name, a) == 0) {
+            nt_metrics_user_stats(i, &sa);
+            TEST_ASSERT_EQUAL_UINT32(2U, sa.samples);
+            TEST_ASSERT_TRUE(near(sa.avg, 1.0));
+        } else {
+            TEST_ASSERT_EQUAL_STRING(b, name);
+            nt_metrics_user_stats(i, &sb);
+            TEST_ASSERT_EQUAL_UINT32(1U, sb.samples);
+            TEST_ASSERT_TRUE(near(sb.avg, 2.0));
+        }
+    }
+}
+
+/* ---- HOT-2: a fresh overlay with no recorded frames has fps==0; nt_metrics_sample() must NOT push
+   1000/fps (== ~1e9 ms) into FRAME_MS — that single outlier would poison the whole window. ---- */
+static void test_frame_ms_skips_zero_fps_frame(void) {
+    nt_debug_overlay_init(NULL); /* fresh: fps_count==0 -> get_fps()==0 */
+    nt_metrics_init();
+    nt_metrics_sample();
+    nt_metrics_stats_t frame;
+    nt_metrics_channel_stats(NT_METRICS_FRAME_MS, &frame);
+    TEST_ASSERT_EQUAL_UINT32(0U, frame.samples); /* no 1e9 poison: the frame is skipped, window empty */
+    /* CPU still sampled, proving the call ran (only the fps==0 frame_ms push is gated). */
+    nt_metrics_stats_t cpu;
+    nt_metrics_channel_stats(NT_METRICS_CPU_MS, &cpu);
+    TEST_ASSERT_EQUAL_UINT32(1U, cpu.samples);
+    nt_debug_overlay_shutdown();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ring_evicts_to_window);
@@ -162,6 +208,8 @@ int main(void) {
     RUN_TEST(test_over_budget_pct);
     RUN_TEST(test_over_budget_empty);
     RUN_TEST(test_gpu_sentinel_not_sampled);
+    RUN_TEST(test_user_channels_long_prefix_distinct);
+    RUN_TEST(test_frame_ms_skips_zero_fps_frame);
     return UNITY_END();
 }
 
