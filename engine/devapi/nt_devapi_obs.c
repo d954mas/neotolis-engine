@@ -325,9 +325,43 @@ static bool resolve_page(const cJSON *params, uint32_t total, const char *who, u
 // #endregion
 
 // #region entity.*
+/* Append a float[n] as a JSON number array under `key`. NULL src emits zeros. Split out so the
+   entity serializers stay under the clang-tidy cognitive-complexity ceiling. */
+static void add_float_array(cJSON *obj, const char *key, const float *src, int n) {
+    cJSON *a = cJSON_AddArrayToObject(obj, key);
+    NT_ASSERT(a != NULL);
+    for (int k = 0; k < n; k++) {
+        cJSON_bool added = cJSON_AddItemToArray(a, cJSON_CreateNumber(src != NULL ? (double)src[k] : 0.0));
+        NT_ASSERT(added);
+        (void)added;
+    }
+}
+
+/* entity "position": [x,y,z] when it has a transform, else null. */
+static void add_entity_position(cJSON *o, nt_entity_t e) {
+    if (nt_transform_comp_has(e)) {
+        add_float_array(o, "position", nt_transform_comp_position(e), 3);
+    } else {
+        cJSON_AddNullToObject(o, "position");
+    }
+}
+
+/* entity "drawable": {visible, color:[r,g,b,a]} when it has a drawable, else null. */
+static void add_entity_drawable(cJSON *o, nt_entity_t e) {
+    if (!nt_drawable_comp_has(e)) {
+        cJSON_AddNullToObject(o, "drawable");
+        return;
+    }
+    cJSON *d = cJSON_AddObjectToObject(o, "drawable");
+    NT_ASSERT(d != NULL);
+    const bool *vis = nt_drawable_comp_visible(e);
+    devapi_add_bool(d, "visible", vis != NULL && *vis);
+    add_float_array(d, "color", nt_drawable_comp_color(e), 4);
+}
+
 /* Serialize one entity's compact view (id/index/generation/alive/enabled + optional position +
-   drawable) into the entities array. Split out so cmd_entity_list stays under the clang-tidy-18
-   cognitive-complexity ceiling and the two-pass loop body stays simple. */
+   drawable) into the entities array. Split out so cmd_entity_list stays under the cognitive-complexity
+   ceiling and the two-pass loop body stays simple. */
 static void add_entity_entry(cJSON *arr, nt_entity_t e) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);
@@ -336,36 +370,8 @@ static void add_entity_entry(cJSON *arr, nt_entity_t e) {
     devapi_add_number(o, "generation", (double)nt_entity_generation(e));
     devapi_add_bool(o, "alive", true);
     devapi_add_bool(o, "enabled", nt_entity_is_enabled(e));
-
-    if (nt_transform_comp_has(e)) {
-        const float *pos = nt_transform_comp_position(e);
-        cJSON *p = cJSON_AddArrayToObject(o, "position");
-        NT_ASSERT(p != NULL);
-        for (int k = 0; k < 3; k++) {
-            cJSON_bool added = cJSON_AddItemToArray(p, cJSON_CreateNumber((double)pos[k]));
-            NT_ASSERT(added);
-            (void)added;
-        }
-    } else {
-        cJSON_AddNullToObject(o, "position");
-    }
-
-    if (nt_drawable_comp_has(e)) {
-        cJSON *d = cJSON_AddObjectToObject(o, "drawable");
-        NT_ASSERT(d != NULL);
-        const bool *vis = nt_drawable_comp_visible(e);
-        devapi_add_bool(d, "visible", vis != NULL && *vis);
-        const float *col = nt_drawable_comp_color(e);
-        cJSON *c = cJSON_AddArrayToObject(d, "color");
-        NT_ASSERT(c != NULL);
-        for (int k = 0; k < 4; k++) {
-            cJSON_bool added = cJSON_AddItemToArray(c, cJSON_CreateNumber(col != NULL ? (double)col[k] : 0.0));
-            NT_ASSERT(added);
-            (void)added;
-        }
-    } else {
-        cJSON_AddNullToObject(o, "drawable");
-    }
+    add_entity_position(o, e);
+    add_entity_drawable(o, e);
 
     cJSON_bool added = cJSON_AddItemToArray(arr, o);
     NT_ASSERT(added);
