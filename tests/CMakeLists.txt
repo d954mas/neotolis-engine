@@ -681,6 +681,8 @@ if(NOT EMSCRIPTEN)
         test_ui_tabbar
         test_ui_tooltip
         test_ui_radial
+        test_nt_ui_rich_build
+        test_nt_ui_rich_wrap
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
     # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub

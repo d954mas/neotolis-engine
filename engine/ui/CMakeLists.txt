@@ -56,6 +56,8 @@ set(NT_UI_SOURCES
     nt_ui_radial.h
     nt_ui_radial_image.c
     nt_ui_radial_image.h
+    nt_ui_rich_text.c
+    nt_ui_rich_text.h
     nt_ui_panel.c
     nt_ui_panel.h
     nt_ui_anim.c

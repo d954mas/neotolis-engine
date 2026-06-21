@@ -297,6 +297,11 @@ struct nt_ui_context {
 #endif
     } pending_combo;
 
+    /* Rich-text builder scratch (frame-scratch nt_ui_rich_state_t*, void* to keep this header
+     * widget-agnostic). nt_ui_rich_begin allocates + parks it here; the builder calls read it; end
+     * (and the solver spike) consume it. Rich-text calls do NOT nest (asserted). */
+    void *pending_rich;
+
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;
