@@ -5,13 +5,10 @@ nt_declare_interface(nt_http)
 
 if(EMSCRIPTEN)
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c web/nt_http_web.c nt_http.h)
-    # Web backend EM_JS uses wasmExports['malloc'] (Closure-safe) + _free + HEAPU8
-    # INTERFACE propagates to any executable linking nt_http
-    # += not =: multiple modules contribute exports; = would clobber (emcc last-wins). _main is a default.
-    target_link_options(nt_http INTERFACE
-        "SHELL:-sEXPORTED_FUNCTIONS+=_malloc,_free"
-        "SHELL:-sEXPORTED_RUNTIME_METHODS+=HEAPU8"
-    )
+    # Web backend EM_JS uses wasmExports['malloc'] (Closure-safe) + _free + HEAPU8.
+    # The exe MUST call nt_web_exports(<target>) -- emcc collapses EXPORTED_* to one
+    # effective `=` list, so a per-module INTERFACE += silently lands in
+    # unexportedSymbols (verified). See cmake/nt_web_exports.cmake.
 else()
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c native/nt_http_native.c nt_http.h)
 endif()
