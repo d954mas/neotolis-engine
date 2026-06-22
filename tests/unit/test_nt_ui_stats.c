@@ -44,12 +44,17 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
+/* The metrics-bridge sub-test needs real nt_metrics + overlay bodies; both compile to no-op stubs
+ * on the OFF mirror (NT_UI_DEBUG_TOOLS=OFF, which forces NT_METRICS_ENABLED=OFF). The remaining
+ * tests exercise only the nt_ui walk getters and run unconditionally. */
+#if NT_UI_DEBUG_TOOLS
 /* Canonical metrics-bridge pattern: walk -> read getter -> publish into nt_metrics. After this, the
  * overlay's nt_debug_overlay_format_lines (a nt_metrics consumer) must show the value. */
 static void publish_ui_metrics_to_stats(const nt_ui_context_t *ctx) {
     nt_metrics_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(ctx));
     nt_metrics_count("ui_command_count", (uint64_t)nt_ui_get_last_walk_command_count(ctx));
 }
+#endif /* NT_UI_DEBUG_TOOLS */
 
 /*after a walk that emits a RECT, the public draw-call
  * getter reports >= 1 (the walker-exit flush issues at least one GL
@@ -85,7 +90,9 @@ static void test_get_last_walk_command_count_matches_frozen_cmds(void) {
 }
 
 /* Bridge pattern: app forwards getter values into nt_debug_overlay; both
- * counters appear in nt_debug_overlay_format_lines with the expected values. */
+ * counters appear in nt_debug_overlay_format_lines with the expected values.
+ * Gated: needs real nt_metrics + overlay bodies (stubbed on the OFF mirror). */
+#if NT_UI_DEBUG_TOOLS
 static void test_metrics_bridge_publishes_to_nt_debug_overlay(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -108,6 +115,7 @@ static void test_metrics_bridge_publishes_to_nt_debug_overlay(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, expected_draw), "bridge: ui_draw_calls value in nt_debug_overlay must match getter output");
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_command_count: 1"), "bridge: ui_command_count must equal frozen_cmds.length");
 }
+#endif /* NT_UI_DEBUG_TOOLS */
 
 /* counters are SET per walk (not accumulated). Walk twice with
  * different command counts -- second getter call reflects second walk. */
@@ -282,7 +290,9 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_last_walk_draw_calls_after_rect);
     RUN_TEST(test_get_last_walk_command_count_matches_frozen_cmds);
+#if NT_UI_DEBUG_TOOLS
     RUN_TEST(test_metrics_bridge_publishes_to_nt_debug_overlay);
+#endif
     RUN_TEST(test_getters_reflect_latest_walk_only);
     RUN_TEST(test_per_type_rect_command_count);
     RUN_TEST(test_per_type_mixed_commands);

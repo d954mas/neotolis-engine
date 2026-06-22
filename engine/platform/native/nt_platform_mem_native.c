@@ -25,24 +25,29 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
 #include <stdlib.h>
 #include <unistd.h>
 
-nt_platform_mem_t nt_platform_memory_usage(void) {
-    nt_platform_mem_t mem = {0};
-    /* statm field 2 = resident pages; × page size = resident bytes. Dev-only probe: open/parse
-       failure is a bug, not "0 bytes" — fail early (AGENTS.md). */
+/* Resident pages from /proc/self/statm field 2. Dev-only probe: any open/parse failure is a bug —
+   fail early (AGENTS.md). strtol over scanf: the scanf family does not report conversion errors. */
+static long statm_resident_pages(void) {
     FILE *f = fopen("/proc/self/statm", "r");
     NT_ASSERT(f != NULL && "fopen(/proc/self/statm) failed");
     char buf[128];
     char *line = fgets(buf, sizeof(buf), f);
     (void)fclose(f);
     NT_ASSERT(line != NULL && "read /proc/self/statm failed");
-    /* strtol, not fscanf: the scanf family does not report conversion errors (cert-err34-c). */
     char *p = buf;
     (void)strtol(p, &p, 10); /* field 1 (total pages) — skip */
     char *after_total = p;
     long pages_rss = strtol(p, &p, 10); /* field 2 (resident pages) */
-    NT_ASSERT(p != after_total && "parsing /proc/self/statm resident field failed");
+    NT_ASSERT(p != after_total && pages_rss >= 0 && "bad /proc/self/statm resident field");
+    return pages_rss;
+}
+
+nt_platform_mem_t nt_platform_memory_usage(void) {
+    nt_platform_mem_t mem = {0};
+    /* statm field 2 = resident pages; × page size = resident bytes. */
+    long pages_rss = statm_resident_pages();
     long page = sysconf(_SC_PAGESIZE);
-    NT_ASSERT(page > 0 && pages_rss >= 0 && "bad page size / rss from /proc/self/statm");
+    NT_ASSERT(page > 0 && "bad page size from sysconf(_SC_PAGESIZE)");
     mem.used = (size_t)pages_rss * (size_t)page;
     mem.reserved = mem.used;
     return mem;
