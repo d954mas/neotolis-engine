@@ -337,6 +337,14 @@ static void test_inline_image_valign_y(void) {
 #define FX_RAINBOW_SPEED 0.30F
 #define FX_PULSE_AMP 0.15F
 #define FX_PULSE_SPEED 4.0F
+#define FX_BOUNCE_AMP 6.0F
+#define FX_BOUNCE_SPEED 6.0F
+#define FX_BOUNCE_PHASE 0.5F
+#define FX_GLOW_AMP 0.6F
+#define FX_GLOW_SPEED 3.0F
+#define FX_SWAY_AMP 4.0F
+#define FX_SWAY_SPEED 3.0F
+#define FX_SWAY_PHASE 0.5F
 
 /* (9) the stock wave fn returns the deterministic offset.y == A*sin(t*SPEED + idx*PHASE).
  * Tests the fn ABI directly (headless, no walk) -- the contract the emit path folds in. */
@@ -486,6 +494,82 @@ static void test_fx_pulse_deterministic(void) {
     TEST_ASSERT_TRUE_MESSAGE(r.scale >= 1.0F - FX_PULSE_AMP - 1e-3F && r.scale <= 1.0F + FX_PULSE_AMP + 1e-3F, "pulse scale within [1-AMP, 1+AMP]");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "pulse has no offset");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "pulse keeps the atom visible");
+}
+
+/* (9e) bounce hops always-upward (offset_y <= 0), bounded by AMP, with the closed-form
+ * -AMP*|sin(t*SPEED + idx*PHASE)|; an amp/speed override produces the same formula tuned. */
+static void test_fx_bounce_deterministic(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.25F;
+    const uint32_t idx = 3U;
+    const float expect = -FX_BOUNCE_AMP * fabsf(sinf((t * FX_BOUNCE_SPEED) + ((float)idx * FX_BOUNCE_PHASE)));
+
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_bounce(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, expect), "bounce offset.y == -AMP*|sin(t*SPEED + idx*PHASE)|");
+    TEST_ASSERT_TRUE_MESSAGE(r.offset_y <= 1e-3F, "bounce hops always-upward (offset_y <= 0)");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r.offset_y) <= FX_BOUNCE_AMP + 1e-3F, "bounce bounded by AMP");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F), "bounce has no x shift");
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "bounce keeps the atom visible");
+
+    /* PARAMS override: amp=12, speed=4 produce the same formula with the tuned constants. */
+    nt_ui_rich_fx_params_t p = {.amp = 12.0F, .speed = 4.0F};
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_bounce(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    const float tuned_expect = -12.0F * fabsf(sinf((t * 4.0F) + ((float)idx * FX_BOUNCE_PHASE)));
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.offset_y, tuned_expect), "bounce tuned == -amp*|sin(t*speed + idx*PHASE)|");
+}
+
+/* (9f) glow brightens each rgb toward white (>= base), keeps alpha, bounded; an amp/speed override
+ * tunes the same lerp. Visual-only (no offset). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-channel brighten asserts + params override
+static void test_fx_glow_deterministic(void) {
+    const float base_color[4] = {0.2F, 0.4F, 0.6F, 0.8F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.5F;
+    const uint32_t idx = 2U;
+    const float g = FX_GLOW_AMP * (0.5F + (0.5F * sinf(t * FX_GLOW_SPEED)));
+    const float er = base_color[0] + ((1.0F - base_color[0]) * g);
+
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[0], er), "glow r == base + (1-base)*amp*(0.5+0.5*sin)");
+    TEST_ASSERT_TRUE_MESSAGE(r.color[0] >= base_color[0] - 1e-3F, "glow brightens r (>= base)");
+    TEST_ASSERT_TRUE_MESSAGE(r.color[1] >= base_color[1] - 1e-3F, "glow brightens g (>= base)");
+    TEST_ASSERT_TRUE_MESSAGE(r.color[2] >= base_color[2] - 1e-3F, "glow brightens b (>= base)");
+    TEST_ASSERT_TRUE_MESSAGE(r.color[0] <= 1.0F + 1e-3F && r.color[1] <= 1.0F + 1e-3F && r.color[2] <= 1.0F + 1e-3F, "glow bounded by white");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[3], 0.8F), "glow keeps the base alpha (color-only)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "glow has no offset (visual-only color)");
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "glow keeps the atom visible");
+
+    /* PARAMS override: amp=1, speed=2 tune the same lerp. */
+    nt_ui_rich_fx_params_t p = {.amp = 1.0F, .speed = 2.0F};
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    const float gt = 1.0F * (0.5F + (0.5F * sinf(t * 2.0F)));
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[0], base_color[0] + ((1.0F - base_color[0]) * gt)), "glow tuned r matches amp/speed override");
+}
+
+/* (9g) sway shifts horizontally within [-AMP, AMP] via AMP*sin(t*SPEED + idx*PHASE); no y/tint.
+ * An amp/speed override tunes the same curve. */
+static void test_fx_sway_deterministic(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.25F;
+    const uint32_t idx = 3U;
+    const float expect = FX_SWAY_AMP * sinf((t * FX_SWAY_SPEED) + ((float)idx * FX_SWAY_PHASE));
+
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_sway(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, expect), "sway offset.x == AMP*sin(t*SPEED + idx*PHASE)");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r.offset_x) <= FX_SWAY_AMP + 1e-3F, "sway x within [-AMP, AMP]");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, 0.0F), "sway has no y shift");
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "sway keeps the atom visible");
+
+    /* PARAMS override: amp=10, speed=2 produce the same formula with the tuned constants. */
+    nt_ui_rich_fx_params_t p = {.amp = 10.0F, .speed = 2.0F};
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_sway(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    const float tuned_expect = 10.0F * sinf((t * 2.0F) + ((float)idx * FX_SWAY_PHASE));
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.offset_x, tuned_expect), "sway tuned == amp*sin(t*speed + idx*PHASE)");
 }
 
 /* (10) PARAMS: a tuned amp/speed produces a DIFFERENT curve than the default, and NULL params is
@@ -1292,6 +1376,9 @@ int main(void) {
     RUN_TEST(test_fx_shake_negative_time_defined);
     RUN_TEST(test_fx_rainbow_deterministic);
     RUN_TEST(test_fx_pulse_deterministic);
+    RUN_TEST(test_fx_bounce_deterministic);
+    RUN_TEST(test_fx_glow_deterministic);
+    RUN_TEST(test_fx_sway_deterministic);
     RUN_TEST(test_fx_params_override_vs_default);
     RUN_TEST(test_fx_push_effect_ex_tunes_emit);
     RUN_TEST(test_fx_markup_params_apply);
