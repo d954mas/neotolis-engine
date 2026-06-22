@@ -139,6 +139,23 @@ static void test_emit_produces_text_spans(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_atom_count(s_fx.ctx) >= 2U, "solver placed >=2 TEXT atoms");
 }
 
+/* (1b) a rich-only frame (NO nt_ui_label before the rich block) must bind the text material at the
+ * CUSTOM dispatch boundary -- emit_text is the only OTHER binder, so without the dispatch bind the
+ * text pipeline stays id==0 and flush discards the glyphs. Force a foreign material before the walk
+ * so the assertion proves a REBIND, not a leftover. */
+static void test_rich_only_frame_binds_text_material(void) {
+    /* Bind a different (sprite) material into the text renderer so a missing rebind is detectable. */
+    nt_text_renderer_set_material(s_fx.sprite_material);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.sprite_material.id, nt_text_renderer_test_material_id(), "precondition: text renderer holds the foreign material");
+
+    nt_text_renderer_test_reset_call_counters();
+    frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* rich block only, no nt_ui_label */
+
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "rich-only frame emits draw_n spans");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_set_material_calls() > 0U, "rich dispatch rebinds the text material");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material.id, nt_text_renderer_test_material_id(), "rich-only frame leaves the ctx text material bound (glyphs not discarded)");
+}
+
 /* (2) the FIXED block size equals the solved total size (D-67-03). */
 static void test_fixed_block_size_matches_solved(void) {
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT);
@@ -1155,6 +1172,7 @@ static void test_custom_fx_runs_via_markup(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
+    RUN_TEST(test_rich_only_frame_binds_text_material);
     RUN_TEST(test_fixed_block_size_matches_solved);
     RUN_TEST(test_single_style_one_span_per_line);
     RUN_TEST(test_double_walk_is_deterministic);

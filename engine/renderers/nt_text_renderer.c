@@ -502,5 +502,6 @@ void nt_text_renderer_test_reset_call_counters(void) {
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
+uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 #endif
 // #endregion
