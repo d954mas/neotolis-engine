@@ -322,11 +322,11 @@ typedef struct {
  * typewriter counter (game-owned) advanced from the same clock; `last_link` latches the
  * id of the last clicked <link> for the readout. */
 typedef struct {
-    float time;            /* seconds, accumulated from frame dt -> the game-passed effect clock */
-    uint32_t last_link;    /* id of the last clicked <link> (0 = none yet) */
-    uint32_t link_clicks;  /* total link clicks (proves the Model-D click readout) */
-    uint32_t hovered_link; /* link under the pointer LAST frame -> styles THIS frame's link (two-pass) */
-    float accepted_latch;  /* seconds remaining on the "Accepted" reaction after a click */
+    float time;                /* seconds, accumulated from frame dt -> the game-passed effect clock */
+    uint32_t last_link;        /* id of the last clicked <link> (0 = none yet) */
+    uint32_t link_clicks;      /* total link clicks (proves the Model-D click readout) */
+    uint32_t hover_a, hover_b; /* link hovered last frame, PER FRONT -> styles this frame (two-pass, independent) */
+    float latch_a, latch_b;    /* "Accepted" reaction seconds remaining, per front */
 } rich_params_t;
 
 /* Dropdown tab: game-owned selection + open flags. */
@@ -419,7 +419,7 @@ static struct tab_state s_state = {
     .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
     .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
-    .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hovered_link = 0U, .accepted_latch = 0.0F},
+    .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hover_a = 0U, .hover_b = 0U, .latch_a = 0.0F, .latch_b = 0.0F},
 };
 // #endregion
 
@@ -1954,30 +1954,31 @@ static nt_ui_rich_style_t rich_base_style(void) {
  * animates. color is AABBGGRR; scale is the rich push_scale multiplier; label is the visible text. */
 typedef struct {
     uint32_t color;     /* link run color this frame */
-    float scale;        /* link run scale multiplier (hover/clicked bump) */
     const char *label;  /* "[Accept quest]" normally; "[OK Accepted]" during the latch */
     const char *mk_col; /* markup color NAME matching `color` (cyan/green/gold) for the <color=..> tag */
+    bool emphasize;     /* apply the visual-only pulse on hover/accept -- NO scale, so the line never reflows */
 } rich_link_look_t;
 
-static rich_link_look_t rich_link_look(const tab_state_t *st) {
-    const bool hovered = (st->rich.hovered_link == rich_link_quest());
-    const bool accepted = (st->rich.accepted_latch > 0.0F);
+/* Per-front: hovered/accepted come from THIS front's own prev-frame result, so the two on-screen links
+ * react INDEPENDENTLY. Feedback is colour + a visual-only pulse -- never a scale (a scale would grow the
+ * line height and shift the whole block on hover). */
+static rich_link_look_t rich_link_look(bool hovered, bool accepted) {
     rich_link_look_t look;
     if (accepted) {
         look.color = 0xFF50C878U; /* green */
-        look.scale = 1.25F;
         look.label = "[OK Accepted]";
         look.mk_col = "green";
+        look.emphasize = true;
     } else if (hovered) {
         look.color = 0xFFF0C84BU; /* cyan highlight */
-        look.scale = 1.18F;
         look.label = "[Accept quest]";
         look.mk_col = "cyan";
+        look.emphasize = true;
     } else {
         look.color = 0xFFE0A040U; /* resting link blue */
-        look.scale = 1.0F;
         look.label = "[Accept quest]";
         look.mk_col = "gold";
+        look.emphasize = false;
     }
     return look;
 }
@@ -1987,8 +1988,7 @@ static rich_link_look_t rich_link_look(const tab_state_t *st) {
  * brightens + scales on hover and flips to a green "Accepted" latch on click. The markup front below
  * rebuilds the SAME content (same link id + look) so the two stay byte-parallel as the link animates. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear builder script: many runs, no deep nesting
-static void render_rich_builder_block(nt_ui_context_t *ctx, const tab_state_t *st, const nt_ui_rich_style_t *base) {
-    const rich_link_look_t look = rich_link_look(st);
+static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t look, const nt_ui_rich_style_t *base) {
     nt_ui_rich_begin(ctx, base);
 
     /* Title line: a big scaled word + real bold / italic / bold-italic faces. */
@@ -2036,21 +2036,23 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, const tab_state_t *s
     RICH_TEXT_LIT(ctx, "rainbow ");
     nt_ui_rich_pop(ctx);
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
-    RICH_TEXT_LIT(ctx, "pulse ");
+    RICH_TEXT_LIT(ctx, "pulse");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
-    RICH_TEXT_LIT(ctx, "fade_in");
-    nt_ui_rich_pop(ctx);
-    RICH_TEXT_LIT(ctx, ". ");
+    RICH_TEXT_LIT(ctx, " (fade_in = typewriter below). ");
 
-    /* Interactive link: brightens + scales on hover, green "Accepted" latch on click. */
+    /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
+     * NO scale -- a scale would grow the line height and reflow the whole block on hover. */
+    if (look.emphasize) {
+        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+    }
     nt_ui_rich_push_color(ctx, look.color);
-    nt_ui_rich_push_scale(ctx, look.scale);
     nt_ui_rich_link(ctx, rich_link_quest());
     nt_ui_rich_text_n(ctx, look.label, strlen(look.label));
-    nt_ui_rich_link(ctx, 0U); /* end link -- link is a set/clear pending field, NOT a style push */
-    nt_ui_rich_pop(ctx);      /* scale */
+    nt_ui_rich_link(ctx, 0U); /* end link -- set/clear pending field, NOT a style push */
     nt_ui_rich_pop(ctx);      /* color */
+    if (look.emphasize) {
+        nt_ui_rich_pop(ctx); /* effect */
+    }
 
     nt_ui_rich_end(ctx);
 }
@@ -2074,23 +2076,26 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Code-first builder (nt_ui_rich_begin / push_* / text_n / image / link / end):", g_current->body);
     nt_ui_rich_result_t res_a = {0};
     const nt_ui_rich_style_t base_a = rich_base_style();
-    render_rich_builder_block(ctx, st, &base_a);
+    const rich_link_look_t look_a = rich_link_look(st->rich.hover_a == rich_link_quest(), st->rich.latch_a > 0.0F);
+    render_rich_builder_block(ctx, look_a, &base_a);
     nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_builder"), NT_UI_DATA_LAYER(LAYER_TEXT), &base_a, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_a);
     // #endregion
 
     /* #region runtime markup parser */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
-    /* Rebuilt each frame so the link's color/scale/label tracks hover+click identically to front 1
-     * (builder == markup parity). Frame-local stack buffer -- no heap in this render path. */
-    const rich_link_look_t look = rich_link_look(st);
+    /* Rebuilt each frame so the link's color/label tracks THIS front's OWN hover+click (independent of
+     * front 1). Frame-local stack buffer -- no heap. Colour + a visual-only pulse, never a scale. */
+    const rich_link_look_t look_b = rich_link_look(st->rich.hover_b == rich_link_quest(), st->rich.latch_b > 0.0F);
+    const char *fx_open = look_b.emphasize ? "<fx=pulse>" : "";
+    const char *fx_close = look_b.emphasize ? "</fx>" : "";
     char markup[512];
     (void)snprintf(markup, sizeof markup,
                    "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
                    "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
                    "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
-                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade_in>fade_in</fx>. "
-                   "<color=%s><scale=%.2f><link=quest>%s</link></scale></color>",
-                   look.mk_col, (double)look.scale, look.label);
+                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse</fx> (fade_in = typewriter below). "
+                   "%s<color=%s><link=quest>%s</link></color>%s",
+                   fx_open, look_b.mk_col, look_b.label, fx_close);
     const nt_ui_rich_style_t base = rich_base_style();
     nt_ui_rich_result_t res_b = {0};
     nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, strlen(markup), container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_b);
@@ -2111,24 +2116,27 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
-    /* Two-pass hover: THIS frame's hovered link styles NEXT frame's link run (the look was computed
-     * at the top of the frame from the stored value). Either front's hover counts -- they overlap. */
-    st->rich.hovered_link = (res_a.hovered_link != 0U) ? res_a.hovered_link : res_b.hovered_link;
+    /* Two-pass, PER FRONT: each link's own prev-frame hover styles its own next frame, so the two
+     * on-screen links react INDEPENDENTLY (hovering one no longer lights the other). */
+    st->rich.hover_a = res_a.hovered_link;
+    st->rich.hover_b = res_b.hovered_link;
 
-    /* Model-D link reaction: latch the clicked link id, arm the "Accepted" reaction, bump the counter. */
+    /* Model-D link reaction: latch the clicked link, arm the per-front "Accepted" reaction, bump the counter. */
     if (res_a.clicked_link != 0U) {
         st->rich.last_link = res_a.clicked_link;
         st->rich.link_clicks++;
-        st->rich.accepted_latch = 1.2F;
+        st->rich.latch_a = 1.2F;
     }
     if (res_b.clicked_link != 0U) {
         st->rich.last_link = res_b.clicked_link;
         st->rich.link_clicks++;
-        st->rich.accepted_latch = 1.2F;
+        st->rich.latch_b = 1.2F;
     }
-    (void)snprintf(buf, sizeof buf, "clock: %.1fs   link hover: 0x%X   last clicked: 0x%X   clicks: %u", (double)st->rich.time, st->rich.hovered_link, st->rich.last_link, st->rich.link_clicks);
+    const uint32_t hov_now = (res_a.hovered_link != 0U) ? res_a.hovered_link : res_b.hovered_link;
+    (void)snprintf(buf, sizeof buf, "clock: %.1fs   link hover: 0x%X   last clicked: 0x%X   clicks: %u", (double)st->rich.time, hov_now, st->rich.last_link, st->rich.link_clicks);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover the link -- it brightens + grows; click it -- it flips to a green [OK Accepted] for ~1s and the counter ticks. Press T for palette.",
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "Hover a link -- it brightens + pulses (no layout shift); click it -- green [OK Accepted] ~1s + the counter ticks. The two links react independently. Press T for palette.",
                 g_current->caption);
 }
 // #endregion
@@ -2927,8 +2935,11 @@ static void frame(void) {
     /* Rich-text effect clock: the GAME accumulates time from frame dt (no engine global clock)
      * and passes it into the rich-text calls -- wave/rainbow/fade_in read it. */
     s_state.rich.time += g_nt_app.dt;
-    if (s_state.rich.accepted_latch > 0.0F) {
-        s_state.rich.accepted_latch -= g_nt_app.dt; /* decay the post-click "Accepted" reaction */
+    if (s_state.rich.latch_a > 0.0F) {
+        s_state.rich.latch_a -= g_nt_app.dt; /* decay the per-front post-click "Accepted" reaction */
+    }
+    if (s_state.rich.latch_b > 0.0F) {
+        s_state.rich.latch_b -= g_nt_app.dt;
     }
 
     if (!s_atlas_bound) {
