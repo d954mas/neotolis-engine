@@ -309,10 +309,16 @@ static void test_inline_image_valign_y(void) {
 
 /* ===== Per-atom effects (FX-67-01/02) ===== */
 
-/* The wave fn's documented curve constants (mirror nt_ui_rich_fx.c). */
+/* The stock fns' documented curve constants (mirror nt_ui_rich_fx.c). */
 #define FX_WAVE_AMP 3.0F
 #define FX_WAVE_SPEED 6.0F
 #define FX_WAVE_PHASE 0.5F
+#define FX_SHAKE_AMP 2.0F
+#define FX_SHAKE_RATE 30.0F
+#define FX_RAINBOW_PHASE 0.07F
+#define FX_RAINBOW_SPEED 0.30F
+#define FX_PULSE_AMP 0.15F
+#define FX_PULSE_SPEED 4.0F
 
 /* (9) the stock wave fn returns the deterministic offset.y == A*sin(t*SPEED + idx*PHASE).
  * Tests the fn ABI directly (headless, no walk) -- the contract the emit path folds in. */
@@ -345,6 +351,123 @@ static void test_fx_fade_in_visibility(void) {
     const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false);
     TEST_ASSERT_TRUE_MESSAGE(r1.visible, "fade_in fully open -> visible");
     TEST_ASSERT_TRUE_MESSAGE(approx(r1.color[3], 1.0F), "fade_in alpha 1 when fully open");
+}
+
+/* Mirror nt_ui_rich_fx.c's rich_fx_hash01 (xorshift-mix, 24-bit -> [0,1)) so the shake
+ * assertions can predict the exact deterministic jitter. */
+static float fx_hash01(uint32_t a, uint32_t b) {
+    uint32_t hh = (a * 0x9E3779B1U) + (b * 0x85EBCA77U);
+    hh ^= hh >> 15;
+    hh *= 0x2C1B3C6DU;
+    hh ^= hh >> 12;
+    return (float)(hh & 0xFFFFFFU) / (float)0x1000000U;
+}
+
+/* Mirror nt_ui_rich_fx.c's rich_fx_hue_rgb (HSV s=v=1 -> RGB) for the rainbow assertion. */
+static void fx_hue_rgb(float hue, float out_rgb[3]) {
+    const float hp = (hue - floorf(hue)) * 6.0F;
+    const float x = 1.0F - fabsf(fmodf(hp, 2.0F) - 1.0F);
+    float r = 0.0F;
+    float g = 0.0F;
+    float b = 0.0F;
+    if (hp < 1.0F) {
+        r = 1.0F;
+        g = x;
+    } else if (hp < 2.0F) {
+        r = x;
+        g = 1.0F;
+    } else if (hp < 3.0F) {
+        g = 1.0F;
+        b = x;
+    } else if (hp < 4.0F) {
+        g = x;
+        b = 1.0F;
+    } else if (hp < 5.0F) {
+        r = x;
+        b = 1.0F;
+    } else {
+        r = 1.0F;
+        b = x;
+    }
+    out_rgb[0] = r;
+    out_rgb[1] = g;
+    out_rgb[2] = b;
+}
+
+/* (9b) shake is deterministic + bounded by AMP, and DEFINED for negative time (H3: the
+ * float->unsigned step quantize goes through a signed intermediate so countdown clocks don't UB). */
+static void test_fx_shake_deterministic(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.25F;
+    const uint32_t idx = 3U;
+    const uint32_t step = (uint32_t)(int32_t)floorf(t * FX_SHAKE_RATE);
+    const float ex = FX_SHAKE_AMP * (fx_hash01(idx, step) - 0.5F) * 2.0F;
+    const float ey = FX_SHAKE_AMP * (fx_hash01(idx, step + 0x1000U) - 0.5F) * 2.0F;
+
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, ex), "shake offset.x == AMP*(hash-0.5)*2");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, ey), "shake offset.y == AMP*(hash(+0x1000)-0.5)*2");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r.offset_x) <= FX_SHAKE_AMP + 1e-3F, "shake x bounded by AMP");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(r.offset_y) <= FX_SHAKE_AMP + 1e-3F, "shake y bounded by AMP");
+
+    /* Re-evaluation at the same (idx,time) is identical (no global state). */
+    const nt_ui_rich_fx_result_t r2 = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, r2.offset_x), "shake x is deterministic");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, r2.offset_y), "shake y is deterministic");
+}
+
+/* (9b') H3: shake is DEFINED + stable + bounded for NEGATIVE time (countdown/clock-offset clocks
+ * are reachable). The .c quantizes through a signed intermediate so there is no out-of-range
+ * float->unsigned conversion UB; the result must equal the same signed-quantize formula. */
+static void test_fx_shake_negative_time_defined(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float tn = -0.25F;
+    const uint32_t idx = 3U;
+    const uint32_t stepn = (uint32_t)(int32_t)floorf(tn * FX_SHAKE_RATE);
+    const float exn = FX_SHAKE_AMP * (fx_hash01(idx, stepn) - 0.5F) * 2.0F;
+
+    const nt_ui_rich_fx_result_t rn = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, tn, false);
+    TEST_ASSERT_TRUE_MESSAGE(approx(rn.offset_x, exn), "shake defined for negative time (signed-intermediate quantize)");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(rn.offset_x) <= FX_SHAKE_AMP + 1e-3F, "shake x bounded for negative time");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(rn.offset_y) <= FX_SHAKE_AMP + 1e-3F, "shake y bounded for negative time");
+}
+
+/* (9c) rainbow REPLACES rgb with the hue curve (absolute tint, D-67-07) and keeps base alpha. */
+static void test_fx_rainbow_deterministic(void) {
+    const float base_color[4] = {0.2F, 0.4F, 0.6F, 0.8F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.5F;
+    const uint32_t idx = 2U;
+    const float hue = ((float)idx * FX_RAINBOW_PHASE) + (t * FX_RAINBOW_SPEED);
+    float rgb[3];
+    fx_hue_rgb(hue, rgb);
+
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_rainbow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[0], rgb[0]), "rainbow r == hue(idx*PHASE + t*SPEED)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[1], rgb[1]), "rainbow g == hue curve");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[2], rgb[2]), "rainbow b == hue curve");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[3], 0.8F), "rainbow keeps the base alpha (REPLACES rgb only)");
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "rainbow keeps the atom visible");
+}
+
+/* (9d) pulse breathes scale = 1 + AMP*sin(t*SPEED), within [1-AMP, 1+AMP], no tint/offset. */
+static void test_fx_pulse_deterministic(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.3F;
+    const float expect = 1.0F + (FX_PULSE_AMP * sinf(t * FX_PULSE_SPEED));
+
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_pulse(7U, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.scale, expect), "pulse scale == 1 + AMP*sin(t*SPEED)");
+    TEST_ASSERT_TRUE_MESSAGE(r.scale >= 1.0F - FX_PULSE_AMP - 1e-3F && r.scale <= 1.0F + FX_PULSE_AMP + 1e-3F, "pulse scale within [1-AMP, 1+AMP]");
+    TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "pulse has no offset");
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "pulse keeps the atom visible");
 }
 
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
@@ -673,6 +796,10 @@ int main(void) {
     RUN_TEST(test_inline_image_resolves_by_name);
     RUN_TEST(test_inline_image_valign_y);
     RUN_TEST(test_fx_wave_deterministic);
+    RUN_TEST(test_fx_shake_deterministic);
+    RUN_TEST(test_fx_shake_negative_time_defined);
+    RUN_TEST(test_fx_rainbow_deterministic);
+    RUN_TEST(test_fx_pulse_deterministic);
     RUN_TEST(test_fx_fade_in_visibility);
     RUN_TEST(test_fx_image_shifts_quad_visual_only);
     RUN_TEST(test_fx_fade_in_skips_image);

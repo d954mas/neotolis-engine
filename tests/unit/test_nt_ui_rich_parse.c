@@ -102,6 +102,18 @@ static void test_tagset_reset(void) {
     TEST_ASSERT_FALSE(nt_ui_rich_tagset_lookup_color(&ts, h("gold"), &color));
 }
 
+/* (4b) an empty registration name ("") is a dead slot the parser can never address (value
+ * parsers guard vlen>0) -> fail-early NT_ASSERT in every register_* (M11). */
+static void test_tagset_empty_name_asserts(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    const nt_font_t fam[4] = {{.id = 1}, {.id = 2}, {.id = 3}, {.id = 4}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_font(&ts, "", fam));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_atlas(&ts, "", (nt_resource_t){.id = 1U}));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_color(&ts, "", 0xFFFFFFFFU));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", 1U));
+}
+
 /* ---- parser malformed-markup death tests (MARK-67-01) ---- */
 static void parse_lit(const char *m) {
     nt_mem_scratch_reset();
@@ -235,6 +247,7 @@ int main(void) {
     RUN_TEST(test_tagset_color_atlas_effect);
     RUN_TEST(test_tagset_override_in_place);
     RUN_TEST(test_tagset_reset);
+    RUN_TEST(test_tagset_empty_name_asserts);
     RUN_TEST(test_parse_unclosed_tag_asserts);
     RUN_TEST(test_parse_mismatched_close_asserts);
     RUN_TEST(test_parse_unknown_tag_asserts);
