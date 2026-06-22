@@ -168,6 +168,11 @@ static nt_ui_rich_style_t *rich_style_top(nt_ui_rich_state_t *st) {
 
 static void rich_push_copy(nt_ui_rich_state_t *st) {
     NT_ASSERT(st->stack_depth < NT_UI_RICH_STACK_DEPTH && "rich style stack overflow");
+    /* HARD cap (survives NT_ASSERT OFF): the parser drives this from untrusted nesting; without the
+     * bound a deep open-tag run would write past stack[] (and a matching </> would underflow-pop). */
+    if (st->stack_depth >= NT_UI_RICH_STACK_DEPTH) {
+        return;
+    }
     st->stack[st->stack_depth] = st->stack[st->stack_depth - 1];
     st->stack_depth++;
 }
@@ -218,6 +223,11 @@ static uint16_t rich_intern_style(nt_ui_rich_state_t *st, const nt_ui_rich_style
         }
     }
     NT_ASSERT(st->style_count < NT_UI_RICH_MAX_STYLES && "rich style table overflow");
+    /* HARD cap (survives NT_ASSERT OFF): untrusted markup can mint many distinct composed styles;
+     * once full, reuse the last slot rather than write past styles[] (a wrong tint beats an OOB). */
+    if (st->style_count >= NT_UI_RICH_MAX_STYLES) {
+        return (uint16_t)(NT_UI_RICH_MAX_STYLES - 1U);
+    }
     st->styles[st->style_count] = *s;
     return (uint16_t)(st->style_count++);
 }
@@ -232,7 +242,11 @@ static bool rich_run_extends_text(const nt_ui_rich_state_t *st, uint16_t style_i
 
 static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_t kind) {
     NT_ASSERT(st->run_count < NT_UI_RICH_MAX_RUNS && "rich run-list overflow");
-    nt_ui_rich_run_t *r = &st->runs[st->run_count++];
+    /* HARD cap (survives NT_ASSERT OFF): the parser appends one run per style change in untrusted
+     * markup. Once full, overwrite the last slot rather than index past runs[] -- callers only
+     * memset+fill the returned pointer, so the worst OFF outcome is a dropped run, never an OOB. */
+    const uint32_t idx = (st->run_count < NT_UI_RICH_MAX_RUNS) ? st->run_count++ : (NT_UI_RICH_MAX_RUNS - 1U);
+    nt_ui_rich_run_t *r = &st->runs[idx];
     memset(r, 0, sizeof *r);
     r->kind = kind;
     return r;
@@ -310,6 +324,14 @@ static uint8_t rich_intern_custom_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn
     /* The cap ceiling is enforced at compile time (see the _Static_assert at the table), so the
      * runtime check is just the table-overflow guard -- the id range can never exhaust first. */
     NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
+    /* HARD cap (survives NT_ASSERT OFF): the parser mints a custom slot per distinct <fx=name>;
+     * once full, reuse the last slot rather than write past custom_fx[] (a wrong effect beats OOB). */
+    if (st->custom_fx_count >= NT_UI_RICH_MAX_CUSTOM_FX) {
+        const uint32_t last = NT_UI_RICH_MAX_CUSTOM_FX - 1U;
+        st->custom_fx[last] = fn;
+        st->custom_fx_user[last] = user_data;
+        return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + last);
+    }
     const uint32_t idx = st->custom_fx_count++;
     st->custom_fx[idx] = fn;
     st->custom_fx_user[idx] = user_data;
@@ -329,7 +351,9 @@ void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *
  * the same fn must not alias). Returns the custom effect_id. */
 static uint8_t rich_intern_stock_ex(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, const nt_ui_rich_fx_params_t *params) {
     NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
-    const uint32_t idx = st->custom_fx_count++;
+    /* HARD cap (survives NT_ASSERT OFF): the parser mints a slot per tuned <fx=name k=v>; once full,
+     * reuse the last slot rather than write past custom_fx_params[]. */
+    const uint32_t idx = (st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX) ? st->custom_fx_count++ : (NT_UI_RICH_MAX_CUSTOM_FX - 1U);
     st->custom_fx[idx] = fn;
     st->custom_fx_params[idx] = *params;                  /* COPY by value -- read at emit, must be block-owned */
     st->custom_fx_user[idx] = &st->custom_fx_params[idx]; /* stock fn reads params via user_data */
@@ -391,6 +415,12 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
     }
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(st->text_len + len <= NT_UI_RICH_MAX_TEXT_BYTES && "rich text buffer overflow");
+    /* HARD overflow guard (survives NT_ASSERT OFF + cannot wrap): on wasm32 size_t is 32-bit, so
+     * `text_len + len` can wrap past the cap and bypass the assert. Subtraction-form bound: reject
+     * any len past the cap, and any len that would not fit the remaining room, before the memcpy. */
+    if (len > (size_t)NT_UI_RICH_MAX_TEXT_BYTES || st->text_len > NT_UI_RICH_MAX_TEXT_BYTES - (uint32_t)len) {
+        return;
+    }
 
     const uint32_t off = st->text_len;
     memcpy(st->text + off, utf8, len);
@@ -493,9 +523,15 @@ static uint8_t rich_hex_nibble(char c) {
     return 0xFFU;
 }
 
-/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Asserts on malformed. */
+/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Asserts on malformed.
+ * Returns opaque white on a bad length so the (assert-elided) OFF read can never run past [s,s+n). */
 static uint32_t rich_parse_hex_color(const char *s, uint32_t n) {
     NT_ASSERT(n == 7U && s[0] == '#' && "rich markup: <color=#hex> must be #RRGGBB");
+    /* HARD length guard (survives NT_ASSERT OFF): the loop below reads s[1..6], so a slice shorter
+     * than 7 would OOB without this. Bail to opaque white instead of dereferencing past `n`. */
+    if (n != 7U || s[0] != '#') {
+        return 0xFFFFFFFFU;
+    }
     uint32_t rgb = 0;
     for (uint32_t i = 1; i < 7U; i++) {
         const uint8_t nib = rich_hex_nibble(s[i]);
@@ -730,6 +766,10 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     }
     /* link is a pending property, not a stack push -- closed by </link> clearing the pending id. */
     NT_ASSERT(ts_stack->depth < NT_UI_RICH_PARSE_TAG_DEPTH && "rich markup: tag nesting too deep");
+    /* HARD cap (survives NT_ASSERT OFF): untrusted nesting must not write past open_stack[]. */
+    if (ts_stack->depth >= NT_UI_RICH_PARSE_TAG_DEPTH) {
+        return;
+    }
     ts_stack->open_stack[ts_stack->depth++] = kind;
 }
 
@@ -764,6 +804,11 @@ static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
  * Returns the next segment write cursor. */
 static void rich_parse_append_byte(nt_ui_rich_state_t *st, char b) {
     NT_ASSERT(st->text_len < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
+    /* HARD cap (survives NT_ASSERT OFF): one byte per literal char of untrusted markup -- drop the
+     * byte once the shared buffer is full rather than write past text[NT_UI_RICH_MAX_TEXT_BYTES]. */
+    if (st->text_len >= NT_UI_RICH_MAX_TEXT_BYTES) {
+        return;
+    }
     st->text[st->text_len++] = b;
 }
 
@@ -812,11 +857,22 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
         while (close < len && markup[close] != '>') {
             close++;
         }
-        NT_ASSERT(close < len && "rich markup: unterminated tag (no '>')");
+        /* HARD stop (survives NT_ASSERT OFF): no '>' before len -> body would start at markup+len and
+         * body[0] would read 1 byte OOB. Stop the tokenizer without dereferencing body. */
+        if (close >= len) {
+            NT_ASSERT(false && "rich markup: unterminated tag (no '>')");
+            break;
+        }
 
         const char *body = markup + i + 1U; /* between '<' and '>' */
         uint32_t blen = (uint32_t)(close - (i + 1U));
-        NT_ASSERT(blen > 0U && "rich markup: empty tag <>");
+        /* HARD guard: an empty `<>` has blen==0; body[0] below would read the '>' (harmless) but the
+         * tag is meaningless. Skip it past the '>' without dispatching, so OFF builds stay bounded. */
+        if (blen == 0U) {
+            NT_ASSERT(false && "rich markup: empty tag <>");
+            i = close + 1U;
+            continue;
+        }
 
         const bool is_close = (body[0] == '/');
         const bool self_close = (blen >= 1U && body[blen - 1U] == '/');
@@ -923,6 +979,11 @@ static void rich_text_metrics(nt_font_t font, float size, float *out_asc, float 
 static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, float t_asc, float t_desc,
                                 uint32_t off, uint32_t len, float advance, bool breakable_before, uint16_t run_idx) {
     NT_ASSERT(*n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
+    /* HARD cap (survives NT_ASSERT OFF): atom stream is content-proportional but capped at
+     * NT_UI_RICH_MAX_GLYPHS; drop atoms past the cap rather than write past out[]. */
+    if (*n >= cap) {
+        return;
+    }
     rich_atom_t *a = &out[(*n)++];
     memset(a, 0, sizeof *a);
     a->kind = NT_RICH_ATOM_TEXT;
@@ -946,11 +1007,13 @@ static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, con
 /* Split an over-long word (advance > container_w) at UTF-8 codepoint boundaries into chunks
  * each <= container_w, so no atom escapes the box (break-anywhere; CSS overflow-wrap:anywhere).
  *
- * O(n): the chunk width is tracked INCREMENTALLY (one per-glyph measure per codepoint), not
- * re-measured from chunk_start each step (which was O(n^2) over the word). cur_w is the
- * width of [chunk_start, i); prev_w is the width up to last_boundary. On commit, prev_w is the
- * committed chunk width and the new chunk re-seeds with the glyph that overflowed -- so the split
- * still lands on a codepoint boundary and no chunk exceeds container_w. */
+ * Chunk width tracked by PREFIX-DIFFERENCE from chunk_start (the same technique
+ * rich_emit_text_effected uses): cur_w = measure([chunk_start, i)) re-measures the whole prefix so
+ * INTER-GLYPH KERNING is included -- an isolated per-codepoint sum drops the kerning the emitted
+ * atom (also measured whole) and the rendered glyphs carry, letting a chunk exceed container_w under
+ * a kerning font. prev_w = measure([chunk_start, last_boundary)) is the committed chunk width; on
+ * commit the new chunk RE-SEEDS its prefix from last_boundary, so each chunk's width is the
+ * standalone whole-chunk measure (matching how the emitted atom is measured and drawn). */
 static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, float t_asc, float t_desc,
                                 const char *text, uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable) {
     uint32_t chunk_start = word_off;
@@ -1033,6 +1096,9 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             const float src_w = (reg != NULL) ? (float)reg->source_w : 1.0F;
             const float src_h = (reg != NULL) ? (float)reg->source_h : 1.0F;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
+            if (n >= cap) {
+                break; /* HARD cap (survives NT_ASSERT OFF): no write past out[] */
+            }
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
             a->kind = NT_RICH_ATOM_IMAGE;
@@ -1050,6 +1116,9 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
             const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
+            if (n >= cap) {
+                break; /* HARD cap (survives NT_ASSERT OFF): no write past out[] */
+            }
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
             a->kind = NT_RICH_ATOM_OBJECT;
@@ -1255,6 +1324,11 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             }
             const rich_atom_t *a = &atoms[i];
             NT_ASSERT(st->solved_count < na && "rich solved-atom overflow");
+            /* HARD cap (survives NT_ASSERT OFF): solved[] is sized to atom_cap >= na; each atom is
+             * visited once so this is structurally bounded, but guard the write regardless. */
+            if (st->solved_count >= na) {
+                break;
+            }
             nt_ui_rich_solved_atom_t *s = &st->solved[st->solved_count++];
             s->kind = a->kind;
             s->x = pen_x;
@@ -1283,8 +1357,11 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
                 nt_ui_rich_link_rect_t *last = (st->link_count > 0U) ? &st->links[st->link_count - 1] : NULL;
                 if (last != NULL && prev_link_id == a->link_id && last->link_id == a->link_id && last->line == L) {
                     last->w = (pen_x + a->w) - last->x; /* extend to cover this atom (adjacent same-link) */
+                } else if (st->link_count >= NT_UI_RICH_MAX_LINKS) {
+                    /* HARD cap (survives NT_ASSERT OFF): drop hitboxes past the cap rather than write
+                     * past links[] -- untrusted markup can declare many disjoint <link> rects. */
+                    NT_ASSERT(false && "rich link-rect overflow");
                 } else {
-                    NT_ASSERT(st->link_count < NT_UI_RICH_MAX_LINKS && "rich link-rect overflow");
                     nt_ui_rich_link_rect_t *lr = &st->links[st->link_count++];
                     lr->link_id = a->link_id;
                     lr->line = L;
