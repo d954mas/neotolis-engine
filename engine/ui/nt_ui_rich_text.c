@@ -1422,14 +1422,23 @@ static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *s
 // #endregion
 
 // #region LINK
+/* Per-rich-block retained press-target cell. Links have NO Clay element, so the capture-cell
+ * mechanism (nt_ui_events) cannot track them; this keyed-by-block-id cell persists the link the
+ * press STARTED on across frames so a click requires press+release on the SAME link (FX-67-03). */
+#define NT_UI_RICH_LINK_TAG NT_UI_STATE_TAG('r', 'l', 'n', 'k')
+typedef struct {
+    uint32_t pressed_link; /* link id the LEFT press began over (0 = pressed over no link / no press) */
+} nt_ui_rich_link_press_t;
+
 /* Hit-test the solver's `<link=id>` rects against the pointer and resolve {hovered_link,
  * clicked_link} (FX-67-03, Model D). NO extra Clay element per link: the rects are local to
  * the FIXED block, so we add the block's solved bbox origin (prev-frame, the same two-pass
- * trick the solver uses for width, D-67-23) before testing. For each distinct hovered link we
- * call nt_ui_events(ctx, link_id, NULL) to advance its per-id capture cell so release-outside
- * yields no click (T-67-07-04); the geometric hover + the pointer's release-over edge give the
- * reported result. The resolved hovered_link is also fed back into the per-atom effect call
- * (hover gates effects). Must run BEFORE emit (emit reads st->hovered_link). */
+ * trick the solver uses for width, D-67-23) before testing. A click requires the press AND the
+ * release on the SAME link: the press-edge records the link under the pointer into a retained
+ * per-block cell (keyed by the block id), and the release-edge reports a click only when the
+ * pointer is still over that SAME link. hovered_link stays purely geometric. The resolved
+ * hovered_link is fed back into the per-atom effect call (hover gates effects). Must run BEFORE
+ * emit (emit reads st->hovered_link). */
 static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id) {
     st->hovered_link = 0U;
     st->clicked_link = 0U;
@@ -1448,21 +1457,33 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
     const nt_pointer_t *p = &ctx->frame_pointers[0];
     const float px = p->x;
     const float py = p->y;
+    const bool pressed = p->buttons[NT_BUTTON_LEFT].is_pressed;
     const bool released = p->buttons[NT_BUTTON_LEFT].is_released;
 
+    /* The link under the pointer this frame (0 = none); geometric hover doubles as the press/release target. */
+    uint32_t over_link = 0U;
     for (uint32_t i = 0; i < st->link_count; i++) {
         const nt_ui_rich_link_rect_t *lr = &st->links[i];
         const float x0 = ox + lr->x;
         const float y0 = oy + lr->y;
         if (px >= x0 && px <= x0 + lr->w && py >= y0 && py <= y0 + lr->h) {
-            st->hovered_link = lr->link_id; /* topmost/first hit wins */
-            /* Advance the link id's per-id capture cell (release-outside -> no click). */
-            (void)nt_ui_events(ctx, lr->link_id, NULL);
-            if (released) {
-                st->clicked_link = lr->link_id;
-            }
+            over_link = lr->link_id; /* topmost/first hit wins */
             break;
         }
+    }
+    st->hovered_link = over_link;
+
+    /* Retained press-target cell, keyed by the block id (links have no Clay element / capture cell). */
+    nt_ui_rich_link_press_t *cell = (nt_ui_rich_link_press_t *)nt_ui_state(ctx, id, (uint32_t)sizeof *cell, NT_UI_RICH_LINK_TAG);
+    if (pressed) {
+        cell->pressed_link = over_link; /* press-edge: latch the link the press started on (0 = none) */
+    }
+    if (released) {
+        /* Click only when the release lands on the SAME link the press started on. */
+        if (over_link != 0U && over_link == cell->pressed_link) {
+            st->clicked_link = over_link;
+        }
+        cell->pressed_link = 0U; /* release clears the latch regardless */
     }
 }
 // #endregion
