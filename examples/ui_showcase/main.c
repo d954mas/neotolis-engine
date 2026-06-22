@@ -2875,6 +2875,16 @@ static float s_nt_field_css_x; /* Cyrillic field center, CSS px (canvas-relative
 static float s_nt_field_css_y;
 static int s_nt_field_visible; /* the field was laid out this frame (Input tab active) */
 
+/* Rich-text smoke surface (tests/browser/rich.spec.ts): the code-first rich block's on-canvas CSS
+ * rect (so the test can click inside it to hit the inline <link>), the block's visibility this frame,
+ * and the game-owned link-click counter -- proving rich self-emit + link interaction reach the real
+ * web render/input path. Populated each frame the Rich tab is active. */
+static float s_nt_rich_css_x; /* code-first rich block center, CSS px */
+static float s_nt_rich_css_y;
+static float s_nt_rich_css_w; /* block width/height in CSS px (the test clicks within it) */
+static float s_nt_rich_css_h;
+static int s_nt_rich_visible; /* the rich block was laid out this frame (Rich tab active) */
+
 EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
 
 /* Pointer to the Cyrillic field's game-owned buffer (UTF-8, NUL-terminated). JS decodes it. */
@@ -2897,6 +2907,26 @@ EMSCRIPTEN_KEEPALIVE void nt_test_open_input_tab(void) {
     }
 }
 
+/* Select the Rich Text tab (so the rich block is laid out + self-emits). Index resolved by render fn. */
+EMSCRIPTEN_KEEPALIVE void nt_test_open_rich_tab(void) {
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        if (g_tabs[i].render == render_rich) {
+            s_active_tab = i;
+            return;
+        }
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE int nt_test_rich_visible(void) { return s_nt_rich_visible; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_x(void) { return s_nt_rich_css_x; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_y(void) { return s_nt_rich_css_y; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_w(void) { return s_nt_rich_css_w; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_h(void) { return s_nt_rich_css_h; }
+
+/* Total <link> clicks the rich blocks have registered (game-owned counter) -- a click on the inline
+ * link bumps it, proving the link-interaction path reached the real browser render+input. */
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_state.rich.link_clicks; }
+
 /* clang-format off */
 /* Force-include UTF8ToString for the readout below. Gated with the hooks so the deployed showcase
  * (NT_SHOWCASE_TEST_HOOKS OFF) carries no test-only dep. The C getters are KEEPALIVE (live as bare
@@ -2912,7 +2942,13 @@ EM_JS(void, nt_test_install_hooks, (void), {
         field_visible: function() { return _nt_test_field_visible() !== 0; },
         field_css: function() {
             return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y() };
-        }
+        },
+        open_rich_tab: function() { _nt_test_open_rich_tab(); },
+        rich_visible: function() { return _nt_test_rich_visible() !== 0; },
+        rich_css: function() {
+            return { x: _nt_test_rich_css_x(), y: _nt_test_rich_css_y(), w: _nt_test_rich_css_w(), h: _nt_test_rich_css_h() };
+        },
+        rich_link_clicks: function() { return _nt_test_rich_link_clicks() >>> 0; }
     };
 })
 /* clang-format on */
@@ -3113,6 +3149,21 @@ static void frame(void) {
                 s_nt_field_css_y = cy_fb / dpr;
             }
             s_nt_ready = 1;
+        }
+        /* Rich Text tab: map the code-first rich block's logical bbox -> canvas CSS px so the spec can
+         * click inside it (the inline <link> sits within this rect). Same UI->fb->CSS map as the field. */
+        {
+            const nt_ui_bbox_t rb = nt_ui_get_bbox(s_ctx, nt_ui_id("showcase/rich_builder"));
+            s_nt_rich_visible = rb.found ? 1 : 0;
+            if (rb.found) {
+                const float dpr = (g_nt_window.dpr > 0.0F) ? g_nt_window.dpr : 1.0F;
+                const float cx_fb = scale.offset_x + (rb.x + rb.width * 0.5F) * scale.scale_x;
+                const float cy_fb = scale.offset_y + (rb.y + rb.height * 0.5F) * scale.scale_y;
+                s_nt_rich_css_x = cx_fb / dpr;
+                s_nt_rich_css_y = cy_fb / dpr;
+                s_nt_rich_css_w = (rb.width * scale.scale_x) / dpr;
+                s_nt_rich_css_h = (rb.height * scale.scale_y) / dpr;
+            }
         }
 #endif /* __EMSCRIPTEN__ && NT_SHOWCASE_TEST_HOOKS */
 
