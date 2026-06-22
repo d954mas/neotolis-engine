@@ -1990,7 +1990,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     /* #region Front B: runtime markup parser */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
     static const char markup[] = "Quest: slay the <b><color=#DC3C3C>Crimson Drake</color></b> and claim "
-                                 "<wave><color=gold><img=gold/> 100 gold</color></wave>. Reward heart <img=heart/> "
+                                 "<fx=wave><color=gold><img=gold/> 100 gold</color></fx>. Reward heart <img=heart/> "
                                  "<i>(urgent)</i> <link=36865>[Accept quest]</link>";
     const nt_ui_rich_style_t base = rich_base_style();
     nt_ui_rich_result_t res_b = {0};
