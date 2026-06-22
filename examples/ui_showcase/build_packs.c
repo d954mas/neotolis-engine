@@ -296,14 +296,15 @@ int main(int argc, char *argv[]) {
     // #region atlas: rich-text inline icons (named regions for <img=name/> by-name resolve)
     /* Inline rich-text images resolve by atlas+region NAME (the atlas IS the registry).
      * A dedicated small icon atlas with named regions ("heart","gold") feeds both the rich-text
-     * demo tab and the no-GL emit test's by-name resolve. Procedural full-bleed sprites (opaque,
-     * no padding/margin/extrude) keep the regions' UV near [0,1] so the inline image stays crisp. */
+     * demo tab and the no-GL emit test's by-name resolve. extrude=1 duplicates each region's edge
+     * texel into a 1px border so LINEAR sampling at a region edge reads its own texel, never the
+     * neighbour — the region UV stays inside the interior (away from the bleed border). */
     nt_atlas_opts_t icons_atlas_opts = nt_atlas_opts_defaults();
     icons_atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
     icons_atlas_opts.allow_transform = false;
-    icons_atlas_opts.padding = 0;
+    icons_atlas_opts.padding = 2;
     icons_atlas_opts.margin = 0;
-    icons_atlas_opts.extrude = 0;
+    icons_atlas_opts.extrude = 1;
     icons_atlas_opts.power_of_two = false;
     icons_atlas_opts.premultiplied = true;
     icons_atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
