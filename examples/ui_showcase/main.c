@@ -1921,10 +1921,10 @@ static nt_ui_rich_style_t rich_base_style(void) {
  * never go stale. Only valid for a string LITERAL (sizeof on a char* would measure the pointer). */
 #define RICH_TEXT_LIT(ctx, lit) nt_ui_rich_text_n((ctx), (lit), (uint32_t)(sizeof(lit) - 1U))
 
-/* Front A: the code-first push/pop builder. Demos styled multi-run text, an inline gold icon, bold +
- * (synth) italic, a wave effect that moves the text AND the gold heart TOGETHER (the D-67-17 driving
- * case), a typewriter reveal (game-owned visible_glyphs, here a fade_in stagger driven by the clock),
- * a custom OBJECT chip, and a clickable <link>. */
+/* Front A: the code-first push/pop builder. Demos styled multi-run text, two inline icons (gold + heart),
+ * bold + (synth) italic, a wave effect that moves the text AND the gold icon TOGETHER (the D-67-17
+ * driving case), and a clickable <link>. (The typewriter/fade_in reveal is block 3; the OBJECT run is
+ * exercised by the unit tests, not this demo.) */
 static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, const nt_ui_rich_style_t *base, nt_ui_rich_result_t *out) {
     nt_ui_rich_begin(ctx, base);
 
@@ -1954,8 +1954,8 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, con
     nt_ui_rich_link(ctx, RICH_LINK_QUEST);
     nt_ui_rich_push_color(ctx, (out != NULL && out->hovered_link == RICH_LINK_QUEST) ? 0xFFFFC864U : 0xFFE0A050U);
     RICH_TEXT_LIT(ctx, "[Accept quest]");
-    nt_ui_rich_pop(ctx); /* color */
-    nt_ui_rich_pop(ctx); /* link */
+    nt_ui_rich_pop(ctx);      /* color */
+    nt_ui_rich_link(ctx, 0U); /* end link -- link is a set/clear pending field, NOT a style push */
 
     nt_ui_rich_end(ctx);
     (void)st;
@@ -1977,7 +1977,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     const float container_w = 560.0F;
 
     /* #region Front A: code-first builder */
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Code-first builder (nt_ui_rich_begin / push_* / text_n / image / object / link / end):", g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Code-first builder (nt_ui_rich_begin / push_* / text_n / image / link / end):", g_current->body);
     nt_ui_rich_result_t res_a = {0};
     /* Two-pass: the prev result drives this frame's link-hover color; the widget fills res_a for next. */
     static nt_ui_rich_result_t s_prev_a;
