@@ -1907,6 +1907,27 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
  * so both land on the same id. (Runtime hash, not a compile-time constant -> use the inline call.) */
 static inline uint32_t rich_link_quest(void) { return nt_hash32_str("quest").value; }
 
+/* Game custom effect: a LOOPING fade. The stock fade_in is one-shot (reveals then holds), so on the
+ * gallery's continuous clock it freezes after startup. This re-reveals every `period` by looping the
+ * clock internally -- and shows off the custom-effect-fn registry. Visual-only (alpha + visible). */
+static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                             void *user_data) {
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)hovered;
+    (void)user_data;
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    const float period = 2.4F;   /* full re-reveal loop */
+    const float stagger = 0.10F; /* per-glyph reveal delay */
+    const float dur = 0.40F;     /* per-glyph fade length */
+    float a = (fmodf(time, period) - (float)atom_idx * stagger) / dur;
+    a = a < 0.0F ? 0.0F : (a > 1.0F ? 1.0F : a);
+    r.color[3] = base_color[3] * a;
+    r.visible = (a > 0.0F);
+    return r;
+}
+
 /* Build the markup-front vocabulary once the font + materials are ready: a named "gold" color, the
  * "wave" stock effect, and the icons atlas alias. The CODE-FIRST builder never touches the tagset --
  * it gets real values directly. */
@@ -1925,6 +1946,8 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", NT_UI_RICH_FX_ID_RAINBOW);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
+    /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
+    nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, NULL);
     nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_icons_atlas_handle);
     /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
     nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
@@ -1984,9 +2007,9 @@ static rich_link_look_t rich_link_look(bool hovered, bool accepted) {
 }
 
 /* Code-first push/pop builder. Demos: real R/B/I/BI faces, a scaled-up title word, an effects gallery
- * (all five stock effects, one per labelled word), two inline icons, and a clickable <link> that
- * brightens + scales on hover and flips to a green "Accepted" latch on click. The markup front below
- * rebuilds the SAME content (same link id + look) so the two stay byte-parallel as the link animates. */
+ * (4 stock effects + a custom looping-fade fn, one per labelled word), two inline icons, and a
+ * clickable <link> that brightens + pulses on hover and flips to a green "Accepted" latch on click.
+ * The markup front below rebuilds the SAME content so the two stay parallel as the link animates. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear builder script: many runs, no deep nesting
 static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t look, const nt_ui_rich_style_t *base) {
     nt_ui_rich_begin(ctx, base);
@@ -2025,7 +2048,7 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
     RICH_TEXT_LIT(ctx, ". Effects: ");
 
-    /* Effects gallery: each stock effect on its own labelled word, all off the same clock. */
+    /* Effects gallery: 4 stock effects + a custom looping-fade fn, one per labelled word, same clock. */
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
     RICH_TEXT_LIT(ctx, "wave ");
     nt_ui_rich_pop(ctx);
@@ -2036,9 +2059,12 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     RICH_TEXT_LIT(ctx, "rainbow ");
     nt_ui_rich_pop(ctx);
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
-    RICH_TEXT_LIT(ctx, "pulse");
+    RICH_TEXT_LIT(ctx, "pulse ");
     nt_ui_rich_pop(ctx);
-    RICH_TEXT_LIT(ctx, " (fade_in = typewriter below). ");
+    nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, NULL); /* custom looping fade (vs the one-shot stock fade_in) */
+    RICH_TEXT_LIT(ctx, "fade");
+    nt_ui_rich_pop(ctx);
+    RICH_TEXT_LIT(ctx, ". ");
 
     /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
      * NO scale -- a scale would grow the line height and reflow the whole block on hover. */
@@ -2066,7 +2092,8 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         return;
     }
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: real bold/italic/bold-italic faces + scaled words + ALL 5 stock effects + inline icons + a clickable link.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: real bold/italic/bold-italic faces + scaled words + 4 stock effects + a custom looping-fade fn + inline icons + a clickable link.",
+                g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The SAME content is authored two ways: the code-first push/pop builder, then the runtime <markup> parser.", g_current->caption);
 
     /* The block wraps at this width; narrow the window to watch the wrap re-flow (no atom escapes). */
@@ -2093,7 +2120,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                    "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
                    "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
                    "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
-                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse</fx> (fade_in = typewriter below). "
+                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade</fx>. "
                    "%s<color=%s><link=quest>%s</link></color>%s",
                    fx_open, look_b.mk_col, look_b.label, fx_close);
     const nt_ui_rich_style_t base = rich_base_style();
