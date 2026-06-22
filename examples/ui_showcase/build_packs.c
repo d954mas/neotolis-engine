@@ -25,6 +25,13 @@
 #define HEADER_DIR "examples/ui_showcase/generated"
 #define FONT_PATH "examples/ui_showcase/raw/font.ttf"
 
+/* Rich-text family: DejaVu R/B/I/BI faces (real bold + oblique, full Cyrillic). The rich tab binds
+ * these to variant slots so <b>/<i> select a real face instead of synth-shear. */
+#define FONT_RICH_R_PATH "examples/ui_showcase/raw/font_dejavu_r.ttf"
+#define FONT_RICH_B_PATH "examples/ui_showcase/raw/font_dejavu_b.ttf"
+#define FONT_RICH_I_PATH "examples/ui_showcase/raw/font_dejavu_i.ttf"
+#define FONT_RICH_BI_PATH "examples/ui_showcase/raw/font_dejavu_bi.ttf"
+
 /* Demo-only Cyrillic block: the engine is codepoint-agnostic; the SHOWCASE bakes Latin +
  * Cyrillic so the Input tab's Cyrillic field renders real multi-byte UTF-8 glyphs, not tofu. */
 #define CHARSET_CYRILLIC "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя"
@@ -347,6 +354,13 @@ int main(int argc, char *argv[]) {
                             .resource_name = "ui_showcase/font",
                         });
     (void)printf("  Font (ASCII + Cyrillic) added: ui_showcase/font\n");
+
+    /* Rich-text family: four real faces, same small ASCII+Cyrillic subset, one per variant slot. */
+    nt_builder_add_font(ctx, FONT_RICH_R_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_r"});
+    nt_builder_add_font(ctx, FONT_RICH_B_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_b"});
+    nt_builder_add_font(ctx, FONT_RICH_I_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_i"});
+    nt_builder_add_font(ctx, FONT_RICH_BI_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_bi"});
+    (void)printf("  Rich-text family (DejaVu R/B/I/BI) added: ui_showcase/font_rich_{r,b,i,bi}\n");
     // #endregion
 
     // #region finish + codegen

@@ -22,6 +22,10 @@
 
 /* --- FONT --- */
 #define ASSET_FONT_UI_SHOWCASE_FONT ((nt_hash64_t){0xA3FFF9B020E5CAD5ULL}) /* ui_showcase/font */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_B ((nt_hash64_t){0x21CB3B011A10979CULL}) /* ui_showcase/font_rich_b */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI ((nt_hash64_t){0x2A0824949A29ABADULL}) /* ui_showcase/font_rich_bi */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_I ((nt_hash64_t){0x841A4565FA404981ULL}) /* ui_showcase/font_rich_i */
+#define ASSET_FONT_UI_SHOWCASE_FONT_RICH_R ((nt_hash64_t){0x272901A758BB8740ULL}) /* ui_showcase/font_rich_r */
 
 /* --- ATLAS --- */
 #define ASSET_ATLAS_UI_SHOWCASE_ATLAS ((nt_hash64_t){0xD10A933806EA38F3ULL}) /* ui_showcase_atlas */
@@ -67,6 +71,10 @@ static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/sprite.vert");
     (void)nt_hash64_str("assets/shaders/sprite_radial.vert");
     (void)nt_hash64_str("ui_showcase/font");
+    (void)nt_hash64_str("ui_showcase/font_rich_b");
+    (void)nt_hash64_str("ui_showcase/font_rich_bi");
+    (void)nt_hash64_str("ui_showcase/font_rich_i");
+    (void)nt_hash64_str("ui_showcase/font_rich_r");
     (void)nt_hash64_str("ui_showcase_atlas");
     (void)nt_hash64_str("ui_showcase_atlas/_white");
     (void)nt_hash64_str("ui_showcase_atlas/arrow_right");
