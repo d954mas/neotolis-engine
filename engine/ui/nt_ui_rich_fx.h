@@ -8,8 +8,10 @@
  *
  * The stock catalog (wave/shake/rainbow/pulse/fade_in) is a STARTING set the game registers
  * piecemeal by name into the tagset (nt_ui_rich_tagset_register_effect) -- NO register_defaults
- * bundle. Per-effect tuning is compile-time constants (NOT tag params);
- * a game that needs tunable amplitude registers its OWN fn. */
+ * bundle. The catalog constants are DEFAULTS: a stock effect is tunable at runtime via
+ * nt_ui_rich_fx_params_t (amp/speed) passed through nt_ui_rich_push_effect_ex or the
+ * `<fx=name amp=.. speed=..>` markup; a field <=0 keeps the default. A game needing a curve the
+ * params can't express still registers its OWN fn. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,7 +26,7 @@
  * mutates so a future field addition stays forward-compatible (no bare {0}, alpha 0 != opaque). */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]);
 
-/* ---- Stock catalog. Per-effect constants are compile-time. ---- */
+/* ---- Stock catalog. Constants are DEFAULTS; user_data (nt_ui_rich_fx_params_t) tunes amp/speed. ---- */
 /* offset.y = AMP * sin(time*SPEED + atom_idx*PHASE) -- a per-atom phase-shifted vertical wave. */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                           void *user_data);

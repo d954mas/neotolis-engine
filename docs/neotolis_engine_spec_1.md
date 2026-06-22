@@ -3106,9 +3106,10 @@ directly off the markup, no tagset needed: `<b>`, `<i>`, `<scale=N>`,
 `<link=id>` (the id is hashed in place), `<color=#RRGGBB>` (hex literal read
 directly), and the default-atlas `<img=region/>` (region resolved by name
 against the base style's atlas). Only the **NAMED** resolves go through the
-**tagset**: `<color=name>`, `<font=name>`, `<fx=name>`, and an
-`<img=alias:region/>` atlas alias — passing one of these with a `NULL` tagset
-asserts. A tagset is therefore required only when the markup uses those named
+**tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
+`<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, stock effects
+only), and an `<img=alias:region/>` atlas alias — passing one of these with a
+`NULL` tagset asserts. A tagset is therefore required only when the markup uses those named
 forms; pure-intrinsic markup parses with a `NULL` tagset.
 
 ## 32.2 Design: flat run-list → solver → one FIXED block
@@ -3147,6 +3148,29 @@ registry (see §32.5, D-67-13).
   registered with the fn (see below): the same fn can be **parameterized per
   registration** (e.g. amplitude/offset read from `user_data`); stock catalogue fns
   receive `NULL` and ignore it.
+- **Tunable stock effects (revises the earlier compile-time-constants stance).**
+  The stock catalogue constants are now **defaults**, not the final word: a stock
+  effect is tunable at runtime via `nt_ui_rich_fx_params_t { float amp; float
+  speed; }` passed as the stock fn's `user_data`. Two fronts deliver it: the builder
+  `nt_ui_rich_push_effect_ex(ctx, stock_id, params)` (params are **copied by value**
+  into per-block storage — they are read at emit, so they must outlive the transient
+  caller struct) and the markup `<fx=name amp=8 speed=3>` (the tag value is the
+  effect name followed by space-separated `key=value` pairs; keys `amp`/`speed`,
+  float values; a malformed pair fails-early via `NT_ASSERT`). **Convention: a field
+  `<= 0` means "use the effect's compile-time default"**, so a partly-specified
+  struct tunes only the field it sets. `params == NULL` (the plain
+  `nt_ui_rich_push_effect` / bare `<fx=name>` path) is **byte-identical** to the
+  original compile-time-default behaviour. Per-effect mapping: wave `amp` = vertical
+  px / `speed` = rad/s; shake `amp` = jitter px / `speed` = steps/s; rainbow `speed`
+  = hue turns/s (`amp` unused); pulse `amp` = scale delta / `speed` = rad/s; fade_in
+  `speed` = per-atom reveal rate (`amp` unused). The params struct is **in-memory
+  only** (never serialized), and tuned stock effects route through the SAME per-block
+  custom-fx table as game-supplied fns (a tuned effect carries an `effect_id >=
+  NT_UI_RICH_FX_CUSTOM_BASE`). Markup `k=v` params apply to **stock effects only** —
+  a `<fx=name>` resolving to a custom fn carries that fn's own `user_data`, so
+  passing `k=v` on a custom name fails-early (D-67-27). This **revises** the original
+  #184/D-67 stance that per-effect tuning was compile-time constants and NOT tag
+  params; the catalogue constants are now the defaults.
 - **Stock + custom effect catalog (extensible).** A stock catalogue
   (wave / shake / rainbow / pulse / fade_in) ships as a starting set, registered
   piecemeal by name. A game also supplies its **own** `nt_ui_rich_fx_fn` and uses
@@ -3209,3 +3233,17 @@ points; flagged here so code and spec do not silently drift:
   typedef is now live on both authoring fronts. At emit the stored `user_data` is
   delivered to the custom fn (its last argument); stock fns get `NULL` — so one fn
   can be parameterized per registration.
+- **D-67-27 — stock effects are runtime-tunable (revises "tuning is compile-time
+  constants").** The original #184/D-67 design said per-effect tuning was
+  compile-time constants and explicitly NOT tag params; a game needing a different
+  amplitude had to register its own fn. Shipped instead: the catalogue constants are
+  **defaults**, and stock effects accept an `nt_ui_rich_fx_params_t { amp, speed }`
+  via `nt_ui_rich_push_effect_ex` (builder, params copied by value into per-block
+  storage) and `<fx=name amp=.. speed=..>` (markup, `key=value` float pairs after the
+  name). A field `<= 0` keeps that effect's default; `params == NULL` is
+  byte-identical to the original behaviour (the existing stock-effect tests stay
+  green). Markup `k=v` applies to stock effects only — a custom-fn name carries its
+  own `user_data`, so `k=v` on a custom name fails-early. The 8 B params struct is
+  in-memory only (never serialized); tuned stock effects route through the same
+  per-block custom-fx table as custom fns (`effect_id >= NT_UI_RICH_FX_CUSTOM_BASE`),
+  so the 48 B style ABI is still unchanged.
