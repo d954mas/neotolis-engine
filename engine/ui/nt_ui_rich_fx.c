@@ -26,6 +26,17 @@
 #define RICH_FX_FADE_STAGGER 0.05F /* sec/atom start offset */
 #define RICH_FX_FADE_DUR 0.30F     /* sec per-atom fade duration */
 
+#define RICH_FX_BOUNCE_AMP 6.0F   /* px hop height */
+#define RICH_FX_BOUNCE_SPEED 6.0F /* rad/sec */
+#define RICH_FX_BOUNCE_PHASE 0.5F /* rad/atom */
+
+#define RICH_FX_GLOW_AMP 0.6F   /* max brighten fraction toward white */
+#define RICH_FX_GLOW_SPEED 3.0F /* rad/sec */
+
+#define RICH_FX_SWAY_AMP 4.0F   /* px horizontal amplitude */
+#define RICH_FX_SWAY_SPEED 3.0F /* rad/sec */
+#define RICH_FX_SWAY_PHASE 0.5F /* rad/atom */
+
 static float rich_fx_clamp01(float v) {
     if (v < 0.0F) {
         return 0.0F;
@@ -181,6 +192,57 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kin
     return r;
 }
 
+nt_ui_rich_fx_result_t nt_ui_rich_fx_bounce(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                            void *user_data) {
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)hovered;
+    /* params: amp = hop px height, speed = rad/s; phase stays a compile-time constant. */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float amp = rich_fx_amp(p, RICH_FX_BOUNCE_AMP);
+    const float speed = rich_fx_speed(p, RICH_FX_BOUNCE_SPEED);
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    /* abs(sin) -> always-upward sharp-bottom hop (y up = negative), distinct from wave's smooth swing. */
+    r.offset_y = -amp * fabsf(sinf((time * speed) + ((float)atom_idx * RICH_FX_BOUNCE_PHASE)));
+    return r;
+}
+
+nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                          void *user_data) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)hovered;
+    /* params: amp = max brighten fraction toward white, speed = rad/s. Visual-only (color). */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float amp = rich_fx_amp(p, RICH_FX_GLOW_AMP);
+    const float speed = rich_fx_speed(p, RICH_FX_GLOW_SPEED);
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    const float g = amp * (0.5F + (0.5F * sinf(time * speed))); /* [0, amp] brighten lerp toward white */
+    r.color[0] = base_color[0] + ((1.0F - base_color[0]) * g);
+    r.color[1] = base_color[1] + ((1.0F - base_color[1]) * g);
+    r.color[2] = base_color[2] + ((1.0F - base_color[2]) * g);
+    /* keep base alpha (r.color[3] already = base_color[3]) */
+    return r;
+}
+
+nt_ui_rich_fx_result_t nt_ui_rich_fx_sway(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                          void *user_data) {
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)hovered;
+    /* params: amp = horizontal px amplitude, speed = rad/s; phase stays a compile-time constant. */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float amp = rich_fx_amp(p, RICH_FX_SWAY_AMP);
+    const float speed = rich_fx_speed(p, RICH_FX_SWAY_SPEED);
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    r.offset_x = amp * sinf((time * speed) + ((float)atom_idx * RICH_FX_SWAY_PHASE));
+    return r;
+}
+
 nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id) {
     switch (effect_id) {
     case NT_UI_RICH_FX_ID_WAVE:
@@ -193,6 +255,12 @@ nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id) {
         return nt_ui_rich_fx_pulse;
     case NT_UI_RICH_FX_ID_FADE_IN:
         return nt_ui_rich_fx_fade_in;
+    case NT_UI_RICH_FX_ID_BOUNCE:
+        return nt_ui_rich_fx_bounce;
+    case NT_UI_RICH_FX_ID_GLOW:
+        return nt_ui_rich_fx_glow;
+    case NT_UI_RICH_FX_ID_SWAY:
+        return nt_ui_rich_fx_sway;
     default:
         return NULL; /* 0 = none, or an unregistered id -> no effect */
     }
