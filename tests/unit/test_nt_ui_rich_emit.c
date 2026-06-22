@@ -27,6 +27,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_rich_fx.h"
+#include "ui/nt_ui_rich_tagset.h"
 #include "ui/nt_ui_rich_text.h"
 #include "unity.h"
 
@@ -885,6 +886,115 @@ static void test_markup_e2e_emit_and_link(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(link_id, clk.clicked_link, "markup link clicked on press+release over its rect");
 }
 
+/* ===== Custom (game-supplied) effects (D-67-26) ===== */
+
+/* A DISTINCTIVE custom effect: a fixed offset no stock fn produces (wave is y-only, shake is
+ * bounded by 2px, pulse/rainbow/fade don't offset) + a fixed magenta tint + a flag the fn sets so
+ * the test can prove the custom fn -- not a stock fn or identity -- actually ran at emit. */
+#define FX_CUSTOM_OFF_X 37.0F
+#define FX_CUSTOM_OFF_Y (-19.0F)
+static uint32_t s_custom_fx_calls;
+
+static nt_ui_rich_fx_result_t custom_fx_fixed(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)time;
+    (void)hovered;
+    s_custom_fx_calls++;
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    r.offset_x = FX_CUSTOM_OFF_X;
+    r.offset_y = FX_CUSTOM_OFF_Y;
+    r.color[0] = 1.0F; /* distinctive magenta tint */
+    r.color[1] = 0.0F;
+    r.color[2] = 1.0F;
+    return r;
+}
+
+/* Build "A [object] B" pushing a CUSTOM effect fn via the builder; record the object draw box. */
+static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    s_obj_measure_calls = 0;
+    s_obj_draw_calls = 0;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("obj_cfx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_effect_fn(s_fx.ctx, fn, user);
+        nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_text_n(s_fx.ctx, " B", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_cfx").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.5F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (17) BUILDER path: a custom fn pushed via nt_ui_rich_push_effect_fn actually RUNS at emit and
+ * its DISTINCTIVE fixed offset lands on the object draw box (vs the no-effect baseline) -- proving
+ * custom resolves to the game's fn, not a stock id or identity. */
+static void test_custom_fx_runs_via_builder(void) {
+    /* No-effect baseline box position. */
+    frame_object(0U, 0.5F);
+    const float x_base = s_obj_draw_x;
+    const float y_base = s_obj_draw_y;
+
+    /* Custom fn: the box shifts by EXACTLY the custom offset (about-center scale==1 -> no scale shift). */
+    s_custom_fx_calls = 0;
+    int local_marker = 0;
+    frame_object_custom_fn(custom_fx_fixed, &local_marker);
+    TEST_ASSERT_TRUE_MESSAGE(s_custom_fx_calls > 0U, "custom effect fn actually ran at emit (builder path)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "object still drawn once under a custom effect");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_x - x_base, FX_CUSTOM_OFF_X), "custom fn's fixed offset.x folds into the object draw box");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_y - y_base, FX_CUSTOM_OFF_Y), "custom fn's fixed offset.y folds into the object draw box");
+}
+
+/* (18) MARKUP path: <fx=myfx> resolves to a tagset-registered custom fn (custom resolves BEFORE
+ * stock) and that fn ACTUALLY RUNS at emit (call counter ticks during the walk) -- proving the
+ * markup front reaches a game fn captured at parse and resolved against the solved state at emit,
+ * even though the tagset is not consulted at emit. A stock <fx=wavename> shares the tagset to prove
+ * the two coexist. */
+static void test_custom_fx_runs_via_markup(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_effect(&ts, "wavename", NT_UI_RICH_FX_ID_WAVE); /* stock entry coexists */
+    nt_ui_rich_tagset_register_effect_fn(&ts, "myfx", custom_fx_fixed, NULL);  /* custom entry */
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    s_custom_fx_calls = 0;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    /* "A " has no effect; "<fx=myfx>BB</fx>" runs the custom fn per glyph; the stock wave too. */
+    static const char *const markup_fx = "A <fx=myfx>BB</fx> <fx=wavename>CC</fx>";
+    nt_pointer_t mouse = {0};
+    nt_text_renderer_test_reset_call_counters();
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("cfx_mk_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("cfx_mk").id, NULL, &ts, &base, markup_fx, strlen(markup_fx), 400.0F, NT_RICH_ALIGN_LEFT, 0.5F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* The custom fn ran (once per glyph of "BB" = 2). The stock wave ran too but does NOT tick the
+     * custom counter -- proving custom resolved to the GAME fn, not the stock id (custom != stock). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_custom_fx_calls, "markup <fx=myfx> ran the custom fn once per glyph (custom before stock)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "markup with custom + stock effects still emits text spans");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -909,5 +1019,7 @@ int main(void) {
     RUN_TEST(test_object_effect_and_skip);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     RUN_TEST(test_markup_e2e_emit_and_link);
+    RUN_TEST(test_custom_fx_runs_via_builder);
+    RUN_TEST(test_custom_fx_runs_via_markup);
     return UNITY_END();
 }

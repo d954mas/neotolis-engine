@@ -18,6 +18,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_rich_fx.h"
 #include "ui/nt_ui_rich_tagset.h"
 #include "ui/nt_ui_rich_text.h"
 #include "unity.h"
@@ -74,6 +75,63 @@ static void test_tagset_color_atlas_effect(void) {
     uint8_t fx = 0;
     TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect(&ts, h("wave"), &fx));
     TEST_ASSERT_EQUAL_UINT8(3U, fx);
+}
+
+/* A stub custom effect fn (identity) used only to prove tagset custom registration/lookup. */
+static nt_ui_rich_fx_result_t parse_stub_fx(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)time;
+    (void)hovered;
+    return nt_ui_rich_fx_identity(base_color);
+}
+
+/* (2b) register_effect_fn registers a CUSTOM effect: the full lookup returns fn+user_data, and the
+ * stock-only lookup MISSES it (so a custom name never resolves to a bogus stock id). */
+static void test_tagset_custom_effect_fn(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+
+    int marker = 0;
+    nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
+
+    /* Full lookup resolves the custom entry to its fn + user_data. */
+    uint8_t id = 0xFFU;
+    nt_ui_rich_fx_fn fn = NULL;
+    void *user = NULL;
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("customfx"), &id, &fn, &user));
+    TEST_ASSERT_TRUE_MESSAGE(fn == parse_stub_fx, "custom lookup returns the registered fn");
+    TEST_ASSERT_TRUE_MESSAGE(user == &marker, "custom lookup returns the registered user_data");
+
+    /* Stock-only lookup misses the custom entry (fn != NULL). */
+    uint8_t stock_id = 0;
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_rich_tagset_lookup_effect(&ts, h("customfx"), &stock_id), "stock-only lookup misses a custom entry");
+
+    /* register_effect_fn requires a non-NULL fn. */
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "bad", NULL, NULL));
+}
+
+/* (2c) a STOCK entry coexists with custom entries: it resolves via BOTH the stock-only lookup and
+ * the full lookup (which reports fn==NULL for a stock entry). */
+static void test_tagset_stock_effect_coexists(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    int marker = 0;
+    nt_ui_rich_tagset_register_effect_fn(&ts, "customfx", parse_stub_fx, &marker);
+    nt_ui_rich_tagset_register_effect(&ts, "stockfx", NT_UI_RICH_FX_ID_PULSE);
+
+    uint8_t stock_id = 0;
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect(&ts, h("stockfx"), &stock_id));
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_RICH_FX_ID_PULSE, stock_id);
+
+    uint8_t id = 0;
+    nt_ui_rich_fx_fn fn = parse_stub_fx;
+    void *user = NULL;
+    TEST_ASSERT_TRUE(nt_ui_rich_tagset_lookup_effect_fn(&ts, h("stockfx"), &id, &fn, &user));
+    TEST_ASSERT_TRUE_MESSAGE(fn == NULL, "stock entry full-lookup reports fn==NULL");
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_RICH_FX_ID_PULSE, id);
 }
 
 /* (3) re-registering a name overrides it in place (no duplicate entry). */
@@ -303,6 +361,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tagset_font_register_lookup);
     RUN_TEST(test_tagset_color_atlas_effect);
+    RUN_TEST(test_tagset_custom_effect_fn);
+    RUN_TEST(test_tagset_stock_effect_coexists);
     RUN_TEST(test_tagset_override_in_place);
     RUN_TEST(test_tagset_reset);
     RUN_TEST(test_tagset_empty_name_asserts);
