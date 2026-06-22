@@ -1922,7 +1922,11 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     const float stagger = 0.10F; /* per-glyph reveal delay */
     const float dur = 0.40F;     /* per-glyph fade length */
     float a = (fmodf(time, period) - (float)atom_idx * stagger) / dur;
-    a = a < 0.0F ? 0.0F : (a > 1.0F ? 1.0F : a);
+    if (a < 0.0F) {
+        a = 0.0F;
+    } else if (a > 1.0F) {
+        a = 1.0F;
+    }
     r.color[3] = base_color[3] * a;
     r.visible = (a > 0.0F);
     return r;
