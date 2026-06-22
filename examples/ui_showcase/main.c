@@ -2071,6 +2071,12 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, (void *)&s_rich_fade_params); /* custom fade, tuned via user_data */
     RICH_TEXT_LIT(ctx, "fade");
     nt_ui_rich_pop(ctx);
+    RICH_TEXT_LIT(ctx, " ");
+    /* A TUNED stock wave: big amplitude + faster speed via push_effect_ex (markup parity: <fx=wave amp=14 speed=5>). */
+    const nt_ui_rich_fx_params_t big_wave = {.amp = 14.0F, .speed = 5.0F};
+    nt_ui_rich_push_effect_ex(ctx, NT_UI_RICH_FX_ID_WAVE, &big_wave);
+    RICH_TEXT_LIT(ctx, "BIG");
+    nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
 
     /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
@@ -2127,7 +2133,8 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                    "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
                    "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
                    "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
-                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade</fx>. "
+                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade</fx> "
+                   "<fx=wave amp=14 speed=5>BIG</fx>. "
                    "%s<color=%s><link=quest>%s</link></color>%s",
                    fx_open, look_b.mk_col, look_b.label, fx_close);
     const nt_ui_rich_style_t base = rich_base_style();
