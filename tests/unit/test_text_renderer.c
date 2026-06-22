@@ -388,6 +388,55 @@ void test_draw_n_does_not_over_read(void) {
     TEST_ASSERT_EQUAL_MEMORY(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
 }
 
+/* ---- C10: a single large rich block routes ALL its glyphs through this shared text-renderer staging
+ * buffer during emit_custom self-emit. A run whose glyph total approaches/exceeds the staging cap must
+ * NOT overflow the fixed staging arrays: emit_quad flushes at the NT_TEXT_RENDERER_MAX_GLYPHS boundary,
+ * so glyph_count never exceeds the cap and vertex_count never exceeds MAX_VERTICES.
+ *
+ * Cap interaction (documented): a single rich block caps its ATOM stream at NT_UI_RICH_MAX_GLYPHS (2048),
+ * but a non-effect run emits ALL its glyphs through ONE draw_n span -- so the glyph total a single span
+ * pushes into staging is bounded by the run's text length, NOT by the atom cap. The text-renderer
+ * staging cap (4096) is therefore the binding overflow guard for a big paragraph, exercised here by a
+ * single draw_n far larger than the cap. ---- */
+void test_draw_n_large_run_flushes_at_staging_cap(void) {
+    nt_text_renderer_flush(); /* start from an empty staging buffer */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    /* A single run well past the renderer cap (no \n -> one continuous span, like a big rich line).
+     * The synthetic font has 'A' as a real glyph (advance 500), so every char stages a quad. */
+    const uint32_t over_cap = (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS + 137U; /* deliberately past the cap */
+    char *big = (char *)malloc((size_t)over_cap + 1U);
+    TEST_ASSERT_NOT_NULL(big);
+    memset(big, 'A', over_cap);
+    big[over_cap] = '\0';
+
+    /* One draw_n with the whole oversized run. emit_quad must flush at the cap so neither staging
+     * array overflows; the call must not trap or write OOB. */
+    nt_text_renderer_draw_n(big, (size_t)over_cap, s_identity, 32.0F, s_white, 0.0F, 0.0F);
+
+    /* After the call the staging buffer holds only the post-flush remainder -- bounded by the cap. */
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_glyph_count() <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS, "glyph_count never exceeds the staging cap (flush-at-boundary kept it bounded)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_vertex_count() <= (uint32_t)NT_TEXT_RENDERER_MAX_VERTICES, "vertex_count never exceeds MAX_VERTICES (4 per glyph, bounded by the cap)");
+
+    /* A second draw of a small run on top still stays bounded (the renderer recovered cleanly). */
+    nt_text_renderer_draw_n("ABC", 3U, s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_glyph_count() <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS, "staging stays bounded after a follow-up draw");
+
+    nt_text_renderer_flush();
+    free(big);
+}
+
+/* ---- C10b: pin the documented cap relationship the rich self-emit relies on -- the per-block atom cap
+ * (NT_UI_RICH_MAX_GLYPHS, defined in ui/nt_ui_rich_text.h) is strictly below the shared staging cap
+ * (NT_TEXT_RENDERER_MAX_GLYPHS). Mirrored here as a literal (this TU does not link nt_ui) so a change to
+ * either cap that breaks the relationship trips this gate. This is the invariant that lets a single rich
+ * block's SPAN count (one per line-fragment, <= atom count) never exceed the staging buffer on its own;
+ * only the per-glyph total (guarded by test_draw_n_large_run_flushes_at_staging_cap) can. ---- */
+#define NT_UI_RICH_MAX_GLYPHS_MIRROR 2048U /* must match NT_UI_RICH_MAX_GLYPHS in ui/nt_ui_rich_text.h */
+void test_rich_atom_cap_below_text_staging_cap(void) {
+    TEST_ASSERT_TRUE_MESSAGE(NT_UI_RICH_MAX_GLYPHS_MIRROR <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS, "rich per-block atom cap must not exceed the shared text-renderer staging cap");
+}
+
 /* ---- Benchmark cases (printed as [BENCH] lines; cover draw hot-loop perf) ---- */
 
 static void bench_draw_short_warm(void) {
@@ -477,6 +526,8 @@ int main(void) {
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);
     RUN_TEST(test_draw_n_does_not_over_read);
+    RUN_TEST(test_draw_n_large_run_flushes_at_staging_cap);
+    RUN_TEST(test_rich_atom_cap_below_text_staging_cap);
     RUN_TEST(test_glyph_depth_bias_persists_across_restore);
     RUN_TEST(test_glyph_depth_bias_resets_on_reinit);
     RUN_TEST(bench_draw_short_warm);
