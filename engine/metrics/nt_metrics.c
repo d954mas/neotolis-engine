@@ -85,8 +85,6 @@ static double percentile(const double *sorted, uint16_t n, double p) {
 
 static void ring_stats(const nt_metrics_ring_t *r, nt_metrics_stats_t *out) {
     double scratch[NT_METRICS_WINDOW];
-    NT_ASSERT(sizeof(scratch) / sizeof(scratch[0]) >= NT_METRICS_WINDOW);
-
     uint16_t n = ring_snapshot(r, scratch);
     if (n == 0) {
         *out = (nt_metrics_stats_t){0};
@@ -182,9 +180,11 @@ void nt_metrics_count_f(const char *name, double value) {
 // #region per-frame sample (hot path: heap-free)
 void nt_metrics_sample(const nt_metrics_frame_t *f) {
     NT_ASSERT(f != NULL);
-    /* cpu_ms/gpu_ms are real measurements: a non-finite value is a host bug, not a sentinel — assert
-       it never reaches the wire as a cJSON `null` (frame_ms keeps its <=0 first-frame sentinel). */
-    NT_ASSERT(isfinite(f->cpu_ms) && isfinite(f->gpu_ms));
+    /* cpu_ms is a real measurement: a non-finite value is a host bug — assert it never reaches the wire
+       as a cJSON `null`. gpu_ms is allowed to be a NEGATIVE non-finite "unsupported" marker (the >= 0
+       skip-guard below drops it); only a finite-or-positive path must hold, so a non-finite POSITIVE
+       gpu (a real bug that would slip past the guard) still traps. */
+    NT_ASSERT(isfinite(f->cpu_ms) && (f->gpu_ms < 0.0F || isfinite(f->gpu_ms)));
 
     /* frame_ms <= 0 or non-finite is the first-frame/garbage dt: pushing it would poison the window
        (a 0 dt yields infinite fps, a huge dt a fps spike). Skip the frame_ms + derived-fps channel,
@@ -199,7 +199,7 @@ void nt_metrics_sample(const nt_metrics_frame_t *f) {
         ring_push(&s_metrics.fixed[NT_METRICS_GPU_MS], (double)f->gpu_ms);
     }
     ring_push(&s_metrics.fixed[NT_METRICS_DRAW_CALLS], (double)f->draw_calls);
-    ring_push(&s_metrics.fixed[NT_METRICS_MEM_TOTAL], (double)f->mem_used);
+    ring_push(&s_metrics.fixed[NT_METRICS_MEM_USED], (double)f->mem_used);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_HWM], (double)f->scratch_hwm);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_USED], (double)f->scratch_used);
     /* pool_occupancy: no portable provider yet — leave it unsampled so perf.stats reports samples:0 +

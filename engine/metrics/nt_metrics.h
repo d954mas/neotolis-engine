@@ -41,9 +41,9 @@ _Static_assert(NT_METRICS_WINDOW > 0 && NT_METRICS_WINDOW <= UINT16_MAX, "NT_MET
 typedef enum {
     NT_METRICS_FRAME_MS = 0,
     NT_METRICS_CPU_MS,
-    NT_METRICS_GPU_MS, /* pushed only when the host's gpu_ms >= 0; the < 0 sentinel never enters the window (empty => samples:0) */
+    NT_METRICS_GPU_MS, /* pushed only when the host's gpu_ms >= 0; any negative value reads as absent (timer unsupported) and never enters the window (empty => samples:0) */
     NT_METRICS_DRAW_CALLS,
-    NT_METRICS_MEM_TOTAL,
+    NT_METRICS_MEM_USED, /* carries nt_metrics_frame_t.mem_used = platform resident/in-use bytes (not reserved) */
     NT_METRICS_SCRATCH_HWM,
     NT_METRICS_SCRATCH_USED,
     NT_METRICS_POOL_OCCUPANCY,
@@ -70,7 +70,7 @@ typedef struct {
 typedef struct {
     float frame_ms;        /* host loop dt in ms; derives fps + the frame_ms channel; skipped if non-finite or <= 0 */
     float cpu_ms;          /* host-measured CPU frame time */
-    float gpu_ms;          /* < 0 sentinel => gpu channel skipped (timer unsupported) */
+    float gpu_ms;          /* -1.0F sentinel when the GPU timer is unsupported; any negative value reads as absent (gpu channel skipped) */
     uint32_t draw_calls;   /* last frame's draw-call count */
     uint64_t mem_used;     /* platform memory in use */
     uint32_t scratch_hwm;  /* scratch high-water mark */

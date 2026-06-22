@@ -9,11 +9,12 @@ nt_add_module(nt_metrics LOG_DOMAIN "metrics"
 )
 
 # Pure storage + math: the host pushes raw per-frame scalars (nt_metrics_frame_t) and
-# sets user counters; nt_metrics references no other engine module. Only nt_core (types
-# + assert) and nt_hash (full-name keying) — no exe-link-time provider contract.
-target_link_libraries(nt_metrics PUBLIC
-    nt_core
-    nt_hash
+# sets user counters; nt_metrics references no other engine module. nt_core (types + assert)
+# is PUBLIC — the header uses its types; nt_hash is PRIVATE (an impl detail used only in
+# nt_metrics.c for full-name keying; static-lib PRIVATE still propagates to the exe link).
+target_link_libraries(nt_metrics
+    PUBLIC nt_core
+    PRIVATE nt_hash
 )
 
 # ring_stats uses ceil() (nearest-rank percentiles); on Linux/GNU ld libm is separate from libc

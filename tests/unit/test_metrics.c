@@ -292,12 +292,13 @@ static void test_user_counter_float_and_tag_flip(void) {
     TEST_ASSERT_EQUAL_UINT16(1U, nt_metrics_user_count());
 }
 
-/* user counter values flow into a windowed ring on each sample (backs perf.stats user_channels). */
+/* user counter values flow into a windowed ring on each sample (backs perf.stats user_channels).
+   Uses a non-colliding name (not "frame_ms") so the user counter does not shadow the fixed channel. */
 static void test_user_counter_windowed(void) {
-    nt_metrics_count_f("frame_ms", 10.0);
+    nt_metrics_count_f("phys_step_ms", 10.0);
     nt_metrics_frame_t fr = {.frame_ms = 16.0F, .gpu_ms = -1.0F};
     nt_metrics_sample(&fr);
-    nt_metrics_count_f("frame_ms", 20.0);
+    nt_metrics_count_f("phys_step_ms", 20.0);
     nt_metrics_sample(&fr);
     TEST_ASSERT_EQUAL_UINT16(1U, nt_metrics_user_count());
     nt_metrics_stats_t s;
