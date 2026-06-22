@@ -1907,28 +1907,22 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
  * so both land on the same id. (Runtime hash, not a compile-time constant -> use the inline call.) */
 static inline uint32_t rich_link_quest(void) { return nt_hash32_str("quest").value; }
 
-/* Game custom effect: a LOOPING fade. The stock fade_in is one-shot (reveals then holds), so on the
- * gallery's continuous clock it freezes after startup. This re-reveals every `period` by looping the
- * clock internally -- and shows off the custom-effect-fn registry. Visual-only (alpha + visible). */
+/* Game custom effect: a LOOPING opacity fade (the stock fade_in is one-shot -> it freezes on the
+ * gallery's continuous clock). Smoothly breathes alpha 15%<->100%, never fully gone (no blank gap),
+ * and is atom_idx-INDEPENDENT: atom_idx here is the GLOBAL block index, so a per-glyph stagger would
+ * push this late word past its window and blank it -- the staggered reveal is the stock fade_in
+ * (the typewriter, block 3). Also shows off the custom-effect-fn registry. */
 static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                              void *user_data) {
+    (void)atom_idx;
     (void)kind;
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
     (void)user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    const float period = 2.4F;   /* full re-reveal loop */
-    const float stagger = 0.10F; /* per-glyph reveal delay */
-    const float dur = 0.40F;     /* per-glyph fade length */
-    float a = (fmodf(time, period) - (float)atom_idx * stagger) / dur;
-    if (a < 0.0F) {
-        a = 0.0F;
-    } else if (a > 1.0F) {
-        a = 1.0F;
-    }
-    r.color[3] = base_color[3] * a;
-    r.visible = (a > 0.0F);
+    const float a = 0.15F + (0.85F * (0.5F + (0.5F * sinf(time * 2.2F)))); /* breathe alpha 0.15 <-> 1.0 */
+    r.color[3] = base_color[3] * a;                                        /* a >= 0.15, so visible stays true (identity) */
     return r;
 }
 
@@ -1941,6 +1935,7 @@ static void rich_ensure_setup(void) {
     }
     nt_ui_rich_tagset_init(&s_rich_tagset);
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "gold", 0xFF3CC8FAU);   /* 0xAABBGGRR amber */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "link", 0xFFE0A040U);   /* resting link blue (matches the builder raw value) */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);   /* hover highlight */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U);  /* accepted state */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "violet", 0xFFE060A0U); /* effects-gallery label */
@@ -2004,7 +1999,7 @@ static rich_link_look_t rich_link_look(bool hovered, bool accepted) {
     } else {
         look.color = 0xFFE0A040U; /* resting link blue */
         look.label = "[Accept quest]";
-        look.mk_col = "gold";
+        look.mk_col = "link"; /* tagset "link" == 0xFFE0A040 so markup matches the builder's raw value */
         look.emphasize = false;
     }
     return look;
