@@ -124,9 +124,9 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
 
 // #region perf.*
 /* perf.snapshot: IMMEDIATE current-frame view from nt_metrics' last-pushed frame (NOT the windowed
-   aggregates). fps is the rolling avg; frame_ms is the real last frame time (distinct from cpu_ms);
-   gpu_ms maps the < 0 sentinel (timer unsupported) to JSON null. user_counters enumerates the
-   nt_metrics user counters with their EXACT stored value. */
+   aggregates). fps is the rolling avg; frame_ms is the real last frame time (distinct from cpu_ms),
+   null until the first valid frame; gpu_ms maps the < 0 sentinel (timer unsupported) to JSON null.
+   user_counters enumerates the nt_metrics user counters with their EXACT stored value. */
 static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -134,8 +134,13 @@ static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_erro
     nt_metrics_frame_t last;
     nt_metrics_last(&last);
     devapi_add_number(result, "fps", (double)nt_metrics_fps());
-    /* frame_ms is the real last frame time, distinct from cpu_ms. */
-    devapi_add_number(result, "frame_ms", (double)last.frame_ms);
+    /* frame_ms is the real last frame time, distinct from cpu_ms. The host pushes <= 0 (or a
+       non-finite) on the first frame (no dt yet); emit null then, mirroring gpu_ms. */
+    if (isfinite(last.frame_ms) && last.frame_ms > 0.0F) {
+        devapi_add_number(result, "frame_ms", (double)last.frame_ms);
+    } else {
+        cJSON_AddNullToObject(result, "frame_ms");
+    }
     devapi_add_number(result, "cpu_ms", (double)last.cpu_ms);
     if (last.gpu_ms < 0.0F) {
         cJSON_AddNullToObject(result, "gpu_ms");
@@ -144,6 +149,8 @@ static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_erro
     }
     devapi_add_number(result, "draw_calls", (double)last.draw_calls);
 
+    /* nt_metrics keeps the exact uint64, but cJSON numbers are IEEE-754 doubles, so a counter above
+       2^53 loses its low bits on the wire — a JSON number-format limit, not a store defect. */
     cJSON *uc = cJSON_AddObjectToObject(result, "user_counters");
     NT_ASSERT(uc != NULL);
     uint16_t un = nt_metrics_user_count();
@@ -645,9 +652,9 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "perf.snapshot",
         .group = "perf",
-        .summary = "immediate current-frame perf view from nt_metrics' last frame (gpu_ms null when unsupported)",
+        .summary = "immediate current-frame perf view from nt_metrics' last frame (frame_ms/gpu_ms null until valid)",
         .params_shape = "{}",
-        .result_shape = "{fps:number,frame_ms:number,cpu_ms:number,gpu_ms:number|null,draw_calls:number,user_counters:object}",
+        .result_shape = "{fps:number,frame_ms:number|null,cpu_ms:number,gpu_ms:number|null,draw_calls:number,user_counters:object}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
