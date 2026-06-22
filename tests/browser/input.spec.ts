@@ -16,7 +16,7 @@ declare global {
 
 // FIRST headless-browser smoke test: a real Chromium drives the genuine web input + clipboard path
 // (keydown incl. Cyrillic -> _ntCharBuf ring; DOM paste -> nt_clipboard cache) against the actual
-// ui_showcase build. No DOM stubbing -- the layer under test is the real engine glue (D-67-27).
+// ui_showcase build. No DOM stubbing -- the layer under test is the real engine glue.
 test('input field: real keydown (Cyrillic) + paste reaches the buffer and the render path', async ({ page }) => {
   await page.goto('/index.html');
 
