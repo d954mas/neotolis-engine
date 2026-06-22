@@ -1000,14 +1000,21 @@ static void rich_image_metrics(const rich_atom_t *a, float mid_ref, float *io_as
         const float desc = (h * 0.5F) - (xh * 0.5F);
         *io_asc = (asc > *io_asc) ? asc : *io_asc;
         *io_desc = (desc > *io_desc) ? desc : *io_desc;
-    } else { /* BASELINE/TOP/BOTTOM: whole box above the baseline (max line height) */
+    } else if (a->kind == NT_RICH_ATOM_OBJECT) {
+        /* OBJECT carries a measured ascent: seat by it so a box with ascent != height (a glyph-like
+         * object) leaves (h - ascent) below the baseline as descent instead of overlapping the next line. */
+        const float asc = a->asc;
+        const float desc = h - a->asc;
+        *io_asc = (asc > *io_asc) ? asc : *io_asc;
+        *io_desc = (desc > *io_desc) ? desc : *io_desc;
+    } else { /* IMAGE BASELINE/TOP/BOTTOM: whole box above the baseline (max line height) */
         *io_asc = (h > *io_asc) ? h : *io_asc;
     }
 }
 
 /* The MIDDLE-valign x-height reference for a line: its text ascent, or the tallest image box when
  * the line has no text (so an image-dominant line still centers). Reserve AND placement share it
- * (H1). Also accumulates the line's text ascent/descent into io_asc/io_desc. */
+ * Also accumulates the line's text ascent/descent into io_asc/io_desc. */
 static float rich_line_text_metrics(const rich_atom_t *atoms, uint32_t na, uint32_t L, float *io_asc, float *io_desc) {
     float text_asc = 0.0F;
     float max_box_h = 0.0F;
@@ -1063,7 +1070,9 @@ static float rich_atom_y(const rich_atom_t *a, float baseline_y, float pen_y, fl
         return pen_y + line_h - a->h + a->offset_y;
     case NT_RICH_VALIGN_BASELINE:
     default:
-        return baseline_y - a->h + a->offset_y;
+        /* OBJECT seats by its measured ascent (box bottom lands at baseline + (h - asc)); IMAGE
+         * baseline keeps the whole box above the baseline (asc == 0). */
+        return baseline_y - ((a->kind == NT_RICH_ATOM_OBJECT) ? a->asc : a->h) + a->offset_y;
     }
 }
 
@@ -1144,6 +1153,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
         const float ox = rich_align_ox(align, align_w, line_w);
 
         float pen_x = ox;
+        uint32_t prev_link_id = 0U; /* link id of the immediately-preceding atom on this line (0 = none/gap) */
         for (uint32_t i = 0; i < na; i++) {
             if (atoms[i].line != L) {
                 continue;
@@ -1172,12 +1182,12 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             s->run_idx = a->run_idx;
             s->link_id = a->link_id;
             if (a->link_id != 0U) {
-                /* Union this atom's rect into the link's last rect when it continues the same
-                 * link on the same line (consecutive atoms / per-glyph fragments); else open a
-                 * new rect. Keeps the rect count bounded for a multi-atom link. */
+                /* Union into the last rect ONLY when the IMMEDIATELY-PRECEDING atom on this line carried
+                 * the same link (a contiguous run). A non-link atom in between resets prev_link_id to 0,
+                 * so [A][gap][A] opens a second rect instead of widening A's rect across the gap. */
                 nt_ui_rich_link_rect_t *last = (st->link_count > 0U) ? &st->links[st->link_count - 1] : NULL;
-                if (last != NULL && last->link_id == a->link_id && last->line == L) {
-                    last->w = (pen_x + a->w) - last->x; /* extend to cover this atom (same link, same line) */
+                if (last != NULL && prev_link_id == a->link_id && last->link_id == a->link_id && last->line == L) {
+                    last->w = (pen_x + a->w) - last->x; /* extend to cover this atom (adjacent same-link) */
                 } else {
                     NT_ASSERT(st->link_count < NT_UI_RICH_MAX_LINKS && "rich link-rect overflow");
                     nt_ui_rich_link_rect_t *lr = &st->links[st->link_count++];
@@ -1189,6 +1199,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
                     lr->h = line_h;
                 }
             }
+            prev_link_id = a->link_id; /* a non-link atom (0) breaks the contiguous run -> next same-link opens a new rect */
             pen_x += a->advance;
         }
         pen_y += line_h;

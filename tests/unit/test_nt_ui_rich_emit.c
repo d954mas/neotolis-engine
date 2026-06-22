@@ -719,6 +719,67 @@ static void test_link_press_a_release_b_no_click(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, res.clicked_link, "press-A + release-B -> NO click");
 }
 
+/* Build "AA XX AA" where the SAME link id wraps the first and last word but NOT the middle word,
+ * all on one line -> two disjoint same-link rects with a non-link gap between. Root floated at a
+ * known offset so the gap x is predictable; walk once with pointer `p`. */
+#define GAP_LINK_ID 0x77777777U
+
+static nt_ui_rich_result_t frame_link_gap(const nt_pointer_t *p) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_state_clear_all(s_fx.ctx);
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_ui_rich_result_t res = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY(
+        {.id = CLAY_ID("link_gap_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_link(s_fx.ctx, GAP_LINK_ID);
+        nt_ui_rich_text_n(s_fx.ctx, "AA ", 3); /* link word 1 */
+        nt_ui_rich_link(s_fx.ctx, 0U);
+        nt_ui_rich_text_n(s_fx.ctx, "XX ", 3); /* non-link GAP word */
+        nt_ui_rich_link(s_fx.ctx, GAP_LINK_ID);
+        nt_ui_rich_text_n(s_fx.ctx, "AA", 2); /* link word 2 (same id) */
+        nt_ui_rich_link(s_fx.ctx, 0U);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("link_gap_rt").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, &res);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    return res;
+}
+
+/* (13c) [A][gap][A] on one line: the repeated link id must NOT union its rect across the non-link
+ * gap. Two disjoint rects exist for A, and the pointer over the GAP reports hovered/clicked == 0. */
+static void test_link_no_union_across_gap(void) {
+    const float hy = LINK_ROOT_Y + 8.0F;
+    /* The GAP word "XX " spans x in [24, 48) from the root (8px/char): mid ~= root + 36. */
+    const float gap_x = LINK_ROOT_X + 36.0F;
+    /* Link word 1 "AA " mid ~= root + 12. */
+    const float a1_x = LINK_ROOT_X + 12.0F;
+
+    /* Warm-up so the prev-frame bbox the hit-test needs is populated. */
+    nt_pointer_t idle = make_ptr(gap_x, hy, false, false, false);
+    (void)frame_link_gap(&idle);
+
+    /* Two disjoint rects for the same link (would be 1 if the union spanned the gap). */
+    nt_ui_rich_result_t hov_gap = frame_link_gap(&idle);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_link_rect_count(s_fx.ctx), "[A][gap][A] -> two disjoint same-link rects (no union across the gap)");
+    /* Pointer over the GAP must NOT report the link (the bug widened A's rect across the gap). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, hov_gap.hovered_link, "pointer over the non-link gap -> hovered == 0");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, hov_gap.clicked_link, "pointer over the gap -> clicked == 0");
+
+    /* Sanity: the pointer over the first link word still hovers the link (the rects are real). */
+    nt_pointer_t over_a = make_ptr(a1_x, hy, false, false, false);
+    nt_ui_rich_result_t hov_a = frame_link_gap(&over_a);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(GAP_LINK_ID, hov_a.hovered_link, "pointer over link word 1 hovers the link");
+}
+
 /* ===== Custom OBJECT (FX-67-04) ===== */
 
 #define OBJ_W 24.0F
@@ -801,6 +862,80 @@ static void test_object_effect_and_skip(void) {
 
     frame_object(NT_UI_RICH_FX_ID_FADE_IN, 0.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_obj_draw_calls, "fade_in t=0 (visible=false) skips the draw_fn call");
+}
+
+/* An object whose measured ascent is LESS than its height -> the box must seat by ascent
+ * (box bottom at baseline + (h - ascent)) and grow the line descent, not hang the whole box
+ * above the baseline. */
+#define OBJ_ASC_W 24.0F
+#define OBJ_ASC_H 18.0F
+#define OBJ_ASC_ASCENT 12.0F /* < height: 6px must fall below the baseline as descent */
+
+static nt_ui_rich_object_measure_t stub_measure_ascent(void *user_data) {
+    (void)user_data;
+    s_obj_measure_calls++;
+    return (nt_ui_rich_object_measure_t){.width = OBJ_ASC_W, .height = OBJ_ASC_H, .ascent = OBJ_ASC_ASCENT};
+}
+
+/* Build "A [object] B" with a measure fn whose ascent != height; solve and probe the object atom. */
+static void frame_object_ascent(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    s_obj_measure_calls = 0;
+    s_obj_draw_calls = 0;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("obj_asc_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
+        nt_ui_rich_object(s_fx.ctx, stub_measure_ascent, stub_draw, NULL);
+        nt_ui_rich_text_n(s_fx.ctx, " B", 2);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_asc").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (15b) an OBJECT with ascent != height is seated by its ascent: the box BOTTOM lands at
+ * baseline + (h - ascent), and the line descent grows so the next line cannot overlap. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- expected-metric setup + atom-scan + per-axis asserts
+static void test_object_baseline_honours_ascent(void) {
+    /* Deterministic text metrics (setUp): ascent 800/1000, descent 200/1000 -> at size 16,
+     * text asc = 12.8, text desc = 3.2, text line height = 16. */
+    const float text_asc = 800.0F / 1000.0F * FONT_SIZE_DEFAULT;  /* 12.8 */
+    const float text_desc = 200.0F / 1000.0F * FONT_SIZE_DEFAULT; /* 3.2 */
+    /* The fix: line asc = max(text_asc, obj_ascent); line desc = max(text_desc, obj_h - obj_ascent). */
+    const float exp_asc = (text_asc > OBJ_ASC_ASCENT) ? text_asc : OBJ_ASC_ASCENT; /* 12.8 */
+    const float exp_obj_desc = OBJ_ASC_H - OBJ_ASC_ASCENT;                         /* 6.0 */
+    const float exp_desc = (text_desc > exp_obj_desc) ? text_desc : exp_obj_desc;  /* 6.0 */
+    const float exp_line_h = exp_asc + exp_desc;
+    const float exp_baseline = exp_asc; /* line 0: pen_y == 0 */
+
+    frame_object_ascent();
+
+    /* The line grew past the bare text line height (descent grew by the object's below-baseline part). */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_total_h(s_fx.ctx) > (text_asc + text_desc) + 1e-3F, "object below-baseline part grows the line descent");
+    TEST_ASSERT_TRUE_MESSAGE(approx(nt_ui_rich_test_total_h(s_fx.ctx), exp_line_h), "one-line height == asc + desc (asc by ascent, desc by h-ascent)");
+
+    /* Find the OBJECT solved atom and assert its box bottom == baseline + (h - ascent). */
+    bool found = false;
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        if (a.kind == NT_RICH_ATOM_OBJECT) {
+            found = true;
+            TEST_ASSERT_TRUE_MESSAGE(approx(a.y, exp_baseline - OBJ_ASC_ASCENT), "object box top == baseline - ascent");
+            TEST_ASSERT_TRUE_MESSAGE(approx(a.y + a.h, exp_baseline + exp_obj_desc), "object box bottom == baseline + (h - ascent)");
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found, "solver placed the OBJECT atom");
 }
 
 /* REGRESSION (showcase Rich Text tab crashed): two nt_ui_rich_text widgets in ONE frame must
@@ -1037,8 +1172,10 @@ int main(void) {
     RUN_TEST(test_fx_fade_in_skips_image);
     RUN_TEST(test_link_hover_and_click);
     RUN_TEST(test_link_press_a_release_b_no_click);
+    RUN_TEST(test_link_no_union_across_gap);
     RUN_TEST(test_object_draws_at_solved_box);
     RUN_TEST(test_object_effect_and_skip);
+    RUN_TEST(test_object_baseline_honours_ascent);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     RUN_TEST(test_markup_e2e_emit_and_link);
     RUN_TEST(test_custom_fx_runs_via_builder);
