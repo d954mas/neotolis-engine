@@ -331,6 +331,37 @@ static void test_break_anywhere_multibyte_codepoint_safe(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(sum_w, 6.0F * EURO_W), "all 6 euro codepoints preserved across chunks (no mid-codepoint cut)");
 }
 
+/* (12) break-anywhere chunk widths are KERNING-AWARE: each emitted chunk's reported width must equal
+ * the STANDALONE whole-chunk measure (measured as one span, which carries inter-glyph kerning), NOT
+ * the sum of isolated per-glyph measures (which drops kerning and lets a chunk exceed the box).
+ *
+ * The test stub font has no glyph table -> tofu fallback -> NO kerning, so isolated-sum and
+ * whole-span measure are numerically equal here. The stub cannot express kerning (nt_font_test_set_metrics
+ * sets only metrics, no kern table), so this asserts the weaker-but-still-meaningful invariant:
+ * chunk width == measure(whole chunk bytes). Reconstruct each chunk's byte span from the known word
+ * (uniform 1-byte 'A' glyphs, EURO_W px each) and compare a.w to the standalone measure. */
+static void test_break_anywhere_chunk_width_is_whole_measure(void) {
+    static const char word[] = "AAAAAAAA"; /* 8 chars * 10px = 80px */
+    const float container_w = 30.0F;       /* fits 3 chars (30px) per line */
+    build_text(word, 8);
+    nt_ui_rich_test_solve_ex(s_fx.ctx, RICH_ID, container_w, FONT_SIZE, NT_RICH_ALIGN_LEFT);
+
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(n > 1U, "over-long word split into multiple chunks");
+    uint32_t consumed = 0; /* running byte offset into `word` (chunks are contiguous, in order) */
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        const uint32_t chunk_chars = (uint32_t)((a.w / EURO_W) + 0.5F);
+        TEST_ASSERT_TRUE_MESSAGE(consumed + chunk_chars <= 8U, "chunks consume <= the whole word");
+        /* The standalone whole-chunk measure (one span -> includes kerning if the font had any). */
+        const float whole = nt_font_measure_n(s_fx.stub_font, word + consumed, chunk_chars, FONT_SIZE, 0.0F).width;
+        TEST_ASSERT_TRUE_MESSAGE(approx(a.w, whole), "chunk width == standalone whole-chunk measure (not isolated per-glyph sum)");
+        TEST_ASSERT_TRUE_MESSAGE(a.w <= container_w + 1e-3F, "no chunk exceeds container_w");
+        consumed += chunk_chars;
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(8U, consumed, "all 8 chars covered across chunks");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mixed_run_advance_sums);
@@ -344,5 +375,6 @@ int main(void) {
     RUN_TEST(test_middle_image_seated_in_reserved_box);
     RUN_TEST(test_degenerate_width_no_hang);
     RUN_TEST(test_break_anywhere_multibyte_codepoint_safe);
+    RUN_TEST(test_break_anywhere_chunk_width_is_whole_measure);
     return UNITY_END();
 }

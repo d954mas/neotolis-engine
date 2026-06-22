@@ -1021,24 +1021,27 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
     const uint32_t word_end = word_off + word_len;
     uint32_t cp = 0;
     uint32_t last_boundary = word_off; /* last codepoint boundary that still fit */
-    float cur_w = 0.0F;                /* running width of [chunk_start, i) */
-    float prev_w = 0.0F;               /* running width of [chunk_start, last_boundary) */
+    float cur_w = 0.0F;                /* measured width of [chunk_start, i) -- prefix incl. kerning */
+    float prev_w = 0.0F;               /* measured width of [chunk_start, last_boundary) */
     bool emitted = false;
     while (i < word_end) {
         uint32_t state = NT_UTF8_ACCEPT;
-        const uint32_t g0 = i;
         do {
             nt_utf8_decode(&state, &cp, (uint8_t)text[i]);
             i++;
         } while (i < word_end && state != NT_UTF8_ACCEPT && state != NT_UTF8_REJECT);
-        cur_w += nt_font_measure_n(font, text + g0, i - g0, size, 0.0F).width; /* incremental, not from chunk_start */
+        /* Prefix from chunk_start -> the running width carries inter-glyph kerning (NOT an isolated
+         * per-glyph sum, which would drop it and let the chunk overflow under a kerning font). */
+        cur_w = nt_font_measure_n(font, text + chunk_start, i - chunk_start, size, 0.0F).width;
         if (cur_w > container_w && last_boundary > chunk_start) {
             /* Commit the chunk up to the previous boundary; restart the new chunk at this glyph. */
             const uint32_t clen = last_boundary - chunk_start;
             rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, t_asc, t_desc, chunk_start, clen, prev_w, emitted ? true : first_breakable, run_idx);
             emitted = true;
             chunk_start = last_boundary;
-            cur_w -= prev_w; /* carry the not-yet-committed tail (the overflowing glyph) into the new chunk */
+            /* Re-seed the prefix from the new chunk_start: re-measure [chunk_start, i) so the carried
+             * tail's width matches a standalone chunk (its own kerning chain, no left neighbour). */
+            cur_w = nt_font_measure_n(font, text + chunk_start, i - chunk_start, size, 0.0F).width;
         }
         last_boundary = i;
         prev_w = cur_w; /* width of [chunk_start, i): the next commit point */
