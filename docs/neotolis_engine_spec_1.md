@@ -3172,8 +3172,14 @@ registry (see §32.5, D-67-13).
   #184/D-67 stance that per-effect tuning was compile-time constants and NOT tag
   params; the catalogue constants are now the defaults.
 - **Stock + custom effect catalog (extensible).** A stock catalogue
-  (wave / shake / rainbow / pulse / fade_in) ships as a starting set, registered
-  piecemeal by name. A game also supplies its **own** `nt_ui_rich_fx_fn` and uses
+  (wave / shake / rainbow / pulse / fade_in / bounce / glow / sway) ships as a
+  starting set, registered piecemeal by name. The visual-only additions:
+  **bounce** (`offset_y = -amp*|sin(time*speed + idx*PHASE)|`, an always-upward
+  sharp-bottom hop — distinct from wave's smooth swing), **glow**
+  (`color.rgb = base + (1-base)*amp*(0.5+0.5*sin(time*speed))`, a brightness pulse
+  toward white, alpha kept), **sway** (`offset_x = amp*sin(time*speed + idx*PHASE)`,
+  the horizontal counterpart to wave). All three honour the `amp`/`speed` params
+  (`<=0` keeps the default). A game also supplies its **own** `nt_ui_rich_fx_fn` and uses
   it from **both** authoring fronts: the builder's
   `nt_ui_rich_push_effect_fn(ctx, fn, user_data)` and, for markup `<fx=name>`,
   `nt_ui_rich_tagset_register_effect_fn(ts, name, fn, user_data)`. A custom name

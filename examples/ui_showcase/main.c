@@ -1947,12 +1947,15 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);   /* hover highlight */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U);  /* accepted state */
     nt_ui_rich_tagset_register_color(&s_rich_tagset, "violet", 0xFFE060A0U); /* effects-gallery label */
-    /* All five stock effects so <fx=name> resolves in the markup front. */
+    /* All eight stock effects so <fx=name> resolves in the markup front. */
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", NT_UI_RICH_FX_ID_WAVE);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", NT_UI_RICH_FX_ID_SHAKE);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", NT_UI_RICH_FX_ID_RAINBOW);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "bounce", NT_UI_RICH_FX_ID_BOUNCE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "glow", NT_UI_RICH_FX_ID_GLOW);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", NT_UI_RICH_FX_ID_SWAY);
     /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
     nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
     nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_icons_atlas_handle);
@@ -2014,7 +2017,7 @@ static rich_link_look_t rich_link_look(bool hovered, bool accepted) {
 }
 
 /* Code-first push/pop builder. Demos: real R/B/I/BI faces, a scaled-up title word, an effects gallery
- * (4 stock effects + a custom looping-fade fn, one per labelled word), two inline icons, and a
+ * (7 stock effects + a custom looping-fade fn, one per labelled word), two inline icons, and a
  * clickable <link> that brightens + pulses on hover and flips to a green "Accepted" latch on click.
  * The markup front below rebuilds the SAME content so the two stay parallel as the link animates. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear builder script: many runs, no deep nesting
@@ -2055,7 +2058,7 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
     RICH_TEXT_LIT(ctx, ". Effects: ");
 
-    /* Effects gallery: 4 stock effects + a custom looping-fade fn, one per labelled word, same clock. */
+    /* Effects gallery: 7 stock effects + a custom looping-fade fn, one per labelled word, same clock. */
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
     RICH_TEXT_LIT(ctx, "wave ");
     nt_ui_rich_pop(ctx);
@@ -2069,7 +2072,16 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     RICH_TEXT_LIT(ctx, "pulse ");
     nt_ui_rich_pop(ctx);
     nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, (void *)&s_rich_fade_params); /* custom fade, tuned via user_data */
-    RICH_TEXT_LIT(ctx, "fade");
+    RICH_TEXT_LIT(ctx, "fade ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_BOUNCE);
+    RICH_TEXT_LIT(ctx, "bounce ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_GLOW);
+    RICH_TEXT_LIT(ctx, "glow ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SWAY);
+    RICH_TEXT_LIT(ctx, "sway");
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, " ");
     /* A TUNED stock wave: big amplitude + faster speed via push_effect_ex (markup parity: <fx=wave amp=14 speed=5>). */
@@ -2105,7 +2117,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         return;
     }
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: real bold/italic/bold-italic faces + scaled words + 4 stock effects + a custom looping-fade fn + inline icons + a clickable link.",
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: real bold/italic/bold-italic faces + scaled words + 7 stock effects + a custom looping-fade fn + inline icons + a clickable link.",
                 g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The SAME content is authored two ways: the code-first push/pop builder, then the runtime <markup> parser.", g_current->caption);
 
@@ -2133,7 +2145,8 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                    "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
                    "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
                    "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
-                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade</fx> "
+                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
+                   "<fx=bounce>bounce </fx><fx=glow>glow </fx><fx=sway>sway</fx> "
                    "<fx=wave amp=14 speed=5>BIG</fx>. "
                    "%s<color=%s><link=quest>%s</link></color>%s",
                    fx_open, look_b.mk_col, look_b.label, fx_close);
