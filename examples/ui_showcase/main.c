@@ -1917,6 +1917,10 @@ static nt_ui_rich_style_t rich_base_style(void) {
     return base;
 }
 
+/* Drift-proof literal push: sizeof-1 byte count from the literal itself, so a hand-counted length can
+ * never go stale. Only valid for a string LITERAL (sizeof on a char* would measure the pointer). */
+#define RICH_TEXT_LIT(ctx, lit) nt_ui_rich_text_n((ctx), (lit), (uint32_t)(sizeof(lit) - 1U))
+
 /* Front A: the code-first push/pop builder. Demos styled multi-run text, an inline gold icon, bold +
  * (synth) italic, a wave effect that moves the text AND the gold heart TOGETHER (the D-67-17 driving
  * case), a typewriter reveal (game-owned visible_glyphs, here a fade_in stagger driven by the clock),
@@ -1924,32 +1928,32 @@ static nt_ui_rich_style_t rich_base_style(void) {
 static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, const nt_ui_rich_style_t *base, nt_ui_rich_result_t *out) {
     nt_ui_rich_begin(ctx, base);
 
-    nt_ui_rich_text_n(ctx, "Quest: slay the ", 16);
+    RICH_TEXT_LIT(ctx, "Quest: slay the ");
     nt_ui_rich_push_color(ctx, 0xFF3C3CDCU); /* crimson */
     nt_ui_rich_push_bold(ctx);
-    nt_ui_rich_text_n(ctx, "Crimson Drake", 13);
+    RICH_TEXT_LIT(ctx, "Crimson Drake");
     nt_ui_rich_pop(ctx); /* bold */
     nt_ui_rich_pop(ctx); /* color */
-    nt_ui_rich_text_n(ctx, " and claim ", 11);
+    RICH_TEXT_LIT(ctx, " and claim ");
 
     /* Wave-effected run: the gold heart icon + a "gold" word wave together (text + image, one effect). */
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
     nt_ui_rich_push_color(ctx, 0xFF3CC8FAU); /* gold */
     nt_ui_rich_image(ctx, s_rich_gold_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
-    nt_ui_rich_text_n(ctx, " 100 gold", 9);
+    RICH_TEXT_LIT(ctx, " 100 gold");
     nt_ui_rich_pop(ctx); /* color */
     nt_ui_rich_pop(ctx); /* effect */
 
-    nt_ui_rich_text_n(ctx, ". Reward heart ", 15);
+    RICH_TEXT_LIT(ctx, ". Reward heart ");
     nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
 
     nt_ui_rich_push_italic(ctx);
-    nt_ui_rich_text_n(ctx, " (urgent) ", 10);
+    RICH_TEXT_LIT(ctx, " (urgent) ");
     nt_ui_rich_pop(ctx); /* italic */
 
     nt_ui_rich_link(ctx, RICH_LINK_QUEST);
     nt_ui_rich_push_color(ctx, (out != NULL && out->hovered_link == RICH_LINK_QUEST) ? 0xFFFFC864U : 0xFFE0A050U);
-    nt_ui_rich_text_n(ctx, "[Accept quest]", 14);
+    RICH_TEXT_LIT(ctx, "[Accept quest]");
     nt_ui_rich_pop(ctx); /* color */
     nt_ui_rich_pop(ctx); /* link */
 
@@ -1983,21 +1987,6 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     s_prev_a = res_a;
     // #endregion
 
-    /* #region typewriter reveal (fade_in stock effect: staggered per-glyph, driven by the clock) */
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "3) Typewriter (the fade_in stock effect staggers each glyph's reveal off the same game clock; loops):", g_current->body);
-    {
-        nt_ui_rich_style_t tw = rich_base_style();
-        nt_ui_rich_begin(ctx, &tw);
-        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
-        nt_ui_rich_text_n(ctx, "The drake stirs... glyphs reveal one by one.", 43);
-        nt_ui_rich_pop(ctx);
-        nt_ui_rich_end(ctx);
-        /* The clock loops ~every 4s so the reveal replays; tw_time = time within the loop window. */
-        const float tw_time = fmodf(st->rich.time, 4.0F);
-        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_typewriter"), NT_UI_DATA_LAYER(LAYER_TEXT), &tw, container_w, NT_RICH_ALIGN_LEFT, tw_time, NULL);
-    }
-    // #endregion
-
     /* #region Front B: runtime markup parser */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
     static const char markup[] = "Quest: slay the <b><color=#DC3C3C>Crimson Drake</color></b> and claim "
@@ -2007,6 +1996,21 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_rich_result_t res_b = {0};
     nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, sizeof markup - 1U, container_w, NT_RICH_ALIGN_LEFT, st->rich.time,
                            &res_b);
+    // #endregion
+
+    /* #region typewriter reveal (fade_in stock effect: staggered per-glyph, driven by the clock) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "3) Typewriter (the fade_in stock effect staggers each glyph's reveal off the same game clock; loops):", g_current->body);
+    {
+        nt_ui_rich_style_t tw = rich_base_style();
+        nt_ui_rich_begin(ctx, &tw);
+        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
+        RICH_TEXT_LIT(ctx, "The drake stirs... glyphs reveal one by one.");
+        nt_ui_rich_pop(ctx);
+        nt_ui_rich_end(ctx);
+        /* The clock loops ~every 4s so the reveal replays; tw_time = time within the loop window. */
+        const float tw_time = fmodf(st->rich.time, 4.0F);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_typewriter"), NT_UI_DATA_LAYER(LAYER_TEXT), &tw, container_w, NT_RICH_ALIGN_LEFT, tw_time, NULL);
+    }
     // #endregion
 
     /* Model-D link reaction: latch the clicked link id + bump the readout counter. */
@@ -2693,8 +2697,9 @@ static void declare_props_panel(nt_ui_context_t *ctx) {
 }
 // #endregion
 
-// #region web test hooks (window.__nt) -- web build only, never compiled native
-#ifdef __EMSCRIPTEN__
+// #region web test hooks (window.__nt) -- web build only, gated behind NT_SHOWCASE_TEST_HOOKS so the
+// deployed/public showcase carries NO test scaffolding; the browser-test build defines the macro.
+#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
 /* Headless-browser smoke test surface (tests/browser/input.spec.ts). Exposes the bare minimum the
  * Playwright test needs to drive the REAL keydown/paste path and read genuine state -- the input
  * field's game-owned buffer + the walker text-command count + the field's on-canvas CSS rect (so the
@@ -2742,7 +2747,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
     };
 })
 /* clang-format on */
-#endif /* __EMSCRIPTEN__ */
+#endif /* __EMSCRIPTEN__ && NT_SHOWCASE_TEST_HOOKS */
 // #endregion
 
 // #region frame
@@ -2917,7 +2922,7 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
         /* Web smoke-test surface: map the Cyrillic field's logical bbox -> canvas CSS px so the
          * Playwright test clicks the real widget (driving the genuine pointerdown->focus path). UI
          * logical -> framebuffer px (offset + ui*scale) -> CSS px (/dpr). Clay bbox + fb are both
@@ -2934,7 +2939,7 @@ static void frame(void) {
             }
             s_nt_ready = 1;
         }
-#endif
+#endif /* __EMSCRIPTEN__ && NT_SHOWCASE_TEST_HOOKS */
 
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
@@ -3180,7 +3185,7 @@ int main(int argc, char *argv[]) {
     nt_platform_web_loading_complete();
 #endif
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
     nt_test_install_hooks(); /* window.__nt smoke-test surface (test-only) */
 #endif
 
