@@ -40,9 +40,10 @@ option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / 
 # -DNT_DEVAPI_ENABLED build stays lean and does not pull in UI debug tools; enable it explicitly,
 # together with NT_UI_DEBUG_TOOLS + NT_DEVAPI_GROUP_INPUT (a hard CMake guard enforces both).
 option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over the nt_ui probe)." OFF)
-# The obs group serializes the dev-only log ring / nt_metrics / overlay / entity / resource L1 reads.
-# Default OFF (opt-in, "use only what you need"); enable explicitly together with NT_UI_DEBUG_TOOLS +
-# NT_METRICS_ENABLED + NT_LOG_RING_ENABLED so the dev-only sources it reads carry real bodies.
+# The obs group serializes the dev-only log ring / nt_metrics / entity / resource L1 reads (nt_metrics
+# is the perf source of truth; the overlay is a sibling consumer, not a provider). Default OFF (opt-in,
+# "use only what you need"); enable explicitly together with NT_METRICS_ENABLED + NT_LOG_RING_ENABLED so
+# the dev-only sources it reads carry real bodies (a hard CMake guard enforces it).
 option(NT_DEVAPI_GROUP_OBS "Build the devapi obs group (log.*/perf.*/entity.*/resource.* reads)." OFF)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.

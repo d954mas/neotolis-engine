@@ -167,6 +167,9 @@ void nt_metrics_count(const char *name, uint64_t value) {
 
 void nt_metrics_count_f(const char *name, double value) {
     NT_ASSERT(name != NULL);
+    /* A non-finite counter is a caller bug: cJSON would serialize NaN/Inf as `null` and poison the
+       aggregates. Reject at the boundary (dev-only) so the wire stays `number`. */
+    NT_ASSERT(isfinite(value));
     uint16_t i = user_slot_for(name);
     if (i == UINT16_MAX) {
         return;
@@ -179,6 +182,9 @@ void nt_metrics_count_f(const char *name, double value) {
 // #region per-frame sample (hot path: heap-free)
 void nt_metrics_sample(const nt_metrics_frame_t *f) {
     NT_ASSERT(f != NULL);
+    /* cpu_ms/gpu_ms are real measurements: a non-finite value is a host bug, not a sentinel — assert
+       it never reaches the wire as a cJSON `null` (frame_ms keeps its <=0 first-frame sentinel). */
+    NT_ASSERT(isfinite(f->cpu_ms) && isfinite(f->gpu_ms));
 
     /* frame_ms <= 0 or non-finite is the first-frame/garbage dt: pushing it would poison the window
        (a 0 dt yields infinite fps, a huge dt a fps spike). Skip the frame_ms + derived-fps channel,
@@ -196,7 +202,8 @@ void nt_metrics_sample(const nt_metrics_frame_t *f) {
     ring_push(&s_metrics.fixed[NT_METRICS_MEM_TOTAL], (double)f->mem_used);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_HWM], (double)f->scratch_hwm);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_USED], (double)f->scratch_used);
-    ring_push(&s_metrics.fixed[NT_METRICS_POOL_OCCUPANCY], 0.0); /* no portable pool occupancy source yet */
+    /* pool_occupancy: no portable provider yet — leave it unsampled so perf.stats reports samples:0 +
+       null aggregates (an honest "unavailable", not a measured 0), mirroring the gpu_ms-absent path. */
 
     for (uint16_t i = 0; i < s_metrics.user_count; i++) {
         double v = s_metrics.user_is_float[i] ? s_metrics.user_f[i] : (double)s_metrics.user_u[i];

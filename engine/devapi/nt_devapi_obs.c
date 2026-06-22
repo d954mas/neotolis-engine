@@ -72,8 +72,8 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
 }
 
 /* Parse the optional {n} count into [0, NT_LOG_RING_DEPTH]; absent -> full ring depth. Out of
-   range / wrong type -> bad_params. Split out of cmd_log_tail to keep that handler under the
-   clang-tidy-18 cognitive-complexity ceiling (mirrors parse_level). */
+   range / wrong type -> bad_params. Split out of cmd_log_tail to keep that handler simple
+   (mirrors parse_level). */
 static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
     if (jn == NULL) {
         *out = NT_LOG_RING_DEPTH;
@@ -82,8 +82,7 @@ static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
     return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, set_bad_params, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
 }
 
-/* Serialize one tail buffer into the entries array. Split out so cmd_log_tail stays under the
-   clang-tidy-18 cognitive-complexity ceiling. */
+/* Serialize one tail buffer into the entries array. Split out so cmd_log_tail stays simple. */
 static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint16_t got) {
     cJSON *arr = cJSON_AddArrayToObject(result, "entries");
     NT_ASSERT(arr != NULL);
@@ -333,7 +332,7 @@ static bool resolve_page(const cJSON *params, uint32_t total, const char *who, u
 
 // #region entity.*
 /* Append a float[n] as a JSON number array under `key`. NULL src emits zeros. Split out so the
-   entity serializers stay under the clang-tidy cognitive-complexity ceiling. */
+   entity serializers stay simple. */
 static void add_float_array(cJSON *obj, const char *key, const float *src, int n) {
     cJSON *a = cJSON_AddArrayToObject(obj, key);
     NT_ASSERT(a != NULL);
@@ -518,8 +517,7 @@ static bool resolve_pack_filter(const cJSON *params, bool *out_filter, uint16_t 
     return true;
 }
 
-/* Serialize one asset entry into the assets array. Split out so cmd_resource_list stays under the
-   clang-tidy-18 cognitive-complexity ceiling. */
+/* Serialize one asset entry into the assets array. Split out so cmd_resource_list stays simple. */
 static void add_asset_entry(cJSON *assets, const nt_resource_asset_info_t *ai) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);
