@@ -1,8 +1,8 @@
-/* Stock rich-text effect catalog (FX-67-02). Each fn is a pure, deterministic curve over
+/* Stock rich-text effect catalog. Each fn is a pure, deterministic curve over
  * (atom_idx, time, hovered) -- no global state, no allocation -- so the same time yields the
  * same transform headless (time==0 is each effect's t=0 value). Per-effect tuning is the
- * compile-time constants below (RESEARCH A5); a game that needs other amplitudes registers
- * its own fn (the catalog is a starting set, D-67-12). */
+ * compile-time constants below; a game that needs other amplitudes registers
+ * its own fn (the catalog is a starting set). */
 
 #include "ui/nt_ui_rich_fx.h"
 

@@ -299,7 +299,7 @@ struct nt_ui_context {
 
     /* Rich-text builder scratch (frame-scratch nt_ui_rich_state_t*, void* to keep this header
      * widget-agnostic). nt_ui_rich_begin allocates + parks it here; the builder calls read it; end
-     * (and the solver spike) consume it. Stays set past the terminal as the "last rich state" handle
+     * (and the solver) consume it. Stays set past the terminal as the "last rich state" handle
      * for test probes; re-zeroed each frame by nt_ui_begin. */
     void *pending_rich;
     /* The no-nest guard: true only between nt_ui_rich_begin and its terminal/end. Separate from

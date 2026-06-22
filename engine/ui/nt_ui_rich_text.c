@@ -1,6 +1,5 @@
-/* Rich text: run-list SoA build + style-stack composition + builder + prototype
- * solver spike. The full word-wrap/baseline/emit solver lands across plans 04-07;
- * this TU carries the data model, the code-first builder, and the Wave-1 spike. */
+/* Rich text: run-list SoA build + style-stack composition + builder + full
+ * word-wrap/baseline/emit solver. */
 
 #include "ui/nt_ui_rich_text.h"
 
@@ -15,12 +14,12 @@
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_image.h" /* nt_ui_image_custom (inline-image emit path) */
 #include "ui/nt_ui_internal.h"
-#include "ui/nt_ui_rich_fx.h" /* per-atom effect ABI + stock catalog (FX-67-01/02) */
+#include "ui/nt_ui_rich_fx.h" /* per-atom effect ABI + stock catalog */
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
 /* Default px font size the public widget feeds the solver when a run carries no per-run
- * size (size lives in the style scale multiplier, D-67-11; absolute <size> is deferred). */
+ * size (size lives in the style scale multiplier; absolute <size> is deferred). */
 #ifndef NT_UI_RICH_DEFAULT_FONT_SIZE
 #define NT_UI_RICH_DEFAULT_FONT_SIZE 16.0F
 #endif
@@ -76,10 +75,10 @@ typedef struct {
     uint32_t link_id; /* 0 = not a link */
 } nt_ui_rich_solved_atom_t;
 
-/* One <link>-marked run's hitbox rect (populated by the solver, consumed in plan 07). */
+/* One <link>-marked run's hitbox rect (populated by the solver). */
 typedef struct {
     uint32_t link_id;
-    uint32_t line; /* line index this rect belongs to -- union key (M9, no float-eq on accumulated y) */
+    uint32_t line; /* line index this rect belongs to -- union key (no float-eq on accumulated y) */
     float x;
     float y;
     float w;
@@ -102,7 +101,7 @@ typedef struct {
     /* Pending link id applied to the next emitted run(s); 0 = none. */
     uint32_t pending_link;
 
-    /* ---- Custom (game-supplied) effects (D-67-26) ----
+    /* ---- Custom (game-supplied) effects ----
      * A per-call fixed-cap table captured at build: a composed-style effect_id >= the custom base
      * indexes (id - base) here. Captured so emit (which sees only the solved state, never the
      * tagset) can resolve a custom fn. */
@@ -121,12 +120,12 @@ typedef struct {
     bool solved_ready;        /* solver ran for this call (emit re-walk safe, read-only) */
     uint32_t emit_span_count; /* draw_n spans the last emit produced (probe) */
 
-    /* ---- Effects + links (FX-67-01..04) ---- */
-    float time;            /* game-passed animation clock fed to per-atom effects (D-67-18) */
+    /* ---- Effects + links ---- */
+    float time;            /* game-passed animation clock fed to per-atom effects */
     uint32_t hovered_link; /* the link id under the pointer this call (0 = none); gates effects */
     uint32_t clicked_link; /* the link id clicked this call (0 = none) */
 
-    /* ---- Inline-image emit (RICH-67-05) ---- */
+    /* ---- Inline-image emit ---- */
     nt_material_t image_material; /* base-style inline-image material (.id==0 -> no images) */
     uint32_t image_emit_count;    /* IMAGE atoms declared as Clay children this call (probe) */
     uint32_t image_block_bytes;   /* size of the last inline-image custom block (probe) */
@@ -154,7 +153,7 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
 /* The composed style is the top of the stack. push_* mutates a COPY pushed on top;
  * pop restores the previous. A new run is emitted only when this composed style
  * differs from the current run's style (dedup). Shared by the builder AND the
- * future parser (plan 06) -- both feed rich_emit_text_run / rich_style_top. */
+ * parser -- both feed rich_emit_text_run / rich_style_top. */
 
 static nt_ui_rich_style_t *rich_style_top(nt_ui_rich_state_t *st) {
     NT_ASSERT(st->stack_depth > 0 && "rich style stack underflow");
@@ -263,7 +262,7 @@ void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult) {
     NT_ASSERT(mult > 0.0F && isfinite(mult) && "rich scale must be finite > 0 (zero/negative -> negative font size)");
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
-    rich_style_top(st)->scale *= mult; /* multiplicative (D-67-11) */
+    rich_style_top(st)->scale *= mult; /* multiplicative */
 }
 
 void nt_ui_rich_push_font(nt_ui_context_t *ctx, const nt_font_t font_id[4]) {
@@ -397,27 +396,25 @@ void nt_ui_rich_end(nt_ui_context_t *ctx) {
     ctx->rich_session_open = false; /* build phase done; pending_rich kept for solve/emit + probes */
     /* Unbalanced pushes are fine -- a push not matched by a pop just stays active
      * to end-of-call and is discarded (the run-list already captured each run's
-     * composed style). Run-list finalized; the solver/emit (plans 04-07) consume it.
-     * The spike (test-only) runs via nt_ui_rich_test_solve; scratch frees on reset. */
+     * composed style). Run-list finalized; the solver/emit consume it. Scratch frees on reset. */
 }
 // #endregion
 
 // #region PARSER
-/* Runtime markup parser (D-67-02): tokenizes an angular `<tag>...</tag>` + self-closing
+/* Runtime markup parser: tokenizes an angular `<tag>...</tag>` + self-closing
  * `<img=region/>` string and DRIVES the shared code-first builder (begin / push_* / text_n / image /
  * pop / end) -- so the run-list is identical to the equivalent builder calls by construction, never a
  * second composition path.
  *
- * Discretion decisions (D-67 Claude's Discretion; recorded in the plan summary):
  *  - Escaping: a backslash escapes the next byte -- `\<` emits a literal '<', `\\` a literal '\'.
  *  - Case: tag NAMES are case-insensitive (`<B>` == `<b>`, `<COLOR=...>` == `<color=...>`).
  *    Tag VALUES (hex digits, names hashed for the tagset) are case-sensitive to the hash.
  *  - Whitespace: preserved verbatim (the solver owns wrap; no collapse).
  *
  * Malformed markup fires NT_ASSERT (builder-validates spirit). Every scan loop is bounded by the
- * input `len` so a non-terminating `<` cannot OOB or loop (MARK-67-05). */
+ * input `len` so a non-terminating `<` cannot OOB or loop. */
 
-#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap (T-67-06-02) */
+#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap */
 
 /* The intrinsic tag a `<name ...>` open maps to; CLOSE/IMG handled separately. */
 typedef enum {
@@ -615,7 +612,7 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         void *fx_user = NULL;
         NT_ASSERT(nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, vlen).value, &effect_id, &fn, &fx_user) && "rich markup: unknown effect name");
         if (fn != NULL) {
-            nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock (D-67-26) */
+            nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock */
         } else {
             nt_ui_rich_push_effect(ctx, effect_id);
         }
@@ -645,7 +642,7 @@ static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, con
     }
 }
 
-/* Assert a literal text segment is well-formed UTF-8 (T-67-06-04): a localized/interpolated
+/* Assert a literal text segment is well-formed UTF-8: a localized/interpolated
  * string with a corrupt byte sequence traps at parse rather than feeding raw bytes downstream.
  * Bounded by n -- a trailing incomplete sequence (state != ACCEPT at the end) also asserts. */
 static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
@@ -754,11 +751,11 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
 // #endregion
 
 // #region SOLVER
-/* Full word-wrap + baseline solver (generalizes the plan-03 spike). Two passes over an
+/* Full word-wrap + baseline solver. Two passes over an
  * ATOM stream (the wrap unit, not runs -- a word can span runs): PASS 1 greedy break with
  * break-anywhere overflow for over-long words; PASS 2 per-line max ascent/descent + L/C/R
  * align offset + per-atom baseline placement. Scratch-only, NO heap. The solved atoms feed
- * both emit (TEXT in this plan; IMAGE/OBJECT in plans 05/07) and the test probes. */
+ * both emit and the test probes. */
 
 /* Internal layout atom: the unit of wrap/position. TEXT runs decompose into word atoms
  * (a trailing space stays with the word -> a break opportunity after); an over-long word
@@ -786,7 +783,7 @@ typedef struct {
     uint32_t link_id;
 } rich_atom_t;
 
-/* x_height proxy (Open Q3): half the text ascent. Stable non-ascent reference so the
+/* x_height proxy: half the text ascent. Stable non-ascent reference so the
  * middle valign differs from baseline. */
 static float rich_x_height(float ascent_px) { return ascent_px * 0.5F; }
 
@@ -923,7 +920,7 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
                 }
             }
         } else if (run->kind == NT_RICH_ATOM_IMAGE) {
-            /* By-name resolve (D-67-13): the atlas IS the registry. Resolve-and-memoize writes
+            /* By-name resolve: the atlas IS the registry. Resolve-and-memoize writes
              * the region index back into the run's ref so emit reuses it (no per-image registry). */
             nt_atlas_resolve_ref(&st->runs[ri].image_ref);
             const uint32_t reg_idx = run->image_ref.region;
@@ -944,7 +941,7 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             a->breakable_before = true; /* image: break opportunity on both sides */
             a->run_idx = (uint16_t)ri;
             a->link_id = run->link_id;
-        } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn (FX-67-04). */
+        } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn. */
             NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
             const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
@@ -993,7 +990,7 @@ static void rich_image_metrics(const rich_atom_t *a, float mid_ref, float *io_as
         const float desc = (h * 0.5F) - (xh * 0.5F);
         *io_asc = (asc > *io_asc) ? asc : *io_asc;
         *io_desc = (desc > *io_desc) ? desc : *io_desc;
-    } else { /* BASELINE/TOP/BOTTOM: whole box above the baseline (D-67-22 max line height) */
+    } else { /* BASELINE/TOP/BOTTOM: whole box above the baseline (max line height) */
         *io_asc = (h > *io_asc) ? h : *io_asc;
     }
 }
@@ -1028,7 +1025,7 @@ static void rich_line_metrics(const rich_atom_t *atoms, uint32_t na, uint32_t L,
     *out_w = 0.0F;
     const float mid_ref = rich_line_text_metrics(atoms, na, L, out_asc, out_desc);
     for (uint32_t i = 0; i < na; i++) {
-        /* IMAGE + OBJECT both reserve a box that demands line ascent/descent (D-67-22). */
+        /* IMAGE + OBJECT both reserve a box that demands line ascent/descent. */
         if (atoms[i].line == L && (atoms[i].kind == NT_RICH_ATOM_IMAGE || atoms[i].kind == NT_RICH_ATOM_OBJECT)) {
             rich_image_metrics(&atoms[i], mid_ref, out_asc, out_desc);
         }
@@ -1060,7 +1057,7 @@ static float rich_atom_y(const rich_atom_t *a, float baseline_y, float pen_y, fl
     }
 }
 
-/* Horizontal align offset for a line of the given width (D-67-21). */
+/* Horizontal align offset for a line of the given width. */
 static float rich_align_ox(nt_rich_align_t align, float container_w, float line_w) {
     if (align == NT_RICH_ALIGN_CENTER) {
         return (container_w - line_w) * 0.5F;
@@ -1072,9 +1069,9 @@ static float rich_align_ox(nt_rich_align_t align, float container_w, float line_
 }
 
 /* Resolve the layout width: explicit container_w is primary; container_w<=0 falls back to
- * the prev-frame nt_ui_get_bbox (D-67-23, the menu's two-pass trick -- no new getter). The
+ * the prev-frame nt_ui_get_bbox (the menu's two-pass trick -- no new getter). The
  * first frame (not found) uses the full screen width, then settles. A degenerate <=0 width
- * clamps to a minimum so the wrap loop never spins (T-67-04-02). */
+ * clamps to a minimum so the wrap loop never spins. */
 static float rich_resolve_width(nt_ui_context_t *ctx, uint32_t id, float container_w) {
     float w = container_w;
     if (w <= 0.0F) {
@@ -1094,7 +1091,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     const float box_w = rich_resolve_width(ctx, id, container_w);
 
     /* Content-proportional upper bound: break-anywhere splits to at most one atom per text
-     * byte, plus one box atom per image/object run. Cap at NT_UI_RICH_MAX_GLYPHS (T-67-04-01). */
+     * byte, plus one box atom per image/object run. Cap at NT_UI_RICH_MAX_GLYPHS. */
     uint32_t atom_cap = st->text_len + st->run_count + 1U;
     if (atom_cap > NT_UI_RICH_MAX_GLYPHS) {
         atom_cap = NT_UI_RICH_MAX_GLYPHS;
@@ -1111,7 +1108,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     /* Grow case (container_w<=0): the FIXED block ends up max_line_w wide, so L/C/R must align
      * against max_line_w, not box_w (the resolved/screen fallback) -- else center/right atoms land
      * outside the block (worst on the first frame). Pre-scan line widths to learn max_line_w, then
-     * align against it (M5). Explicit container_w aligns against the box as before. */
+     * align against it. Explicit container_w aligns against the box as before. */
     float max_line_w = 0.0F;
     for (uint32_t L = 0; L < st->line_count; L++) {
         float line_w = 0.0F;
@@ -1167,10 +1164,10 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             if (a->link_id != 0U) {
                 /* Union this atom's rect into the link's last rect when it continues the same
                  * link on the same line (consecutive atoms / per-glyph fragments); else open a
-                 * new rect. Keeps the rect count bounded for a multi-atom link (D-67-24). */
+                 * new rect. Keeps the rect count bounded for a multi-atom link. */
                 nt_ui_rich_link_rect_t *last = (st->link_count > 0U) ? &st->links[st->link_count - 1] : NULL;
                 if (last != NULL && last->link_id == a->link_id && last->line == L) {
-                    last->w = (pen_x + a->w) - last->x; /* extend to cover this atom (same link, same line; M9) */
+                    last->w = (pen_x + a->w) - last->x; /* extend to cover this atom (same link, same line) */
                 } else {
                     NT_ASSERT(st->link_count < NT_UI_RICH_MAX_LINKS && "rich link-rect overflow");
                     nt_ui_rich_link_rect_t *lr = &st->links[st->link_count++];
@@ -1187,11 +1184,11 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
         pen_y += line_h;
     }
     /* The FIXED block hosts the container width (explicit) or the max line width (grow) -- the
-     * same width L/C/R aligned against, so alignment stays inside the block (M5). */
+     * same width L/C/R aligned against, so alignment stays inside the block. */
     st->total_w = align_w;
     st->total_h = pen_y;
 
-    /* Probe: record the first IMAGE atom's by-name-resolved region + solved y (RICH-67-05). */
+    /* Probe: record the first IMAGE atom's by-name-resolved region + solved y. */
     st->image_region = NT_ATLAS_INVALID_REGION;
     st->image_y = 0.0F;
     for (uint32_t i = 0; i < st->solved_count; i++) {
@@ -1214,13 +1211,13 @@ static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
     out[3] = ((float)((abgr >> 24) & 0xFFU) / 255.0F) * opacity;
 }
 
-/* Evaluate the per-atom effect (FX-67-01/02). Returns the visual-only transform for the atom at
+/* Evaluate the per-atom effect. Returns the visual-only transform for the atom at
  * fx_idx; effect_id 0 / an unregistered id -> identity (no shift, base color, scale 1, visible).
- * `hovered` is true only when the atom belongs to the currently-hovered link (D-67-24). The
+ * `hovered` is true only when the atom belongs to the currently-hovered link. The
  * effect is VISUAL-ONLY -- the caller folds it into position/tint/scale at emit; layout is NOT
- * recomputed (D-67-19). */
+ * recomputed. */
 static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
-    /* Custom (game-supplied) fns resolve BEFORE stock (D-67-26): a custom effect_id indexes the
+    /* Custom (game-supplied) fns resolve BEFORE stock: a custom effect_id indexes the
      * per-block table captured at build; otherwise fall back to the stock catalog. */
     nt_ui_rich_fx_fn fn = NULL;
     if (nt_ui_rich_fx_id_is_custom(s->effect_id)) {
@@ -1243,7 +1240,7 @@ static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const n
 /* Build the per-span model mat4 for draw_n: LAYOUT pen (ox,oy) -> world via world_mat4,
  * with the text-renderer Y-up <-> Clay Y-down sign flip on col1 (mirrors emit_text in
  * nt_ui.c). `shear` applies synthetic italic for a run that requested italic with no italic
- * family member (D-67-04/16): in text-local Y-up space, x' = x + k*y leans glyphs right
+ * family member: in text-local Y-up space, x' = x + k*y leans glyphs right
  * above the baseline -- fold k*col0 into col1. */
 static void rich_span_model(const float world[16], float ox, float oy, bool shear, float out[16]) {
     const float sign_y = -1.0F;
@@ -1258,7 +1255,7 @@ static void rich_span_model(const float world[16], float ox, float oy, bool shea
     }
 }
 
-/* Emit one TEXT atom WITHOUT an effect: the plan-04 one-span-per-atom path (batch-friendly). */
+/* Emit one TEXT atom WITHOUT an effect: one span per atom (batch-friendly). */
 static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
     const float baseline_y = box_y + s->y + s->asc; /* solved y is glyph-box top */
     float model[16];
@@ -1270,7 +1267,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
 }
 
 /* Emit one TEXT atom WITH an effect: explode to per-glyph draw_n so the curve phase-shifts per
- * glyph (D-67-17; the localized batch break is accepted, D-67-19 / Open Q2). VISUAL-ONLY -- it
+ * glyph (the localized batch break is accepted). VISUAL-ONLY -- it
  * shifts the glyph pen + tints + scales about the glyph center; the solver's pen advance is
  * unchanged.
  *
@@ -1321,8 +1318,8 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
     }
 }
 
-/* OBJECT atoms (FX-67-04): the game's own draw_fn at the solved box, in the FIXED block's
- * absolute LAYOUT coords. The engine never draws the object itself (renderer-agnostic, D-67-05).
+/* OBJECT atoms: the game's own draw_fn at the solved box, in the FIXED block's
+ * absolute LAYOUT coords. The engine never draws the object itself (renderer-agnostic).
  * The per-atom effect shifts/scales the box about its center; not-visible skips the call. */
 static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y) {
     for (uint32_t i = 0; i < st->solved_count; i++) {
@@ -1377,8 +1374,8 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
 // #endregion
 
 // #region image-emit
-/* Inline IMAGE atoms ride the EXISTING Phase-66 custom-attr sprite path (nt_ui_image_custom,
- * D-67-14) -- exactly as nt_ui_radial.c does, but geom_mode REGION (real atlas region) with
+/* Inline IMAGE atoms ride the EXISTING custom-attr sprite path (nt_ui_image_custom)
+ * -- exactly as nt_ui_radial.c does, but geom_mode REGION (real atlas region) with
  * the 48 B {a_tint, a_uvrect, a_layout} block: a_tint = the run's lossless float4 tint, a_uvrect
  * + a_layout walker-filled by name. Each image is a FLOATING child of the FIXED block, attached
  * at the block's top-left and offset to the solver's solved (x,y) -- so wrap/baseline stay the
@@ -1389,9 +1386,9 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
         return; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
     }
 
-    /* Per-atom effect (FX-67-01): shift xy, multiply a_tint, scale w/h about center, skip if
-     * not visible. VISUAL-ONLY -- the solved box stays the solver's (D-67-19); only the render
-     * transform + tint move (the "text + gold icon wave together" case, D-67-17). */
+    /* Per-atom effect: shift xy, multiply a_tint, scale w/h about center, skip if
+     * not visible. VISUAL-ONLY -- the solved box stays the solver's; only the render
+     * transform + tint move (text + gold icon wave together). */
     float base_tint[4];
     rich_unpack_color(s->color, 1.0F, base_tint); /* opacity rides element_data, so 1.0 here */
     const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_tint);
@@ -1442,10 +1439,10 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
     st->image_emit_count++;
 }
 
-/* Declare the ONE measured Clay element hosting the solved run-list (D-67-03, Architecture A)
+/* Declare the ONE measured Clay element hosting the solved run-list
  * -- never a per-run Clay element. The custom data routes the walk back to our self-emit.
  * Inline IMAGE atoms are declared as FLOATING children of this block (positioned at the solved
- * (x,y)); their textured sprite emit rides nt_ui_image_custom (RICH-67-05). */
+ * (x,y)); their textured sprite emit rides nt_ui_image_custom. */
 static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
     nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
     NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
@@ -1476,16 +1473,16 @@ static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *s
 // #region LINK
 /* Per-rich-block retained press-target cell. Links have NO Clay element, so the capture-cell
  * mechanism (nt_ui_events) cannot track them; this keyed-by-block-id cell persists the link the
- * press STARTED on across frames so a click requires press+release on the SAME link (FX-67-03). */
+ * press STARTED on across frames so a click requires press+release on the SAME link. */
 #define NT_UI_RICH_LINK_TAG NT_UI_STATE_TAG('r', 'l', 'n', 'k')
 typedef struct {
     uint32_t pressed_link; /* link id the LEFT press began over (0 = pressed over no link / no press) */
 } nt_ui_rich_link_press_t;
 
 /* Hit-test the solver's `<link=id>` rects against the pointer and resolve {hovered_link,
- * clicked_link} (FX-67-03, Model D). NO extra Clay element per link: the rects are local to
+ * clicked_link}. NO extra Clay element per link: the rects are local to
  * the FIXED block, so we add the block's solved bbox origin (prev-frame, the same two-pass
- * trick the solver uses for width, D-67-23) before testing. A click requires the press AND the
+ * trick the solver uses for width) before testing. A click requires the press AND the
  * release on the SAME link: the press-edge records the link under the pointer into a retained
  * per-block cell (keyed by the block id), and the release-edge reports a click only when the
  * pointer is still over that SAME link. hovered_link stays purely geometric. The resolved
@@ -1550,7 +1547,7 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
 
     nt_ui_rich_state_t *st = rich_state(ctx);
     st->image_material = style->image_material;
-    st->time = time; /* game-owned animation clock (D-67-18); no global frame clock */
+    st->time = time; /* game-owned animation clock; no global frame clock */
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
     rich_resolve_links(ctx, st, id); /* hover gates effects -> must precede emit */
     rich_declare_fixed_block(ctx, st, id, data);

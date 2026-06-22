@@ -1543,7 +1543,7 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
     frame.opacity = opacity;
 
-    /* Rich-text self-emits its solved text spans through the text renderer (D-67-03: ONE
+    /* Rich-text self-emits its solved text spans through the text renderer (ONE
      * measured FIXED block hosts the wrapped run-list); the game handler owns every other
      * CUSTOM element. */
     if (cd->type == NT_UI_CUSTOM_TYPE_RICH_TEXT) {

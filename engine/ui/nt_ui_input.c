@@ -1054,7 +1054,7 @@ static void emit_field(input_frame_t *f) {
     /* Optional sprite background: when bg_art resolves the field draws the sprite (9-slice if the region
      * has baked borders) and bg_color becomes its TINT (zero = untinted) -- the same .image +
      * backgroundColor convention as nt_ui_panel/button. Unset/unresolved = the flat bg_color rect. The
-     * sprite art SNAPS across states (button precedent, D-67-26); only the flat color cross-fades. */
+     * sprite art SNAPS across states (button precedent); only the flat color cross-fades. */
     nt_ui_image_payload_t *bg_art_p = make_bg_payload(skin->bg_art);
     if (bg_art_p != NULL) {
         root.image = (Clay_ImageElementConfig){.imageData = bg_art_p};
@@ -1095,7 +1095,7 @@ static void emit_field(input_frame_t *f) {
                 .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
         }
     } else {
-        /* state_speed == 0 (default) or sprite-bg: instant snap = the exact pre-#221 behavior. */
+        /* state_speed == 0 (default) or sprite-bg: instant snap (no cross-fade). */
         if (has_bg) {
             root.backgroundColor = nt_ui_unpack_abgr(skin->bg_color);
         }

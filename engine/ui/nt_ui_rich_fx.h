@@ -1,15 +1,14 @@
 #ifndef NT_UI_RICH_FX_H
 #define NT_UI_RICH_FX_H
 
-/* Per-ATOM rich-text effects (FX-67-01/02). An effect fn runs at EMIT, once per solved atom
- * (glyph AND image AND object -- D-67-17, per-atom, NOT #184's per-glyph/TEXT-only framing),
- * and is VISUAL-ONLY: it shifts/tints/scales/hides the atom but never changes the solver's
- * layout (line/box stay put, D-67-19). The animation clock is passed IN BY THE GAME (`time`);
- * there is no global frame clock (RESEARCH Pitfall 4).
+/* Per-ATOM rich-text effects. An effect fn runs at EMIT, once per solved atom
+ * (glyph AND image AND object -- per-atom), and is VISUAL-ONLY: it shifts/tints/scales/hides
+ * the atom but never changes the solver's layout (line/box stay put). The animation clock is
+ * passed IN BY THE GAME (`time`); there is no global frame clock.
  *
  * The stock catalog (wave/shake/rainbow/pulse/fade_in) is a STARTING set the game registers
  * piecemeal by name into the tagset (nt_ui_rich_tagset_register_effect) -- NO register_defaults
- * bundle (D-67-12). Per-effect tuning is compile-time constants (NOT tag params, RESEARCH A5);
+ * bundle. Per-effect tuning is compile-time constants (NOT tag params);
  * a game that needs tunable amplitude registers its OWN fn. */
 
 #include <stdbool.h>
@@ -18,14 +17,14 @@
 /* nt_ui_rich_fx_result_t + nt_ui_rich_fx_fn + nt_rich_atom_kind_t are declared in nt_ui_rich_text.h
  * (so the builder's push_effect_fn signature avoids a text.h <-> fx.h include cycle). The ABSOLUTE
  * tint contract: identity returns base_color verbatim, rainbow REPLACES rgb, fade_in scales the base
- * alpha -- the emit path uses it directly (D-67-07, never out = base * color). */
+ * alpha -- the emit path uses it directly (never out = base * color). */
 #include "ui/nt_ui_rich_text.h"
 
 /* The identity result: no shift, no tint change, no scale, visible. Use as the base a stock fn
  * mutates so a future field addition stays forward-compatible (no bare {0}, alpha 0 != opaque). */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]);
 
-/* ---- Stock catalog (D-67-20). Per-effect constants are compile-time (RESEARCH A5). ---- */
+/* ---- Stock catalog. Per-effect constants are compile-time. ---- */
 /* offset.y = AMP * sin(time*SPEED + atom_idx*PHASE) -- a per-atom phase-shifted vertical wave. */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
 /* offset.xy = AMP * (hash(atom_idx, floor(time*RATE)) - 0.5) -- a per-atom deterministic jitter. */
@@ -53,9 +52,9 @@ nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id);
 /* ---- Custom (game-supplied) effects ----
  * A game registers its OWN fn (push_effect_fn / tagset register_effect_fn). The (fn,user_data)
  * pair lives in a per-block fixed-cap table captured at build (NOT in the 48B style, NOT in the
- * tagset -- which is not present at emit, D-67); the style's uint8 effect_id carries a CUSTOM
+ * tagset -- which is not present at emit); the style's uint8 effect_id carries a CUSTOM
  * index instead of a stock id when effect_id >= NT_UI_RICH_FX_CUSTOM_BASE. The emit path resolves
- * a custom id against the solved-state table, a stock id against nt_ui_rich_fx_stock (D-67-26). */
+ * a custom id against the solved-state table, a stock id against nt_ui_rich_fx_stock. */
 #define NT_UI_RICH_FX_CUSTOM_BASE 128U /* effect_id >= this -> index (id - BASE) into the per-block custom table */
 
 /* True when a composed-style effect_id names a custom (game-supplied) fn, not a stock id. */

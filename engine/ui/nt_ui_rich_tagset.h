@@ -1,7 +1,7 @@
 #ifndef NT_UI_RICH_TAGSET_H
 #define NT_UI_RICH_TAGSET_H
 
-/* Rich-text PARSER vocabulary (D-67-09): a standalone owned object holding the
+/* Rich-text PARSER vocabulary: a standalone owned object holding the
  * name->value maps the markup parser needs to turn a name-string into a real value
  * (`<font=heading>`, `<color=gold>`, `<img=alias:region/>`, `<wave>`, `<obj=portrait/>`).
  *
@@ -41,12 +41,12 @@
 /* ---- Per-kind entries (key = xxh64 of the registered name) ---- */
 typedef struct {
     uint64_t name_hash;
-    nt_font_t family[4]; /* R/B/I/BI; <b>/<i> select within the family (D-67-16) */
+    nt_font_t family[4]; /* R/B/I/BI; <b>/<i> select within the family */
 } nt_ui_rich_tagset_font_t;
 
 typedef struct {
     uint64_t name_hash;
-    nt_resource_t atlas; /* <img=alias:region/> -> this handle, then by-name region resolve (D-67-13) */
+    nt_resource_t atlas; /* <img=alias:region/> -> this handle, then by-name region resolve */
 } nt_ui_rich_tagset_atlas_t;
 
 typedef struct {
@@ -56,10 +56,10 @@ typedef struct {
 
 /* An <fx=name> resolves to EITHER a stock catalog id OR a game-supplied custom fn. fn==NULL ->
  * stock (effect_id carries the catalog index); fn!=NULL -> custom (effect_id is ignored, the
- * builder captures fn+user_data into the per-block table at build time, D-67-26). */
+ * builder captures fn+user_data into the per-block table at build time). */
 typedef struct {
     uint64_t name_hash;
-    uint8_t effect_id;   /* stock-catalog index when fn==NULL (D-67-12/20) */
+    uint8_t effect_id;   /* stock-catalog index when fn==NULL */
     nt_ui_rich_fx_fn fn; /* custom effect callback, or NULL for a stock effect */
     void *user_data;     /* passed back to the custom fn (NULL for stock) */
 } nt_ui_rich_tagset_effect_t;
@@ -71,7 +71,7 @@ typedef struct {
     void *user_data;
 } nt_ui_rich_tagset_object_t;
 
-/* ---- The registry object (plain owned struct; NOT on nt_ui_context, D-67-09) ---- */
+/* ---- The registry object (plain owned struct; NOT on nt_ui_context) ---- */
 typedef struct nt_ui_rich_tagset {
     nt_ui_rich_tagset_font_t fonts[NT_UI_RICH_TAGSET_MAX_FONTS];
     uint32_t font_count;
@@ -96,7 +96,7 @@ void nt_ui_rich_tagset_register_atlas(nt_ui_rich_tagset_t *ts, const char *name,
 void nt_ui_rich_tagset_register_color(nt_ui_rich_tagset_t *ts, const char *name, uint32_t color_abgr);
 void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name, uint8_t effect_id);
 /* Register a game-supplied custom effect fn under `name` so `<fx=name>` resolves to it (resolved
- * BEFORE stock). The (fn,user_data) is captured into the run-list at parse/build time (D-67-26). */
+ * BEFORE stock). The (fn,user_data) is captured into the run-list at parse/build time. */
 void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn, void *user_data);
 void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
 

@@ -287,7 +287,7 @@ int main(int argc, char *argv[]) {
     // #endregion
 
     // #region atlas: rich-text inline icons (named regions for <img=name/> by-name resolve)
-    /* Inline rich-text images resolve by atlas+region NAME (D-67-13, the atlas IS the registry).
+    /* Inline rich-text images resolve by atlas+region NAME (the atlas IS the registry).
      * A dedicated small icon atlas with named regions ("heart","gold") feeds both the rich-text
      * demo tab and the no-GL emit test's by-name resolve. Procedural full-bleed sprites (opaque,
      * no padding/margin/extrude) keep the regions' UV near [0,1] so the inline image stays crisp. */

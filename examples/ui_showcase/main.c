@@ -317,9 +317,9 @@ typedef struct {
     float hold_progress; /* latched hold_progress for the radial fill display */
 } radial_params_t;
 
-/* Rich Text tab: the GAME owns the effect clock (no engine global clock, RESEARCH Pitfall 4):
+/* Rich Text tab: the GAME owns the effect clock (no engine global clock):
  * `time` accumulates from frame dt and feeds wave/rainbow; `visible_glyphs` is the block-level
- * typewriter counter (game-owned, D-67-06) advanced from the same clock; `last_link` latches the
+ * typewriter counter (game-owned) advanced from the same clock; `last_link` latches the
  * id of the last clicked <link> for the readout. */
 typedef struct {
     float time;           /* seconds, accumulated from frame dt -> the game-passed effect clock */
@@ -1892,7 +1892,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
 
 /* Build the markup-front vocabulary once the font + materials are ready: a named "gold" color, the
  * "wave" stock effect, and the icons atlas alias. The CODE-FIRST builder never touches the tagset --
- * it gets real values directly (D-67-09). */
+ * it gets real values directly. */
 static void rich_ensure_setup(void) {
     if (s_rich_ready || !s_font_bound || s_rich_image_material.id == 0U) {
         return;
@@ -1921,9 +1921,9 @@ static nt_ui_rich_style_t rich_base_style(void) {
  * never go stale. Only valid for a string LITERAL (sizeof on a char* would measure the pointer). */
 #define RICH_TEXT_LIT(ctx, lit) nt_ui_rich_text_n((ctx), (lit), (uint32_t)(sizeof(lit) - 1U))
 
-/* Front A: the code-first push/pop builder. Demos styled multi-run text, two inline icons (gold + heart),
- * bold + (synth) italic, a wave effect that moves the text AND the gold icon TOGETHER (the D-67-17
- * driving case), and a clickable <link>. (The typewriter/fade_in reveal is block 3; the OBJECT run is
+/* Code-first push/pop builder. Demos styled multi-run text, two inline icons (gold + heart),
+ * bold + (synth) italic, a wave effect that moves the text AND the gold icon TOGETHER,
+ * and a clickable <link>. (The typewriter/fade_in reveal is block 3; the OBJECT run is
  * exercised by the unit tests, not this demo.) */
 static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, const nt_ui_rich_style_t *base, nt_ui_rich_result_t *out) {
     nt_ui_rich_begin(ctx, base);
@@ -1976,7 +1976,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     /* The block wraps at this width; narrow the window to watch the wrap re-flow (no atom escapes). */
     const float container_w = 560.0F;
 
-    /* #region Front A: code-first builder */
+    /* #region code-first builder */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Code-first builder (nt_ui_rich_begin / push_* / text_n / image / link / end):", g_current->body);
     nt_ui_rich_result_t res_a = {0};
     /* Two-pass: the prev result drives this frame's link-hover color; the widget fills res_a for next. */
@@ -1987,7 +1987,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     s_prev_a = res_a;
     // #endregion
 
-    /* #region Front B: runtime markup parser */
+    /* #region runtime markup parser */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
     static const char markup[] = "Quest: slay the <b><color=#DC3C3C>Crimson Drake</color></b> and claim "
                                  "<fx=wave><color=gold><img=gold/> 100 gold</color></fx>. Reward heart <img=heart/> "
@@ -2819,8 +2819,8 @@ static void frame(void) {
         }
     }
 
-    /* Rich-text effect clock: the GAME accumulates time from frame dt (no engine global clock,
-     * RESEARCH Pitfall 4) and passes it into the rich-text calls -- wave/rainbow/fade_in read it. */
+    /* Rich-text effect clock: the GAME accumulates time from frame dt (no engine global clock)
+     * and passes it into the rich-text calls -- wave/rainbow/fade_in read it. */
     s_state.rich.time += g_nt_app.dt;
 
     if (!s_atlas_bound) {
@@ -3055,7 +3055,7 @@ int main(int argc, char *argv[]) {
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
 
     /* Rich-text inline-icon atlas + its texture + the textured-tint FS. The by-name refs resolve
-     * lazily (memoized on first emit) -- the atlas IS the registry (D-67-13). */
+     * lazily (memoized on first emit) -- the atlas IS the registry. */
     s_icons_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ICONS, NT_ASSET_ATLAS);
     s_icons_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ICONS_TEX0, NT_ASSET_TEXTURE);
     s_rich_image_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RICH_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
