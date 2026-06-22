@@ -556,7 +556,10 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     if (colon < vlen) {
         NT_ASSERT(tagset != NULL && "rich markup: <img=alias:..> needs a tagset");
         const uint64_t alias_hash = nt_hash64((const void *)val, colon).value;
-        NT_ASSERT(nt_ui_rich_tagset_lookup_atlas(tagset, alias_hash, &atlas) && "rich markup: unknown <img> atlas alias");
+        /* Evaluate the side-effecting lookup OUTSIDE the assert: an OFF build elides the assert's
+         * argument, which would silently skip the atlas write. */
+        const bool alias_ok = nt_ui_rich_tagset_lookup_atlas(tagset, alias_hash, &atlas);
+        NT_ASSERT(alias_ok && "rich markup: unknown <img> atlas alias");
         region = val + colon + 1;
         region_len = vlen - colon - 1;
         NT_ASSERT(region_len > 0U && "rich markup: <img=alias:region/> empty region");
@@ -584,7 +587,9 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         } else {
             NT_ASSERT(tagset != NULL && "rich markup: named <color> needs a tagset");
             uint32_t abgr = 0;
-            NT_ASSERT(nt_ui_rich_tagset_lookup_color(tagset, nt_hash64((const void *)val, vlen).value, &abgr) && "rich markup: unknown color name");
+            /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the write. */
+            const bool color_ok = nt_ui_rich_tagset_lookup_color(tagset, nt_hash64((const void *)val, vlen).value, &abgr);
+            NT_ASSERT(color_ok && "rich markup: unknown color name");
             nt_ui_rich_push_color(ctx, abgr);
         }
         break;
@@ -594,7 +599,9 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     case RICH_TAG_FONT: {
         NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <font=name> needs a tagset");
         nt_font_t fam[4];
-        NT_ASSERT(nt_ui_rich_tagset_lookup_font(tagset, nt_hash64((const void *)val, vlen).value, fam) && "rich markup: unknown font name");
+        /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the family write. */
+        const bool font_ok = nt_ui_rich_tagset_lookup_font(tagset, nt_hash64((const void *)val, vlen).value, fam);
+        NT_ASSERT(font_ok && "rich markup: unknown font name");
         nt_ui_rich_push_font(ctx, fam);
         break;
     }
@@ -610,7 +617,10 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         uint8_t effect_id = 0;
         nt_ui_rich_fx_fn fn = NULL;
         void *fx_user = NULL;
-        NT_ASSERT(nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, vlen).value, &effect_id, &fn, &fx_user) && "rich markup: unknown effect name");
+        /* The lookup is the SOLE writer of effect_id/fn/fx_user -- evaluate it OUTSIDE the assert so an
+         * OFF build (which elides the assert arg) still resolves <fx=name> instead of silently no-effect. */
+        const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, vlen).value, &effect_id, &fn, &fx_user);
+        NT_ASSERT(fx_ok && "rich markup: unknown effect name");
         if (fn != NULL) {
             nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock */
         } else {
