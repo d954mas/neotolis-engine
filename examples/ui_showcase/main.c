@@ -1887,8 +1887,11 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 // #region Rich Text tab (RICH/MARK/FX -- both authoring fronts)
-/* Link ids for the demo (any non-zero uint32; the markup front uses <link=N> with the same value). */
-#define RICH_LINK_QUEST 36865U /* 0x9001; the markup front uses <link=36865> for parity */
+/* The demo link id. Both fronts must resolve to the SAME value: the builder calls
+ * nt_ui_rich_link(ctx, nt_hash32_str("quest")) and the markup writes <link=quest> -- the parser
+ * hashes the link value with nt_hash32(val, vlen), and nt_hash32_str(s) == nt_hash32(s, strlen(s)),
+ * so both land on the same id. (Runtime hash, not a compile-time constant -> use the inline call.) */
+static inline uint32_t rich_link_quest(void) { return nt_hash32_str("quest").value; }
 
 /* Build the markup-front vocabulary once the font + materials are ready: a named "gold" color, the
  * "wave" stock effect, and the icons atlas alias. The CODE-FIRST builder never touches the tagset --
@@ -1925,7 +1928,7 @@ static nt_ui_rich_style_t rich_base_style(void) {
  * bold + (synth) italic, a wave effect that moves the text AND the gold icon TOGETHER,
  * and a clickable <link>. (The typewriter/fade_in reveal is block 3; the OBJECT run is
  * exercised by the unit tests, not this demo.) */
-static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, const nt_ui_rich_style_t *base, nt_ui_rich_result_t *out) {
+static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, const nt_ui_rich_style_t *base) {
     nt_ui_rich_begin(ctx, base);
 
     RICH_TEXT_LIT(ctx, "Quest: slay the ");
@@ -1951,10 +1954,8 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, con
     RICH_TEXT_LIT(ctx, " (urgent) ");
     nt_ui_rich_pop(ctx); /* italic */
 
-    nt_ui_rich_link(ctx, RICH_LINK_QUEST);
-    nt_ui_rich_push_color(ctx, (out != NULL && out->hovered_link == RICH_LINK_QUEST) ? 0xFFFFC864U : 0xFFE0A050U);
+    nt_ui_rich_link(ctx, rich_link_quest());
     RICH_TEXT_LIT(ctx, "[Accept quest]");
-    nt_ui_rich_pop(ctx);      /* color */
     nt_ui_rich_link(ctx, 0U); /* end link -- link is a set/clear pending field, NOT a style push */
 
     nt_ui_rich_end(ctx);
@@ -1979,19 +1980,16 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     /* #region code-first builder */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Code-first builder (nt_ui_rich_begin / push_* / text_n / image / link / end):", g_current->body);
     nt_ui_rich_result_t res_a = {0};
-    /* Two-pass: the prev result drives this frame's link-hover color; the widget fills res_a for next. */
-    static nt_ui_rich_result_t s_prev_a;
     const nt_ui_rich_style_t base_a = rich_base_style();
-    render_rich_builder_block(ctx, st, &base_a, &s_prev_a);
+    render_rich_builder_block(ctx, st, &base_a);
     nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_builder"), NT_UI_DATA_LAYER(LAYER_TEXT), &base_a, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_a);
-    s_prev_a = res_a;
     // #endregion
 
     /* #region runtime markup parser */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
     static const char markup[] = "Quest: slay the <b><color=#DC3C3C>Crimson Drake</color></b> and claim "
                                  "<fx=wave><color=gold><img=gold/> 100 gold</color></fx>. Reward heart <img=heart/> "
-                                 "<i>(urgent)</i> <link=36865>[Accept quest]</link>";
+                                 "<i>(urgent)</i> <link=quest>[Accept quest]</link>";
     const nt_ui_rich_style_t base = rich_base_style();
     nt_ui_rich_result_t res_b = {0};
     nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, sizeof markup - 1U, container_w, NT_RICH_ALIGN_LEFT, st->rich.time,
