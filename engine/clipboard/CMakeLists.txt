@@ -11,8 +11,9 @@ nt_declare_interface(nt_clipboard)
 if(EMSCRIPTEN)
     nt_add_module(nt_clipboard LOG_DOMAIN "clipboard" web/nt_clipboard_web.c nt_clipboard.h)
     # Web backend self-declares its EM_JS runtime-method deps via EM_JS_DEPS in
-    # nt_clipboard_web.c ($stringToNewUTF8,$UTF8ToString,_malloc,_free) -- composes
-    # across modules and survives Closure, so no exe-level export list is needed.
+    # nt_clipboard_web.c ($stringToNewUTF8,$UTF8ToString; free moved to C, malloc
+    # transitive) -- composes across modules and survives Closure, so no exe-level
+    # export list is needed.
     target_link_libraries(nt_clipboard PUBLIC nt_core nt_clipboard_interface)
 else()
     nt_add_module(nt_clipboard LOG_DOMAIN "clipboard" native/nt_clipboard_native.c nt_clipboard.h)

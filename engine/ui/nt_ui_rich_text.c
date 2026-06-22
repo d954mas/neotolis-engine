@@ -1592,9 +1592,10 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
         return; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
     }
 
-    /* Per-atom effect: shift xy, multiply a_tint, scale w/h about center, skip if
-     * not visible. VISUAL-ONLY -- the solved box stays the solver's; only the render
-     * transform + tint move (text + gold icon wave together). */
+    /* Per-atom effect: shift xy, set a_tint to the effect's ABSOLUTE resolved tint
+     * (identity == the run's base tint), scale w/h about center, skip if not visible.
+     * VISUAL-ONLY -- the solved box stays the solver's; only the render transform +
+     * tint move (text + gold icon wave together). */
     float base_tint[4];
     rich_unpack_color(s->color, 1.0F, base_tint); /* opacity rides element_data, so 1.0 here */
     const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_tint);

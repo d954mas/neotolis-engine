@@ -6,14 +6,15 @@ font_dejavu_b.ttf   DejaVu Sans Bold
 font_dejavu_i.ttf   DejaVu Sans Oblique
 font_dejavu_bi.ttf  DejaVu Sans Bold Oblique
 
-The DejaVu fonts are a public-domain derivative of the Bitstream Vera Fonts.
-Redistribution and use (including bundling into application asset packs) is
-permitted. Full Cyrillic coverage; used here only for the ui_showcase Rich Text
-tab to demonstrate real bold / italic / bold-italic faces.
+The DejaVu fonts derive from the Bitstream Vera Fonts and are distributed under
+the Bitstream Vera Fonts License -- a permissive, MIT-style license (with a
+font-name restriction), NOT public domain. Redistribution and use (including
+bundling into application asset packs) is permitted as long as the copyright
+notice is preserved. Full Cyrillic coverage; used here only for the ui_showcase
+Rich Text tab to demonstrate real bold / italic / bold-italic faces.
 
 Bitstream Vera Fonts Copyright (c) 2003 by Bitstream, Inc. Bitstream Vera is a
-trademark of Bitstream, Inc. The Bitstream Vera license grants permission to
-use, copy, modify, and distribute the fonts and derivatives.
+trademark of Bitstream, Inc. The Bitstream Vera Fonts License grants permission
+to use, copy, modify, and distribute the fonts and derivatives.
 
-DejaVu changes are in the public domain. See https://dejavu-fonts.github.io/
-for the full license text and authors.
+See https://dejavu-fonts.github.io/ for the full license text and authors.

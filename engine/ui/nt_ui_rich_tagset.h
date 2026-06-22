@@ -18,8 +18,8 @@
 
 #include "font/nt_font.h"         /* nt_font_t */
 #include "resource/nt_resource.h" /* nt_resource_t (atlas alias handle) */
-#include "ui/nt_ui_rich_fx.h"     /* nt_ui_rich_fx_fn (custom effect callback) */
-#include "ui/nt_ui_rich_text.h"   /* nt_ui_rich_object_measure_fn / draw_fn */
+#include "ui/nt_ui_rich_fx.h"     /* nt_ui_rich_fx_result_t / nt_ui_rich_fx_identity */
+#include "ui/nt_ui_rich_text.h"   /* nt_ui_rich_fx_fn + object measure/draw fns */
 
 /* ---- Vocabulary caps (no heap; NT_ASSERT on overflow) ---- */
 #ifndef NT_UI_RICH_TAGSET_MAX_FONTS

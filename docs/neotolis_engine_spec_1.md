@@ -3205,7 +3205,7 @@ registry (see §32.5, D-67-13).
 
 ## 32.5 Spec ↔ #184-proposal divergences (per AGENTS.md)
 
-The shipped feature deliberately diverges from the original #184 proposal on five
+The shipped feature deliberately diverges from the original #184 proposal on seven
 points; flagged here so code and spec do not silently drift:
 
 - **D-67-13 — name-based image resolve replaces `register_image_tag`.** #184

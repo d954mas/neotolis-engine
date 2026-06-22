@@ -6,7 +6,7 @@ nt_declare_interface(nt_http)
 if(EMSCRIPTEN)
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c web/nt_http_web.c nt_http.h)
     # Web backend self-declares its EM_JS runtime-method deps via EM_JS_DEPS in
-    # nt_http_web.c ($UTF8ToString,$HEAPU8,_malloc) -- composes across modules and
+    # nt_http_web.c ($UTF8ToString,malloc) -- composes across modules and
     # survives Closure, so no exe-level export list is needed.
 else()
     nt_add_module(nt_http LOG_DOMAIN "http" nt_http.c native/nt_http_native.c nt_http.h)
