@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 /* Fixed BSS ring (no heap, single-threaded — same assumption as nt_log). head/count/wrap
-   idiom mirrors nt_debug_overlay's fps_ring; both domain and msg are owned copies. */
+   idiom; both domain and msg are owned copies. */
 static struct {
     nt_log_ring_entry_t entries[NT_LOG_RING_DEPTH];
     uint16_t head;  /* next write slot */

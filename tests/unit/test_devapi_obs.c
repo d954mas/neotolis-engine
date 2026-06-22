@@ -22,9 +22,8 @@
 /* clang-format on */
 
 void setUp(void) {
-    /* L1 modules the obs handlers read. nt_metrics (perf source of truth) + log ring are dev-only
-       sources; entity + components + resource back entity.list / resource.list. perf.* reads
-       nt_metrics directly now (no overlay). */
+    /* L1 modules the obs handlers read. nt_metrics + log ring are dev-only sources; entity +
+       components + resource back entity.list / resource.list. perf.* reads nt_metrics directly. */
     nt_metrics_init();
     nt_log_ring_init();
     /* nt_log_add_sink is idempotent: re-attaching the same (fn,user) across tests is a no-op,
@@ -172,7 +171,7 @@ static void test_perf_snapshot_keys_and_gpu_null(void) {
     cJSON *fm = cJSON_GetObjectItemCaseSensitive(r, "frame_ms");
     TEST_ASSERT_NOT_NULL(fm);
     TEST_ASSERT_TRUE(cJSON_IsNull(fm) || cJSON_IsNumber(fm));
-    /* gpu_ms: present, and null when the GPU timer is unsupported (overlay returns -1.0). */
+    /* gpu_ms: present, and null when the GPU timer is unsupported (nt_metrics' -1.0 sentinel). */
     cJSON *gpu = cJSON_GetObjectItemCaseSensitive(r, "gpu_ms");
     TEST_ASSERT_NOT_NULL(gpu);
     TEST_ASSERT_TRUE(cJSON_IsNull(gpu) || cJSON_IsNumber(gpu));

@@ -1,4 +1,4 @@
-/* L1 CTest for the nt_metrics perf collector (now the perf source of truth), no devapi.
+/* L1 CTest for the nt_metrics perf collector, no devapi.
  * Drives the REAL public paths: nt_metrics_count/_f for user counters and nt_metrics_sample(frame)
  * for the fixed channels, so percentiles/skip-guards/fps are asserted as the host would see them. */
 
@@ -257,7 +257,7 @@ static void test_user_counter_truncated_collision_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_metrics_count(b, 2U)); /* new slot's display collides -> assert */
 }
 
-/* ---- exact uint64 round-trip past 2^53 (P2-A) ---- */
+/* ---- exact uint64 round-trip past 2^53 ---- */
 
 /* An int counter above 2^53 must survive nt_metrics_user_get EXACTLY (a double would lose the low
    bits). Prove the union keeps full uint64 precision. */
@@ -276,7 +276,7 @@ static void test_user_counter_uint64_exact(void) {
 
 /* count_f keeps the double; re-writing a name flips its tag (last write wins). */
 static void test_user_counter_float_and_tag_flip(void) {
-    nt_metrics_count("v", 5U); /* int */
+    nt_metrics_count("v", 5U);
     const char *name = NULL;
     uint64_t u = 0;
     double f = 0.0;

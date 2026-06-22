@@ -15,9 +15,9 @@
 #include "unity.h"
 /* clang-format on */
 
-/* The overlay is now a pure CONSUMER of nt_metrics: format_lines reads fps/cpu/gpu/draws + user
- * counters from nt_metrics, so these tests feed nt_metrics (count + sample) and assert the HUD text
- * reflects it. The draw test still exercises the text_renderer bind path (gfx-backed). */
+/* Overlay reads its display data from nt_metrics: format_lines reads fps/cpu/gpu/draws + user
+ * counters, so these tests feed nt_metrics (count + sample) and assert the HUD text reflects it.
+ * The draw test still exercises the text_renderer bind path (gfx-backed). */
 
 /* ---- Assert catching (setjmp/longjmp via hookable handler) ---- */
 
@@ -133,8 +133,8 @@ static void test_stats_user_counters(void) {
     nt_debug_overlay_init(NULL);
 
     nt_metrics_count("bunnies", 1000U);
-    nt_metrics_count("bunnies", 2000U);    /* update */
-    nt_metrics_count("atlas_quality", 1U); /* second counter */
+    nt_metrics_count("bunnies", 2000U);
+    nt_metrics_count("atlas_quality", 1U);
     nt_metrics_count_f("frame_ms", 16.667);
 
     char buf[512];
@@ -167,7 +167,7 @@ static void test_stats_user_counter_uint64_exact(void) {
 }
 #endif /* NT_METRICS_ENABLED */
 
-/* ---- Test 7: Pitfall 9 — explicit set_material AND set_font on draw ----
+/* ---- explicit set_material AND set_font on draw ----
  * nt_debug_overlay_draw must call BOTH setters every time even when the material/font id matches the
  * previous frame, defeating nt_text_renderer's change-detection early-out. */
 static void test_stats_draw_pitfall9_explicit_set_calls(void) {

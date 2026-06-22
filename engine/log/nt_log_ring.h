@@ -4,12 +4,10 @@
 #include "log/nt_log.h"
 #include <stdint.h>
 
-/* Reusable dev-only log-tail ring. A host attaches nt_log_ring_sink via
- * nt_log_add_sink; every nt_log_write then COPIES {level, domain, msg} into a bounded
- * ring. The devapi log.tail command reads it. L1-testable without devapi.
+/* Dev-only bounded log-tail ring; a sink copies each line so log.tail can read it
+ * without borrowing caller pointers.
  *
- * Dev-only: NT_LOG_RING_ENABLED=0 (release/OFF mirror) compiles real no-op bodies, so
- * the ring ships zero footprint in release. Defaults to NT_UI_DEBUG_TOOLS. */
+ * NT_LOG_RING_ENABLED=0 (release/OFF mirror) compiles no-op bodies for zero footprint. */
 #ifndef NT_LOG_RING_ENABLED
 #define NT_LOG_RING_ENABLED 1
 #endif

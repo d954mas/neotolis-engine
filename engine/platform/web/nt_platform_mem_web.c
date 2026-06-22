@@ -7,10 +7,7 @@
 
 nt_platform_mem_t nt_platform_memory_usage(void) {
     nt_platform_mem_t mem = {0};
-    /* uordblks = allocator in-use bytes. On the pinned Emscripten toolchain struct mallinfo.uordblks is
-       already size_t (unsigned), so it fits wasm32 exactly with no int-wrap concern — a plain widening
-       read. We do not use mallinfo2(): the pinned toolchain does not declare it and buys nothing here.
-       Dev-only probe. */
+    /* uordblks (size_t on wasm32) = allocator in-use bytes; mallinfo2 not declared on the pinned toolchain. */
     struct mallinfo mi = mallinfo();
     mem.used = (size_t)mi.uordblks;
     mem.reserved = (size_t)emscripten_get_heap_size();

@@ -122,10 +122,7 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
 // #endregion
 
 // #region perf.*
-/* perf.snapshot: IMMEDIATE current-frame view from nt_metrics' last-pushed frame (NOT the windowed
-   aggregates). fps is the rolling avg; frame_ms is the real last frame time (distinct from cpu_ms),
-   null until the first valid frame; gpu_ms maps the < 0 sentinel (timer unsupported) to JSON null.
-   user_counters enumerates the nt_metrics user counters with their EXACT stored value. */
+/* perf.snapshot: immediate last-frame view (not the window). */
 static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)params;
     (void)err;
@@ -233,7 +230,6 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
                 }
             }
             if (found < 0) {
-                /* Unknown channel: bad_params listing valid channels. */
                 set_bad_params(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
                 return false;
             }
@@ -366,9 +362,8 @@ static void add_entity_drawable(cJSON *o, nt_entity_t e) {
 }
 
 /* Serialize one entity's compact view (id/index/generation/enabled + optional position +
-   drawable) into the entities array. Split out so cmd_entity_list stays under the cognitive-complexity
-   ceiling and the two-pass loop body stays simple. Pass 2 only reaches proven-live slots, so no
-   `alive` field is emitted — every entry is live by construction. */
+   drawable) into the entities array. Split out so cmd_entity_list stays simple. Pass 2 only
+   reaches proven-live slots, so no `alive` field is emitted — every entry is live by construction. */
 static void add_entity_entry(cJSON *arr, nt_entity_t e) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);
@@ -398,10 +393,8 @@ static bool entity_slot_matches(uint16_t idx, bool only_drawable, nt_entity_t *o
     return true;
 }
 
-/* entity.list{offset?, limit?, only_drawable?}: live entities with compact fields (no world matrix).
-   Two heap-free passes over 1..nt_entity_max() via nt_entity_at_index: pass 1 counts the honest
-   filtered total, pass 2 emits the [begin,end) page resolved against it — so the whole live range is
-   pageable, not just a fixed prefix. Optional only_drawable filter. Bad offset/limit -> bad_params. */
+/* entity.list{offset?, limit?, only_drawable?} -> live entities with compact fields (no world
+   matrix). Bad offset/limit -> bad_params. */
 static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     bool only_drawable = false;

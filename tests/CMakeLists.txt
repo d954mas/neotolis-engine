@@ -204,7 +204,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_input COMMAND test_input)
 
-    # --- Input inject + player-gate tests (INPUT-04 scaffold; Plan 03 adds inject cases) ---
+    # --- Input inject + player-gate tests ---
     add_executable(test_input_inject unit/test_input_inject.c)
     target_link_libraries(test_input_inject PRIVATE nt_input_stub nt_log_stub unity)
     nt_set_warning_flags(test_input_inject)
@@ -235,9 +235,9 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_gfx COMMAND test_gfx)
 
     # --- Graphics scissor/viewport tests ---
-    # Plan 03 added restore_gpu cases that call into nt_sprite_renderer +
-    # nt_text_renderer; the renderer libs (and their transitive deps for
-    # font/resource/hash/pool/material) are required at link time.
+    # restore_gpu cases call into nt_sprite_renderer + nt_text_renderer; their
+    # renderer libs (and transitive font/resource/hash/pool/material deps) are
+    # required at link time.
     add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
     target_link_libraries(test_nt_gfx_scissor PRIVATE
         nt_sprite_renderer nt_text_renderer nt_font nt_material
@@ -635,7 +635,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_element_data)
 
-    # --- Debug overlay module tests (overlay as nt_metrics consumer + Pitfall 9 draw bind) ---
+    # --- Debug overlay module tests (overlay as nt_metrics consumer + draw bind) ---
     # The overlay reads nt_metrics for the HUD, so the test feeds nt_metrics (count + sample); the
     # draw test still needs the text_renderer/gfx bind chain.
     add_executable(test_debug_overlay unit/test_debug_overlay.c)

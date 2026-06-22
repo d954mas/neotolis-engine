@@ -3,16 +3,9 @@
 
 #include "core/nt_types.h"
 
-/* Layer-1 perf SOURCE OF TRUTH. A bounded, no-heap, dev-only collector the host
- * pushes raw per-frame scalars into (nt_metrics_sample) and sets user counters on
- * (nt_metrics_count*). It derives rolling fps + windowed aggregates and stores the
- * last-pushed frame. nt_debug_overlay and the devapi perf.* group are pure CONSUMERS
- * that read from here. nt_metrics reads NO clock and NO other engine module — the
- * host owns measurement, this owns storage + math.
- *
- * Dev-only: NT_METRICS_ENABLED=0 (release/OFF mirror) compiles real no-op bodies,
- * so the collector ships zero footprint in release. Defaults to NT_UI_DEBUG_TOOLS.
- * The gate is independent of NT_DEVAPI_ENABLED. */
+/* Dev-only perf collector: the host pushes per-frame scalars; reads no clock itself. */
+
+/* NT_METRICS_ENABLED=0 (release/OFF mirror) compiles no-op bodies for zero footprint. */
 #ifndef NT_METRICS_ENABLED
 #define NT_METRICS_ENABLED 1
 #endif
@@ -86,17 +79,11 @@ void nt_metrics_init(void);
 void nt_metrics_reset(void);
 
 /* ---- User counters (this module owns them; the host sets them) ----
- * Keyed by the FULL 64-bit name hash so two counters sharing a 31-char prefix do not
- * alias. The exact value is kept (uint64 counts keep full precision past 2^53, floats
- * keep double) and also pushed into a windowed ring for perf.stats. Last write wins;
- * re-writing a name with the other variant flips its tag. */
+ * Keyed by full 64-bit name hash so prefix-31 collisions don't alias. */
 void nt_metrics_count(const char *name, uint64_t value);
 void nt_metrics_count_f(const char *name, double value);
 
-/* ---- Per-frame sample (hot path: heap-free) ----
- * Pushes the fixed-channel rings from *f (with the frame_ms <= 0/non-finite and the
- * gpu < 0 skip guards), samples every user counter's ring from its stored exact value,
- * and records *f as the last-frame snapshot for nt_metrics_last(). */
+/* ---- Per-frame sample (hot path: heap-free) ---- */
 void nt_metrics_sample(const nt_metrics_frame_t *f);
 
 /* ---- Read side for consumers (overlay + perf.snapshot) ---- */

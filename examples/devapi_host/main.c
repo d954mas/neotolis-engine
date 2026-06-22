@@ -144,7 +144,7 @@ static void recover_on_disconnect(void) {
 }
 
 /* Poll the gfx "frame" GPU timer segment; returns ms, or -1 when no timer is available (drain ready
-   results 1-2 frames old, keep the freshest). The host owns this measurement now (was the overlay's). */
+   results 1-2 frames old, keep the freshest). */
 static float poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
     bool ready = false;
@@ -155,9 +155,7 @@ static float poll_gpu_ms(void) {
 }
 
 static void frame(void) {
-    /* The host owns the loop, so it measures the frame: frame_ms is the wall delta between frame
-       starts; cpu_ms brackets the work below; gpu/draw/mem/scratch are read at frame end. nt_metrics
-       stores + aggregates — it reads no clock itself. */
+    /* Host owns measurement; nt_metrics only stores. */
     static double s_last_begin = 0.0;
     double now = nt_time_now();
     float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
@@ -165,11 +163,7 @@ static void frame(void) {
     double cpu_begin = now;
 
     nt_window_poll();
-    /* Order matters: nt_devapi_update first runs net_poll (a command may enqueue into the
-       devapi input schedule), then ticks that schedule and — only on a real sim-advance — releases
-       due events into nt_input's immediate inject buffer. nt_input_poll next samples hardware AND
-       applies that whole buffer post-edge-clear, so an injected rising edge survives to this frame's
-       update. nt_input itself knows nothing about frames; the devapi layer owns the schedule. */
+    /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
     recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop. */
     nt_input_poll();
@@ -187,11 +181,9 @@ static void frame(void) {
         nt_window_swap_buffers();
     }
 
-    /* cpu_ms = time spent in this frame's work (frame begin -> here). */
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
 
-    /* User counters so perf.snapshot/perf.stats have a user channel to observe: a monotonic int
-       counter + this frame's cpu_ms as a float. The host sets these directly on nt_metrics now. */
+    /* Seed a user int + float channel so perf.* has something to observe. */
     static uint64_t s_frame_counter = 0;
     s_frame_counter++;
     nt_metrics_count("frames", s_frame_counter);

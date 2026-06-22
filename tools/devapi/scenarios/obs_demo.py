@@ -7,17 +7,6 @@ nt_metrics_sample() feeds a real window, the log ring captures real nt_log_write
 the L2 handlers serialize the live L1 capabilities + reject bad bot params over the wire. The
 unit/build gates cover the handlers in isolation; this UAT covers the live-host round trip.
 
-  1. log.tail{n,level}            — last-N {level,domain,msg} array shape + the level filter.
-  2. perf.snapshot                — keys present; gpu_ms is null on this host (no GPU timer);
-                                    user_counters carries the host's "frames"/"cpu_ms" counters.
-  3. perf.reset -> stepped run    — manual-step a window of frames so the metrics rings fill, then
-     -> perf.stats               perf.stats populates the per-channel aggregate schema
-                                    (samples>0, avg/median/p95/p99/p99_9 present); a bad budget_ms
-                                    and an unknown channel both -> bad_params.
-  4. entity.list{offset,limit}    — {total:int} + a bounded entities[] array; a negative offset
-                                    -> bad_params.
-  5. resource.list{include_assets}— packs[] always present; a flat assets[] only when requested.
-
 By default this script LAUNCHES its own devapi_host subprocess on a free port, drives the obs
 commands, and tears it down — so a single `python obs_demo.py` is a self-contained UAT. Point it at an
 already-running host with --port N (or env NT_DEVAPI_PORT) + --no-launch.

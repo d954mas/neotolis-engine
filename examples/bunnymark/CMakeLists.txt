@@ -64,7 +64,7 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# HD pack guard (Open Q3 — HD art may not exist yet).
+# HD pack guard — HD art may not exist yet.
 # The demo ships SD-only when examples/bunnymark/raw/hd/ is absent. When the
 # user drops 5 PNGs in raw/hd/ and reconfigures, the HD branch in build_packs.c
 # emits bunnymark_hd.ntpack and main.c sees BUNNYMARK_HD_AVAILABLE = 1.
