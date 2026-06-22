@@ -169,7 +169,7 @@ static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_erro
 /* Fixed-channel name table: maps the {channels} filter token to the nt_metrics enum. The order is
    the enum order so perf.stats with no filter emits all channels in a stable order. */
 static const char *const k_channel_names[NT_METRICS_CHANNEL_COUNT] = {
-    "frame_ms", "cpu_ms", "gpu_ms", "draw_calls", "mem_total", "scratch_hwm", "scratch_used", "pool_occupancy",
+    "frame_ms", "cpu_ms", "gpu_ms", "draw_calls", "mem_used", "scratch_hwm", "scratch_used", "pool_occupancy",
 };
 
 /* Serialize one channel's windowed aggregates. Empty window (samples==0) emits null aggregates
@@ -234,7 +234,7 @@ static bool cmd_perf_stats(const cJSON *params, cJSON *result, nt_devapi_error *
             }
             if (found < 0) {
                 /* Unknown channel: bad_params listing valid channels. */
-                set_bad_params(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_total, scratch_hwm, scratch_used, pool_occupancy)");
+                set_bad_params(err, "perf.stats: unknown channel (valid: frame_ms, cpu_ms, gpu_ms, draw_calls, mem_used, scratch_hwm, scratch_used, pool_occupancy)");
                 return false;
             }
             want[found] = true;
@@ -365,16 +365,16 @@ static void add_entity_drawable(cJSON *o, nt_entity_t e) {
     add_float_array(d, "color", nt_drawable_comp_color(e), 4);
 }
 
-/* Serialize one entity's compact view (id/index/generation/alive/enabled + optional position +
+/* Serialize one entity's compact view (id/index/generation/enabled + optional position +
    drawable) into the entities array. Split out so cmd_entity_list stays under the cognitive-complexity
-   ceiling and the two-pass loop body stays simple. */
+   ceiling and the two-pass loop body stays simple. Pass 2 only reaches proven-live slots, so no
+   `alive` field is emitted — every entry is live by construction. */
 static void add_entity_entry(cJSON *arr, nt_entity_t e) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);
     devapi_add_number(o, "id", (double)e.id);
     devapi_add_number(o, "index", (double)nt_entity_index(e));
     devapi_add_number(o, "generation", (double)nt_entity_generation(e));
-    devapi_add_bool(o, "alive", true);
     devapi_add_bool(o, "enabled", nt_entity_is_enabled(e));
     add_entity_position(o, e);
     add_entity_drawable(o, e);
@@ -427,7 +427,7 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
 
     uint32_t begin = 0;
     uint32_t end = 0;
-    if (!resolve_page(params, total, "entity.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
+    if (!resolve_page(params, total, "entity.list: offset/limit must be integers in [0, UINT32_MAX]", &begin, &end, err)) {
         return false;
     }
 
@@ -599,7 +599,7 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
 
     uint32_t begin = 0;
     uint32_t end = 0;
-    if (!resolve_page(params, total, "resource.list: offset/limit must be non-negative numbers", &begin, &end, err)) {
+    if (!resolve_page(params, total, "resource.list: offset/limit must be integers in [0, UINT32_MAX]", &begin, &end, err)) {
         return false;
     }
 
@@ -626,7 +626,6 @@ static bool cmd_resource_list(const cJSON *params, cJSON *result, nt_devapi_erro
         devapi_add_string(o, "state", pack_state_token(info.state));
         devapi_add_number(o, "priority", (double)info.priority);
         devapi_add_number(o, "asset_count", (double)info.asset_count);
-        devapi_add_bool(o, "mounted", info.mounted != 0U);
         cJSON_bool added = cJSON_AddItemToArray(packs, o);
         NT_ASSERT(added);
         (void)added;
@@ -681,7 +680,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .group = "entity",
         .summary = "live entities with compact fields (id/generation/enabled/position/drawable); fully paginated with honest total",
         .params_shape = "{offset?:number, limit?:number, only_drawable?:bool}",
-        .result_shape = "{total:number,entities:[{id,index,generation,alive,enabled,position,drawable}]}",
+        .result_shape = "{total:number,entities:[{id,index,generation,enabled,position,drawable}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
@@ -690,7 +689,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .group = "resource",
         .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped, pack_id-filtered) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
-        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id:string,type,state,pack_index}],asset_total?:number,assets_truncated?:bool}",
+        .result_shape = "{total:number,packs:[{id,state,priority,asset_count}],assets?:[{resource_id:string,type,state,pack_index}],asset_total?:number,assets_truncated?:bool}",
         .frame_behavior = "any",
         .side_effects = "none",
     },

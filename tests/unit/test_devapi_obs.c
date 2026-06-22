@@ -195,6 +195,32 @@ static void test_perf_snapshot_user_counters(void) {
     cJSON_Delete(root);
 }
 
+/* A user counter above 2^53 set via the host path (nt_metrics_count) is serialized by perf.snapshot
+   as a JSON IEEE-754 double, so its low bits are lost on the wire — a documented number-format limit,
+   not a store defect. Pin that contract: the emitted value must equal the double-ROUNDED value (what a
+   double can represent), not the exact uint64 and not some other squash. The OFF mirror has a no-op
+   nt_metrics_count (the counter never registers), so guard on the real collector. */
+#if NT_METRICS_ENABLED
+static void test_perf_snapshot_user_counter_big_double_rounding(void) {
+    const uint64_t big = (1ULL << 53) + 1ULL; /* not representable as a double; rounds to 2^53 */
+    nt_metrics_count("big_counter", big);
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
+    cJSON *uc = cJSON_GetObjectItemCaseSensitive(result_of(root), "user_counters");
+    cJSON *bc = cJSON_GetObjectItemCaseSensitive(uc, "big_counter");
+    TEST_ASSERT_TRUE(cJSON_IsNumber(bc));
+    /* Documented contract: the counter is serialized as a double, so above 2^53 its low bits are LOST
+       on the wire (the store keeps the exact uint64; the JSON number is double-precision). Assert the
+       wire value equals the double-ROUNDED uint64 within a few ULPs near 2^53 (ULP ~= 2; cJSON's %g
+       printer can add up to one more ULP), NOT the exact 2^53+1. Compare with a tolerance: Unity's
+       float/double asserts are compiled out in this config. */
+    const double want = (double)big; /* (double)(2^53+1) rounds to 2^53 */
+    const double got = bc->valuedouble;
+    TEST_ASSERT_TRUE((got - want) < 4.0 && (want - got) < 4.0); /* double + print loss, a few ULPs */
+    cJSON_Delete(root);
+}
+#endif /* NT_METRICS_ENABLED */
+
 /* ---- perf.stats ---- */
 
 /* test_perf_stats_channel_shape + test_perf_reset_ok feed a known sample set via nt_metrics_sample,
@@ -255,6 +281,8 @@ static void test_perf_stats_empty_window_null_aggregates(void) {
 
 static void test_perf_stats_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"budget_ms\":-1}}"));
+    /* non-finite budget_ms hits the isfinite reject branch (cJSON parses 1e400 as +Inf). */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"budget_ms\":1e400}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"nope\"]}}"));
     assert_bad_params(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":\"frame_ms\"}}"));
 }
@@ -298,7 +326,9 @@ static void test_entity_list_total_and_fields(void) {
     cJSON *e0 = cJSON_GetArrayItem(entities, 0);
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(e0, "id")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(e0, "generation")));
-    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e0, "alive")));
+    /* `alive` was dropped: pass-2 only serializes proven-live slots, so every entry is live by
+       construction. Assert it is absent so a re-introduced always-true field is caught. */
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(e0, "alive"));
     cJSON_Delete(root);
 }
 
@@ -310,6 +340,39 @@ static void test_entity_list_only_drawable_filter(void) {
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"only_drawable\":true}}"));
     TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(result_of(root), "total")->valueint);
+    cJSON_Delete(root);
+}
+
+/* entity.list `limit` is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX: a request for limit > cap clamps to
+   the cap (at most cap entries emitted) while `total` stays the honest count. Needs > cap live
+   entities, so this re-inits the entity system (and its dependent comp storages, in dep order) with a
+   larger max — the fixture default is 256. The re-inited stack matches what tearDown shuts down. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_entity_list_limit_clamps_to_cap(void) {
+    enum { OBS_LIMIT_MAX = 512 }; /* mirrors nt_devapi_obs.c NT_DEVAPI_OBS_LIMIT_MAX default */
+    const int n = OBS_LIMIT_MAX + 1;
+    /* Tear the comp storages down first (they hold entity-sized sparse arrays), then re-init entity
+       with room for > cap live entities, then re-init the comps against the new entity instance. */
+    nt_drawable_comp_shutdown();
+    nt_transform_comp_shutdown();
+    nt_entity_shutdown();
+    nt_entity_desc_t big = nt_entity_desc_defaults();
+    big.max_entities = (uint16_t)(n + 16);
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_entity_init(&big));
+    nt_transform_comp_desc_t tdesc = nt_transform_comp_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_transform_comp_init(&tdesc));
+    nt_drawable_comp_desc_t ddesc = nt_drawable_comp_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_drawable_comp_init(&ddesc));
+    for (int i = 0; i < n; i++) {
+        (void)nt_entity_create();
+    }
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"limit\":1000}}"));
+    cJSON *r = result_of(root);
+    TEST_ASSERT_EQUAL_INT(n, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint); /* honest total */
+    cJSON *entities = cJSON_GetObjectItemCaseSensitive(r, "entities");
+    TEST_ASSERT_TRUE(cJSON_IsArray(entities));
+    TEST_ASSERT_EQUAL_INT(OBS_LIMIT_MAX, cJSON_GetArraySize(entities)); /* clamped to cap, not 1000 */
     cJSON_Delete(root);
 }
 
@@ -536,6 +599,7 @@ int main(void) {
     RUN_TEST(test_perf_snapshot_keys_and_gpu_null);
     RUN_TEST(test_perf_snapshot_user_counters);
 #if NT_METRICS_ENABLED
+    RUN_TEST(test_perf_snapshot_user_counter_big_double_rounding);
     RUN_TEST(test_perf_stats_channel_shape);
     RUN_TEST(test_perf_stats_gpu_sentinel_null);
 #endif
@@ -546,6 +610,7 @@ int main(void) {
 #endif
     RUN_TEST(test_entity_list_total_and_fields);
     RUN_TEST(test_entity_list_only_drawable_filter);
+    RUN_TEST(test_entity_list_limit_clamps_to_cap);
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);
     RUN_TEST(test_resource_list_include_assets_flat);

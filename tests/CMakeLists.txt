@@ -438,9 +438,9 @@ if(NOT EMSCRIPTEN)
 
         # When the obs group is compiled into nt_devapi, the registry's nt_devapi_register_obs() call
         # pulls nt_devapi_obs.c, which references the obs L1 providers (log ring/metrics/entity/
-        # components/resource/scratch/platform — NOT the overlay; it is a sibling consumer of metrics,
-        # not an obs provider). Static linking drags this chain into EVERY test that links nt_devapi +
-        # inits it, not just the obs test. List the providers (+ resource's http/fs stubs) so the
+        # components/resource — NOT the overlay; it is a sibling consumer of metrics, not an obs
+        # provider). Static linking drags this chain into EVERY test that links nt_devapi + inits it,
+        # not just the obs test. List the providers (+ resource's http/fs stubs) so the
         # group-independent devapi tests still link. Empty when OBS is OFF.
         # GNU-ld single-pass: these trail nt_devapi and precede nt_core/nt_log_stub on each link line.
         set(NT_DEVAPI_OBS_PROVIDER_LIBS "")
@@ -448,7 +448,7 @@ if(NOT EMSCRIPTEN)
             set(NT_DEVAPI_OBS_PROVIDER_LIBS
                 nt_log_ring nt_metrics
                 nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
-                nt_resource nt_mem_scratch nt_platform nt_pool nt_math nt_shared nt_hash
+                nt_resource nt_math nt_shared nt_hash
                 nt_http_stub nt_fs_stub
             )
         endif()
@@ -550,7 +550,7 @@ if(NOT EMSCRIPTEN)
                 nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
                 nt_log_ring nt_metrics
                 nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
-                nt_resource nt_mem_scratch nt_platform nt_pool nt_math nt_shared
+                nt_resource nt_math nt_shared
                 nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
                 nt_core nt_log nt_hash unity
             )
