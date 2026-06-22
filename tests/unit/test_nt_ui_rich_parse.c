@@ -241,6 +241,64 @@ static void test_parse_invalid_utf8_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad));
 }
 
+/* ---- fail-early domain-input asserts (rich API) ---- */
+
+/* Open a fresh rich builder session (no frame needed; the builder is scratch-only). */
+static void rich_session_begin(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_begin(s_fx.ctx, &base);
+}
+
+/* (15) <img=.../> with a NULL base (no default_atlas source) -> NT_ASSERT in the parser. */
+static void test_parse_img_null_base_asserts(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    const char *m = "<img=icon/>";
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m)));
+}
+
+/* (16) push_scale with a non-finite-or-non-positive multiplier -> NT_ASSERT (negative font size guard). */
+static void test_push_scale_bad_mult_asserts(void) {
+    rich_session_begin();
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_push_scale(s_fx.ctx, 0.0F));
+    rich_session_begin();
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_push_scale(s_fx.ctx, -1.5F));
+}
+
+/* (17) rich_image with a non-positive scale -> NT_ASSERT (negative Clay fixed-size guard). */
+static void test_rich_image_bad_scale_asserts(void) {
+    rich_session_begin();
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, 0xDEADBEEFULL);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 0.0F));
+    rich_session_begin();
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, -2.0F));
+}
+
+/* (18) the public widget + markup entries with id==0 -> NT_ASSERT (id drives bbox/link origin). */
+static void test_rich_text_zero_id_asserts(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "x", 1);
+    nt_ui_rich_end(s_fx.ctx);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_text(s_fx.ctx, 0U, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL));
+    nt_ui_end(s_fx.ctx);
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_text_markup(s_fx.ctx, 0U, NULL, NULL, &base, "x", 1U, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL));
+    nt_ui_end(s_fx.ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tagset_font_register_lookup);
@@ -259,5 +317,9 @@ int main(void) {
     RUN_TEST(test_parse_len_bounded);
     RUN_TEST(test_parse_escape_literal_lt);
     RUN_TEST(test_parse_invalid_utf8_asserts);
+    RUN_TEST(test_parse_img_null_base_asserts);
+    RUN_TEST(test_push_scale_bad_mult_asserts);
+    RUN_TEST(test_rich_image_bad_scale_asserts);
+    RUN_TEST(test_rich_text_zero_id_asserts);
     return UNITY_END();
 }

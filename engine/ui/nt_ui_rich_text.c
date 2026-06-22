@@ -4,6 +4,7 @@
 
 #include "ui/nt_ui_rich_text.h"
 
+#include <math.h> /* isfinite (fail-early scale guards) */
 #include <string.h>
 
 #include "clay.h"
@@ -251,6 +252,7 @@ void nt_ui_rich_push_color(nt_ui_context_t *ctx, uint32_t color_abgr) {
 }
 
 void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult) {
+    NT_ASSERT(mult > 0.0F && isfinite(mult) && "rich scale must be finite > 0 (zero/negative -> negative font size)");
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
     rich_style_top(st)->scale *= mult; /* multiplicative (D-67-11) */
@@ -332,6 +334,7 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
 }
 
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale) {
+    NT_ASSERT(scale > 0.0F && isfinite(scale) && "rich image scale must be finite > 0 (negative -> negative Clay fixed size)");
     nt_ui_rich_state_t *st = rich_state(ctx);
     const uint16_t style_idx = rich_intern_style(st, rich_style_top(st));
     nt_ui_rich_run_t *r = rich_new_run(st, NT_RICH_ATOM_IMAGE);
@@ -508,6 +511,7 @@ typedef struct {
  * the tagset alias's atlas. The region name is always resolved by name (the atlas IS the registry). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + NT_ASSERT validation branches
 static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *val, uint32_t vlen) {
+    NT_ASSERT(base != NULL && "rich markup: <img=.../> needs a base style (default_atlas source)");
     NT_ASSERT(vlen > 0U && "rich markup: <img=...> needs a region");
     /* Split on a single ':' -> alias:region. */
     uint32_t colon = vlen;
@@ -1488,11 +1492,13 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
 }
 // #endregion
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- entry-guard NT_ASSERT branches + a linear solve/resolve/emit pipeline
 void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_style_t *style, float container_w, nt_rich_align_t align, float time,
                      nt_ui_rich_result_t *out) {
     NT_ASSERT(ctx != NULL && "nt_ui_rich_text: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_rich_text: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_rich_text: style must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_rich_text: id must be non-zero (drives bbox resolve + link rect origin)");
 
     nt_ui_rich_state_t *st = rich_state(ctx);
     st->image_material = style->image_material;
@@ -1510,11 +1516,13 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     ctx->rich_session_open = false;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- entry-guard NT_ASSERT branches + a linear parse/solve/resolve/emit pipeline
 void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *style, const char *markup, size_t len,
                             float container_w, nt_rich_align_t align, float time, nt_ui_rich_result_t *out) {
     NT_ASSERT(ctx != NULL && "nt_ui_rich_text_markup: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_rich_text_markup: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_rich_text_markup: style must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_rich_text_markup: id must be non-zero (drives bbox resolve + link rect origin)");
 
     nt_ui_rich_parse(ctx, tagset, style, markup, len); /* parse opens its own begin/end */
     nt_ui_rich_state_t *st = rich_state(ctx);
