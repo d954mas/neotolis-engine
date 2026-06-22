@@ -1062,7 +1062,7 @@ static void emit_field(input_frame_t *f) {
 
     const bool has_bg = (skin->bg_color != 0U);
     const bool has_border = (style->border_width > 0.0F && skin->border_color != 0U);
-    if (style->state_speed > 0.0F && bg_art_p == NULL) {
+    if (style->state_speed > 0.0F && bg_art_p == NULL && (has_bg || has_border)) {
         /* Eased cross-fade (flat-color path only): the anim slot retains the previous frame's resolved
          * channels, so a skin-state change ramps bg/border from the old color to the new over state_speed.
          * Pack the 8 resolved channels (bg RGBA + border RGBA) into the slot's free float lanes; tint_t
