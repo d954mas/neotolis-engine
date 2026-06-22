@@ -547,6 +547,12 @@ static void test_fx_glow_deterministic(void) {
     const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
     const float gt = 1.0F * (0.5F + (0.5F * sinf(t * 2.0F)));
     TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[0], base_color[0] + ((1.0F - base_color[0]) * gt)), "glow tuned r matches amp/speed override");
+
+    /* PARAMS amp > 1: the brighten factor clamps at 1 so rgb stays bounded by white (not over-driven). */
+    nt_ui_rich_fx_params_t over = {.amp = 2.0F, .speed = 0.0F}; /* speed 0 -> 0.5+0.5*sin(0)=0.5; 2*0.5=1.0 saturates the lerp */
+    const nt_ui_rich_fx_result_t big = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &over);
+    TEST_ASSERT_TRUE_MESSAGE(big.color[0] <= 1.0F + 1e-3F && big.color[1] <= 1.0F + 1e-3F && big.color[2] <= 1.0F + 1e-3F, "glow amp>1 stays bounded by white (clamp01)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(big.color[0], 1.0F) && approx(big.color[1], 1.0F) && approx(big.color[2], 1.0F), "glow amp=2 at sin=0 saturates rgb to white exactly");
 }
 
 /* (9g) sway shifts horizontally within [-AMP, AMP] via AMP*sin(t*SPEED + idx*PHASE); no y/tint.
@@ -679,9 +685,30 @@ static void test_fx_markup_params_apply(void) {
     TEST_ASSERT_TRUE_MESSAGE(id_speed_only >= NT_UI_RICH_FX_CUSTOM_BASE, "tuned <fx=wave speed=5> routes through the params path");
 }
 
+/* (10d) BUILDER push_effect_ex(WAVE, NULL): the NULL-params path carries the STOCK id (no custom-table
+ * slot allocated), mirroring the markup-side STOCK-id assertion in (10c). */
+static void test_fx_push_effect_ex_null_stock_id(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_push_effect_ex(s_fx.ctx, NT_UI_RICH_FX_ID_WAVE, NULL); /* NULL params -> stock id, no custom slot */
+    nt_ui_rich_text_n(s_fx.ctx, "X", 1);
+    nt_ui_rich_pop(s_fx.ctx);
+    nt_ui_rich_end(s_fx.ctx);
+    nt_ui_rich_test_solve(s_fx.ctx, 400.0F, FONT_SIZE_DEFAULT);
+
+    const uint8_t id = nt_ui_rich_test_atom_effect_id(s_fx.ctx, 0U);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_ID_WAVE, id, "push_effect_ex(WAVE, NULL) carries the stock id");
+    TEST_ASSERT_TRUE_MESSAGE(id < NT_UI_RICH_FX_CUSTOM_BASE, "NULL-params path does not allocate a custom-table slot");
+}
+
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
  * carries the effect_id; emit folds the wave offset into the image quad + the tint into a_tint. */
-static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time, nt_ui_rich_fx_fn fn_for_image) {
+static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -704,7 +731,6 @@ static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_fx").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, time, NULL);
     }
     nt_ui_end(s_fx.ctx);
-    (void)fn_for_image;
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 }
@@ -715,7 +741,7 @@ static void test_fx_image_shifts_quad_visual_only(void) {
     const nt_material_t mat = make_rich_image_material();
 
     /* No effect: record the image quad's first-vertex y + the solved total height. */
-    frame_effected_image(mat, 0U, 0.0F, NULL);
+    frame_effected_image(mat, 0U, 0.0F);
     float pos_noeff[3] = {0};
     nt_sprite_renderer_test_last_emit_position(0U, pos_noeff);
     const float total_h_noeff = nt_ui_rich_test_total_h(s_fx.ctx);
@@ -723,7 +749,7 @@ static void test_fx_image_shifts_quad_visual_only(void) {
 
     /* Wave effect at a time whose offset.y is clearly non-zero. The image atom's fx_idx is its
      * solved index; the quad shifts by the wave offset, but the SOLVED box y is unchanged. */
-    frame_effected_image(mat, NT_UI_RICH_FX_ID_WAVE, 0.4F, NULL);
+    frame_effected_image(mat, NT_UI_RICH_FX_ID_WAVE, 0.4F);
     float pos_eff[3] = {0};
     nt_sprite_renderer_test_last_emit_position(0U, pos_eff);
     const float total_h_eff = nt_ui_rich_test_total_h(s_fx.ctx);
@@ -741,7 +767,7 @@ static void test_fx_fade_in_skips_image(void) {
     const nt_material_t mat = make_rich_image_material();
 
     /* time 0: every atom's fade window is closed -> the image is skipped. */
-    frame_effected_image(mat, NT_UI_RICH_FX_ID_FADE_IN, 0.0F, NULL);
+    frame_effected_image(mat, NT_UI_RICH_FX_ID_FADE_IN, 0.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "fade_in t=0 skips the image atom emit");
     /* The image's solved box is still reserved (layout unchanged) -- the solver placed it. */
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_total_h(s_fx.ctx) > 0.0F, "layout still solved with the box reserved");
@@ -1381,6 +1407,7 @@ int main(void) {
     RUN_TEST(test_fx_sway_deterministic);
     RUN_TEST(test_fx_params_override_vs_default);
     RUN_TEST(test_fx_push_effect_ex_tunes_emit);
+    RUN_TEST(test_fx_push_effect_ex_null_stock_id);
     RUN_TEST(test_fx_markup_params_apply);
     RUN_TEST(test_fx_fade_in_visibility);
     RUN_TEST(test_fx_image_shifts_quad_visual_only);

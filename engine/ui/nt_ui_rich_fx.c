@@ -220,7 +220,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t
     const float amp = rich_fx_amp(p, RICH_FX_GLOW_AMP);
     const float speed = rich_fx_speed(p, RICH_FX_GLOW_SPEED);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    const float g = amp * (0.5F + (0.5F * sinf(time * speed))); /* [0, amp] brighten lerp toward white */
+    const float g = rich_fx_clamp01(amp * (0.5F + (0.5F * sinf(time * speed)))); /* clamp01: keep rgb bounded by white even when params amp > 1 */
     r.color[0] = base_color[0] + ((1.0F - base_color[0]) * g);
     r.color[1] = base_color[1] + ((1.0F - base_color[1]) * g);
     r.color[2] = base_color[2] + ((1.0F - base_color[2]) * g);
