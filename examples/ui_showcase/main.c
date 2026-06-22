@@ -1907,11 +1907,17 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
  * so both land on the same id. (Runtime hash, not a compile-time constant -> use the inline call.) */
 static inline uint32_t rich_link_quest(void) { return nt_hash32_str("quest").value; }
 
-/* Game custom effect: a LOOPING opacity fade (the stock fade_in is one-shot -> it freezes on the
- * gallery's continuous clock). Smoothly breathes alpha 15%<->100%, never fully gone (no blank gap),
- * and is atom_idx-INDEPENDENT: atom_idx here is the GLOBAL block index, so a per-glyph stagger would
- * push this late word past its window and blank it -- the staggered reveal is the stock fade_in
- * (the typewriter, block 3). Also shows off the custom-effect-fn registry. */
+/* (a) PARAMETERIZED custom effect: the game passes tunables through user_data. Must outlive the
+ * frame (read at emit), so the instance is file-scope, not a stack temp. */
+typedef struct {
+    float speed;     /* breathe rate (rad/s) */
+    float min_alpha; /* opacity floor -- never fully gone, so no blank gap */
+} rich_fade_params_t;
+static const rich_fade_params_t s_rich_fade_params = {.speed = 2.2F, .min_alpha = 0.15F};
+
+/* A LOOPING opacity fade (the stock fade_in is one-shot -> it freezes on the gallery's continuous
+ * clock). atom_idx-INDEPENDENT: atom_idx here is the GLOBAL block index, so a per-glyph stagger
+ * would push this late word past its window and blank it (that staggered reveal is the typewriter). */
 static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                              void *user_data) {
     (void)atom_idx;
@@ -1919,10 +1925,12 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
-    (void)user_data;
+    const rich_fade_params_t *p = (const rich_fade_params_t *)user_data;
+    const float speed = (p != NULL) ? p->speed : 2.2F;
+    const float min_a = (p != NULL) ? p->min_alpha : 0.15F;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    const float a = 0.15F + (0.85F * (0.5F + (0.5F * sinf(time * 2.2F)))); /* breathe alpha 0.15 <-> 1.0 */
-    r.color[3] = base_color[3] * a;                                        /* a >= 0.15, so visible stays true (identity) */
+    const float a = min_a + ((1.0F - min_a) * (0.5F + (0.5F * sinf(time * speed))));
+    r.color[3] = base_color[3] * a; /* a >= min_a, so visible stays true (identity) */
     return r;
 }
 
@@ -1946,7 +1954,7 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
     /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
-    nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, NULL);
+    nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
     nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_icons_atlas_handle);
     /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
     nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
@@ -2060,7 +2068,7 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
     RICH_TEXT_LIT(ctx, "pulse ");
     nt_ui_rich_pop(ctx);
-    nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, NULL); /* custom looping fade (vs the one-shot stock fade_in) */
+    nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, (void *)&s_rich_fade_params); /* custom fade, tuned via user_data */
     RICH_TEXT_LIT(ctx, "fade");
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
