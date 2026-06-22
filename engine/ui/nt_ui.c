@@ -493,6 +493,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Reset so a button begin that asserted mid-flight can't wedge subsequent frames. */
     ctx->pending_button.active = false;
 
+    /* Same guard for rich-text: an unbalanced begin (no terminal text call) must not poison the
+     * next frame's no-nest assert, and pending_rich must not dangle into freed scratch next frame. */
+    ctx->pending_rich = NULL;
+    ctx->rich_session_open = false;
+
     /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
      * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
     if (ctx->use_raycast_input) {

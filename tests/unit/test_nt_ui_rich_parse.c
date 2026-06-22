@@ -29,6 +29,7 @@ void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -104,6 +105,7 @@ static void test_tagset_reset(void) {
 static void parse_lit(const char *m) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m));
 }
 
@@ -134,6 +136,7 @@ static void test_parse_over_deep_nesting_asserts(void) {
     buf[n] = '\0';
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n));
 }
 
@@ -155,6 +158,7 @@ static void test_parse_len_bounded(void) {
     const char *full = "<b>ok</b>";
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, full, 2U)); /* only "<b" visible -> unterminated */
 }
 
@@ -162,6 +166,7 @@ static void test_parse_len_bounded(void) {
 static void test_parse_escape_literal_lt(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     const char *m = "a\\<b"; /* a, literal '<', b */
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
@@ -175,6 +180,7 @@ static void test_parse_invalid_utf8_asserts(void) {
     const char bad[] = {'h', 'i', (char)0xFF, 'x'}; /* 0xFF is never valid UTF-8 */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad));
 }
 

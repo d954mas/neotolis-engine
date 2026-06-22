@@ -29,6 +29,7 @@ void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -223,6 +224,7 @@ static void test_markup_equals_builder_core(void) {
     /* Parser path (fresh scratch). */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     const char *markup = "<b>HP</b> <img=heart/> full";
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, markup, strlen(markup));
     run_snapshot_t parser;
@@ -262,6 +264,7 @@ static void test_markup_equals_builder_full(void) {
 
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     const char *markup = "<color=#FF8800>hot</color><scale=1.5>big</scale><font=heading>head</font><link=quest1>go</link>";
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, markup, strlen(markup));
     run_snapshot_t parser;
@@ -291,6 +294,7 @@ static void test_markup_img_alias(void) {
 
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     const char *markup = "<img=icons:gold/>";
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, markup, strlen(markup));
     run_snapshot_t parser;

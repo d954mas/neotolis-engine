@@ -32,6 +32,7 @@ void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     /* units_per_em=1000, ascent=800, descent=-200: advance = size/2/char. */
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
 }
@@ -102,6 +103,7 @@ static void test_icon_baseline_vs_middle_delta(void) {
 
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     const float y_middle = icon_y_for_valign(NT_RICH_VALIGN_MIDDLE);
 
     /* Deterministic line ascent: text ascent dominates (16px) vs icon middle. */
@@ -151,6 +153,7 @@ static void build_text(const char *utf8, size_t len) {
 static void reset_call(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
 }
 
 /* (4) break-anywhere: a single word longer than container_w breaks mid-glyph so no

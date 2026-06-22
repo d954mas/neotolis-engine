@@ -299,8 +299,12 @@ struct nt_ui_context {
 
     /* Rich-text builder scratch (frame-scratch nt_ui_rich_state_t*, void* to keep this header
      * widget-agnostic). nt_ui_rich_begin allocates + parks it here; the builder calls read it; end
-     * (and the solver spike) consume it. Rich-text calls do NOT nest (asserted). */
+     * (and the solver spike) consume it. Stays set past the terminal as the "last rich state" handle
+     * for test probes; re-zeroed each frame by nt_ui_begin. */
     void *pending_rich;
+    /* The no-nest guard: true only between nt_ui_rich_begin and its terminal/end. Separate from
+     * pending_rich so a completed session releases the lock while probes can still read the state. */
+    bool rich_session_open;
 
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;

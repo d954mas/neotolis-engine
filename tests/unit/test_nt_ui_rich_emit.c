@@ -90,6 +90,7 @@ void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     /* Deterministic metrics: advance = size/2/char; ascent 800/1000. */
     nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
 }
@@ -207,10 +208,9 @@ static void test_double_walk_is_deterministic(void) {
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
  * The image rides the rich_image material with a 48 B {a_tint,a_uvrect,a_layout} block. */
 static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign, uint32_t tint_abgr) {
-    /* Fresh frame: clear the per-call rich scratch so back-to-back frames in one test don't
-     * trip the "rich-text calls do not nest" guard (pending_rich is cleared on scratch reset). */
+    /* Fresh frame: free the per-call rich scratch. pending_rich is released by the terminal
+     * nt_ui_rich_text and re-zeroed by nt_ui_begin, so no manual clear is needed here. */
     nt_mem_scratch_reset();
-    s_fx.ctx->pending_rich = NULL;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -352,6 +352,7 @@ static void test_fx_fade_in_visibility(void) {
 static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time, nt_ui_rich_fx_fn fn_for_image) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -437,6 +438,7 @@ static nt_pointer_t make_ptr(float x, float y, bool down, bool pressed, bool rel
 static nt_ui_rich_result_t frame_link(const nt_pointer_t *p) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -468,6 +470,7 @@ static float link_hit_x(void) { return LINK_ROOT_X + (3.0F * 8.0F) + (2.0F * 8.0
 static void test_link_hover_and_click(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
 
     /* Warm-up frame: the link rects exist this frame, but the block's bbox is resolved from the
      * PREV frame (D-67-23 two-pass), so hovering needs the block solved at least once. */
@@ -523,6 +526,7 @@ static void stub_draw(void *user_data, float x, float y, float w, float h) {
 static void frame_object(uint8_t effect_id, float time) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
 
@@ -578,6 +582,33 @@ static void test_object_effect_and_skip(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_obj_draw_calls, "fade_in t=0 (visible=false) skips the draw_fn call");
 }
 
+/* REGRESSION (showcase Rich Text tab crashed): two nt_ui_rich_text widgets in ONE frame must
+ * not trip the "rich-text calls do not nest" guard. The terminal call now releases pending_rich,
+ * so the second begin starts clean. NO manual pending_rich nulling here -- that masking hid the bug. */
+static void test_two_rich_text_blocks_one_frame_no_trap(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_multi_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "first block", 11);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_a").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+
+        /* second rich-text widget, SAME frame -- this is the call that crashed the demo tab */
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "second block", 12);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_b").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_text_renderer_test_reset_call_counters();
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "both rich-text blocks emit (no nest-guard trap)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -595,5 +626,6 @@ int main(void) {
     RUN_TEST(test_link_hover_and_click);
     RUN_TEST(test_object_draws_at_solved_box);
     RUN_TEST(test_object_effect_and_skip);
+    RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     return UNITY_END();
 }

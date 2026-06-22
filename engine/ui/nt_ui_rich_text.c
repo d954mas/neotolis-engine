@@ -231,7 +231,7 @@ static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_
 // #region builder
 void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     NT_ASSERT(ctx != NULL);
-    NT_ASSERT(ctx->pending_rich == NULL && "rich-text calls do not nest");
+    NT_ASSERT(!ctx->rich_session_open && "rich-text calls do not nest");
 
     nt_ui_rich_state_t *st = NT_MEM_SCRATCH_ALLOC(nt_ui_rich_state_t);
     memset(st, 0, sizeof *st);
@@ -244,6 +244,7 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
     st->stack[0] = base ? *base : nt_ui_rich_style_defaults();
     st->stack_depth = 1;
     ctx->pending_rich = st;
+    ctx->rich_session_open = true;
 }
 
 void nt_ui_rich_push_color(nt_ui_context_t *ctx, uint32_t color_abgr) {
@@ -351,6 +352,7 @@ void nt_ui_rich_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(st->stack_depth >= 1 && "rich style stack corrupted");
+    ctx->rich_session_open = false; /* build phase done; pending_rich kept for solve/emit + probes */
     /* Unbalanced pushes are fine -- a push not matched by a pop just stays active
      * to end-of-call and is discarded (the run-list already captured each run's
      * composed style). Run-list finalized; the solver/emit (plans 04-07) consume it.
@@ -1390,6 +1392,10 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
         out->hovered_link = st->hovered_link;
         out->clicked_link = st->clicked_link;
     }
+    /* Builder session done: release the no-nest lock so the next rich-text call (same frame) is
+     * allowed. pending_rich stays as the last-state handle (probes); solved state also lives in
+     * the custom command. */
+    ctx->rich_session_open = false;
 }
 
 void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data_t *data, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *style, const char *markup, size_t len,
@@ -1409,6 +1415,7 @@ void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_eleme
         out->hovered_link = st->hovered_link;
         out->clicked_link = st->clicked_link;
     }
+    ctx->rich_session_open = false; /* release the no-nest lock (see nt_ui_rich_text) */
 }
 
 // #region test_access
