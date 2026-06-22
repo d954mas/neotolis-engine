@@ -104,7 +104,8 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_
     (void)base_wh;
     (void)hovered;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    const uint32_t step = (uint32_t)(time * RICH_FX_SHAKE_RATE); /* quantize so it snaps per step */
+    /* via signed intermediate: float->unsigned is UB for negative time (game-owned, reachable) */
+    const uint32_t step = (uint32_t)(int32_t)floorf(time * RICH_FX_SHAKE_RATE); /* quantize so it snaps per step */
     r.offset_x = RICH_FX_SHAKE_AMP * (rich_fx_hash01(atom_idx, step) - 0.5F) * 2.0F;
     r.offset_y = RICH_FX_SHAKE_AMP * (rich_fx_hash01(atom_idx, step + 0x1000U) - 0.5F) * 2.0F;
     return r;

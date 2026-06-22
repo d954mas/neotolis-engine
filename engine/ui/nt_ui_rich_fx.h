@@ -18,12 +18,15 @@
 #include "ui/nt_ui_rich_text.h" /* nt_rich_atom_kind_t */
 
 /* The effect transform applied to one atom at emit. offset shifts the quad / draw() xy;
- * color multiplies the glyph tint / image a_tint; scale scales about the atom center;
- * visible==false skips the atom emit (fade_in / typewriter-per-glyph). */
+ * color is the ABSOLUTE resolved RGBA tint (NOT a multiplier): identity returns base_color
+ * verbatim, rainbow REPLACES rgb, fade_in scales the base alpha -- the emit path uses it
+ * directly as the glyph tint / image a_tint (D-67-07). Do NOT do out = base * color: that
+ * re-squares the channel (the lossless-a_tint bug fixed in 67-07). scale scales about the atom
+ * center; visible==false skips the atom emit (fade_in / typewriter-per-glyph). */
 typedef struct {
     float offset_x; /*  0: px shift of the atom quad / draw() x */
     float offset_y; /*  4: px shift of the atom quad / draw() y */
-    float color[4]; /*  8: RGBA multiply against the atom's base color (text tint / image a_tint) */
+    float color[4]; /*  8: ABSOLUTE resolved RGBA tint -- REPLACES the base (identity == base_color), never multiplies */
     float scale;    /* 24: scale about the atom center (1 = identity) */
     bool visible;   /* 28: false -> skip the atom emit */
 } nt_ui_rich_fx_result_t;
