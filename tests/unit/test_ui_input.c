@@ -1167,6 +1167,177 @@ static void test_state_speed_eases_bg_color(void) {
     s_style.state_speed = 0.0F; /* restore the default for any later test sharing s_style */
 }
 
+/* ---- C8: state_speed packs raw 0-255 colour channels into the cross-fade anim lanes (off_xyz/opacity,
+ * rot_xyz/tint_t). Driving a focus transition must NOT trip the anim target asserts/clamps on those
+ * 0-255 values: the eased bg/border colour readback stays in [0,255] across the ease. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_anim_lane_bounds(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("lanes");
+    /* A border + a bright skin so the eased channels exercise the full 0-255 range, not just greys.
+     * border_width>0 + non-zero border_color enables the border cross-fade lane (rot_xyz/tint_t). */
+    s_style.state_speed = 6.0F;
+    s_style.border_width = 2.0F;
+    s_style.skin[NT_UI_INPUT_IDLE].bg_color = 0xFF202020U;
+    s_style.skin[NT_UI_INPUT_IDLE].border_color = 0xFF404040U;
+    s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFF0E0D0U;     /* bright -> high channel values */
+    s_style.skin[NT_UI_INPUT_FOCUSED].border_color = 0xFFFFC080U; /* near-255 border channels */
+
+    /* Settle unfocused, then focus and ease for several frames; every frame's eased bg+border colour
+     * must stay within [0,255] (no negative or >255 channel leaks from the 0-255 lane packing). */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+
+    for (int frame = 0; frame < 12; ++frame) {
+        (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+        const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(rc);
+        const Clay_Color bg = rc->renderData.rectangle.backgroundColor;
+        TEST_ASSERT_TRUE_MESSAGE(bg.r >= 0.0F && bg.r <= 255.0F, "eased bg.r within [0,255]");
+        TEST_ASSERT_TRUE_MESSAGE(bg.g >= 0.0F && bg.g <= 255.0F, "eased bg.g within [0,255]");
+        TEST_ASSERT_TRUE_MESSAGE(bg.b >= 0.0F && bg.b <= 255.0F, "eased bg.b within [0,255]");
+        TEST_ASSERT_TRUE_MESSAGE(bg.a >= 0.0F && bg.a <= 255.0F, "eased bg.a within [0,255]");
+        /* The border colour rides the rot_xyz/tint_t lanes; if those leaked out of range the anim
+         * target asserts would already have trapped before we reach this readback (NT_ASSERT_FULL). */
+    }
+
+    init_style(); /* restore the shared style for later tests */
+}
+
+/* ---- C8: re-solving the SAME field across frames with state_speed>0 reuses ONE anim slot -- no
+ * per-frame slot leak or collision growth. The anim collision counter (probe) must not grow once the
+ * slot is warm, and the eased bg colour moves MONOTONICALLY toward the focused target (proving the slot
+ * persists its in-flight channels across frames rather than re-snapping). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_single_slot_reuse(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("reuse");
+    s_style.state_speed = 4.0F; /* slow ease so several intermediate frames are observable */
+    /* Idle 0x20 grey -> focused 0xD0 grey: bg.r climbs from 32 toward 208. */
+    const float focused_r = (float)0xD0;
+    s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFD0D0D0U;
+
+    /* Warm: two settled unfocused frames create the slot once. */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    const uint32_t coll_warm = nt_ui_get_anim_collision_count(s_fx.ctx);
+
+    /* Focus, then ease over many frames. The slot must be REUSED each frame (no new collision), and
+     * the eased bg.r must be non-decreasing toward the focused target (monotone ease == persisted slot). */
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+
+    float prev_r = -1.0F;
+    for (int frame = 0; frame < 16; ++frame) {
+        (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+        const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(rc);
+        const float r = rc->renderData.rectangle.backgroundColor.r;
+        TEST_ASSERT_TRUE_MESSAGE(r >= prev_r - 0.5F, "eased bg.r is monotone toward the focused target (slot persisted, not re-snapped)");
+        TEST_ASSERT_TRUE_MESSAGE(r <= focused_r + 0.5F, "eased bg.r never overshoots the focused target");
+        prev_r = r;
+    }
+
+    /* The whole focus-and-ease run reused ONE slot: the collision counter did not grow per frame. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(coll_warm, nt_ui_get_anim_collision_count(s_fx.ctx), "re-solving the field reuses one anim slot (no per-frame slot leak / collision growth)");
+
+    init_style(); /* restore the shared style */
+}
+
+/* ---- C9: edit_step inserts at a UTF-8 multibyte boundary; the caret lands ON a codepoint boundary
+ * (never mid-sequence). Insert 'X' between two Cyrillic codepoints and read the caret via the probe:
+ * it must be 3 (after 'А' + 'X'), a valid boundary, and the 4 surrounding bytes stay a valid UTF-8 run. ---- */
+static void test_edit_step_insert_caret_on_codepoint_boundary(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1"); /* "Аб" */
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END);        /* caret = 4 */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_ARROW_LEFT); /* caret = 2 (one codepoint left) */
+
+    nt_input_poll();                     /* clear the held ARROW_LEFT so its auto-repeat can't re-fire on the insert frame */
+    nt_input_buffer_char((uint32_t)'X'); /* splice 'X' between 'А' and 'б' */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+
+    /* 'X' spliced between 'А' and 'б' -> the buffer is a valid UTF-8 run. */
+    TEST_ASSERT_EQUAL_STRING("\xD0\x90X\xD0\xB1", buf);
+
+    /* The caret sits AFTER the inserted single-byte 'X', i.e. byte 3 -- on a codepoint boundary. */
+    uint32_t caret = 99U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3U, caret, "caret lands on the codepoint boundary after the inserted 'X'");
+
+    /* The byte at the caret is a valid lead (not a 10xxxxxx continuation): no mid-sequence split. */
+    TEST_ASSERT_NOT_EQUAL_UINT8_MESSAGE(0x80U, (uint8_t)buf[caret] & 0xC0U, "caret byte is not a UTF-8 continuation byte");
+}
+
+/* ---- C9: edit_step backspace deletes ACROSS a whole multibyte char and leaves the caret on a
+ * codepoint boundary (the prev-boundary walk skips the continuation byte). After deleting 'б' the
+ * caret is 2 (the 'А' boundary), and the buffer is the single valid 2-byte 'А'. ---- */
+static void test_edit_step_backspace_across_multibyte_caret_boundary(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1"); /* "Аб" */
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END); /* caret = 4 */
+
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE); /* delete 'б' (2 bytes) */
+
+    uint32_t caret = 99U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, caret, "backspace across a 2-byte char lands the caret on the prev codepoint boundary");
+    TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(buf)); /* only 'А' remains */
+    TEST_ASSERT_EQUAL_UINT8(0xD0U, (uint8_t)buf[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x90U, (uint8_t)buf[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)buf[2]);
+
+    /* A second backspace clears 'А' and the caret returns to 0. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE);
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, caret, "caret at buffer start after the buffer empties");
+}
+
+/* ---- C9: scroll_step caret-follow on a FIXED-width field. A line wider than the inner content box
+ * scrolls right when the caret jumps to END (caret near the right edge -> scroll_x > 0 so it stays
+ * visible), and scrolls back to 0 when the caret returns HOME (left edge in view again). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_step_caret_follow_fixed_width(void) {
+    char buf[64];
+    /* IN_W=240, pad_x=6 -> inner ~228px. 30 glyphs * 10px = 300px >> inner, so END must scroll. */
+    strcpy(buf, "abcdefghijklmnopqrstuvwxyz0123");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+
+    /* HOME first: caret at 0, the left edge is visible, scroll pinned at 0. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+    float scroll_home = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_home));
+    /* scroll_x is clamped >= 0; HOME keeps the left edge in view so it sits at (effectively) 0. */
+    TEST_ASSERT_TRUE_MESSAGE(scroll_home >= 0.0F && scroll_home < 0.5F, "caret at HOME keeps scroll pinned at 0");
+
+    /* END: the caret is past the right edge of the inner box, so scroll_step slides the view right. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END);
+    float scroll_end = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_end));
+    TEST_ASSERT_TRUE_MESSAGE(scroll_end > 0.0F, "caret at END scrolls the view so the caret stays visible");
+
+    /* The caret's right edge must sit within the inner content width (caret visible, not scissored). */
+    const float inner_w = IN_W - (PAD_X * 2.0F);
+    const float caret_px = (float)strlen(buf) * GLYPH_W; /* prefix width to the end caret */
+    const float caret_right_in_view = (caret_px + s_style.caret_width) - scroll_end;
+    TEST_ASSERT_TRUE_MESSAGE(caret_right_in_view <= inner_w + 0.5F, "the end caret's right edge stays within the inner content box");
+
+    /* Back HOME: the left edge re-enters view, scroll collapses to 0 again. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+    float scroll_back = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_back));
+    TEST_ASSERT_TRUE_MESSAGE(scroll_back >= 0.0F && scroll_back < 0.5F, "returning HOME scrolls the view back to 0");
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -1247,6 +1418,11 @@ int main(void) {
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
     RUN_TEST(test_state_speed_eases_bg_color);
+    RUN_TEST(test_state_speed_anim_lane_bounds);
+    RUN_TEST(test_state_speed_single_slot_reuse);
+    RUN_TEST(test_edit_step_insert_caret_on_codepoint_boundary);
+    RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
+    RUN_TEST(test_scroll_step_caret_follow_fixed_width);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);
