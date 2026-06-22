@@ -73,6 +73,16 @@ _Static_assert(sizeof(nt_ui_rich_fx_result_t) == 32, "nt_ui_rich_fx_result_t sta
 typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                                    void *user_data);
 
+/* Runtime tuning for the STOCK effect catalog (wave/shake/rainbow/pulse/fade_in). Passed as the
+ * stock fn's user_data via nt_ui_rich_push_effect_ex / `<fx=name k=v>` markup. Convention: a field
+ * <= 0 means "use the effect's compile-time default" (so a partly-specified struct still tunes only
+ * the field it sets). In-memory only -- never serialized. amp/speed map per effect (see fx.c). */
+typedef struct {
+    float amp;   /* 0: effect-specific magnitude (wave px / shake px / pulse scale delta); <=0 -> default */
+    float speed; /* 4: effect-specific rate (rad/s or hue/s or reveal rate); <=0 -> default */
+} nt_ui_rich_fx_params_t;
+_Static_assert(sizeof(nt_ui_rich_fx_params_t) == 8, "nt_ui_rich_fx_params_t stable size (2 float)");
+
 /* Variant bits select font_id[]: bit0=bold bit1=italic. */
 #define NT_UI_RICH_VARIANT_BOLD (1U << 0)
 #define NT_UI_RICH_VARIANT_ITALIC (1U << 1)
@@ -137,6 +147,12 @@ void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id);
  * (fn,user_data) is captured into a per-call fixed-cap table; the composed style carries a
  * custom effect_id index into it. fn must be non-NULL. */
 void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data);
+/* Push a STOCK effect (stock_id, NT_UI_RICH_FX_ID_*) TUNED by `params`. The params are COPIED by
+ * value into per-block storage (caller-side params are typically transient/stack; they are read at
+ * EMIT, so they must be block-owned) and the stock fn receives a pointer to that copy as user_data.
+ * params==NULL is identical to nt_ui_rich_push_effect(ctx, stock_id) (stock defaults). NO heap;
+ * fixed cap; asserts on overflow. */
+void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_ui_rich_fx_params_t *params);
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
 void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);

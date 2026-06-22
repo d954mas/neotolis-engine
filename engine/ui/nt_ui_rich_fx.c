@@ -1,14 +1,15 @@
 /* Stock rich-text effect catalog. Each fn is a pure, deterministic curve over
  * (atom_idx, time, hovered) -- no global state, no allocation -- so the same time yields the
- * same transform headless (time==0 is each effect's t=0 value). Per-effect tuning is the
- * compile-time constants below; a game that needs other amplitudes registers
- * its own fn (the catalog is a starting set). */
+ * same transform headless (time==0 is each effect's t=0 value). The constants below are the
+ * compile-time DEFAULTS; nt_ui_rich_push_effect_ex / `<fx=name k=v>` can override amp/speed per
+ * registration by passing an nt_ui_rich_fx_params_t as user_data (a field <=0 keeps the default).
+ * user_data==NULL (the plain push_effect path) -> every default, byte-identical to the original. */
 
 #include "ui/nt_ui_rich_fx.h"
 
 #include <math.h>
 
-/* Per-effect constants (compile-time; NOT tag params). Tuned for 16px text at ~60fps. */
+/* Per-effect constants (compile-time DEFAULTS; overridable via nt_ui_rich_fx_params_t). Tuned for 16px text at ~60fps. */
 #define RICH_FX_WAVE_AMP 3.0F   /* px vertical amplitude */
 #define RICH_FX_WAVE_SPEED 6.0F /* rad/sec */
 #define RICH_FX_WAVE_PHASE 0.5F /* rad/atom */
@@ -34,6 +35,11 @@ static float rich_fx_clamp01(float v) {
     }
     return v;
 }
+
+/* Resolve a tunable field: a stored value > 0 overrides; NULL params OR a field <= 0 keeps the
+ * compile-time default (so the plain push_effect path -- user_data==NULL -- is byte-identical). */
+static float rich_fx_amp(const nt_ui_rich_fx_params_t *p, float def) { return (p != NULL && p->amp > 0.0F) ? p->amp : def; }
+static float rich_fx_speed(const nt_ui_rich_fx_params_t *p, float def) { return (p != NULL && p->speed > 0.0F) ? p->speed : def; }
 
 nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]) {
     nt_ui_rich_fx_result_t r;
@@ -94,9 +100,12 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
-    (void)user_data;
+    /* params: amp = vertical px amplitude, speed = rad/s; phase stays a compile-time constant. */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float amp = rich_fx_amp(p, RICH_FX_WAVE_AMP);
+    const float speed = rich_fx_speed(p, RICH_FX_WAVE_SPEED);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    r.offset_y = RICH_FX_WAVE_AMP * sinf((time * RICH_FX_WAVE_SPEED) + ((float)atom_idx * RICH_FX_WAVE_PHASE));
+    r.offset_y = amp * sinf((time * speed) + ((float)atom_idx * RICH_FX_WAVE_PHASE));
     return r;
 }
 
@@ -106,12 +115,15 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
-    (void)user_data;
+    /* params: amp = jitter px amplitude, speed = jitter steps/sec (the time quantize rate). */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float amp = rich_fx_amp(p, RICH_FX_SHAKE_AMP);
+    const float rate = rich_fx_speed(p, RICH_FX_SHAKE_RATE);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     /* via signed intermediate: float->unsigned is UB for negative time (game-owned, reachable) */
-    const uint32_t step = (uint32_t)(int32_t)floorf(time * RICH_FX_SHAKE_RATE); /* quantize so it snaps per step */
-    r.offset_x = RICH_FX_SHAKE_AMP * (rich_fx_hash01(atom_idx, step) - 0.5F) * 2.0F;
-    r.offset_y = RICH_FX_SHAKE_AMP * (rich_fx_hash01(atom_idx, step + 0x1000U) - 0.5F) * 2.0F;
+    const uint32_t step = (uint32_t)(int32_t)floorf(time * rate); /* quantize so it snaps per step */
+    r.offset_x = amp * (rich_fx_hash01(atom_idx, step) - 0.5F) * 2.0F;
+    r.offset_y = amp * (rich_fx_hash01(atom_idx, step + 0x1000U) - 0.5F) * 2.0F;
     return r;
 }
 
@@ -121,9 +133,11 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kin
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
-    (void)user_data;
+    /* params: speed = hue turns/sec; amp is unused (rainbow has no magnitude axis). */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float speed = rich_fx_speed(p, RICH_FX_RAINBOW_SPEED);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    const float hue = ((float)atom_idx * RICH_FX_RAINBOW_PHASE) + (time * RICH_FX_RAINBOW_SPEED);
+    const float hue = ((float)atom_idx * RICH_FX_RAINBOW_PHASE) + (time * speed);
     float rgb[3];
     rich_fx_hue_rgb(hue, rgb);
     r.color[0] = rgb[0];
@@ -140,9 +154,12 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
-    (void)user_data;
+    /* params: amp = scale delta (1 +/- amp), speed = rad/s. */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float amp = rich_fx_amp(p, RICH_FX_PULSE_AMP);
+    const float speed = rich_fx_speed(p, RICH_FX_PULSE_SPEED);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    r.scale = 1.0F + (RICH_FX_PULSE_AMP * sinf(time * RICH_FX_PULSE_SPEED));
+    r.scale = 1.0F + (amp * sinf(time * speed));
     return r;
 }
 
@@ -152,9 +169,13 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kin
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
-    (void)user_data;
+    /* params: speed = per-atom reveal rate (1/sec); amp unused. The DEFAULT path keeps the exact
+     * original /DUR division (byte-identical, not the float-distinct *(1/DUR)); an override divides
+     * by the equivalent 1/speed duration. */
+    const nt_ui_rich_fx_params_t *p = (const nt_ui_rich_fx_params_t *)user_data;
+    const float dur = (p != NULL && p->speed > 0.0F) ? (1.0F / p->speed) : RICH_FX_FADE_DUR;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    const float a = rich_fx_clamp01((time - ((float)atom_idx * RICH_FX_FADE_STAGGER)) / RICH_FX_FADE_DUR);
+    const float a = rich_fx_clamp01((time - ((float)atom_idx * RICH_FX_FADE_STAGGER)) / dur);
     r.color[3] = base_color[3] * a;
     r.visible = (a > 0.0F); /* fully transparent -> skip the atom emit */
     return r;

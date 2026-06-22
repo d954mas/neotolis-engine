@@ -107,6 +107,9 @@ typedef struct {
      * tagset) can resolve a custom fn. */
     nt_ui_rich_fx_fn custom_fx[NT_UI_RICH_MAX_CUSTOM_FX];
     void *custom_fx_user[NT_UI_RICH_MAX_CUSTOM_FX];
+    /* By-value param storage for stock effects tuned via push_effect_ex / `<fx=name k=v>`: the slot's
+     * custom_fx_user points HERE so the params outlive the (transient) caller struct until emit. */
+    nt_ui_rich_fx_params_t custom_fx_params[NT_UI_RICH_MAX_CUSTOM_FX];
     uint32_t custom_fx_count;
     /* The cap must keep every custom id (BASE + index) inside a uint8_t -- ceiling enforced here, not
      * by a dead runtime assert. */
@@ -319,6 +322,33 @@ void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *
     const uint8_t id = rich_intern_custom_fx(st, fn, user_data);
     rich_push_copy(st);
     rich_style_top(st)->effect_id = id; /* >= NT_UI_RICH_FX_CUSTOM_BASE -> custom table index */
+}
+
+/* Intern a (stock fn, by-value params) into a FRESH custom slot whose user_data points at the
+ * block-owned params copy. No dedup: each tuned push gets its own params slot (different params with
+ * the same fn must not alias). Returns the custom effect_id. */
+static uint8_t rich_intern_stock_ex(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, const nt_ui_rich_fx_params_t *params) {
+    NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
+    const uint32_t idx = st->custom_fx_count++;
+    st->custom_fx[idx] = fn;
+    st->custom_fx_params[idx] = *params;                  /* COPY by value -- read at emit, must be block-owned */
+    st->custom_fx_user[idx] = &st->custom_fx_params[idx]; /* stock fn reads params via user_data */
+    return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + idx);
+}
+
+void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_ui_rich_fx_params_t *params) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    /* No params -> plain stock path (NULL user_data -> compile-time defaults), byte-identical to push_effect. */
+    if (params == NULL) {
+        rich_push_copy(st);
+        rich_style_top(st)->effect_id = stock_id;
+        return;
+    }
+    nt_ui_rich_fx_fn fn = nt_ui_rich_fx_stock(stock_id);
+    NT_ASSERT(fn != NULL && "nt_ui_rich_push_effect_ex: stock_id is not a stock catalog id");
+    const uint8_t id = rich_intern_stock_ex(st, fn, params);
+    rich_push_copy(st);
+    rich_style_top(st)->effect_id = id; /* routed through the per-block custom table -> &params copy at emit */
 }
 
 void nt_ui_rich_pop(nt_ui_context_t *ctx) {
@@ -572,6 +602,50 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
 }
 
+/* Parse the param tail of `<fx=name amp=8 speed=3>` ([s,s+n) = the bytes AFTER the name, including
+ * the leading space(s)). Each space-separated token is `key=value` (key: amp|speed; value: float).
+ * Writes into *out; returns true if >=1 param was set. Malformed (bad float, unknown key, no '=')
+ * -> NT_ASSERT (fail-early). An empty/all-space tail sets nothing and returns false. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key NT_ASSERT validation
+static bool rich_parse_fx_params(const char *s, uint32_t n, nt_ui_rich_fx_params_t *out) {
+    bool any = false;
+    uint32_t i = 0;
+    while (i < n) {
+        while (i < n && s[i] == ' ') { /* skip the separator run */
+            i++;
+        }
+        if (i >= n) {
+            break;
+        }
+        const uint32_t tok = i;
+        while (i < n && s[i] != ' ') { /* span one key=value token */
+            i++;
+        }
+        const uint32_t tlen = i - tok;
+        /* Split the token on '='. */
+        uint32_t eq = tlen;
+        for (uint32_t k = 0; k < tlen; k++) {
+            if (s[tok + k] == '=') {
+                eq = k;
+                break;
+            }
+        }
+        NT_ASSERT(eq < tlen && eq > 0U && "rich markup: <fx=name k=v> param needs key=value");
+        const char *key = s + tok;
+        const char *vv = s + tok + eq + 1U;
+        const uint32_t vvlen = tlen - eq - 1U;
+        if (rich_name_eq(key, eq, "amp")) {
+            out->amp = rich_parse_float(vv, vvlen);
+        } else if (rich_name_eq(key, eq, "speed")) {
+            out->speed = rich_parse_float(vv, vvlen);
+        } else {
+            NT_ASSERT(false && "rich markup: <fx=name k=v> unknown param key (use amp|speed)");
+        }
+        any = true;
+    }
+    return any;
+}
+
 /* Dispatch one OPEN tag `<name=value>` (value may be empty) onto the builder + tag stack. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- tag-kind switch + per-tag NT_ASSERT validation branches
 static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, const nt_ui_rich_tagset_t *tagset, const char *name, uint32_t nlen, const char *val, uint32_t vlen) {
@@ -618,15 +692,32 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     }
     case RICH_TAG_EFFECT: {
         NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <fx=name> needs a tagset");
+        /* The value is `name` followed by space-separated `key=value` params (keys: amp, speed). Split
+         * the name off the first space; the remainder (if any) parses into nt_ui_rich_fx_params_t. */
+        uint32_t nlen_fx = vlen;
+        for (uint32_t k = 0; k < vlen; k++) {
+            if (val[k] == ' ') {
+                nlen_fx = k;
+                break;
+            }
+        }
+        NT_ASSERT(nlen_fx > 0U && "rich markup: <fx= ..> empty effect name");
+        nt_ui_rich_fx_params_t params = {0};
+        const bool has_params = rich_parse_fx_params(val + nlen_fx, vlen - nlen_fx, &params);
+
         uint8_t effect_id = 0;
         nt_ui_rich_fx_fn fn = NULL;
         void *fx_user = NULL;
         /* The lookup is the SOLE writer of effect_id/fn/fx_user -- evaluate it OUTSIDE the assert so an
          * OFF build (which elides the assert arg) still resolves <fx=name> instead of silently no-effect. */
-        const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, vlen).value, &effect_id, &fn, &fx_user);
+        const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, nlen_fx).value, &effect_id, &fn, &fx_user);
         NT_ASSERT(fx_ok && "rich markup: unknown effect name");
         if (fn != NULL) {
+            /* Markup k=v params apply to STOCK effects only: a custom fn carries its own user_data. */
+            NT_ASSERT(!has_params && "rich markup: <fx=name k=v> params apply to STOCK effects only (custom fn carries its own user_data)");
             nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock */
+        } else if (has_params) {
+            nt_ui_rich_push_effect_ex(ctx, effect_id, &params);
         } else {
             nt_ui_rich_push_effect(ctx, effect_id);
         }
