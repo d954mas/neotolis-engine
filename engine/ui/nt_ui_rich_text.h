@@ -66,9 +66,12 @@ _Static_assert(sizeof(nt_ui_rich_fx_result_t) == 32, "nt_ui_rich_fx_result_t sta
 
 /* Per-atom effect callback. base_xy/base_wh/base_color are the solver's resolved atom box +
  * color (read-only inputs); time is the game-owned clock (seconds); hovered is true only for
- * the atoms of the currently-hovered link (link hover gates effects). The fn returns
- * the visual-only transform; it MUST NOT mutate layout. */
-typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
+ * the atoms of the currently-hovered link (link hover gates effects). user_data is the pointer
+ * the game registered with the fn (push_effect_fn / register_effect_fn) -- NULL for stock fns --
+ * so one fn can be parameterized per registration. The fn returns the visual-only transform;
+ * it MUST NOT mutate layout. */
+typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                                   void *user_data);
 
 /* Variant bits select font_id[]: bit0=bold bit1=italic. */
 #define NT_UI_RICH_VARIANT_BOLD (1U << 0)

@@ -3136,11 +3136,14 @@ registry (see §32.5, D-67-13).
 ## 32.4 Effects (visual-only) and links
 
 - **Per-atom effects** are a pure deterministic curve `fn(atom_idx, kind,
-  base_xy, base_wh, base_color, time, hovered) → {offset, color, scale, visible}`
-  evaluated at emit and folded into the existing position / tint / scale (no 5th
-  custom attr). They are **visual-only**: the solver layout never re-flows. The
-  animation clock is **passed in by the game** (`time`) — there is no engine
-  global frame clock (RESEARCH Pitfall 4).
+  base_xy, base_wh, base_color, time, hovered, user_data) → {offset, color, scale,
+  visible}` evaluated at emit and folded into the existing position / tint / scale
+  (no 5th custom attr). They are **visual-only**: the solver layout never re-flows.
+  The animation clock is **passed in by the game** (`time`) — there is no engine
+  global frame clock (RESEARCH Pitfall 4). The `user_data` is the pointer the game
+  registered with the fn (see below): the same fn can be **parameterized per
+  registration** (e.g. amplitude/offset read from `user_data`); stock catalogue fns
+  receive `NULL` and ignore it.
 - **Stock + custom effect catalog (extensible).** A stock catalogue
   (wave / shake / rainbow / pulse / fade_in) ships as a starting set, registered
   piecemeal by name. A game also supplies its **own** `nt_ui_rich_fx_fn` and uses
@@ -3200,4 +3203,6 @@ points; flagged here so code and spec do not silently drift:
   `effect_id >= NT_UI_RICH_FX_CUSTOM_BASE` carried in the (unchanged 48 B) style —
   NOT looked up in the tagset at emit, since the tagset is game-owned and not
   guaranteed present during the walk. The previously-dead `nt_ui_rich_fx_fn`
-  typedef is now live on both authoring fronts.
+  typedef is now live on both authoring fronts. At emit the stored `user_data` is
+  delivered to the custom fn (its last argument); stock fns get `NULL` — so one fn
+  can be parameterized per registration.

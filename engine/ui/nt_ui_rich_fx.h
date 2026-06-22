@@ -26,16 +26,21 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]);
 
 /* ---- Stock catalog. Per-effect constants are compile-time. ---- */
 /* offset.y = AMP * sin(time*SPEED + atom_idx*PHASE) -- a per-atom phase-shifted vertical wave. */
-nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
+nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                          void *user_data);
 /* offset.xy = AMP * (hash(atom_idx, floor(time*RATE)) - 0.5) -- a per-atom deterministic jitter. */
-nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
+nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                           void *user_data);
 /* color = hsv((atom_idx*PHASE + time*SPEED) mod 1, 1, 1) -- a per-atom hue cycle (alpha kept). */
-nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
+nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                             void *user_data);
 /* scale = 1 + AMP * sin(time*SPEED) -- a uniform breathing pulse about each atom's center. */
-nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
+nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                           void *user_data);
 /* color.a *= clamp((time - atom_idx*STAGGER) / DUR, 0, 1) -- a staggered per-atom fade-in;
  * alpha 0 -> visible=false so the atom is skipped entirely until its window opens. */
-nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
+nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                             void *user_data);
 
 /* Resolve a stock effect_id (1-based catalog index; 0 = none) to its fn, or NULL if out of range.
  * The composed style carries the effect_id; the emit path maps it to a fn through this table so a
@@ -54,7 +59,9 @@ nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id);
  * pair lives in a per-block fixed-cap table captured at build (NOT in the 48B style, NOT in the
  * tagset -- which is not present at emit); the style's uint8 effect_id carries a CUSTOM
  * index instead of a stock id when effect_id >= NT_UI_RICH_FX_CUSTOM_BASE. The emit path resolves
- * a custom id against the solved-state table, a stock id against nt_ui_rich_fx_stock. */
+ * a custom id against the solved-state table, a stock id against nt_ui_rich_fx_stock. The stored
+ * user_data is passed back to the custom fn at emit (NULL for stock) -- one fn, parameterized per
+ * registration. */
 #define NT_UI_RICH_FX_CUSTOM_BASE 128U /* effect_id >= this -> index (id - BASE) into the per-block custom table */
 
 /* True when a composed-style effect_id names a custom (game-supplied) fn, not a stock id. */

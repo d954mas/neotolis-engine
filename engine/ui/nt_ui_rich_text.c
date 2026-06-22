@@ -1220,10 +1220,12 @@ static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const n
     /* Custom (game-supplied) fns resolve BEFORE stock: a custom effect_id indexes the
      * per-block table captured at build; otherwise fall back to the stock catalog. */
     nt_ui_rich_fx_fn fn = NULL;
+    void *user_data = NULL; /* custom fn gets its registered pointer; stock fns get NULL */
     if (nt_ui_rich_fx_id_is_custom(s->effect_id)) {
         const uint32_t idx = (uint32_t)s->effect_id - NT_UI_RICH_FX_CUSTOM_BASE;
         if (idx < st->custom_fx_count) {
             fn = st->custom_fx[idx];
+            user_data = st->custom_fx_user[idx];
         }
     } else {
         fn = nt_ui_rich_fx_stock(s->effect_id);
@@ -1234,7 +1236,7 @@ static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const n
     const float base_xy[2] = {s->x, s->y};
     const float base_wh[2] = {s->w, s->h};
     const bool hovered = (s->link_id != 0U) && (s->link_id == st->hovered_link);
-    return fn(s->fx_idx, s->kind, base_xy, base_wh, base_color, st->time, hovered);
+    return fn(s->fx_idx, s->kind, base_xy, base_wh, base_color, st->time, hovered, user_data);
 }
 
 /* Build the per-span model mat4 for draw_n: LAYOUT pen (ox,oy) -> world via world_mat4,

@@ -88,21 +88,25 @@ static void rich_fx_hue_rgb(float h, float out_rgb[3]) {
     out_rgb[2] = b;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                          void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
+    (void)user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     r.offset_y = RICH_FX_WAVE_AMP * sinf((time * RICH_FX_WAVE_SPEED) + ((float)atom_idx * RICH_FX_WAVE_PHASE));
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                           void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
+    (void)user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     /* via signed intermediate: float->unsigned is UB for negative time (game-owned, reachable) */
     const uint32_t step = (uint32_t)(int32_t)floorf(time * RICH_FX_SHAKE_RATE); /* quantize so it snaps per step */
@@ -111,11 +115,13 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                             void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
+    (void)user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float hue = ((float)atom_idx * RICH_FX_RAINBOW_PHASE) + (time * RICH_FX_RAINBOW_SPEED);
     float rgb[3];
@@ -127,22 +133,26 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kin
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                           void *user_data) {
     (void)atom_idx;
     (void)kind;
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
+    (void)user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     r.scale = 1.0F + (RICH_FX_PULSE_AMP * sinf(time * RICH_FX_PULSE_SPEED));
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                             void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;
     (void)hovered;
+    (void)user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float a = rich_fx_clamp01((time - ((float)atom_idx * RICH_FX_FADE_STAGGER)) / RICH_FX_FADE_DUR);
     r.color[3] = base_color[3] * a;

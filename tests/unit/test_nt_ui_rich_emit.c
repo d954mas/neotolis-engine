@@ -329,13 +329,13 @@ static void test_fx_wave_deterministic(void) {
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.25F;
     const uint32_t idx = 3U;
-    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     const float expect = FX_WAVE_AMP * sinf((t * FX_WAVE_SPEED) + ((float)idx * FX_WAVE_PHASE));
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, expect), "wave offset.y == A*sin(t*SPEED + idx*PHASE)");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F), "wave has no x shift");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "wave keeps the atom visible");
     /* At time 0 the curve is its t=0 value (headless-deterministic). */
-    const nt_ui_rich_fx_result_t z = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false);
+    const nt_ui_rich_fx_result_t z = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(z.offset_y, FX_WAVE_AMP * sinf((float)idx * FX_WAVE_PHASE)), "wave t=0 is deterministic");
 }
 
@@ -345,11 +345,11 @@ static void test_fx_fade_in_visibility(void) {
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     /* atom 0 at time 0: window just opening -> alpha 0 -> not visible. */
-    const nt_ui_rich_fx_result_t r0 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false);
+    const nt_ui_rich_fx_result_t r0 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false, NULL);
     TEST_ASSERT_FALSE_MESSAGE(r0.visible, "fade_in at t=0 alpha 0 -> atom skipped");
     TEST_ASSERT_TRUE_MESSAGE(approx(r0.color[3], 0.0F), "fade_in alpha 0 at t=0");
     /* later: fully faded in -> visible, alpha 1. */
-    const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false);
+    const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(r1.visible, "fade_in fully open -> visible");
     TEST_ASSERT_TRUE_MESSAGE(approx(r1.color[3], 1.0F), "fade_in alpha 1 when fully open");
 }
@@ -407,14 +407,14 @@ static void test_fx_shake_deterministic(void) {
     const float ex = FX_SHAKE_AMP * (fx_hash01(idx, step) - 0.5F) * 2.0F;
     const float ey = FX_SHAKE_AMP * (fx_hash01(idx, step + 0x1000U) - 0.5F) * 2.0F;
 
-    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, ex), "shake offset.x == AMP*(hash-0.5)*2");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, ey), "shake offset.y == AMP*(hash(+0x1000)-0.5)*2");
     TEST_ASSERT_TRUE_MESSAGE(fabsf(r.offset_x) <= FX_SHAKE_AMP + 1e-3F, "shake x bounded by AMP");
     TEST_ASSERT_TRUE_MESSAGE(fabsf(r.offset_y) <= FX_SHAKE_AMP + 1e-3F, "shake y bounded by AMP");
 
     /* Re-evaluation at the same (idx,time) is identical (no global state). */
-    const nt_ui_rich_fx_result_t r2 = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    const nt_ui_rich_fx_result_t r2 = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, r2.offset_x), "shake x is deterministic");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, r2.offset_y), "shake y is deterministic");
 }
@@ -431,7 +431,7 @@ static void test_fx_shake_negative_time_defined(void) {
     const uint32_t stepn = (uint32_t)(int32_t)floorf(tn * FX_SHAKE_RATE);
     const float exn = FX_SHAKE_AMP * (fx_hash01(idx, stepn) - 0.5F) * 2.0F;
 
-    const nt_ui_rich_fx_result_t rn = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, tn, false);
+    const nt_ui_rich_fx_result_t rn = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, tn, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(rn.offset_x, exn), "shake defined for negative time (signed-intermediate quantize)");
     TEST_ASSERT_TRUE_MESSAGE(fabsf(rn.offset_x) <= FX_SHAKE_AMP + 1e-3F, "shake x bounded for negative time");
     TEST_ASSERT_TRUE_MESSAGE(fabsf(rn.offset_y) <= FX_SHAKE_AMP + 1e-3F, "shake y bounded for negative time");
@@ -448,7 +448,7 @@ static void test_fx_rainbow_deterministic(void) {
     float rgb[3];
     fx_hue_rgb(hue, rgb);
 
-    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_rainbow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_rainbow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(r.color[0], rgb[0]), "rainbow r == hue(idx*PHASE + t*SPEED)");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.color[1], rgb[1]), "rainbow g == hue curve");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.color[2], rgb[2]), "rainbow b == hue curve");
@@ -464,7 +464,7 @@ static void test_fx_pulse_deterministic(void) {
     const float t = 0.3F;
     const float expect = 1.0F + (FX_PULSE_AMP * sinf(t * FX_PULSE_SPEED));
 
-    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_pulse(7U, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false);
+    const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_pulse(7U, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(r.scale, expect), "pulse scale == 1 + AMP*sin(t*SPEED)");
     TEST_ASSERT_TRUE_MESSAGE(r.scale >= 1.0F - FX_PULSE_AMP - 1e-3F && r.scale <= 1.0F + FX_PULSE_AMP + 1e-3F, "pulse scale within [1-AMP, 1+AMP]");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "pulse has no offset");
@@ -888,14 +888,22 @@ static void test_markup_e2e_emit_and_link(void) {
 
 /* ===== Custom (game-supplied) effects (D-67-26) ===== */
 
-/* A DISTINCTIVE custom effect: a fixed offset no stock fn produces (wave is y-only, shake is
- * bounded by 2px, pulse/rainbow/fade don't offset) + a fixed magenta tint + a flag the fn sets so
- * the test can prove the custom fn -- not a stock fn or identity -- actually ran at emit. */
-#define FX_CUSTOM_OFF_X 37.0F
-#define FX_CUSTOM_OFF_Y (-19.0F)
+/* A DISTINCTIVE user_data-DRIVEN custom effect: the offset is read from the game-registered
+ * user_data (NOT a constant), so the test asserts the emitted box reflects that EXACT pointer's
+ * fields -- proving user_data is delivered to the callback at emit, not merely stored. A NULL
+ * user_data (e.g. a stock-style registration) falls back to a sentinel offset distinct from any
+ * param so the two paths are distinguishable. */
+typedef struct {
+    float off_x;
+    float off_y;
+} fx_param_t;
+#define FX_CUSTOM_NULL_OFF_X 5.0F /* sentinel when user_data == NULL */
+#define FX_CUSTOM_NULL_OFF_Y 7.0F
 static uint32_t s_custom_fx_calls;
+static void *s_custom_fx_seen_user; /* the user_data the fn actually received at emit */
 
-static nt_ui_rich_fx_result_t custom_fx_fixed(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered) {
+static nt_ui_rich_fx_result_t custom_fx_param(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                              void *user_data) {
     (void)atom_idx;
     (void)kind;
     (void)base_xy;
@@ -903,9 +911,16 @@ static nt_ui_rich_fx_result_t custom_fx_fixed(uint32_t atom_idx, nt_rich_atom_ki
     (void)time;
     (void)hovered;
     s_custom_fx_calls++;
+    s_custom_fx_seen_user = user_data;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    r.offset_x = FX_CUSTOM_OFF_X;
-    r.offset_y = FX_CUSTOM_OFF_Y;
+    if (user_data != NULL) {
+        const fx_param_t *p = (const fx_param_t *)user_data;
+        r.offset_x = p->off_x; /* offset DERIVED from the registered user_data */
+        r.offset_y = p->off_y;
+    } else {
+        r.offset_x = FX_CUSTOM_NULL_OFF_X;
+        r.offset_y = FX_CUSTOM_NULL_OFF_Y;
+    }
     r.color[0] = 1.0F; /* distinctive magenta tint */
     r.color[1] = 0.0F;
     r.color[2] = 1.0F;
@@ -940,40 +955,46 @@ static void frame_object_custom_fn(nt_ui_rich_fx_fn fn, void *user) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (17) BUILDER path: a custom fn pushed via nt_ui_rich_push_effect_fn actually RUNS at emit and
- * its DISTINCTIVE fixed offset lands on the object draw box (vs the no-effect baseline) -- proving
- * custom resolves to the game's fn, not a stock id or identity. */
+/* (17) BUILDER path: a custom fn pushed via nt_ui_rich_push_effect_fn actually RUNS at emit AND
+ * receives its registered user_data -- the object draw box shifts by EXACTLY the offset carried in
+ * the user_data struct (vs the no-effect baseline), proving the registered pointer reaches the
+ * callback at emit time, not just that some custom fn ran. */
 static void test_custom_fx_runs_via_builder(void) {
     /* No-effect baseline box position. */
     frame_object(0U, 0.5F);
     const float x_base = s_obj_draw_x;
     const float y_base = s_obj_draw_y;
 
-    /* Custom fn: the box shifts by EXACTLY the custom offset (about-center scale==1 -> no scale shift). */
+    /* Custom fn: the box shifts by EXACTLY the user_data-carried offset (about-center scale==1). */
     s_custom_fx_calls = 0;
-    int local_marker = 0;
-    frame_object_custom_fn(custom_fx_fixed, &local_marker);
+    s_custom_fx_seen_user = NULL;
+    fx_param_t param = {.off_x = 37.0F, .off_y = -19.0F};
+    frame_object_custom_fn(custom_fx_param, &param);
     TEST_ASSERT_TRUE_MESSAGE(s_custom_fx_calls > 0U, "custom effect fn actually ran at emit (builder path)");
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(&param, s_custom_fx_seen_user, "custom fn received the EXACT registered user_data pointer at emit");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "object still drawn once under a custom effect");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_x - x_base, FX_CUSTOM_OFF_X), "custom fn's fixed offset.x folds into the object draw box");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_y - y_base, FX_CUSTOM_OFF_Y), "custom fn's fixed offset.y folds into the object draw box");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_x - x_base, param.off_x), "custom fn's user_data offset.x folds into the object draw box");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_y - y_base, param.off_y), "custom fn's user_data offset.y folds into the object draw box");
 }
 
 /* (18) MARKUP path: <fx=myfx> resolves to a tagset-registered custom fn (custom resolves BEFORE
- * stock) and that fn ACTUALLY RUNS at emit (call counter ticks during the walk) -- proving the
- * markup front reaches a game fn captured at parse and resolved against the solved state at emit,
- * even though the tagset is not consulted at emit. A stock <fx=wavename> shares the tagset to prove
- * the two coexist. */
+ * stock) and that fn ACTUALLY RUNS at emit (call counter ticks during the walk) AND receives the
+ * user_data registered with it -- proving the markup/tagset front carries fn+user_data through
+ * parse -> per-block table -> emit, even though the tagset is not consulted at emit. A stock
+ * <fx=wavename> shares the tagset to prove the two coexist. */
+static fx_param_t s_markup_param = {.off_x = 11.0F, .off_y = -3.0F};
+
 static void test_custom_fx_runs_via_markup(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
-    nt_ui_rich_tagset_register_effect(&ts, "wavename", NT_UI_RICH_FX_ID_WAVE); /* stock entry coexists */
-    nt_ui_rich_tagset_register_effect_fn(&ts, "myfx", custom_fx_fixed, NULL);  /* custom entry */
+    nt_ui_rich_tagset_register_effect(&ts, "wavename", NT_UI_RICH_FX_ID_WAVE);           /* stock entry coexists */
+    nt_ui_rich_tagset_register_effect_fn(&ts, "myfx", custom_fx_param, &s_markup_param); /* custom + user_data */
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
     s_custom_fx_calls = 0;
+    s_custom_fx_seen_user = NULL;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -992,6 +1013,7 @@ static void test_custom_fx_runs_via_markup(void) {
     /* The custom fn ran (once per glyph of "BB" = 2). The stock wave ran too but does NOT tick the
      * custom counter -- proving custom resolved to the GAME fn, not the stock id (custom != stock). */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_custom_fx_calls, "markup <fx=myfx> ran the custom fn once per glyph (custom before stock)");
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(&s_markup_param, s_custom_fx_seen_user, "markup-registered user_data reaches the custom fn at emit");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "markup with custom + stock effects still emits text spans");
 }
 
