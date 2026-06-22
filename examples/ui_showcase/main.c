@@ -318,13 +318,13 @@ typedef struct {
 } radial_params_t;
 
 /* Rich Text tab: the GAME owns the effect clock (no engine global clock):
- * `time` accumulates from frame dt and feeds wave/rainbow; `visible_glyphs` is the block-level
- * typewriter counter (game-owned) advanced from the same clock; `last_link` latches the
- * id of the last clicked <link> for the readout. */
+ * `time` accumulates from frame dt and feeds wave/rainbow (the typewriter is driven
+ * by fmodf(time, 4), not a counter); `last_link`/`link_clicks` track <link> clicks for
+ * the readout; `hover_*`/`latch_*` carry the per-front hover + "Accepted" reaction. */
 typedef struct {
     float time;                /* seconds, accumulated from frame dt -> the game-passed effect clock */
     uint32_t last_link;        /* id of the last clicked <link> (0 = none yet) */
-    uint32_t link_clicks;      /* total link clicks (proves the Model-D click readout) */
+    uint32_t link_clicks;      /* total link clicks shown in the readout */
     uint32_t hover_a, hover_b; /* link hovered last frame, PER FRONT -> styles this frame (two-pass, independent) */
     float latch_a, latch_b;    /* "Accepted" reaction seconds remaining, per front */
 } rich_params_t;
@@ -394,8 +394,8 @@ struct tab_state {
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
-    /* Rich Text tab: the game-owned effect clock + typewriter reveal counter + the last
-     * link clicked (no engine global clock exists; the game accumulates time from frame dt). */
+    /* Rich Text tab: the game-owned effect clock + link latches/counter (no engine global
+     * clock exists; the game accumulates time from frame dt, see rich_params_t). */
     rich_params_t rich;
 };
 
@@ -1942,11 +1942,10 @@ static void rich_ensure_setup(void) {
         return;
     }
     nt_ui_rich_tagset_init(&s_rich_tagset);
-    nt_ui_rich_tagset_register_color(&s_rich_tagset, "gold", 0xFF3CC8FAU);   /* 0xAABBGGRR amber */
-    nt_ui_rich_tagset_register_color(&s_rich_tagset, "link", 0xFFE0A040U);   /* resting link blue (matches the builder raw value) */
-    nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);   /* hover highlight */
-    nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U);  /* accepted state */
-    nt_ui_rich_tagset_register_color(&s_rich_tagset, "violet", 0xFFE060A0U); /* effects-gallery label */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "gold", 0xFF3CC8FAU);  /* 0xAABBGGRR amber */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "link", 0xFFE0A040U);  /* resting link blue (matches the builder raw value) */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);  /* hover highlight */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U); /* accepted state */
     /* All eight stock effects so <fx=name> resolves in the markup front. */
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", NT_UI_RICH_FX_ID_WAVE);
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", NT_UI_RICH_FX_ID_SHAKE);
@@ -2175,7 +2174,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     st->rich.hover_a = res_a.hovered_link;
     st->rich.hover_b = res_b.hovered_link;
 
-    /* Model-D link reaction: latch the clicked link, arm the per-front "Accepted" reaction, bump the counter. */
+    /* Link reaction: latch the clicked link, arm the per-front "Accepted" reaction, bump the counter. */
     if (res_a.clicked_link != 0U) {
         st->rich.last_link = res_a.clicked_link;
         st->rich.link_clicks++;
