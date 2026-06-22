@@ -551,9 +551,9 @@ jobs:
           cmake --build --preset native-debug --target build_ui_showcase_packs
           ./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase
 
-      - name: Build ui_showcase wasm (debug)
+      - name: Build ui_showcase wasm (debug, with browser-test hooks)
         run: |
-          emcmake cmake --preset wasm-debug
+          emcmake cmake --preset wasm-debug -DNT_SHOWCASE_TEST_HOOKS=ON
           cmake --build --preset wasm-debug --target ui_showcase
 
       - name: Cache Playwright browsers

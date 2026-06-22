@@ -1,9 +1,11 @@
 // Minimal static server for the ui_showcase wasm build. Adds COOP/COEP (cross-origin isolation,
-// harmless for the single-threaded baseline build, required if a threaded build is ever served) and
-// the correct application/wasm MIME so the streaming instantiate path works. No dependency beyond Node.
+// harmless for the single-threaded baseline build, required if a threaded build is ever served),
+// keeps every response same-origin (CORP same-origin to match the require-corp embedder policy --
+// the test is a representative single-origin load, not cross-origin), and the correct
+// application/wasm MIME so the streaming instantiate path works. No dependency beyond Node.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 
@@ -29,13 +31,15 @@ const MIME = {
 const server = createServer(async (req, res) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
 
   let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
-  // Contain the path inside ROOT (no traversal).
+  // Contain the path inside ROOT (no traversal). Compare against ROOT + sep so a SIBLING dir whose
+  // name merely EXTENDS ROOT as a prefix (e.g. "<root>-evil") can't pass; allow exact ROOT too.
+  const root = normalize(ROOT);
   const filePath = normalize(join(ROOT, urlPath));
-  if (!filePath.startsWith(normalize(ROOT))) {
+  if (filePath !== root && !filePath.startsWith(root + sep)) {
     res.statusCode = 403;
     res.end('forbidden');
     return;
