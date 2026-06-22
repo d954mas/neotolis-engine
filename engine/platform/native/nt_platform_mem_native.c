@@ -22,6 +22,7 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
 
 #elif defined(__linux__)
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 nt_platform_mem_t nt_platform_memory_usage(void) {
@@ -30,12 +31,16 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
        failure is a bug, not "0 bytes" — fail early (AGENTS.md). */
     FILE *f = fopen("/proc/self/statm", "r");
     NT_ASSERT(f != NULL && "fopen(/proc/self/statm) failed");
-    long pages_total = 0;
-    long pages_rss = 0;
-    int parsed = fscanf(f, "%ld %ld", &pages_total, &pages_rss);
-    fclose(f);
-    NT_ASSERT(parsed == 2 && "parsing /proc/self/statm failed");
-    (void)parsed;
+    char buf[128];
+    char *line = fgets(buf, sizeof(buf), f);
+    (void)fclose(f);
+    NT_ASSERT(line != NULL && "read /proc/self/statm failed");
+    /* strtol, not fscanf: the scanf family does not report conversion errors (cert-err34-c). */
+    char *p = buf;
+    (void)strtol(p, &p, 10); /* field 1 (total pages) — skip */
+    char *after_total = p;
+    long pages_rss = strtol(p, &p, 10); /* field 2 (resident pages) */
+    NT_ASSERT(p != after_total && "parsing /proc/self/statm resident field failed");
     long page = sysconf(_SC_PAGESIZE);
     NT_ASSERT(page > 0 && pages_rss >= 0 && "bad page size / rss from /proc/self/statm");
     mem.used = (size_t)pages_rss * (size_t)page;

@@ -16,6 +16,12 @@ target_link_libraries(nt_metrics PUBLIC
     nt_hash
 )
 
+# ring_stats uses ceil() (nearest-rank percentiles); on Linux/GNU ld libm is separate from libc
+# (Windows/macOS fold it into libc). Mirrors engine/math + engine/window.
+if(NOT WIN32)
+    target_link_libraries(nt_metrics PRIVATE m)
+endif()
+
 if(NT_METRICS_ENABLED)
     target_compile_definitions(nt_metrics PUBLIC NT_METRICS_ENABLED=1)
 else()
