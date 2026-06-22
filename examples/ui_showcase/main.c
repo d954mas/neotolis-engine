@@ -3389,10 +3389,14 @@ int main(int argc, char *argv[]) {
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
     nt_font_destroy(s_font);
+    for (uint32_t i = 0; i < 4U; i++) {
+        nt_font_destroy(s_rich_font[i]);
+    }
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_destroy(s_radial_material);
+    nt_material_destroy(s_rich_image_material);
     for (int m = 0; m < 4; ++m) {
         nt_material_destroy(s_radial_image_material[m]);
     }
