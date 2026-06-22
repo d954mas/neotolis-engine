@@ -5,31 +5,15 @@
 #include "font/nt_font.h"
 #include "material/nt_material.h"
 
-#ifndef NT_DEBUG_OVERLAY_MAX_USER_COUNTERS
-#define NT_DEBUG_OVERLAY_MAX_USER_COUNTERS 16
-#endif
-
-#ifndef NT_DEBUG_OVERLAY_FPS_WINDOW_MAX
-#define NT_DEBUG_OVERLAY_FPS_WINDOW_MAX 240
-#endif
-
-#ifndef NT_DEBUG_OVERLAY_USER_COUNTER_NAME_MAX
-#define NT_DEBUG_OVERLAY_USER_COUNTER_NAME_MAX 32
-#endif
-
-/* Display config only. The overlay is a pure consumer of nt_metrics — fps/cpu/gpu/draws +
-   user counters all live in nt_metrics now; these knobs validate at init for forward-compat. */
+/* Display config only. The overlay is a pure consumer of nt_metrics — fps/cpu/gpu/draws + user
+   counters all live in nt_metrics now, so the overlay stores no window/capacity of its own. The desc
+   is kept (init still takes one) but carries no live knobs after the inversion; `reserved` exists only
+   to keep the struct non-empty for future config. */
 typedef struct {
-    uint16_t fps_window;            /* default 60 */
-    uint16_t user_counter_capacity; /* default 16 */
+    uint16_t reserved;
 } nt_debug_overlay_desc_t;
 
-static inline nt_debug_overlay_desc_t nt_debug_overlay_desc_defaults(void) {
-    return (nt_debug_overlay_desc_t){
-        .fps_window = 60,
-        .user_counter_capacity = 16,
-    };
-}
+static inline nt_debug_overlay_desc_t nt_debug_overlay_desc_defaults(void) { return (nt_debug_overlay_desc_t){0}; }
 
 /* ---- Lifecycle ---- */
 

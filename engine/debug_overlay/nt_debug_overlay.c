@@ -17,9 +17,8 @@ static struct {
 // #region Lifecycle
 nt_result_t nt_debug_overlay_init(const nt_debug_overlay_desc_t *desc) {
     NT_ASSERT(!s_overlay.initialized);
-    nt_debug_overlay_desc_t d = (desc != NULL) ? *desc : nt_debug_overlay_desc_defaults();
-    NT_ASSERT(d.fps_window > 0 && d.fps_window <= NT_DEBUG_OVERLAY_FPS_WINDOW_MAX);
-    NT_ASSERT(d.user_counter_capacity <= NT_DEBUG_OVERLAY_MAX_USER_COUNTERS);
+    /* desc carries no live knobs after the nt_metrics inversion; accepted for API stability. */
+    (void)desc;
 
     memset(&s_overlay, 0, sizeof(s_overlay));
     s_overlay.initialized = true;
