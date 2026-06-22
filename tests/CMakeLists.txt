@@ -110,10 +110,13 @@ if(NOT EMSCRIPTEN)
     # counters, and the test drives those same public paths — so it links nt_metrics + nt_hash only,
     # no overlay/gfx/scratch/platform providers. GNU-ld order: consumer (nt_metrics) before nt_hash;
     # nt_core/nt_log_stub trail last.
-    add_executable(test_metrics unit/test_metrics.c)
+    # nt_assert_trap.c backs the collision death-test (NT_TEST_EXPECT_ASSERT); needs unit/ on the
+    # include path so it resolves "test_helpers/nt_assert_trap.h".
+    add_executable(test_metrics unit/test_metrics.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_metrics PRIVATE
         nt_metrics nt_hash nt_log_stub unity
     )
+    target_include_directories(test_metrics PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_metrics PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_metrics)
 

@@ -165,10 +165,13 @@ static void test_perf_snapshot_keys_and_gpu_null(void) {
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
     cJSON *r = result_of(root);
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "fps")));
-    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "frame_ms")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "cpu_ms")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "draw_calls")));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItemCaseSensitive(r, "user_counters"));
+    /* frame_ms: present, and null until the first valid frame (no frame pushed in this test). */
+    cJSON *fm = cJSON_GetObjectItemCaseSensitive(r, "frame_ms");
+    TEST_ASSERT_NOT_NULL(fm);
+    TEST_ASSERT_TRUE(cJSON_IsNull(fm) || cJSON_IsNumber(fm));
     /* gpu_ms: present, and null when the GPU timer is unsupported (overlay returns -1.0). */
     cJSON *gpu = cJSON_GetObjectItemCaseSensitive(r, "gpu_ms");
     TEST_ASSERT_NOT_NULL(gpu);
@@ -182,8 +185,13 @@ static void test_perf_snapshot_user_counters(void) {
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
     cJSON *uc = cJSON_GetObjectItemCaseSensitive(result_of(root), "user_counters");
-    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(uc, "enemies")));
-    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(uc, "frame_avg")));
+    cJSON *enemies = cJSON_GetObjectItemCaseSensitive(uc, "enemies");
+    cJSON *frame_avg = cJSON_GetObjectItemCaseSensitive(uc, "frame_avg");
+    TEST_ASSERT_TRUE(cJSON_IsNumber(enemies));
+    TEST_ASSERT_TRUE(cJSON_IsNumber(frame_avg));
+    /* exact values survive serialization, not just the type (catches a value/tag regression). */
+    TEST_ASSERT_EQUAL_INT(7, enemies->valueint);
+    TEST_ASSERT_TRUE((frame_avg->valuedouble - 16.5) < 1e-6 && (16.5 - frame_avg->valuedouble) < 1e-6);
     cJSON_Delete(root);
 }
 
@@ -499,6 +507,22 @@ static void test_perf_snapshot_frame_ms_distinct_from_cpu(void) {
     TEST_ASSERT_TRUE((frame_ms - cpu_ms) > 1e-6 || (cpu_ms - frame_ms) > 1e-6);
     cJSON_Delete(root);
 }
+
+/* frame_ms is null until the first valid frame (host pushes <= 0 before any dt), then the real
+   number once a valid frame lands — mirroring gpu_ms' first-frame null. */
+static void test_perf_snapshot_frame_ms_null_until_valid(void) {
+    push_metrics_frame(-1.0F, 5.0F, -1.0F, 0U); /* first frame: no dt yet */
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
+    TEST_ASSERT_TRUE(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(result_of(root), "frame_ms")));
+    cJSON_Delete(root);
+
+    push_metrics_frame(16.0F, 5.0F, -1.0F, 0U); /* a valid frame */
+    cJSON *root2 = parse_ok(nt_devapi_submit("{\"method\":\"perf.snapshot\"}"));
+    cJSON *fm = cJSON_GetObjectItemCaseSensitive(result_of(root2), "frame_ms");
+    TEST_ASSERT_TRUE(cJSON_IsNumber(fm));
+    TEST_ASSERT_TRUE((fm->valuedouble - 16.0) < 1e-4 && (16.0 - fm->valuedouble) < 1e-4);
+    cJSON_Delete(root2);
+}
 #endif /* NT_METRICS_ENABLED */
 
 int main(void) {
@@ -534,6 +558,7 @@ int main(void) {
 #endif
 #if NT_METRICS_ENABLED
     RUN_TEST(test_perf_snapshot_frame_ms_distinct_from_cpu);
+    RUN_TEST(test_perf_snapshot_frame_ms_null_until_valid);
 #endif
     return UNITY_END();
 }

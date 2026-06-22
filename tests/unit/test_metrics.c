@@ -10,6 +10,7 @@
 /* clang-format off */
 #include "core/nt_assert.h"
 #include "metrics/nt_metrics.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -18,7 +19,10 @@
 /* Unity's double/float asserts are compiled out in this config; compare with a tolerance. */
 static bool near(double a, double b) { return fabs(a - b) <= 1e-9; }
 
-void setUp(void) { nt_metrics_init(); }
+void setUp(void) {
+    nt_test_assert_install(); /* the collision death-test arms this; a stray assert elsewhere still traps loudly */
+    nt_metrics_init();
+}
 void tearDown(void) {}
 
 /* Push one frame carrying a given frame_ms; the other scalars are inert defaults (gpu -1 sentinel so
@@ -200,37 +204,57 @@ static void test_last_frame_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(42U, last.draw_calls);
 }
 
-/* ---- user counters: full-name hash keying (P1-A) via the REAL public path ---- */
+/* ---- user counters: full-name hash keying via the REAL public path ---- */
 
-/* Two names sharing a 31-char prefix but differing AFTER it must land in two distinct counters —
-   keyed by the full 64-bit name hash, not a truncated strcmp. Driven through nt_metrics_count, the
-   real host path (no test hook). */
-static void test_user_counters_long_prefix_distinct(void) {
-    const char *a = "physics_substep_accumulator_msA"; /* 31 chars */
-    const char *b = "physics_substep_accumulator_msB";
+/* NT_METRICS_USER_NAME_MAX is 32, so the display name truncates to the first 31 chars. Two names
+   LONGER than 31 chars that differ WITHIN the first 31 must (a) truncate to DISTINCT displays and
+   (b) carry distinct full 64-bit hashes — so they land in two counters, each holding its own value.
+   This exercises the >31-char truncation path under hash keying; it would FAIL a buggy
+   strcmp-on-truncated-name impl only if the names collided after truncation (see the next test),
+   so the partner is the genuine truncation+display coverage. Driven through nt_metrics_count. */
+static void test_user_counters_long_truncated_distinct(void) {
+    /* 40 chars each, differ at index 4 (well inside the first 31) -> distinct 31-char displays. */
+    const char *a = "physA_substep_accumulator_milliseconds_x";
+    const char *b = "physB_substep_accumulator_milliseconds_x";
+    TEST_ASSERT_TRUE(strlen(a) > (size_t)(NT_METRICS_USER_NAME_MAX - 1));
+    TEST_ASSERT_TRUE(strlen(b) > (size_t)(NT_METRICS_USER_NAME_MAX - 1));
     nt_metrics_count(a, 10U);
     nt_metrics_count(b, 20U);
     TEST_ASSERT_EQUAL_UINT16(2U, nt_metrics_user_count());
 
-    bool saw_a = false;
-    bool saw_b = false;
-    for (uint16_t i = 0; i < nt_metrics_user_count(); i++) {
-        const char *name = NULL;
-        uint64_t u = 0;
-        double f = 0.0;
-        bool is_float = true;
-        nt_metrics_user_get(i, &name, &u, &f, &is_float);
-        TEST_ASSERT_FALSE(is_float);
-        if (strcmp(name, a) == 0) {
-            saw_a = true;
-            TEST_ASSERT_EQUAL_UINT64(10U, u);
-        } else {
-            TEST_ASSERT_EQUAL_STRING(b, name);
-            saw_b = true;
-            TEST_ASSERT_EQUAL_UINT64(20U, u);
-        }
-    }
-    TEST_ASSERT_TRUE(saw_a && saw_b);
+    /* insertion-ordered: slot 0 is `a`, slot 1 is `b`. Each display is the truncated name (first 31
+       chars) and each channel holds ONLY its own value. */
+    const size_t disp = (size_t)(NT_METRICS_USER_NAME_MAX - 1);
+    const char *n0 = NULL;
+    const char *n1 = NULL;
+    uint64_t u0 = 0;
+    uint64_t u1 = 0;
+    bool float0 = true;
+    bool float1 = true;
+    nt_metrics_user_get(0, &n0, &u0, NULL, &float0);
+    nt_metrics_user_get(1, &n1, &u1, NULL, &float1);
+    TEST_ASSERT_FALSE(float0);
+    TEST_ASSERT_FALSE(float1);
+    TEST_ASSERT_EQUAL_INT(0, strncmp(n0, a, disp));
+    TEST_ASSERT_EQUAL_UINT64(10U, u0);
+    TEST_ASSERT_EQUAL_INT(0, strncmp(n1, b, disp));
+    TEST_ASSERT_EQUAL_UINT64(20U, u1);
+    /* distinct truncated displays (differ within the first 31 chars). */
+    TEST_ASSERT_TRUE(strncmp(n0, n1, disp) != 0);
+}
+
+/* Two names IDENTICAL in their first 31 chars but differing only at index >= 31 truncate to the SAME
+   display while keeping DISTINCT full hashes — an ambiguous exposed name. The second nt_metrics_count
+   (the new slot) must trip the display-collision NT_ASSERT. Uses the setjmp assert-trap harness. */
+static void test_user_counter_truncated_collision_asserts(void) {
+    /* Identical first 31 chars (the truncation window), differ only at index >= 31. */
+    const char *a = "abcdefghijklmnopqrstuvwxyz01234_suffixA";
+    const char *b = "abcdefghijklmnopqrstuvwxyz01234_suffixB";
+    TEST_ASSERT_TRUE(strncmp(a, b, (size_t)(NT_METRICS_USER_NAME_MAX - 1)) == 0); /* same truncated display */
+    TEST_ASSERT_TRUE(strcmp(a, b) != 0);                                          /* distinct full names -> distinct hashes */
+    nt_metrics_count(a, 1U);
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_metrics_user_count());
+    NT_TEST_EXPECT_ASSERT(nt_metrics_count(b, 2U)); /* new slot's display collides -> assert */
 }
 
 /* ---- exact uint64 round-trip past 2^53 (P2-A) ---- */
@@ -298,7 +322,8 @@ int main(void) {
     RUN_TEST(test_frame_ms_skips_nonpositive_and_nonfinite);
     RUN_TEST(test_fps_rolling_avg);
     RUN_TEST(test_last_frame_snapshot);
-    RUN_TEST(test_user_counters_long_prefix_distinct);
+    RUN_TEST(test_user_counters_long_truncated_distinct);
+    RUN_TEST(test_user_counter_truncated_collision_asserts);
     RUN_TEST(test_user_counter_uint64_exact);
     RUN_TEST(test_user_counter_float_and_tag_flip);
     RUN_TEST(test_user_counter_windowed);
