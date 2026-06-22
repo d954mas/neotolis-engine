@@ -3140,8 +3140,23 @@ registry (see §32.5, D-67-13).
   evaluated at emit and folded into the existing position / tint / scale (no 5th
   custom attr). They are **visual-only**: the solver layout never re-flows. The
   animation clock is **passed in by the game** (`time`) — there is no engine
-  global frame clock (RESEARCH Pitfall 4). A stock catalogue
-  (wave / shake / rainbow / pulse / fade_in) is registered piecemeal by name.
+  global frame clock (RESEARCH Pitfall 4).
+- **Stock + custom effect catalog (extensible).** A stock catalogue
+  (wave / shake / rainbow / pulse / fade_in) ships as a starting set, registered
+  piecemeal by name. A game also supplies its **own** `nt_ui_rich_fx_fn` and uses
+  it from **both** authoring fronts: the builder's
+  `nt_ui_rich_push_effect_fn(ctx, fn, user_data)` and, for markup `<fx=name>`,
+  `nt_ui_rich_tagset_register_effect_fn(ts, name, fn, user_data)`. A custom name
+  resolves **before** the stock catalogue. Because effects evaluate at emit — when
+  only the solved run-list (parked in the custom command) is available and the
+  tagset is **not** guaranteed present — the resolved effect is captured at
+  build/solve into the solved state: the composed style carries a `uint8_t`
+  `effect_id`, and an id `>= NT_UI_RICH_FX_CUSTOM_BASE` indexes a per-block
+  fixed-cap `(fn, user_data)` table (no heap, no 48 B style ABI growth); a smaller
+  id is a stock catalogue index resolved via `nt_ui_rich_fx_stock`. An unknown
+  stock id falls back to identity (D-67-26). The 48 B `nt_ui_rich_style_t` ABI is
+  unchanged; the per-block custom table is in-memory-only frame scratch, never
+  serialized.
 - **Links** (`<link=id>`): the widget hit-tests its **own** solver rects against
   the pointer (offset by the block's prev-frame bbox origin) and reports
   `{hovered_link, clicked_link}` — there is **no extra Clay element per link**.
@@ -3176,3 +3191,13 @@ points; flagged here so code and spec do not silently drift:
 - **D-67-23 — the FIXED block reuses `nt_ui_get_bbox`** for its prev-frame origin
   (the link hit-test + the `container_w <= 0` width fallback) rather than adding a
   new block-origin getter; the block therefore carries `decl.id`.
+- **D-67-26 — custom effect fns are captured into the solved state, not the
+  tagset.** #184 promised a game-supplied effect callback + an extensible catalog.
+  Shipped: `nt_ui_rich_push_effect_fn` (builder) and
+  `nt_ui_rich_tagset_register_effect_fn` (`<fx=name>`) register a custom
+  `nt_ui_rich_fx_fn`; custom resolves before stock. The (fn, user_data) is interned
+  at build/solve into a per-block fixed-cap table and addressed by a custom
+  `effect_id >= NT_UI_RICH_FX_CUSTOM_BASE` carried in the (unchanged 48 B) style —
+  NOT looked up in the tagset at emit, since the tagset is game-owned and not
+  guaranteed present during the walk. The previously-dead `nt_ui_rich_fx_fn`
+  typedef is now live on both authoring fronts.
