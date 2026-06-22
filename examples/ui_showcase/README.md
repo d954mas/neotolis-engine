@@ -49,10 +49,13 @@ lighten and writes the index on click).
 12. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
     the code-first push/pop builder AND the runtime `<markup>` parser. Demos
-    multi-run color/bold/(synth)italic text, inline icons (lossless per-image
-    tint), a **wave** effect moving text + a gold icon together, a **typewriter**
-    (`fade_in` stagger off the game clock), and a clickable **link**; see the
-    **Rich Text controls** + **Rich Text visual-QA protocol** below.
+    **real** bold / italic / bold-italic faces (DejaVu R/B/I/BI baked into the
+    pack), per-run **scale** (a big title + a smaller reward word), **all five**
+    stock effects in a gallery (`wave` `shake` `rainbow` `pulse` `fade_in`),
+    inline icons (lossless per-image tint), a **typewriter** (`fade_in` stagger
+    off the game clock), and an **interactive link** that brightens + grows on
+    hover and flips to a green "Accepted" latch on click; see the **Rich Text
+    controls** + **Rich Text visual-QA protocol** below.
 13. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
@@ -170,13 +173,14 @@ the code-first builder, once via the runtime markup parser — to prove byte-ide
 
 | Element | Behavior |
 |---------|----------|
-| **Code-first builder** block | `nt_ui_rich_begin` / `push_color` / `push_bold` / `push_italic` / `push_effect` / `text_n` / `image` / `link` / `end` — explicit real values (font / abgr color / atlas ref) |
-| **Runtime markup** block | `nt_ui_rich_text_markup` parses `"<b>…</b> <color=gold><img=gold/></color> <link=N>…</link>"`; a tagset registers the `gold` color, the `wave` effect, and the icons atlas alias |
+| **Code-first builder** block | `nt_ui_rich_begin` / `push_scale` / `push_color` / `push_bold` / `push_italic` / `push_effect` / `text_n` / `image` / `link` / `end` — explicit real values (font / abgr color / atlas ref) |
+| **Runtime markup** block | `nt_ui_rich_text_markup` parses the SAME content via `<scale=N>` / `<b>` / `<i>` / `<color=name>` / `<fx=name>` / `<img=name/>` / `<link=quest>…</link>`; a tagset registers the named colors, all five stock effects, the `rich` font family, and the icons atlas alias |
+| **Real faces** | DejaVu **R / B / I / BI** are baked and bound to the four variant slots, so `<b>` = real bold, `<i>` = real oblique, `<b><i>` = real bold-italic — no synth-shear, no faux-bold |
+| **Scale** | a big `<scale=1.6>` **DRAKE** title word + a smaller `<scale=0.85>` "100 gold" show visible per-run size variation |
+| **Effects gallery** | all five stock effects appear, one per labelled word — `wave` `shake` `rainbow` `pulse` `fade_in` — each animating off the same game `time` clock |
 | **Inline icons** | the gold + heart icons sit baseline-aligned (`valign=middle`) beside the text; the run's `<color>` rides the **lossless** per-image `a_tint` |
-| **Bold / italic** | `<b>` selects the bold font variant (falls back to Regular here — the demo font ships one face); `<i>` **synth-shears** (the variant is absent), the D-67-16 fallback |
-| **wave** effect | the gold word + the gold icon wave **together** (per-atom effect across kinds, the D-67-17 driving case), driven by the game `time` clock |
-| **Typewriter** | the `fade_in` stock effect staggers each glyph's reveal off the same clock; it loops every ~4 s so the reveal replays |
-| **Link** | hover `[Accept quest]` brightens it; clicking ticks the click counter (Model-D reaction); the readout shows the hovered / last-clicked id |
+| **Typewriter** | the third line uses `fade_in` to stagger each glyph's reveal off the clock; it loops every ~4 s so the reveal replays |
+| **Link** | hovering `[Accept quest]` **brightens (cyan) and scales up**; clicking flips it to a green **`[OK Accepted]`** for ~1.2 s, ticks the click counter, and latches the id (Model-D reaction). Both fronts react identically (the markup string is rebuilt each frame with the same link look) |
 
 ## Rich Text visual-QA protocol
 
@@ -184,24 +188,26 @@ The GL surface is **not reliably headless-capturable** here, so rich text is ver
 **user's eyes** at the BLOCKING visual-QA gate — there is no automated screenshot regression.
 Build + run the native showcase, open the **Rich Text** tab, and confirm:
 
-1. **Multi-style text** — each run renders with the correct per-run color / scale; the crimson
-   "Crimson Drake", the gold "100 gold", and the body text are visibly distinct and on one
-   wrapped paragraph.
-2. **Inline-icon baseline alignment** — the gold + heart icons sit on the text baseline
+1. **Real bold / italic / bold-italic** — on the "faces:" line, `regular` / **`bold`** / *`italic`* /
+   ***`bold-italic`*** are four visibly DIFFERENT faces (real DejaVu weights + slant), not a
+   synth-shear or a faux-bold smear. The crimson **DRAKE** title is the bold face, scaled up.
+2. **Scale variation** — the **DRAKE** title word is clearly LARGER (`<scale=1.6>`) than the body,
+   and the "100 gold" run is slightly SMALLER (`<scale=0.85>`); the layout still wraps cleanly.
+3. **All five effects animate** — in the "Effects:" gallery each labelled word moves on its own:
+   `wave` (vertical sine), `shake` (jitter), `rainbow` (hue cycle), `pulse` (breathing scale),
+   `fade_in` (staggered reveal). The layout does NOT re-flow (effects are visual-only).
+4. **Inline-icon baseline alignment** — the gold + heart icons sit on the text baseline
    (`valign=middle`), neither floating above the cap height nor clipping below the descenders;
    the gold icon carries its lossless tint.
-3. **Bold / italic coverage** — `<i>(urgent)</i>` shows a clean synthetic-italic **shear** (the
-   demo font has no italic face); `<b>` is heavier where a bold face exists (here it falls back
-   to Regular — no faux-bold smear).
-4. **wave moves text + icon together** — under `<wave>` the gold word AND the gold icon ride the
-   same vertical wave in phase-shifted lockstep (the per-atom-across-kinds case); the layout does
-   NOT re-flow (effects are visual-only).
-5. **Typewriter reveal** — the third line reveals glyph-by-glyph and replays on the ~4 s loop;
+5. **Typewriter reveal** — the third block reveals glyph-by-glyph and replays on the ~4 s loop;
    no glyph pops in at full alpha out of order.
-6. **Link hover + click** — hovering `[Accept quest]` brightens it; clicking ticks the `clicks`
-   readout and latches the `last clicked` id (Model D).
+6. **Link hover + click (the headline interaction)** — hovering `[Accept quest]` makes it
+   **brighten to cyan AND grow**; clicking flips it to a green **`[OK Accepted]`** for ~1.2 s,
+   ticks the `clicks` readout, and latches the `last clicked` id (Model D). The reaction is
+   unmistakable, not a no-op.
 7. **Both fronts identical** — the builder block (1) and the markup block (2) render the SAME
-   styled paragraph; any divergence is a parser bug.
+   styled paragraph INCLUDING the live link reaction (the markup is rebuilt each frame with the
+   same link look); any divergence is a parser bug.
 8. **Wrap at the container width** — narrow the window; the paragraph re-flows at the ~560 px
    block width with NO atom escaping the box, and lines stack on a correct max baseline.
 9. **Dark/Light parity** — press **T**; both palettes restyle the rich-text tab (the body color
