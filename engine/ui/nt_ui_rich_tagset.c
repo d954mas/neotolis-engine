@@ -24,7 +24,7 @@ void nt_ui_rich_tagset_reset(nt_ui_rich_tagset_t *ts) {
 
 // #region register
 void nt_ui_rich_tagset_register_font(nt_ui_rich_tagset_t *ts, const char *name, const nt_font_t family[4]) {
-    NT_ASSERT(ts != NULL && name != NULL && family != NULL);
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0' && family != NULL);
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->font_count; i++) {
         if (ts->fonts[i].name_hash == h) {
@@ -39,7 +39,7 @@ void nt_ui_rich_tagset_register_font(nt_ui_rich_tagset_t *ts, const char *name, 
 }
 
 void nt_ui_rich_tagset_register_atlas(nt_ui_rich_tagset_t *ts, const char *name, nt_resource_t atlas) {
-    NT_ASSERT(ts != NULL && name != NULL);
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0');
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->atlas_count; i++) {
         if (ts->atlases[i].name_hash == h) {
@@ -54,7 +54,7 @@ void nt_ui_rich_tagset_register_atlas(nt_ui_rich_tagset_t *ts, const char *name,
 }
 
 void nt_ui_rich_tagset_register_color(nt_ui_rich_tagset_t *ts, const char *name, uint32_t color_abgr) {
-    NT_ASSERT(ts != NULL && name != NULL);
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0');
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->color_count; i++) {
         if (ts->colors[i].name_hash == h) {
@@ -69,7 +69,7 @@ void nt_ui_rich_tagset_register_color(nt_ui_rich_tagset_t *ts, const char *name,
 }
 
 void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name, uint8_t effect_id) {
-    NT_ASSERT(ts != NULL && name != NULL);
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0');
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->effect_count; i++) {
         if (ts->effects[i].name_hash == h) {
@@ -84,7 +84,7 @@ void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name
 }
 
 void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
-    NT_ASSERT(ts != NULL && name != NULL && measure_fn != NULL);
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0' && measure_fn != NULL);
     const uint64_t h = nt_hash64_str(name).value;
     for (uint32_t i = 0; i < ts->object_count; i++) {
         if (ts->objects[i].name_hash == h) {

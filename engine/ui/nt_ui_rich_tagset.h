@@ -8,12 +8,14 @@
  * It is NOT on nt_ui_context and the CODE-FIRST builder NEVER touches it -- the builder
  * gets real values directly (push_color(abgr), push_font(family), image(ref)). Registration
  * exists ONLY so the parser can resolve a name. Keys are xxh64 of the name (the same
- * convention atlas region names use); no heap -- fixed `#define` caps, NT_ASSERT on overflow. */
+ * convention atlas region names use); no heap -- fixed `#define` caps, NT_ASSERT on overflow.
+ *
+ * In-memory-only: this struct is NEVER serialized (no pack/ABI contract), so there is
+ * deliberately no _Static_assert pinning its size -- native and wasm layouts may differ. */
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "atlas/nt_atlas.h"       /* nt_atlas_region_ref_t (not strictly needed, kept for symmetry) */
 #include "font/nt_font.h"         /* nt_font_t */
 #include "resource/nt_resource.h" /* nt_resource_t (atlas alias handle) */
 #include "ui/nt_ui_rich_text.h"   /* nt_ui_rich_object_measure_fn / draw_fn */
