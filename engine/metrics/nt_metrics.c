@@ -21,10 +21,9 @@ typedef struct {
 static struct {
     nt_metrics_ring_t fixed[NT_METRICS_CHANNEL_COUNT];
 
-    /* User counters, insertion-ordered + capped. Keyed by the FULL 64-bit name hash so two
-       counters sharing the first 31 chars do not alias into one ring. The exact last value is
-       kept in a tagged union so int counts survive past 2^53 and floats keep their decimals; the
-       windowed ring (as double) backs perf.stats. The truncated name is for display/serialization. */
+    /* User counters, capped + insertion-ordered. Keyed by the FULL 64-bit name hash so 31-char
+       prefixes don't alias. Exact last value in a tagged union (uint64 past 2^53 / float decimals);
+       the windowed ring (double) backs perf.stats; the truncated name is for serialization. */
     nt_metrics_ring_t user_ring[NT_METRICS_MAX_USER_CHANNELS];
     uint64_t user_hashes[NT_METRICS_MAX_USER_CHANNELS];
     uint64_t user_u[NT_METRICS_MAX_USER_CHANNELS];

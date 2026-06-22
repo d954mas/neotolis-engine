@@ -13,10 +13,9 @@
 #include "resource/nt_resource.h"
 #include "transform_comp/nt_transform_comp.h"
 
-/* Observability command group: the log / perf / entity / resource namespaces. Every command
-   is an IMMEDIATE read — it serializes the L1 capabilities and returns on the same call; nothing
-   in this group ever defers the response. Bot input is range/type-checked -> bad_params; only
-   host-call invariants assert. Compiles out entirely when NT_DEVAPI_GROUP_OBS is absent. */
+/* Observability command group (log / perf / entity / resource): every command is an IMMEDIATE read,
+   never deferred. Bot input is range/type-checked -> bad_params; only host-call invariants assert.
+   Compiles out entirely when NT_DEVAPI_GROUP_OBS is absent. */
 
 #ifdef NT_DEVAPI_GROUP_OBS
 

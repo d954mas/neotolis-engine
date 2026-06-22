@@ -23,6 +23,8 @@ _Static_assert(NT_METRICS_WINDOW > 0 && NT_METRICS_WINDOW <= UINT16_MAX, "NT_MET
 #ifndef NT_METRICS_MAX_USER_CHANNELS
 #define NT_METRICS_MAX_USER_CHANNELS 16
 #endif
+/* nt_metrics_user_count() returns uint16_t, so an override past UINT16_MAX would wrap. */
+_Static_assert(NT_METRICS_MAX_USER_CHANNELS > 0 && NT_METRICS_MAX_USER_CHANNELS <= UINT16_MAX, "NT_METRICS_MAX_USER_CHANNELS must be in (0, UINT16_MAX]");
 
 #ifndef NT_METRICS_USER_NAME_MAX
 #define NT_METRICS_USER_NAME_MAX 32

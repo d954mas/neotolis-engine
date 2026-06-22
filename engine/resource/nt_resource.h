@@ -14,6 +14,10 @@
 #define NT_RESOURCE_MAX_ASSETS 2048
 #endif
 
+/* nt_resource_pack_count()/_asset_count() return uint16_t, so an override past UINT16_MAX would wrap. */
+_Static_assert(NT_RESOURCE_MAX_PACKS > 0 && NT_RESOURCE_MAX_PACKS <= UINT16_MAX, "NT_RESOURCE_MAX_PACKS must be in (0, UINT16_MAX]");
+_Static_assert(NT_RESOURCE_MAX_ASSETS > 0 && NT_RESOURCE_MAX_ASSETS <= UINT16_MAX, "NT_RESOURCE_MAX_ASSETS must be in (0, UINT16_MAX]");
+
 #ifndef NT_RESOURCE_MAX_SLOTS
 #define NT_RESOURCE_MAX_SLOTS 2048
 #endif
