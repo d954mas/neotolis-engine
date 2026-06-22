@@ -21,7 +21,7 @@
 #endif
 
 /* Process memory probe (platform abstraction: never call the OS from a module).
- * `used` = resident bytes (native RSS / web mallinfo uordblks).
+ * `used` = in-use bytes: native RSS, web allocator in-use bytes (mallinfo uordblks, NOT RSS).
  * `reserved` = bytes committed by the allocator (web heap size); on native there
  * is no cheap distinct reserve figure, so `reserved` mirrors `used`. */
 typedef struct {

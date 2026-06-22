@@ -19,6 +19,8 @@ void test_memory_usage_used_nonzero_on_native(void) {
  * web sets reserved == heap size >= used. Either way reserved >= used. */
 void test_memory_usage_reserved_ge_used(void) {
     nt_platform_mem_t mem = nt_platform_memory_usage();
+    /* Trivially true on native (reserved == used by construction); the real distinct-reserve path
+       (reserved == web heap size > used) is exercised only on the web build. */
     TEST_ASSERT_GREATER_OR_EQUAL_size_t(mem.used, mem.reserved);
 }
 
