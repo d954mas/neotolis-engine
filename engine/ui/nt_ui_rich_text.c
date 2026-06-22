@@ -721,6 +721,12 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     }
     case RICH_TAG_LINK: {
         NT_ASSERT(vlen > 0U && "rich markup: <link=id> needs an id");
+        /* No nested links (HTML's no-nested-anchor rule): pending_link is a single scalar, so an inner
+         * </link> would zero the outer's id -- text between the inner and outer close would silently
+         * lose the enclosing link. Reject loudly instead of composing wrong. */
+        for (uint32_t d = 0; d < ts_stack->depth; d++) {
+            NT_ASSERT(ts_stack->open_stack[d] != RICH_TAG_LINK && "rich markup: nested <link> is not allowed");
+        }
         const uint32_t link_id = nt_hash32(val, vlen).value;
         NT_ASSERT(link_id != 0U && "rich markup: <link=name> hashed to 0 (the none sentinel)");
         nt_ui_rich_link(ctx, link_id);
