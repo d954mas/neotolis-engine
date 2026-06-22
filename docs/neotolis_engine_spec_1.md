@@ -2786,6 +2786,7 @@ engine/
     font/
     debug_overlay/          # dev HUD — consumes nt_metrics (frame time / draw calls / user counters)
     metrics/                # L1 perf source of truth (host pushes per-frame data; overlay + perf.* read)
+    platform/               # OS process/memory probes; native/ web/ (configure-time split; header is core/nt_platform.h)
     resources/
     packs/
     formats/

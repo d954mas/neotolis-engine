@@ -23,6 +23,10 @@
 #define NT_LOG_RING_MSG_SIZE 512
 #endif
 
+/* The sink stores an already-truncated nt_log line; keep its buffer >= nt_log's so the copy's snprintf
+   never re-truncates a UTF-8 sequence mid-codepoint. */
+_Static_assert(NT_LOG_RING_MSG_SIZE >= NT_LOG_BUF_SIZE, "NT_LOG_RING_MSG_SIZE must be >= NT_LOG_BUF_SIZE");
+
 #ifndef NT_LOG_RING_DOMAIN_SIZE
 #define NT_LOG_RING_DOMAIN_SIZE 64
 #endif

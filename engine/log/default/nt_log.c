@@ -18,9 +18,7 @@
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
 #endif
 
-#ifndef NT_LOG_BUF_SIZE
-#define NT_LOG_BUF_SIZE 512
-#endif
+/* NT_LOG_BUF_SIZE is the public sink line cap, declared in nt_log.h. */
 
 static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 

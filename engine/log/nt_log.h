@@ -31,6 +31,12 @@ void nt_log_add_sink(nt_log_sink_fn fn, void *user);
 /* Remove the slot matching (fn,user); a no-op if no such slot is registered. */
 void nt_log_remove_sink(nt_log_sink_fn fn, void *user);
 
+/* Max length (incl. NUL) of a formatted line handed to a sink. nt_log_write truncates to this on a
+ * UTF-8-safe boundary, so a sink's own copy buffer must be >= this to never re-truncate mid-codepoint. */
+#ifndef NT_LOG_BUF_SIZE
+#define NT_LOG_BUF_SIZE 512
+#endif
+
 /* --- Single log function --- */
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);
 
