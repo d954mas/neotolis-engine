@@ -488,6 +488,113 @@ static void test_fx_pulse_deterministic(void) {
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "pulse keeps the atom visible");
 }
 
+/* (10) PARAMS: a tuned amp/speed produces a DIFFERENT curve than the default, and NULL params is
+ * byte-identical to the default (the plain push_effect path). Tests the stock fn ABI directly. */
+static void test_fx_params_override_vs_default(void) {
+    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const float xy[2] = {0.0F, 0.0F};
+    const float wh[2] = {10.0F, 16.0F};
+    const float t = 0.25F;
+    const uint32_t idx = 3U;
+
+    /* NULL params == byte-identical to the compile-time default curve. */
+    const nt_ui_rich_fx_result_t def = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
+    const float def_expect = FX_WAVE_AMP * sinf((t * FX_WAVE_SPEED) + ((float)idx * FX_WAVE_PHASE));
+    TEST_ASSERT_TRUE_MESSAGE(approx(def.offset_y, def_expect), "wave NULL params == compile-time default");
+
+    /* Tuned amp = 14, speed = 5: the offset matches the SAME formula with the overridden constants,
+     * and is measurably different from the default. */
+    nt_ui_rich_fx_params_t p = {.amp = 14.0F, .speed = 5.0F};
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    const float tuned_expect = 14.0F * sinf((t * 5.0F) + ((float)idx * FX_WAVE_PHASE));
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.offset_y, tuned_expect), "wave tuned offset == amp*sin(t*speed + idx*PHASE)");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(tuned.offset_y - def.offset_y) > 0.01F, "tuned wave differs from the default");
+
+    /* A field <=0 keeps that effect's default: amp=0 -> default amp, speed=5 overrides only speed. */
+    nt_ui_rich_fx_params_t half = {.amp = 0.0F, .speed = 5.0F};
+    const nt_ui_rich_fx_result_t mixed = nt_ui_rich_fx_wave(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &half);
+    const float mixed_expect = FX_WAVE_AMP * sinf((t * 5.0F) + ((float)idx * FX_WAVE_PHASE));
+    TEST_ASSERT_TRUE_MESSAGE(approx(mixed.offset_y, mixed_expect), "amp<=0 keeps default amp, speed override applies");
+}
+
+/* Build [text][image][text] with a TUNED stock wave (via push_effect_ex) over the whole block;
+ * record the image quad's first-vertex y (the wave offset folds into it). params NULL -> stock
+ * default curve. Reuses the IMAGE-quad position probe -- the same one test (11) trusts. */
+static float frame_tuned_wave_image_y(nt_material_t img_mat, const nt_ui_rich_fx_params_t *params, float time) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = img_mat;
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("tw_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_effect_ex(s_fx.ctx, NT_UI_RICH_FX_ID_WAVE, params);
+        nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " B", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("tw").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, time, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    float pos[3] = {0};
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    return pos[1];
+}
+
+/* (10b) BUILDER push_effect_ex: a big-amplitude tuned wave shifts the image quad y differently than
+ * the default wave -- proving the by-value params reach the stock fn at emit through the per-block table. */
+static void test_fx_push_effect_ex_tunes_emit(void) {
+    const nt_material_t mat = make_rich_image_material();
+    const float t = 0.25F;
+    const float y_default = frame_tuned_wave_image_y(mat, NULL, t); /* NULL -> stock default */
+    nt_ui_rich_fx_params_t big = {.amp = 14.0F, .speed = 5.0F};
+    const float y_tuned = frame_tuned_wave_image_y(mat, &big, t);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(y_tuned - y_default) > 0.1F, "push_effect_ex tuned wave shifts the quad differently than the default");
+}
+
+/* Parse a wave markup over a one-glyph block and return the first solved atom's effect_id. A plain
+ * <fx=wave> carries the STOCK id; a tuned <fx=wave amp=.. speed=..> routes through the per-block
+ * custom table -> a CUSTOM id (>= NT_UI_RICH_FX_CUSTOM_BASE). The solve uses the test probe. */
+static uint8_t markup_wave_atom_effect_id(const char *markup) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, &ts, &base, markup, strlen(markup));
+    nt_ui_rich_test_solve(s_fx.ctx, 400.0F, FONT_SIZE_DEFAULT);
+    return nt_ui_rich_test_atom_effect_id(s_fx.ctx, 0U);
+}
+
+/* (10c) MARKUP <fx=wave amp=14 speed=5> applies the params via the per-block custom table: the
+ * tuned markup carries a CUSTOM effect_id (the params path), the plain <fx=wave> a STOCK id. The
+ * builder/markup VALUE parity (same emitted offset) is covered by the direct-ABI test (10) +
+ * push_effect_ex emit test (10b); here we prove the markup front reaches the params path at all. */
+static void test_fx_markup_params_apply(void) {
+    const uint8_t id_default = markup_wave_atom_effect_id("<fx=wave>X</fx>");
+    const uint8_t id_tuned = markup_wave_atom_effect_id("<fx=wave amp=14 speed=5>X</fx>");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_RICH_FX_ID_WAVE, id_default, "default <fx=wave> carries the stock id");
+    TEST_ASSERT_TRUE_MESSAGE(id_tuned >= NT_UI_RICH_FX_CUSTOM_BASE, "tuned <fx=wave amp=.. speed=..> routes through the per-block custom table");
+
+    /* An only-speed form also routes through the params path (amp omitted -> default amp). */
+    const uint8_t id_speed_only = markup_wave_atom_effect_id("<fx=wave speed=5>X</fx>");
+    TEST_ASSERT_TRUE_MESSAGE(id_speed_only >= NT_UI_RICH_FX_CUSTOM_BASE, "tuned <fx=wave speed=5> routes through the params path");
+}
+
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
  * carries the effect_id; emit folds the wave offset into the image quad + the tint into a_tint. */
 static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time, nt_ui_rich_fx_fn fn_for_image) {
@@ -1185,6 +1292,9 @@ int main(void) {
     RUN_TEST(test_fx_shake_negative_time_defined);
     RUN_TEST(test_fx_rainbow_deterministic);
     RUN_TEST(test_fx_pulse_deterministic);
+    RUN_TEST(test_fx_params_override_vs_default);
+    RUN_TEST(test_fx_push_effect_ex_tunes_emit);
+    RUN_TEST(test_fx_markup_params_apply);
     RUN_TEST(test_fx_fade_in_visibility);
     RUN_TEST(test_fx_image_shifts_quad_visual_only);
     RUN_TEST(test_fx_fade_in_skips_image);

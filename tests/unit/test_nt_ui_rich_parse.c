@@ -197,6 +197,38 @@ static void test_parse_bad_hex_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("
 /* (9) a close tag with no matching open -> NT_ASSERT. */
 static void test_parse_orphan_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("HP</b>")); }
 
+/* Parse a <fx=...> markup against a tagset that knows the stock "wave" + a custom "fade". */
+static void parse_fx(const char *m) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect_fn(&ts, "fade", parse_stub_fx, NULL);
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
+}
+
+/* (8b) a well-formed <fx=wave amp=8 speed=3> parses without an assert (the happy path). */
+static void test_parse_fx_params_ok(void) {
+    parse_fx("<fx=wave amp=8 speed=3>hi</fx>");
+    parse_fx("<fx=wave speed=2.5>hi</fx>"); /* a single param + a float value */
+    TEST_ASSERT_TRUE_MESSAGE(true, "tuned <fx=...> markup parsed without an assert");
+}
+
+/* (8c) a bad float value in an fx param -> NT_ASSERT (fail-early). */
+static void test_parse_fx_bad_float_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp=8x>hi</fx>")); }
+
+/* (8d) an unknown fx param key -> NT_ASSERT. */
+static void test_parse_fx_unknown_key_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave bogus=3>hi</fx>")); }
+
+/* (8e) a param token with no '=' -> NT_ASSERT. */
+static void test_parse_fx_no_equals_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp>hi</fx>")); }
+
+/* (8f) k=v params on a CUSTOM-fn effect name -> NT_ASSERT (params apply to STOCK effects only). */
+static void test_parse_fx_params_on_custom_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=fade amp=8>hi</fx>")); }
+
 /* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: <b> pushes the BUILDER style
  * stack (NT_UI_RICH_STACK_DEPTH), which is checked first, so this exercises the BUILDER cap.
  * The parser's own tag-stack cap is covered separately by test_parse_tag_stack_overflow. */
@@ -373,6 +405,11 @@ int main(void) {
     RUN_TEST(test_parse_unknown_tag_asserts);
     RUN_TEST(test_parse_bad_hex_asserts);
     RUN_TEST(test_parse_orphan_close_asserts);
+    RUN_TEST(test_parse_fx_params_ok);
+    RUN_TEST(test_parse_fx_bad_float_asserts);
+    RUN_TEST(test_parse_fx_unknown_key_asserts);
+    RUN_TEST(test_parse_fx_no_equals_asserts);
+    RUN_TEST(test_parse_fx_params_on_custom_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_tag_stack_overflow_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);
