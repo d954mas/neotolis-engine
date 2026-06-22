@@ -229,6 +229,108 @@ static void test_total_width_is_container(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(nt_ui_rich_test_total_w(s_fx.ctx), 200.0F), "explicit container_w drives the FIXED block width");
 }
 
+/* (8) M5: CENTER/RIGHT align with container_w<=0 (grow case) keep every atom inside [0, total_w].
+ * The block grows to max_line_w, so the per-line align offset must be computed against that, not the
+ * resolved/screen width -- else center/right atoms land outside the block (worst on the first frame,
+ * when the bbox fallback returns the full screen width). id 0 has no prev bbox -> screen-width path. */
+static void assert_grow_align_in_block(nt_rich_align_t align) {
+    build_text("AAA BBB CCC DDD", 15);
+    nt_ui_rich_test_solve_ex(s_fx.ctx, RICH_ID, -1.0F, FONT_SIZE, align); /* container_w<=0, no prev bbox -> grow + screen-width fallback */
+    const float total_w = nt_ui_rich_test_total_w(s_fx.ctx);
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(n > 0U, "atoms placed");
+    for (uint32_t i = 0; i < n; i++) {
+        nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        TEST_ASSERT_TRUE_MESSAGE(a.x >= -1e-3F, "atom x >= 0 (inside block left)");
+        TEST_ASSERT_TRUE_MESSAGE(a.x + a.w <= total_w + 1e-3F, "atom right edge <= total_w (inside block)");
+    }
+}
+
+static void test_grow_align_center_in_block(void) {
+    assert_grow_align_in_block(NT_RICH_ALIGN_CENTER);
+    reset_call();
+    assert_grow_align_in_block(NT_RICH_ALIGN_RIGHT);
+}
+
+/* (9) H1: a MIDDLE-valign image on an IMAGE-DOMINANT line (no text, or text far shorter than the
+ * image) is seated INSIDE its reserved line box. Reserve and placement must use the same x-height
+ * reference -- otherwise the icon centers against a different ascent than the box was reserved with.
+ * Deterministic: a single 16px icon, MIDDLE valign, on a line with only tiny text. */
+static void test_middle_image_seated_in_reserved_box(void) {
+    /* Tiny 2px text + a 16px MIDDLE icon: the image dominates the line ascent. */
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_image(s_fx.ctx, icon_ref(), NT_RICH_VALIGN_MIDDLE, 0.0F, ICON_SCALE);
+    nt_ui_rich_text_n(s_fx.ctx, "x", 1);
+    nt_ui_rich_end(s_fx.ctx);
+    nt_ui_rich_test_solve_ex(s_fx.ctx, RICH_ID, 10000.0F, 2.0F, NT_RICH_ALIGN_LEFT); /* size 2 -> ascent 1.6px */
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_line_count(s_fx.ctx));
+    const float total_h = nt_ui_rich_test_total_h(s_fx.ctx);
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    bool saw = false;
+    for (uint32_t i = 0; i < n; i++) {
+        nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        if (a.kind == NT_RICH_ATOM_IMAGE) {
+            saw = true;
+            /* The icon's box must sit fully within the reserved line box [0, total_h]. */
+            TEST_ASSERT_TRUE_MESSAGE(a.y >= -1e-3F, "MIDDLE icon top >= line box top (reserved box)");
+            TEST_ASSERT_TRUE_MESSAGE(a.y + a.h <= total_h + 1e-3F, "MIDDLE icon bottom <= line box bottom (reserved box)");
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(saw, "icon atom present");
+}
+
+/* (10) degenerate width: rich_solve with container_w == 0 (and < 0) must terminate with a bounded
+ * line count and no hang (the T-67-04-02 anti-hang clamp). The greedy break would spin on a 0/neg
+ * box without the clamp; the test completing proves it does not. */
+static void test_degenerate_width_no_hang(void) {
+    build_text("AAA BBB CCC", 11);
+    nt_ui_rich_test_solve_ex(s_fx.ctx, RICH_ID, 0.0F, FONT_SIZE, NT_RICH_ALIGN_LEFT); /* width 0 -> clamp to 1px */
+    const uint32_t lines0 = nt_ui_rich_test_line_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(lines0 > 0U, "width 0 still solves (clamped)");
+    TEST_ASSERT_TRUE_MESSAGE(lines0 <= nt_ui_rich_test_atom_count(s_fx.ctx) + 1U, "line count bounded by atom count");
+
+    reset_call();
+    build_text("AAA BBB CCC", 11);
+    nt_ui_rich_test_solve_ex(s_fx.ctx, RICH_ID, -50.0F, FONT_SIZE, NT_RICH_ALIGN_LEFT); /* negative width -> clamp */
+    const uint32_t lines1 = nt_ui_rich_test_line_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(lines1 > 0U, "negative width still solves (clamped, no hang)");
+}
+
+#define EURO_W 10.0F /* stub font advances size/2 per CODEPOINT -> 10px at size 20 */
+
+/* One break-anywhere chunk must fit the box AND hold a whole number of euros (codepoint-safe cut):
+ * a mid-codepoint split would yield a partial 3-byte sequence whose width is not a multiple of EURO_W. */
+static void assert_chunk_codepoint_safe(nt_ui_rich_test_atom_t a, float container_w) {
+    TEST_ASSERT_TRUE_MESSAGE(a.x + a.w <= container_w + 1e-3F, "no multibyte chunk exceeds the box");
+    const float cps = a.w / EURO_W;
+    const float rounded = (float)(int)(cps + 0.5F);
+    TEST_ASSERT_TRUE_MESSAGE(approx(cps, rounded), "chunk width is a whole multiple of one codepoint (boundary-safe)");
+    TEST_ASSERT_TRUE_MESSAGE(cps >= 1.0F - 1e-3F, "each chunk has >=1 whole codepoint");
+}
+
+/* (11) multibyte break-anywhere: an over-long word of 3-byte UTF-8 codepoints (U+20AC EURO SIGN,
+ * "\xE2\x82\xAC") split by the box must cut only on codepoint boundaries. The codepoint-safe-break
+ * claim was ASCII-only tested before. */
+static void test_break_anywhere_multibyte_codepoint_safe(void) {
+    static const char euros[] = "\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC"; /* 6 euros = 18 bytes */
+    const float container_w = 25.0F;                                                                        /* fits 2 euros (20px), not 3 (30px) per line */
+    build_text(euros, 18);
+    nt_ui_rich_test_solve_ex(s_fx.ctx, RICH_ID, container_w, FONT_SIZE, NT_RICH_ALIGN_LEFT);
+
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(n > 1U, "over-long multibyte word split into multiple atoms");
+    float sum_w = 0.0F;
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        assert_chunk_codepoint_safe(a, container_w);
+        sum_w += a.w;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(approx(sum_w, 6.0F * EURO_W), "all 6 euro codepoints preserved across chunks (no mid-codepoint cut)");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mixed_run_advance_sums);
@@ -238,5 +340,9 @@ int main(void) {
     RUN_TEST(test_align_lcr_offsets);
     RUN_TEST(test_max_line_height_over_atoms);
     RUN_TEST(test_total_width_is_container);
+    RUN_TEST(test_grow_align_center_in_block);
+    RUN_TEST(test_middle_image_seated_in_reserved_box);
+    RUN_TEST(test_degenerate_width_no_hang);
+    RUN_TEST(test_break_anywhere_multibyte_codepoint_safe);
     return UNITY_END();
 }

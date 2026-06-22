@@ -5,6 +5,7 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "clay.h"
@@ -124,11 +125,13 @@ static void test_parse_bad_hex_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("
 /* (9) a close tag with no matching open -> NT_ASSERT. */
 static void test_parse_orphan_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("HP</b>")); }
 
-/* (10) over-deep nesting beyond the tag-stack depth cap -> NT_ASSERT before overflow. */
-static void test_parse_over_deep_nesting_asserts(void) {
+/* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: <b> pushes the BUILDER style
+ * stack (NT_UI_RICH_STACK_DEPTH), which is checked first, so this exercises the BUILDER cap.
+ * The parser's own tag-stack cap is covered separately by test_parse_tag_stack_overflow. */
+static void test_parse_over_deep_style_stack_asserts(void) {
     char buf[256];
     uint32_t n = 0;
-    for (uint32_t i = 0; i < 40U; i++) { /* 40 > NT_UI_RICH_PARSE_TAG_DEPTH (32) */
+    for (uint32_t i = 0; i < 40U; i++) { /* 40 > NT_UI_RICH_STACK_DEPTH (32) */
         buf[n++] = '<';
         buf[n++] = 'b';
         buf[n++] = '>';
@@ -138,6 +141,48 @@ static void test_parse_over_deep_nesting_asserts(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n));
+}
+
+/* Build a string of `reps` nested "<link=L0><link=L1>..." opens (distinct values so none can
+ * collide on a single bad hash); when balanced is set, append the matching </link> closes. */
+static uint32_t build_nested_links(char *buf, uint32_t reps, bool balanced) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < reps; i++) {
+        n += (uint32_t)sprintf(buf + n, "<link=L%u>", i);
+    }
+    if (balanced) {
+        for (uint32_t i = 0; i < reps; i++) {
+            const char *close = "</link>";
+            for (const char *p = close; *p != '\0'; p++) {
+                buf[n++] = *p;
+            }
+        }
+    }
+    buf[n] = '\0';
+    return n;
+}
+
+/* (10b) drive the PARSER tag stack to overflow WITHOUT touching the builder style stack: <link=..>
+ * is a pending property (no style push) but still pushes the parser tag stack. 31 nested links parse
+ * fine (proving the trip at 40 is the DEPTH guard, not a hash-to-0 or style-stack assert); 40 nested
+ * links trip the parser's own NT_UI_RICH_PARSE_TAG_DEPTH guard -- the previously-shadowed code path. */
+static void test_parse_tag_stack_overflow_asserts(void) {
+    char buf[1024];
+
+    /* 31 < 32: balanced nesting parses without an assert. */
+    const uint32_t ok_n = build_nested_links(buf, 31U, true);
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, ok_n);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) == 0U, "links carry no text -> no runs, but parse succeeded");
+
+    /* 40 > 32: the parser tag stack overflows before the builder style stack is ever touched. */
+    const uint32_t over_n = build_nested_links(buf, 40U, false);
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, over_n));
 }
 
 /* ---- bounded-scan robustness (MARK-67-05) ---- */
@@ -195,7 +240,8 @@ int main(void) {
     RUN_TEST(test_parse_unknown_tag_asserts);
     RUN_TEST(test_parse_bad_hex_asserts);
     RUN_TEST(test_parse_orphan_close_asserts);
-    RUN_TEST(test_parse_over_deep_nesting_asserts);
+    RUN_TEST(test_parse_over_deep_style_stack_asserts);
+    RUN_TEST(test_parse_tag_stack_overflow_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);
     RUN_TEST(test_parse_len_bounded);
     RUN_TEST(test_parse_escape_literal_lt);

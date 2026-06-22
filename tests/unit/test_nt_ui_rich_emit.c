@@ -609,6 +609,59 @@ static void test_two_rich_text_blocks_one_frame_no_trap(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "both rich-text blocks emit (no nest-guard trap)");
 }
 
+/* ===== Public markup entry e2e (nt_ui_rich_text_markup) ===== */
+
+#define MK_ROOT_X 60.0F
+#define MK_ROOT_Y 30.0F
+#define MK_CONTAINER_W 400.0F
+
+/* Drive the PUBLIC markup entry through parse -> solve -> emit -> link in one call, inside a CLAY
+ * block positioned at a known offset, and walk once. Markup: "go <link=here>HERE</link> now". */
+static nt_ui_rich_result_t frame_markup(const nt_pointer_t *p) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    static const char *const markup = "go <link=here>HERE</link> now";
+    nt_ui_rich_result_t res = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("mk_root"),
+          .layout = {.sizing = {CLAY_SIZING_FIXED(MK_CONTAINER_W), CLAY_SIZING_FIXED(200)}},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {MK_ROOT_X, MK_ROOT_Y}}}) {
+        nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("mk_rt").id, NULL, NULL, &base, markup, strlen(markup), MK_CONTAINER_W, NT_RICH_ALIGN_LEFT, 0.0F, &res);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    return res;
+}
+
+/* (16) the public markup entry emits text spans, sizes the FIXED block to container_w, and resolves
+ * a link click via a warm prev-frame bbox. (No test called this public entry before.) */
+static void test_markup_e2e_emit_and_link(void) {
+    const uint32_t link_id = nt_hash32("here", 4).value;
+
+    /* Warm-up frame so the prev-frame bbox the link hit-test needs is populated (D-67-23). */
+    nt_text_renderer_test_reset_call_counters();
+    nt_pointer_t idle = make_ptr(0.0F, 0.0F, false, false, false);
+    (void)frame_markup(&idle);
+
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "markup entry emits draw_n spans");
+    TEST_ASSERT_TRUE_MESSAGE(approx(nt_ui_rich_test_total_w(s_fx.ctx), MK_CONTAINER_W), "markup FIXED width == container_w");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_link_rect_count(s_fx.ctx) >= 1U, "markup <link> produced a link rect");
+
+    /* Hover + release over the link rect: "go " = 3 chars * 8px = 24px; link "HERE" mid at +16px. */
+    const float hx = MK_ROOT_X + (3.0F * 8.0F) + (2.0F * 8.0F);
+    const float hy = MK_ROOT_Y + 8.0F;
+    nt_pointer_t rel = make_ptr(hx, hy, false, false, true);
+    nt_ui_rich_result_t clk = frame_markup(&rel);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(link_id, clk.hovered_link, "markup link hovered (hash of \"here\")");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(link_id, clk.clicked_link, "markup link clicked on release over its rect");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -627,5 +680,6 @@ int main(void) {
     RUN_TEST(test_object_draws_at_solved_box);
     RUN_TEST(test_object_effect_and_skip);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
+    RUN_TEST(test_markup_e2e_emit_and_link);
     return UNITY_END();
 }
