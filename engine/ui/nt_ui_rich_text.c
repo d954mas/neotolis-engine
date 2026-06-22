@@ -102,6 +102,14 @@ typedef struct {
     /* Pending link id applied to the next emitted run(s); 0 = none. */
     uint32_t pending_link;
 
+    /* ---- Custom (game-supplied) effects (D-67-26) ----
+     * A per-call fixed-cap table captured at build: a composed-style effect_id >= the custom base
+     * indexes (id - base) here. Captured so emit (which sees only the solved state, never the
+     * tagset) can resolve a custom fn. */
+    nt_ui_rich_fx_fn custom_fx[NT_UI_RICH_MAX_CUSTOM_FX];
+    void *custom_fx_user[NT_UI_RICH_MAX_CUSTOM_FX];
+    uint32_t custom_fx_count;
+
     /* ---- Solver output (frame scratch; consumed by emit + the test probes) ---- */
     nt_ui_rich_solved_atom_t *solved; /* NT_UI_RICH_MAX_GLYPHS cap */
     uint32_t solved_count;
@@ -284,6 +292,30 @@ void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
     rich_style_top(st)->effect_id = effect_id;
+}
+
+/* Intern a custom (fn,user_data) into the per-call table; returns its custom effect_id (base +
+ * index). Dedups identical pairs so a repeated <fx=name> shares a slot (and a table entry). */
+static uint8_t rich_intern_custom_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn, void *user_data) {
+    for (uint32_t i = 0; i < st->custom_fx_count; i++) {
+        if (st->custom_fx[i] == fn && st->custom_fx_user[i] == user_data) {
+            return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + i);
+        }
+    }
+    NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
+    NT_ASSERT(st->custom_fx_count < (255U - NT_UI_RICH_FX_CUSTOM_BASE) && "rich custom-effect id range exhausted");
+    const uint32_t idx = st->custom_fx_count++;
+    st->custom_fx[idx] = fn;
+    st->custom_fx_user[idx] = user_data;
+    return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + idx);
+}
+
+void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data) {
+    NT_ASSERT(fn != NULL && "nt_ui_rich_push_effect_fn: fn must be non-NULL");
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    const uint8_t id = rich_intern_custom_fx(st, fn, user_data);
+    rich_push_copy(st);
+    rich_style_top(st)->effect_id = id; /* >= NT_UI_RICH_FX_CUSTOM_BASE -> custom table index */
 }
 
 void nt_ui_rich_pop(nt_ui_context_t *ctx) {
@@ -579,8 +611,14 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     case RICH_TAG_EFFECT: {
         NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <fx=name> needs a tagset");
         uint8_t effect_id = 0;
-        NT_ASSERT(nt_ui_rich_tagset_lookup_effect(tagset, nt_hash64((const void *)val, vlen).value, &effect_id) && "rich markup: unknown effect name");
-        nt_ui_rich_push_effect(ctx, effect_id);
+        nt_ui_rich_fx_fn fn = NULL;
+        void *fx_user = NULL;
+        NT_ASSERT(nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, vlen).value, &effect_id, &fn, &fx_user) && "rich markup: unknown effect name");
+        if (fn != NULL) {
+            nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock (D-67-26) */
+        } else {
+            nt_ui_rich_push_effect(ctx, effect_id);
+        }
         break;
     }
     case RICH_TAG_NONE:
@@ -1182,7 +1220,17 @@ static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
  * effect is VISUAL-ONLY -- the caller folds it into position/tint/scale at emit; layout is NOT
  * recomputed (D-67-19). */
 static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
-    const nt_ui_rich_fx_fn fn = nt_ui_rich_fx_stock(s->effect_id);
+    /* Custom (game-supplied) fns resolve BEFORE stock (D-67-26): a custom effect_id indexes the
+     * per-block table captured at build; otherwise fall back to the stock catalog. */
+    nt_ui_rich_fx_fn fn = NULL;
+    if (nt_ui_rich_fx_id_is_custom(s->effect_id)) {
+        const uint32_t idx = (uint32_t)s->effect_id - NT_UI_RICH_FX_CUSTOM_BASE;
+        if (idx < st->custom_fx_count) {
+            fn = st->custom_fx[idx];
+        }
+    } else {
+        fn = nt_ui_rich_fx_stock(s->effect_id);
+    }
     if (fn == NULL) {
         return nt_ui_rich_fx_identity(base_color);
     }

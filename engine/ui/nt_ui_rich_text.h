@@ -35,6 +35,9 @@ typedef struct nt_ui_rich_tagset nt_ui_rich_tagset_t; /* parser vocabulary; defi
 #ifndef NT_UI_RICH_MAX_LINKS
 #define NT_UI_RICH_MAX_LINKS 32 /* hitbox rects per call */
 #endif
+#ifndef NT_UI_RICH_MAX_CUSTOM_FX
+#define NT_UI_RICH_MAX_CUSTOM_FX 16 /* distinct game-supplied (fn,user_data) effects per call */
+#endif
 /* Shared UTF-8 text buffer for all TEXT runs in one call. */
 #ifndef NT_UI_RICH_MAX_TEXT_BYTES
 #define NT_UI_RICH_MAX_TEXT_BYTES 4096
@@ -46,6 +49,27 @@ typedef enum {
     NT_RICH_ATOM_IMAGE,
     NT_RICH_ATOM_OBJECT,
 } nt_rich_atom_kind_t;
+
+/* ---- Per-atom effect ABI (full catalog + stock curves live in nt_ui_rich_fx.h) ----
+ * Declared here (not fx.h) so the builder signature nt_ui_rich_push_effect_fn can name the fn
+ * type without a text.h <-> fx.h include cycle (fx.h includes this header). The effect transform
+ * applied to one atom at emit: offset shifts the quad / draw() xy; color is the ABSOLUTE resolved
+ * RGBA tint (NOT a multiplier -- identity returns base_color verbatim); scale scales about the
+ * atom center; visible==false skips the atom emit. */
+typedef struct {
+    float offset_x; /*  0: px shift of the atom quad / draw() x */
+    float offset_y; /*  4: px shift of the atom quad / draw() y */
+    float color[4]; /*  8: ABSOLUTE resolved RGBA tint -- REPLACES the base (identity == base_color), never multiplies */
+    float scale;    /* 24: scale about the atom center (1 = identity) */
+    bool visible;   /* 28: false -> skip the atom emit */
+} nt_ui_rich_fx_result_t;
+_Static_assert(sizeof(nt_ui_rich_fx_result_t) == 32, "nt_ui_rich_fx_result_t stable ABI (6 float + 1 bool + pad)");
+
+/* Per-atom effect callback. base_xy/base_wh/base_color are the solver's resolved atom box +
+ * color (read-only inputs); time is the game-owned clock (seconds); hovered is true only for
+ * the atoms of the currently-hovered link (link hover gates effects, D-67-24). The fn returns
+ * the visual-only transform; it MUST NOT mutate layout. */
+typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered);
 
 /* Variant bits select font_id[]: bit0=bold bit1=italic (D-67-04/16). */
 #define NT_UI_RICH_VARIANT_BOLD (1U << 0)
@@ -107,6 +131,10 @@ void nt_ui_rich_push_font(nt_ui_context_t *ctx, const nt_font_t font_id[4]);
 void nt_ui_rich_push_bold(nt_ui_context_t *ctx);
 void nt_ui_rich_push_italic(nt_ui_context_t *ctx);
 void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id);
+/* Push a game-supplied CUSTOM effect fn (resolved at emit, BEFORE the stock catalog). The
+ * (fn,user_data) is captured into a per-call fixed-cap table; the composed style carries a
+ * custom effect_id index into it (D-67-26). fn must be non-NULL. */
+void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data);
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
 void nt_ui_rich_object(nt_ui_context_t *ctx, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);

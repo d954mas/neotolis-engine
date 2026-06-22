@@ -74,6 +74,8 @@ void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name
     for (uint32_t i = 0; i < ts->effect_count; i++) {
         if (ts->effects[i].name_hash == h) {
             ts->effects[i].effect_id = effect_id;
+            ts->effects[i].fn = NULL; /* override a prior custom entry back to stock */
+            ts->effects[i].user_data = NULL;
             return;
         }
     }
@@ -81,6 +83,27 @@ void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name
     nt_ui_rich_tagset_effect_t *e = &ts->effects[ts->effect_count++];
     e->name_hash = h;
     e->effect_id = effect_id;
+    e->fn = NULL; /* stock entry */
+    e->user_data = NULL;
+}
+
+void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn, void *user_data) {
+    NT_ASSERT(ts != NULL && name != NULL && name[0] != '\0' && fn != NULL && "rich tagset: custom effect needs a non-NULL fn");
+    const uint64_t h = nt_hash64_str(name).value;
+    for (uint32_t i = 0; i < ts->effect_count; i++) {
+        if (ts->effects[i].name_hash == h) {
+            ts->effects[i].effect_id = 0; /* custom entry: id unused (resolved via fn) */
+            ts->effects[i].fn = fn;
+            ts->effects[i].user_data = user_data;
+            return; /* override in place */
+        }
+    }
+    NT_ASSERT(ts->effect_count < NT_UI_RICH_TAGSET_MAX_EFFECTS && "rich tagset effect table overflow");
+    nt_ui_rich_tagset_effect_t *e = &ts->effects[ts->effect_count++];
+    e->name_hash = h;
+    e->effect_id = 0;
+    e->fn = fn;
+    e->user_data = user_data;
 }
 
 void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data) {
@@ -140,8 +163,21 @@ bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name
 bool nt_ui_rich_tagset_lookup_effect(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint8_t *out_effect_id) {
     NT_ASSERT(ts != NULL && out_effect_id != NULL);
     for (uint32_t i = 0; i < ts->effect_count; i++) {
+        if (ts->effects[i].name_hash == name_hash && ts->effects[i].fn == NULL) {
+            *out_effect_id = ts->effects[i].effect_id; /* stock entries only (a custom entry misses) */
+            return true;
+        }
+    }
+    return false;
+}
+
+bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint8_t *out_effect_id, nt_ui_rich_fx_fn *out_fn, void **out_user) {
+    NT_ASSERT(ts != NULL && out_effect_id != NULL && out_fn != NULL && out_user != NULL);
+    for (uint32_t i = 0; i < ts->effect_count; i++) {
         if (ts->effects[i].name_hash == name_hash) {
             *out_effect_id = ts->effects[i].effect_id;
+            *out_fn = ts->effects[i].fn; /* NULL -> stock (use out_effect_id); non-NULL -> custom */
+            *out_user = ts->effects[i].user_data;
             return true;
         }
     }
