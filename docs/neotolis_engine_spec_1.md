@@ -3200,8 +3200,12 @@ registry (see §32.5, D-67-13).
   link's atoms). The Model-D game reacts to the reported click.
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
   a box via `measure_fn` (text wraps around it); the widget calls the game's
-  `draw_fn(user_data, x, y, w, h)` at the solved box. The engine never draws the
-  object (renderer-agnostic, D-67-05).
+  `draw_fn(user_data, x, y, w, h, color)` at the solved box. The engine never draws
+  the object (renderer-agnostic, D-67-05). `color` is the **absolute resolved RGBA**
+  the engine resolved for the atom — the run's `<color>` with parent opacity folded
+  into alpha plus any per-atom effect tint, the SAME color the TEXT and IMAGE paths
+  render with — so a custom object honours opacity / `<color>` / effects consistently
+  (AGENTS.md "if sprites have it, UI images need it too").
 
 ## 32.5 Spec ↔ #184-proposal divergences (per AGENTS.md)
 

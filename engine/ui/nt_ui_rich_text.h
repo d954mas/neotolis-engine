@@ -131,7 +131,11 @@ typedef struct {
 } nt_ui_rich_object_measure_t;
 
 typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_data);
-typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h);
+/* color is the ABSOLUTE resolved RGBA the engine resolved for this atom: the run's <color>
+ * with parent opacity folded into alpha and any per-atom effect tint applied -- the SAME color
+ * the TEXT/IMAGE paths render with. The game should modulate its own draw by it so a custom
+ * OBJECT honours opacity / <color> / fx identically (AGENTS.md API consistency). */
+typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, const float color[4]);
 
 /* ---- Builder (code-first push/pop) ---- */
 /* All builder calls operate on the per-call run-list owned by ctx between begin/end.

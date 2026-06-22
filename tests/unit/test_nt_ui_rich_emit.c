@@ -1022,6 +1022,7 @@ static void test_link_no_union_across_gap(void) {
 static uint32_t s_obj_measure_calls;
 static uint32_t s_obj_draw_calls;
 static float s_obj_draw_x, s_obj_draw_y, s_obj_draw_w, s_obj_draw_h;
+static float s_obj_draw_color[4];
 
 static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
     (void)user_data;
@@ -1029,13 +1030,14 @@ static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = OBJ_W, .height = OBJ_H, .ascent = OBJ_H};
 }
 
-static void stub_draw(void *user_data, float x, float y, float w, float h) {
+static void stub_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
     (void)user_data;
     s_obj_draw_calls++;
     s_obj_draw_x = x;
     s_obj_draw_y = y;
     s_obj_draw_w = w;
     s_obj_draw_h = h;
+    memcpy(s_obj_draw_color, color, sizeof s_obj_draw_color);
 }
 
 /* Build "A [object] B" with an optional effect; walk once. Records the draw_fn call args. */
@@ -1096,6 +1098,46 @@ static void test_object_effect_and_skip(void) {
 
     frame_object(NT_UI_RICH_FX_ID_FADE_IN, 0.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_obj_draw_calls, "fade_in t=0 (visible=false) skips the draw_fn call");
+}
+
+/* (15c) the OBJECT draw callback receives the ABSOLUTE resolved RGBA: a <color> run with a
+ * parent opacity folds the <color> rgb + (alpha * opacity) into the callback color, exactly the
+ * color the TEXT/IMAGE paths render with. Proves a custom object can honour opacity/<color>/fx. */
+static void test_object_draw_receives_resolved_color(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    s_obj_measure_calls = 0;
+    s_obj_draw_calls = 0;
+    memset(s_obj_draw_color, 0, sizeof s_obj_draw_color);
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    /* The rich block carries opacity 0.5 -> frame->opacity 0.5 at emit. */
+    const float block_opacity = 0.5F;
+    nt_ui_element_data_t block_data = {.user_data = NULL, .layer = 0U, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = block_opacity};
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("obj_col_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_color(s_fx.ctx, 0xFF0080FFU); /* 0xAABBGGRR: r=255 g=128 b=0 a=255 */
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_col").id, &block_data, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "object drew once");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[0], 1.0F), "object color.r == 255/255 (<color> rgb)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[1], 128.0F / 255.0F), "object color.g == 128/255 (<color> rgb)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[2], 0.0F), "object color.b == 0/255 (<color> rgb)");
+    /* alpha = base alpha (1.0) * parent opacity (0.5) -- the same fold the TEXT path uses. */
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[3], block_opacity), "object color.a == base_alpha * parent_opacity (opacity folded like TEXT)");
 }
 
 /* An object whose measured ascent is LESS than its height -> the box must seat by ascent
@@ -1417,6 +1459,7 @@ int main(void) {
     RUN_TEST(test_link_no_union_across_gap);
     RUN_TEST(test_object_draws_at_solved_box);
     RUN_TEST(test_object_effect_and_skip);
+    RUN_TEST(test_object_draw_receives_resolved_color);
     RUN_TEST(test_object_baseline_honours_ascent);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     RUN_TEST(test_markup_e2e_emit_and_link);
