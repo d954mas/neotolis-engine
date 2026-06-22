@@ -1599,7 +1599,9 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
      * VISUAL-ONLY -- the solved box stays the solver's; only the render transform +
      * tint move (text + gold icon wave together). */
     float base_tint[4];
-    rich_unpack_color(s->color, 1.0F, base_tint); /* opacity rides element_data, so 1.0 here */
+    /* 1.0 here: parent opacity is folded into a_tint alpha at the walker (build_custom_block),
+     * where the post-bake accumulated opacity is known -- the build-time walk has no opacity yet. */
+    rich_unpack_color(s->color, 1.0F, base_tint);
     const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_tint);
     if (!fx.visible) {
         return; /* fade_in / typewriter: skip the image entirely until its window opens */

@@ -294,6 +294,60 @@ static void test_inline_image_a_tint_lossless(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(48U, nt_ui_rich_test_image_block_bytes(s_fx.ctx), "inline-image custom block is 48 B (3 attrs)");
 }
 
+/* Build [text][image][text] under a rich block carrying `opacity`; walk once. The image's
+ * a_tint alpha must fade with the parent opacity (folded at the walker), matching the text path. */
+static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = img_mat;
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_ui_element_data_t block_data = {.user_data = NULL, .layer = 0U, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_OPACITY, .transform = nt_ui_transform_defaults(), .opacity = opacity};
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_op_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " B", 2);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_op").id, &block_data, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (6b) the inline image's a_tint alpha fades with the parent opacity: a fully-opaque white run
+ * under a 0.5-opacity rich block emits a_tint.a == 0.5 (base_alpha 1.0 * parent 0.5), matching the
+ * TEXT path's opacity fold. At opacity 1.0 the a_tint stays lossless 1.0 (no fade). */
+static void test_inline_image_fades_with_parent_opacity(void) {
+    const nt_material_t mat = make_rich_image_material();
+
+    frame_image_with_opacity(mat, 1.0F);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 1)");
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 1.0F), "a_tint.a == 1.0 at full opacity (lossless)");
+    }
+
+    frame_image_with_opacity(mat, 0.5F);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 0.5)");
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        /* rgb unchanged (white), alpha = base 1.0 * parent 0.5 -- same fold as TEXT. */
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 1.0F) && approx(out[1], 1.0F) && approx(out[2], 1.0F), "a_tint.rgb unchanged by opacity (white)");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 0.5F), "a_tint.a == base_alpha * parent_opacity (image fades like TEXT)");
+    }
+}
+
 /* (7) by-name resolve: <img by name_hash> resolves to the white region index (0) via
  * nt_atlas_ref + nt_atlas_resolve_ref -- no per-image registry. */
 static void test_inline_image_resolves_by_name(void) {
@@ -1436,6 +1490,7 @@ int main(void) {
     RUN_TEST(test_single_style_one_span_per_line);
     RUN_TEST(test_double_walk_is_deterministic);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
+    RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_inline_image_a_tint_lossless);
     RUN_TEST(test_inline_image_resolves_by_name);
     RUN_TEST(test_inline_image_valign_y);

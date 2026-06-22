@@ -1222,9 +1222,12 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out
 }
 
 /* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
- * by attr_map offset (attr_map = single source of truth, no magic slots). Returns
- * float count. */
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]) {
+ * by attr_map offset (attr_map = single source of truth, no magic slots). `opacity` is the
+ * accumulated parent opacity; it folds into the a_tint alpha (when the material declares a_tint)
+ * so a custom-attr REGION image fades with its parents exactly like color_packed sprites and rich
+ * TEXT do -- the a_tint lives in the block, not backgroundColor, so the walker's backgroundColor
+ * fold never reaches it. Returns float count. */
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float opacity, float out[16]) {
     NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
     const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
     memcpy(out, blk->custom_attrs, blk->custom_bytes);
@@ -1234,9 +1237,17 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     /* Cache the injection-attr name hashes once (runtime hash; same fn the material used). */
     static uint32_t s_hash_layout;
     static uint32_t s_hash_uvrect;
+    static uint32_t s_hash_tint;
     if (s_hash_layout == 0U) {
         s_hash_layout = nt_hash32_str("a_layout").value;
         s_hash_uvrect = nt_hash32_str("a_uvrect").value;
+        s_hash_tint = nt_hash32_str("a_tint").value;
+    }
+    if (opacity < 1.0F) {
+        const int to = custom_attr_float_offset(mi, s_hash_tint);
+        if (to >= 0) {
+            out[to + 3] *= opacity; /* fold parent opacity into a_tint alpha (matches the text path) */
+        }
     }
 
     /* a_layout = {aspect = w/h, bbox_width_px, bbox_height_px, 0}. Bbox-derived at emit
@@ -1745,7 +1756,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
         if (ip != NULL && ip->custom != NULL) {
             float blk[16];
-            const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, blk);
+            const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, ws->accum_opacity, blk);
             nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
             if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
                 const Clay_Color rt = local.renderData.image.backgroundColor;
