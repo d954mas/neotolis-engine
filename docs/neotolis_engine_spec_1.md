@@ -3101,6 +3101,13 @@ frame. It DRIVES the shared builder (`begin` / `push_*` / `text_n` / `image` /
 `pop` / `end`), so a markup string and the equivalent builder calls produce a
 byte-identical run-list — one composition path, two front ends (D-67-02).
 
+**Intrinsic vs tagset-resolved tag values.** Only `<color=#RRGGBB>` is
+**intrinsic** — the parser reads the hex literal directly, no tagset needed.
+Every NAMED value (`<color=name>`, `<font=name>`, `<fx=name>`, and an
+`<img=alias:region/>` atlas alias) is resolved through the **tagset**: passing a
+named value with a `NULL` tagset asserts. A tagset is therefore optional only for
+markup that sticks to intrinsic hex colors + default-atlas `<img=region/>`.
+
 ## 32.2 Design: flat run-list → solver → one FIXED block
 
 - **Run-list (SoA, frame scratch).** The builder appends runs into a flat
