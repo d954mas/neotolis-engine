@@ -322,9 +322,11 @@ typedef struct {
  * typewriter counter (game-owned) advanced from the same clock; `last_link` latches the
  * id of the last clicked <link> for the readout. */
 typedef struct {
-    float time;           /* seconds, accumulated from frame dt -> the game-passed effect clock */
-    uint32_t last_link;   /* id of the last clicked <link> (0 = none yet) */
-    uint32_t link_clicks; /* total link clicks (proves the Model-D click readout) */
+    float time;            /* seconds, accumulated from frame dt -> the game-passed effect clock */
+    uint32_t last_link;    /* id of the last clicked <link> (0 = none yet) */
+    uint32_t link_clicks;  /* total link clicks (proves the Model-D click readout) */
+    uint32_t hovered_link; /* link under the pointer LAST frame -> styles THIS frame's link (two-pass) */
+    float accepted_latch;  /* seconds remaining on the "Accepted" reaction after a click */
 } rich_params_t;
 
 /* Dropdown tab: game-owned selection + open flags. */
@@ -417,7 +419,7 @@ static struct tab_state s_state = {
     .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
     .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
-    .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U},
+    .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hovered_link = 0U, .accepted_latch = 0.0F},
 };
 // #endregion
 
@@ -495,6 +497,8 @@ static nt_resource_t s_sprite_fs_handle;
 static nt_resource_t s_text_vs_handle;
 static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
+/* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
+static nt_resource_t s_rich_font_resource[4];
 /* Radial: shared extended-layout VS + flat SDF FS + textured reveal FS. */
 static nt_resource_t s_radial_vs_handle;
 static nt_resource_t s_radial_fs_handle;
@@ -521,9 +525,11 @@ static nt_atlas_region_ref_t s_radial_art_ref;
 static nt_material_t s_rich_image_material;
 static nt_atlas_region_ref_t s_rich_heart_ref;
 static nt_atlas_region_ref_t s_rich_gold_ref;
-/* The rich-text base font (variant slot R; B/I unset -> bold falls back to R, italic synth-shears). */
-static nt_font_t s_rich_font;
-/* The markup-front vocabulary: a named "gold" color + the wave effect + the icons atlas alias. */
+/* Rich-text font family (variant slots R/B/I/BI -> real DejaVu faces). Index = NT_UI_RICH_VARIANT_*
+ * bitmask: [0]=R, [1]=Bold, [2]=Italic, [3]=Bold-Italic (matches rich_resolve_font). */
+static nt_font_t s_rich_font[4];
+static bool s_rich_font_bound; /* all 4 family faces attached to their handles */
+/* The markup-front vocabulary: named colors + the stock effects + the icons atlas alias. */
 static nt_ui_rich_tagset_t s_rich_tagset;
 static bool s_rich_ready;
 static nt_font_t s_font;
@@ -1085,6 +1091,14 @@ static void try_bind_resources(void) {
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("ui_showcase: font bound at slot 0");
+    }
+    if (!s_rich_font_bound && nt_resource_is_ready(s_rich_font_resource[0]) && nt_resource_is_ready(s_rich_font_resource[1]) && nt_resource_is_ready(s_rich_font_resource[2]) &&
+        nt_resource_is_ready(s_rich_font_resource[3])) {
+        for (uint32_t i = 0; i < 4U; i++) {
+            nt_font_add(s_rich_font[i], s_rich_font_resource[i]);
+        }
+        s_rich_font_bound = true;
+        nt_log_info("ui_showcase: rich-text family R/B/I/BI bound");
     }
 }
 // #endregion
@@ -1897,22 +1911,33 @@ static inline uint32_t rich_link_quest(void) { return nt_hash32_str("quest").val
  * "wave" stock effect, and the icons atlas alias. The CODE-FIRST builder never touches the tagset --
  * it gets real values directly. */
 static void rich_ensure_setup(void) {
-    if (s_rich_ready || !s_font_bound || s_rich_image_material.id == 0U) {
+    if (s_rich_ready || !s_rich_font_bound || s_rich_image_material.id == 0U) {
         return;
     }
-    s_rich_font = s_font; /* variant slot R; B/I unset -> bold falls back to R, italic synth-shears */
     nt_ui_rich_tagset_init(&s_rich_tagset);
-    nt_ui_rich_tagset_register_color(&s_rich_tagset, "gold", 0xFF3CC8FAU); /* 0xAABBGGRR amber */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "gold", 0xFF3CC8FAU);   /* 0xAABBGGRR amber */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);   /* hover highlight */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U);  /* accepted state */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "violet", 0xFFE060A0U); /* effects-gallery label */
+    /* All five stock effects so <fx=name> resolves in the markup front. */
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", NT_UI_RICH_FX_ID_SHAKE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", NT_UI_RICH_FX_ID_RAINBOW);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
     nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_icons_atlas_handle);
+    /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
+    nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
     s_rich_ready = true;
 }
 
-/* The base composed style shared by both fronts: the bound font at slot R, the body text color, and
- * the inline-image material + the icons atlas as the default by-name image source. */
+/* The base composed style shared by both fronts: the four real faces in their variant slots, the body
+ * text color, and the inline-image material + the icons atlas as the default by-name image source. */
 static nt_ui_rich_style_t rich_base_style(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.font_id[0] = s_rich_font;
+    for (uint32_t i = 0; i < 4U; i++) {
+        base.font_id[i] = s_rich_font[i]; /* R/B/I/BI -> real DejaVu faces */
+    }
     base.color_abgr = showcase_pack_clay_abgr(g_current->body->color);
     base.scale = 1.0F;
     base.image_material = s_rich_image_material;
@@ -1924,42 +1949,110 @@ static nt_ui_rich_style_t rich_base_style(void) {
  * never go stale. Only valid for a string LITERAL (sizeof on a char* would measure the pointer). */
 #define RICH_TEXT_LIT(ctx, lit) nt_ui_rich_text_n((ctx), (lit), (uint32_t)(sizeof(lit) - 1U))
 
-/* Code-first push/pop builder. Demos styled multi-run text, two inline icons (gold + heart),
- * bold + (synth) italic, a wave effect that moves the text AND the gold icon TOGETHER,
- * and a clickable <link>. (The typewriter/fade_in reveal is block 3; the OBJECT run is
- * exercised by the unit tests, not this demo.) */
-static void render_rich_builder_block(nt_ui_context_t *ctx, tab_state_t *st, const nt_ui_rich_style_t *base) {
+/* Per-frame dynamic link presentation. The link reacts to LAST frame's hover + a post-click latch:
+ * both fronts read the SAME values so the builder == markup parity holds while the link still
+ * animates. color is AABBGGRR; scale is the rich push_scale multiplier; label is the visible text. */
+typedef struct {
+    uint32_t color;     /* link run color this frame */
+    float scale;        /* link run scale multiplier (hover/clicked bump) */
+    const char *label;  /* "[Accept quest]" normally; "[OK Accepted]" during the latch */
+    const char *mk_col; /* markup color NAME matching `color` (cyan/green/gold) for the <color=..> tag */
+} rich_link_look_t;
+
+static rich_link_look_t rich_link_look(const tab_state_t *st) {
+    const bool hovered = (st->rich.hovered_link == rich_link_quest());
+    const bool accepted = (st->rich.accepted_latch > 0.0F);
+    rich_link_look_t look;
+    if (accepted) {
+        look.color = 0xFF50C878U; /* green */
+        look.scale = 1.25F;
+        look.label = "[OK Accepted]";
+        look.mk_col = "green";
+    } else if (hovered) {
+        look.color = 0xFFF0C84BU; /* cyan highlight */
+        look.scale = 1.18F;
+        look.label = "[Accept quest]";
+        look.mk_col = "cyan";
+    } else {
+        look.color = 0xFFE0A040U; /* resting link blue */
+        look.scale = 1.0F;
+        look.label = "[Accept quest]";
+        look.mk_col = "gold";
+    }
+    return look;
+}
+
+/* Code-first push/pop builder. Demos: real R/B/I/BI faces, a scaled-up title word, an effects gallery
+ * (all five stock effects, one per labelled word), two inline icons, and a clickable <link> that
+ * brightens + scales on hover and flips to a green "Accepted" latch on click. The markup front below
+ * rebuilds the SAME content (same link id + look) so the two stay byte-parallel as the link animates. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear builder script: many runs, no deep nesting
+static void render_rich_builder_block(nt_ui_context_t *ctx, const tab_state_t *st, const nt_ui_rich_style_t *base) {
+    const rich_link_look_t look = rich_link_look(st);
     nt_ui_rich_begin(ctx, base);
 
-    RICH_TEXT_LIT(ctx, "Quest: slay the ");
+    /* Title line: a big scaled word + real bold / italic / bold-italic faces. */
+    nt_ui_rich_push_scale(ctx, 1.6F);
     nt_ui_rich_push_color(ctx, 0xFF3C3CDCU); /* crimson */
     nt_ui_rich_push_bold(ctx);
-    RICH_TEXT_LIT(ctx, "Crimson Drake");
+    RICH_TEXT_LIT(ctx, "DRAKE");
     nt_ui_rich_pop(ctx); /* bold */
     nt_ui_rich_pop(ctx); /* color */
-    RICH_TEXT_LIT(ctx, " and claim ");
+    nt_ui_rich_pop(ctx); /* scale */
+    RICH_TEXT_LIT(ctx, " quest -- faces: regular ");
+    nt_ui_rich_push_bold(ctx);
+    RICH_TEXT_LIT(ctx, "bold");
+    nt_ui_rich_pop(ctx); /* bold */
+    RICH_TEXT_LIT(ctx, " ");
+    nt_ui_rich_push_italic(ctx);
+    RICH_TEXT_LIT(ctx, "italic");
+    nt_ui_rich_pop(ctx); /* italic */
+    RICH_TEXT_LIT(ctx, " ");
+    nt_ui_rich_push_bold(ctx);
+    nt_ui_rich_push_italic(ctx);
+    RICH_TEXT_LIT(ctx, "bold-italic");
+    nt_ui_rich_pop(ctx); /* italic */
+    nt_ui_rich_pop(ctx); /* bold */
+    RICH_TEXT_LIT(ctx, ". ");
 
-    /* Wave-effected run: the gold heart icon + a "gold" word wave together (text + image, one effect). */
-    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
+    /* Reward run: the gold icon + a smaller "gold" word + the heart icon. */
     nt_ui_rich_push_color(ctx, 0xFF3CC8FAU); /* gold */
     nt_ui_rich_image(ctx, s_rich_gold_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
-    RICH_TEXT_LIT(ctx, " 100 gold");
+    nt_ui_rich_push_scale(ctx, 0.85F);
+    RICH_TEXT_LIT(ctx, " 100 gold ");
+    nt_ui_rich_pop(ctx); /* scale */
     nt_ui_rich_pop(ctx); /* color */
-    nt_ui_rich_pop(ctx); /* effect */
-
-    RICH_TEXT_LIT(ctx, ". Reward heart ");
     nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+    RICH_TEXT_LIT(ctx, ". Effects: ");
 
-    nt_ui_rich_push_italic(ctx);
-    RICH_TEXT_LIT(ctx, " (urgent) ");
-    nt_ui_rich_pop(ctx); /* italic */
+    /* Effects gallery: each stock effect on its own labelled word, all off the same clock. */
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
+    RICH_TEXT_LIT(ctx, "wave ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SHAKE);
+    RICH_TEXT_LIT(ctx, "shake ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_RAINBOW);
+    RICH_TEXT_LIT(ctx, "rainbow ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+    RICH_TEXT_LIT(ctx, "pulse ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
+    RICH_TEXT_LIT(ctx, "fade_in");
+    nt_ui_rich_pop(ctx);
+    RICH_TEXT_LIT(ctx, ". ");
 
+    /* Interactive link: brightens + scales on hover, green "Accepted" latch on click. */
+    nt_ui_rich_push_color(ctx, look.color);
+    nt_ui_rich_push_scale(ctx, look.scale);
     nt_ui_rich_link(ctx, rich_link_quest());
-    RICH_TEXT_LIT(ctx, "[Accept quest]");
+    nt_ui_rich_text_n(ctx, look.label, strlen(look.label));
     nt_ui_rich_link(ctx, 0U); /* end link -- link is a set/clear pending field, NOT a style push */
+    nt_ui_rich_pop(ctx);      /* scale */
+    nt_ui_rich_pop(ctx);      /* color */
 
     nt_ui_rich_end(ctx);
-    (void)st;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
@@ -1971,7 +2064,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         return;
     }
 
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: styled runs + inline icons + bold/italic + wave/typewriter effects + a clickable link.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: real bold/italic/bold-italic faces + scaled words + ALL 5 stock effects + inline icons + a clickable link.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The SAME content is authored two ways: the code-first push/pop builder, then the runtime <markup> parser.", g_current->caption);
 
     /* The block wraps at this width; narrow the window to watch the wrap re-flow (no atom escapes). */
@@ -1987,13 +2080,20 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* #region runtime markup parser */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
-    static const char markup[] = "Quest: slay the <b><color=#DC3C3C>Crimson Drake</color></b> and claim "
-                                 "<fx=wave><color=gold><img=gold/> 100 gold</color></fx>. Reward heart <img=heart/> "
-                                 "<i>(urgent)</i> <link=quest>[Accept quest]</link>";
+    /* Rebuilt each frame so the link's color/scale/label tracks hover+click identically to front 1
+     * (builder == markup parity). Frame-local stack buffer -- no heap in this render path. */
+    const rich_link_look_t look = rich_link_look(st);
+    char markup[512];
+    (void)snprintf(markup, sizeof markup,
+                   "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
+                   "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
+                   "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
+                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade_in>fade_in</fx>. "
+                   "<color=%s><scale=%.2f><link=quest>%s</link></scale></color>",
+                   look.mk_col, (double)look.scale, look.label);
     const nt_ui_rich_style_t base = rich_base_style();
     nt_ui_rich_result_t res_b = {0};
-    nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, sizeof markup - 1U, container_w, NT_RICH_ALIGN_LEFT, st->rich.time,
-                           &res_b);
+    nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, strlen(markup), container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_b);
     // #endregion
 
     /* #region typewriter reveal (fade_in stock effect: staggered per-glyph, driven by the clock) */
@@ -2011,18 +2111,25 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
-    /* Model-D link reaction: latch the clicked link id + bump the readout counter. */
+    /* Two-pass hover: THIS frame's hovered link styles NEXT frame's link run (the look was computed
+     * at the top of the frame from the stored value). Either front's hover counts -- they overlap. */
+    st->rich.hovered_link = (res_a.hovered_link != 0U) ? res_a.hovered_link : res_b.hovered_link;
+
+    /* Model-D link reaction: latch the clicked link id, arm the "Accepted" reaction, bump the counter. */
     if (res_a.clicked_link != 0U) {
         st->rich.last_link = res_a.clicked_link;
         st->rich.link_clicks++;
+        st->rich.accepted_latch = 1.2F;
     }
     if (res_b.clicked_link != 0U) {
         st->rich.last_link = res_b.clicked_link;
         st->rich.link_clicks++;
+        st->rich.accepted_latch = 1.2F;
     }
-    (void)snprintf(buf, sizeof buf, "clock: %.1fs   link hover: 0x%X   last clicked: 0x%X   clicks: %u", (double)st->rich.time, res_a.hovered_link, st->rich.last_link, st->rich.link_clicks);
+    (void)snprintf(buf, sizeof buf, "clock: %.1fs   link hover: 0x%X   last clicked: 0x%X   clicks: %u", (double)st->rich.time, st->rich.hovered_link, st->rich.last_link, st->rich.link_clicks);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover [Accept quest] (it brightens) and click it -- the counter ticks (Model D). Press T for dark/light.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover the link -- it brightens + grows; click it -- it flips to a green [OK Accepted] for ~1s and the counter ticks. Press T for palette.",
+                g_current->caption);
 }
 // #endregion
 
@@ -2820,6 +2927,9 @@ static void frame(void) {
     /* Rich-text effect clock: the GAME accumulates time from frame dt (no engine global clock)
      * and passes it into the rich-text calls -- wave/rainbow/fade_in read it. */
     s_state.rich.time += g_nt_app.dt;
+    if (s_state.rich.accepted_latch > 0.0F) {
+        s_state.rich.accepted_latch -= g_nt_app.dt; /* decay the post-click "Accepted" reaction */
+    }
 
     if (!s_atlas_bound) {
         try_bind_resources();
@@ -3004,7 +3114,8 @@ int main(int argc, char *argv[]) {
 
     /* sprite + text + base radial + 4 radial-image reveal-mode + 1 packed-region material = 8. */
     nt_material_init(&(nt_material_desc_t){.max_materials = 9});
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
+    /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
@@ -3044,6 +3155,10 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
+    s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
+    s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
+    s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
+    s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
     /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
     s_radial_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
     s_radial_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
@@ -3176,6 +3291,16 @@ int main(int argc, char *argv[]) {
         .band_count = 8,
         .measure_cache_size = 256,
     });
+    /* One handle per rich-text face; each holds its own glyph-curve atlas. */
+    for (uint32_t i = 0; i < 4U; i++) {
+        s_rich_font[i] = nt_font_create(&(nt_font_create_desc_t){
+            .curve_texture_width = 1024,
+            .curve_texture_height = 512,
+            .band_texture_height = 256,
+            .band_count = 8,
+            .measure_cache_size = 256,
+        });
+    }
 
     nt_resource_set_activate_time_budget(0);
 
