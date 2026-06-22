@@ -292,25 +292,22 @@ void nt_ui_rich_pop(nt_ui_context_t *ctx) {
 
 void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id) { rich_state(ctx)->pending_link = link_id; }
 
-void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
-    if (utf8 == NULL || len == 0U) {
+/* Finalize a TEXT run over [off, off+len) bytes ALREADY present in st->text (the bytes are not
+ * copied here -- the caller wrote them). Shared by nt_ui_rich_text_n (copies first) and the
+ * parser's direct accumulation (writes into st->text in place, then finalizes -- one copy, no
+ * 4KB stack buffer; L15). Extends the previous run when the composed style/flags/link match. */
+static void rich_text_finalize_run(nt_ui_rich_state_t *st, uint32_t off, uint32_t len) {
+    if (len == 0U) {
         return;
     }
-    nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(st->text_len + len <= NT_UI_RICH_MAX_TEXT_BYTES && "rich text buffer overflow");
-
     bool synth_italic = false;
     const nt_ui_rich_style_t *top = rich_style_top(st);
     (void)rich_resolve_font(top, &synth_italic);
     const uint8_t flags = synth_italic ? NT_UI_RICH_RUN_SYNTH_ITALIC : 0U;
     const uint16_t style_idx = rich_intern_style(st, top);
 
-    const uint32_t off = st->text_len;
-    memcpy(st->text + off, utf8, len);
-    st->text_len += (uint32_t)len;
-
     if (rich_run_extends_text(st, style_idx, flags, st->pending_link)) {
-        st->runs[st->run_count - 1].text_len += (uint32_t)len; /* same style -> extend (dedup) */
+        st->runs[st->run_count - 1].text_len += len; /* same style -> extend (dedup) */
         return;
     }
     nt_ui_rich_run_t *r = rich_new_run(st, NT_RICH_ATOM_TEXT);
@@ -318,7 +315,20 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
     r->flags = flags;
     r->link_id = st->pending_link;
     r->text_off = off;
-    r->text_len = (uint32_t)len;
+    r->text_len = len;
+}
+
+void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
+    if (utf8 == NULL || len == 0U) {
+        return;
+    }
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(st->text_len + len <= NT_UI_RICH_MAX_TEXT_BYTES && "rich text buffer overflow");
+
+    const uint32_t off = st->text_len;
+    memcpy(st->text + off, utf8, len);
+    st->text_len += (uint32_t)len;
+    rich_text_finalize_run(st, off, (uint32_t)len);
 }
 
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale) {
@@ -606,13 +616,22 @@ static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
     NT_ASSERT(state == NT_UTF8_ACCEPT && "rich markup: truncated UTF-8 sequence in text");
 }
 
-/* Flush the accumulated literal text run, validating UTF-8 first. */
-static void rich_flush_text(nt_ui_context_t *ctx, const char *buf, uint32_t *n) {
-    if (*n > 0U) {
-        rich_assert_valid_utf8(buf, *n);
-        nt_ui_rich_text_n(ctx, buf, *n);
-        *n = 0;
+/* Append one literal byte directly into the run-list text buffer (no intermediate stack copy; L15).
+ * Returns the next segment write cursor. */
+static void rich_parse_append_byte(nt_ui_rich_state_t *st, char b) {
+    NT_ASSERT(st->text_len < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
+    st->text[st->text_len++] = b;
+}
+
+/* Flush the literal segment [seg_off, st->text_len): validate UTF-8 then finalize the run over the
+ * bytes already in st->text (no second copy). Resets *seg_off to the new cursor. */
+static void rich_flush_text(nt_ui_rich_state_t *st, uint32_t *seg_off) {
+    const uint32_t n = st->text_len - *seg_off;
+    if (n > 0U) {
+        rich_assert_valid_utf8(st->text + *seg_off, n);
+        rich_text_finalize_run(st, *seg_off, n);
     }
+    *seg_off = st->text_len;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- the tokenizer: text/tag/escape branches + bounded scans
@@ -621,31 +640,29 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
     NT_ASSERT(markup != NULL || len == 0U);
 
     nt_ui_rich_begin(ctx, base);
+    nt_ui_rich_state_t *st = rich_state(ctx);
     rich_tag_stack_t ts_stack;
     ts_stack.depth = 0;
 
-    /* Literal-text run accumulator: a flush point at every tag boundary or escape resolve. */
-    char text_buf[NT_UI_RICH_MAX_TEXT_BYTES];
-    uint32_t text_n = 0;
+    /* Literal text accumulates DIRECTLY into the run-list text buffer (st->text); seg_off marks
+     * the current segment start. Flush at every tag boundary -> one copy, no 4KB stack frame (L15). */
+    uint32_t seg_off = st->text_len;
 
     size_t i = 0;
     while (i < len) {
         const char c = markup[i];
         if (c == '\\' && (i + 1U) < len) {
-            /* Escape: the next byte is literal (\< -> '<', \\ -> '\'). */
-            NT_ASSERT(text_n < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
-            text_buf[text_n++] = markup[i + 1U];
+            rich_parse_append_byte(st, markup[i + 1U]); /* escape: next byte is literal (\< -> '<') */
             i += 2U;
             continue;
         }
         if (c != '<') {
-            NT_ASSERT(text_n < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
-            text_buf[text_n++] = c;
+            rich_parse_append_byte(st, c);
             i++;
             continue;
         }
         /* A '<' begins a tag. Flush any pending literal text first. */
-        rich_flush_text(ctx, text_buf, &text_n);
+        rich_flush_text(st, &seg_off);
         /* Find the matching '>' (bounded by len -> a non-terminating '<' asserts, never loops). */
         size_t close = i + 1U;
         while (close < len && markup[close] != '>') {
@@ -688,7 +705,7 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
         i = close + 1U;
     }
     /* Flush the trailing literal text. */
-    rich_flush_text(ctx, text_buf, &text_n);
+    rich_flush_text(st, &seg_off);
     NT_ASSERT(ts_stack.depth == 0U && "rich markup: unclosed tag(s) at end of string");
     nt_ui_rich_end(ctx);
 }
