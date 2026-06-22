@@ -2732,17 +2732,20 @@ EMSCRIPTEN_KEEPALIVE void nt_test_open_input_tab(void) {
 }
 
 /* clang-format off */
-/* Decode the field buffer pointer with the module-internal UTF8ToString (in EM_JS scope), so the test
- * needs no -sEXPORTED_RUNTIME_METHODS export. The C getters are KEEPALIVE (auto-exported as _name). */
+/* Force-include UTF8ToString for the readout below. Gated with the hooks so the deployed showcase
+ * (NT_SHOWCASE_TEST_HOOKS OFF) carries no test-only dep. The C getters are KEEPALIVE (live as bare
+ * _name in the glue scope); bare access + EM_JS_DEPS is Closure-safe, no exported-methods list. */
+EM_JS_DEPS(nt_showcase_test_hooks, "$UTF8ToString")
+
 EM_JS(void, nt_test_install_hooks, (void), {
     window.__nt = {
-        get ready() { return Module['_nt_test_ready']() !== 0; },
-        input_buffer: function() { return UTF8ToString(Module['_nt_test_input_buffer']()); },
-        walk_text_cmd_count: function() { return Module['_nt_test_walk_text_cmd_count']() >>> 0; },
-        open_input_tab: function() { Module['_nt_test_open_input_tab'](); },
-        field_visible: function() { return Module['_nt_test_field_visible']() !== 0; },
+        get ready() { return _nt_test_ready() !== 0; },
+        input_buffer: function() { return UTF8ToString(_nt_test_input_buffer()); },
+        walk_text_cmd_count: function() { return _nt_test_walk_text_cmd_count() >>> 0; },
+        open_input_tab: function() { _nt_test_open_input_tab(); },
+        field_visible: function() { return _nt_test_field_visible() !== 0; },
         field_css: function() {
-            return { x: Module['_nt_test_field_css_x'](), y: Module['_nt_test_field_css_y']() };
+            return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y() };
         }
     };
 })

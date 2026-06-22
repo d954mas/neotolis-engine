@@ -1,6 +1,7 @@
 #include "clipboard/nt_clipboard.h"
 
 #include <emscripten.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Browser clipboard reads are async (Promise). We never block the frame on one:
@@ -34,22 +35,32 @@ static void cache_store(const char *utf8) {
     s_cache[n] = '\0';
 }
 
-/* KEEPALIVE bridge: the DOM paste listener (EM_JS) calls this with the pasted text. */
-EMSCRIPTEN_KEEPALIVE void nt_clipboard_web_on_paste(const char *utf8) { cache_store(utf8); }
+/* KEEPALIVE bridge: the DOM paste listener (EM_JS) hands us a stringToNewUTF8 heap pointer and
+ * transfers ownership; we cache the text and free it here. C owns the free so JS needs no _free
+ * export (free can't be force-kept as a wasm export through release DCE; malloc rides in on
+ * $stringToNewUTF8's own deps). */
+EMSCRIPTEN_KEEPALIVE void nt_clipboard_web_on_paste(char *utf8) {
+    cache_store(utf8);
+    free(utf8);
+}
 
 /* clang-format off */
+/* Force-include the runtime methods this TU's EM_JS bodies reference. EM_JS_DEPS composes across
+ * modules (each backend declares its own) and survives Closure: the symbols land in the JS support
+ * library, so the bare names below are minified consistently with the rest of the glue -- no
+ * EXPORTED_RUNTIME_METHODS list needed. $stringToNewUTF8 transitively pulls malloc. */
+EM_JS_DEPS(nt_clipboard_web, "$stringToNewUTF8,$UTF8ToString")
+
 EM_JS(void, nt_clipboard_web_register, (void), {
     document.addEventListener("paste", function(e) {
         var text = (e.clipboardData || window.clipboardData).getData("text");
-        /* Module[...] access: bare globals get renamed by Closure (release). */
-        var ptr = Module["stringToNewUTF8"](text);
-        Module["_nt_clipboard_web_on_paste"](ptr);
-        Module["_free"](ptr);
+        /* stringToNewUTF8 allocs on the C heap; nt_clipboard_web_on_paste takes ownership + frees. */
+        _nt_clipboard_web_on_paste(stringToNewUTF8(text));
     });
 })
 
 EM_JS(void, nt_clipboard_web_write, (const char *utf8), {
-    var text = Module["UTF8ToString"](utf8);
+    var text = UTF8ToString(utf8);
     if (navigator.clipboard && navigator.clipboard.writeText) {
         /* Best-effort OS write: writeText needs recent user-activation, which may be gone by the
          * frame loop, so the Promise can reject. We swallow it via .catch (no unhandled rejection);

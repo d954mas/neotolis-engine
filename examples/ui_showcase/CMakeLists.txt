@@ -113,10 +113,6 @@ if(EMSCRIPTEN)
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"
     )
-    # Authoritative emcc export superset (nt_http + nt_clipboard web backends). A per-module
-    # INTERFACE += does not survive emcc's single-`=` collapse, so the exe owns the full list.
-    nt_web_exports(ui_showcase)
-
     # Test-only: gate the window.__nt smoke-test surface (input.spec.ts hooks + bbox->CSS mapping)
     # behind a define so the deployed/public showcase ships NO test scaffolding. The browser-test CI
     # job configures with -DNT_SHOWCASE_TEST_HOOKS=ON; normal/deploy builds leave it OFF.

@@ -10,7 +10,6 @@ include(cmake/warnings.cmake)
 include(cmake/test_target.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
-include(cmake/nt_web_exports.cmake)
 
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
