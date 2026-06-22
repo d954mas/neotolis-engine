@@ -144,7 +144,7 @@ def check_log_tail(client: DevApiClient) -> None:
 
 
 def check_perf_snapshot(client: DevApiClient) -> None:
-    """2. perf.snapshot exposes the live overlay view; gpu_ms is null on this host (no GPU timer)."""
+    """2. perf.snapshot exposes the live nt_metrics current-frame snapshot; gpu_ms is null on this host (no GPU timer)."""
     snap = client.result("perf.snapshot")
     for k in ("fps", "frame_ms", "cpu_ms", "draw_calls", "user_counters"):
         assert k in snap, f"perf.snapshot missing key {k!r} (got {sorted(snap)})"
