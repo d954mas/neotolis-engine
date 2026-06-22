@@ -11,8 +11,8 @@
  * host owns measurement, this owns storage + math.
  *
  * Dev-only: NT_METRICS_ENABLED=0 (release/OFF mirror) compiles real no-op bodies,
- * so the collector ships zero footprint in release. Default ON in debug. The gate
- * is independent of NT_DEVAPI_ENABLED. */
+ * so the collector ships zero footprint in release. Defaults to NT_UI_DEBUG_TOOLS.
+ * The gate is independent of NT_DEVAPI_ENABLED. */
 #ifndef NT_METRICS_ENABLED
 #define NT_METRICS_ENABLED 1
 #endif
@@ -23,6 +23,8 @@
 #ifndef NT_METRICS_WINDOW
 #define NT_METRICS_WINDOW 256
 #endif
+/* head/count are uint16_t and count saturates AT the window, so an override past UINT16_MAX wraps. */
+_Static_assert(NT_METRICS_WINDOW > 0 && NT_METRICS_WINDOW <= UINT16_MAX, "NT_METRICS_WINDOW must be in (0, UINT16_MAX]");
 
 /* Max distinct user counters. Each carries one windowed ring + the last exact value. */
 #ifndef NT_METRICS_MAX_USER_CHANNELS

@@ -18,10 +18,6 @@ typedef struct {
     uint16_t count; /* live samples, saturates at NT_METRICS_WINDOW */
 } nt_metrics_ring_t;
 
-/* head/count are uint16_t; count saturates AT the window size, so an override past UINT16_MAX would
-   wrap silently. */
-_Static_assert(NT_METRICS_WINDOW <= UINT16_MAX, "NT_METRICS_WINDOW must fit the uint16_t ring head/count");
-
 static struct {
     nt_metrics_ring_t fixed[NT_METRICS_CHANNEL_COUNT];
 

@@ -435,7 +435,7 @@ static void test_resource_list_pack_id_filters_assets(void) {
         TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_register(pid_b, rid, 0U, (uint32_t)(100 + i)));
     }
 
-    /* Resolve pack A's raw slot index so we can assert each returned asset's "pack" field matches it. */
+    /* Resolve pack A's raw slot index so we can assert each returned asset's "pack_index" matches it. */
     uint16_t slot_a = UINT16_MAX;
     uint16_t pack_count = nt_resource_pack_count();
     for (uint16_t i = 0; i < pack_count; i++) {
@@ -455,7 +455,7 @@ static void test_resource_list_pack_id_filters_assets(void) {
     TEST_ASSERT_EQUAL_INT(count_a, cJSON_GetArraySize(assets));
     TEST_ASSERT_EQUAL_INT(count_a, cJSON_GetObjectItemCaseSensitive(r, "asset_total")->valueint);
     cJSON *a = NULL;
-    cJSON_ArrayForEach(a, assets) { TEST_ASSERT_EQUAL_INT(slot_a, cJSON_GetObjectItemCaseSensitive(a, "pack")->valueint); }
+    cJSON_ArrayForEach(a, assets) { TEST_ASSERT_EQUAL_INT(slot_a, cJSON_GetObjectItemCaseSensitive(a, "pack_index")->valueint); }
     cJSON_Delete(root);
 }
 

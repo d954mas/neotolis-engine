@@ -528,7 +528,9 @@ static void add_asset_entry(cJSON *assets, const nt_resource_asset_info_t *ai) {
     devapi_add_string(o, "resource_id", rid_hex);
     devapi_add_number(o, "type", (double)ai->type);
     devapi_add_string(o, "state", asset_state_token(ai->state));
-    devapi_add_number(o, "pack", (double)ai->pack_index);
+    /* pack_index = the raw packs[] slot (matches resource.list's pack_id filter resolution), not the
+       public pack_id; named explicitly so a bot does not mistake it for the pack's id. */
+    devapi_add_number(o, "pack_index", (double)ai->pack_index);
     cJSON_bool added = cJSON_AddItemToArray(assets, o);
     NT_ASSERT(added);
     (void)added;
@@ -688,7 +690,7 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
         .group = "resource",
         .summary = "mounted packs (id/state/priority/asset_count); flat assets[] (capped, pack_id-filtered) when include_assets; paginated with total",
         .params_shape = "{offset?:number, limit?:number, pack_id?:number, include_assets?:bool}",
-        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id:string,type,state,pack}],asset_total?:number,assets_truncated?:bool}",
+        .result_shape = "{total:number,packs:[{id,state,priority,asset_count,mounted}],assets?:[{resource_id:string,type,state,pack_index}],asset_total?:number,assets_truncated?:bool}",
         .frame_behavior = "any",
         .side_effects = "none",
     },

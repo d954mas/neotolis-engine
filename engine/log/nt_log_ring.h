@@ -9,7 +9,7 @@
  * ring. The devapi log.tail command reads it. L1-testable without devapi.
  *
  * Dev-only: NT_LOG_RING_ENABLED=0 (release/OFF mirror) compiles real no-op bodies, so
- * the ring ships zero footprint in release. Default ON in debug. */
+ * the ring ships zero footprint in release. Defaults to NT_UI_DEBUG_TOOLS. */
 #ifndef NT_LOG_RING_ENABLED
 #define NT_LOG_RING_ENABLED 1
 #endif
@@ -17,6 +17,8 @@
 #ifndef NT_LOG_RING_DEPTH
 #define NT_LOG_RING_DEPTH 1024
 #endif
+/* head/count are uint16_t and count saturates AT the depth, so an override past UINT16_MAX wraps. */
+_Static_assert(NT_LOG_RING_DEPTH > 0 && NT_LOG_RING_DEPTH <= UINT16_MAX, "NT_LOG_RING_DEPTH must be in (0, UINT16_MAX]");
 
 /* Reuse nt_log's 512-byte truncation semantics for the message buffer. */
 #ifndef NT_LOG_RING_MSG_SIZE
