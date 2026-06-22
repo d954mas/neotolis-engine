@@ -108,6 +108,9 @@ typedef struct {
     nt_ui_rich_fx_fn custom_fx[NT_UI_RICH_MAX_CUSTOM_FX];
     void *custom_fx_user[NT_UI_RICH_MAX_CUSTOM_FX];
     uint32_t custom_fx_count;
+    /* The cap must keep every custom id (BASE + index) inside a uint8_t -- ceiling enforced here, not
+     * by a dead runtime assert. */
+    _Static_assert(NT_UI_RICH_MAX_CUSTOM_FX <= (255 - NT_UI_RICH_FX_CUSTOM_BASE), "custom-fx cap exceeds the uint8_t effect-id range above NT_UI_RICH_FX_CUSTOM_BASE");
 
     /* ---- Solver output (frame scratch; consumed by emit + the test probes) ---- */
     nt_ui_rich_solved_atom_t *solved; /* NT_UI_RICH_MAX_GLYPHS cap */
@@ -301,8 +304,9 @@ static uint8_t rich_intern_custom_fx(nt_ui_rich_state_t *st, nt_ui_rich_fx_fn fn
             return (uint8_t)(NT_UI_RICH_FX_CUSTOM_BASE + i);
         }
     }
+    /* The cap ceiling is enforced at compile time (see the _Static_assert at the table), so the
+     * runtime check is just the table-overflow guard -- the id range can never exhaust first. */
     NT_ASSERT(st->custom_fx_count < NT_UI_RICH_MAX_CUSTOM_FX && "rich custom-effect table overflow");
-    NT_ASSERT(st->custom_fx_count < (255U - NT_UI_RICH_FX_CUSTOM_BASE) && "rich custom-effect id range exhausted");
     const uint32_t idx = st->custom_fx_count++;
     st->custom_fx[idx] = fn;
     st->custom_fx_user[idx] = user_data;
@@ -328,7 +332,7 @@ void nt_ui_rich_link(nt_ui_context_t *ctx, uint32_t link_id) { rich_state(ctx)->
 /* Finalize a TEXT run over [off, off+len) bytes ALREADY present in st->text (the bytes are not
  * copied here -- the caller wrote them). Shared by nt_ui_rich_text_n (copies first) and the
  * parser's direct accumulation (writes into st->text in place, then finalizes -- one copy, no
- * 4KB stack buffer; L15). Extends the previous run when the composed style/flags/link match. */
+ * 4KB stack buffer). Extends the previous run when the composed style/flags/link match. */
 static void rich_text_finalize_run(nt_ui_rich_state_t *st, uint32_t off, uint32_t len) {
     if (len == 0U) {
         return;
@@ -665,7 +669,7 @@ static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
     NT_ASSERT(state == NT_UTF8_ACCEPT && "rich markup: truncated UTF-8 sequence in text");
 }
 
-/* Append one literal byte directly into the run-list text buffer (no intermediate stack copy; L15).
+/* Append one literal byte directly into the run-list text buffer (no intermediate stack copy).
  * Returns the next segment write cursor. */
 static void rich_parse_append_byte(nt_ui_rich_state_t *st, char b) {
     NT_ASSERT(st->text_len < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
@@ -694,7 +698,7 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
     ts_stack.depth = 0;
 
     /* Literal text accumulates DIRECTLY into the run-list text buffer (st->text); seg_off marks
-     * the current segment start. Flush at every tag boundary -> one copy, no 4KB stack frame (L15). */
+     * the current segment start. Flush at every tag boundary -> one copy, no 4KB stack frame. */
     uint32_t seg_off = st->text_len;
 
     size_t i = 0;
@@ -798,7 +802,7 @@ typedef struct {
 static float rich_x_height(float ascent_px) { return ascent_px * 0.5F; }
 
 /* Count UTF-8 codepoints in [off,off+len). Drives the running per-glyph effect index so an
- * effect's phase progresses monotonically across atoms instead of repeating per word (L13). */
+ * effect's phase progresses monotonically across atoms instead of repeating per word. */
 static uint32_t rich_glyph_count(const char *text, uint32_t off, uint32_t len) {
     uint32_t n = 0;
     uint32_t state = NT_UTF8_ACCEPT;
@@ -819,7 +823,7 @@ static void rich_text_metrics(nt_font_t font, float size, float *out_asc, float 
         *out_desc = 0.0F;
         return;
     }
-    const float px = size / (float)m.units_per_em; /* same conversion as nt_ui_input.c:698 */
+    const float px = size / (float)m.units_per_em; /* px = size/units_per_em, same scale as the input field's glyph metrics */
     *out_asc = (float)m.ascent * px;
     *out_desc = -(float)m.descent * px;
 }
@@ -852,7 +856,7 @@ static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, con
  * each <= container_w, so no atom escapes the box (break-anywhere; CSS overflow-wrap:anywhere).
  *
  * O(n): the chunk width is tracked INCREMENTALLY (one per-glyph measure per codepoint), not
- * re-measured from chunk_start each step (which was O(n^2) over the word, L16). cur_w is the
+ * re-measured from chunk_start each step (which was O(n^2) over the word). cur_w is the
  * width of [chunk_start, i); prev_w is the width up to last_boundary. On commit, prev_w is the
  * committed chunk width and the new chunk re-seeds with the glyph that overflowed -- so the split
  * still lands on a codepoint boundary and no chunk exceeds container_w. */
@@ -991,7 +995,7 @@ static uint32_t rich_break_lines(rich_atom_t *atoms, uint32_t na, float containe
 
 /* An IMAGE atom's ascent/descent demand for the line, given the MIDDLE x-height reference
  * (mid_ref: line text ascent, or tallest image box when the line has no text). Placement reuses
- * the SAME mid_ref so the reserved box and the seated image agree (H1). */
+ * the SAME mid_ref so the reserved box and the seated image agree. */
 static void rich_image_metrics(const rich_atom_t *a, float mid_ref, float *io_asc, float *io_desc) {
     const float h = a->h;
     if (a->valign == NT_RICH_VALIGN_MIDDLE) {
@@ -1035,7 +1039,7 @@ static float rich_line_text_metrics(const rich_atom_t *atoms, uint32_t na, uint3
 
 /* Per-line max ascent/descent over the line's atoms + the line's pixel width. out_mid_ref is the
  * MIDDLE-valign x-height reference (see rich_line_text_metrics); PLACEMENT must reuse it so a
- * centered image seats inside its reserved box (H1). */
+ * centered image seats inside its reserved box. */
 static void rich_line_metrics(const rich_atom_t *atoms, uint32_t na, uint32_t L, float *out_asc, float *out_desc, float *out_w, float *out_mid_ref) {
     *out_asc = 0.0F;
     *out_desc = 0.0F;
@@ -1061,7 +1065,7 @@ static float rich_atom_y(const rich_atom_t *a, float baseline_y, float pen_y, fl
     }
     switch (a->valign) {
     case NT_RICH_VALIGN_MIDDLE: {
-        const float xh = rich_x_height(mid_ref); /* SAME ref rich_image_metrics reserved with (H1) */
+        const float xh = rich_x_height(mid_ref); /* SAME ref rich_image_metrics reserved with */
         return baseline_y - ((a->h * 0.5F) + (xh * 0.5F)) + a->offset_y;
     }
     case NT_RICH_VALIGN_TOP:
@@ -1141,7 +1145,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     const float align_w = (container_w > 0.0F) ? box_w : max_line_w;
 
     float pen_y = 0.0F;
-    uint32_t glyph_cursor = 0; /* running per-glyph effect index across the whole block (L13) */
+    uint32_t glyph_cursor = 0; /* running per-glyph effect index across the whole block */
     for (uint32_t L = 0; L < st->line_count; L++) {
         float asc = 0.0F;
         float desc = 0.0F;
@@ -1173,7 +1177,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             s->color = a->color;
             s->effect_id = a->effect_id;
             /* Running glyph index: the effect curve phase advances monotonically across the block
-             * (per-glyph for TEXT, one step per image/object) so adjacent words don't repeat phase (L13). */
+             * (per-glyph for TEXT, one step per image/object) so adjacent words don't repeat phase. */
             s->fx_idx = glyph_cursor;
             glyph_cursor += (a->kind == NT_RICH_ATOM_TEXT) ? rich_glyph_count(st->text, a->text_off, a->text_len) : 1U;
             s->text_off = a->text_off;
@@ -1298,7 +1302,9 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
  * prefix up to each glyph boundary), NOT a per-glyph re-measure summed up: a per-glyph re-measure
  * starts each glyph with no left neighbour, so it drops the inter-glyph kerning the solver's
  * whole-span advance includes -- the word would drift from its reserved box under a kerning font
- * (M10). prefix-differencing keeps sum(advances) == measure(whole) exactly. */
+ * prefix-differencing keeps sum(advances) == measure(whole) exactly. The prefix re-measure is O(n^2)
+ * but n is one atom (a single word/line-width fragment), so it is bounded and accepted -- a per-glyph
+ * measure would be O(n) but would drop kerning. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);
