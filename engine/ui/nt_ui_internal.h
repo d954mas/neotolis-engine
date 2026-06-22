@@ -544,4 +544,10 @@ void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */
 bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
 
+/* Map device pointer (px,py) into element `id`'s LOCAL Clay-layout coords via the element's baked
+ * transform — the SAME inverse-affine / raycast path as the standard widget hit-test. Sets the Clay
+ * current-ctx internally. false => not resolvable this frame / clipped out / 3D ray misses the plane
+ * (out args untouched). Used by rich-text link hit-test so transformed/raycast blocks hit where they draw. */
+bool nt_ui_internal_pointer_to_local(nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly);
+
 #endif /* NT_UI_INTERNAL_H */

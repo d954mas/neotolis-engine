@@ -2363,6 +2363,45 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
     return true;
 }
 
+/* Map device pointer (px,py) → element-LOCAL Clay-layout coords (lx,ly) via the element's baked
+ * transform (slot already validated by the caller). Mirrors the resolve-time path: 3D ctx unprojects
+ * through inv_view_proj + intersects the widget plane (raycast_hit); 2D ctx applies the inverse 2×2
+ * affine. Returns false only when a 3D ray misses the plane (parallel/behind); 2D always maps.
+ * Single source of truth so the standard widget hit-test AND rich-text link hit-test share it. */
+static bool map_pointer_to_local(const nt_ui_context_t *ctx, const nt_ui_baked_xform_t *b, int32_t slot, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly,
+                                 float *out_t) {
+    if (ctx->use_raycast_input) {
+        /* Inspector widgets (layer 240-255) hit-test against the ortho overlay so they hit at
+         * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
+        const float *iv = ctx->inv_view_proj;
+#if NT_UI_DEBUG_TOOLS
+        if (ctx->hit_layer[slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
+            iv = ctx->inv_inspector_view_proj;
+        }
+#else
+        (void)slot;
+#endif
+        return raycast_hit(iv, b, px, py, screen_w, screen_h, out_lx, out_ly, out_t);
+    }
+    (void)slot;
+    (void)screen_w;
+    (void)screen_h;
+    const float det = (b->m[0] * b->m[5]) - (b->m[4] * b->m[1]);
+    NT_ASSERT(det != 0.0F && "map_pointer_to_local: element has singular affine");
+    const float inv_a = b->m[5] / det;
+    const float inv_b = -b->m[4] / det;
+    const float inv_c = -b->m[1] / det;
+    const float inv_d = b->m[0] / det;
+    const float rx = px - b->m[12];
+    const float ry = py - b->m[13];
+    *out_lx = (inv_a * rx) + (inv_b * ry);
+    *out_ly = (inv_c * rx) + (inv_d * ry);
+    if (out_t != NULL) {
+        *out_t = 0.0F; /* 2D ctx has no depth */
+    }
+    return true;
+}
+
 /* out_t / out_zindex (both nullable, valid only when this returns true): out_t = world distance from
  * the near plane to the hit in 3D ctx (0 in 2D); out_zindex = the hit element's effective Clay zIndex
  * (its floating tree-root's), used for 2D front-most arbitration. */
@@ -2404,32 +2443,8 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     }
     float lx;
     float ly;
-    if (ctx->use_raycast_input) {
-        /* Inspector widgets (layer 240-255) hit-test against the ortho overlay so they hit at
-         * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
-        const float *iv = ctx->inv_view_proj;
-#if NT_UI_DEBUG_TOOLS
-        if (ctx->hit_layer[slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
-            iv = ctx->inv_inspector_view_proj;
-        }
-#endif
-        if (!raycast_hit(iv, &b, px, py, screen_w, screen_h, &lx, &ly, out_t)) {
-            return false;
-        }
-    } else {
-        const float det = (b.m[0] * b.m[5]) - (b.m[4] * b.m[1]);
-        NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
-        const float inv_a = b.m[5] / det;
-        const float inv_b = -b.m[4] / det;
-        const float inv_c = -b.m[1] / det;
-        const float inv_d = b.m[0] / det;
-        const float rx = px - b.m[12];
-        const float ry = py - b.m[13];
-        lx = (inv_a * rx) + (inv_b * ry);
-        ly = (inv_c * rx) + (inv_d * ry);
-        if (out_t != NULL) {
-            *out_t = 0.0F; /* 2D ctx has no depth */
-        }
+    if (!map_pointer_to_local(ctx, &b, slot, px, py, screen_w, screen_h, &lx, &ly, out_t)) {
+        return false;
     }
 
     const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
@@ -2446,6 +2461,52 @@ bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px,
     const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL, NULL);
     Clay_SetCurrentContext(saved);
     return hit;
+}
+
+/* Inner resolve for nt_ui_internal_pointer_to_local — caller owns the Clay current-ctx scope.
+ * Same id-resolve + staleness + clip-chain gate as ui_hit_test, then maps the pointer to local. */
+static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly) {
+    if (id == 0U) {
+        return false;
+    }
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return false;
+    }
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+        return false;
+    }
+    if (ctx->hit_generation[slot] != ctx->current_generation) {
+        return false; /* not re-declared this frame (same staleness contract as ui_hit_test) */
+    }
+    float screen_w = 0.0F;
+    float screen_h = 0.0F;
+    if (ctx->use_raycast_input) {
+        NT_ASSERT(ctx->view_proj_set && "nt_ui_internal_pointer_to_local: 3D ctx but nt_ui_set_view_proj was not called this frame");
+        screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+        screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
+    }
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {
+        return false;
+    }
+    const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
+    return map_pointer_to_local(ctx, &b, slot, px, py, screen_w, screen_h, out_lx, out_ly, NULL);
+}
+
+/* Map device pointer (px,py) into element `id`'s LOCAL Clay-layout coords (lx,ly), using the SAME
+ * baked-transform path as ui_hit_test (clip-chain gate + inverse-affine / raycast). Used by rich-text
+ * link hit-test so a transformed/raycast block resolves links where it DRAWS them, not at the flat
+ * layout rect. Returns false (and leaves out_lx/out_ly untouched) when the id isn't this-frame-resolvable,
+ * the clip chain rejects the pointer, or a 3D ray misses the block plane. */
+bool nt_ui_internal_pointer_to_local(nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_pointer_to_local: ctx must be non-NULL");
+    NT_ASSERT(out_lx != NULL && out_ly != NULL && "nt_ui_internal_pointer_to_local: out args must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool ok = pointer_to_local_resolved(ctx, id, px, py, out_lx, out_ly);
+    Clay_SetCurrentContext(saved);
+    return ok;
 }
 
 #if NT_UI_DEBUG_TOOLS

@@ -1705,7 +1705,9 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
     if (st->link_count == 0U) {
         return;
     }
-    /* Block origin from the prev-frame solved tree; first frame (not found) -> origin (0,0). */
+    /* Block origin in the block's LOCAL Clay-layout space (prev-frame solved tree, same as the standard
+     * widget hit-test reads); first frame (not found) -> origin (0,0). The link rects are local offsets
+     * from this origin, so the pointer must be mapped into the SAME local space before testing. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     const float ox = bb.found ? bb.x : 0.0F;
     const float oy = bb.found ? bb.y : 0.0F;
@@ -1715,20 +1717,29 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
         return;
     }
     const nt_pointer_t *p = &ctx->frame_pointers[0];
-    const float px = p->x;
-    const float py = p->y;
     const bool pressed = p->buttons[NT_BUTTON_LEFT].is_pressed;
     const bool released = p->buttons[NT_BUTTON_LEFT].is_released;
 
+    /* Map the pointer into the block's LOCAL layout space via the block's baked transform (inverse-affine
+     * for 2D, raycast for a 3D ctx) — the SAME path the standard widgets use. A transformed/raycast block
+     * DRAWS its links at the baked transform; this makes the hit-test match the draw. !found (block not
+     * resolvable this frame, clipped out, or a 3D ray miss) -> no link under the pointer. The flat
+     * (identity-transform, 2D-ctx) case maps 1:1, so behavior is unchanged there. */
+    float lpx = 0.0F;
+    float lpy = 0.0F;
+    const bool mapped = nt_ui_internal_pointer_to_local(ctx, id, p->x, p->y, &lpx, &lpy);
+
     /* The link under the pointer this frame (0 = none); geometric hover doubles as the press/release target. */
     uint32_t over_link = 0U;
-    for (uint32_t i = 0; i < st->link_count; i++) {
-        const nt_ui_rich_link_rect_t *lr = &st->links[i];
-        const float x0 = ox + lr->x;
-        const float y0 = oy + lr->y;
-        if (px >= x0 && px <= x0 + lr->w && py >= y0 && py <= y0 + lr->h) {
-            over_link = lr->link_id; /* topmost/first hit wins */
-            break;
+    if (mapped) {
+        for (uint32_t i = 0; i < st->link_count; i++) {
+            const nt_ui_rich_link_rect_t *lr = &st->links[i];
+            const float x0 = ox + lr->x;
+            const float y0 = oy + lr->y;
+            if (lpx >= x0 && lpx <= x0 + lr->w && lpy >= y0 && lpy <= y0 + lr->h) {
+                over_link = lr->link_id; /* topmost/first hit wins */
+                break;
+            }
         }
     }
     st->hovered_link = over_link;

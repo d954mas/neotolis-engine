@@ -877,6 +877,45 @@ static nt_ui_rich_result_t frame_link(const nt_pointer_t *p) {
  * width. "go " is 3 chars; link "HERE" is 4 chars; advance = size/2 per char at size 16 -> 8px. */
 static float link_hit_x(void) { return LINK_ROOT_X + (3.0F * 8.0F) + (2.0F * 8.0F); }
 
+/* Pure-translation transform on the block so the link DRAWS at (local + LINK_XFORM_DX/DY) on screen.
+ * Big enough that the transformed and untransformed link positions don't overlap (link rect ~32x16). */
+#define LINK_XFORM_DX 120.0F
+#define LINK_XFORM_DY 90.0F
+
+/* Same block as frame_link, but the FIXED block carries a HAS_TRANSFORM translation (offset_x/y).
+ * The block DRAWS its links shifted by (DX,DY); the hit-test must map the pointer through the block's
+ * baked transform to resolve them there. Mirrors frame_link's two-pass warm-up contract. */
+static nt_ui_rich_result_t frame_link_xform(const nt_pointer_t *p) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_ui_transform_t t = nt_ui_transform_defaults();
+    t.offset_x = LINK_XFORM_DX;
+    t.offset_y = LINK_XFORM_DY;
+    const nt_ui_element_data_t *xdata = NT_UI_DATA_XFORM(0U, &t, 1.0F);
+
+    nt_ui_rich_result_t res = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("linkx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {LINK_ROOT_X, LINK_ROOT_Y}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "go ", 3);
+        nt_ui_rich_link(s_fx.ctx, LINK_ID);
+        nt_ui_rich_text_n(s_fx.ctx, "HERE", 4);
+        nt_ui_rich_link(s_fx.ctx, 0U);
+        nt_ui_rich_text_n(s_fx.ctx, " now", 4);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("linkx_rt").id, xdata, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, &res);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    return res;
+}
+
 /* X far outside every link rect (past the whole block width). */
 static float link_miss_x(void) { return LINK_ROOT_X + 380.0F; }
 
@@ -1066,6 +1105,43 @@ static void test_link_no_union_across_gap(void) {
     nt_pointer_t over_a = make_ptr(a1_x, hy, false, false, false);
     nt_ui_rich_result_t hov_a = frame_link_gap(&over_a);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(GAP_LINK_ID, hov_a.hovered_link, "pointer over link word 1 hovers the link");
+}
+
+/* Link hit-test under a block transform: the block carries a HAS_TRANSFORM translation, so it DRAWS
+ * its links shifted by (DX,DY). The hit-test must map the pointer through the block's baked transform
+ * (the SAME path standard widgets use) -> the pointer at the TRANSFORMED screen position resolves the
+ * link, and the pointer at the old untransformed position now misses (draw == hit). */
+static void test_link_hover_honors_block_transform(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_state_clear_all(s_fx.ctx);
+
+    const float local_hx = link_hit_x();            /* link mid-x in the block's LOCAL layout space */
+    const float local_hy = LINK_ROOT_Y + 8.0F;      /* inside the single line */
+    const float draw_hx = local_hx + LINK_XFORM_DX; /* where the link is DRAWN on screen */
+    const float draw_hy = local_hy + LINK_XFORM_DY;
+
+    /* Warm-up: the two-pass bbox needs the block solved once (first frame has no prev bbox). */
+    nt_pointer_t over_draw = make_ptr(draw_hx, draw_hy, false, false, false);
+    (void)frame_link_xform(&over_draw);
+
+    /* Positive: pointer at the TRANSFORMED draw position resolves the link. */
+    nt_ui_rich_result_t hov = frame_link_xform(&over_draw);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, hov.hovered_link, "transformed block: pointer at the drawn link position hovers the link");
+
+    /* Negative: pointer at the OLD untransformed layout position now misses (it's no longer where
+     * the link is drawn). This is the bug the fix closes -- a flat-rect test would still hit here. */
+    nt_pointer_t over_flat = make_ptr(local_hx, local_hy, false, false, false);
+    nt_ui_rich_result_t miss = frame_link_xform(&over_flat);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, miss.hovered_link, "transformed block: pointer at the OLD flat-layout position misses (draw != flat-rect)");
+
+    /* Click through the transform: press+release at the drawn position -> real click. */
+    nt_pointer_t press = make_ptr(draw_hx, draw_hy, true, true, false);
+    (void)frame_link_xform(&press);
+    nt_pointer_t release = make_ptr(draw_hx, draw_hy, false, false, true);
+    nt_ui_rich_result_t clk = frame_link_xform(&release);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.clicked_link, "transformed block: press+release at the drawn link position -> click");
 }
 
 /* ===== Custom OBJECT (FX-67-04) ===== */
@@ -1512,6 +1588,7 @@ int main(void) {
     RUN_TEST(test_link_hover_and_click);
     RUN_TEST(test_link_press_a_release_b_no_click);
     RUN_TEST(test_link_no_union_across_gap);
+    RUN_TEST(test_link_hover_honors_block_transform);
     RUN_TEST(test_object_draws_at_solved_box);
     RUN_TEST(test_object_effect_and_skip);
     RUN_TEST(test_object_draw_receives_resolved_color);
