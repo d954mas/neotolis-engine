@@ -1945,15 +1945,14 @@ typedef struct {
     uint32_t icon_region;      /* resolved heart region index */
     nt_material_t material;    /* the sprite material both objects bind */
     const float *clock;        /* &s_state.rich.time -- drives progress + spin */
-    /* <obj=cube/> renders a perspective cube into its inline box WITHOUT touching glViewport: it
-     * projection-remaps the cube into the box's NDC sub-rect (VP_box = view_proj * world_mat4) and
-     * scissors to the box in physical px. draw_fn has no ctx, so the frame UBO's view_proj + the
-     * physical fb dims (for scissor px) + the enclosing scroll clip (to restore) are stashed each
-     * frame BEFORE nt_ui_walk. world_mat4 arrives per-call via the draw_fn arg. */
+    /* <obj=cube/> renders a perspective cube into its inline box WITHOUT touching glViewport OR scissor: it
+     * projection-remaps the cube into the box's NDC sub-rect (VP_box = view_proj * world_mat4); the walker's
+     * scroll-clip scissor (already active) clips it to the panel. draw_fn has no ctx, so the frame UBO's
+     * view_proj + physical fb dims (for the box->NDC aspect) are stashed each frame BEFORE nt_ui_walk.
+     * world_mat4 arrives per-call via the draw_fn arg. */
     struct {
-        float view_proj[16];                /* the frame UBO ortho (LAYOUT -> clip, logical, no Y-flip) */
-        float fb_w, fb_h;                   /* physical framebuffer dims (NDC -> scissor px) */
-        int clip_x, clip_y, clip_w, clip_h; /* enclosing scroll clip in LAYOUT px; <0 w => no clip */
+        float view_proj[16]; /* the frame UBO ortho (LAYOUT -> clip, logical, no Y-flip) */
+        float fb_w, fb_h;    /* physical framebuffer dims (box NDC half-extent -> px aspect) */
     } cube_view;
 } rich_obj_demo_t;
 static rich_obj_demo_t s_rich_obj_demo;
@@ -2083,52 +2082,15 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
     glm_quatv(q, t * 1.2F, (vec3){0.3F, 1.0F, 0.2F});
     const float rot[4] = {q[0], q[1], q[2], q[3]};
 
-    /* Scissor to the box in PHYSICAL px: the full-screen viewport is the whole framebuffer, so NDC -> px
-     * is the plain [-1,1] -> [0,fb] map (no viewport offset). GL y is bottom-up; box bottom (NDC) is the
-     * smaller y, so gl_bottom uses `bottom`. */
-    float sx = (left + 1.0F) * 0.5F * d->cube_view.fb_w;
-    float sright = (right + 1.0F) * 0.5F * d->cube_view.fb_w;
-    float gl_bottom = (bottom + 1.0F) * 0.5F * d->cube_view.fb_h;
-    float gl_top = (top + 1.0F) * 0.5F * d->cube_view.fb_h;
-    int scx = (int)sx;
-    int scy = (int)gl_bottom;
-    int scw = (int)(sright - sx);
-    int sch = (int)(gl_top - gl_bottom);
-    if (scw <= 0 || sch <= 0) {
-        return;
-    }
-
-    nt_gfx_set_scissor(scx, scy, scw, sch);
-    nt_gfx_set_scissor_enabled(true);
-
+    /* NO scissor manipulation: the clip-space remap already confines the cube to its box NDC sub-rect, and
+     * the walker's enclosing scroll-clip scissor is still active during the custom emit (emit_custom does
+     * not touch it) -> the cube is clipped to the panel for free. Touching scissor here corrupted the
+     * walker's clip for everything drawn after the cube. Viewport is also untouched (no leak). */
     nt_shape_renderer_set_depth(true);
     nt_shape_renderer_set_vp((const float *)cube_vp);
     /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text. */
     nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.0F, 1.0F, 1.0F}, rot, color);
-    nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW (scissored to the box) */
-
-    /* RESTORE scissor only (viewport untouched -> nothing to restore). Re-apply the enclosing scroll clip
-     * (the Rich tab content lives inside s_id_stage_scroll's clip; emit_custom does NOT save/restore scissor)
-     * or disable scissor if there is none. DO NOT call set_viewport. */
-    if (d->cube_view.clip_w > 0) {
-        /* clip rect is LAYOUT (logical) px; map through view_proj+identity world like the box does so the
-         * physical scissor matches the walker's. Reuse the ortho directly: NDC.x = vp*x. */
-        vec4 cl_tl;
-        vec4 cl_br;
-        glm_mat4_mulv((vec4 *)d->cube_view.view_proj, (vec4){(float)d->cube_view.clip_x, (float)d->cube_view.clip_y, 0.0F, 1.0F}, cl_tl);
-        glm_mat4_mulv((vec4 *)d->cube_view.view_proj, (vec4){(float)(d->cube_view.clip_x + d->cube_view.clip_w), (float)(d->cube_view.clip_y + d->cube_view.clip_h), 0.0F, 1.0F}, cl_br);
-        /* ortho has no Y-flip, so clip_y(top) maps to LARGER ndc.y; GL bottom uses the smaller -> cl_br. */
-        const float cl_left = (cl_tl[0] + 1.0F) * 0.5F * d->cube_view.fb_w;
-        const float cl_right = (cl_br[0] + 1.0F) * 0.5F * d->cube_view.fb_w;
-        const float cl_top_ndc = cl_tl[1];
-        const float cl_bot_ndc = cl_br[1];
-        const float cl_gl_bot = ((cl_top_ndc < cl_bot_ndc ? cl_top_ndc : cl_bot_ndc) + 1.0F) * 0.5F * d->cube_view.fb_h;
-        const float cl_gl_top = ((cl_top_ndc > cl_bot_ndc ? cl_top_ndc : cl_bot_ndc) + 1.0F) * 0.5F * d->cube_view.fb_h;
-        nt_gfx_set_scissor((int)cl_left, (int)cl_gl_bot, (int)(cl_right - cl_left), (int)(cl_gl_top - cl_gl_bot));
-        nt_gfx_set_scissor_enabled(true);
-    } else {
-        nt_gfx_set_scissor_enabled(false);
-    }
+    nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
 }
 
 /* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
@@ -3393,23 +3355,13 @@ static void frame(void) {
 
         nt_ui_end(s_ctx);
 
-        /* Stash what the <obj=cube/> draw_fn needs (it has no ctx). The cube REMAPS into its box NDC via
-         * view_proj (the frame UBO ortho) * world_mat4 (per-call arg) and scissors in physical px (fb dims);
-         * clip = the enclosing stage_scroll clip (the Rich tab content lives inside it) so the cube restores
-         * it after its scissored draw instead of leaving scissor off. NO viewport touch -> no walk_vp stash. */
+        /* Stash what the <obj=cube/> draw_fn needs (it has no ctx): view_proj (the frame UBO ortho) to remap
+         * the cube into its box NDC (VP_box = view_proj * world_mat4) + the physical fb dims for the box->NDC
+         * aspect. NO viewport/scissor touch in the draw -> nothing else to stash. */
         {
             memcpy(s_rich_obj_demo.cube_view.view_proj, vp, 64);
             s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
             s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
-            const nt_ui_bbox_t clip = nt_ui_get_bbox(s_ctx, s_id_stage_scroll);
-            if (clip.found) {
-                s_rich_obj_demo.cube_view.clip_x = (int)clip.x;
-                s_rich_obj_demo.cube_view.clip_y = (int)clip.y;
-                s_rich_obj_demo.cube_view.clip_w = (int)clip.width;
-                s_rich_obj_demo.cube_view.clip_h = (int)clip.height;
-            } else {
-                s_rich_obj_demo.cube_view.clip_w = -1; /* no clip -> restore scissor disabled */
-            }
         }
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
