@@ -1233,6 +1233,13 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
         } else { /* NT_RICH_ATOM_OBJECT: reserve the box via the run's measure_fn. */
             NT_ASSERT(run->object_measure != NULL && "rich object: measure_fn must be non-NULL");
             const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
+            /* measure_fn is game-trusted: fail early on a garbage box. */
+            NT_ASSERT(isfinite(m.width) && isfinite(m.height) && isfinite(m.ascent) && m.width >= 0.0F && m.height >= 0.0F && "rich object: measure_fn must return finite, non-negative width/height");
+            /* HARD clamp (survives NT_ASSERT OFF): a NaN/negative box must not reach rich_break_lines
+             * (wrap), ascent/descent accumulation, or the Clay FIXED block size. */
+            const float obj_w = (isfinite(m.width) && m.width >= 0.0F) ? m.width : 0.0F;
+            const float obj_h = (isfinite(m.height) && m.height >= 0.0F) ? m.height : 0.0F;
+            const float obj_asc = isfinite(m.ascent) ? m.ascent : 0.0F;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
             if (n >= cap) {
                 break; /* HARD cap (survives NT_ASSERT OFF): no write past out[] */
@@ -1240,10 +1247,10 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
             a->kind = NT_RICH_ATOM_OBJECT;
-            a->advance = m.width;
-            a->w = m.width;
-            a->h = m.height;
-            a->asc = m.ascent; /* above-baseline for valign=baseline placement */
+            a->advance = obj_w;
+            a->w = obj_w;
+            a->h = obj_h;
+            a->asc = obj_asc; /* above-baseline for valign=baseline placement */
             a->valign = NT_RICH_VALIGN_BASELINE;
             a->color = style->color_abgr;
             a->effect_id = style->effect_id;
