@@ -11,6 +11,7 @@
  * the global input char ring (nt_input_buffer_char); physical keys via the
  * set_key/poll edge path. */
 
+#include <math.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1152,7 +1153,8 @@ static void test_state_speed_eases_bg_color(void) {
         (void)field_frame(&IDLE_PTR, id, eb, sizeof eb, true, NULL);
         const Clay_RenderCommand *r_idle = find_field_bg_rect(s_fx.ctx);
         TEST_ASSERT_NOT_NULL(r_idle);
-        TEST_ASSERT_EQUAL_INT_MESSAGE((int)idle_r, (int)r_idle->renderData.rectangle.backgroundColor.r, "settled unfocused bg must be the idle skin color");
+        /* OKLab round-trip (sRGB->linear->cbrt->back) is exact only to ~1 unit on a settled value. */
+        TEST_ASSERT_TRUE_MESSAGE(fabsf(r_idle->renderData.rectangle.backgroundColor.r - idle_r) <= 1.5F, "settled unfocused bg must be the idle skin color");
 
         /* Press to focus: the slot now eases from idle toward focused. */
         nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
@@ -1167,52 +1169,109 @@ static void test_state_speed_eases_bg_color(void) {
     s_style.state_speed = 0.0F; /* restore the default for any later test sharing s_style */
 }
 
-/* ---- C8: state_speed packs raw 0-255 colour channels into the cross-fade anim lanes (off_xyz/opacity,
- * rot_xyz/tint_t). Driving a focus transition must NOT trip the anim target asserts/clamps on those
- * 0-255 values: the eased bg/border colour readback stays in [0,255] across the ease. ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_state_speed_anim_lane_bounds(void) {
-    char buf[8] = {0};
-    const uint32_t id = nt_ui_id("lanes");
-    /* A border + a bright skin so the eased channels exercise the full 0-255 range, not just greys.
-     * border_width>0 + non-zero border_color enables the border cross-fade lane (rot_xyz/tint_t). */
-    s_style.state_speed = 6.0F;
-    s_style.border_width = 2.0F;
-    s_style.skin[NT_UI_INPUT_IDLE].bg_color = 0xFF202020U;
-    s_style.skin[NT_UI_INPUT_IDLE].border_color = 0xFF404040U;
-    s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFF0E0D0U;     /* bright -> high channel values */
-    s_style.skin[NT_UI_INPUT_FOCUSED].border_color = 0xFFFFC080U; /* near-255 border channels */
+/* Reference OKLab math (mirrors engine/ui/nt_ui_input.c) so the test can compute the EXPECTED
+ * perceptual interpolant independently of the engine and prove it != the naive sRGB midpoint.
+ * Per-term parens are omitted on the 3x3 matrix multiplies (matrix form is the readable shape here). */
+static float t_s2l(float c) { return (c <= 0.04045F) ? (c / 12.92F) : powf((c + 0.055F) / 1.055F, 2.4F); }
+static float t_l2s(float c) { return (c <= 0.0031308F) ? (c * 12.92F) : ((1.055F * powf(c, 1.0F / 2.4F)) - 0.055F); }
+static float t_clamp01(float c) {
+    if (c < 0.0F) {
+        return 0.0F;
+    }
+    return (c > 1.0F) ? 1.0F : c;
+}
 
-    /* Settle unfocused, then focus and ease for several frames; every frame's eased bg+border colour
-     * must stay within [0,255] (no negative or >255 channel leaks from the 0-255 lane packing). */
+typedef struct {
+    float l, a, b;
+} t_oklab;
+
+// NOLINTBEGIN(readability-math-missing-parentheses)
+
+static t_oklab t_to_oklab(uint32_t packed) {
+    const float r = t_s2l((float)(packed & 0xFFU) / 255.0F);
+    const float g = t_s2l((float)((packed >> 8) & 0xFFU) / 255.0F);
+    const float b = t_s2l((float)((packed >> 16) & 0xFFU) / 255.0F);
+    const float lc = 0.4122214708F * r + 0.5363325363F * g + 0.0514459929F * b;
+    const float mc = 0.2119034982F * r + 0.6806995451F * g + 0.1073969566F * b;
+    const float sc = 0.0883024619F * r + 0.2817188376F * g + 0.6299787005F * b;
+    const float L = cbrtf(lc);
+    const float M = cbrtf(mc);
+    const float S = cbrtf(sc);
+    return (t_oklab){
+        .l = 0.2104542553F * L + 0.7936177850F * M - 0.0040720468F * S,
+        .a = 1.9779984951F * L - 2.4285922050F * M + 0.4505937099F * S,
+        .b = 0.0259040371F * L + 0.7827717662F * M - 0.8086757660F * S,
+    };
+}
+
+static void t_from_oklab(t_oklab o, float *R, float *G, float *B) {
+    const float l_ = o.l + 0.3963377774F * o.a + 0.2158037573F * o.b;
+    const float m_ = o.l - 0.1055613458F * o.a - 0.0638541728F * o.b;
+    const float s_ = o.l - 0.0894841775F * o.a - 1.2914855480F * o.b;
+    const float l = l_ * l_ * l_;
+    const float m = m_ * m_ * m_;
+    const float s = s_ * s_ * s_;
+    float r = 4.0767416621F * l - 3.3077115913F * m + 0.2309699292F * s;
+    float g = -1.2684380046F * l + 2.6097574011F * m - 0.3413193965F * s;
+    float b = -0.0041960863F * l - 0.7034186147F * m + 1.7076147010F * s;
+    *R = t_clamp01(t_l2s(r)) * 255.0F;
+    *G = t_clamp01(t_l2s(g)) * 255.0F;
+    *B = t_clamp01(t_l2s(b)) * 255.0F;
+}
+// NOLINTEND(readability-math-missing-parentheses)
+
+/* ---- The eased bg midpoint is the OKLab interpolation of from/to, NOT the naive sRGB midpoint. A
+ * single ease step with k = state_speed*frame_dt = 0.5 lands cur exactly halfway: from + (to-from)*0.5
+ * in OKLab. The from/to pair (saturated blue -> yellow) has OKLab-mid clearly off the sRGB-mid on every
+ * channel, so the rendered rect must match the OKLab-mid and differ from the sRGB-mid. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_oklab_midpoint(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("oklab_mid");
+    /* frame_dt is 0.016 (field_frame); state_speed*dt = 0.5 -> first eased frame == exact OKLab mid. */
+    s_style.state_speed = 0.5F / 0.016F;
+    const uint32_t from = 0xFFE04020U; /* saturated blue (0xAABBGGRR: r=0x20 g=0x40 b=0xE0) */
+    const uint32_t to = 0xFF20C0E0U;   /* saturated yellow (r=0xE0 g=0xC0 b=0x20) */
+    s_style.skin[NT_UI_INPUT_IDLE].bg_color = from;
+    s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = to;
+
+    /* Settle unfocused so the cell holds the idle (from) colour. */
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+
+    /* Focus: the first eased frame steps cur from `from` toward `to` by k=0.5 -> exact OKLab midpoint. */
     nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(rc);
+    const Clay_Color got = rc->renderData.rectangle.backgroundColor;
 
-    for (int frame = 0; frame < 12; ++frame) {
-        (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
-        const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
-        TEST_ASSERT_NOT_NULL(rc);
-        const Clay_Color bg = rc->renderData.rectangle.backgroundColor;
-        TEST_ASSERT_TRUE_MESSAGE(bg.r >= 0.0F && bg.r <= 255.0F, "eased bg.r within [0,255]");
-        TEST_ASSERT_TRUE_MESSAGE(bg.g >= 0.0F && bg.g <= 255.0F, "eased bg.g within [0,255]");
-        TEST_ASSERT_TRUE_MESSAGE(bg.b >= 0.0F && bg.b <= 255.0F, "eased bg.b within [0,255]");
-        TEST_ASSERT_TRUE_MESSAGE(bg.a >= 0.0F && bg.a <= 255.0F, "eased bg.a within [0,255]");
-        /* The border colour rides the rot_xyz/tint_t lanes; if those leaked out of range the anim
-         * target asserts would already have trapped before we reach this readback (NT_ASSERT_FULL). */
-    }
+    /* Expected OKLab midpoint, computed independently. */
+    const t_oklab of = t_to_oklab(from);
+    const t_oklab ot = t_to_oklab(to);
+    const t_oklab mid = {(of.l + ot.l) * 0.5F, (of.a + ot.a) * 0.5F, (of.b + ot.b) * 0.5F};
+    float er = 0.0F;
+    float eg = 0.0F;
+    float eb = 0.0F;
+    t_from_oklab(mid, &er, &eg, &eb);
+    /* OKLab mid ~ (120.4, 143.8, 166.7) vs sRGB mid (128,128,128). The rendered rect matches OKLab. */
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.r - er) <= 1.5F, "eased bg.r matches the OKLab midpoint");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.g - eg) <= 1.5F, "eased bg.g matches the OKLab midpoint");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.b - eb) <= 1.5F, "eased bg.b matches the OKLab midpoint");
+
+    /* And it is NOT the naive sRGB midpoint: blue channel differs by ~39 units (167 vs 128). */
+    const float srgb_mid_b = 128.0F;
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.b - srgb_mid_b) > 10.0F, "OKLab midpoint must differ from the naive sRGB midpoint (no muddy lerp)");
 
     init_style(); /* restore the shared style for later tests */
 }
 
-/* ---- C8: re-solving the SAME field across frames with state_speed>0 reuses ONE anim slot -- no
- * per-frame slot leak or collision growth. The anim collision counter (probe) must not grow once the
- * slot is warm, and the eased bg colour moves MONOTONICALLY toward the focused target (proving the slot
- * persists its in-flight channels across frames rather than re-snapping). ---- */
+/* ---- The colour-ease cell persists across frames: ONE cell is reused (state-pool occupancy does not
+ * grow per frame once warm) and the eased bg.r moves MONOTONICALLY toward the focused target, staying
+ * in [0,255] -- proving the cell retains its in-flight OKLab colour rather than re-snapping. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_state_speed_single_slot_reuse(void) {
+static void test_state_speed_cell_reuse(void) {
     char buf[8] = {0};
     const uint32_t id = nt_ui_id("reuse");
     s_style.state_speed = 4.0F; /* slow ease so several intermediate frames are observable */
@@ -1220,13 +1279,13 @@ static void test_state_speed_single_slot_reuse(void) {
     const float focused_r = (float)0xD0;
     s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFD0D0D0U;
 
-    /* Warm: two settled unfocused frames create the slot once. */
+    /* Warm: two settled unfocused frames create the cell once. */
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
-    const uint32_t coll_warm = nt_ui_get_anim_collision_count(s_fx.ctx);
+    const uint32_t slots_warm = nt_ui_state_used_slots(s_fx.ctx);
 
-    /* Focus, then ease over many frames. The slot must be REUSED each frame (no new collision), and
-     * the eased bg.r must be non-decreasing toward the focused target (monotone ease == persisted slot). */
+    /* Focus, then ease over many frames. The cell must be REUSED each frame (occupancy flat), and the
+     * eased bg.r must be non-decreasing toward the focused target (monotone ease == persisted cell). */
     nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
@@ -1237,13 +1296,14 @@ static void test_state_speed_single_slot_reuse(void) {
         const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
         TEST_ASSERT_NOT_NULL(rc);
         const float r = rc->renderData.rectangle.backgroundColor.r;
-        TEST_ASSERT_TRUE_MESSAGE(r >= prev_r - 0.5F, "eased bg.r is monotone toward the focused target (slot persisted, not re-snapped)");
+        TEST_ASSERT_TRUE_MESSAGE(r >= 0.0F && r <= 255.0F, "eased bg.r stays in [0,255]");
+        TEST_ASSERT_TRUE_MESSAGE(r >= prev_r - 0.5F, "eased bg.r is monotone toward the focused target (cell persisted, not re-snapped)");
         TEST_ASSERT_TRUE_MESSAGE(r <= focused_r + 0.5F, "eased bg.r never overshoots the focused target");
         prev_r = r;
     }
 
-    /* The whole focus-and-ease run reused ONE slot: the collision counter did not grow per frame. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(coll_warm, nt_ui_get_anim_collision_count(s_fx.ctx), "re-solving the field reuses one anim slot (no per-frame slot leak / collision growth)");
+    /* The whole focus-and-ease run reused ONE cell: state-pool occupancy did not grow per frame. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(slots_warm, nt_ui_state_used_slots(s_fx.ctx), "re-solving the field reuses one colour-ease cell (no per-frame cell leak / occupancy growth)");
 
     init_style(); /* restore the shared style */
 }
@@ -1418,8 +1478,8 @@ int main(void) {
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
     RUN_TEST(test_state_speed_eases_bg_color);
-    RUN_TEST(test_state_speed_anim_lane_bounds);
-    RUN_TEST(test_state_speed_single_slot_reuse);
+    RUN_TEST(test_state_speed_oklab_midpoint);
+    RUN_TEST(test_state_speed_cell_reuse);
     RUN_TEST(test_edit_step_insert_caret_on_codepoint_boundary);
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
