@@ -838,12 +838,44 @@ static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
     NT_ASSERT(state == NT_UTF8_ACCEPT && "rich markup: truncated UTF-8 sequence in text");
 }
 
+/* Expected total byte length of the UTF-8 sequence a lead byte begins (0 = not a lead byte). */
+static uint32_t rich_utf8_seq_len(uint8_t lead) {
+    if (lead < 0x80U) {
+        return 1U;
+    }
+    if ((lead & 0xE0U) == 0xC0U) {
+        return 2U;
+    }
+    if ((lead & 0xF0U) == 0xE0U) {
+        return 3U;
+    }
+    if ((lead & 0xF8U) == 0xF0U) {
+        return 4U;
+    }
+    return 0U; /* continuation byte or invalid lead */
+}
+
+/* Largest m <= n such that buf[0,m) ends on a COMPLETE UTF-8 codepoint boundary. A buffer-full
+ * truncation can sever a multi-byte sequence mid-codepoint; trimming the partial tail keeps the
+ * flushed run valid UTF-8 (else rich_assert_valid_utf8 TRAPS in FULL / feeds invalid bytes in OFF). */
+static uint32_t rich_utf8_complete_prefix(const char *buf, uint32_t n) {
+    uint32_t m = n;
+    while (m > 0U && ((uint8_t)buf[m - 1U] & 0xC0U) == 0x80U) {
+        m--; /* back over trailing continuation bytes to the lead */
+    }
+    if (m == 0U) {
+        return n; /* all continuation bytes (no lead in range) -> let the validator catch it */
+    }
+    const uint32_t expect = rich_utf8_seq_len((uint8_t)buf[m - 1U]);
+    const uint32_t have = n - (m - 1U);
+    return (expect != 0U && have < expect) ? (m - 1U) : n; /* incomplete trailing sequence -> drop it whole */
+}
+
 /* Append one literal byte directly into the run-list text buffer (no intermediate stack copy).
- * Returns the next segment write cursor. */
+ * Hitting the shared 4KB cap on long UNTRUSTED markup is graceful truncation, not a dev error: drop
+ * the byte (no write past text[NT_UI_RICH_MAX_TEXT_BYTES]). rich_flush_text trims any partial trailing
+ * codepoint a cap-truncation may have left, so a severed multi-byte sequence never reaches the validator. */
 static void rich_parse_append_byte(nt_ui_rich_state_t *st, char b) {
-    NT_ASSERT(st->text_len < NT_UI_RICH_MAX_TEXT_BYTES && "rich markup: text run overflow");
-    /* HARD cap (survives NT_ASSERT OFF): one byte per literal char of untrusted markup -- drop the
-     * byte once the shared buffer is full rather than write past text[NT_UI_RICH_MAX_TEXT_BYTES]. */
     if (st->text_len >= NT_UI_RICH_MAX_TEXT_BYTES) {
         return;
     }
@@ -853,7 +885,15 @@ static void rich_parse_append_byte(nt_ui_rich_state_t *st, char b) {
 /* Flush the literal segment [seg_off, st->text_len): validate UTF-8 then finalize the run over the
  * bytes already in st->text (no second copy). Resets *seg_off to the new cursor. */
 static void rich_flush_text(nt_ui_rich_state_t *st, uint32_t *seg_off) {
-    const uint32_t n = st->text_len - *seg_off;
+    uint32_t n = st->text_len - *seg_off;
+    /* Drop a partial trailing codepoint a buffer-full truncation may have severed: rewind text_len so
+     * the next segment also starts on a clean boundary (only shrinks when AT the cap -- the common
+     * case is a no-op). The validator below then never sees a lone lead/continuation byte. */
+    const uint32_t kept = rich_utf8_complete_prefix(st->text + *seg_off, n);
+    if (kept < n) {
+        st->text_len = *seg_off + kept;
+        n = kept;
+    }
     if (n > 0U) {
         rich_assert_valid_utf8(st->text + *seg_off, n);
         rich_text_finalize_run(st, *seg_off, n);
@@ -1715,6 +1755,8 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
     if (ctx->frame_pointer_count == 0U) {
         return;
     }
+    /* Links hit-test the PRIMARY pointer only (frame_pointers[0]); multi-pointer link interaction
+     * (a 2nd touch hovering/clicking a different link) is not supported. */
     const nt_pointer_t *p = &ctx->frame_pointers[0];
     const bool pressed = p->buttons[NT_BUTTON_LEFT].is_pressed;
     const bool released = p->buttons[NT_BUTTON_LEFT].is_released;

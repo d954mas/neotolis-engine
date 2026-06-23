@@ -33,7 +33,15 @@ const server = createServer(async (req, res) => {
   res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
 
-  let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  // Malformed percent-encoding (e.g. /%ZZ) throws URIError; answer 400 instead of crashing the server.
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  } catch {
+    res.statusCode = 400;
+    res.end('bad request');
+    return;
+  }
   if (urlPath === '/') urlPath = '/index.html';
   // Contain the path inside ROOT (no traversal). Compare against ROOT + sep so a SIBLING dir whose
   // name merely EXTENDS ROOT as a prefix (e.g. "<root>-evil") can't pass; allow exact ROOT too.
