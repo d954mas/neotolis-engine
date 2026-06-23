@@ -5,7 +5,7 @@
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
-#if NT_INTROSPECT_ENABLED
+#if NT_INTROSPECT_ENABLED || NT_INTROSPECT_WRITE_ENABLED
 #include "introspect/nt_introspect.h"
 #endif
 
@@ -53,6 +53,51 @@ static void transform_describe(nt_entity_t entity, nt_introspect_sink *s) {
 }
 #endif
 
+#if NT_INTROSPECT_WRITE_ENABLED
+/* The writable field set IS this ladder's accepted keys: world_matrix has no case (derived,
+   read-only) -> falls through to bad_params. Each write goes through a dirty-setting setter. */
+static bool transform_apply(nt_entity_t entity, const char *key, const nt_write_value *v, bool dry_run, const char **err_msg) {
+    if (strcmp(key, "position") == 0) {
+        if (v->kind != NT_WV_VEC3) {
+            *err_msg = "transform.position expects 3 numbers";
+            return false;
+        }
+        if (!dry_run) {
+            nt_transform_comp_set_position(entity, v->as.v[0], v->as.v[1], v->as.v[2]);
+        }
+        return true;
+    }
+    if (strcmp(key, "scale") == 0) {
+        if (v->kind != NT_WV_VEC3) {
+            *err_msg = "transform.scale expects 3 numbers";
+            return false;
+        }
+        if (!dry_run) {
+            nt_transform_comp_set_scale(entity, v->as.v[0], v->as.v[1], v->as.v[2]);
+        }
+        return true;
+    }
+    if (strcmp(key, "rotation") == 0) {
+        if (v->kind != NT_WV_VEC4) {
+            *err_msg = "transform.rotation expects 4 numbers";
+            return false;
+        }
+        /* Reject a degenerate quaternion BEFORE set_rotation: cglm normalize snaps ||q||~0 to identity. */
+        float n2 = (v->as.v[0] * v->as.v[0]) + (v->as.v[1] * v->as.v[1]) + (v->as.v[2] * v->as.v[2]) + (v->as.v[3] * v->as.v[3]);
+        if (n2 <= 1e-12F) {
+            *err_msg = "transform.rotation must be a non-zero quaternion";
+            return false;
+        }
+        if (!dry_run) {
+            nt_transform_comp_set_rotation(entity, v->as.v);
+        }
+        return true;
+    }
+    *err_msg = "unknown or read-only field for transform";
+    return false;
+}
+#endif
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
@@ -80,6 +125,9 @@ nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
         .on_destroy = transform_on_destroy,
 #if NT_INTROSPECT_ENABLED
         .describe = transform_describe,
+#endif
+#if NT_INTROSPECT_WRITE_ENABLED
+        .apply = transform_apply,
 #endif
     });
 
@@ -128,6 +176,35 @@ bool *nt_transform_comp_dirty(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_dirty[idx];
+}
+
+/* ---- Field mutation (the safe write path: maintains dirty so the world matrix recomputes) ---- */
+
+void nt_transform_comp_set_position(nt_entity_t entity, float x, float y, float z) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    s_trs[idx].position[0] = x;
+    s_trs[idx].position[1] = y;
+    s_trs[idx].position[2] = z;
+    s_dirty[idx] = true;
+}
+
+void nt_transform_comp_set_scale(nt_entity_t entity, float x, float y, float z) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    s_trs[idx].scale[0] = x;
+    s_trs[idx].scale[1] = y;
+    s_trs[idx].scale[2] = z;
+    s_dirty[idx] = true;
+}
+
+void nt_transform_comp_set_rotation(nt_entity_t entity, const float q[4]) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    /* Caller rejects a degenerate q first: glm_quat_normalize_to snaps ||q||~0 to identity silently. */
+    versor src = {q[0], q[1], q[2], q[3]};
+    glm_quat_normalize_to(src, s_trs[idx].rotation);
+    s_dirty[idx] = true;
 }
 
 const float *nt_transform_comp_world_matrix(nt_entity_t entity) {

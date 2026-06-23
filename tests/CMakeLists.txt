@@ -450,6 +450,9 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_OBS)
             list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_OBS=1)
         endif()
+        if(NT_DEVAPI_GROUP_ENTITY_WRITE)
+            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_ENTITY_WRITE=1)
+        endif()
 
         # When the obs group is compiled into nt_devapi, the registry's nt_devapi_register_obs() call
         # pulls nt_devapi_obs.c, which references the obs L1 providers (log ring/metrics/entity/
@@ -576,6 +579,26 @@ if(NOT EMSCRIPTEN)
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_OBS=1
             )
             nt_setup_test_target(test_devapi_obs)
+        endif()
+
+        # L2 entity-write group (entity.set) via submit(): writes through the component apply() hooks.
+        # Links the REAL transform/drawable (apply hooks + setters) + nt_introspect (nt_write_value type)
+        # + nt_entity. nt_devapi also carries the obs group here, so its providers (metrics / log_ring /
+        # resource) must resolve too. Consumer-before-provider: nt_devapi first, providers next, core/log last.
+        if(NT_DEVAPI_GROUP_ENTITY_WRITE)
+            add_executable(test_devapi_entity_write unit/test_devapi_entity_write.c)
+            target_link_libraries(test_devapi_entity_write PRIVATE
+                nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
+                nt_log_ring nt_metrics
+                nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
+                nt_resource nt_math nt_shared
+                nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
+                nt_core nt_log nt_hash unity
+            )
+            target_compile_definitions(test_devapi_entity_write PRIVATE
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_ENTITY_WRITE=1
+            )
+            nt_setup_test_target(test_devapi_entity_write)
         endif()
     endif()
 

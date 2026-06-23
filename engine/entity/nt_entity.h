@@ -45,16 +45,28 @@ _Static_assert(NT_MAX_COMP_STORAGES <= 0xFF, "nt_comp_id_t (uint8_t) must index 
 typedef bool (*nt_comp_has_fn)(nt_entity_t entity);
 typedef void (*nt_comp_on_destroy_fn)(nt_entity_t entity);
 
-/* Forward decl of the dev-only introspection sink (defined in introspect/nt_introspect.h). Lets a
-   component register an optional self-describe without entity taking a dependency on introspect. */
+/* Forward decls of the dev-only introspection types (defined in introspect/nt_introspect.h). Let a
+   component register an optional self-describe (read) + apply (write) without entity depending on
+   introspect or devapi. */
 typedef struct nt_introspect_sink nt_introspect_sink;
 typedef void (*nt_comp_describe_fn)(nt_entity_t entity, nt_introspect_sink *sink);
+typedef struct nt_write_value nt_write_value;
+/* Apply one already-typed value to writable field `key` THROUGH the component's real setter (sets
+   dirty / repacks / normalizes). `dry_run` validates everything (kind/arity/range/semantic) but does
+   NOT mutate — it backs whole-or-nothing batch writes (validate all, then apply all). Returns false +
+   sets *err_msg (devapi maps it to bad_params) on an unknown/read-only key, a kind/arity mismatch, or
+   a range/semantic reject. The accepted-key set IS the component's writable field set — a key with no
+   case falls through to bad_params, which is how "writable is a subset of readable" and
+   "id/world_matrix never writable" are enforced structurally. Populate ONLY under
+   #if NT_INTROSPECT_WRITE_ENABLED; NULL = component is read-only. */
+typedef bool (*nt_comp_apply_fn)(nt_entity_t entity, const char *key, const nt_write_value *v, bool dry_run, const char **err_msg);
 
 typedef struct {
     const char *name;
     nt_comp_has_fn has;
     nt_comp_on_destroy_fn on_destroy;
-    nt_comp_describe_fn describe; /* optional (NULL = not introspectable); populate ONLY under #if NT_INTROSPECT_ENABLED */
+    nt_comp_describe_fn describe; /* read; optional (NULL = not introspectable); populate ONLY under #if NT_INTROSPECT_ENABLED */
+    nt_comp_apply_fn apply;       /* write; optional (NULL = read-only); populate ONLY under #if NT_INTROSPECT_WRITE_ENABLED */
 } nt_comp_storage_reg_t;
 
 /* ---- Public API ---- */

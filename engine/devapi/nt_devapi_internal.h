@@ -184,6 +184,12 @@ void nt_devapi_register_ui(void);
 void nt_devapi_register_obs(void);
 #endif
 
+/* Entity-write group registrar (per-group #ifdef). Defined in nt_devapi_entity_write.c, invoked from
+   nt_devapi_init under the same compile gate. A dev-only DEBUG write; registers no tick/reset hook. */
+#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
+void nt_devapi_register_entity_write(void);
+#endif
+
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
    nt_devapi_init under the same compile gate. */
 #ifdef NT_DEVAPI_GROUP_DISCOVERY

@@ -31,6 +31,10 @@ option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_U
 # exercises the stub path. Set build-wide below so component describe()/registration see the same value
 # without each linking the module.
 option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
+# Write side (component apply hooks / entity.set). Defaults to NT_INTROSPECT_ENABLED; set OFF for a
+# read-only deployment tier. The devapi entity-write group hard-requires it. Build-wide so component
+# apply()/registration see the same value without linking introspect.
+option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
@@ -50,10 +54,14 @@ option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over 
 # "use only what you need"); enable explicitly together with NT_METRICS_ENABLED + NT_LOG_RING_ENABLED so
 # the dev-only sources it reads carry real bodies (a hard CMake guard enforces it).
 option(NT_DEVAPI_GROUP_OBS "Build the devapi obs group (log.*/perf.*/entity.*/resource.* reads)." OFF)
+# Dev-only component WRITE group (entity.set). Default OFF (opt-in) so a deployment can expose read-only
+# introspection (obs) WITHOUT mutation — three tiers: no devapi / read-only / read-write. Hard-requires
+# NT_INTROSPECT_WRITE_ENABLED (the component apply hooks).
+option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write group." OFF)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)
-    foreach(_grp CORE TIME INPUT DISCOVERY UI OBS)
+    foreach(_grp CORE TIME INPUT DISCOVERY UI OBS ENTITY_WRITE)
         if(NT_DEVAPI_GROUP_${_grp})
             message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
                 "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "
@@ -70,6 +78,7 @@ endif()
 # Build-wide so a component's gated describe()/registration and the nt_introspect TU agree on the value
 # without the component linking the module (it calls the sink only through the passed vtable pointer).
 add_compile_definitions(NT_INTROSPECT_ENABLED=$<BOOL:${NT_INTROSPECT_ENABLED}>)
+add_compile_definitions(NT_INTROSPECT_WRITE_ENABLED=$<BOOL:${NT_INTROSPECT_WRITE_ENABLED}>)
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")

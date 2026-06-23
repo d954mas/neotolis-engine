@@ -403,10 +403,10 @@ jobs:
       - name: Smoke test builder (debug)
         run: ./build/tools/builder/native-debug/builder
 
-      # devapi + ui/obs groups ON so the devapi test targets (incl. the ui.* + obs.* tests) build + run.
-      # GROUP_UI / GROUP_OBS are opt-in (default OFF), so enable them explicitly here.
+      # devapi + ui/obs/entity_write groups ON so the devapi test targets (incl. the ui.* + obs.* +
+      # entity.set tests) build + run. GROUP_UI / GROUP_OBS / GROUP_ENTITY_WRITE are opt-in (default OFF).
       - name: Configure native debug tests (FULL asserts, devapi ON)
-        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON
+        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
 
       - name: Build native debug tests
         run: cmake --build --preset native-debug-test
@@ -498,7 +498,7 @@ jobs:
       # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
       # GROUP_UI / GROUP_OBS opt-in off) they would be linted with wrong flags or missing.
       - name: Configure
-        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON
+        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug

@@ -111,6 +111,23 @@ if(NT_DEVAPI_GROUP_OBS)
     )
 endif()
 
+# Entity-write group (entity.set): a dev-only DEBUG write over the component apply() hooks. Hard-requires
+# NT_INTROSPECT_WRITE_ENABLED (the engine-side apply hooks) — with it OFF every component is read-only and
+# entity.set could only ever return bad_params (a false surface). Links nt_entity (resolution + the
+# storage registry holding the apply hooks); the writable components (transform/drawable) are linked by
+# the host/test, exactly as obs links its providers. Independent of GROUP_OBS (its own deployment tier).
+if(NT_DEVAPI_GROUP_ENTITY_WRITE AND NOT NT_INTROSPECT_WRITE_ENABLED)
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_ENTITY_WRITE requires NT_INTROSPECT_WRITE_ENABLED (the component "
+        "apply() hooks). With it OFF every component is read-only, so entity.set could only return "
+        "bad_params. Enable it, e.g. -DNT_INTROSPECT_WRITE_ENABLED=ON (or NT_UI_DEBUG_TOOLS=ON).")
+endif()
+
+if(NT_DEVAPI_GROUP_ENTITY_WRITE)
+    target_sources(nt_devapi PRIVATE nt_devapi_entity_write.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_ENTITY_WRITE=1)
+    target_link_libraries(nt_devapi PRIVATE nt_entity)
+endif()
+
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 
 # nt_devapi_net -- native loopback TCP transport. Separate target so a core-only consumer pulls no

@@ -2716,6 +2716,20 @@ A bot inspects engine state through the devapi **obs** command group — a thin 
 
 **Build deps are hard, not silent.** A CMake `FATAL_ERROR` guard (mirroring the `ui` group's DEBUG_TOOLS guard) requires `NT_DEVAPI_GROUP_OBS` to be built with `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, **and** `NT_INTROSPECT_ENABLED` ON — those carry the real log-ring, metrics, and entity-introspection bodies the group reads (`perf.*` reads `nt_metrics` directly now; `entity.list` walks components through `nt_introspect`; the group does **not** link `nt_debug_overlay`, which is a sibling consumer, not a provider). With any dep OFF the group would link no-op stubs (an always-empty `log.tail`, a zero `perf.stats`, a core-fields-only `entity.list`) — a vacuously-passing false green — so configure fails fast instead. A second guard ties the debug overlay to metrics: `NT_UI_DEBUG_TOOLS` ⇒ `NT_METRICS_ENABLED` (the overlay HUD consumes `nt_metrics`). `NT_UI_DEBUG_TOOLS=ON` defaults all of `NT_LOG_RING_ENABLED` / `NT_METRICS_ENABLED` / `NT_INTROSPECT_ENABLED` on.
 
+### The `entity_write` group — a dev-only DEBUG write (`entity.set`)
+
+Symmetric to `entity.list` reads, the **`entity_write`** group adds **`entity.set`**: a bot writes a writable field of one component on a live entity. It is the inverse of the read introspection — instead of a component's `describe()` pushing values out to a sink, the component's `apply()` hook receives an already-typed value and writes it **through the component's real setter** (which maintains the engine invariants: the transform dirty flag, the drawable packed-RGBA8 mirror, quaternion normalization). cJSON is parsed into a neutral `nt_write_value` (number→F32, bool→BOOL, array[3]→VEC3, array[4]→VEC4) **inside devapi**; the component never sees cJSON, exactly as the read JSON sink keeps cJSON inside devapi.
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `entity.set` | `{id, component, field, value}` or `{id, component, fields:{...}}` | `{component, fields:[string]}` | **WRITE** one writable field, or a whole-or-nothing batch of one component's fields, through `apply()`. Immediate (a field write is idempotent state, not an edge — `transform world_matrix` recomputes next update). Single field is atomic; a batch validates every field (parse + `dry_run` apply) before mutating any, so a bad field leaves nothing written |
+
+**Not a control path.** `entity.set` maintains *engine* invariants but bypasses *game* logic (collision, rules) — it is for debugging, tests, and visual tuning, not for driving the game. Game control flows through the game's own semantic devapi commands.
+
+**Writable ⊆ readable, enforced structurally.** The writable field set IS the `apply()` hook's accepted-key set: a field with no case (e.g. `world_matrix`, derived/read-only) falls through to `bad_params`; core `id`/`generation`/`index` have no component route at all. Untrusted input is fully validated before any mutation (kind, arity, finiteness, range, non-degenerate quaternion) → `bad_params`, never a trap; a stale/dead handle is `bad_params`, not an assert. The wire is intentionally stricter than the raw setter where needed (colour rejected outside `[0,1]` so the float and the packed byte cannot desync).
+
+**Own deployment tier.** `entity.set` is its own group `NT_DEVAPI_GROUP_ENTITY_WRITE` (default **OFF**), independent of `obs` — three tiers: no devapi / read-only (obs) / read-write (obs + entity_write). A `FATAL_ERROR` guard requires `NT_INTROSPECT_WRITE_ENABLED` (the component `apply()` hooks); with it OFF every component is read-only, so `entity.set` could only ever return `bad_params` — a false surface.
+
 ---
 
 # 25. Engine/Game Boundary

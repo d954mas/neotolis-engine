@@ -15,6 +15,13 @@
 #define NT_INTROSPECT_ENABLED 1
 #endif
 
+/* Write side (component apply / entity.set). Defaults to NT_INTROSPECT_ENABLED — a dev build that can
+   read can also write; set OFF independently for a read-only deployment tier (the devapi entity-write
+   group hard-requires it). Build-wide, like NT_INTROSPECT_ENABLED. */
+#ifndef NT_INTROSPECT_WRITE_ENABLED
+#define NT_INTROSPECT_WRITE_ENABLED NT_INTROSPECT_ENABLED
+#endif
+
 /* Max sink container-NESTING depth (entity object = depth 1, each begin_group adds one). Bounds nesting
    only — a flat entity carrying 100+ components stays at depth 2. */
 #ifndef NT_INTROSPECT_MAX_DEPTH
@@ -60,5 +67,23 @@ void nt_entity_to_string(nt_entity_t e, char *buf, size_t cap);
 
 /* Log an entity's text representation at `level` (no JSON path, no cJSON). */
 void nt_log_entity(nt_log_level_t level, nt_entity_t e);
+
+/* ---- Write side (the inverse of the read sink) ----
+ * A neutral typed value the component's apply() hook receives. devapi parses cJSON into this (the
+ * inverse of the JSON sink reading a component out), so apply hooks never see cJSON. Deliberately
+ * tiny: scalars + fixed float vectors; no ref/enum/str (refs/ids are read-only, no string field is
+ * writable in v1). The kind is the WIRE SHAPE (arity), not the semantic: a 4-float value is NT_WV_VEC4
+ * whether the field is a quaternion or an rgba color — devapi parses the shape, the apply() hook owns
+ * the semantic (normalize quat / clamp color). */
+typedef enum { NT_WV_F32, NT_WV_BOOL, NT_WV_VEC3, NT_WV_VEC4 } nt_write_kind_t;
+
+typedef struct nt_write_value {
+    nt_write_kind_t kind;
+    union {
+        float f32;  /* NT_WV_F32 */
+        bool b;     /* NT_WV_BOOL */
+        float v[4]; /* NT_WV_VEC3 uses [0..2]; NT_WV_VEC4 uses [0..3] (e.g. quaternion or rgba) */
+    } as;
+} nt_write_value;
 
 #endif /* NT_INTROSPECT_H */
