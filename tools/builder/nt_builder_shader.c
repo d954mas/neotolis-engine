@@ -6,6 +6,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
+#include <stdlib.h> /* getenv (headless display probe) */
 
 /* --- Headless GL context for shader validation --- */
 
@@ -27,6 +28,15 @@ static void ensure_gl_context(void) {
         return;
     }
     s_gl_init_attempted = true;
+
+#if defined(__linux__)
+    /* Headless (no display): skip -- glfwInit partial-connects X11 then fails, and GLFW's
+     * init-failure cleanup leaks the X11 connection (LSan). Validation needs a real context anyway. */
+    if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) {
+        NT_LOG_WARN("shader validation skipped: no display (headless)");
+        return;
+    }
+#endif
 
     if (!glfwInit()) {
         NT_LOG_WARN("shader validation skipped: glfwInit failed");
