@@ -1934,9 +1934,9 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     return r;
 }
 
-/* Build the markup-front vocabulary once the font + materials are ready: a named "gold" color, the
- * "wave" stock effect, and the icons atlas alias. The CODE-FIRST builder never touches the tagset --
- * it gets real values directly. */
+/* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
+ * effects plus a custom effect fn, the icons atlas, and the rich font family. The CODE-FIRST builder
+ * never touches the tagset -- it gets real values directly. */
 static void rich_ensure_setup(void) {
     if (s_rich_ready || !s_rich_font_bound || s_rich_image_material.id == 0U) {
         return;
@@ -1987,7 +1987,7 @@ static nt_ui_rich_style_t rich_base_style(void) {
 typedef struct {
     uint32_t color;     /* link run color this frame */
     const char *label;  /* "[Accept quest]" normally; "[OK Accepted]" during the latch */
-    const char *mk_col; /* markup color NAME matching `color` (cyan/green/gold) for the <color=..> tag */
+    const char *mk_col; /* markup color NAME matching `color` (cyan/green/link) for the <color=..> tag */
     bool emphasize;     /* apply the visual-only pulse on hover/accept -- NO scale, so the line never reflows */
 } rich_link_look_t;
 
@@ -3267,7 +3267,7 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode + 1 packed-region material = 8. */
+    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region + rich-image = 9. */
     nt_material_init(&(nt_material_desc_t){.max_materials = 9});
     /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});

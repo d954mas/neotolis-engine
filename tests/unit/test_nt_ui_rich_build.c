@@ -133,7 +133,7 @@ static void test_dedup_and_split_on_style_change(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_rich_test_run_count(s_fx.ctx));
 }
 
-/* ---- builder == parser identity (MARK-67-04) ---- */
+/* ---- builder == parser identity ---- */
 /* Snapshot the per-call run-list into a flat array so we can compare two independent calls
  * (a frame begin/end resets the scratch, so we cannot hold pointers across them). */
 #define MAX_SNAP_RUNS 16

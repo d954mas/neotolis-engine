@@ -1308,7 +1308,7 @@ static void test_state_speed_cell_reuse(void) {
     init_style(); /* restore the shared style */
 }
 
-/* ---- C9: edit_step inserts at a UTF-8 multibyte boundary; the caret lands ON a codepoint boundary
+/* ---- edit_step inserts at a UTF-8 multibyte boundary; the caret lands ON a codepoint boundary
  * (never mid-sequence). Insert 'X' between two Cyrillic codepoints and read the caret via the probe:
  * it must be 3 (after 'А' + 'X'), a valid boundary, and the 4 surrounding bytes stay a valid UTF-8 run. ---- */
 static void test_edit_step_insert_caret_on_codepoint_boundary(void) {
@@ -1335,7 +1335,7 @@ static void test_edit_step_insert_caret_on_codepoint_boundary(void) {
     TEST_ASSERT_NOT_EQUAL_UINT8_MESSAGE(0x80U, (uint8_t)buf[caret] & 0xC0U, "caret byte is not a UTF-8 continuation byte");
 }
 
-/* ---- C9: edit_step backspace deletes ACROSS a whole multibyte char and leaves the caret on a
+/* ---- edit_step backspace deletes ACROSS a whole multibyte char and leaves the caret on a
  * codepoint boundary (the prev-boundary walk skips the continuation byte). After deleting 'б' the
  * caret is 2 (the 'А' boundary), and the buffer is the single valid 2-byte 'А'. ---- */
 static void test_edit_step_backspace_across_multibyte_caret_boundary(void) {
@@ -1361,7 +1361,7 @@ static void test_edit_step_backspace_across_multibyte_caret_boundary(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, caret, "caret at buffer start after the buffer empties");
 }
 
-/* ---- C9: scroll_step caret-follow on a FIXED-width field. A line wider than the inner content box
+/* ---- scroll_step caret-follow on a FIXED-width field. A line wider than the inner content box
  * scrolls right when the caret jumps to END (caret near the right edge -> scroll_x > 0 so it stays
  * visible), and scrolls back to 0 when the caret returns HOME (left edge in view again). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

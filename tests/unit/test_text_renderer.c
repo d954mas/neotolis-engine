@@ -426,15 +426,18 @@ void test_draw_n_large_run_flushes_at_staging_cap(void) {
     free(big);
 }
 
-/* ---- C10b: pin the documented cap relationship the rich self-emit relies on -- the per-block atom cap
- * (NT_UI_RICH_MAX_GLYPHS, defined in ui/nt_ui_rich_text.h) is strictly below the shared staging cap
- * (NT_TEXT_RENDERER_MAX_GLYPHS). Mirrored here as a literal (this TU does not link nt_ui) so a change to
- * either cap that breaks the relationship trips this gate. This is the invariant that lets a single rich
- * block's SPAN count (one per line-fragment, <= atom count) never exceed the staging buffer on its own;
- * only the per-glyph total (guarded by test_draw_n_large_run_flushes_at_staging_cap) can. ---- */
-#define NT_UI_RICH_MAX_GLYPHS_MIRROR 2048U /* must match NT_UI_RICH_MAX_GLYPHS in ui/nt_ui_rich_text.h */
+/* ---- The actual safety net for a single rich TEXT run is the renderer's SELF-FLUSH at the staging cap
+ * (test_draw_n_large_run_flushes_at_staging_cap), NOT a cap ratio: a non-effect run emits at most one
+ * glyph per codepoint, so a single run's worst-case glyph total is bounded by its byte count
+ * (NT_UI_RICH_MAX_TEXT_BYTES, one glyph per byte upper bound). That cap EQUALS the renderer staging cap
+ * (NT_TEXT_RENDERER_MAX_GLYPHS), so a single max run sits right at the boundary -- the self-flush, not
+ * headroom, is what keeps it bounded. Pin <= here (mirrored literal; this TU does not link nt_ui) so a
+ * future bump of either cap that pushed the text-byte cap ABOVE the renderer cap (where a single run
+ * could overrun BEFORE the flush) trips this gate. ---- */
+#define NT_UI_RICH_MAX_TEXT_BYTES_MIRROR 4096U /* must match NT_UI_RICH_MAX_TEXT_BYTES in ui/nt_ui_rich_text.h */
 void test_rich_atom_cap_below_text_staging_cap(void) {
-    TEST_ASSERT_TRUE_MESSAGE(NT_UI_RICH_MAX_GLYPHS_MIRROR <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS, "rich per-block atom cap must not exceed the shared text-renderer staging cap");
+    TEST_ASSERT_TRUE_MESSAGE(NT_UI_RICH_MAX_TEXT_BYTES_MIRROR <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS,
+                             "rich text-byte cap (1 glyph/byte upper bound for one run) must not exceed the renderer staging cap; the renderer self-flush is the real net");
 }
 
 /* ---- Benchmark cases (printed as [BENCH] lines; cover draw hot-loop perf) ---- */

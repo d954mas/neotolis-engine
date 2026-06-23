@@ -113,7 +113,7 @@ static void test_icon_baseline_vs_middle_delta(void) {
     const float expect_delta = (icon_h - x_height) * 0.5F;
 
     TEST_ASSERT_FALSE_MESSAGE(approx(y_baseline, y_middle), "middle and baseline place the icon differently");
-    TEST_ASSERT_TRUE_MESSAGE(approx(y_middle - y_baseline, expect_delta), "icon y delta == (x_height - icon_h)/2");
+    TEST_ASSERT_TRUE_MESSAGE(approx(y_middle - y_baseline, expect_delta), "icon y delta == (icon_h - x_height)/2");
 }
 
 /* (3) forced wrap: a narrow container fits "HP " + icon but not " full" -> 2 lines,
@@ -229,7 +229,7 @@ static void test_total_width_is_container(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(nt_ui_rich_test_total_w(s_fx.ctx), 200.0F), "explicit container_w drives the FIXED block width");
 }
 
-/* (8) M5: CENTER/RIGHT align with container_w<=0 (grow case) keep every atom inside [0, total_w].
+/* (8) CENTER/RIGHT align with container_w<=0 (grow case) keep every atom inside [0, total_w].
  * The block grows to max_line_w, so the per-line align offset must be computed against that, not the
  * resolved/screen width -- else center/right atoms land outside the block (worst on the first frame,
  * when the bbox fallback returns the full screen width). id 0 has no prev bbox -> screen-width path. */
@@ -252,7 +252,7 @@ static void test_grow_align_center_in_block(void) {
     assert_grow_align_in_block(NT_RICH_ALIGN_RIGHT);
 }
 
-/* (9) H1: a MIDDLE-valign image on an IMAGE-DOMINANT line (no text, or text far shorter than the
+/* (9) a MIDDLE-valign image on an IMAGE-DOMINANT line (no text, or text far shorter than the
  * image) is seated INSIDE its reserved line box. Reserve and placement must use the same x-height
  * reference -- otherwise the icon centers against a different ascent than the box was reserved with.
  * Deterministic: a single 16px icon, MIDDLE valign, on a line with only tiny text. */
@@ -283,7 +283,7 @@ static void test_middle_image_seated_in_reserved_box(void) {
 }
 
 /* (10) degenerate width: rich_solve with container_w == 0 (and < 0) must terminate with a bounded
- * line count and no hang (the T-67-04-02 anti-hang clamp). The greedy break would spin on a 0/neg
+ * line count and no hang (the anti-hang clamp). The greedy break would spin on a 0/neg
  * box without the clamp; the test completing proves it does not. */
 static void test_degenerate_width_no_hang(void) {
     build_text("AAA BBB CCC", 11);
