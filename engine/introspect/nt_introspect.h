@@ -49,6 +49,11 @@ typedef struct nt_introspect_sink {
     void (*field_str)(struct nt_introspect_sink *s, const char *key, const char *v);
     void (*field_enum)(struct nt_introspect_sink *s, const char *key, const char *token);
     void (*field_ref)(struct nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, uint64_t id);
+    /* Describe the current group's asset by its runtime handle (asset_type = nt_asset_type_t): emits a
+       `handle` field, and a RESOLVING sink (the devapi JSON sink) also reverse-maps it to its source
+       `resource`/`name`. Keyless — writes into the component's own group. Lets a resource-backed
+       component (mesh/...) expose its asset WITHOUT depending on the resource system. */
+    void (*field_asset)(struct nt_introspect_sink *s, uint8_t asset_type, uint32_t runtime_handle);
 } nt_introspect_sink;
 
 /* Stable token for a ref kind (shared by the text + JSON sinks). */

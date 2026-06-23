@@ -35,6 +35,7 @@ static void alpha_describe(nt_entity_t e, nt_introspect_sink *s) {
     s->field_str(s, "name", "hi");
     s->field_enum(s, "state", "ready");
     s->field_ref(s, "tex", NT_REF_RESOURCE, 0x9AF3);
+    s->field_asset(s, 1, 7);
     s->begin_group(s, "nested");
     s->field_u64(s, "inner", 1);
     s->end_group(s);
@@ -42,6 +43,13 @@ static void alpha_describe(nt_entity_t e, nt_introspect_sink *s) {
 static void beta_describe(nt_entity_t e, nt_introspect_sink *s) {
     (void)e;
     s->field_bool(s, "flag", false);
+}
+
+/* gamma: a marker component with NO describe — the walk must still emit it as an empty group. */
+static bool s_gamma[CAP];
+static bool gamma_has(nt_entity_t e) {
+    uint16_t i = nt_entity_index(e);
+    return nt_entity_is_alive(e) && i < CAP && s_gamma[i];
 }
 
 #if NT_INTROSPECT_WRITE_ENABLED
@@ -67,6 +75,7 @@ void setUp(void) {
     nt_entity_init(&(nt_entity_desc_t){.max_entities = CAP - 1});
     memset(s_alpha, 0, sizeof(s_alpha));
     memset(s_beta, 0, sizeof(s_beta));
+    memset(s_gamma, 0, sizeof(s_gamma));
     nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "alpha",
                                                         .has = alpha_has,
                                                         .on_destroy = noop_destroy,
@@ -76,6 +85,7 @@ void setUp(void) {
 #endif
     });
     nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "beta", .has = beta_has, .on_destroy = noop_destroy, .describe = beta_describe});
+    nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "gamma", .has = gamma_has, .on_destroy = noop_destroy}); /* no describe */
 }
 void tearDown(void) { nt_entity_shutdown(); }
 
@@ -109,8 +119,19 @@ void test_introspect_all_primitives(void) {
     TEST_ASSERT_NOT_NULL(strstr(buf, "name=hi"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "state=ready"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "tex=resource#0x9af3"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "handle=7 type=1")); /* field_asset: handle + type in the text sink */
     TEST_ASSERT_NOT_NULL(strstr(buf, "nested{"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "inner=1"));
+}
+
+void test_introspect_empty_group_for_describeless(void) {
+    nt_entity_t e = nt_entity_create();
+    s_gamma[nt_entity_index(e)] = true;
+    char buf[256];
+    nt_entity_to_string(e, buf, sizeof(buf));
+    /* gamma has no describe -> still emitted as an empty group, so a marker component's presence shows. */
+    TEST_ASSERT_NOT_NULL(strstr(buf, "gamma{"));
+    TEST_ASSERT_NULL(strstr(buf, "alpha{"));
 }
 
 void test_introspect_only_present_components(void) {
@@ -182,6 +203,7 @@ int main(void) {
     RUN_TEST(test_introspect_core_fields_no_components);
     RUN_TEST(test_introspect_all_primitives);
     RUN_TEST(test_introspect_only_present_components);
+    RUN_TEST(test_introspect_empty_group_for_describeless);
     RUN_TEST(test_introspect_dead_entity);
     RUN_TEST(test_introspect_truncation_safe);
     RUN_TEST(test_introspect_log_entity_smoke);

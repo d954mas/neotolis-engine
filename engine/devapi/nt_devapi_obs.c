@@ -7,6 +7,7 @@
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
 #include "entity/nt_entity.h"
+#include "hash/nt_hash.h"
 #include "introspect/nt_introspect.h"
 #include "log/nt_log_ring.h"
 #include "metrics/nt_metrics.h"
@@ -387,6 +388,24 @@ static void j_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, ui
     cJSON_AddStringToObject(ref, "id", hex);
 }
 
+/* Resolving asset sink: a runtime handle -> its source resource_id (reverse scan) -> name (label),
+   written flat into the component's own group. The resource/hash deps live HERE (devapi already links
+   them), so resource-backed components stay decoupled. */
+static void j_asset(nt_introspect_sink *s, uint8_t asset_type, uint32_t handle) {
+    cJSON *o = json_top((obs_json_sink *)s);
+    devapi_add_number(o, "handle", (double)handle);
+    uint64_t src = nt_resource_source_of(asset_type, handle);
+    if (src != 0) {
+        char hex[19];
+        (void)snprintf(hex, sizeof(hex), "0x%" PRIx64, src);
+        cJSON_AddStringToObject(o, "resource", hex);
+        const char *name = nt_hash64_label((nt_hash64_t){.value = src});
+        if (name != NULL) {
+            cJSON_AddStringToObject(o, "name", name);
+        }
+    }
+}
+
 static void obs_json_sink_init(obs_json_sink *j, cJSON *root) {
     j->base = (nt_introspect_sink){
         .begin_group = j_begin_group,
@@ -399,6 +418,7 @@ static void obs_json_sink_init(obs_json_sink *j, cJSON *root) {
         .field_str = j_str,
         .field_enum = j_enum,
         .field_ref = j_ref,
+        .field_asset = j_asset,
     };
     j->stack[0] = root;
     j->depth = 1;
@@ -420,41 +440,119 @@ static void add_entity_entry(cJSON *arr, nt_entity_t e) {
     (void)added;
 }
 
-/* True if the live slot at `idx` (1..nt_entity_max()) passes the component filter; writes the resolved
-   handle to *out. When `filtered`, only entities carrying component `filter_id` match. False for a dead
-   slot or a filtered-out entity. */
-static bool entity_slot_matches(uint16_t idx, bool filtered, nt_comp_id_t filter_id, nt_entity_t *out) {
-    nt_entity_t e = nt_entity_at_index(idx);
-    if (e.id == NT_ENTITY_INVALID.id) {
+/* Per-clause term cap: bounds the stack id arrays + a DoS ceiling on filter size. Override with -D. */
+#ifndef NT_DEVAPI_QUERY_MAX_TERMS
+#define NT_DEVAPI_QUERY_MAX_TERMS 16
+#endif
+
+/* Component-set filter: an entity passes if it has EVERY `all`, at least ONE `any` (when any present),
+   and NONE of `none`. Component ids resolved once from names (never matched by string per entity). */
+typedef struct {
+    nt_comp_id_t all[NT_DEVAPI_QUERY_MAX_TERMS];
+    nt_comp_id_t any[NT_DEVAPI_QUERY_MAX_TERMS];
+    nt_comp_id_t none[NT_DEVAPI_QUERY_MAX_TERMS];
+    uint8_t n_all, n_any, n_none;
+} entity_filter;
+
+/* Resolve a JSON array of component-name strings, APPENDING their ids to `ids` (count in *n). Unknown
+   name / non-string element / over the per-clause cap -> bad_params. A NULL/absent clause is empty. */
+static bool append_filter_terms(const cJSON *arr, nt_comp_id_t *ids, uint8_t *n, nt_devapi_error *err) {
+    if (arr == NULL) {
+        return true;
+    }
+    if (!cJSON_IsArray(arr)) {
+        set_bad_params(err, "entity.list: all/any/none must be arrays of component names");
         return false;
     }
-    if (filtered && !nt_entity_has_comp(e, filter_id)) {
-        return false;
+    const cJSON *el = NULL;
+    cJSON_ArrayForEach(el, arr) {
+        if (*n >= NT_DEVAPI_QUERY_MAX_TERMS) {
+            set_bad_params(err, "entity.list: too many filter terms");
+            return false;
+        }
+        if (!cJSON_IsString(el) || el->valuestring == NULL) {
+            set_bad_params(err, "entity.list: filter terms must be component-name strings");
+            return false;
+        }
+        nt_comp_id_t id = nt_entity_storage_find(el->valuestring);
+        if (id == NT_COMP_ID_INVALID) {
+            set_bad_params(err, "entity.list: unknown component in filter");
+            return false;
+        }
+        ids[(*n)++] = id;
     }
-    *out = e;
     return true;
 }
 
-/* entity.list{offset?, limit?, component?} -> live entities (core fields + each present component as a
-   named group; no world matrix). `component` filters to entities carrying that component; an unknown
-   name -> bad_params. Bad offset/limit -> bad_params. */
-static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
-    (void)ud;
-    /* Resolve the component filter once to a stable id (not per entity, never by string in the loop). */
-    bool filtered = false;
-    nt_comp_id_t filter_id = NT_COMP_ID_INVALID;
+/* Parse {component?, all?, any?, none?} into resolved ids. `component:"x"` is sugar for all:["x"]. */
+static bool parse_entity_filter(const cJSON *params, entity_filter *f, nt_devapi_error *err) {
+    f->n_all = 0;
+    f->n_any = 0;
+    f->n_none = 0;
     const cJSON *jcomp = cJSON_GetObjectItemCaseSensitive(params, "component");
     if (jcomp != NULL) {
         if (!cJSON_IsString(jcomp) || jcomp->valuestring == NULL) {
             set_bad_params(err, "entity.list: component must be a string");
             return false;
         }
-        filter_id = nt_entity_storage_find(jcomp->valuestring);
-        if (filter_id == NT_COMP_ID_INVALID) {
+        nt_comp_id_t id = nt_entity_storage_find(jcomp->valuestring);
+        if (id == NT_COMP_ID_INVALID) {
             set_bad_params(err, "entity.list: unknown component");
             return false;
         }
-        filtered = true;
+        f->all[f->n_all++] = id;
+    }
+    return append_filter_terms(cJSON_GetObjectItemCaseSensitive(params, "all"), f->all, &f->n_all, err) &&
+           append_filter_terms(cJSON_GetObjectItemCaseSensitive(params, "any"), f->any, &f->n_any, err) &&
+           append_filter_terms(cJSON_GetObjectItemCaseSensitive(params, "none"), f->none, &f->n_none, err);
+}
+
+static bool entity_passes(nt_entity_t e, const entity_filter *f) {
+    for (uint8_t i = 0; i < f->n_all; i++) {
+        if (!nt_entity_has_comp(e, f->all[i])) {
+            return false;
+        }
+    }
+    if (f->n_any > 0) {
+        bool found = false;
+        for (uint8_t i = 0; i < f->n_any && !found; i++) {
+            found = nt_entity_has_comp(e, f->any[i]);
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    for (uint8_t i = 0; i < f->n_none; i++) {
+        if (nt_entity_has_comp(e, f->none[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* True if the live slot at `idx` (1..nt_entity_max()) exists and passes the filter; writes the handle
+   to *out. False for a dead slot or a filtered-out entity. */
+static bool entity_slot_matches(uint16_t idx, const entity_filter *f, nt_entity_t *out) {
+    nt_entity_t e = nt_entity_at_index(idx);
+    if (e.id == NT_ENTITY_INVALID.id) {
+        return false;
+    }
+    if (!entity_passes(e, f)) {
+        return false;
+    }
+    *out = e;
+    return true;
+}
+
+/* entity.list{offset?, limit?, component?, all?, any?, none?} -> live entities (core fields + each
+   present component as a named group; no world matrix). Filter: has every `all` + at least one `any`
+   + none of `none`; `component:"x"` is sugar for all:["x"]. Unknown component / bad offset/limit ->
+   bad_params. */
+static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)ud;
+    entity_filter f;
+    if (!parse_entity_filter(params, &f, err)) {
+        return false;
     }
 
     uint16_t emax = nt_entity_max();
@@ -464,7 +562,7 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
     uint32_t total = 0;
     for (uint32_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e;
-        if (entity_slot_matches((uint16_t)idx, filtered, filter_id, &e)) {
+        if (entity_slot_matches((uint16_t)idx, &f, &e)) {
             total++;
         }
     }
@@ -483,7 +581,7 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
     uint32_t matched = 0;
     for (uint32_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e;
-        if (!entity_slot_matches((uint16_t)idx, filtered, filter_id, &e)) {
+        if (!entity_slot_matches((uint16_t)idx, &f, &e)) {
             continue;
         }
         if (matched >= begin && matched < end) {
@@ -722,8 +820,9 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "entity.list",
         .group = "entity",
-        .summary = "live entities: core fields (id/index/generation/enabled) + each present component as a named group; fully paginated with honest total; optional `component` filter",
-        .params_shape = "{offset?:number, limit?:number, component?:string}",
+        .summary = "live entities: core fields (id/index/generation/enabled) + each present component as a named group (empty {} when it has no describe); fully paginated with honest total; "
+                   "component-set filter: has every `all` + at least one `any` + none of `none` (`component` is sugar for all:[x])",
+        .params_shape = "{offset?:number, limit?:number, component?:string, all?:[string], any?:[string], none?:[string]}",
         .result_shape = "{total:number,entities:[{id,index,generation,enabled,<component>:{...}}]}",
         .frame_behavior = "any",
         .side_effects = "none",

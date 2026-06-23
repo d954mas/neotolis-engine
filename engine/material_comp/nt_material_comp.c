@@ -4,6 +4,9 @@
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
+#if NT_INTROSPECT_ENABLED
+#include "introspect/nt_introspect.h"
+#endif
 
 static nt_comp_storage_t s_storage;
 static nt_material_t *s_material_handles;
@@ -19,6 +22,12 @@ static void material_on_destroy(nt_entity_t entity) {
         nt_comp_storage_remove(&s_storage, entity);
     }
 }
+
+#if NT_INTROSPECT_ENABLED
+/* Handle only: a material is runtime-constructed (no NT_ASSET_MATERIAL resource), so it has no
+   resource_id to reverse-resolve to a name. */
+static void material_describe(nt_entity_t entity, nt_introspect_sink *s) { s->field_ref(s, "handle", NT_REF_HANDLE, nt_material_comp_handle(entity)->id); }
+#endif
 
 /* ---- Lifecycle ---- */
 
@@ -41,6 +50,9 @@ nt_result_t nt_material_comp_init(const nt_material_comp_desc_t *desc) {
         .name = "material",
         .has = nt_material_comp_has,
         .on_destroy = material_on_destroy,
+#if NT_INTROSPECT_ENABLED
+        .describe = material_describe,
+#endif
     });
 
     return NT_OK;

@@ -231,6 +231,14 @@ bool nt_resource_pack_info(uint16_t i, nt_resource_pack_info_t *out);
 uint16_t nt_resource_asset_count(void);
 bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out);
 
+#if NT_INTROSPECT_ENABLED
+/* Dev-only: the resource_id (nt_hash64 of the asset name) that published runtime `handle` for
+   `asset_type` (nt_asset_type_t), or 0 if no live slot publishes it (procedural / not resource-backed).
+   O(slots) scan of the canonical slot table — no separate index, no desync; introspection only, not a
+   hot path. Pair with nt_hash64_label() for the human name when NT_HASH_LABELS is built. */
+uint64_t nt_resource_source_of(uint8_t asset_type, uint32_t runtime_handle);
+#endif
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle);

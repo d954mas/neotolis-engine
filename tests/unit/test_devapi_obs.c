@@ -11,6 +11,7 @@
 /* clang-format off */
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "mesh_comp/nt_mesh_comp.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "log/nt_log_ring.h"
@@ -36,6 +37,8 @@ void setUp(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_transform_comp_init(&tdesc));
     nt_drawable_comp_desc_t ddesc = nt_drawable_comp_desc_defaults();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_drawable_comp_init(&ddesc));
+    nt_mesh_comp_desc_t mdesc = nt_mesh_comp_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_mesh_comp_init(&mdesc));
     nt_resource_desc_t rdesc = {0};
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_init(&rdesc));
 
@@ -45,6 +48,7 @@ void setUp(void) {
 void tearDown(void) {
     nt_devapi_shutdown();
     nt_resource_shutdown();
+    nt_mesh_comp_shutdown();
     nt_drawable_comp_shutdown();
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
@@ -370,6 +374,43 @@ static void test_entity_list_component_filter(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"component\":123}}"));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_entity_query_all_any_none(void) {
+    nt_entity_t a = nt_entity_create(); /* transform + mesh */
+    nt_transform_comp_add(a);
+    nt_mesh_comp_add(a);
+    *nt_mesh_comp_handle(a) = (nt_mesh_t){.id = 42};
+    nt_entity_t b = nt_entity_create(); /* drawable only */
+    nt_drawable_comp_add(b);
+    nt_entity_t c = nt_entity_create(); /* transform only */
+    nt_transform_comp_add(c);
+
+    /* all:[transform,mesh] -> only `a`; its mesh group exposes the runtime handle (no resource published
+       it in this test, so no name) — proves field_asset + the empty-group-on-describe-less path. */
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"all\":[\"transform\",\"mesh\"]}}"));
+    cJSON *r = result_of(root);
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint);
+    cJSON *ent = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(r, "entities"), 0);
+    cJSON *mesh = cJSON_GetObjectItemCaseSensitive(ent, "mesh");
+    TEST_ASSERT_TRUE(cJSON_IsObject(mesh));
+    TEST_ASSERT_EQUAL_INT(42, cJSON_GetObjectItemCaseSensitive(mesh, "handle")->valueint);
+    cJSON_Delete(root);
+
+    /* any:[mesh,drawable] -> a (mesh) + b (drawable). */
+    root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"any\":[\"mesh\",\"drawable\"]}}"));
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(result_of(root), "total")->valueint);
+    cJSON_Delete(root);
+
+    /* all:[transform] none:[mesh] -> only c (transform without mesh). */
+    root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"all\":[\"transform\"],\"none\":[\"mesh\"]}}"));
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(result_of(root), "total")->valueint);
+    cJSON_Delete(root);
+
+    /* unknown component in a filter -> bad_params; a non-array clause -> bad_params. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"all\":[\"nope\"]}}"));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"all\":\"transform\"}}"));
+}
+
 /* entity.list `limit` is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX: a request for limit > cap clamps to
    the cap (at most cap entries emitted) while `total` stays the honest count. Needs > cap live
    entities, so this re-inits the entity system (and its dependent comp storages, in dep order) with a
@@ -637,6 +678,7 @@ int main(void) {
 #endif
     RUN_TEST(test_entity_list_total_and_fields);
     RUN_TEST(test_entity_list_component_filter);
+    RUN_TEST(test_entity_query_all_any_none);
     RUN_TEST(test_entity_list_limit_clamps_to_cap);
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);

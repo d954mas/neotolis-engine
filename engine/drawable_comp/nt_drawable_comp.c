@@ -54,6 +54,16 @@ static void drawable_on_destroy(nt_entity_t entity) {
 static void drawable_describe(nt_entity_t entity, nt_introspect_sink *s) {
     s->field_bool(s, "visible", *nt_drawable_comp_visible(entity));
     s->field_floats(s, "color", nt_drawable_comp_color(entity), 4);
+    /* tag: a game's semantic marker (e.g. nt_hash32_str("house")). Resolve to its string via the hash
+       label registry when available (NT_HASH_LABELS) so a bot reads "house", not just the hash. */
+    nt_hash32_t tag = *nt_drawable_comp_tag(entity);
+    if (tag.value != 0) {
+        s->field_u64(s, "tag", tag.value);
+        const char *name = nt_hash32_label(tag);
+        if (name != NULL) {
+            s->field_str(s, "tag_name", name);
+        }
+    }
 }
 #endif
 

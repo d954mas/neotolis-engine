@@ -32,12 +32,16 @@ void nt_entity_introspect(nt_entity_t e, nt_introspect_sink *s) {
         return;
     }
     s->field_bool(s, "enabled", nt_entity_is_enabled(e));
+    /* Emit a group for EVERY present component — empty when it has no describe() — so a tool sees the
+       whole component set (incl. marker components), not just the describe-capable ones. */
     uint8_t n = nt_entity_storage_count();
     for (uint8_t i = 0; i < n; i++) {
         const nt_comp_storage_reg_t *r = nt_entity_storage_at(i);
-        if (r->describe != NULL && r->has(e)) {
+        if (r->has(e)) {
             s->begin_group(s, r->name);
-            r->describe(e, s);
+            if (r->describe != NULL) {
+                r->describe(e, s);
+            }
             s->end_group(s);
         }
     }
@@ -93,6 +97,7 @@ static void t_floats(nt_introspect_sink *s, const char *key, const float *v, int
 static void t_str(nt_introspect_sink *s, const char *key, const char *v) { text_append(as_text(s), "%s=%s ", key, v != NULL ? v : "(null)"); }
 static void t_enum(nt_introspect_sink *s, const char *key, const char *token) { text_append(as_text(s), "%s=%s ", key, token != NULL ? token : "?"); }
 static void t_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, uint64_t id) { text_append(as_text(s), "%s=%s#0x%" PRIx64 " ", key, nt_introspect_ref_kind_name(kind), id); }
+static void t_asset(nt_introspect_sink *s, uint8_t asset_type, uint32_t handle) { text_append(as_text(s), "handle=%u type=%u ", (unsigned)handle, (unsigned)asset_type); }
 
 static void text_sink_init(text_sink_t *t, char *buf, size_t cap) {
     t->base = (nt_introspect_sink){
@@ -106,6 +111,7 @@ static void text_sink_init(text_sink_t *t, char *buf, size_t cap) {
         .field_str = t_str,
         .field_enum = t_enum,
         .field_ref = t_ref,
+        .field_asset = t_asset,
     };
     t->buf = buf;
     t->cap = cap;

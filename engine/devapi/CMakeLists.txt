@@ -103,7 +103,7 @@ if(NT_DEVAPI_GROUP_OBS)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_OBS=1)
     target_link_libraries(nt_devapi PRIVATE
         nt_log_ring nt_metrics
-        nt_entity nt_resource nt_introspect
+        nt_entity nt_resource nt_introspect nt_hash
     )
 endif()
 

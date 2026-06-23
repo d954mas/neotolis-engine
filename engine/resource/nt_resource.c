@@ -1395,6 +1395,23 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
     return false;
 }
 
+#if NT_INTROSPECT_ENABLED
+uint64_t nt_resource_source_of(uint8_t asset_type, uint32_t runtime_handle) {
+    if (runtime_handle == 0) {
+        return 0;
+    }
+    /* Scan the canonical slot table (no separate index to desync). A slot publishes one runtime handle
+       per resource_id; handles are unique per gfx object, so the first match is the source. */
+    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+        const NtResourceSlot *slot = &s_resource.slots[si];
+        if (slot->resource_id != 0 && slot->asset_type == asset_type && slot->runtime_handle == runtime_handle) {
+            return slot->resource_id;
+        }
+    }
+    return 0;
+}
+#endif
+
 void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t *total) {
     int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {

@@ -4,6 +4,10 @@
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
+#if NT_INTROSPECT_ENABLED
+#include "introspect/nt_introspect.h"
+#include "nt_pack_format.h" /* NT_ASSET_MESH */
+#endif
 
 static nt_comp_storage_t s_storage;
 static nt_mesh_t *s_mesh_handles;
@@ -19,6 +23,12 @@ static void mesh_on_destroy(nt_entity_t entity) {
         nt_comp_storage_remove(&s_storage, entity);
     }
 }
+
+#if NT_INTROSPECT_ENABLED
+/* Emit the runtime mesh handle as a resolvable asset. The resolving sink (devapi JSON) reverse-maps it
+   to its source resource + name — mesh_comp stays decoupled from the resource system. */
+static void mesh_describe(nt_entity_t entity, nt_introspect_sink *s) { s->field_asset(s, NT_ASSET_MESH, nt_mesh_comp_handle(entity)->id); }
+#endif
 
 /* ---- Lifecycle ---- */
 
@@ -41,6 +51,9 @@ nt_result_t nt_mesh_comp_init(const nt_mesh_comp_desc_t *desc) {
         .name = "mesh",
         .has = nt_mesh_comp_has,
         .on_destroy = mesh_on_destroy,
+#if NT_INTROSPECT_ENABLED
+        .describe = mesh_describe,
+#endif
     });
 
     return NT_OK;
