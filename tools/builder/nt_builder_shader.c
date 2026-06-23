@@ -32,6 +32,7 @@ static void ensure_gl_context(void) {
 #if defined(__linux__)
     /* Headless (no display): skip -- glfwInit partial-connects X11 then fails, and GLFW's
      * init-failure cleanup leaks the X11 connection (LSan). Validation needs a real context anyway. */
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) -- the builder is single-threaded
     if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) {
         NT_LOG_WARN("shader validation skipped: no display (headless)");
         return;
