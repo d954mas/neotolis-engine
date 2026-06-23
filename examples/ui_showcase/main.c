@@ -2006,16 +2006,23 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
-    /* model = T(center) * Rz(angle) * S(box); pivot {0.5,0.5} keeps the spin about its own center. */
-    mat4 model;
-    glm_mat4_identity(model);
-    glm_translate(model, (vec3){x + (w * 0.5F), y + (h * 0.5F), 0.0F});
-    glm_rotate_z(model, t * 2.0F, model);
-    glm_scale(model, (vec3){w, h, 1.0F});
-    /* Compose the UI transform on the LEFT: world_model = world_mat4 * model (world flip/xform wraps the spin). */
-    mat4 world_model;
-    glm_mat4_mul((vec4 *)world_mat4, model, world_model);
-    nt_sprite_renderer_emit_region(d->icon_atlas, d->icon_region, (const float *)world_model, 0.5F, 0.5F, rich_obj_pack_color(color), 0);
+    /* Rotate the box corners about the box centre in LAYOUT space, then emit through world_mat4 (the proven
+     * emit_geometry path -- explicit corners set the exact size, unlike emit_region's native-source size). */
+    const float cx = x + (w * 0.5F);
+    const float cy = y + (h * 0.5F);
+    const float hw = w * 0.5F;
+    const float hh = h * 0.5F;
+    const float cs = cosf(t * 2.0F);
+    const float sn = sinf(t * 2.0F);
+    const float dx[4] = {-hw, hw, hw, -hw}; /* TL, TR, BR, BL */
+    const float dy[4] = {-hh, -hh, hh, hh};
+    float pos[4][2];
+    for (int i = 0; i < 4; ++i) {
+        pos[i][0] = cx + (dx[i] * cs) - (dy[i] * sn);
+        pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
+    }
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color));
 }
 
 /* TRUE 3D OBJECT: a perspective rotating cube rendered through nt_shape_renderer into the reserved
