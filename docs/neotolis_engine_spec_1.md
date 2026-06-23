@@ -3108,8 +3108,9 @@ directly), and the default-atlas `<img=region/>` (region resolved by name
 against the base style's atlas). Only the **NAMED** resolves go through the
 **tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
 `<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, stock effects
-only), and an `<img=alias:region/>` atlas alias — passing one of these with a
-`NULL` tagset asserts. A tagset is therefore required only when the markup uses those named
+only), an `<img=alias:region/>` atlas alias, and the self-closing
+`<obj=name/>` (a game-drawn WidgetSpan resolved like `<img=alias:region/>`) —
+passing one of these with a `NULL` tagset asserts. A tagset is therefore required only when the markup uses those named
 forms; pure-intrinsic markup parses with a `NULL` tagset.
 
 ## 32.2 Design: flat run-list → solver → one FIXED block
@@ -3131,7 +3132,13 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
 An `<img>` atom is a **floating child** of the FIXED block, positioned at the
 solver's solved `(x, y)`, emitted through the existing `nt_ui_image_custom`
 (`geom_mode = REGION`) — the same Phase-31 custom-attr sprite path the radial
-widgets use. The 48 B block is `{a_tint, a_uvrect, a_layout}`: `a_tint` is the
+widgets use. The floating child is declared with
+`.floating.clipTo = CLAY_CLIP_TO_ATTACHED_PARENT`, so it inherits the FIXED
+block's full clip chain (incl. an enclosing scroll) and is scissored to the
+panel/scroll — without it a floating child positioned at the solved `(x, y)`
+would **escape** the scroll scissor. Each clipped inline image therefore costs a
+scissor pair (a renderer flush) — the per-image batch cost. The 48 B block is
+`{a_tint, a_uvrect, a_layout}`: `a_tint` is the
 run's **lossless** float4 tint (a `<color>` around an `<img>` survives at full
 precision, not the u8 vertex-color path); `a_uvrect` / `a_layout` are walker-
 filled by name. Images resolve **by atlas + region name** — the atlas IS the
@@ -3214,7 +3221,7 @@ registry (see §32.5, D-67-13).
 
 ## 32.5 Spec ↔ #184-proposal divergences (per AGENTS.md)
 
-The shipped feature deliberately diverges from the original #184 proposal on seven
+The shipped feature deliberately diverges from the original #184 proposal on eight
 points; flagged here so code and spec do not silently drift:
 
 - **D-67-13 — name-based image resolve replaces `register_image_tag`.** #184
@@ -3262,13 +3269,14 @@ points; flagged here so code and spec do not silently drift:
   in-memory only (never serialized); tuned stock effects route through the same
   per-block custom-fx table as custom fns (`effect_id >= NT_UI_RICH_FX_CUSTOM_BASE`),
   so the 48 B style ABI is still unchanged.
-- **D-67-28 — OBJECT `draw_fn` receives the frame `world_mat4`.** The originally
-  shipped `draw_fn(user_data, x, y, w, h, color)` gave the game only LAYOUT box px and
-  no way to reach the UI's LAYOUT→world transform — so a game emitting at those raw
-  coords with identity rendered Y-mirrored (the default 2D ctx bakes the screen Y-flip
-  into `world_mat4`, which the object never saw) and a 3D object had to hand-roll a
-  fragile `glViewport` map. Shipped now: the signature gains a trailing
-  `const float world_mat4[16]` (the same per-element matrix `nt_ui_custom_frame_t`
-  carries), making the previously-shipped-but-never-correctly-drawable API actually
-  usable. No layout/ABI change; it only adds an emit-time argument the engine already
-  had on hand.
+- **D-67-28 — OBJECT `draw_fn` receives the frame `world_mat4`.** The shipped
+  contract is `draw_fn(user_data, x, y, w, h, color, world_mat4)`: `x, y, w, h` are the
+  solved LAYOUT box px, `color` the resolved RGBA, and `world_mat4` is the frame's
+  LAYOUT→world matrix (the same per-element matrix `nt_ui_custom_frame_t` carries, with
+  the screen Y-flip baked in for the default 2D ctx). The game emits through
+  `world_mat4` so a game-drawn object lands under the **same** transform as the TEXT and
+  IMAGE paths — without it a game emitting at the raw LAYOUT coords with identity would
+  render Y-mirrored and a 3D object would have to hand-roll a fragile `glViewport` map.
+  The signature is finalized within Phase 67 (the `color` arg then `world_mat4` were
+  added on this unmerged branch before merge — no external consumer, no ABI break). No
+  layout change; it only adds emit-time arguments the engine already had on hand.
