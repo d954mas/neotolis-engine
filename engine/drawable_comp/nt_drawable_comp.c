@@ -7,6 +7,9 @@
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
 #include "hash/nt_hash.h"
+#if NT_INTROSPECT_ENABLED
+#include "introspect/nt_introspect.h"
+#endif
 
 static nt_comp_storage_t s_storage;
 
@@ -47,6 +50,13 @@ static void drawable_on_destroy(nt_entity_t entity) {
     }
 }
 
+#if NT_INTROSPECT_ENABLED
+static void drawable_describe(nt_entity_t entity, nt_introspect_sink *s) {
+    s->field_bool(s, "visible", *nt_drawable_comp_visible(entity));
+    s->field_floats(s, "color", nt_drawable_comp_color(entity), 4);
+}
+#endif
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_drawable_comp_init(const nt_drawable_comp_desc_t *desc) {
@@ -73,6 +83,9 @@ nt_result_t nt_drawable_comp_init(const nt_drawable_comp_desc_t *desc) {
         .name = "drawable",
         .has = nt_drawable_comp_has,
         .on_destroy = drawable_on_destroy,
+#if NT_INTROSPECT_ENABLED
+        .describe = drawable_describe,
+#endif
     });
 
     return NT_OK;

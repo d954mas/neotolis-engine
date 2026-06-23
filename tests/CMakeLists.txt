@@ -276,6 +276,21 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_entity COMMAND test_entity)
 
+    # --- Entity introspection facility (gated: the walk + text sink emit real output only with
+    # NT_INTROSPECT_ENABLED; the OFF mirror compiles stubs that would fail these assertions). nt_introspect
+    # consumes nt_entity (list it first) + nt_log_write (nt_log_stub trails). ---
+    if(NT_INTROSPECT_ENABLED)
+        add_executable(test_introspect unit/test_introspect.c)
+        target_link_libraries(test_introspect PRIVATE nt_introspect nt_entity nt_core nt_log_stub unity)
+        target_compile_definitions(test_introspect PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_set_warning_flags(test_introspect)
+        nt_set_sanitizer_flags(test_introspect)
+        set_target_properties(test_introspect PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
+        add_test(NAME test_introspect COMMAND test_introspect)
+    endif()
+
     # --- Transform component tests ---
     add_executable(test_transform_comp unit/test_transform_comp.c)
     target_link_libraries(test_transform_comp PRIVATE nt_transform_comp nt_entity nt_log_stub unity)
@@ -445,10 +460,13 @@ if(NOT EMSCRIPTEN)
         # GNU-ld single-pass: these trail nt_devapi and precede nt_core/nt_log_stub on each link line.
         set(NT_DEVAPI_OBS_PROVIDER_LIBS "")
         if(NT_DEVAPI_GROUP_OBS)
+            # obs.o now references nt_introspect + nt_entity for the entity walk (no longer
+            # nt_transform_comp/nt_drawable_comp/nt_comp_storage/nt_math — the components self-register, so
+            # obs names none). nt_introspect precedes nt_entity (consumer before provider, GNU-ld single pass).
             set(NT_DEVAPI_OBS_PROVIDER_LIBS
                 nt_log_ring nt_metrics
-                nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
-                nt_resource nt_math nt_shared nt_hash
+                nt_introspect nt_entity
+                nt_resource nt_shared nt_hash
                 nt_http_stub nt_fs_stub
             )
         endif()
@@ -549,7 +567,7 @@ if(NOT EMSCRIPTEN)
             target_link_libraries(test_devapi_obs PRIVATE
                 nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
                 nt_log_ring nt_metrics
-                nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
+                nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
                 nt_resource nt_math nt_shared
                 nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
                 nt_core nt_log nt_hash unity

@@ -5,6 +5,9 @@
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
+#if NT_INTROSPECT_ENABLED
+#include "introspect/nt_introspect.h"
+#endif
 
 static nt_comp_storage_t s_storage;
 
@@ -42,6 +45,14 @@ static void transform_on_destroy(nt_entity_t entity) {
     }
 }
 
+#if NT_INTROSPECT_ENABLED
+static void transform_describe(nt_entity_t entity, nt_introspect_sink *s) {
+    s->field_floats(s, "position", nt_transform_comp_position(entity), 3);
+    s->field_floats(s, "rotation", nt_transform_comp_rotation(entity), 4);
+    s->field_floats(s, "scale", nt_transform_comp_scale(entity), 3);
+}
+#endif
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
@@ -67,6 +78,9 @@ nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
         .name = "transform",
         .has = nt_transform_comp_has,
         .on_destroy = transform_on_destroy,
+#if NT_INTROSPECT_ENABLED
+        .describe = transform_describe,
+#endif
     });
 
     return NT_OK;

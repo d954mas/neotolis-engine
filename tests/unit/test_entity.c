@@ -223,6 +223,65 @@ void test_entity_register_storage_and_destroy_cleanup(void) {
     TEST_ASSERT_EQUAL_UINT32(e.id, s_mock_destroyed_entity.id);
 }
 
+/* ---- Registry accessors: stable component id / has / component set ---- */
+
+static bool s_mock2_has_result = false;
+static bool mock2_has(nt_entity_t entity) {
+    (void)entity;
+    return s_mock2_has_result;
+}
+static void mock2_on_destroy(nt_entity_t entity) { (void)entity; }
+
+static void register_two_mocks(void) {
+    nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "mock", .has = mock_has, .on_destroy = mock_on_destroy});
+    nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "mock2", .has = mock2_has, .on_destroy = mock2_on_destroy});
+}
+
+void test_entity_storage_find_and_at(void) {
+    register_two_mocks();
+    TEST_ASSERT_EQUAL_UINT8(2, nt_entity_storage_count());
+    /* Stable id == registration order; name->id resolves once. */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_entity_storage_find("mock"));
+    TEST_ASSERT_EQUAL_UINT8(1, nt_entity_storage_find("mock2"));
+    TEST_ASSERT_EQUAL_UINT8(NT_COMP_ID_INVALID, nt_entity_storage_find("absent"));
+    const nt_comp_storage_reg_t *r0 = nt_entity_storage_at(0);
+    TEST_ASSERT_NOT_NULL(r0);
+    TEST_ASSERT_EQUAL_STRING("mock", r0->name);
+    TEST_ASSERT_NULL(nt_entity_storage_at(2)); /* out of range */
+}
+
+void test_entity_has_comp_and_components(void) {
+    register_two_mocks();
+    nt_entity_t e = nt_entity_create();
+    nt_comp_id_t id0 = nt_entity_storage_find("mock");
+    nt_comp_id_t id1 = nt_entity_storage_find("mock2");
+
+    s_mock_has_result = false;
+    s_mock2_has_result = false;
+    TEST_ASSERT_FALSE(nt_entity_has_comp(e, id0));
+    TEST_ASSERT_EQUAL_UINT8(0, nt_entity_components(e, NULL, 0));
+
+    s_mock_has_result = true;
+    s_mock2_has_result = true;
+    TEST_ASSERT_TRUE(nt_entity_has_comp(e, id0));
+    TEST_ASSERT_TRUE(nt_entity_has_comp(e, id1));
+    nt_comp_id_t ids[2] = {0xFF, 0xFF};
+    TEST_ASSERT_EQUAL_UINT8(2, nt_entity_components(e, ids, 2));
+    TEST_ASSERT_EQUAL_UINT8(0, ids[0]); /* registration order */
+    TEST_ASSERT_EQUAL_UINT8(1, ids[1]);
+}
+
+void test_entity_components_truncation(void) {
+    register_two_mocks();
+    nt_entity_t e = nt_entity_create();
+    s_mock_has_result = true;
+    s_mock2_has_result = true;
+    /* max=1 writes the first present id but returns the TRUE total -> caller sees return > max. */
+    nt_comp_id_t one = 0xFF;
+    TEST_ASSERT_EQUAL_UINT8(2, nt_entity_components(e, &one, 1));
+    TEST_ASSERT_EQUAL_UINT8(0, one);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -247,5 +306,8 @@ int main(void) {
     RUN_TEST(test_entity_at_index_out_of_range_invalid);
     RUN_TEST(test_entity_at_index_returns_new_after_recreate);
     RUN_TEST(test_entity_register_storage_and_destroy_cleanup);
+    RUN_TEST(test_entity_storage_find_and_at);
+    RUN_TEST(test_entity_has_comp_and_components);
+    RUN_TEST(test_entity_components_truncation);
     return UNITY_END();
 }

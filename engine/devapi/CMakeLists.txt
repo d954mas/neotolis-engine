@@ -85,24 +85,29 @@ endif()
 # The obs READ surface (log.tail / perf.stats) serializes the dev-only nt_log_ring + nt_metrics. With
 # either dep OFF those compile to no-op stubs (empty log.tail, zero perf.stats) — a vacuously-passing
 # "false green". Hard-fail so GROUP_OBS can never link the stub bodies; enable both deps with it.
-if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED))
-    message(FATAL_ERROR "NT_DEVAPI_GROUP_OBS requires NT_LOG_RING_ENABLED and NT_METRICS_ENABLED "
-        "(the obs group reads the dev-only log ring + metrics collector; with either dep OFF it would "
-        "link no-op stubs — empty log.tail / zero perf.stats — a false green). Enable both, e.g. "
-        "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON (or NT_UI_DEBUG_TOOLS=ON, which defaults both).")
+if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED OR NOT NT_INTROSPECT_ENABLED))
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_OBS requires NT_LOG_RING_ENABLED, NT_METRICS_ENABLED and "
+        "NT_INTROSPECT_ENABLED (the obs group reads the dev-only log ring + metrics collector and walks "
+        "entities through nt_introspect; with any dep OFF it would link no-op stubs — empty log.tail / "
+        "zero perf.stats / core-fields-only entity.list — a false green). Enable all, e.g. "
+        "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON (or "
+        "NT_UI_DEBUG_TOOLS=ON, which defaults all three).")
 endif()
 
 # Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads over the L1 capabilities.
-# Links the dev-only ring + metrics collector + the entity/resource readers. perf.* now reads
-# nt_metrics directly (the overlay is a sibling consumer, not a provider here), so no nt_debug_overlay
-# dep. GNU-ld single-pass order: nt_devapi (consumer) is listed first on the exe link line; these
-# provider libs trail it, with nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
+# Links the dev-only ring + metrics collector + the entity/resource readers + nt_introspect (the
+# generic entity describe walk). entity.* no longer references any specific component: components
+# self-register a describe() with the entity storage registry, so the obs TU pulls neither
+# nt_transform_comp nor nt_drawable_comp (a host/test links those to make them appear). perf.* reads
+# nt_metrics directly (the overlay is a sibling consumer, not a provider here). GNU-ld single-pass
+# order: nt_devapi (consumer) is listed first on the exe link line; these provider libs trail it, with
+# nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
 if(NT_DEVAPI_GROUP_OBS)
     target_sources(nt_devapi PRIVATE nt_devapi_obs.c)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_OBS=1)
     target_link_libraries(nt_devapi PRIVATE
         nt_log_ring nt_metrics
-        nt_entity nt_transform_comp nt_drawable_comp nt_resource
+        nt_entity nt_resource nt_introspect
     )
 endif()
 

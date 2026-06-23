@@ -174,3 +174,41 @@ nt_entity_t nt_entity_at_index(uint16_t index) {
        building inline keeps the static entity_make internal. */
     return (nt_entity_t){.id = ((uint32_t)s_entity.generations[index] << 16) | index};
 }
+
+uint8_t nt_entity_storage_count(void) { return s_entity.reg_count; }
+
+const nt_comp_storage_reg_t *nt_entity_storage_at(nt_comp_id_t id) {
+    if (id >= s_entity.reg_count) {
+        return NULL;
+    }
+    return &s_entity.registrations[id];
+}
+
+nt_comp_id_t nt_entity_storage_find(const char *name) {
+    NT_ASSERT(name != NULL);
+    for (uint8_t i = 0; i < s_entity.reg_count; i++) {
+        if (strcmp(s_entity.registrations[i].name, name) == 0) {
+            return (nt_comp_id_t)i;
+        }
+    }
+    return NT_COMP_ID_INVALID;
+}
+
+bool nt_entity_has_comp(nt_entity_t e, nt_comp_id_t id) {
+    NT_ASSERT(id < s_entity.reg_count);
+    return s_entity.registrations[id].has(e);
+}
+
+uint8_t nt_entity_components(nt_entity_t e, nt_comp_id_t *out_ids, uint8_t max) {
+    NT_ASSERT(out_ids != NULL || max == 0);
+    uint8_t total = 0;
+    for (uint8_t i = 0; i < s_entity.reg_count; i++) {
+        if (s_entity.registrations[i].has(e)) {
+            if (total < max) {
+                out_ids[total] = (nt_comp_id_t)i;
+            }
+            total++;
+        }
+    }
+    return total;
+}

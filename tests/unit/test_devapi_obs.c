@@ -322,24 +322,52 @@ static void test_entity_list_total_and_fields(void) {
     cJSON *entities = cJSON_GetObjectItemCaseSensitive(r, "entities");
     TEST_ASSERT_TRUE(cJSON_IsArray(entities));
     TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(entities));
+
+    /* Entity a (created first -> enumerated first) carries transform, serialized as a NAMED GROUP with
+       the position we set; it has no drawable, so that key is ABSENT (not null) — sparse by omission. */
     cJSON *e0 = cJSON_GetArrayItem(entities, 0);
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(e0, "id")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(e0, "generation")));
+    cJSON *tr = cJSON_GetObjectItemCaseSensitive(e0, "transform");
+    TEST_ASSERT_TRUE(cJSON_IsObject(tr));
+    cJSON *pos = cJSON_GetObjectItemCaseSensitive(tr, "position");
+    TEST_ASSERT_TRUE(cJSON_IsArray(pos));
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(pos));
+    /* valueint is cJSON's integer projection of the stored double (1.0/2.0/3.0) — avoids Unity's
+       float-assert path, which this target compiles out. */
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArrayItem(pos, 0)->valueint);
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArrayItem(pos, 1)->valueint);
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArrayItem(pos, 2)->valueint);
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(e0, "drawable"));
     /* `alive` was dropped: pass-2 only serializes proven-live slots, so every entry is live by
        construction. Assert it is absent so a re-introduced always-true field is caught. */
     TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(e0, "alive"));
+
+    /* Entity b carries drawable, serialized as a named group with visible + color; no transform key. */
+    cJSON *e1 = cJSON_GetArrayItem(entities, 1);
+    cJSON *dr = cJSON_GetObjectItemCaseSensitive(e1, "drawable");
+    TEST_ASSERT_TRUE(cJSON_IsObject(dr));
+    TEST_ASSERT_TRUE(cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(dr, "visible")));
+    TEST_ASSERT_TRUE(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(dr, "color")));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(e1, "transform"));
     cJSON_Delete(root);
 }
 
-static void test_entity_list_only_drawable_filter(void) {
+static void test_entity_list_component_filter(void) {
     nt_entity_t a = nt_entity_create();
     nt_entity_t b = nt_entity_create();
     (void)a;
     TEST_ASSERT_TRUE(nt_drawable_comp_add(b));
 
-    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"only_drawable\":true}}"));
+    /* Filter by component name -> only entities carrying it (resolved once to a stable id). */
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"component\":\"drawable\"}}"));
     TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(result_of(root), "total")->valueint);
     cJSON_Delete(root);
+
+    /* Unknown component -> explicit bad_params, not a silent empty list. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"component\":\"nope\"}}"));
+    /* Non-string component -> bad_params. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"component\":123}}"));
 }
 
 /* entity.list `limit` is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX: a request for limit > cap clamps to
@@ -608,7 +636,7 @@ int main(void) {
     RUN_TEST(test_perf_reset_ok);
 #endif
     RUN_TEST(test_entity_list_total_and_fields);
-    RUN_TEST(test_entity_list_only_drawable_filter);
+    RUN_TEST(test_entity_list_component_filter);
     RUN_TEST(test_entity_list_limit_clamps_to_cap);
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);

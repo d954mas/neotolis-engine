@@ -26,6 +26,11 @@ option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT
 # release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
 # (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path. Independent of NT_DEVAPI_ENABLED.
 option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
+# Dev-only entity introspection (nt_introspect: entity.* describe + nt_log_entity). OFF compiles real
+# no-op bodies so release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
+# exercises the stub path. Set build-wide below so component describe()/registration see the same value
+# without each linking the module.
+option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
@@ -61,6 +66,10 @@ set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full.
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()
+
+# Build-wide so a component's gated describe()/registration and the nt_introspect TU agree on the value
+# without the component linking the module (it calls the sink only through the passed vtable pointer).
+add_compile_definitions(NT_INTROSPECT_ENABLED=$<BOOL:${NT_INTROSPECT_ENABLED}>)
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")

@@ -6,12 +6,11 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
-#include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "introspect/nt_introspect.h"
 #include "log/nt_log_ring.h"
 #include "metrics/nt_metrics.h"
 #include "resource/nt_resource.h"
-#include "transform_comp/nt_transform_comp.h"
 
 /* Observability command group (log / perf / entity / resource): every command is an IMMEDIATE read,
    never deferred. Bot input is range/type-checked -> bad_params; only host-call invariants assert.
@@ -326,84 +325,140 @@ static bool resolve_page(const cJSON *params, uint32_t total, const char *who, u
 // #endregion
 
 // #region entity.*
-/* Append a float[n] as a JSON number array under `key`. NULL src emits zeros. Split out so the
-   entity serializers stay simple. */
-static void add_float_array(cJSON *obj, const char *key, const float *src, int n) {
-    cJSON *a = cJSON_AddArrayToObject(obj, key);
-    NT_ASSERT(a != NULL);
-    for (int k = 0; k < n; k++) {
-        cJSON_bool added = cJSON_AddItemToArray(a, cJSON_CreateNumber(src != NULL ? (double)src[k] : 0.0));
+/* JSON sink for nt_entity_introspect: renders the format-agnostic walk into a cJSON object tree.
+   cJSON lives only in devapi, so the JSON form of the sink belongs here. `stack` holds the current
+   container — begin_group pushes a child object, end_group pops; seeded at depth 1 with the entity
+   object so a component group never pops past it. */
+typedef struct {
+    nt_introspect_sink base;
+    cJSON *stack[NT_INTROSPECT_MAX_DEPTH];
+    uint8_t depth;
+    uint8_t skipped; /* begin_groups refused past MAX_DEPTH; end_group unwinds them before popping */
+} obs_json_sink;
+
+static cJSON *json_top(obs_json_sink *j) { return j->stack[j->depth - 1]; }
+
+static void j_begin_group(nt_introspect_sink *s, const char *key) {
+    obs_json_sink *j = (obs_json_sink *)s;
+    if (j->depth >= NT_INTROSPECT_MAX_DEPTH) {
+        /* Asserts-off safety net: refuse to overflow the fixed stack. A describe() nesting this deep is
+           a bug; deeper fields fold into the current container instead of writing out of bounds. */
+        NT_ASSERT(false && "nt_introspect: begin_group past NT_INTROSPECT_MAX_DEPTH");
+        j->skipped++;
+        return;
+    }
+    cJSON *child = cJSON_AddObjectToObject(json_top(j), key);
+    NT_ASSERT(child != NULL);
+    j->stack[j->depth++] = child;
+}
+static void j_end_group(nt_introspect_sink *s) {
+    obs_json_sink *j = (obs_json_sink *)s;
+    if (j->skipped > 0) {
+        j->skipped--;
+        return;
+    }
+    NT_ASSERT(j->depth > 1); /* never pop the seed entity object */
+    j->depth--;
+}
+static void j_f32(nt_introspect_sink *s, const char *key, float v) { devapi_add_number(json_top((obs_json_sink *)s), key, (double)v); }
+static void j_i64(nt_introspect_sink *s, const char *key, int64_t v) { devapi_add_number(json_top((obs_json_sink *)s), key, (double)v); }
+static void j_u64(nt_introspect_sink *s, const char *key, uint64_t v) { devapi_add_number(json_top((obs_json_sink *)s), key, (double)v); }
+static void j_bool(nt_introspect_sink *s, const char *key, bool v) { devapi_add_bool(json_top((obs_json_sink *)s), key, v); }
+
+static void j_floats(nt_introspect_sink *s, const char *key, const float *v, int count) {
+    obs_json_sink *j = (obs_json_sink *)s;
+    NT_ASSERT(v != NULL); /* describe() boundary: a present component's accessor never returns NULL */
+    cJSON *arr = cJSON_AddArrayToObject(json_top(j), key);
+    NT_ASSERT(arr != NULL);
+    for (int i = 0; i < count; i++) {
+        cJSON_bool added = cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)v[i]));
         NT_ASSERT(added);
         (void)added;
     }
 }
+static void j_str(nt_introspect_sink *s, const char *key, const char *v) { cJSON_AddStringToObject(json_top((obs_json_sink *)s), key, v != NULL ? v : ""); }
+static void j_enum(nt_introspect_sink *s, const char *key, const char *token) { cJSON_AddStringToObject(json_top((obs_json_sink *)s), key, token != NULL ? token : ""); }
 
-/* entity "position": [x,y,z] when it has a transform, else null. */
-static void add_entity_position(cJSON *o, nt_entity_t e) {
-    if (nt_transform_comp_has(e)) {
-        add_float_array(o, "position", nt_transform_comp_position(e), 3);
-    } else {
-        cJSON_AddNullToObject(o, "position");
-    }
+/* A ref is a typed id token, never expanded inline: {"ref":"<kind>","id":"0x..."}. Hex string id
+   keeps the full 64 bits exact (a cJSON number is a double). */
+static void j_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, uint64_t id) {
+    obs_json_sink *j = (obs_json_sink *)s;
+    cJSON *ref = cJSON_AddObjectToObject(json_top(j), key);
+    NT_ASSERT(ref != NULL);
+    cJSON_AddStringToObject(ref, "ref", nt_introspect_ref_kind_name(kind));
+    char hex[19];
+    (void)snprintf(hex, sizeof(hex), "0x%" PRIx64, id);
+    cJSON_AddStringToObject(ref, "id", hex);
 }
 
-/* entity "drawable": {visible, color:[r,g,b,a]} when it has a drawable, else null. */
-static void add_entity_drawable(cJSON *o, nt_entity_t e) {
-    if (!nt_drawable_comp_has(e)) {
-        cJSON_AddNullToObject(o, "drawable");
-        return;
-    }
-    cJSON *d = cJSON_AddObjectToObject(o, "drawable");
-    NT_ASSERT(d != NULL);
-    const bool *vis = nt_drawable_comp_visible(e);
-    devapi_add_bool(d, "visible", vis != NULL && *vis);
-    add_float_array(d, "color", nt_drawable_comp_color(e), 4);
+static void obs_json_sink_init(obs_json_sink *j, cJSON *root) {
+    j->base = (nt_introspect_sink){
+        .begin_group = j_begin_group,
+        .end_group = j_end_group,
+        .field_f32 = j_f32,
+        .field_i64 = j_i64,
+        .field_u64 = j_u64,
+        .field_bool = j_bool,
+        .field_floats = j_floats,
+        .field_str = j_str,
+        .field_enum = j_enum,
+        .field_ref = j_ref,
+    };
+    j->stack[0] = root;
+    j->depth = 1;
+    j->skipped = 0;
 }
 
-/* Serialize one entity's compact view (id/index/generation/enabled + optional position +
-   drawable) into the entities array. Split out so cmd_entity_list stays simple. Pass 2 only
-   reaches proven-live slots, so no `alive` field is emitted — every entry is live by construction. */
+/* Serialize one entity (core fields + each present component as a named group) into the entities
+   array via the generic introspection walk — no component-specific code here. Pass 2 only reaches
+   proven-live slots, so the live shape carries no `alive` field: every entry is live by construction. */
 static void add_entity_entry(cJSON *arr, nt_entity_t e) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);
-    devapi_add_number(o, "id", (double)e.id);
-    devapi_add_number(o, "index", (double)nt_entity_index(e));
-    devapi_add_number(o, "generation", (double)nt_entity_generation(e));
-    devapi_add_bool(o, "enabled", nt_entity_is_enabled(e));
-    add_entity_position(o, e);
-    add_entity_drawable(o, e);
+    obs_json_sink sink;
+    obs_json_sink_init(&sink, o);
+    nt_entity_introspect(e, &sink.base);
 
     cJSON_bool added = cJSON_AddItemToArray(arr, o);
     NT_ASSERT(added);
     (void)added;
 }
 
-/* True if the live slot at `idx` (1..nt_entity_max()) passes the only_drawable filter; writes the
-   resolved handle to *out. False for a dead slot or a filtered-out entity. */
-static bool entity_slot_matches(uint16_t idx, bool only_drawable, nt_entity_t *out) {
+/* True if the live slot at `idx` (1..nt_entity_max()) passes the component filter; writes the resolved
+   handle to *out. When `filtered`, only entities carrying component `filter_id` match. False for a dead
+   slot or a filtered-out entity. */
+static bool entity_slot_matches(uint16_t idx, bool filtered, nt_comp_id_t filter_id, nt_entity_t *out) {
     nt_entity_t e = nt_entity_at_index(idx);
     if (e.id == NT_ENTITY_INVALID.id) {
         return false;
     }
-    if (only_drawable && !nt_drawable_comp_has(e)) {
+    if (filtered && !nt_entity_has_comp(e, filter_id)) {
         return false;
     }
     *out = e;
     return true;
 }
 
-/* entity.list{offset?, limit?, only_drawable?} -> live entities with compact fields (no world
-   matrix). Bad offset/limit -> bad_params. */
+/* entity.list{offset?, limit?, component?} -> live entities (core fields + each present component as a
+   named group; no world matrix). `component` filters to entities carrying that component; an unknown
+   name -> bad_params. Bad offset/limit -> bad_params. */
 static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
-    bool only_drawable = false;
-    const cJSON *jod = cJSON_GetObjectItemCaseSensitive(params, "only_drawable");
-    if (jod != NULL) {
-        if (!cJSON_IsBool(jod)) {
-            set_bad_params(err, "entity.list: only_drawable must be a bool");
+    /* Resolve the component filter once to a stable id (not per entity, never by string in the loop). */
+    bool filtered = false;
+    nt_comp_id_t filter_id = NT_COMP_ID_INVALID;
+    const cJSON *jcomp = cJSON_GetObjectItemCaseSensitive(params, "component");
+    if (jcomp != NULL) {
+        if (!cJSON_IsString(jcomp) || jcomp->valuestring == NULL) {
+            set_bad_params(err, "entity.list: component must be a string");
             return false;
         }
-        only_drawable = cJSON_IsTrue(jod);
+        filter_id = nt_entity_storage_find(jcomp->valuestring);
+        if (filter_id == NT_COMP_ID_INVALID) {
+            set_bad_params(err, "entity.list: unknown component");
+            return false;
+        }
+        filtered = true;
     }
 
     uint16_t emax = nt_entity_max();
@@ -413,7 +468,7 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
     uint32_t total = 0;
     for (uint32_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e;
-        if (entity_slot_matches((uint16_t)idx, only_drawable, &e)) {
+        if (entity_slot_matches((uint16_t)idx, filtered, filter_id, &e)) {
             total++;
         }
     }
@@ -432,7 +487,7 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
     uint32_t matched = 0;
     for (uint32_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e;
-        if (!entity_slot_matches((uint16_t)idx, only_drawable, &e)) {
+        if (!entity_slot_matches((uint16_t)idx, filtered, filter_id, &e)) {
             continue;
         }
         if (matched >= begin && matched < end) {
@@ -671,9 +726,9 @@ static const nt_devapi_command_desc k_obs_cmds[] = {
     {
         .method = "entity.list",
         .group = "entity",
-        .summary = "live entities with compact fields (id/generation/enabled/position/drawable); fully paginated with honest total",
-        .params_shape = "{offset?:number, limit?:number, only_drawable?:bool}",
-        .result_shape = "{total:number,entities:[{id,index,generation,enabled,position,drawable}]}",
+        .summary = "live entities: core fields (id/index/generation/enabled) + each present component as a named group; fully paginated with honest total; optional `component` filter",
+        .params_shape = "{offset?:number, limit?:number, component?:string}",
+        .result_shape = "{total:number,entities:[{id,index,generation,enabled,<component>:{...}}]}",
         .frame_behavior = "any",
         .side_effects = "none",
     },
