@@ -1934,6 +1934,74 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     return r;
 }
 
+/* (b) GAME-DRAWN OBJECTS (<obj=name/> WidgetSpans). The first real OBJECT pixel draw: the engine
+ * never touches these; draw_fn paints via the sprite renderer at the solver-reserved box. draw_fn has
+ * NO ctx, so everything it needs is stashed here (read at emit; must outlive the frame -> file-scope). */
+typedef struct {
+    nt_resource_t white_atlas; /* solid-fill source (the showcase atlas) */
+    uint32_t white_region;     /* resolved white-pixel region index */
+    nt_resource_t icon_atlas;  /* the icons atlas (heart) */
+    uint32_t icon_region;      /* resolved heart region index */
+    nt_material_t material;    /* the sprite material both objects bind */
+    const float *clock;        /* &s_state.rich.time -- drives progress + spin */
+} rich_obj_demo_t;
+static rich_obj_demo_t s_rich_obj_demo;
+
+/* draw_fn receives RGBA in 0..1 (the resolved <color> + folded opacity + fx tint). Pack to 0xAABBGGRR. */
+static uint32_t rich_obj_pack_color(const float color[4]) {
+    const uint32_t r = (uint32_t)((color[0] * 255.0F) + 0.5F);
+    const uint32_t g = (uint32_t)((color[1] * 255.0F) + 0.5F);
+    const uint32_t b = (uint32_t)((color[2] * 255.0F) + 0.5F);
+    const uint32_t a = (uint32_t)((color[3] * 255.0F) + 0.5F);
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+#define RICH_OBJ_BAR_W 160.0F
+#define RICH_OBJ_BAR_H 14.0F
+#define RICH_OBJ_SPIN 24.0F
+
+/* LIVE PROGRESS BAR: a dim track + a bright value rect filled to `progress` of the width. */
+static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
+}
+static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+    const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
+    /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
+    nt_sprite_renderer_set_material(d->material);
+    const float t = (d->clock != NULL) ? *d->clock : 0.0F;
+    const float progress = 0.5F + (0.5F * sinf(t * 1.5F)); /* loops 0..1 */
+    const uint32_t value_col = rich_obj_pack_color(color);
+    /* Track: same color at ~25% alpha so it tints/fades with the text. */
+    float track[4] = {color[0], color[1], color[2], color[3] * 0.25F};
+    const uint32_t track_col = rich_obj_pack_color(track);
+    const float track_pos[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+    const float fill_w = w * progress;
+    const float fill_pos[4][2] = {{x, y}, {x + fill_w, y}, {x + fill_w, y + h}, {x, y + h}};
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, NT_MATH_MAT4_IDENTITY, track_col);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, NT_MATH_MAT4_IDENTITY, value_col);
+}
+
+/* SPINNING ICON: the heart region rotated about its own center (pivot {0.5,0.5}). A true 3D cube is
+ * the SAME hook with the game's own 3D render into the box -- a 2D rotation proves the mechanism. */
+static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
+}
+static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+    const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
+    nt_sprite_renderer_set_material(d->material);
+    const float t = (d->clock != NULL) ? *d->clock : 0.0F;
+    /* model = T(center) * Rz(angle) * S(box); pivot {0.5,0.5} keeps the spin about its own center. */
+    mat4 model;
+    glm_mat4_identity(model);
+    glm_translate(model, (vec3){x + (w * 0.5F), y + (h * 0.5F), 0.0F});
+    glm_rotate_z(model, t * 2.0F, model);
+    glm_scale(model, (vec3){w, h, 1.0F});
+    nt_sprite_renderer_emit_region(d->icon_atlas, d->icon_region, (const float *)model, 0.5F, 0.5F, rich_obj_pack_color(color), 0);
+}
+
 /* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
  * effects plus a custom effect fn, the icons atlas, and the rich font family. The CODE-FIRST builder
  * never touches the tagset -- it gets real values directly. */
@@ -1960,6 +2028,19 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_icons_atlas_handle);
     /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
     nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
+
+    /* GAME-DRAWN OBJECT tags (<obj=loadbar/>, <obj=spin/>): resolve the region indices once and stash
+     * everything draw_fn needs (it gets no ctx). The heart ref resolves its index lazily on first use. */
+    nt_atlas_resolve_ref(&s_rich_heart_ref);
+    s_rich_obj_demo.white_atlas = s_atlas_handle;
+    s_rich_obj_demo.white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value);
+    s_rich_obj_demo.icon_atlas = s_icons_atlas_handle;
+    s_rich_obj_demo.icon_region = s_rich_heart_ref.region;
+    s_rich_obj_demo.material = s_sprite_material;
+    s_rich_obj_demo.clock = &s_state.rich.time;
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "loadbar", rich_obj_bar_measure, rich_obj_bar_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "spin", rich_obj_spin_measure, rich_obj_spin_draw, &s_rich_obj_demo);
+
     s_rich_ready = true;
 }
 
@@ -2172,6 +2253,18 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     const nt_ui_rich_style_t base = rich_base_style();
     nt_ui_rich_result_t res_b = {0};
     nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, strlen(markup), container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_b);
+    // #endregion
+
+    /* #region game-drawn objects (<obj=name/> WidgetSpans -- the FIRST real OBJECT pixel draw) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "2b) Game-drawn objects (<obj=name/>): the game's own draw_fn paints a LIVE progress bar + a spinning icon inline; text wraps around the reserved box.", g_current->body);
+    {
+        const char *obj_src = "Loading <obj=loadbar/> spinning <obj=spin/> -- drawn by the game, sized by the solver.";
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), obj_src, g_current->caption);
+        const nt_ui_rich_style_t obj_base = rich_base_style();
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_objects"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &obj_base, obj_src, strlen(obj_src), container_w, NT_RICH_ALIGN_LEFT,
+                               st->rich.time, NULL);
+    }
     // #endregion
 
     /* #region typewriter reveal (fade_in stock effect: staggered per-glyph, driven by the clock) */
