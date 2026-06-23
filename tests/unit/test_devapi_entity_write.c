@@ -142,6 +142,9 @@ static void test_non_finite_bad_params(void) {
 static void test_degenerate_quaternion_bad_params(void) {
     nt_entity_t e = make_transform_entity();
     assert_bad_params(set_submit(e.id, "\"component\":\"transform\",\"field\":\"rotation\",\"value\":[0,0,0,0]"));
+    /* Overflow magnitude: ||q||^2 -> +Inf in float would pass the <= gate and silently zero the quat;
+       the !isfinite guard must reject it instead of returning a false ok:true. */
+    assert_bad_params(set_submit(e.id, "\"component\":\"transform\",\"field\":\"rotation\",\"value\":[1e38,1e38,1e38,1e38]"));
 }
 
 static void test_color_out_of_range_rejected_no_desync(void) {

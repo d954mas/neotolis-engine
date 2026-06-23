@@ -1,5 +1,6 @@
 #include "transform_comp/nt_transform_comp.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -82,9 +83,11 @@ static bool transform_apply(nt_entity_t entity, const char *key, const nt_write_
             *err_msg = "transform.rotation expects 4 numbers";
             return false;
         }
-        /* Reject a degenerate quaternion BEFORE set_rotation: cglm normalize snaps ||q||~0 to identity. */
+        /* Reject a degenerate quaternion BEFORE set_rotation: cglm normalize snaps ||q||~0 to identity.
+           !isfinite guards an overflow-magnitude quat (||q||^2 -> +Inf passes the <= test, then cglm
+           divides by sqrt(Inf) and silently stores a zero quaternion). */
         float n2 = (v->as.v[0] * v->as.v[0]) + (v->as.v[1] * v->as.v[1]) + (v->as.v[2] * v->as.v[2]) + (v->as.v[3] * v->as.v[3]);
-        if (n2 <= 1e-12F) {
+        if (!isfinite(n2) || n2 <= 1e-12F) {
             *err_msg = "transform.rotation must be a non-zero quaternion";
             return false;
         }

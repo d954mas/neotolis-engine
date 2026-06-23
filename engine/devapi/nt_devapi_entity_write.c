@@ -18,6 +18,10 @@
 #ifndef NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS
 #define NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS 16
 #endif
+/* Stringize the cap into the bad_params message (the preprocessor will not expand a macro inside a
+   string literal, so embed the value, not the token — and stay drift-proof if the cap changes). */
+#define NT_DEVAPI_STR2(x) #x
+#define NT_DEVAPI_STR(x) NT_DEVAPI_STR2(x)
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
@@ -168,7 +172,7 @@ static bool apply_batch(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *jfie
     }
     int n = cJSON_GetArraySize(jfields);
     if (n == 0 || n > NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS) {
-        set_bad_params(err, "entity.set: fields must hold 1..NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS entries");
+        set_bad_params(err, "entity.set: fields must hold 1.." NT_DEVAPI_STR(NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS) " entries");
         return false;
     }
     const char *keys[NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS];
