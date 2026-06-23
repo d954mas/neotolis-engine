@@ -136,7 +136,9 @@ static void sprite_on_destroy(nt_entity_t entity) {
 
 #if NT_INTROSPECT_ENABLED
 static void sprite_describe(nt_entity_t entity, nt_introspect_sink *s) {
-    s->field_ref(s, "atlas", NT_REF_RESOURCE, nt_sprite_comp_atlas(entity)->id);
+    /* atlas is the resource HANDLE (slot+generation), not a name-hash resource_id — emit it as a handle,
+       since `resource` on the obs surface always means an nt_hash64 name hash (joinable with resource.list). */
+    s->field_ref(s, "atlas", NT_REF_HANDLE, nt_sprite_comp_atlas(entity)->id);
     s->field_bool(s, "resolved", nt_sprite_comp_is_resolved(entity));
     s->field_u64(s, "flags", *nt_sprite_comp_flags(entity));
     s->field_floats(s, "origin", nt_sprite_comp_origin(entity), 2);
