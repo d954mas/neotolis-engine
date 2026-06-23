@@ -140,6 +140,9 @@ bool nt_ui_rich_tagset_lookup_font(const nt_ui_rich_tagset_t *ts, uint64_t name_
 
 bool nt_ui_rich_tagset_lookup_atlas(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_resource_t *out_atlas) {
     NT_ASSERT(ts != NULL && out_atlas != NULL);
+    if (ts == NULL || out_atlas == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
+        return false;
+    }
     for (uint32_t i = 0; i < ts->atlas_count; i++) {
         if (ts->atlases[i].name_hash == name_hash) {
             *out_atlas = ts->atlases[i].atlas;
@@ -186,6 +189,9 @@ bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t 
 
 bool nt_ui_rich_tagset_lookup_object(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_ui_rich_tagset_object_t *out_object) {
     NT_ASSERT(ts != NULL && out_object != NULL);
+    if (ts == NULL || out_object == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
+        return false;
+    }
     for (uint32_t i = 0; i < ts->object_count; i++) {
         if (ts->objects[i].name_hash == name_hash) {
             *out_object = ts->objects[i];

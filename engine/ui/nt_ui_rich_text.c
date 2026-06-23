@@ -642,6 +642,11 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     uint32_t region_len = vlen;
     if (colon < vlen) {
         NT_ASSERT(tagset != NULL && "rich markup: <img=alias:..> needs a tagset");
+        /* HARD guard (survives NT_ASSERT OFF): no tagset -> can't resolve the alias -> skip the
+         * image (mirrors the unresolved-name skip below). Plain <img=region/> never reaches here. */
+        if (tagset == NULL) {
+            return;
+        }
         const uint64_t alias_hash = nt_hash64((const void *)val, colon).value;
         /* Evaluate the side-effecting lookup OUTSIDE the assert: an OFF build elides the assert's
          * argument, which would silently skip the atlas write. */
@@ -661,6 +666,11 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- mandated OFF-safe hard guards (empty name + unknown/NULL-measure) atop the asserts
 static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const char *val, uint32_t vlen) {
     NT_ASSERT(tagset != NULL && "rich markup: <obj=.../> needs a tagset");
+    /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below would deref NULL on
+     * untrusted markup (<obj=x/> with a text-only, tagset-less config). Skip the object. */
+    if (tagset == NULL) {
+        return;
+    }
     /* HARD guard (survives NT_ASSERT OFF): empty name resolves nothing -> never push a bogus object. */
     if (vlen == 0U) {
         NT_ASSERT(false && "rich markup: <obj/> needs a name");
