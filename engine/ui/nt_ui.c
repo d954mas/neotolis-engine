@@ -1223,10 +1223,12 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out
 
 /* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
  * by attr_map offset (attr_map = single source of truth, no magic slots). `opacity` is the
- * accumulated parent opacity; it folds into the a_tint alpha (when the material declares a_tint)
- * so a custom-attr REGION image fades with its parents exactly like color_packed sprites and rich
- * TEXT do -- the a_tint lives in the block, not backgroundColor, so the walker's backgroundColor
- * fold never reaches it. Returns float count. */
+ * accumulated parent opacity; it folds into the a_tint alpha only when the block opts in
+ * (fold_opacity_into_a_tint, set by the rich inline-image path) so that REGION image fades with its
+ * parents exactly like color_packed sprites and rich TEXT do -- the a_tint lives in the block, not
+ * backgroundColor, so the walker's backgroundColor fold never reaches it. Radial widgets do NOT opt
+ * in (a_tint.w is a reveal strength, not alpha) and fade via color_packed/a_color. Returns float
+ * count. */
 static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float opacity, float out[16]) {
     NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
     const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
@@ -1243,7 +1245,9 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
         s_hash_uvrect = nt_hash32_str("a_uvrect").value;
         s_hash_tint = nt_hash32_str("a_tint").value;
     }
-    if (opacity < 1.0F) {
+    /* OPT-IN: only the rich inline-image path folds opacity into a_tint.w (straight RGBA alpha).
+     * radial_image's a_tint.w is a reveal strength (not alpha) and fades via color_packed/a_color. */
+    if (blk->fold_opacity_into_a_tint && opacity < 1.0F) {
         const int to = custom_attr_float_offset(mi, s_hash_tint);
         if (to >= 0) {
             out[to + 3] *= opacity; /* fold parent opacity into a_tint alpha (matches the text path) */

@@ -58,6 +58,9 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .custom_bytes = (uint8_t)sizeof blk,
         .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_REGION,
+        /* a_tint.w is the TINT reveal strength, not alpha: do NOT fold opacity into it. Real alpha
+         * fades via color_packed -> a_color (the walker's backgroundColor.a path). */
+        .fold_opacity_into_a_tint = false,
         .flip_bits = style->flip_bits,
         .flags = style->flags,
         .origin_x = style->origin_x,

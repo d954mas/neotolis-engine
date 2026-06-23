@@ -1634,6 +1634,7 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
         .custom_bytes = (uint8_t)sizeof blk,
         .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_REGION,
+        .fold_opacity_into_a_tint = true, /* a_tint is a straight RGBA tint here; fade alpha with parent opacity (C2) */
         .slice9_scale = 1.0F,
         .color_packed = 0xFFFFFFFFU, /* tint lives in a_tint, not color_packed */
     };
