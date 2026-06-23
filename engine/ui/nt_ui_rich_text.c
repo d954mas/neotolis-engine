@@ -548,6 +548,12 @@ static uint32_t rich_parse_hex_color(const char *s, uint32_t n) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + NT_ASSERT validation branches
 static float rich_parse_float(const char *s, uint32_t n) {
     NT_ASSERT(n > 0U && "rich markup: empty numeric value");
+    /* HARD empty guard (survives NT_ASSERT OFF): n==0 (<scale=>, <fx=wave amp=>) would read s[0] OOB
+     * below. Return a bounded 0.0F -- for amp/speed 0 means "use default" per the <=0 convention; for
+     * scale the push_scale>0 assert is the dev guard. */
+    if (n == 0U) {
+        return 0.0F;
+    }
     float sign = 1.0F;
     uint32_t i = 0;
     if (s[0] == '-') {
@@ -667,6 +673,13 @@ static bool rich_parse_fx_params(const char *s, uint32_t n, nt_ui_rich_fx_params
             }
         }
         NT_ASSERT(eq < tlen && eq > 0U && "rich markup: <fx=name k=v> param needs key=value");
+        /* HARD guard (survives NT_ASSERT OFF): a token with no '=' (<fx=wave amp>) leaves eq==tlen, so
+         * vvlen = tlen-eq-1 underflows to UINT_MAX and rich_parse_float(vv, UINT_MAX) reads massively
+         * OOB. eq==0 (<fx=wave =3>) gives an empty key that matches nothing -> the unknown-key assert,
+         * harmless. Skip a token that isn't key=value (i already sits at the separator/end). */
+        if (eq >= tlen) {
+            continue;
+        }
         const char *key = s + tok;
         const char *vv = s + tok + eq + 1U;
         const uint32_t vvlen = tlen - eq - 1U;
@@ -784,9 +797,17 @@ static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, con
     const rich_tag_kind_t kind = rich_tag_kind(name, nlen);
     NT_ASSERT(kind != RICH_TAG_NONE && "rich markup: unknown close tag");
     NT_ASSERT(ts_stack->depth > 0U && "rich markup: close tag with no open");
+    /* HARD underflow guard (survives NT_ASSERT OFF): an orphan close (</b> with no open) would do
+     * --depth on depth==0 -> wraps to UINT_MAX -> open_stack[UINT_MAX] OOB read. Bail before decrement. */
+    if (ts_stack->depth == 0U) {
+        return;
+    }
     const rich_tag_kind_t top = ts_stack->open_stack[--ts_stack->depth];
     NT_ASSERT(top == kind && "rich markup: mismatched close tag");
-    if (kind == RICH_TAG_LINK) {
+    /* Decide the pop on what was actually OPENED (top), not the close tag's kind: a mismatched close
+     * like <link=1></b> (top==LINK, kind==BOLD) must not nt_ui_rich_pop() -- <link> pushed NO style
+     * entry (it's a pending field), so that would pop past base. For well-formed markup top==kind. */
+    if (top == RICH_TAG_LINK) {
         nt_ui_rich_link(ctx, 0U); /* clear the pending link id */
     } else {
         nt_ui_rich_pop(ctx); /* style-stack pop */

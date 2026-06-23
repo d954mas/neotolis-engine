@@ -193,8 +193,18 @@ static void test_parse_unknown_tag_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_l
 /* (8) malformed hex in <color=#..> -> NT_ASSERT. */
 static void test_parse_bad_hex_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<color=#zzz>x</color>")); }
 
-/* (9) a close tag with no matching open -> NT_ASSERT. */
+/* (9) a close tag with no matching open -> NT_ASSERT. In NT_ASSERT OFF the close-tag hard guard
+ * early-returns before --depth, so depth never wraps to UINT_MAX (no open_stack[UINT_MAX] OOB). */
 static void test_parse_orphan_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("HP</b>")); }
+
+/* (9b) a mismatched link/style close (<link=1></b>): top==LINK but the close kind==BOLD. In FULL this
+ * traps on the mismatch assert; the fix also makes OFF pop on `top` (LINK -> clear pending), never
+ * nt_ui_rich_pop (which would pop the base style past 0). */
+static void test_parse_mismatched_link_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<link=1></b>")); }
+
+/* (9c) an empty numeric value (<scale=>) -> NT_ASSERT. In OFF the rich_parse_float n==0 hard guard
+ * returns a bounded 0.0F before any s[0] read (the push_scale>0 assert is the scale dev guard). */
+static void test_parse_empty_scale_value_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<scale=>x</scale>")); }
 
 /* Parse a <fx=...> markup against a tagset that knows the stock "wave" + a custom "fade". */
 static void parse_fx(const char *m) {
@@ -227,6 +237,10 @@ static void test_parse_fx_no_equals_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_
 
 /* (8f) k=v params on a CUSTOM-fn effect name -> NT_ASSERT (params apply to STOCK effects only). */
 static void test_parse_fx_params_on_custom_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=fade amp=8>hi</fx>")); }
+
+/* (8g) an empty fx param value (amp=) -> NT_ASSERT in FULL (rich_parse_float n>0). In OFF the n==0
+ * hard guard returns 0.0F (= "use default") with no OOB read. */
+static void test_parse_fx_empty_value_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp=>hi</fx>")); }
 
 /* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: <b> pushes the BUILDER style
  * stack (NT_UI_RICH_STACK_DEPTH), which is checked first, so this exercises the BUILDER cap.
@@ -377,11 +391,14 @@ int main(void) {
     RUN_TEST(test_parse_unknown_tag_asserts);
     RUN_TEST(test_parse_bad_hex_asserts);
     RUN_TEST(test_parse_orphan_close_asserts);
+    RUN_TEST(test_parse_mismatched_link_close_asserts);
+    RUN_TEST(test_parse_empty_scale_value_asserts);
     RUN_TEST(test_parse_fx_params_ok);
     RUN_TEST(test_parse_fx_bad_float_asserts);
     RUN_TEST(test_parse_fx_unknown_key_asserts);
     RUN_TEST(test_parse_fx_no_equals_asserts);
     RUN_TEST(test_parse_fx_params_on_custom_asserts);
+    RUN_TEST(test_parse_fx_empty_value_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_nested_link_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);
