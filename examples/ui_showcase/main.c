@@ -2032,8 +2032,8 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
 #define RICH_OBJ_CUBE 64.0F
 static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
     (void)user_data;
-    /* Square box; ascent ~0.8*h sits it on the text baseline (raises the line height -- own paragraph). */
-    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 52.0F};
+    /* Square box; ascent ~0.6*h centres the cube on the text line (not floating high above it). */
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 40.0F};
 }
 static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
@@ -2088,8 +2088,9 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
      * walker's clip for everything drawn after the cube. Viewport is also untouched (no leak). */
     nt_shape_renderer_set_depth(true);
     nt_shape_renderer_set_vp((const float *)cube_vp);
-    /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text. */
-    nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.0F, 1.0F, 1.0F}, rot, color);
+    /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text.
+     * size 1.5 (not 1.0) so the cube fills more of its reserved box -- a unit cube projects to only ~36%. */
+    nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.5F, 1.5F, 1.5F}, rot, color);
     nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
 }
 
