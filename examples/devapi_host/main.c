@@ -179,13 +179,19 @@ static void frame(void) {
     /* The host fills the per-frame scalars it measured, then pushes one sample into nt_metrics
        (which derives fps + windows + the snapshot view). This host renders nothing and inits no gfx,
        so gpu_ms is the "no timer" sentinel and draw_calls is 0 — set explicitly, not polled. */
-    nt_platform_mem_t mem = nt_platform_memory_usage();
+    /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
+       on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
+    static uint64_t s_mem_used;
+    static uint32_t s_mem_tick;
+    if ((s_mem_tick++ % 30U) == 0U) {
+        s_mem_used = nt_platform_memory_usage().used;
+    }
     nt_metrics_frame_t mf = {
         .frame_ms = frame_ms,
         .cpu_ms = cpu_ms,
         .gpu_ms = -1.0F,
         .draw_calls = 0,
-        .mem_used = mem.used,
+        .mem_used = s_mem_used,
         .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
         .scratch_used = (uint32_t)nt_mem_scratch_used(),
     };

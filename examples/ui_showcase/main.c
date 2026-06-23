@@ -2445,12 +2445,19 @@ static void frame(void) {
 
     /* cpu_ms = time spent in this frame's work; fill + push one sample into nt_metrics. */
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
+    /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
+       on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
+    static uint64_t s_mem_used;
+    static uint32_t s_mem_tick;
+    if ((s_mem_tick++ % 30U) == 0U) {
+        s_mem_used = nt_platform_memory_usage().used;
+    }
     nt_metrics_frame_t mf = {
         .frame_ms = frame_ms,
         .cpu_ms = cpu_ms,
         .gpu_ms = showcase_poll_gpu_ms(),
         .draw_calls = nt_gfx_get_frame_draw_calls(),
-        .mem_used = nt_platform_memory_usage().used,
+        .mem_used = s_mem_used,
         .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
         .scratch_used = (uint32_t)nt_mem_scratch_used(),
     };
