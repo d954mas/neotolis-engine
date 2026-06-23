@@ -1778,6 +1778,23 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
         cell->pressed_link = 0U; /* release clears the latch regardless */
     }
 }
+
+/* Copy the resolved hover/click + the first solved link's BLOCK-LOCAL rect into the public result. */
+static void rich_fill_result(const nt_ui_rich_state_t *st, nt_ui_rich_result_t *out) {
+    out->hovered_link = st->hovered_link;
+    out->clicked_link = st->clicked_link;
+    if (st->link_count > 0U) {
+        const nt_ui_rich_link_rect_t *lr = &st->links[0];
+        out->first_link = lr->link_id;
+        out->first_link_rect[0] = lr->x;
+        out->first_link_rect[1] = lr->y;
+        out->first_link_rect[2] = lr->w;
+        out->first_link_rect[3] = lr->h;
+    } else {
+        out->first_link = 0U;
+        out->first_link_rect[0] = out->first_link_rect[1] = out->first_link_rect[2] = out->first_link_rect[3] = 0.0F;
+    }
+}
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- entry-guard NT_ASSERT branches + a linear solve/resolve/emit pipeline
@@ -1795,8 +1812,7 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     rich_resolve_links(ctx, st, id); /* hover gates effects -> must precede emit */
     rich_declare_fixed_block(ctx, st, id, data);
     if (out != NULL) {
-        out->hovered_link = st->hovered_link;
-        out->clicked_link = st->clicked_link;
+        rich_fill_result(st, out);
     }
     /* Builder session done: release the no-nest lock so the next rich-text call (same frame) is
      * allowed. pending_rich stays as the last-state handle (probes); solved state also lives in
@@ -1820,8 +1836,7 @@ void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_eleme
     rich_resolve_links(ctx, st, id);
     rich_declare_fixed_block(ctx, st, id, data);
     if (out != NULL) {
-        out->hovered_link = st->hovered_link;
-        out->clicked_link = st->clicked_link;
+        rich_fill_result(st, out);
     }
     ctx->rich_session_open = false; /* release the no-nest lock (see nt_ui_rich_text) */
 }

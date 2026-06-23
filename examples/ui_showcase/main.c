@@ -2107,6 +2107,18 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_end(ctx);
 }
 
+#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
+/* The code-first block's quest <link> BLOCK-LOCAL rect (from res_a.first_link_rect), stashed at the
+ * rich_text call and mapped to CSS px against the block bbox each frame -- so rich.spec.ts does ONE
+ * precise pointerdown->up at the link center (a HARD-asserted gate, not a band sweep). */
+static float s_nt_rich_link_local[4]; /* {x, y, w, h} block-local px of the first link */
+static int s_nt_rich_link_present;    /* the code-first block resolved a first link this frame */
+static float s_nt_rich_link_css_x;    /* link center + size in CSS px (canvas-relative) */
+static float s_nt_rich_link_css_y;
+static float s_nt_rich_link_css_w;
+static float s_nt_rich_link_css_h;
+#endif
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[128];
@@ -2130,6 +2142,14 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     const rich_link_look_t look_a = rich_link_look(st->rich.hover_a == rich_link_quest(), st->rich.latch_a > 0.0F);
     render_rich_builder_block(ctx, look_a, &base_a);
     nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_builder"), NT_UI_DATA_LAYER(LAYER_TEXT), &base_a, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_a);
+#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
+    /* Stash the quest link's block-local rect for the per-frame CSS map (rich.spec.ts clicks it). */
+    s_nt_rich_link_present = (res_a.first_link != 0U) ? 1 : 0;
+    s_nt_rich_link_local[0] = res_a.first_link_rect[0];
+    s_nt_rich_link_local[1] = res_a.first_link_rect[1];
+    s_nt_rich_link_local[2] = res_a.first_link_rect[2];
+    s_nt_rich_link_local[3] = res_a.first_link_rect[3];
+#endif
     // #endregion
 
     /* #region runtime markup parser */
@@ -2923,6 +2943,14 @@ EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_y(void) { return s_nt_rich_css_y; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_w(void) { return s_nt_rich_css_w; }
 EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_h(void) { return s_nt_rich_css_h; }
 
+/* The quest <link>'s on-canvas CSS rect (center x/y + w/h) -- the spec clicks its center for a
+ * deterministic link hit. present==0 when the link hasn't resolved a rect yet (rich block not laid out). */
+EMSCRIPTEN_KEEPALIVE int nt_test_rich_link_present(void) { return s_nt_rich_link_present; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_x(void) { return s_nt_rich_link_css_x; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_y(void) { return s_nt_rich_link_css_y; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_w(void) { return s_nt_rich_link_css_w; }
+EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_h(void) { return s_nt_rich_link_css_h; }
+
 /* Total <link> clicks the rich blocks have registered (game-owned counter) -- a click on the inline
  * link bumps it, proving the link-interaction path reached the real browser render+input. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_state.rich.link_clicks; }
@@ -2947,6 +2975,9 @@ EM_JS(void, nt_test_install_hooks, (void), {
         rich_visible: function() { return _nt_test_rich_visible() !== 0; },
         rich_css: function() {
             return { x: _nt_test_rich_css_x(), y: _nt_test_rich_css_y(), w: _nt_test_rich_css_w(), h: _nt_test_rich_css_h() };
+        },
+        rich_link_css: function() {
+            return { present: _nt_test_rich_link_present() !== 0, x: _nt_test_rich_link_css_x(), y: _nt_test_rich_link_css_y(), w: _nt_test_rich_link_css_w(), h: _nt_test_rich_link_css_h() };
         },
         rich_link_clicks: function() { return _nt_test_rich_link_clicks() >>> 0; }
     };
@@ -3163,6 +3194,15 @@ static void frame(void) {
                 s_nt_rich_css_y = cy_fb / dpr;
                 s_nt_rich_css_w = (rb.width * scale.scale_x) / dpr;
                 s_nt_rich_css_h = (rb.height * scale.scale_y) / dpr;
+                /* Quest link: block-local rect + block origin -> CSS px center/size (same UI->fb->CSS map). */
+                if (s_nt_rich_link_present) {
+                    const float lcx_fb = scale.offset_x + (rb.x + s_nt_rich_link_local[0] + s_nt_rich_link_local[2] * 0.5F) * scale.scale_x;
+                    const float lcy_fb = scale.offset_y + (rb.y + s_nt_rich_link_local[1] + s_nt_rich_link_local[3] * 0.5F) * scale.scale_y;
+                    s_nt_rich_link_css_x = lcx_fb / dpr;
+                    s_nt_rich_link_css_y = lcy_fb / dpr;
+                    s_nt_rich_link_css_w = (s_nt_rich_link_local[2] * scale.scale_x) / dpr;
+                    s_nt_rich_link_css_h = (s_nt_rich_link_local[3] * scale.scale_y) / dpr;
+                }
             }
         }
 #endif /* __EMSCRIPTEN__ && NT_SHOWCASE_TEST_HOOKS */

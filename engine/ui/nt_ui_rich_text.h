@@ -167,10 +167,14 @@ void nt_ui_rich_end(nt_ui_context_t *ctx);
 /* ---- Link interaction result ---- */
 /* The widget hit-tests its `<link=id>` solver rects itself (NO extra Clay element) and reports
  * the link under the pointer + the link clicked this frame. 0 = none. Link hover gates effects
- * (an effect reads `hovered==true` only for the hovered link's atoms). */
+ * (an effect reads `hovered==true` only for the hovered link's atoms). first_link_rect is the
+ * BLOCK-LOCAL rect of the first solved `<link>` (game adds the block origin to position a tooltip
+ * / hit-test externally); first_link == 0 when the block has no link. */
 typedef struct {
-    uint32_t hovered_link; /* link id under the pointer this frame (0 = none) */
-    uint32_t clicked_link; /* link id clicked (released over its rect) this frame (0 = none) */
+    uint32_t hovered_link;    /* link id under the pointer this frame (0 = none) */
+    uint32_t clicked_link;    /* link id clicked (released over its rect) this frame (0 = none) */
+    uint32_t first_link;      /* id of the first solved link this frame (0 = none) */
+    float first_link_rect[4]; /* {x, y, w, h} block-local px of the first link (valid iff first_link != 0) */
 } nt_ui_rich_result_t;
 
 /* ---- Runtime markup parser (the SECOND authoring front) ---- */
