@@ -285,6 +285,25 @@ static void test_parse_obj_unknown_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_o
 /* (8j) <obj/> with an empty name -> NT_ASSERT; the hard guard returns without pushing a run. */
 static void test_parse_obj_empty_name_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_obj("<obj/>")); }
 
+/* (8k) <obj=x/> with a NULL tagset (a legit text-only config) -> NT_ASSERT in FULL. The OFF hard guard
+ * (if (tagset == NULL) return; before the lookup) can't be unit-tested -- no OFF ctest preset exists --
+ * but it is OFF-safe by construction (early-return BEFORE nt_ui_rich_tagset_lookup_object derefs ts). */
+static void test_parse_obj_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<obj=x/>")); }
+
+/* (8l) <img=alias:region/> with a NULL tagset -> NT_ASSERT in FULL (alias needs a tagset). Same OFF
+ * hard guard (early-return inside the colon branch before nt_ui_rich_tagset_lookup_atlas derefs ts);
+ * by-construction OFF-safe, not unit-testable without an OFF preset. A VALID base is supplied so the
+ * trap is the tagset assert (the colon branch), not the base-NULL guard at the top of rich_parse_img. */
+static void parse_img_null_tagset(const char *m) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+}
+static void test_parse_img_alias_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_img_null_tagset("<img=a:b/>")); }
+
 /* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: each <b> pushes BOTH the parser
  * tag stack (NT_UI_RICH_PARSE_TAG_DEPTH) and the builder style stack (now PARSE_TAG_DEPTH+1); the
  * parser tag cap (the lower of the two) trips first. 40 > either cap, so the assert fires. */
@@ -308,9 +327,10 @@ static void test_parse_over_deep_style_stack_asserts(void) {
  * style stack balanced exactly back to base (depth never desynced from the tag stack, so no pop
  * underflow / OOB in OFF). Sweeps N up to NT_UI_RICH_PARSE_TAG_DEPTH. */
 static void test_parse_balanced_at_cap_stays_synced(void) {
-    /* Mirror NT_UI_RICH_PARSE_TAG_DEPTH (private to nt_ui_rich_text.c). The engine _Static_assert ties
-     * NT_UI_RICH_STACK_DEPTH == this + 1, so a balanced nest at this depth must NOT over-cap the style stack. */
-    const uint32_t parse_tag_depth = 32U;
+    /* Read the REAL NT_UI_RICH_PARSE_TAG_DEPTH (private to nt_ui_rich_text.c) via the test surface so the
+     * sweep always lands on the true cap. The engine _Static_assert ties NT_UI_RICH_STACK_DEPTH == this + 1,
+     * so a balanced nest at this depth must NOT over-cap the style stack. */
+    const uint32_t parse_tag_depth = nt_ui_rich_test_parse_tag_depth();
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.color_abgr = 0xFF112233U; /* a base tint distinguishable from any <b> push (bold doesn't change color) */
     for (uint32_t depth = 1U; depth <= parse_tag_depth; depth++) {
@@ -484,6 +504,49 @@ static void test_parse_utf8_truncation_codepoint_aware(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UTF8_ACCEPT, state, "kept truncated text is valid UTF-8 (ends on a codepoint boundary)");
 }
 
+/* (14c) the SAME cap-straddle trim, but the truncated trailing sequence is 3-byte (0xE2 0x80 0x99 ’)
+ * and 4-byte (0xF0 0x9F 0x98 0x80 😀). Exercises rich_utf8_seq_len's 3/4-byte branches and
+ * rich_utf8_complete_prefix's multi-continuation drop: a lead at the cap whose continuations spill
+ * past the buffer must roll the WHOLE partial sequence back, so the kept prefix decodes clean. */
+static void utf8_truncation_lead_case(const char *seq, uint32_t seq_len) {
+    static char buf[NT_UI_RICH_MAX_TEXT_BYTES + 64];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < NT_UI_RICH_MAX_TEXT_BYTES - 1U; i++) {
+        buf[n++] = 'a'; /* fills text_len to cap-1; the lead below lands at the last slot */
+    }
+    for (uint32_t i = 0; i < seq_len; i++) {
+        buf[n++] = seq[i]; /* lead at cap, continuations spill past -> whole sequence must roll back */
+    }
+    buf[n++] = 'z'; /* trailing ASCII past the cap -> dropped */
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n); /* a trap here is a FAILURE (valid input) */
+
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, runs, "one text run from the truncated literal");
+    const uint32_t kept = nt_ui_rich_test_run_text_len(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UI_RICH_MAX_TEXT_BYTES - 1U, kept, "partial multibyte lead trimmed whole (no severed codepoint)");
+    const char *t = nt_ui_rich_test_run_text(s_fx.ctx, 0);
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t cp = 0;
+    for (uint32_t i = 0; i < kept; i++) {
+        nt_utf8_decode(&state, &cp, (uint8_t)t[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UTF8_ACCEPT, state, "kept truncated text is valid UTF-8 (ends on a codepoint boundary)");
+}
+
+static void test_parse_utf8_truncation_3byte_lead(void) {
+    const char seq[3] = {(char)0xE2, (char)0x80, (char)0x99}; /* ’ U+2019 */
+    utf8_truncation_lead_case(seq, 3U);
+}
+
+static void test_parse_utf8_truncation_4byte_lead(void) {
+    const char seq[4] = {(char)0xF0, (char)0x9F, (char)0x98, (char)0x80}; /* 😀 U+1F600 */
+    utf8_truncation_lead_case(seq, 4U);
+}
+
 /* ---- fail-early domain-input asserts (rich API) ---- */
 
 /* Open a fresh rich builder session (no frame needed; the builder is scratch-only). */
@@ -567,6 +630,8 @@ int main(void) {
     RUN_TEST(test_parse_obj_self_close_emits_object_run);
     RUN_TEST(test_parse_obj_unknown_asserts);
     RUN_TEST(test_parse_obj_empty_name_asserts);
+    RUN_TEST(test_parse_obj_null_tagset_asserts);
+    RUN_TEST(test_parse_img_alias_null_tagset_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
     RUN_TEST(test_parse_mixed_tag_stack_sync);
@@ -577,6 +642,8 @@ int main(void) {
     RUN_TEST(test_parse_escape_literal_lt);
     RUN_TEST(test_parse_invalid_utf8_asserts);
     RUN_TEST(test_parse_utf8_truncation_codepoint_aware);
+    RUN_TEST(test_parse_utf8_truncation_3byte_lead);
+    RUN_TEST(test_parse_utf8_truncation_4byte_lead);
     RUN_TEST(test_parse_img_null_base_asserts);
     RUN_TEST(test_push_scale_bad_mult_asserts);
     RUN_TEST(test_rich_image_bad_scale_asserts);

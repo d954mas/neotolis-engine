@@ -239,6 +239,8 @@ uint32_t nt_ui_rich_test_clicked_link(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_link_rect_count(nt_ui_context_t *ctx);
 /* The solver effect_id carried by a solved atom (0 = none) -- proves effects ride the solved stream. */
 uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom);
+/* The private parser matched-open-tag depth cap, so the at-cap sweep can't drift from a hand-copied literal. */
+uint32_t nt_ui_rich_test_parse_tag_depth(void);
 #endif
 // #endregion
 

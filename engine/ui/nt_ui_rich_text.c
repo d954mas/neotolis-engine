@@ -30,12 +30,7 @@
  * style differs from the current run (dedup against the style table). */
 
 #define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap (parser) */
-/* One slot deeper than the parser tag cap: stack[0] is the base style, so every parser-permitted
- * nesting level (1..PARSE_TAG_DEPTH) has a push slot ABOVE base. A BALANCED <b>xN + </b>xN at
- * N==PARSE_TAG_DEPTH must not desync the two stacks (a style pop past base). Both caps now gate
- * the SAME nesting depth. */
-/* Derived (NOT a literal): the +1 over the parser cap is the invariant -- keep STACK_DEPTH defined
- * in terms of PARSE_TAG_DEPTH so the two can never drift. */
+/* +1 over the parser tag cap so a balanced push/pop chain at max nesting never pops the base style. */
 #define NT_UI_RICH_STACK_DEPTH (NT_UI_RICH_PARSE_TAG_DEPTH + 1) /* push/pop nesting per call */
 
 typedef struct {
@@ -1582,7 +1577,9 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
 /* Emit one TEXT atom WITH an effect: per-glyph draw_n so the curve phase-shifts per glyph. VISUAL-
  * ONLY (shifts/tints/scales about the glyph center; pen advance unchanged). Per-glyph pen comes from
  * CUMULATIVE-prefix measures (not per-glyph re-measure) so sum(advances) == measure(whole) exactly --
- * a per-glyph re-measure drops inter-glyph kerning and the word would drift from its reserved box. */
+ * a per-glyph re-measure drops inter-glyph kerning and the word would drift from its reserved box.
+ * Cost is O(N^2) in atom length (each glyph re-measures the growing prefix), but an atom is bounded
+ * to ONE word / break-anywhere line-chunk (<= container_w), so N is tiny in practice. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);
@@ -1720,7 +1717,7 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
         .custom_bytes = (uint8_t)sizeof blk,
         .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_REGION,
-        .fold_opacity_into_a_tint = true, /* a_tint is a straight RGBA tint here; fade alpha with parent opacity (C2) */
+        .fold_opacity_into_a_tint = true, /* a_tint is a straight RGBA tint here; fade alpha with parent opacity */
         .slice9_scale = 1.0F,
         .color_packed = 0xFFFFFFFFU, /* tint lives in a_tint, not color_packed */
     };
@@ -1999,5 +1996,7 @@ uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom) {
     NT_ASSERT(atom < st->solved_count);
     return st->solved[atom].effect_id;
 }
+
+uint32_t nt_ui_rich_test_parse_tag_depth(void) { return NT_UI_RICH_PARSE_TAG_DEPTH; }
 #endif
 // #endregion

@@ -23,6 +23,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
@@ -1209,6 +1210,7 @@ static uint32_t s_obj_measure_calls;
 static uint32_t s_obj_draw_calls;
 static float s_obj_draw_x, s_obj_draw_y, s_obj_draw_w, s_obj_draw_h;
 static float s_obj_draw_color[4];
+static float s_obj_draw_world[16];
 
 static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
     (void)user_data;
@@ -1225,6 +1227,7 @@ static void stub_draw(void *user_data, float x, float y, float w, float h, const
     s_obj_draw_w = w;
     s_obj_draw_h = h;
     memcpy(s_obj_draw_color, color, sizeof s_obj_draw_color);
+    memcpy(s_obj_draw_world, world_mat4, sizeof s_obj_draw_world);
 }
 
 /* Build "A [object] B" with an optional effect; walk once. Records the draw_fn call args. */
@@ -1361,6 +1364,101 @@ static void test_object_markup_reaches_draw_fn(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "markup-path draw_fn w == measured width");
     TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "markup-path draw_fn h == measured height");
 }
+
+/* A second object draw stub that captures ITS world_mat4 into a separate static, so a single frame
+ * with two objects can compare the matrix each receives (proves every emit shares one matrix). */
+static float s_obj2_draw_world[16];
+static uint32_t s_obj2_draw_calls;
+static void stub_draw2(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    (void)user_data;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color;
+    s_obj2_draw_calls++;
+    memcpy(s_obj2_draw_world, world_mat4, sizeof s_obj2_draw_world);
+}
+
+#define OBJ_XFORM_DX 120.0F
+#define OBJ_XFORM_DY 90.0F
+
+/* (15e) world_mat4 CONTENT, not just non-NULL (D-67-28): under a FIXED block carrying a HAS_TRANSFORM
+ * translation (mirrors test_link_hover_honors_block_transform), an OBJECT must receive the SAME baked
+ * world matrix every other emit in the block uses -- Y-flip baked in (world[5] < 0) and the block's
+ * (DX,DY) translation present. Two objects in one block must get BYTE-EQUAL matrices. */
+static void test_object_world_mat4_matches_block_transform(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    s_obj_draw_calls = 0;
+    s_obj2_draw_calls = 0;
+    memset(s_obj_draw_world, 0, sizeof s_obj_draw_world);
+    memset(s_obj2_draw_world, 0, sizeof s_obj2_draw_world);
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_ui_transform_t t = nt_ui_transform_defaults();
+    t.offset_x = OBJ_XFORM_DX;
+    t.offset_y = OBJ_XFORM_DY;
+    const nt_ui_element_data_t *xdata = NT_UI_DATA_XFORM(0U, &t, 1.0F);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("obj_xform_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_text_n(s_fx.ctx, " ", 1);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw2, NULL);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_xform_rt").id, xdata, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "first object drew once");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj2_draw_calls, "second object drew once");
+    /* Both objects in the SAME block get the IDENTICAL baked world matrix (not just non-NULL). */
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(s_obj_draw_world, s_obj2_draw_world, sizeof s_obj_draw_world, "both objects in one block receive the SAME world_mat4 (one shared matrix per emit)");
+    /* Y-flip baked into the column-major world matrix: the +y axis row (world[5]) is negative. */
+    TEST_ASSERT_TRUE_MESSAGE(s_obj_draw_world[5] < 0.0F, "world_mat4 carries the baked Y-flip (world[5] < 0)");
+    /* The block's HAS_TRANSFORM translation rides the matrix: translation column (world[12],world[13])
+     * reflects the (DX,DY) offset. Y-flip negates the Y translation contribution -> compare magnitudes. */
+    const bool tx_present = fabsf(s_obj_draw_world[12]) >= OBJ_XFORM_DX - 1.0F;
+    const bool ty_present = fabsf(s_obj_draw_world[13]) >= OBJ_XFORM_DY - 1.0F;
+    TEST_ASSERT_TRUE_MESSAGE(tx_present, "world_mat4 translation carries the block's X transform offset");
+    TEST_ASSERT_TRUE_MESSAGE(ty_present, "world_mat4 translation carries the block's Y transform offset");
+}
+
+/* (15f) degenerate measure_fn return: a stub returning {NaN, -5, NaN} must (a) trap the fail-early
+ * assert in FULL, and (b) -- proven separately via the clamp -- keep the block size finite. This
+ * death test pins the FULL assert; the OFF hard clamp (non-finite/negative -> 0) is by-construction
+ * bounded (clamps width/height/ascent BEFORE rich_break_lines / the Clay FIXED block size). */
+static nt_ui_rich_object_measure_t stub_measure_degenerate(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = NAN, .height = -5.0F, .ascent = NAN};
+}
+static void frame_object_measure(nt_ui_rich_object_measure_fn measure_fn) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("obj_deg_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_object(s_fx.ctx, measure_fn, stub_draw, NULL);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("obj_deg_rt").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+static void test_object_degenerate_measure_asserts(void) { NT_TEST_EXPECT_ASSERT(frame_object_measure(stub_measure_degenerate)); }
 
 /* An object whose measured ascent is LESS than its height -> the box must seat by ascent
  * (box bottom at baseline + (h - ascent)) and grow the line descent, not hang the whole box
@@ -1685,6 +1783,8 @@ int main(void) {
     RUN_TEST(test_object_effect_and_skip);
     RUN_TEST(test_object_draw_receives_resolved_color);
     RUN_TEST(test_object_markup_reaches_draw_fn);
+    RUN_TEST(test_object_world_mat4_matches_block_transform);
+    RUN_TEST(test_object_degenerate_measure_asserts);
     RUN_TEST(test_object_baseline_honours_ascent);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     RUN_TEST(test_markup_e2e_emit_and_link);
