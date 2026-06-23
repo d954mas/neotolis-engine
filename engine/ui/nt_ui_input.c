@@ -1160,7 +1160,7 @@ static void emit_field(input_frame_t *f) {
         } else {
             float k = style->state_speed * ctx->frame_dt;
             if (k > 1.0F) {
-                k = 1.0F; /* clamp: dt can be 0 on the first frame; caps overshoot */
+                k = 1.0F; /* cap a large dt*state_speed overshoot (first-frame no-flash is the !seen snap above) */
             }
             oklab_ease(&cell->bg, bg_t, k);
             oklab_ease(&cell->bd, bd_t, k);
@@ -1262,6 +1262,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     NT_ASSERT(style->text.font_id < NT_UI_MAX_FONTS && "nt_ui_input_text: style.text.font_id out of range");
     NT_ASSERT(isfinite(style->caret_width) && style->caret_width > 0.0F && "nt_ui_input_text: style.caret_width must be finite > 0");
     NT_ASSERT(style->text.font_size > 0.0F && "nt_ui_input_text: style.text.font_size must be > 0");
+    NT_ASSERT(isfinite(style->state_speed) && style->state_speed >= 0.0F && "nt_ui_input_text: style.state_speed must be finite >= 0");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_input_text: decl->id must be 0 (id is the explicit param)");
         NT_ASSERT(decl->userData == NULL && "nt_ui_input_text: decl->userData must be NULL (data param controls)");
