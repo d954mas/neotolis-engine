@@ -1945,16 +1945,14 @@ typedef struct {
     uint32_t icon_region;      /* resolved heart region index */
     nt_material_t material;    /* the sprite material both objects bind */
     const float *clock;        /* &s_state.rich.time -- drives progress + spin */
-    /* <obj=cube/> draws RAW GL (own viewport+scissor) into its inline box, so it needs the SAME
-     * logical->physical map the walker uses + the state it must restore. Stashed each frame BEFORE
-     * nt_ui_walk (draw_fn has no ctx). LAYOUT (Y-down) -> physical: phys = offset + scale * logical;
-     * GL scissor/viewport are bottom-left so y is flipped against fb_h. */
+    /* <obj=cube/> renders a perspective cube into its inline box WITHOUT touching glViewport: it
+     * projection-remaps the cube into the box's NDC sub-rect (VP_box = view_proj * world_mat4) and
+     * scissors to the box in physical px. draw_fn has no ctx, so the frame UBO's view_proj + the
+     * physical fb dims (for scissor px) + the enclosing scroll clip (to restore) are stashed each
+     * frame BEFORE nt_ui_walk. world_mat4 arrives per-call via the draw_fn arg. */
     struct {
-        float fb_w, fb_h;         /* physical framebuffer dims */
-        float scale_x, scale_y;   /* physical / logical */
-        float offset_x, offset_y; /* physical margin (0 in EXPAND) */
-        int walk_vp_x, walk_vp_y; /* walker's glViewport rect (restore target) */
-        int walk_vp_w, walk_vp_h;
+        float view_proj[16];                /* the frame UBO ortho (LAYOUT -> clip, logical, no Y-flip) */
+        float fb_w, fb_h;                   /* physical framebuffer dims (NDC -> scissor px) */
         int clip_x, clip_y, clip_w, clip_h; /* enclosing scroll clip in LAYOUT px; <0 w => no clip */
     } cube_view;
 } rich_obj_demo_t;
@@ -1978,7 +1976,7 @@ static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
 }
-static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
     nt_sprite_renderer_set_material(d->material);
@@ -1992,8 +1990,10 @@ static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float 
     const float fill_w = w * progress;
     const float fill_pos[4][2] = {{x, y}, {x + fill_w, y}, {x + fill_w, y + h}, {x, y + h}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, NT_MATH_MAT4_IDENTITY, track_col);
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, NT_MATH_MAT4_IDENTITY, value_col);
+    /* Emit THROUGH world_mat4 (byte-identical to emit_custom_geometry) so the bar lands under the
+     * UI transform incl. the Y-flip; identity here mirrored it to the top. */
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col);
 }
 
 /* SPINNING ICON: the heart region rotated about its own center (pivot {0.5,0.5}). A true 3D cube is
@@ -2002,7 +2002,7 @@ static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
 }
-static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
@@ -2012,78 +2012,112 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
     glm_translate(model, (vec3){x + (w * 0.5F), y + (h * 0.5F), 0.0F});
     glm_rotate_z(model, t * 2.0F, model);
     glm_scale(model, (vec3){w, h, 1.0F});
-    nt_sprite_renderer_emit_region(d->icon_atlas, d->icon_region, (const float *)model, 0.5F, 0.5F, rich_obj_pack_color(color), 0);
+    /* Compose the UI transform on the LEFT: world_model = world_mat4 * model (world flip/xform wraps the spin). */
+    mat4 world_model;
+    glm_mat4_mul((vec4 *)world_mat4, model, world_model);
+    nt_sprite_renderer_emit_region(d->icon_atlas, d->icon_region, (const float *)world_model, 0.5F, 0.5F, rich_obj_pack_color(color), 0);
 }
 
 /* TRUE 3D OBJECT: a perspective rotating cube rendered through nt_shape_renderer into the reserved
  * inline box -- the WidgetSpan killer-feature. The engine reserves a 2D box; the game paints full 3D.
- * draw_fn gets LAYOUT (Y-down) box px; it owns the GL viewport+scissor it sets, so it maps to physical
- * and RESTORES the walker's viewport + the enclosing scroll clip before returning (no leak). */
+ * NO glViewport hijack: the perspective cube is REMAPPED into the box's NDC sub-rect (a clip-space
+ * pre-scale/offset) and SCISSORED to the box in physical px, so the full-screen viewport is untouched
+ * (no leak to collapse later UI). draw_fn gets LAYOUT (Y-down) box px + the frame world_mat4. */
 #define RICH_OBJ_CUBE 64.0F
 static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
     (void)user_data;
     /* Square box; ascent ~0.8*h sits it on the text baseline (raises the line height -- own paragraph). */
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 52.0F};
 }
-static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     if (w <= 0.0F || h <= 0.0F) {
         return;
     }
-    const float sx = d->cube_view.scale_x;
-    const float sy = d->cube_view.scale_y;
-    const float ox = d->cube_view.offset_x;
-    const float oy = d->cube_view.offset_y;
-    const float fbh = d->cube_view.fb_h;
-    /* LAYOUT (Y-down) box -> physical, then GL bottom-left flip. Matches the walker scissor map exactly
-     * (nt_ui_internal_apply_scissor_logical_to_physical): viewport origin {0,0} in EXPAND => phys = offset + scale*logical. */
-    const int phys_x = (int)floorf(ox + (sx * x));
-    const int phys_y_top = (int)floorf(oy + (sy * y));
-    const int phys_w = (int)ceilf(sx * w);
-    const int phys_h = (int)ceilf(sy * h);
-    const int phys_y_gl = (int)fbh - phys_y_top - phys_h;
-    if (phys_w <= 0 || phys_h <= 0) {
-        return;
-    }
+    /* VP_box = view_proj * world_mat4 maps a LAYOUT box corner -> clip. In this 2D ortho path w_clip==1,
+     * so clip.xy IS ndc. world_mat4 Y-flips, so the box TOP maps ABOVE the box BOTTOM (top>bottom). */
+    mat4 vp_box;
+    glm_mat4_mul((vec4 *)d->cube_view.view_proj, (vec4 *)world_mat4, vp_box);
+    vec4 tl;
+    vec4 br;
+    glm_mat4_mulv(vp_box, (vec4){x, y, 0.0F, 1.0F}, tl);
+    glm_mat4_mulv(vp_box, (vec4){x + w, y + h, 0.0F, 1.0F}, br);
+    const float left = tl[0];
+    const float right = br[0];
+    const float top = tl[1];
+    const float bottom = br[1];
+    const float center_x = (left + right) * 0.5F;
+    const float center_y = (top + bottom) * 0.5F;
+    const float half_x = (right - left) * 0.5F;
+    const float half_y = (top - bottom) * 0.5F; /* > 0: top>bottom after the Y-flip */
 
-    /* VP = perspective * lookat. Plain glm_* (vanilla GL clip -1..1 NDC depth) -- matches the shape
-     * template winding (RH) + the depth buffer cleared to 1.0; set_depth(true) => LEQUAL+write so the
-     * cube is solid + self-correct against itself. The box's depth is the cleared 1.0 (UI is depth-off). */
-    const float aspect = (float)phys_w / (float)phys_h;
+    /* Remap R applied in CLIP space BEFORE the perspective divide: clip'.x = half_x*clip.x + center_x*clip.w,
+     * clip'.y = half_y*clip.y + center_y*clip.w, z/w pass through -> the cube's [-1,1] NDC lands in the box. */
+    mat4 remap;
+    glm_mat4_identity(remap);
+    remap[0][0] = half_x;
+    remap[1][1] = half_y;
+    remap[3][0] = center_x;
+    remap[3][1] = center_y;
+
+    /* Box pixel aspect: NDC half-extents are resolution-independent, so multiply by fb to get px aspect. */
+    const float aspect = (fabsf(half_x) * d->cube_view.fb_w) / (fabsf(half_y) * d->cube_view.fb_h);
     mat4 view;
     mat4 proj;
-    mat4 vp;
+    mat4 persp_vp;
+    mat4 cube_vp;
     glm_lookat((vec3){0.0F, 0.0F, 3.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
     glm_perspective(glm_rad(50.0F), aspect, 0.1F, 100.0F, proj);
-    glm_mat4_mul(proj, view, vp);
+    glm_mat4_mul(proj, view, persp_vp);
+    glm_mat4_mul(remap, persp_vp, cube_vp); /* R * perspective * lookat */
 
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
     versor q;
     glm_quatv(q, t * 1.2F, (vec3){0.3F, 1.0F, 0.2F});
     const float rot[4] = {q[0], q[1], q[2], q[3]};
 
-    nt_gfx_set_viewport(phys_x, phys_y_gl, phys_w, phys_h);
-    nt_gfx_set_scissor(phys_x, phys_y_gl, phys_w, phys_h);
+    /* Scissor to the box in PHYSICAL px: the full-screen viewport is the whole framebuffer, so NDC -> px
+     * is the plain [-1,1] -> [0,fb] map (no viewport offset). GL y is bottom-up; box bottom (NDC) is the
+     * smaller y, so gl_bottom uses `bottom`. */
+    float sx = (left + 1.0F) * 0.5F * d->cube_view.fb_w;
+    float sright = (right + 1.0F) * 0.5F * d->cube_view.fb_w;
+    float gl_bottom = (bottom + 1.0F) * 0.5F * d->cube_view.fb_h;
+    float gl_top = (top + 1.0F) * 0.5F * d->cube_view.fb_h;
+    int scx = (int)sx;
+    int scy = (int)gl_bottom;
+    int scw = (int)(sright - sx);
+    int sch = (int)(gl_top - gl_bottom);
+    if (scw <= 0 || sch <= 0) {
+        return;
+    }
+
+    nt_gfx_set_scissor(scx, scy, scw, sch);
     nt_gfx_set_scissor_enabled(true);
 
     nt_shape_renderer_set_depth(true);
-    nt_shape_renderer_set_vp((const float *)vp);
+    nt_shape_renderer_set_vp((const float *)cube_vp);
     /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text. */
     nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.0F, 1.0F, 1.0F}, rot, color);
-    nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW (inside our viewport+scissor) */
+    nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW (scissored to the box) */
 
-    /* RESTORE -- the walker sets glViewport ONCE at walk start and never per-dispatch; a leaked viewport
-     * collapses every later UI element into this tiny box. Restore the walker's full viewport, and the
-     * enclosing scroll clip (the Rich tab content sits inside s_id_stage_scroll's clip -- emit_custom does
-     * NOT save/restore scissor). Walker re-binds pipeline/program/depth/cull/blend on the next sprite. */
-    nt_gfx_set_viewport(d->cube_view.walk_vp_x, d->cube_view.walk_vp_y, d->cube_view.walk_vp_w, d->cube_view.walk_vp_h);
+    /* RESTORE scissor only (viewport untouched -> nothing to restore). Re-apply the enclosing scroll clip
+     * (the Rich tab content lives inside s_id_stage_scroll's clip; emit_custom does NOT save/restore scissor)
+     * or disable scissor if there is none. DO NOT call set_viewport. */
     if (d->cube_view.clip_w > 0) {
-        const int c_phys_x = (int)floorf(ox + (sx * (float)d->cube_view.clip_x));
-        const int c_phys_y_top = (int)floorf(oy + (sy * (float)d->cube_view.clip_y));
-        const int c_phys_w = (int)ceilf(sx * (float)d->cube_view.clip_w);
-        const int c_phys_h = (int)ceilf(sy * (float)d->cube_view.clip_h);
-        const int c_phys_y_gl = (int)fbh - c_phys_y_top - c_phys_h;
-        nt_gfx_set_scissor(c_phys_x, c_phys_y_gl, c_phys_w, c_phys_h);
+        /* clip rect is LAYOUT (logical) px; map through view_proj+identity world like the box does so the
+         * physical scissor matches the walker's. Reuse the ortho directly: NDC.x = vp*x. */
+        vec4 cl_tl;
+        vec4 cl_br;
+        glm_mat4_mulv((vec4 *)d->cube_view.view_proj, (vec4){(float)d->cube_view.clip_x, (float)d->cube_view.clip_y, 0.0F, 1.0F}, cl_tl);
+        glm_mat4_mulv((vec4 *)d->cube_view.view_proj, (vec4){(float)(d->cube_view.clip_x + d->cube_view.clip_w), (float)(d->cube_view.clip_y + d->cube_view.clip_h), 0.0F, 1.0F}, cl_br);
+        /* ortho has no Y-flip, so clip_y(top) maps to LARGER ndc.y; GL bottom uses the smaller -> cl_br. */
+        const float cl_left = (cl_tl[0] + 1.0F) * 0.5F * d->cube_view.fb_w;
+        const float cl_right = (cl_br[0] + 1.0F) * 0.5F * d->cube_view.fb_w;
+        const float cl_top_ndc = cl_tl[1];
+        const float cl_bot_ndc = cl_br[1];
+        const float cl_gl_bot = ((cl_top_ndc < cl_bot_ndc ? cl_top_ndc : cl_bot_ndc) + 1.0F) * 0.5F * d->cube_view.fb_h;
+        const float cl_gl_top = ((cl_top_ndc > cl_bot_ndc ? cl_top_ndc : cl_bot_ndc) + 1.0F) * 0.5F * d->cube_view.fb_h;
+        nt_gfx_set_scissor((int)cl_left, (int)cl_gl_bot, (int)(cl_right - cl_left), (int)(cl_gl_top - cl_gl_bot));
         nt_gfx_set_scissor_enabled(true);
     } else {
         nt_gfx_set_scissor_enabled(false);
@@ -3352,23 +3386,14 @@ static void frame(void) {
 
         nt_ui_end(s_ctx);
 
-        /* Stash the physical map the <obj=cube/> draw_fn needs (it owns raw GL viewport+scissor, has no
-         * ctx). offset/scale + fb dims reproduce the walker's logical->physical map; walk_vp = the SINGLE
-         * glViewport the walker sets at walk start (restore target); clip = the enclosing stage_scroll clip
-         * (the Rich tab content lives inside it) so the cube restores it instead of leaving scissor off. */
+        /* Stash what the <obj=cube/> draw_fn needs (it has no ctx). The cube REMAPS into its box NDC via
+         * view_proj (the frame UBO ortho) * world_mat4 (per-call arg) and scissors in physical px (fb dims);
+         * clip = the enclosing stage_scroll clip (the Rich tab content lives inside it) so the cube restores
+         * it after its scissored draw instead of leaving scissor off. NO viewport touch -> no walk_vp stash. */
         {
-            const int wox = (int)roundf(scale.offset_x);
-            const int woy = (int)roundf(scale.offset_y);
+            memcpy(s_rich_obj_demo.cube_view.view_proj, vp, 64);
             s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
             s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
-            s_rich_obj_demo.cube_view.scale_x = scale.scale_x;
-            s_rich_obj_demo.cube_view.scale_y = scale.scale_y;
-            s_rich_obj_demo.cube_view.offset_x = scale.offset_x;
-            s_rich_obj_demo.cube_view.offset_y = scale.offset_y;
-            s_rich_obj_demo.cube_view.walk_vp_x = wox;
-            s_rich_obj_demo.cube_view.walk_vp_y = woy;
-            s_rich_obj_demo.cube_view.walk_vp_w = (int)scale.fb_w - (2 * wox);
-            s_rich_obj_demo.cube_view.walk_vp_h = (int)scale.fb_h - (2 * woy);
             const nt_ui_bbox_t clip = nt_ui_get_bbox(s_ctx, s_id_stage_scroll);
             if (clip.found) {
                 s_rich_obj_demo.cube_view.clip_x = (int)clip.x;
