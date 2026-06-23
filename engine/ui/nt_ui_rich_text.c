@@ -1721,7 +1721,9 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
 
     const Clay_ElementDeclaration decl = {
         .layout = {.sizing = {CLAY_SIZING_FIXED(scaled_w), CLAY_SIZING_FIXED(scaled_h)}},
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+        /* clipTo=ATTACHED_PARENT: inherit the FIXED block's full clip chain (incl. an enclosing scroll) so
+         * the image is clipped to the panel -- without it a floating child escapes the scroll scissor. */
+        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
     };
     nt_ui_image_custom(ctx, idata, &img, &decl);
     st->image_emit_count++;
