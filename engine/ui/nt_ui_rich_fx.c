@@ -1,9 +1,6 @@
-/* Stock rich-text effect catalog. Each fn is a pure, deterministic curve over
- * (atom_idx, time, hovered) -- no global state, no allocation -- so the same time yields the
- * same transform headless (time==0 is each effect's t=0 value). The constants below are the
- * compile-time DEFAULTS; nt_ui_rich_push_effect_ex / `<fx=name k=v>` can override amp/speed per
- * registration by passing an nt_ui_rich_fx_params_t as user_data (a field <=0 keeps the default).
- * user_data==NULL (the plain push_effect path) -> every default, byte-identical to the original. */
+/* Stock effect catalog: each fn is a pure deterministic curve over (atom_idx, time, hovered) -- no
+ * global state, so the same time replays headless. user_data is an optional nt_ui_rich_fx_params_t
+ * override (NULL -> every compile-time default; a field <=0 keeps that field's default). */
 
 #include "ui/nt_ui_rich_fx.h"
 

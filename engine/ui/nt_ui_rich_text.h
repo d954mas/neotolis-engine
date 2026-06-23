@@ -49,12 +49,9 @@ typedef enum {
     NT_RICH_ATOM_OBJECT,
 } nt_rich_atom_kind_t;
 
-/* ---- Per-atom effect ABI (full catalog + stock curves live in nt_ui_rich_fx.h) ----
- * Declared here (not fx.h) so the builder signature nt_ui_rich_push_effect_fn can name the fn
- * type without a text.h <-> fx.h include cycle (fx.h includes this header). The effect transform
- * applied to one atom at emit: offset shifts the quad / draw() xy; color is the ABSOLUTE resolved
- * RGBA tint (NOT a multiplier -- identity returns base_color verbatim); scale scales about the
- * atom center; visible==false skips the atom emit. */
+/* ---- Per-atom effect ABI (full catalog + stock curves in nt_ui_rich_fx.h) ----
+ * Declared here, not fx.h, so push_effect_fn's signature avoids a text.h<->fx.h include cycle
+ * (fx.h includes this header). */
 typedef struct {
     float offset_x; /*  0: px shift of the atom quad / draw() x */
     float offset_y; /*  4: px shift of the atom quad / draw() y */
@@ -64,19 +61,13 @@ typedef struct {
 } nt_ui_rich_fx_result_t;
 _Static_assert(sizeof(nt_ui_rich_fx_result_t) == 32, "nt_ui_rich_fx_result_t stable ABI (6 float + 1 bool + pad)");
 
-/* Per-atom effect callback. base_xy/base_wh/base_color are the solver's resolved atom box +
- * color (read-only inputs); time is the game-owned clock (seconds); hovered is true only for
- * the atoms of the currently-hovered link (link hover gates effects). user_data is the pointer
- * the game registered with the fn (push_effect_fn / register_effect_fn) -- NULL for stock fns --
- * so one fn can be parameterized per registration. The fn returns the visual-only transform;
- * it MUST NOT mutate layout. */
+/* Per-atom effect callback. hovered is true only for the hovered link's atoms (hover gates
+ * effects). Returns a visual-only transform; MUST NOT mutate layout. */
 typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
                                                    void *user_data);
 
-/* Runtime tuning for the STOCK effect catalog (wave/shake/rainbow/pulse/fade_in). Passed as the
- * stock fn's user_data via nt_ui_rich_push_effect_ex / `<fx=name k=v>` markup. Convention: a field
- * <= 0 means "use the effect's compile-time default" (so a partly-specified struct still tunes only
- * the field it sets). In-memory only -- never serialized. amp/speed map per effect (see fx.c). */
+/* Runtime tuning for the STOCK effect catalog, passed as the stock fn's user_data. Convention: a
+ * field <= 0 means "use the effect's compile-time default" (a partial struct tunes only its set fields). */
 typedef struct {
     float amp;   /* 0: effect-specific magnitude (wave px / shake px / pulse scale delta); <=0 -> default */
     float speed; /* 4: effect-specific rate (rad/s or hue/s or reveal rate); <=0 -> default */
@@ -131,10 +122,8 @@ typedef struct {
 } nt_ui_rich_object_measure_t;
 
 typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_data);
-/* color is the ABSOLUTE resolved RGBA the engine resolved for this atom: the run's <color>
- * with parent opacity folded into alpha and any per-atom effect tint applied -- the SAME color
- * the TEXT/IMAGE paths render with. The game should modulate its own draw by it so a custom
- * OBJECT honours opacity / <color> / fx identically (AGENTS.md API consistency). */
+/* color is the ABSOLUTE resolved RGBA (run <color> + folded opacity + fx tint) -- the SAME color
+ * the TEXT/IMAGE paths use. Modulate the custom draw by it so OBJECT honours opacity/<color>/fx. */
 typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, const float color[4]);
 
 /* ---- Builder (code-first push/pop) ---- */
@@ -151,11 +140,8 @@ void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id);
  * (fn,user_data) is captured into a per-call fixed-cap table; the composed style carries a
  * custom effect_id index into it. fn must be non-NULL. */
 void nt_ui_rich_push_effect_fn(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, void *user_data);
-/* Push a STOCK effect (stock_id, NT_UI_RICH_FX_ID_*) TUNED by `params`. The params are COPIED by
- * value into per-block storage (caller-side params are typically transient/stack; they are read at
- * EMIT, so they must be block-owned) and the stock fn receives a pointer to that copy as user_data.
- * params==NULL is identical to nt_ui_rich_push_effect(ctx, stock_id) (stock defaults). NO heap;
- * fixed cap; asserts on overflow. */
+/* Push a STOCK effect TUNED by `params`. params are COPIED into per-block storage (read at EMIT, so
+ * the transient caller struct must not be aliased). params==NULL == nt_ui_rich_push_effect(stock). */
 void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_ui_rich_fx_params_t *params);
 void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len);
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale);
@@ -165,11 +151,8 @@ void nt_ui_rich_pop(nt_ui_context_t *ctx);
 void nt_ui_rich_end(nt_ui_context_t *ctx);
 
 /* ---- Link interaction result ---- */
-/* The widget hit-tests its `<link=id>` solver rects itself (NO extra Clay element) and reports
- * the link under the pointer + the link clicked this frame. 0 = none. Link hover gates effects
- * (an effect reads `hovered==true` only for the hovered link's atoms). first_link_rect is the
- * BLOCK-LOCAL rect of the first solved `<link>` (game adds the block origin to position a tooltip
- * / hit-test externally); first_link == 0 when the block has no link. */
+/* The widget hit-tests its `<link=id>` rects itself (no extra Clay element). first_link_rect is
+ * BLOCK-LOCAL (add the block origin to place a tooltip / hit-test externally). 0 = none. */
 typedef struct {
     uint32_t hovered_link;    /* link id under the pointer this frame (0 = none) */
     uint32_t clicked_link;    /* link id clicked (released over its rect) this frame (0 = none) */
@@ -178,19 +161,11 @@ typedef struct {
 } nt_ui_rich_result_t;
 
 /* ---- Runtime markup parser (the SECOND authoring front) ---- */
-/* Parses an angular `<tag>...</tag>` + self-closing `<img=region/>` markup string into the
- * SAME run-list as the equivalent code-first builder calls, by DRIVING the shared builder
- * (begin / push_* / text_n / image / pop / end) -- no second composition path. A markup string and the
- * equivalent builder sequence produce a byte-identical run-list.
- *
- * CORE tags are intrinsic (no registration): `<b>` `<i>` `<color=#hex>` `<scale=N>`
- * `<font=name>` `<link=id>` and self-closing `<img=region/>` / `<img=alias:region/>`. Names
- * (`<font=name>`, `<color=name>`, `<img=alias:...>`) resolve via the passed tagset; `<color=#hex>`
- * is intrinsic hex; `<img=region/>` resolves against base->default_atlas.
- *
- * Malformed markup fires NT_ASSERT (builder-validates spirit). The tokenizer scan is bounded by
- * `len` so adversarial input cannot OOB or loop. `tagset` may be NULL when the markup
- * uses only intrinsic tags. The parser opens/closes its own begin/end on ctx. */
+/* Parses `<tag>...</tag>` + self-closing `<img=region/>` by DRIVING the shared builder -- the
+ * run-list is byte-identical to the equivalent builder calls (no second composition path).
+ * Intrinsic tags: `<b>` `<i>` `<color=#hex>` `<scale=N>` `<font=name>` `<link=id>` `<img=.../>`;
+ * names resolve via `tagset` (NULL when only intrinsic tags are used). Malformed markup asserts
+ * (builder-validates); the scan is `len`-bounded so adversarial input can't OOB/loop. */
 void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *markup, size_t len);
 
 /* Convenience entry: parse the markup, then solve + emit it as a wrapped block (parse -> the

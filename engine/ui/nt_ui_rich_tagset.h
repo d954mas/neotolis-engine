@@ -1,17 +1,10 @@
 #ifndef NT_UI_RICH_TAGSET_H
 #define NT_UI_RICH_TAGSET_H
 
-/* Rich-text PARSER vocabulary: a standalone owned object holding the
- * name->value maps the markup parser needs to turn a name-string into a real value
- * (`<font=heading>`, `<color=gold>`, `<img=alias:region/>`, `<wave>`, `<obj=portrait/>`).
- *
- * It is NOT on nt_ui_context and the CODE-FIRST builder NEVER touches it -- the builder
- * gets real values directly (push_color(abgr), push_font(family), image(ref)). Registration
- * exists ONLY so the parser can resolve a name. Keys are xxh64 of the name (the same
- * convention atlas region names use); no heap -- fixed `#define` caps, NT_ASSERT on overflow.
- *
- * In-memory-only: this struct is NEVER serialized (no pack/ABI contract), so there is
- * deliberately no _Static_assert pinning its size -- native and wasm layouts may differ. */
+/* Rich-text PARSER vocabulary: name->value maps so markup can resolve a name (`<font=heading>`,
+ * `<color=gold>`, `<img=alias:region/>`). The CODE-FIRST builder NEVER touches it (it gets real
+ * values directly); registration exists ONLY for the parser. Keys are xxh64 of the name; no heap
+ * (fixed caps). In-memory only, NEVER serialized -- so no _Static_assert pins its size. */
 
 #include <stdbool.h>
 #include <stdint.h>

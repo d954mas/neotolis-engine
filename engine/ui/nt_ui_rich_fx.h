@@ -1,17 +1,10 @@
 #ifndef NT_UI_RICH_FX_H
 #define NT_UI_RICH_FX_H
 
-/* Per-ATOM rich-text effects. An effect fn runs at EMIT, once per solved atom
- * (glyph AND image AND object -- per-atom), and is VISUAL-ONLY: it shifts/tints/scales/hides
- * the atom but never changes the solver's layout (line/box stay put). The animation clock is
- * passed IN BY THE GAME (`time`); there is no global frame clock.
- *
- * The stock catalog (wave/shake/rainbow/pulse/fade_in/bounce/glow/sway) is a STARTING set the game registers
- * piecemeal by name into the tagset (nt_ui_rich_tagset_register_effect) -- NO register_defaults
- * bundle. The catalog constants are DEFAULTS: a stock effect is tunable at runtime via
- * nt_ui_rich_fx_params_t (amp/speed) passed through nt_ui_rich_push_effect_ex or the
- * `<fx=name amp=.. speed=..>` markup; a field <=0 keeps the default. A game needing a curve the
- * params can't express still registers its OWN fn. */
+/* Per-ATOM rich-text effects. An effect fn runs at EMIT, once per solved atom, VISUAL-ONLY (never
+ * touches layout). The clock is game-passed (`time`); no global frame clock. The stock catalog
+ * constants are DEFAULTS, tunable via nt_ui_rich_fx_params_t (amp/speed; a field <=0 keeps the
+ * default); a game needing a curve params can't express registers its OWN fn. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -69,13 +62,9 @@ nt_ui_rich_fx_fn nt_ui_rich_fx_stock(uint8_t effect_id);
 #define NT_UI_RICH_FX_ID_SWAY 8U
 
 /* ---- Custom (game-supplied) effects ----
- * A game registers its OWN fn (push_effect_fn / tagset register_effect_fn). The (fn,user_data)
- * pair lives in a per-block fixed-cap table captured at build (NOT in the 48B style, NOT in the
- * tagset -- which is not present at emit); the style's uint8 effect_id carries a CUSTOM
- * index instead of a stock id when effect_id >= NT_UI_RICH_FX_CUSTOM_BASE. The emit path resolves
- * a custom id against the solved-state table, a stock id against nt_ui_rich_fx_stock. The stored
- * user_data is passed back to the custom fn at emit (NULL for stock) -- one fn, parameterized per
- * registration. */
+ * The (fn,user_data) pair lives in a per-block fixed-cap table captured at build (NOT the style, NOT
+ * the tagset -- absent at emit); the style's uint8 effect_id carries a CUSTOM index when it is
+ * >= NT_UI_RICH_FX_CUSTOM_BASE, else a stock id resolved via nt_ui_rich_fx_stock. */
 #define NT_UI_RICH_FX_CUSTOM_BASE 128U /* effect_id >= this -> index (id - BASE) into the per-block custom table */
 
 /* True when a composed-style effect_id names a custom (game-supplied) fn, not a stock id. */

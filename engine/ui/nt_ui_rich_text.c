@@ -156,10 +156,8 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
 }
 
 // #region style-stack
-/* The composed style is the top of the stack. push_* mutates a COPY pushed on top;
- * pop restores the previous. A new run is emitted only when this composed style
- * differs from the current run's style (dedup). Shared by the builder AND the
- * parser -- both feed rich_emit_text_run / rich_style_top. */
+/* The composed style is the stack top: push_* pushes a mutated COPY, pop restores. A new run starts
+ * only when the composed style differs from the current run's (dedup). Shared by builder + parser. */
 
 static nt_ui_rich_style_t *rich_style_top(nt_ui_rich_state_t *st) {
     NT_ASSERT(st->stack_depth > 0 && "rich style stack underflow");
@@ -458,25 +456,16 @@ void nt_ui_rich_end(nt_ui_context_t *ctx) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(st->stack_depth >= 1 && "rich style stack corrupted");
     ctx->rich_session_open = false; /* build phase done; pending_rich kept for solve/emit + probes */
-    /* Unbalanced pushes are fine -- a push not matched by a pop just stays active
-     * to end-of-call and is discarded (the run-list already captured each run's
-     * composed style). Run-list finalized; the solver/emit consume it. Scratch frees on reset. */
+    /* Unbalanced pushes are harmless: each run already captured its composed style at append time. */
 }
 // #endregion
 
 // #region PARSER
-/* Runtime markup parser: tokenizes an angular `<tag>...</tag>` + self-closing
- * `<img=region/>` string and DRIVES the shared code-first builder (begin / push_* / text_n / image /
- * pop / end) -- so the run-list is identical to the equivalent builder calls by construction, never a
- * second composition path.
- *
- *  - Escaping: a backslash escapes the next byte -- `\<` emits a literal '<', `\\` a literal '\'.
- *  - Case: tag NAMES are case-insensitive (`<B>` == `<b>`, `<COLOR=...>` == `<color=...>`).
- *    Tag VALUES (hex digits, names hashed for the tagset) are case-sensitive to the hash.
+/* Markup tokenizer that DRIVES the shared builder (no second composition path). Contract:
+ *  - Escaping: `\` escapes the next byte (`\<` -> literal '<', `\\` -> literal '\').
+ *  - Case: tag NAMES are case-insensitive; tag VALUES (hex, hashed names) are case-sensitive.
  *  - Whitespace: preserved verbatim (the solver owns wrap; no collapse).
- *
- * Malformed markup fires NT_ASSERT (builder-validates spirit). Every scan loop is bounded by the
- * input `len` so a non-terminating `<` cannot OOB or loop. */
+ * Every scan loop is `len`-bounded so a non-terminating `<` can't OOB or loop. */
 
 #define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap */
 
@@ -939,11 +928,9 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
 // #endregion
 
 // #region SOLVER
-/* Full word-wrap + baseline solver. Two passes over an
- * ATOM stream (the wrap unit, not runs -- a word can span runs): PASS 1 greedy break with
- * break-anywhere overflow for over-long words; PASS 2 per-line max ascent/descent + L/C/R
- * align offset + per-atom baseline placement. Scratch-only, NO heap. The solved atoms feed
- * both emit and the test probes. */
+/* Word-wrap + baseline solver over an ATOM stream (the wrap unit, not runs -- a word can span runs):
+ * PASS 1 greedy break (break-anywhere for over-long words); PASS 2 per-line ascent/descent + L/C/R
+ * align + baseline placement. Scratch-only, no heap. */
 
 /* Internal layout atom: the unit of wrap/position. TEXT runs decompose into word atoms
  * (a trailing space stays with the word -> a break opportunity after); an over-long word
@@ -1434,11 +1421,7 @@ static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
     out[3] = ((float)((abgr >> 24) & 0xFFU) / 255.0F) * opacity;
 }
 
-/* Evaluate the per-atom effect. Returns the visual-only transform for the atom at
- * fx_idx; effect_id 0 / an unregistered id -> identity (no shift, base color, scale 1, visible).
- * `hovered` is true only when the atom belongs to the currently-hovered link. The
- * effect is VISUAL-ONLY -- the caller folds it into position/tint/scale at emit; layout is NOT
- * recomputed. */
+/* Evaluate the per-atom effect -> visual-only transform; effect_id 0 / unregistered -> identity. */
 static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
     /* Custom (game-supplied) fns resolve BEFORE stock: a custom effect_id indexes the
      * per-block table captured at build; otherwise fall back to the stock catalog. */
@@ -1462,11 +1445,8 @@ static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const n
     return fn(s->fx_idx, s->kind, base_xy, base_wh, base_color, st->time, hovered, user_data);
 }
 
-/* Build the per-span model mat4 for draw_n: LAYOUT pen (ox,oy) -> world via world_mat4,
- * with the text-renderer Y-up <-> Clay Y-down sign flip on col1 (mirrors emit_text in
- * nt_ui.c). `shear` applies synthetic italic for a run that requested italic with no italic
- * family member: in text-local Y-up space, x' = x + k*y leans glyphs right
- * above the baseline -- fold k*col0 into col1. */
+/* Per-span model mat4 for draw_n: LAYOUT pen (ox,oy) -> world, with the text Y-up <-> Clay Y-down
+ * flip on col1 (mirrors emit_text in nt_ui.c). `shear` folds synthetic-italic lean (k*col0) into col1. */
 static void rich_span_model(const float world[16], float ox, float oy, bool shear, float out[16]) {
     const float sign_y = -1.0F;
     const float k = shear ? 0.2F : 0.0F; /* synthetic-italic shear factor */
@@ -1491,18 +1471,10 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
     st->emit_span_count++;
 }
 
-/* Emit one TEXT atom WITH an effect: explode to per-glyph draw_n so the curve phase-shifts per
- * glyph (the localized batch break is accepted). VISUAL-ONLY -- it
- * shifts the glyph pen + tints + scales about the glyph center; the solver's pen advance is
- * unchanged.
- *
- * Per-glyph pen positions are derived from the CUMULATIVE-prefix measure (measure of the atom
- * prefix up to each glyph boundary), NOT a per-glyph re-measure summed up: a per-glyph re-measure
- * starts each glyph with no left neighbour, so it drops the inter-glyph kerning the solver's
- * whole-span advance includes -- the word would drift from its reserved box under a kerning font
- * prefix-differencing keeps sum(advances) == measure(whole) exactly. The prefix re-measure is O(n^2)
- * but n is one atom (a single word/line-width fragment), so it is bounded and accepted -- a per-glyph
- * measure would be O(n) but would drop kerning. */
+/* Emit one TEXT atom WITH an effect: per-glyph draw_n so the curve phase-shifts per glyph. VISUAL-
+ * ONLY (shifts/tints/scales about the glyph center; pen advance unchanged). Per-glyph pen comes from
+ * CUMULATIVE-prefix measures (not per-glyph re-measure) so sum(advances) == measure(whole) exactly --
+ * a per-glyph re-measure drops inter-glyph kerning and the word would drift from its reserved box. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);
@@ -1603,22 +1575,16 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
 // #endregion
 
 // #region image-emit
-/* Inline IMAGE atoms ride the EXISTING custom-attr sprite path (nt_ui_image_custom)
- * -- exactly as nt_ui_radial.c does, but geom_mode REGION (real atlas region) with
- * the 48 B {a_tint, a_uvrect, a_layout} block: a_tint = the run's lossless float4 tint, a_uvrect
- * + a_layout walker-filled by name. Each image is a FLOATING child of the FIXED block, attached
- * at the block's top-left and offset to the solver's solved (x,y) -- so wrap/baseline stay the
- * solver's, and the image batches on the shared rich_image material. */
+/* Inline IMAGE atoms ride the custom-attr sprite path (nt_ui_image_custom), geom_mode REGION, with
+ * the {a_tint, a_uvrect, a_layout} block (a_uvrect/a_layout walker-filled by name). Each image is a
+ * FLOATING child of the FIXED block, offset to the solved (x,y) -- so wrap/baseline stay the solver's. */
 static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s) {
     const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
     if (run->image_ref.region == NT_ATLAS_INVALID_REGION || run->image_ref.atlas.id == 0U) {
         return; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
     }
 
-    /* Per-atom effect: shift xy, set a_tint to the effect's ABSOLUTE resolved tint
-     * (identity == the run's base tint), scale w/h about center, skip if not visible.
-     * VISUAL-ONLY -- the solved box stays the solver's; only the render transform +
-     * tint move (text + gold icon wave together). */
+    /* Per-atom effect: VISUAL-ONLY transform (the solved box stays the solver's). */
     float base_tint[4];
     /* 1.0 here: parent opacity is folded into a_tint alpha at the walker (build_custom_block),
      * where the post-bake accumulated opacity is known -- the build-time walk has no opacity yet. */
@@ -1628,9 +1594,7 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
         return; /* fade_in / typewriter: skip the image entirely until its window opens */
     }
 
-    /* Block in attr_map order {a_tint, a_uvrect, a_layout}: a_tint carries the effect's resolved
-     * tint (identity == the run's lossless base tint, so no-effect stays lossless); a_uvrect/a_layout
-     * are {0} placeholders the walker fills by name. */
+    /* attr_map order {a_tint, a_uvrect, a_layout}: a_tint = effect tint; a_uvrect/a_layout {0}, walker-filled. */
     float blk[12];
     memset(blk, 0, sizeof blk);
     blk[0] = fx.color[0]; /* a_tint @ 0..3 (effect color; identity == base tint) */
@@ -1671,10 +1635,8 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
     st->image_emit_count++;
 }
 
-/* Declare the ONE measured Clay element hosting the solved run-list
- * -- never a per-run Clay element. The custom data routes the walk back to our self-emit.
- * Inline IMAGE atoms are declared as FLOATING children of this block (positioned at the solved
- * (x,y)); their textured sprite emit rides nt_ui_image_custom. */
+/* Declare the ONE measured Clay element hosting the solved run-list (never a per-run element); the
+ * custom data routes the walk back to self-emit. Inline IMAGE atoms are FLOATING children of it. */
 static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
     nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
     NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
@@ -1711,24 +1673,17 @@ typedef struct {
     uint32_t pressed_link; /* link id the LEFT press began over (0 = pressed over no link / no press) */
 } nt_ui_rich_link_press_t;
 
-/* Hit-test the solver's `<link=id>` rects against the pointer and resolve {hovered_link,
- * clicked_link}. NO extra Clay element per link: the rects are local to
- * the FIXED block, so we add the block's solved bbox origin (prev-frame, the same two-pass
- * trick the solver uses for width) before testing. A click requires the press AND the
- * release on the SAME link: the press-edge records the link under the pointer into a retained
- * per-block cell (keyed by the block id), and the release-edge reports a click only when the
- * pointer is still over that SAME link. hovered_link stays purely geometric. The resolved
- * hovered_link is fed back into the per-atom effect call (hover gates effects). Must run BEFORE
- * emit (emit reads st->hovered_link). */
+/* Resolve {hovered_link, clicked_link} from the solver's `<link>` rects (no per-link Clay element).
+ * A click needs press AND release over the SAME link (latched in the per-block press cell).
+ * Must run BEFORE emit -- emit reads st->hovered_link (hover gates effects). */
 static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id) {
     st->hovered_link = 0U;
     st->clicked_link = 0U;
     if (st->link_count == 0U) {
         return;
     }
-    /* Block origin in the block's LOCAL Clay-layout space (prev-frame solved tree, same as the standard
-     * widget hit-test reads); first frame (not found) -> origin (0,0). The link rects are local offsets
-     * from this origin, so the pointer must be mapped into the SAME local space before testing. */
+    /* Link rects are offsets from the block origin; map the pointer into the SAME local space (prev-
+     * frame bbox; first frame not-found -> origin 0,0) before testing. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     const float ox = bb.found ? bb.x : 0.0F;
     const float oy = bb.found ? bb.y : 0.0F;
@@ -1741,11 +1696,8 @@ static void rich_resolve_links(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uin
     const bool pressed = p->buttons[NT_BUTTON_LEFT].is_pressed;
     const bool released = p->buttons[NT_BUTTON_LEFT].is_released;
 
-    /* Map the pointer into the block's LOCAL layout space via the block's baked transform (inverse-affine
-     * for 2D, raycast for a 3D ctx) — the SAME path the standard widgets use. A transformed/raycast block
-     * DRAWS its links at the baked transform; this makes the hit-test match the draw. !found (block not
-     * resolvable this frame, clipped out, or a 3D ray miss) -> no link under the pointer. The flat
-     * (identity-transform, 2D-ctx) case maps 1:1, so behavior is unchanged there. */
+    /* Map via the block's baked transform (inverse-affine 2D / raycast 3D) so the hit-test matches the
+     * draw; the flat 2D case maps 1:1. !mapped (clipped / 3D ray miss) -> no link under the pointer. */
     float lpx = 0.0F;
     float lpy = 0.0F;
     const bool mapped = nt_ui_internal_pointer_to_local(ctx, id, p->x, p->y, &lpx, &lpy);
