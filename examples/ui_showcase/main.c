@@ -1941,8 +1941,6 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
 typedef struct {
     nt_resource_t white_atlas; /* solid-fill source (the showcase atlas) */
     uint32_t white_region;     /* resolved white-pixel region index */
-    nt_resource_t icon_atlas;  /* the icons atlas (heart) */
-    uint32_t icon_region;      /* resolved heart region index */
     nt_material_t material;    /* the sprite material both objects bind */
     const float *clock;        /* &s_state.rich.time -- drives progress + spin */
     /* <obj=cube/> renders a perspective cube into its inline box WITHOUT touching glViewport OR scissor: it
@@ -1990,13 +1988,14 @@ static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float 
     const float fill_pos[4][2] = {{x, y}, {x + fill_w, y}, {x + fill_w, y + h}, {x, y + h}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     /* Emit THROUGH world_mat4 (byte-identical to emit_custom_geometry) so the bar lands under the
-     * UI transform incl. the Y-flip; identity here mirrored it to the top. */
+     * UI transform incl. the Y-flip. */
     nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col);
     nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col);
 }
 
-/* SPINNING ICON: the heart region rotated about its own center (pivot {0.5,0.5}). A true 3D cube is
- * the SAME hook with the game's own 3D render into the box -- a 2D rotation proves the mechanism. */
+/* SPINNING ICON: a white quad rotated about its own center (the icon texture was intentionally
+ * dropped). A true 3D cube is the SAME hook with the game's own 3D render into the box -- this 2D
+ * rotation proves the mechanism. */
 static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
@@ -2026,8 +2025,9 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
 
 /* TRUE 3D OBJECT: a perspective rotating cube rendered through nt_shape_renderer into the reserved
  * inline box -- the WidgetSpan killer-feature. The engine reserves a 2D box; the game paints full 3D.
- * NO glViewport hijack: the perspective cube is REMAPPED into the box's NDC sub-rect (a clip-space
- * pre-scale/offset) and SCISSORED to the box in physical px, so the full-screen viewport is untouched
+ * NO glViewport hijack and NO scissor touch: the perspective cube is REMAPPED into the box's NDC
+ * sub-rect (a clip-space pre-scale/offset) so it confines itself to the box, and the walker's
+ * already-active scroll-clip scissor clips it to the panel -- the full-screen viewport is untouched
  * (no leak to collapse later UI). draw_fn gets LAYOUT (Y-down) box px + the frame world_mat4. */
 #define RICH_OBJ_CUBE 64.0F
 static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
@@ -2084,8 +2084,11 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
 
     /* NO scissor manipulation: the clip-space remap already confines the cube to its box NDC sub-rect, and
      * the walker's enclosing scroll-clip scissor is still active during the custom emit (emit_custom does
-     * not touch it) -> the cube is clipped to the panel for free. Touching scissor here corrupted the
-     * walker's clip for everything drawn after the cube. Viewport is also untouched (no leak). */
+     * not touch it) -> the cube is clipped to the panel for free. Rely on that scissor; don't touch GL
+     * scissor here (it would leak to later UI). Viewport is also untouched (no leak). */
+    /* Depth write into the SHARED default-fb depth buffer is safe ONLY because every showcase UI pipeline
+     * is depth-test/write off: the cube's writes never occlude later UI, and depth is cleared to 1.0 at
+     * begin_pass. */
     nt_shape_renderer_set_depth(true);
     nt_shape_renderer_set_vp((const float *)cube_vp);
     /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text.
@@ -2121,13 +2124,10 @@ static void rich_ensure_setup(void) {
     /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
     nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
 
-    /* GAME-DRAWN OBJECT tags (<obj=loadbar/>, <obj=spin/>): resolve the region indices once and stash
-     * everything draw_fn needs (it gets no ctx). The heart ref resolves its index lazily on first use. */
-    nt_atlas_resolve_ref(&s_rich_heart_ref);
+    /* GAME-DRAWN OBJECT tags (<obj=loadbar/>, <obj=spin/>): resolve the region index once and stash
+     * everything draw_fn needs (it gets no ctx). */
     s_rich_obj_demo.white_atlas = s_atlas_handle;
     s_rich_obj_demo.white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value);
-    s_rich_obj_demo.icon_atlas = s_icons_atlas_handle;
-    s_rich_obj_demo.icon_region = s_rich_heart_ref.region;
     s_rich_obj_demo.material = s_sprite_material;
     s_rich_obj_demo.clock = &s_state.rich.time;
     nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "loadbar", rich_obj_bar_measure, rich_obj_bar_draw, &s_rich_obj_demo);
