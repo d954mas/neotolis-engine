@@ -6,12 +6,15 @@
 #include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_net.h"
+#include "drawable_comp/nt_drawable_comp.h"
+#include "entity/nt_entity.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "log/nt_log_ring.h"
 #include "memory/nt_mem_scratch.h"
 #include "metrics/nt_metrics.h"
 #include "time/nt_time.h"
+#include "transform_comp/nt_transform_comp.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h" /* NT_UI_BUTTON_DEF for the registered-widget role. */
 #include "ui/nt_ui_scale.h"  /* nt_ui_compute_scale + nt_ui_viewport_from_scale for the scaled ctx. */
@@ -262,6 +265,20 @@ int main(void) {
     NT_ASSERT(s_hud_scaled_ctx != NULL && "devapi_host: failed to create scaled hud UI context");
     nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
 
+    /* Seed a few entities so entity.list / entity.set have live data over the socket (this host renders
+       nothing; these are pure data, and the comp inits register each component's describe()/apply()). */
+    nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
+    nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
+    nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});
+    nt_entity_t seed_a = nt_entity_create(); /* transform only */
+    nt_transform_comp_add(seed_a);
+    nt_transform_comp_set_position(seed_a, 1.0F, 2.0F, 3.0F);
+    nt_entity_t seed_b = nt_entity_create(); /* drawable only */
+    nt_drawable_comp_add(seed_b);
+    nt_entity_t seed_c = nt_entity_create(); /* both */
+    nt_transform_comp_add(seed_c);
+    nt_drawable_comp_add(seed_c);
+
     uint16_t port = resolve_port();
     if (!nt_devapi_net_start(port)) {
         printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
@@ -291,6 +308,9 @@ int main(void) {
     nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();
     nt_mem_scratch_shutdown();
+    nt_drawable_comp_shutdown();
+    nt_transform_comp_shutdown();
+    nt_entity_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();
     nt_engine_shutdown();

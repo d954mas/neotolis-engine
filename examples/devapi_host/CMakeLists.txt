@@ -19,6 +19,10 @@ target_link_libraries(devapi_host PRIVATE
     # by render.info + the nt_ui renderer chain (the host renders nothing itself); nt_platform supplies
     # the memory probe.
     nt_metrics nt_log_ring
+    # Seeded entities for entity.list / entity.set: the host links + inits transform/drawable so they
+    # register their describe()/apply(). obs/entity_write reference only nt_entity + nt_introspect
+    # (pulled transitively via nt_devapi), so the components must be added here explicitly.
+    nt_transform_comp nt_drawable_comp nt_comp_storage nt_entity nt_math
     nt_platform
     nt_gfx)
 if(WIN32)
