@@ -29,7 +29,14 @@
  * stale after the next nt_mem_scratch_reset. A run only starts when the COMPOSED
  * style differs from the current run (dedup against the style table). */
 
-#define NT_UI_RICH_STACK_DEPTH 32 /* push/pop nesting per call */
+#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap (parser) */
+/* One slot deeper than the parser tag cap: stack[0] is the base style, so every parser-permitted
+ * nesting level (1..PARSE_TAG_DEPTH) has a push slot ABOVE base. A BALANCED <b>xN + </b>xN at
+ * N==PARSE_TAG_DEPTH must not desync the two stacks (a style pop past base). Both caps now gate
+ * the SAME nesting depth. */
+/* Derived (NOT a literal): the +1 over the parser cap is the invariant -- keep STACK_DEPTH defined
+ * in terms of PARSE_TAG_DEPTH so the two can never drift. */
+#define NT_UI_RICH_STACK_DEPTH (NT_UI_RICH_PARSE_TAG_DEPTH + 1) /* push/pop nesting per call */
 
 typedef struct {
     nt_rich_atom_kind_t kind;
@@ -161,7 +168,10 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
 
 static nt_ui_rich_style_t *rich_style_top(nt_ui_rich_state_t *st) {
     NT_ASSERT(st->stack_depth > 0 && "rich style stack underflow");
-    return &st->stack[st->stack_depth - 1];
+    /* HARD clamp (survives NT_ASSERT OFF): a desynced depth==0 would index stack[(uint32_t)-1] OOB.
+     * Floor to the base slot rather than underflow the index (defense-in-depth with nt_ui_rich_pop). */
+    const uint32_t i = st->stack_depth ? st->stack_depth - 1U : 0U;
+    return &st->stack[i];
 }
 
 static void rich_push_copy(nt_ui_rich_state_t *st) {
@@ -278,6 +288,12 @@ void nt_ui_rich_push_color(nt_ui_context_t *ctx, uint32_t color_abgr) {
 
 void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult) {
     NT_ASSERT(mult > 0.0F && isfinite(mult) && "rich scale must be finite > 0 (zero/negative -> negative font size)");
+    /* HARD clamp (survives NT_ASSERT OFF): <scale=0> / <scale=-2> feed a non-positive mult here. In OFF
+     * the assert is elided, so style.scale would go <=0 -> size = font_size*scale <= 0 into nt_font_measure_n.
+     * Fall back to identity (1.0) so OFF stays bounded like every other markup path. */
+    if (!(mult > 0.0F) || !isfinite(mult)) {
+        mult = 1.0F;
+    }
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
     rich_style_top(st)->scale *= mult; /* multiplicative */
@@ -376,6 +392,12 @@ void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, uint8_t stock_id, const nt_
 void nt_ui_rich_pop(nt_ui_context_t *ctx) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(st->stack_depth > 1 && "rich pop past base style");
+    /* HARD floor (survives NT_ASSERT OFF): this is the LONE style-stack mutator without an `if (cap)`
+     * guard. An over-cap or unbalanced close (e.g. balanced </b> beyond what push could honour) would
+     * wrap stack_depth below the base style -> later rich_style_top reads stack[(uint32_t)-1] OOB. */
+    if (st->stack_depth <= 1U) {
+        return;
+    }
     st->stack_depth--;
 }
 
@@ -467,7 +489,7 @@ void nt_ui_rich_end(nt_ui_context_t *ctx) {
  *  - Whitespace: preserved verbatim (the solver owns wrap; no collapse).
  * Every scan loop is `len`-bounded so a non-terminating `<` can't OOB or loop. */
 
-#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap */
+/* NT_UI_RICH_PARSE_TAG_DEPTH defined at the top (drives NT_UI_RICH_STACK_DEPTH = it + 1). */
 
 /* The intrinsic tag a `<name ...>` open maps to; CLOSE/IMG handled separately. */
 typedef enum {

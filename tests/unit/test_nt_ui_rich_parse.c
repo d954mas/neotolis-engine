@@ -242,13 +242,13 @@ static void test_parse_fx_params_on_custom_asserts(void) { NT_TEST_EXPECT_ASSERT
  * hard guard returns 0.0F (= "use default") with no OOB read. */
 static void test_parse_fx_empty_value_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp=>hi</fx>")); }
 
-/* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: <b> pushes the BUILDER style
- * stack (NT_UI_RICH_STACK_DEPTH), which is checked first, so this exercises the BUILDER cap.
- * The parser's own tag-stack cap is covered separately by test_parse_tag_stack_overflow. */
+/* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: each <b> pushes BOTH the parser
+ * tag stack (NT_UI_RICH_PARSE_TAG_DEPTH) and the builder style stack (now PARSE_TAG_DEPTH+1); the
+ * parser tag cap (the lower of the two) trips first. 40 > either cap, so the assert fires. */
 static void test_parse_over_deep_style_stack_asserts(void) {
     char buf[256];
     uint32_t n = 0;
-    for (uint32_t i = 0; i < 40U; i++) { /* 40 > NT_UI_RICH_STACK_DEPTH (32) */
+    for (uint32_t i = 0; i < 40U; i++) { /* 40 > NT_UI_RICH_PARSE_TAG_DEPTH (32) */
         buf[n++] = '<';
         buf[n++] = 'b';
         buf[n++] = '>';
@@ -258,6 +258,53 @@ static void test_parse_over_deep_style_stack_asserts(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n));
+}
+
+/* (10c) cap-parity regression (#1+#2): a BALANCED <b>xN + </b>xN at N == the parser tag cap must
+ * parse WITHOUT a trap (no over-cap), and the trailing text must carry the BASE style -- proof the
+ * style stack balanced exactly back to base (depth never desynced from the tag stack, so no pop
+ * underflow / OOB in OFF). Sweeps N up to NT_UI_RICH_PARSE_TAG_DEPTH. */
+static void test_parse_balanced_at_cap_stays_synced(void) {
+    /* Mirror NT_UI_RICH_PARSE_TAG_DEPTH (private to nt_ui_rich_text.c). The engine _Static_assert ties
+     * NT_UI_RICH_STACK_DEPTH == this + 1, so a balanced nest at this depth must NOT over-cap the style stack. */
+    const uint32_t parse_tag_depth = 32U;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF112233U; /* a base tint distinguishable from any <b> push (bold doesn't change color) */
+    for (uint32_t depth = 1U; depth <= parse_tag_depth; depth++) {
+        char buf[512];
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < depth; i++) { /* depth opens */
+            buf[n++] = '<';
+            buf[n++] = 'b';
+            buf[n++] = '>';
+        }
+        for (uint32_t i = 0; i < depth; i++) { /* depth balanced closes */
+            buf[n++] = '<';
+            buf[n++] = '/';
+            buf[n++] = 'b';
+            buf[n++] = '>';
+        }
+        buf[n++] = 'x'; /* trailing text -> must carry the BASE style (stack back at base) */
+
+        nt_mem_scratch_reset();
+        s_fx.ctx->pending_rich = NULL;
+        s_fx.ctx->rich_session_open = false;
+        nt_ui_rich_parse(s_fx.ctx, NULL, &base, buf, n); /* no trap in FULL: balanced, never over-cap */
+
+        const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+        TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "balanced-at-cap markup produced the trailing-text run");
+        /* The LAST run is the trailing "x": its composed style must equal base (variant cleared, color base). */
+        const nt_ui_rich_style_t last = nt_ui_rich_test_run_style(s_fx.ctx, runs - 1U);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, last.variant, "trailing text after balanced <b> nesting must be NON-bold (stack back at base)");
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, last.color_abgr, "trailing text must carry the BASE color (style stack balanced back to base)");
+    }
+}
+
+/* (16b) <scale=0> / <scale=-1>: the push_scale>0 assert traps in FULL. In OFF the hard clamp falls
+ * back to identity (no <=0 font size into nt_font_measure_n). */
+static void test_parse_scale_nonpositive_asserts(void) {
+    NT_TEST_EXPECT_ASSERT(parse_lit("<scale=0>x</scale>"));
+    NT_TEST_EXPECT_ASSERT(parse_lit("<scale=-1>x</scale>"));
 }
 
 /* (10b) nested <link> is rejected (HTML's no-nested-anchor rule): pending_link is a single scalar,
@@ -400,6 +447,8 @@ int main(void) {
     RUN_TEST(test_parse_fx_params_on_custom_asserts);
     RUN_TEST(test_parse_fx_empty_value_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
+    RUN_TEST(test_parse_balanced_at_cap_stays_synced);
+    RUN_TEST(test_parse_scale_nonpositive_asserts);
     RUN_TEST(test_parse_nested_link_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);
     RUN_TEST(test_parse_len_bounded);
