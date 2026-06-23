@@ -252,6 +252,39 @@ static void test_parse_fx_params_on_custom_asserts(void) { NT_TEST_EXPECT_ASSERT
  * hard guard returns 0.0F (= "use default") with no OOB read. */
 static void test_parse_fx_empty_value_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp=>hi</fx>")); }
 
+/* Parse markup against a tagset that registers an OBJECT tag "widget". The parse-side name hash
+ * (nt_hash64(val, vlen)) MUST equal the register-side hash (nt_hash64_str) or lookup_object misses. */
+static void parse_obj(const char *m) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_object_tag(&ts, "widget", parse_stub_object_measure, NULL, NULL);
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
+}
+
+/* (8h) <obj=name/> self-closes and dispatches via the tagset -> a NT_RICH_ATOM_OBJECT run exists
+ * (proves the parse-side hash matches the register-side hash and the run is appended). */
+static void test_parse_obj_self_close_emits_object_run(void) {
+    parse_obj("a <obj=widget/> b");
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_object = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_OBJECT) {
+            found_object = true;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_object, "<obj=widget/> produced a NT_RICH_ATOM_OBJECT run");
+}
+
+/* (8i) <obj=nope/> with a name not in the tagset -> NT_ASSERT (unknown object), and no bogus run. */
+static void test_parse_obj_unknown_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_obj("<obj=nope/>")); }
+
+/* (8j) <obj/> with an empty name -> NT_ASSERT; the hard guard returns without pushing a run. */
+static void test_parse_obj_empty_name_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_obj("<obj/>")); }
+
 /* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: each <b> pushes BOTH the parser
  * tag stack (NT_UI_RICH_PARSE_TAG_DEPTH) and the builder style stack (now PARSE_TAG_DEPTH+1); the
  * parser tag cap (the lower of the two) trips first. 40 > either cap, so the assert fires. */
@@ -531,6 +564,9 @@ int main(void) {
     RUN_TEST(test_parse_fx_no_equals_asserts);
     RUN_TEST(test_parse_fx_params_on_custom_asserts);
     RUN_TEST(test_parse_fx_empty_value_asserts);
+    RUN_TEST(test_parse_obj_self_close_emits_object_run);
+    RUN_TEST(test_parse_obj_unknown_asserts);
+    RUN_TEST(test_parse_obj_empty_name_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
     RUN_TEST(test_parse_mixed_tag_stack_sync);

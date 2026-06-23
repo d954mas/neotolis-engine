@@ -1326,6 +1326,41 @@ static void test_object_draw_receives_resolved_color(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[3], block_opacity), "object color.a == base_alpha * parent_opacity (opacity folded like TEXT)");
 }
 
+/* (15d) END-TO-END markup path: register an OBJECT tag, then drive the FULL public pipeline via
+ * nt_ui_rich_text_markup with a string containing <obj=widget/>. Proves the parser dispatch reaches
+ * the registered draw_fn (the same path the demo uses) -- not just a direct builder call. */
+static void test_object_markup_reaches_draw_fn(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    s_obj_measure_calls = 0;
+    s_obj_draw_calls = 0;
+    s_obj_draw_w = 0.0F;
+    s_obj_draw_h = 0.0F;
+
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_object_tag(&ts, "widget", stub_measure, stub_draw, NULL);
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    const char *markup = "A <obj=widget/> B";
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("obj_markup_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("obj_markup").id, NULL, &ts, &base, markup, strlen(markup), 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_TRUE_MESSAGE(s_obj_measure_calls >= 1U, "<obj=widget/> markup reserved the box via measure_fn");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "<obj=widget/> markup reached draw_fn exactly once (end-to-end)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_w, OBJ_W), "markup-path draw_fn w == measured width");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_h, OBJ_H), "markup-path draw_fn h == measured height");
+}
+
 /* An object whose measured ascent is LESS than its height -> the box must seat by ascent
  * (box bottom at baseline + (h - ascent)) and grow the line descent, not hang the whole box
  * above the baseline. */
@@ -1648,6 +1683,7 @@ int main(void) {
     RUN_TEST(test_object_draws_at_solved_box);
     RUN_TEST(test_object_effect_and_skip);
     RUN_TEST(test_object_draw_receives_resolved_color);
+    RUN_TEST(test_object_markup_reaches_draw_fn);
     RUN_TEST(test_object_baseline_honours_ascent);
     RUN_TEST(test_two_rich_text_blocks_one_frame_no_trap);
     RUN_TEST(test_markup_e2e_emit_and_link);

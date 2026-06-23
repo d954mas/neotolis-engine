@@ -655,6 +655,29 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
 }
 
+/* `<obj=name/>` self-close: a game-drawn WidgetSpan (measure_fn sizes the box, draw_fn paints it).
+ * Name resolved via the tagset using the SAME hash as register_object_tag (nt_hash64_str -> the full
+ * name bytes), which equals nt_hash64(val, vlen) here since [val,val+vlen) IS the name. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- mandated OFF-safe hard guards (empty name + unknown/NULL-measure) atop the asserts
+static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const char *val, uint32_t vlen) {
+    NT_ASSERT(tagset != NULL && "rich markup: <obj=.../> needs a tagset");
+    /* HARD guard (survives NT_ASSERT OFF): empty name resolves nothing -> never push a bogus object. */
+    if (vlen == 0U) {
+        NT_ASSERT(false && "rich markup: <obj/> needs a name");
+        return;
+    }
+    nt_ui_rich_tagset_object_t obj = {0};
+    /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the side effect. */
+    const bool obj_ok = nt_ui_rich_tagset_lookup_object(tagset, nt_hash64((const void *)val, vlen).value, &obj);
+    NT_ASSERT(obj_ok && "rich markup: unknown <obj>");
+    /* HARD guard: unknown name or a (defensively) NULL measure_fn -> skip; nt_ui_rich_object asserts
+     * measure_fn != NULL, but register_object_tag rejects NULL measure so this only fires on miss. */
+    if (!obj_ok || obj.measure_fn == NULL) {
+        return;
+    }
+    nt_ui_rich_object(ctx, obj.measure_fn, obj.draw_fn, obj.user_data);
+}
+
 /* Parse the param tail of `<fx=name amp=8 speed=3>` ([s,s+n) = the bytes AFTER the name, including
  * the leading space(s)). Each space-separated token is `key=value` (key: amp|speed; value: float).
  * Writes into *out; returns true if >=1 param was set. Malformed (bad float, unknown key, no '=')
@@ -974,8 +997,14 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
             const char *val = (eq < eff) ? (body + eq + 1U) : body;
             const uint32_t vlen = (eq < eff) ? (eff - eq - 1U) : 0U;
             if (self_close) {
-                NT_ASSERT(rich_name_eq(name, nlen, "img") && "rich markup: only <img=.../> self-closes");
-                rich_parse_img(ctx, tagset, base, val, vlen);
+                if (rich_name_eq(name, nlen, "img")) {
+                    rich_parse_img(ctx, tagset, base, val, vlen);
+                } else if (rich_name_eq(name, nlen, "obj")) {
+                    rich_parse_obj(ctx, tagset, val, vlen);
+                } else {
+                    /* HARD skip (survives OFF): any other self-closing name is unsupported. */
+                    NT_ASSERT(false && "rich markup: only <img=.../> or <obj=.../> self-close");
+                }
             } else {
                 rich_open_tag(ctx, &ts_stack, tagset, name, nlen, val, vlen);
             }
