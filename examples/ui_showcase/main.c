@@ -16,6 +16,7 @@
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "render/nt_render_defs.h"
+#include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -1944,6 +1945,18 @@ typedef struct {
     uint32_t icon_region;      /* resolved heart region index */
     nt_material_t material;    /* the sprite material both objects bind */
     const float *clock;        /* &s_state.rich.time -- drives progress + spin */
+    /* <obj=cube/> draws RAW GL (own viewport+scissor) into its inline box, so it needs the SAME
+     * logical->physical map the walker uses + the state it must restore. Stashed each frame BEFORE
+     * nt_ui_walk (draw_fn has no ctx). LAYOUT (Y-down) -> physical: phys = offset + scale * logical;
+     * GL scissor/viewport are bottom-left so y is flipped against fb_h. */
+    struct {
+        float fb_w, fb_h;         /* physical framebuffer dims */
+        float scale_x, scale_y;   /* physical / logical */
+        float offset_x, offset_y; /* physical margin (0 in EXPAND) */
+        int walk_vp_x, walk_vp_y; /* walker's glViewport rect (restore target) */
+        int walk_vp_w, walk_vp_h;
+        int clip_x, clip_y, clip_w, clip_h; /* enclosing scroll clip in LAYOUT px; <0 w => no clip */
+    } cube_view;
 } rich_obj_demo_t;
 static rich_obj_demo_t s_rich_obj_demo;
 
@@ -2002,6 +2015,81 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
     nt_sprite_renderer_emit_region(d->icon_atlas, d->icon_region, (const float *)model, 0.5F, 0.5F, rich_obj_pack_color(color), 0);
 }
 
+/* TRUE 3D OBJECT: a perspective rotating cube rendered through nt_shape_renderer into the reserved
+ * inline box -- the WidgetSpan killer-feature. The engine reserves a 2D box; the game paints full 3D.
+ * draw_fn gets LAYOUT (Y-down) box px; it owns the GL viewport+scissor it sets, so it maps to physical
+ * and RESTORES the walker's viewport + the enclosing scroll clip before returning (no leak). */
+#define RICH_OBJ_CUBE 64.0F
+static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
+    (void)user_data;
+    /* Square box; ascent ~0.8*h sits it on the text baseline (raises the line height -- own paragraph). */
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 52.0F};
+}
+static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+    const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
+    if (w <= 0.0F || h <= 0.0F) {
+        return;
+    }
+    const float sx = d->cube_view.scale_x;
+    const float sy = d->cube_view.scale_y;
+    const float ox = d->cube_view.offset_x;
+    const float oy = d->cube_view.offset_y;
+    const float fbh = d->cube_view.fb_h;
+    /* LAYOUT (Y-down) box -> physical, then GL bottom-left flip. Matches the walker scissor map exactly
+     * (nt_ui_internal_apply_scissor_logical_to_physical): viewport origin {0,0} in EXPAND => phys = offset + scale*logical. */
+    const int phys_x = (int)floorf(ox + (sx * x));
+    const int phys_y_top = (int)floorf(oy + (sy * y));
+    const int phys_w = (int)ceilf(sx * w);
+    const int phys_h = (int)ceilf(sy * h);
+    const int phys_y_gl = (int)fbh - phys_y_top - phys_h;
+    if (phys_w <= 0 || phys_h <= 0) {
+        return;
+    }
+
+    /* VP = perspective * lookat. Plain glm_* (vanilla GL clip -1..1 NDC depth) -- matches the shape
+     * template winding (RH) + the depth buffer cleared to 1.0; set_depth(true) => LEQUAL+write so the
+     * cube is solid + self-correct against itself. The box's depth is the cleared 1.0 (UI is depth-off). */
+    const float aspect = (float)phys_w / (float)phys_h;
+    mat4 view;
+    mat4 proj;
+    mat4 vp;
+    glm_lookat((vec3){0.0F, 0.0F, 3.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
+    glm_perspective(glm_rad(50.0F), aspect, 0.1F, 100.0F, proj);
+    glm_mat4_mul(proj, view, vp);
+
+    const float t = (d->clock != NULL) ? *d->clock : 0.0F;
+    versor q;
+    glm_quatv(q, t * 1.2F, (vec3){0.3F, 1.0F, 0.2F});
+    const float rot[4] = {q[0], q[1], q[2], q[3]};
+
+    nt_gfx_set_viewport(phys_x, phys_y_gl, phys_w, phys_h);
+    nt_gfx_set_scissor(phys_x, phys_y_gl, phys_w, phys_h);
+    nt_gfx_set_scissor_enabled(true);
+
+    nt_shape_renderer_set_depth(true);
+    nt_shape_renderer_set_vp((const float *)vp);
+    /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text. */
+    nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.0F, 1.0F, 1.0F}, rot, color);
+    nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW (inside our viewport+scissor) */
+
+    /* RESTORE -- the walker sets glViewport ONCE at walk start and never per-dispatch; a leaked viewport
+     * collapses every later UI element into this tiny box. Restore the walker's full viewport, and the
+     * enclosing scroll clip (the Rich tab content sits inside s_id_stage_scroll's clip -- emit_custom does
+     * NOT save/restore scissor). Walker re-binds pipeline/program/depth/cull/blend on the next sprite. */
+    nt_gfx_set_viewport(d->cube_view.walk_vp_x, d->cube_view.walk_vp_y, d->cube_view.walk_vp_w, d->cube_view.walk_vp_h);
+    if (d->cube_view.clip_w > 0) {
+        const int c_phys_x = (int)floorf(ox + (sx * (float)d->cube_view.clip_x));
+        const int c_phys_y_top = (int)floorf(oy + (sy * (float)d->cube_view.clip_y));
+        const int c_phys_w = (int)ceilf(sx * (float)d->cube_view.clip_w);
+        const int c_phys_h = (int)ceilf(sy * (float)d->cube_view.clip_h);
+        const int c_phys_y_gl = (int)fbh - c_phys_y_top - c_phys_h;
+        nt_gfx_set_scissor(c_phys_x, c_phys_y_gl, c_phys_w, c_phys_h);
+        nt_gfx_set_scissor_enabled(true);
+    } else {
+        nt_gfx_set_scissor_enabled(false);
+    }
+}
+
 /* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
  * effects plus a custom effect fn, the icons atlas, and the rich font family. The CODE-FIRST builder
  * never touches the tagset -- it gets real values directly. */
@@ -2040,6 +2128,7 @@ static void rich_ensure_setup(void) {
     s_rich_obj_demo.clock = &s_state.rich.time;
     nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "loadbar", rich_obj_bar_measure, rich_obj_bar_draw, &s_rich_obj_demo);
     nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "spin", rich_obj_spin_measure, rich_obj_spin_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "cube", rich_obj_cube_measure, rich_obj_cube_draw, &s_rich_obj_demo);
 
     s_rich_ready = true;
 }
@@ -2263,6 +2352,15 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), obj_src, g_current->caption);
         const nt_ui_rich_style_t obj_base = rich_base_style();
         nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_objects"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &obj_base, obj_src, strlen(obj_src), container_w, NT_RICH_ALIGN_LEFT,
+                               st->rich.time, NULL);
+    }
+    /* TRUE 3D: the same WidgetSpan hook, but draw_fn renders a perspective rotating cube through
+     * nt_shape_renderer into the reserved box -- the renderer-agnostic proof (2D bar -> 2D spin -> 3D cube). */
+    {
+        const char *cube_src = "True 3D -- a spinning <color=cyan>cube</color> rendered into the inline box: <obj=cube/>";
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), cube_src, g_current->caption);
+        const nt_ui_rich_style_t cube_base = rich_base_style();
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_cube"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &cube_base, cube_src, strlen(cube_src), container_w, NT_RICH_ALIGN_LEFT,
                                st->rich.time, NULL);
     }
     // #endregion
@@ -3254,6 +3352,34 @@ static void frame(void) {
 
         nt_ui_end(s_ctx);
 
+        /* Stash the physical map the <obj=cube/> draw_fn needs (it owns raw GL viewport+scissor, has no
+         * ctx). offset/scale + fb dims reproduce the walker's logical->physical map; walk_vp = the SINGLE
+         * glViewport the walker sets at walk start (restore target); clip = the enclosing stage_scroll clip
+         * (the Rich tab content lives inside it) so the cube restores it instead of leaving scissor off. */
+        {
+            const int wox = (int)roundf(scale.offset_x);
+            const int woy = (int)roundf(scale.offset_y);
+            s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
+            s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
+            s_rich_obj_demo.cube_view.scale_x = scale.scale_x;
+            s_rich_obj_demo.cube_view.scale_y = scale.scale_y;
+            s_rich_obj_demo.cube_view.offset_x = scale.offset_x;
+            s_rich_obj_demo.cube_view.offset_y = scale.offset_y;
+            s_rich_obj_demo.cube_view.walk_vp_x = wox;
+            s_rich_obj_demo.cube_view.walk_vp_y = woy;
+            s_rich_obj_demo.cube_view.walk_vp_w = (int)scale.fb_w - (2 * wox);
+            s_rich_obj_demo.cube_view.walk_vp_h = (int)scale.fb_h - (2 * woy);
+            const nt_ui_bbox_t clip = nt_ui_get_bbox(s_ctx, s_id_stage_scroll);
+            if (clip.found) {
+                s_rich_obj_demo.cube_view.clip_x = (int)clip.x;
+                s_rich_obj_demo.cube_view.clip_y = (int)clip.y;
+                s_rich_obj_demo.cube_view.clip_w = (int)clip.width;
+                s_rich_obj_demo.cube_view.clip_h = (int)clip.height;
+            } else {
+                s_rich_obj_demo.cube_view.clip_w = -1; /* no clip -> restore scissor disabled */
+            }
+        }
+
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
@@ -3365,6 +3491,7 @@ int main(int argc, char *argv[]) {
     /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
+    nt_shape_renderer_init(); /* <obj=cube/> renders a real 3D cube into its inline box (embedded shaders). */
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
@@ -3572,6 +3699,7 @@ int main(int argc, char *argv[]) {
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
+    nt_shape_renderer_shutdown();
     nt_font_destroy(s_font);
     for (uint32_t i = 0; i < 4U; i++) {
         nt_font_destroy(s_rich_font[i]);
