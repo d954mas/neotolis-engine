@@ -123,8 +123,12 @@ typedef struct {
 
 typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_data);
 /* color is the ABSOLUTE resolved RGBA (run <color> + folded opacity + fx tint) -- the SAME color
- * the TEXT/IMAGE paths use. Modulate the custom draw by it so OBJECT honours opacity/<color>/fx. */
-typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, const float color[4]);
+ * the TEXT/IMAGE paths use. Modulate the custom draw by it so OBJECT honours opacity/<color>/fx.
+ * x,y,w,h are LAYOUT (logical, Clay Y-down) px. world_mat4 maps a LAYOUT point -> world EXACTLY
+ * like every other engine emit (the default 2D ctx bakes the screen Y-flip into it): multiply your
+ * positions by it (emit_geometry world arg) or compose it on the LEFT of your model so the object
+ * lands under the UI's transform incl. the Y-flip -- passing identity mirrors the object vertically. */
+typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]);
 
 /* ---- Builder (code-first push/pop) ---- */
 /* All builder calls operate on the per-call run-list owned by ctx between begin/end.

@@ -3200,8 +3200,13 @@ registry (see §32.5, D-67-13).
   link's atoms). The Model-D game reacts to the reported click.
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
   a box via `measure_fn` (text wraps around it); the widget calls the game's
-  `draw_fn(user_data, x, y, w, h, color)` at the solved box. The engine never draws
-  the object (renderer-agnostic, D-67-05). `color` is the **absolute resolved RGBA**
+  `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
+  never draws the object (renderer-agnostic, D-67-05). `x,y,w,h` are LAYOUT (logical,
+  Clay Y-down) px; `world_mat4` is the frame's column-major LAYOUT→world matrix — the
+  **same** matrix every other engine emit uses, with the screen Y-flip baked in for the
+  default 2D ctx — so the game multiplies its positions by it (or composes it on the
+  LEFT of its model) and the object lands correctly under the UI transform incl. the
+  Y-flip (D-67-28). `color` is the **absolute resolved RGBA**
   the engine resolved for the atom — the run's `<color>` with parent opacity folded
   into alpha plus any per-atom effect tint, the SAME color the TEXT and IMAGE paths
   render with — so a custom object honours opacity / `<color>` / effects consistently
@@ -3257,3 +3262,13 @@ points; flagged here so code and spec do not silently drift:
   in-memory only (never serialized); tuned stock effects route through the same
   per-block custom-fx table as custom fns (`effect_id >= NT_UI_RICH_FX_CUSTOM_BASE`),
   so the 48 B style ABI is still unchanged.
+- **D-67-28 — OBJECT `draw_fn` receives the frame `world_mat4`.** The originally
+  shipped `draw_fn(user_data, x, y, w, h, color)` gave the game only LAYOUT box px and
+  no way to reach the UI's LAYOUT→world transform — so a game emitting at those raw
+  coords with identity rendered Y-mirrored (the default 2D ctx bakes the screen Y-flip
+  into `world_mat4`, which the object never saw) and a 3D object had to hand-roll a
+  fragile `glViewport` map. Shipped now: the signature gains a trailing
+  `const float world_mat4[16]` (the same per-element matrix `nt_ui_custom_frame_t`
+  carries), making the previously-shipped-but-never-correctly-drawable API actually
+  usable. No layout/ABI change; it only adds an emit-time argument the engine already
+  had on hand.

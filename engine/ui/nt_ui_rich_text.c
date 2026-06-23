@@ -1633,7 +1633,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
         const float oy = box_y + s->y + fx.offset_y + ((s->h - scaled_h) * 0.5F);
         /* fx.color is the absolute resolved RGBA: <color> with frame->opacity folded into alpha
          * + the effect tint -- the same color TEXT/IMAGE render with. */
-        run->object_draw(run->object_user, ox, oy, scaled_w, scaled_h, fx.color);
+        run->object_draw(run->object_user, ox, oy, scaled_w, scaled_h, fx.color, frame->world_mat4);
     }
 }
 

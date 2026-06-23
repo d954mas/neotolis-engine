@@ -1216,8 +1216,9 @@ static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = OBJ_W, .height = OBJ_H, .ascent = OBJ_H};
 }
 
-static void stub_draw(void *user_data, float x, float y, float w, float h, const float color[4]) {
+static void stub_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
     (void)user_data;
+    TEST_ASSERT_NOT_NULL(world_mat4); /* engine always passes the frame's layout->world matrix */
     s_obj_draw_calls++;
     s_obj_draw_x = x;
     s_obj_draw_y = y;
