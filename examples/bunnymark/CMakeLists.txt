@@ -37,8 +37,7 @@ target_link_libraries(bunnymark_demo PRIVATE
 target_include_directories(bunnymark_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 if(EMSCRIPTEN)
-    # nt_platform supplies nt_platform_memory_usage for the metrics mem_used channel; its EMSCRIPTEN
-    # build compiles the web probe. (nt_platform_web is the separate window/platform target.)
+    # nt_platform (memory probe for metrics mem_used) is distinct from nt_platform_web (window target).
     target_link_libraries(bunnymark_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs)
 else()
     target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_platform)

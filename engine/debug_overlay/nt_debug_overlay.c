@@ -7,9 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Pure consumer of nt_metrics: keeps only display config + the format/draw path.
-   fps/cpu/gpu/draws come from nt_metrics_fps()/nt_metrics_last(); user counters from
-   nt_metrics_user_count()/_user_get(). The host pushes the data into nt_metrics. */
+/* Pure consumer of nt_metrics: holds only display config; all stats are read from nt_metrics. */
 static struct {
     bool initialized;
 } s_overlay;

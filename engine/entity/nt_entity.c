@@ -170,8 +170,7 @@ nt_entity_t nt_entity_at_index(uint16_t index) {
     if (index == 0 || index > s_entity.max_entities || !s_entity.alive[index]) {
         return NT_ENTITY_INVALID;
     }
-    /* Compose from the public encoding (low16=index, high16=current generation) —
-       building inline keeps the static entity_make internal. */
+    /* Public encoding: low16=index, high16=current generation. */
     return (nt_entity_t){.id = ((uint32_t)s_entity.generations[index] << 16) | index};
 }
 

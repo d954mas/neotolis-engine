@@ -118,10 +118,8 @@ void devapi_add_bool(cJSON *obj, const char *key, bool value) {
     (void)item;
 }
 
-/* Shared strict check: the node must be a finite, integer-valued number in [0, max_d]. On success
-   writes the validated double to *out_d and returns true; on any violation routes through set_bad
-   and returns false. Reading valueint truncates and casting an out-of-range/NaN/Inf double to an
-   unsigned is UB, so the range/finiteness/integer checks happen here on the double before any cast. */
+/* Require a finite, integer-valued number in [0, max_d], writing it to *out_d. Casting an
+   out-of-range/NaN/Inf double to unsigned is UB, so all checks run on the double before any cast. */
 static bool parse_number_exact(const cJSON *node, double max_d, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, double *out_d) {
     if (!cJSON_IsNumber(node)) {
         set_bad(err, message);

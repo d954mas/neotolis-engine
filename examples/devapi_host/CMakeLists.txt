@@ -14,14 +14,9 @@ target_link_libraries(devapi_host PRIVATE
     nt_ui
     nt_sprite_renderer nt_text_renderer nt_material nt_font nt_atlas nt_resource
     nt_http nt_fs
-    # Obs L1 providers: nt_metrics (the perf store the host pushes into) + nt_log_ring (log.tail).
-    # Consumers (main.c + nt_devapi's obs group) are listed above; these trail them. nt_gfx is required
-    # by render.info + the nt_ui renderer chain (the host renders nothing itself); nt_platform supplies
-    # the memory probe.
+    # Obs providers must trail their consumers above for GNU ld single-pass.
     nt_metrics nt_log_ring
-    # Seeded entities for entity.list / entity.set: the host links + inits transform/drawable so they
-    # register their describe()/apply(). obs/entity_write reference only nt_entity + nt_introspect
-    # (pulled transitively via nt_devapi), so the components must be added here explicitly.
+    # entity.set reaches these via describe()/apply(); only nt_entity is transitive, so list explicitly.
     nt_transform_comp nt_drawable_comp nt_comp_storage nt_entity nt_math
     nt_platform
     nt_gfx)

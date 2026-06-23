@@ -1333,7 +1333,6 @@ bool nt_resource_pack_info(uint16_t i, nt_resource_pack_info_t *out) {
     if (!out) {
         return false;
     }
-    /* Resolve the i-th mounted pack (skip empty slots). */
     uint16_t seen = 0;
     for (uint16_t slot = 0; slot < NT_RESOURCE_MAX_PACKS; slot++) {
         const NtPackMeta *pack = &s_resource.packs[slot];

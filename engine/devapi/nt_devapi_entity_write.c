@@ -6,11 +6,9 @@
 #include "entity/nt_entity.h"
 #include "introspect/nt_introspect.h"
 
-/* entity.set command group: a DEV-ONLY DEBUG/INSPECTION write. It sets writable component fields on a
-   live entity through the component's apply() hook, which routes every write through the real setter
-   (dirty flag / packed-mirror repack / quaternion normalize). It maintains ENGINE invariants but NOT
-   game logic, so it is for debugging/tests/tuning, not a control path — game control flows through
-   semantic game commands. Gated by NT_DEVAPI_GROUP_ENTITY_WRITE (hard-requires NT_INTROSPECT_WRITE_ENABLED). */
+/* entity.set: a dev-only DEBUG write. Sets writable component fields through the component's apply()
+   hook (the real setter — dirty flag / packed-mirror repack / quaternion normalize), so it keeps
+   engine invariants but bypasses game logic: a debug/tuning tool, not a control path. */
 
 #ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
 
@@ -18,8 +16,7 @@
 #ifndef NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS
 #define NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS 16
 #endif
-/* Stringize the cap into the bad_params message (the preprocessor will not expand a macro inside a
-   string literal, so embed the value, not the token — and stay drift-proof if the cap changes). */
+/* Stringize the cap so the bad_params message tracks it (no macro expansion inside a string literal). */
 #define NT_DEVAPI_STR2(x) #x
 #define NT_DEVAPI_STR(x) NT_DEVAPI_STR2(x)
 
@@ -42,8 +39,7 @@ static bool finite_f(double d, float *out) {
 }
 
 /* Parse a cJSON value into a typed nt_write_value by WIRE SHAPE only (number->F32, bool->BOOL,
-   array[3]->VEC3, array[4]->VEC4). Range/semantic (color [0,1], unit quaternion) is the apply() hook's
-   job — this is the inverse of the JSON sink reading a component out. */
+   array[3]->VEC3, array[4]->VEC4). Range/semantic (color [0,1], unit quaternion) is the apply() hook's job. */
 static bool parse_write_value(const cJSON *node, nt_write_value *out, nt_devapi_error *err) {
     if (node == NULL) {
         set_bad_params(err, "entity.set: missing value");

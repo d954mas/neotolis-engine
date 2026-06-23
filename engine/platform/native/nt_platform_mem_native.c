@@ -11,7 +11,7 @@
 nt_platform_mem_t nt_platform_memory_usage(void) {
     nt_platform_mem_t mem = {0};
     PROCESS_MEMORY_COUNTERS pmc;
-    /* Dev-only probe: a syscall failure is a bug, not "0 bytes used". Fail early (AGENTS.md). */
+    /* A syscall failure is a bug, not "0 bytes used" — assert rather than report a bogus figure. */
     BOOL ok = GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
     NT_ASSERT(ok && "GetProcessMemoryInfo failed");
     (void)ok;
@@ -25,8 +25,7 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
 #include <stdlib.h>
 #include <unistd.h>
 
-/* Resident pages from /proc/self/statm field 2. Dev-only probe: any open/parse failure is a bug —
-   fail early (AGENTS.md). strtol over scanf: the scanf family does not report conversion errors. */
+/* Resident pages from /proc/self/statm field 2. strtol over scanf: scanf can't report parse errors. */
 static long statm_resident_pages(void) {
     FILE *f = fopen("/proc/self/statm", "r");
     NT_ASSERT(f != NULL && "fopen(/proc/self/statm) failed");
@@ -60,7 +59,7 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
     nt_platform_mem_t mem = {0};
     mach_task_basic_info_data_t info;
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    /* Dev-only probe: a task_info failure is a bug, not "0 bytes" — fail early (AGENTS.md). */
+    /* A task_info failure is a bug, not "0 bytes" — assert rather than report a bogus figure. */
     kern_return_t kr = task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count);
     NT_ASSERT(kr == KERN_SUCCESS && "task_info(MACH_TASK_BASIC_INFO) failed");
     (void)kr;

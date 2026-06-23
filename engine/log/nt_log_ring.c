@@ -4,8 +4,7 @@
 
 #include <stdio.h>
 
-/* Fixed BSS ring (no heap, single-threaded — same assumption as nt_log). head/count/wrap
-   idiom; both domain and msg are owned copies. */
+/* Fixed BSS ring, no heap, single-threaded (same assumption as nt_log); entries are owned copies. */
 static struct {
     nt_log_ring_entry_t entries[NT_LOG_RING_DEPTH];
     uint16_t head;  /* next write slot */
@@ -24,8 +23,7 @@ void nt_log_ring_sink(nt_log_level_t level, const char *domain, const char *msg,
     nt_log_ring_entry_t *e = &s_ring.entries[s_ring.head];
     e->level = level;
 
-    /* Copy both — never store the caller's pointer. domain is "" (not NULL)
-       per the sink contract, but guard anyway. snprintf always NUL-terminates + truncates. */
+    /* Copy both — never store the caller's pointer (NULL-guard despite the "" sink contract). */
     (void)snprintf(e->domain, sizeof(e->domain), "%s", (domain != NULL) ? domain : "");
     (void)snprintf(e->msg, sizeof(e->msg), "%s", (msg != NULL) ? msg : "");
 
@@ -43,8 +41,7 @@ uint16_t nt_log_ring_tail(uint16_t n, nt_log_level_t min_level, nt_log_ring_entr
         n = s_ring.count;
     }
 
-    /* Walk backward from the newest (head-1) for up to count entries; emit newest-first,
-       keeping only level >= min_level, until n are written. */
+    /* Walk backward from the newest, emitting newest-first. */
     uint16_t written = 0;
     uint16_t idx = s_ring.head; /* one past newest */
     for (uint16_t scanned = 0; scanned < s_ring.count && written < n; scanned++) {

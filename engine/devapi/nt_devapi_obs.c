@@ -18,8 +18,7 @@
 
 #ifdef NT_DEVAPI_GROUP_OBS
 
-/* Pagination cap shared by entity.list / resource.list: oversized `limit` -> huge payload DoS.
-   Mirrors the NT_DEVAPI_STEP_MAX fail-fast-ceiling style. Override per build with -D. */
+/* Pagination cap shared by entity.list / resource.list: oversized `limit` -> huge payload DoS. */
 #ifndef NT_DEVAPI_OBS_LIMIT_MAX
 #define NT_DEVAPI_OBS_LIMIT_MAX 512
 #endif
@@ -69,9 +68,8 @@ static bool parse_level(const cJSON *jlevel, nt_log_level_t *out, nt_devapi_erro
     return true;
 }
 
-/* Parse the optional {n} count into [0, NT_LOG_RING_DEPTH]; absent -> full ring depth. Out of
-   range / wrong type -> bad_params. Split out of cmd_log_tail to keep that handler simple
-   (mirrors parse_level). */
+/* Parse the optional {n} count into [0, NT_LOG_RING_DEPTH]; absent -> full ring depth.
+   Out of range / wrong type -> bad_params. */
 static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
     if (jn == NULL) {
         *out = NT_LOG_RING_DEPTH;
@@ -80,7 +78,7 @@ static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
     return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, set_bad_params, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
 }
 
-/* Serialize one tail buffer into the entries array. Split out so cmd_log_tail stays simple. */
+/* Serialize one tail buffer into the entries array. */
 static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint16_t got) {
     cJSON *arr = cJSON_AddArrayToObject(result, "entries");
     NT_ASSERT(arr != NULL);
@@ -109,9 +107,8 @@ static bool cmd_log_tail(const cJSON *params, cJSON *result, nt_devapi_error *er
         return false;
     }
 
-    /* Newest-first tail into a static buffer (no heap; ring-depth bounded).
-       INVARIANT: obs handlers must NEVER recurse into nt_devapi_submit — this static is shared across
-       the single-threaded, non-re-entrant dispatch and would be clobbered mid-serialize on recursion. */
+    /* Static (no heap) is safe only because dispatch is single-threaded and non-re-entrant:
+       an obs handler must never recurse into nt_devapi_submit or this buffer is clobbered mid-serialize. */
     static nt_log_ring_entry_t s_tail[NT_LOG_RING_DEPTH];
     uint16_t got = nt_log_ring_tail(n, min_level, s_tail);
     add_log_entries(result, s_tail, got);
@@ -325,9 +322,8 @@ static bool resolve_page(const cJSON *params, uint32_t total, const char *who, u
 // #endregion
 
 // #region entity.*
-/* JSON sink for nt_entity_introspect: renders the format-agnostic walk into a cJSON object tree.
-   cJSON lives only in devapi, so the JSON form of the sink belongs here. `stack` holds the current
-   container — begin_group pushes a child object, end_group pops; seeded at depth 1 with the entity
+/* JSON sink for nt_entity_introspect: renders the walk into a cJSON object tree. `stack` holds the
+   current container — begin_group pushes a child, end_group pops; seeded at depth 1 with the entity
    object so a component group never pops past it. */
 typedef struct {
     nt_introspect_sink base;
@@ -565,7 +561,7 @@ static bool resolve_pack_filter(const cJSON *params, bool *out_filter, uint16_t 
     return true;
 }
 
-/* Serialize one asset entry into the assets array. Split out so cmd_resource_list stays simple. */
+/* Serialize one asset entry into the assets array. */
 static void add_asset_entry(cJSON *assets, const nt_resource_asset_info_t *ai) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);

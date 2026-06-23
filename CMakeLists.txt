@@ -18,22 +18,13 @@ set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected in
 # The 0/1 define is attached PUBLIC to the nt_ui target inside engine/ui/CMakeLists.txt
 # so external consumers see the same value via target_link_libraries.
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
-# Dev-only log-tail ring (nt_log_ring). OFF compiles real no-op bodies so
-# release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
-# (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path.
+# OFF compiles real no-op bodies (zero release footprint); default tracks NT_UI_DEBUG_TOOLS so the CI OFF mirror exercises the stub path.
 option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
-# Dev-only perf collector (nt_metrics). OFF compiles real no-op bodies so
-# release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
-# (NT_UI_DEBUG_TOOLS=OFF) exercises the stub path. Independent of NT_DEVAPI_ENABLED.
+# Independent of NT_DEVAPI_ENABLED. OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror.
 option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
-# Dev-only entity introspection (nt_introspect: entity.* describe + nt_log_entity). OFF compiles real
-# no-op bodies so release ships zero footprint; defaults to NT_UI_DEBUG_TOOLS so the CI OFF mirror
-# exercises the stub path. Set build-wide below so component describe()/registration see the same value
-# without each linking the module.
+# OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror. Set build-wide below so component describe()/registration agree without linking the module.
 option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
-# Write side (component apply hooks / entity.set). Defaults to NT_INTROSPECT_ENABLED; set OFF for a
-# read-only deployment tier. The devapi entity-write group hard-requires it. Build-wide so component
-# apply()/registration see the same value without linking introspect.
+# Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Build-wide below so component apply()/registration agree without linking introspect.
 option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
@@ -49,14 +40,9 @@ option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / 
 # -DNT_DEVAPI_ENABLED build stays lean and does not pull in UI debug tools; enable it explicitly,
 # together with NT_UI_DEBUG_TOOLS + NT_DEVAPI_GROUP_INPUT (a hard CMake guard enforces both).
 option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over the nt_ui probe)." OFF)
-# The obs group serializes the dev-only log ring / nt_metrics / entity / resource L1 reads (nt_metrics
-# is the perf source of truth; the overlay is a sibling consumer, not a provider). Default OFF (opt-in,
-# "use only what you need"); enable explicitly together with NT_METRICS_ENABLED + NT_LOG_RING_ENABLED so
-# the dev-only sources it reads carry real bodies (a hard CMake guard enforces it).
+# Default OFF (opt-in); enable with NT_METRICS_ENABLED + NT_LOG_RING_ENABLED so the sources it reads carry real bodies (a hard CMake guard enforces it).
 option(NT_DEVAPI_GROUP_OBS "Build the devapi obs group (log.*/perf.*/entity.*/resource.* reads)." OFF)
-# Dev-only component WRITE group (entity.set). Default OFF (opt-in) so a deployment can expose read-only
-# introspection (obs) WITHOUT mutation — three tiers: no devapi / read-only / read-write. Hard-requires
-# NT_INTROSPECT_WRITE_ENABLED (the component apply hooks).
+# Default OFF so a deployment can expose read-only obs WITHOUT mutation. Hard-requires NT_INTROSPECT_WRITE_ENABLED.
 option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write group." OFF)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.

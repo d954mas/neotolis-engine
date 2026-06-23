@@ -21,9 +21,7 @@ typedef struct {
 static struct {
     nt_metrics_ring_t fixed[NT_METRICS_CHANNEL_COUNT];
 
-    /* User counters, capped + insertion-ordered. Keyed by the FULL 64-bit name hash so 31-char
-       prefixes don't alias. Exact last value in a tagged union (uint64 past 2^53 / float decimals);
-       the windowed ring (double) backs perf.stats; the truncated name is for serialization. */
+    /* Keyed by the FULL 64-bit name hash so 31-char prefixes don't alias. */
     nt_metrics_ring_t user_ring[NT_METRICS_MAX_USER_CHANNELS];
     uint64_t user_hashes[NT_METRICS_MAX_USER_CHANNELS];
     uint64_t user_u[NT_METRICS_MAX_USER_CHANNELS];
@@ -126,12 +124,8 @@ void nt_metrics_reset(void) {
 // #endregion
 
 // #region user counters (owned here)
-/* Find a user counter slot by full name hash, or append a new one. Returns the slot index. A full table
-   means the host registered more distinct counters than the compile-time cap: a config bug, so it asserts
-   (a silent drop would hide telemetry from the very tool meant to surface it). The UINT16_MAX return is
-   the asserts-off safety net — drop rather than overflow the fixed arrays. A new slot also asserts its
-   truncated display name does not collide with an existing distinct counter's, so the exposed name stays
-   unambiguous end to end. */
+/* Slot for `name` by full hash, appending if new. Full table / truncated-name collision assert
+   (config bug); UINT16_MAX is the asserts-off drop so the fixed arrays never overflow. */
 static uint16_t user_slot_for(const char *name) {
     uint64_t h = nt_hash64_str(name).value;
     for (uint16_t i = 0; i < s_metrics.user_count; i++) {
@@ -167,8 +161,7 @@ void nt_metrics_count(const char *name, uint64_t value) {
 
 void nt_metrics_count_f(const char *name, double value) {
     NT_ASSERT(name != NULL);
-    /* A non-finite counter is a caller bug: cJSON would serialize NaN/Inf as `null` and poison the
-       aggregates. Reject at the boundary (dev-only) so the wire stays `number`. */
+    /* Reject non-finite at the boundary: cJSON serializes NaN/Inf as `null` and poisons aggregates. */
     NT_ASSERT(isfinite(value));
     uint16_t i = user_slot_for(name);
     if (i == UINT16_MAX) {
@@ -182,22 +175,17 @@ void nt_metrics_count_f(const char *name, double value) {
 // #region per-frame sample (hot path: heap-free)
 void nt_metrics_sample(const nt_metrics_frame_t *f) {
     NT_ASSERT(f != NULL);
-    /* cpu_ms is a real measurement: a non-finite OR negative value is a host bug — assert it never
-       reaches the wire as a cJSON `null` and never poisons the window with a negative avg/min. gpu_ms is
-       allowed to be a NEGATIVE non-finite "unsupported" marker (the >= 0 skip-guard below drops it); only
-       a finite-or-positive path must hold, so a non-finite POSITIVE gpu (a real bug that would slip past
-       the guard) still traps. */
+    /* cpu_ms must be finite + non-negative (real measurement). gpu_ms may be a negative non-finite
+       "unsupported" marker (dropped by the >= 0 guard below); a non-finite POSITIVE gpu still traps. */
     NT_ASSERT(isfinite(f->cpu_ms) && f->cpu_ms >= 0.0F && (f->gpu_ms < 0.0F || isfinite(f->gpu_ms)));
 
-    /* frame_ms <= 0 or non-finite is the first-frame/garbage dt: pushing it would poison the window
-       (a 0 dt yields infinite fps, a huge dt a fps spike). Skip the frame_ms + derived-fps channel,
-       still sample the rest so a sibling read proves the loop ran. */
+    /* Skip a non-finite or <= 0 frame_ms (first-frame/garbage dt): a 0 dt yields infinite fps.
+       Still sample the rest so a sibling read proves the loop ran. */
     if (isfinite(f->frame_ms) && f->frame_ms > 0.0F) {
         ring_push(&s_metrics.fixed[NT_METRICS_FRAME_MS], (double)f->frame_ms);
     }
     ring_push(&s_metrics.fixed[NT_METRICS_CPU_MS], (double)f->cpu_ms);
-    /* gpu_ms: the < 0 sentinel (timer unsupported) must NOT enter the window, else perf.stats would
-       report a confident avg/min/max:-1 — contradicting perf.snapshot's gpu_ms:null contract. */
+    /* < 0 sentinel (timer unsupported) must not enter the window: keeps perf.stats null, not -1. */
     if (f->gpu_ms >= 0.0F) {
         ring_push(&s_metrics.fixed[NT_METRICS_GPU_MS], (double)f->gpu_ms);
     }
@@ -205,8 +193,8 @@ void nt_metrics_sample(const nt_metrics_frame_t *f) {
     ring_push(&s_metrics.fixed[NT_METRICS_MEM_USED], (double)f->mem_used);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_HWM], (double)f->scratch_hwm);
     ring_push(&s_metrics.fixed[NT_METRICS_SCRATCH_USED], (double)f->scratch_used);
-    /* pool_occupancy: no portable provider yet — leave it unsampled so perf.stats reports samples:0 +
-       null aggregates (an honest "unavailable", not a measured 0), mirroring the gpu_ms-absent path. */
+    /* pool_occupancy: no portable provider yet — left unsampled so perf.stats reads samples:0 (null),
+       not a measured 0. */
 
     for (uint16_t i = 0; i < s_metrics.user_count; i++) {
         double v = s_metrics.user_is_float[i] ? s_metrics.user_f[i] : (double)s_metrics.user_u[i];

@@ -51,14 +51,10 @@ typedef void (*nt_comp_on_destroy_fn)(nt_entity_t entity);
 typedef struct nt_introspect_sink nt_introspect_sink;
 typedef void (*nt_comp_describe_fn)(nt_entity_t entity, nt_introspect_sink *sink);
 typedef struct nt_write_value nt_write_value;
-/* Apply one already-typed value to writable field `key` THROUGH the component's real setter (sets
-   dirty / repacks / normalizes). `dry_run` validates everything (kind/arity/range/semantic) but does
-   NOT mutate — it backs whole-or-nothing batch writes (validate all, then apply all). Returns false +
-   sets *err_msg (devapi maps it to bad_params) on an unknown/read-only key, a kind/arity mismatch, or
-   a range/semantic reject. The accepted-key set IS the component's writable field set — a key with no
-   case falls through to bad_params, which is how "writable is a subset of readable" and
-   "id/world_matrix never writable" are enforced structurally. Populate ONLY under
-   #if NT_INTROSPECT_WRITE_ENABLED; NULL = component is read-only. */
+/* Apply one typed value to writable field `key` through the component's real setter. `dry_run`
+   validates (kind/arity/range) without mutating, to back whole-or-nothing batch writes. Returns false
+   and sets *err_msg on an unknown/read-only key or a validation reject; the accepted-key set IS the
+   writable field set. Populate ONLY under #if NT_INTROSPECT_WRITE_ENABLED; NULL = read-only. */
 typedef bool (*nt_comp_apply_fn)(nt_entity_t entity, const char *key, const nt_write_value *v, bool dry_run, const char **err_msg);
 
 typedef struct {

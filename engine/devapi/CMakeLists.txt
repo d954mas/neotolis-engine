@@ -94,14 +94,10 @@ if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED OR
         "NT_UI_DEBUG_TOOLS=ON, which defaults all three).")
 endif()
 
-# Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads over the L1 capabilities.
-# Links the dev-only ring + metrics collector + the entity/resource readers + nt_introspect (the
-# generic entity describe walk). entity.* no longer references any specific component: components
-# self-register a describe() with the entity storage registry, so the obs TU pulls neither
-# nt_transform_comp nor nt_drawable_comp (a host/test links those to make them appear). perf.* reads
-# nt_metrics directly (the overlay is a sibling consumer, not a provider here). GNU-ld single-pass
-# order: nt_devapi (consumer) is listed first on the exe link line; these provider libs trail it, with
-# nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
+# Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads. entity.* walks via nt_introspect
+# and pulls no specific component — components self-register a describe(), so a host/test links the
+# concrete ones. GNU-ld single-pass: nt_devapi (consumer) precedes these provider libs on the exe link
+# line, nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
 if(NT_DEVAPI_GROUP_OBS)
     target_sources(nt_devapi PRIVATE nt_devapi_obs.c)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_OBS=1)
@@ -112,10 +108,8 @@ if(NT_DEVAPI_GROUP_OBS)
 endif()
 
 # Entity-write group (entity.set): a dev-only DEBUG write over the component apply() hooks. Hard-requires
-# NT_INTROSPECT_WRITE_ENABLED (the engine-side apply hooks) — with it OFF every component is read-only and
-# entity.set could only ever return bad_params (a false surface). Links nt_entity (resolution + the
-# storage registry holding the apply hooks); the writable components (transform/drawable) are linked by
-# the host/test, exactly as obs links its providers. Independent of GROUP_OBS (its own deployment tier).
+# NT_INTROSPECT_WRITE_ENABLED (else every component is read-only — see the guard below). Links nt_entity
+# (resolution + the storage registry holding the apply hooks); the host/test links the writable components.
 if(NT_DEVAPI_GROUP_ENTITY_WRITE AND NOT NT_INTROSPECT_WRITE_ENABLED)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_ENTITY_WRITE requires NT_INTROSPECT_WRITE_ENABLED (the component "
         "apply() hooks). With it OFF every component is read-only, so entity.set could only return "

@@ -55,8 +55,7 @@ static void transform_describe(nt_entity_t entity, nt_introspect_sink *s) {
 #endif
 
 #if NT_INTROSPECT_WRITE_ENABLED
-/* The writable field set IS this ladder's accepted keys: world_matrix has no case (derived,
-   read-only) -> falls through to bad_params. Each write goes through a dirty-setting setter. */
+/* world_matrix has no case: derived/read-only, so it falls through to bad_params. */
 static bool transform_apply(nt_entity_t entity, const char *key, const nt_write_value *v, bool dry_run, const char **err_msg) {
     if (strcmp(key, "position") == 0) {
         if (v->kind != NT_WV_VEC3) {

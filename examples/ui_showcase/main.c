@@ -2261,8 +2261,7 @@ static float showcase_poll_gpu_ms(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    /* The app measures the frame and pushes it into nt_metrics (the perf source of truth); the overlay
-       HUD + the per-tab gpu readouts read it back. frame_ms is the wall delta; cpu_ms brackets work. */
+    /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
     static double s_last_begin = 0.0;
     double now = nt_time_now();
     float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
@@ -2443,7 +2442,6 @@ static void frame(void) {
     nt_gfx_end_segment();
     nt_gfx_end_frame();
 
-    /* cpu_ms = time spent in this frame's work; fill + push one sample into nt_metrics. */
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
        on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
@@ -2577,8 +2575,7 @@ int main(int argc, char *argv[]) {
 
     nt_resource_set_activate_time_budget(0);
 
-    /* The app pushes per-frame data into nt_metrics (the perf source of truth); the overlay HUD reads
-       it back. */
+    /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
     nt_metrics_init();
     nt_debug_overlay_init(NULL);
 

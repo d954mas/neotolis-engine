@@ -179,9 +179,7 @@ static void frame(void) {
     nt_metrics_count("frames", s_frame_counter);
     nt_metrics_count_f("cpu_ms", (double)cpu_ms);
 
-    /* The host fills the per-frame scalars it measured, then pushes one sample into nt_metrics
-       (which derives fps + windows + the snapshot view). This host renders nothing and inits no gfx,
-       so gpu_ms is the "no timer" sentinel and draw_calls is 0 — set explicitly, not polled. */
+    /* This host inits no gfx, so gpu_ms is the "no timer" sentinel and draw_calls is 0. */
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
        on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
     static uint64_t s_mem_used;
@@ -225,10 +223,8 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 
-    /* Observability wiring: the host measures the frame and pushes it into nt_metrics (the L1 perf
-       store); the log ring captures every nt_log_write for log.tail. The obs devapi group
-       self-registers under NT_DEVAPI_GROUP_OBS — no host register call. No overlay: this host renders
-       no HUD, and perf.* reads nt_metrics directly. */
+    /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.
+       The obs devapi group self-registers under NT_DEVAPI_GROUP_OBS — no host register call. */
     nt_log_ring_init();
     nt_log_add_sink(nt_log_ring_sink, NULL);
     nt_metrics_init();
@@ -265,8 +261,8 @@ int main(void) {
     NT_ASSERT(s_hud_scaled_ctx != NULL && "devapi_host: failed to create scaled hud UI context");
     nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
 
-    /* Seed a few entities so entity.list / entity.set have live data over the socket (this host renders
-       nothing; these are pure data, and the comp inits register each component's describe()/apply()). */
+    /* Seed entities so entity.list / entity.set have live data; the comp inits register each
+       component's describe()/apply(). */
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
     nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
     nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});

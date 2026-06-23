@@ -26,8 +26,7 @@ void nt_entity_introspect(nt_entity_t e, nt_introspect_sink *s) {
     s->field_u64(s, "id", e.id);
     s->field_u64(s, "index", nt_entity_index(e));
     s->field_u64(s, "generation", nt_entity_generation(e));
-    /* A dead handle is reported, not asserted: nt_log_entity may be handed any handle. The obs
-       enumerator only passes proven-live slots, so it never takes this branch. */
+    /* A dead handle is reported, not asserted: nt_log_entity may be handed any handle. */
     if (!nt_entity_is_alive(e)) {
         s->field_bool(s, "alive", false);
         return;

@@ -24,8 +24,7 @@ static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 
 void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
 
-/* Fixed BSS sink registry (~4 slots, overridable -D). Tiny + always-compiled;
-   the dev-only gating lives in the attached sink (nt_log_ring), not here. */
+/* Fixed BSS sink registry, single-threaded; dev-only gating lives in the attached sink, not here. */
 #ifndef NT_LOG_MAX_SINKS
 #define NT_LOG_MAX_SINKS 4
 #endif
@@ -34,25 +33,24 @@ static void *s_sink_user[NT_LOG_MAX_SINKS];
 static uint8_t s_sink_count;
 
 void nt_log_add_sink(nt_log_sink_fn fn, void *user) {
-    NT_ASSERT(fn != NULL); /* host-call invariant, not bot input */
-    /* Idempotent: re-registering the exact (fn,user) pair is a no-op, so callers can attach a sink
-       across re-inits without leaking duplicate slots (each would fan out the same line twice). */
+    NT_ASSERT(fn != NULL);
+    /* Idempotent: skip a duplicate (fn,user) slot — it would fan out every line twice. */
     for (uint8_t i = 0; i < s_sink_count; i++) {
         if (s_sinks[i] == fn && s_sink_user[i] == user) {
             return;
         }
     }
-    NT_ASSERT(s_sink_count < NT_LOG_MAX_SINKS); /* registry full is a host-call invariant */
+    NT_ASSERT(s_sink_count < NT_LOG_MAX_SINKS);
     s_sinks[s_sink_count] = fn;
     s_sink_user[s_sink_count] = user;
     s_sink_count++;
 }
 
 void nt_log_remove_sink(nt_log_sink_fn fn, void *user) {
-    NT_ASSERT(fn != NULL); /* host-call invariant, not bot input */
+    NT_ASSERT(fn != NULL);
     for (uint8_t i = 0; i < s_sink_count; i++) {
         if (s_sinks[i] == fn && s_sink_user[i] == user) {
-            /* Compact the tail down so the array stays dense (order is irrelevant to fan-out). */
+            /* Compact the tail to keep the array dense (fan-out order is irrelevant). */
             for (uint8_t j = i + 1U; j < s_sink_count; j++) {
                 s_sinks[j - 1U] = s_sinks[j];
                 s_sink_user[j - 1U] = s_sink_user[j];
@@ -65,11 +63,8 @@ void nt_log_remove_sink(nt_log_sink_fn fn, void *user) {
     }
 }
 
-/* Append a "..." marker to a truncated msg WITHOUT leaving a split multibyte sequence — the line is
-   later stored verbatim in the log ring and serialized as a JSON string, where cJSON rejects invalid
-   UTF-8. Walk back over any trailing UTF-8 continuation bytes (0b10xxxxxx), then drop a now-orphaned
-   lead byte (>= 0xC0) whose continuation bytes were cut — both leave the marker on a codepoint
-   boundary. buf must hold at least 4 bytes (NT_LOG_BUF_SIZE is 512). */
+/* Append "..." to a truncated msg on a UTF-8 codepoint boundary: cJSON later rejects a split
+   multibyte sequence when the line is serialized. buf must hold >= 4 bytes. */
 static void append_truncation_marker(char *buf, size_t cap) {
     size_t end = cap - 4; /* room for "..." + NUL */
     while (end > 0 && ((unsigned char)buf[end - 1] & 0xC0U) == 0x80U) {
@@ -101,7 +96,7 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
         append_truncation_marker(msg, sizeof(msg));
     }
 
-    /* Fan out the final formatted line to registered sinks (single-threaded). */
+    /* Fan out to sinks (single-threaded). */
     for (uint8_t i = 0; i < s_sink_count; i++) {
         s_sinks[i](level, domain ? domain : "", msg, s_sink_user[i]);
     }
@@ -159,9 +154,8 @@ bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *f
     if (written < 0) {
         return false;
     }
-    /* Apply the same UTF-8-safe truncation nt_log_write does, BEFORE the dedup hash + forward, so a
-       >buf message stores valid UTF-8 in the ring (cJSON rejects a split multibyte sequence) and two
-       messages differing only past the cut still hash identically (both truncate to the same marker). */
+    /* Truncate before hashing so messages differing only past the cut dedup identically (and the
+       stored line stays valid UTF-8). */
     if (written >= (int)sizeof(msg)) {
         append_truncation_marker(msg, sizeof(msg));
     }

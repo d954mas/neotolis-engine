@@ -13,9 +13,7 @@ endif()
 
 target_link_libraries(nt_platform PUBLIC nt_core)
 
-# Windows: GetProcessMemoryInfo lives in psapi. PUBLIC so an executable linking
-# nt_platform inherits it (a static lib's PRIVATE link does not propagate),
-# mirroring nt_devapi_net's ws2_32.
+# GetProcessMemoryInfo lives in psapi; PUBLIC so executables linking this static lib inherit it.
 if(WIN32)
     target_link_libraries(nt_platform PUBLIC psapi)
 endif()

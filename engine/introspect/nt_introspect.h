@@ -5,9 +5,8 @@
 #include "entity/nt_entity.h"
 #include "log/nt_log.h"
 
-/* Dev-only entity introspection. A component self-registers a describe() with the entity storage
-   registry; nt_entity_introspect walks core fields + each present component into a FORMAT-AGNOSTIC
-   sink — text (here, zero-dep, backs logs/nt_entity_to_string) or JSON (in devapi, where cJSON lives). */
+/* Dev-only entity introspection. Components self-register a describe(); nt_entity_introspect walks
+   core fields + each present component into a format-agnostic sink (text here, JSON in devapi). */
 
 /* NT_INTROSPECT_ENABLED=0 (release/OFF mirror) compiles no-op bodies for zero footprint. Set
    build-wide so component describe()/registration see the same value without linking this module. */
@@ -15,9 +14,8 @@
 #define NT_INTROSPECT_ENABLED 1
 #endif
 
-/* Write side (component apply / entity.set). Defaults to NT_INTROSPECT_ENABLED — a dev build that can
-   read can also write; set OFF independently for a read-only deployment tier (the devapi entity-write
-   group hard-requires it). Build-wide, like NT_INTROSPECT_ENABLED. */
+/* Write side (component apply / entity.set). Set OFF independently for a read-only deployment tier.
+   Build-wide, like NT_INTROSPECT_ENABLED. */
 #ifndef NT_INTROSPECT_WRITE_ENABLED
 #define NT_INTROSPECT_WRITE_ENABLED NT_INTROSPECT_ENABLED
 #endif
@@ -37,11 +35,9 @@ typedef enum {
     NT_REF_HANDLE,
 } nt_ref_kind_t;
 
-/* Format-agnostic visitor. describe() emits fields/groups through these callbacks; the concrete sink
-   renders them. Pick a field by MEANING: a handle/id into another store -> field_ref (typed,
-   followable, leaks no pointer); an enumerated value -> field_enum (stable token, never the raw enum);
-   a plain scalar -> field_u64/i64/f32/bool; vec3/vec4/mat3/mat4 -> field_floats (the sink reads
-   `count`); free text -> field_str. begin_group/end_group nest (bounded by NT_INTROSPECT_MAX_DEPTH). */
+/* Format-agnostic visitor: describe() emits fields/groups, the concrete sink renders them. field_ref
+   and field_enum emit a stable token (never a raw pointer or enum value); field_floats reads `count`
+   (vec3/vec4/mat3/mat4); begin_group/end_group nest, bounded by NT_INTROSPECT_MAX_DEPTH. */
 typedef struct nt_introspect_sink {
     void (*begin_group)(struct nt_introspect_sink *s, const char *key);
     void (*end_group)(struct nt_introspect_sink *s);
@@ -69,12 +65,9 @@ void nt_entity_to_string(nt_entity_t e, char *buf, size_t cap);
 void nt_log_entity(nt_log_level_t level, nt_entity_t e);
 
 /* ---- Write side (the inverse of the read sink) ----
- * A neutral typed value the component's apply() hook receives. devapi parses cJSON into this (the
- * inverse of the JSON sink reading a component out), so apply hooks never see cJSON. Deliberately
- * tiny: scalars + fixed float vectors; no ref/enum/str (refs/ids are read-only, no string field is
- * writable in v1). The kind is the WIRE SHAPE (arity), not the semantic: a 4-float value is NT_WV_VEC4
- * whether the field is a quaternion or an rgba color — devapi parses the shape, the apply() hook owns
- * the semantic (normalize quat / clamp color). */
+ * Neutral typed value the component's apply() hook receives; devapi parses cJSON into this, so apply
+ * hooks never see cJSON. `kind` is the wire shape (arity), not the semantic: a 4-float value is
+ * NT_WV_VEC4 whether it's a quaternion or an rgba color — the apply() hook owns the semantic. */
 typedef enum { NT_WV_F32, NT_WV_BOOL, NT_WV_VEC3, NT_WV_VEC4 } nt_write_kind_t;
 
 typedef struct nt_write_value {
