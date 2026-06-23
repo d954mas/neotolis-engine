@@ -126,10 +126,12 @@ void nt_metrics_reset(void) {
 // #endregion
 
 // #region user counters (owned here)
-/* Find a user counter slot by full name hash, or append a new one. Returns the slot index, or
-   UINT16_MAX when the table is full (drop the counter — a dev-only collector overflow is non-fatal).
-   A new slot asserts its truncated display name does not collide with an existing distinct counter's,
-   so the exposed name stays unambiguous end to end. */
+/* Find a user counter slot by full name hash, or append a new one. Returns the slot index. A full table
+   means the host registered more distinct counters than the compile-time cap: a config bug, so it asserts
+   (a silent drop would hide telemetry from the very tool meant to surface it). The UINT16_MAX return is
+   the asserts-off safety net — drop rather than overflow the fixed arrays. A new slot also asserts its
+   truncated display name does not collide with an existing distinct counter's, so the exposed name stays
+   unambiguous end to end. */
 static uint16_t user_slot_for(const char *name) {
     uint64_t h = nt_hash64_str(name).value;
     for (uint16_t i = 0; i < s_metrics.user_count; i++) {
@@ -138,6 +140,7 @@ static uint16_t user_slot_for(const char *name) {
         }
     }
     if (s_metrics.user_count >= NT_METRICS_MAX_USER_CHANNELS) {
+        NT_ASSERT(false && "nt_metrics: user-counter table full; raise NT_METRICS_MAX_USER_CHANNELS");
         return UINT16_MAX;
     }
     uint16_t i = s_metrics.user_count;
@@ -179,11 +182,12 @@ void nt_metrics_count_f(const char *name, double value) {
 // #region per-frame sample (hot path: heap-free)
 void nt_metrics_sample(const nt_metrics_frame_t *f) {
     NT_ASSERT(f != NULL);
-    /* cpu_ms is a real measurement: a non-finite value is a host bug — assert it never reaches the wire
-       as a cJSON `null`. gpu_ms is allowed to be a NEGATIVE non-finite "unsupported" marker (the >= 0
-       skip-guard below drops it); only a finite-or-positive path must hold, so a non-finite POSITIVE
-       gpu (a real bug that would slip past the guard) still traps. */
-    NT_ASSERT(isfinite(f->cpu_ms) && (f->gpu_ms < 0.0F || isfinite(f->gpu_ms)));
+    /* cpu_ms is a real measurement: a non-finite OR negative value is a host bug — assert it never
+       reaches the wire as a cJSON `null` and never poisons the window with a negative avg/min. gpu_ms is
+       allowed to be a NEGATIVE non-finite "unsupported" marker (the >= 0 skip-guard below drops it); only
+       a finite-or-positive path must hold, so a non-finite POSITIVE gpu (a real bug that would slip past
+       the guard) still traps. */
+    NT_ASSERT(isfinite(f->cpu_ms) && f->cpu_ms >= 0.0F && (f->gpu_ms < 0.0F || isfinite(f->gpu_ms)));
 
     /* frame_ms <= 0 or non-finite is the first-frame/garbage dt: pushing it would poison the window
        (a 0 dt yields infinite fps, a huge dt a fps spike). Skip the frame_ms + derived-fps channel,

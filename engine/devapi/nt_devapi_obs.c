@@ -408,11 +408,12 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
 
     uint16_t emax = nt_entity_max();
 
-    /* Pass 1: honest count of all matching live entities (no working buffer, no cap). */
+    /* Pass 1: honest count of all matching live entities (no working buffer, no cap).
+       uint32_t counter: emax may be UINT16_MAX, so a uint16_t idx would wrap past it and never end. */
     uint32_t total = 0;
-    for (uint16_t idx = 1; idx <= emax; idx++) {
+    for (uint32_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e;
-        if (entity_slot_matches(idx, only_drawable, &e)) {
+        if (entity_slot_matches((uint16_t)idx, only_drawable, &e)) {
             total++;
         }
     }
@@ -429,9 +430,9 @@ static bool cmd_entity_list(const cJSON *params, cJSON *result, nt_devapi_error 
 
     /* Pass 2: emit only entities whose running matched-index falls in [begin, end). */
     uint32_t matched = 0;
-    for (uint16_t idx = 1; idx <= emax; idx++) {
+    for (uint32_t idx = 1; idx <= emax; idx++) {
         nt_entity_t e;
-        if (!entity_slot_matches(idx, only_drawable, &e)) {
+        if (!entity_slot_matches((uint16_t)idx, only_drawable, &e)) {
             continue;
         }
         if (matched >= begin && matched < end) {
