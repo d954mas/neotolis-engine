@@ -21,6 +21,7 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "ui/nt_ui_rich_text.h"
 #include "unity.h"
+#include "utf8/nt_utf8.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
@@ -87,6 +88,12 @@ static nt_ui_rich_fx_result_t parse_stub_fx(uint32_t atom_idx, nt_rich_atom_kind
     (void)hovered;
     (void)user_data;
     return nt_ui_rich_fx_identity(base_color);
+}
+
+/* Stub object measure fn (fixed box) used only to prove object-tag registration guards. */
+static nt_ui_rich_object_measure_t parse_stub_object_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = 8.0F, .height = 8.0F, .ascent = 8.0F};
 }
 
 /* (2b) register_effect_fn registers a CUSTOM effect: the full lookup returns fn+user_data, and the
@@ -162,7 +169,8 @@ static void test_tagset_reset(void) {
 }
 
 /* (4b) an empty registration name ("") is a dead slot the parser can never address (value
- * parsers guard vlen>0) -> fail-early NT_ASSERT in every register_* (M11). */
+ * parsers guard vlen>0) -> fail-early NT_ASSERT in every register_* (including the fn/object-tag
+ * variants, which guard name[0]!='\0' too). */
 static void test_tagset_empty_name_asserts(void) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts);
@@ -171,9 +179,11 @@ static void test_tagset_empty_name_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_atlas(&ts, "", (nt_resource_t){.id = 1U}));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_color(&ts, "", 0xFFFFFFFFU));
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect(&ts, "", 1U));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_effect_fn(&ts, "", parse_stub_fx, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_tagset_register_object_tag(&ts, "", parse_stub_object_measure, NULL, NULL));
 }
 
-/* ---- parser malformed-markup death tests (MARK-67-01) ---- */
+/* ---- parser malformed-markup death tests ---- */
 static void parse_lit(const char *m) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -300,6 +310,43 @@ static void test_parse_balanced_at_cap_stays_synced(void) {
     }
 }
 
+/* (10d) mixed-tag stack-sync: interleave style-stack PUSH tags (<color>/<scale>/<font>) with <link>
+ * (which does NOT push -- it only sets the pending link field) in a nested+balanced markup. Because
+ * rich_close_tag branches on top==RICH_TAG_LINK to NOT pop the style stack, the trailing text after
+ * all closes must carry the BASE style -- proof the style stack and the tag stack stay in sync across
+ * the link asymmetry (a desync here would leave the trailing run mid-stack: wrong color/scale/font). */
+static void test_parse_mixed_tag_stack_sync(void) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts);
+    nt_ui_rich_tagset_register_color(&ts, "accent", 0xFFAABBCCU);
+    const nt_font_t hdr[4] = {{.id = 21}, {.id = 22}, {.id = 23}, {.id = 24}};
+    nt_ui_rich_tagset_register_font(&ts, "hdr", hdr);
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF112233U; /* distinguishable from the accent push */
+    base.scale = 1.0F;
+    const nt_font_t base_face = {.id = 7};
+    for (uint32_t i = 0; i < 4U; i++) {
+        base.font_id[i] = base_face; /* a base family distinct from "hdr" */
+    }
+
+    /* <link> wraps the pushes; its </link> must NOT pop the style stack. Balanced, well-formed. */
+    const char *m = "<color=accent><link=q1><scale=2><font=hdr>inner</font></scale></link></color>tail";
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
+
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "mixed-tag markup produced the trailing-text run");
+    const nt_ui_rich_style_t last = nt_ui_rich_test_run_style(s_fx.ctx, runs - 1U);
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, last.color_abgr, "trailing text carries the BASE color (style stack synced past <link>)");
+    const float scale_err = (last.scale > 1.0F) ? (last.scale - 1.0F) : (1.0F - last.scale);
+    TEST_ASSERT_TRUE_MESSAGE(scale_err < 1e-3F, "trailing text carries the BASE scale (no leaked <scale> push)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(7U, last.font_id[0].id, "trailing text carries the BASE font (no leaked <font> push)");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, last.variant, "trailing text variant back at base");
+}
+
 /* (16b) <scale=0> / <scale=-1>: the push_scale>0 assert traps in FULL. In OFF the hard clamp falls
  * back to identity (no <=0 font size into nt_font_measure_n). */
 static void test_parse_scale_nonpositive_asserts(void) {
@@ -322,7 +369,7 @@ static void test_parse_nested_link_asserts(void) {
     NT_TEST_EXPECT_ASSERT(parse_lit("<link=a><link=b>hi</link></link>"));
 }
 
-/* ---- bounded-scan robustness (MARK-67-05) ---- */
+/* ---- bounded-scan robustness ---- */
 
 /* (11) a pathological non-terminating '<' string asserts on the unterminated tag and does NOT
  * loop forever or read past `len` -- the test completing proves the scan is bounded. */
@@ -357,13 +404,51 @@ static void test_parse_escape_literal_lt(void) {
     TEST_ASSERT_EQUAL_MEMORY("a<b", t, 3);
 }
 
-/* (14) invalid UTF-8 in a literal text segment -> NT_ASSERT (T-67-06-04). */
+/* (14) invalid UTF-8 in a literal text segment -> NT_ASSERT. */
 static void test_parse_invalid_utf8_asserts(void) {
     const char bad[] = {'h', 'i', (char)0xFF, 'x'}; /* 0xFF is never valid UTF-8 */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad));
+}
+
+/* (14b) a buffer-full truncation that lands MID multibyte sequence must not sever a codepoint:
+ * rich_parse_append_byte trims the partial trailing UTF-8 so rich_flush_text's validator never sees
+ * a lone lead/continuation byte (which would TRAP in FULL on otherwise-valid input). Fill the text
+ * buffer so a 2-byte 'é' (0xC3 0xA9) straddles the cap: the lead lands at the last slot, the
+ * continuation is dropped, and the trim rolls the lone lead back -> kept text is valid UTF-8. */
+static void test_parse_utf8_truncation_codepoint_aware(void) {
+    static char buf[NT_UI_RICH_MAX_TEXT_BYTES + 64];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < NT_UI_RICH_MAX_TEXT_BYTES - 1U; i++) {
+        buf[n++] = 'a'; /* fills text_len to cap-1 */
+    }
+    buf[n++] = (char)0xC3; /* 2-byte lead -> lands at the last slot (text_len -> cap, buffer now full) */
+    buf[n++] = (char)0xA9; /* continuation -> dropped; the trim must roll the lone lead back too */
+    buf[n++] = (char)0xC3; /* a SECOND straddling sequence past the cap -> entirely dropped */
+    buf[n++] = (char)0xA9;
+    buf[n++] = 'z'; /* trailing ASCII past the cap -> dropped */
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    /* No NT_TEST_EXPECT_ASSERT: a trap here is a FAILURE (the whole point is no trap on valid input). */
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n);
+
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, runs, "one text run from the truncated literal");
+    const uint32_t kept = nt_ui_rich_test_run_text_len(s_fx.ctx, 0);
+    /* Kept text stops at the last COMPLETE codepoint: the cap-1 'a' bytes, lone lead trimmed away. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UI_RICH_MAX_TEXT_BYTES - 1U, kept, "partial trailing UTF-8 lead trimmed (no severed codepoint)");
+    /* Re-validate the kept bytes are well-formed UTF-8 (no lone lead/continuation survived). */
+    const char *t = nt_ui_rich_test_run_text(s_fx.ctx, 0);
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t cp = 0;
+    for (uint32_t i = 0; i < kept; i++) {
+        nt_utf8_decode(&state, &cp, (uint8_t)t[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_UTF8_ACCEPT, state, "kept truncated text is valid UTF-8 (ends on a codepoint boundary)");
 }
 
 /* ---- fail-early domain-input asserts (rich API) ---- */
@@ -448,12 +533,14 @@ int main(void) {
     RUN_TEST(test_parse_fx_empty_value_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
+    RUN_TEST(test_parse_mixed_tag_stack_sync);
     RUN_TEST(test_parse_scale_nonpositive_asserts);
     RUN_TEST(test_parse_nested_link_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);
     RUN_TEST(test_parse_len_bounded);
     RUN_TEST(test_parse_escape_literal_lt);
     RUN_TEST(test_parse_invalid_utf8_asserts);
+    RUN_TEST(test_parse_utf8_truncation_codepoint_aware);
     RUN_TEST(test_parse_img_null_base_asserts);
     RUN_TEST(test_push_scale_bad_mult_asserts);
     RUN_TEST(test_rich_image_bad_scale_asserts);

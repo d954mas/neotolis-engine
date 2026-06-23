@@ -100,6 +100,17 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool approx(float a, float b) { return fabsf(a - b) < 1e-3F; }
 
+/* Mirror nt_ui_rich_fx.c's rich_fx_clamp01 so the glow params asserts predict the clamped factor. */
+static float rich_fx_clamp01_ref(float v) {
+    if (v < 0.0F) {
+        return 0.0F;
+    }
+    if (v > 1.0F) {
+        return 1.0F;
+    }
+    return v;
+}
+
 /* Build a 2-run text-only block, declare the rich-text widget, walk once. */
 static void frame_two_run_text(float container_w, nt_rich_align_t align) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -156,7 +167,7 @@ static void test_rich_only_frame_binds_text_material(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material.id, nt_text_renderer_test_material_id(), "rich-only frame leaves the ctx text material bound (glyphs not discarded)");
 }
 
-/* (2) the FIXED block size equals the solved total size (D-67-03). */
+/* (2) the FIXED block size equals the solved total size. */
 static void test_fixed_block_size_matches_solved(void) {
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT);
     /* Explicit container_w drives total_w; total_h is the one-line height (size 16 -> 16px). */
@@ -164,7 +175,7 @@ static void test_fixed_block_size_matches_solved(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_total_h(s_fx.ctx) > 0.0F, "FIXED height == solved line height");
 }
 
-/* (3) a run WITHOUT an effect emits one span per line-fragment (Open Q2 batch-friendly):
+/* (3) a run WITHOUT an effect emits one span per line-fragment (batch-friendly):
  * one wide line of one style -> exactly one span. */
 static void test_single_style_one_span_per_line(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
@@ -187,7 +198,7 @@ static void test_single_style_one_span_per_line(void) {
 }
 
 /* (4) double-walk determinism: re-walking the same frame yields identical span counts and
- * does NOT mutate the run-list (UI-06 re-walkable, read-only on context). */
+ * does NOT mutate the run-list (re-walkable, read-only on context). */
 static void test_double_walk_is_deterministic(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -221,7 +232,7 @@ static void test_double_walk_is_deterministic(void) {
     TEST_ASSERT_TRUE_MESSAGE(spans_1 > 0U, "emit actually ran");
 }
 
-/* ===== Inline IMAGE emit (RICH-67-05) ===== */
+/* ===== Inline IMAGE emit ===== */
 
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
  * The image rides the rich_image material with a 48 B {a_tint,a_uvrect,a_layout} block. */
@@ -379,7 +390,7 @@ static void test_inline_image_valign_y(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(y_top, 0.0F), "TOP-aligned image sits at the line top (pen_y=0 on line 0)");
 }
 
-/* ===== Per-atom effects (FX-67-01/02) ===== */
+/* ===== Per-atom effects ===== */
 
 /* The stock fns' documented curve constants (mirror nt_ui_rich_fx.c). */
 #define FX_WAVE_AMP 3.0F
@@ -399,6 +410,8 @@ static void test_inline_image_valign_y(void) {
 #define FX_SWAY_AMP 4.0F
 #define FX_SWAY_SPEED 3.0F
 #define FX_SWAY_PHASE 0.5F
+#define FX_FADE_STAGGER 0.05F
+#define FX_FADE_DUR 0.30F
 
 /* (9) the stock wave fn returns the deterministic offset.y == A*sin(t*SPEED + idx*PHASE).
  * Tests the fn ABI directly (headless, no walk) -- the contract the emit path folds in. */
@@ -419,6 +432,7 @@ static void test_fx_wave_deterministic(void) {
 }
 
 /* fade_in returns alpha 0 + visible=false before its window opens; alpha ramps after. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- visibility asserts + params duration override
 static void test_fx_fade_in_visibility(void) {
     const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     const float xy[2] = {0.0F, 0.0F};
@@ -431,6 +445,20 @@ static void test_fx_fade_in_visibility(void) {
     const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(r1.visible, "fade_in fully open -> visible");
     TEST_ASSERT_TRUE_MESSAGE(approx(r1.color[3], 1.0F), "fade_in alpha 1 when fully open");
+
+    /* PARAMS override: speed = reveal rate (1/sec) -> per-atom duration dur = 1/speed. speed=10 -> a
+     * fast 0.1s fade; pick a mid-window time so the ramp is partial (not clamped) and pins 1/speed. */
+    nt_ui_rich_fx_params_t p = {.amp = 0.0F, .speed = 10.0F};
+    const uint32_t idx = 2U;
+    const float tp = 0.15F; /* (tp - idx*STAGGER)/dur = (0.15 - 0.10)/0.10 = 0.5 -> mid-ramp, unclamped */
+    const float dur_p = 1.0F / 10.0F;
+    const float a_p = (tp - ((float)idx * FX_FADE_STAGGER)) / dur_p;
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_fade_in(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, tp, false, &p);
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[3], base_color[3] * a_p), "fade_in tuned alpha == base * (t - idx*STAGGER)/(1/speed)");
+    TEST_ASSERT_TRUE_MESSAGE(tuned.visible, "fade_in tuned mid-ramp is visible");
+    /* The default duration (FX_FADE_DUR) would give a DIFFERENT alpha at the same time -> override took effect. */
+    const float a_def = (tp - ((float)idx * FX_FADE_STAGGER)) / FX_FADE_DUR;
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(a_p - a_def) > 0.01F, "fade_in speed override changes the duration (differs from default)");
 }
 
 /* Mirror nt_ui_rich_fx.c's rich_fx_hash01 (xorshift-mix, 24-bit -> [0,1)) so the shake
@@ -474,8 +502,9 @@ static void fx_hue_rgb(float hue, float out_rgb[3]) {
     out_rgb[2] = b;
 }
 
-/* (9b) shake is deterministic + bounded by AMP, and DEFINED for negative time (H3: the
+/* (9b) shake is deterministic + bounded by AMP, and DEFINED for negative time (the
  * float->unsigned step quantize goes through a signed intermediate so countdown clocks don't UB). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- deterministic + bounded asserts + params override
 static void test_fx_shake_deterministic(void) {
     const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     const float xy[2] = {0.0F, 0.0F};
@@ -496,9 +525,18 @@ static void test_fx_shake_deterministic(void) {
     const nt_ui_rich_fx_result_t r2 = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, r2.offset_x), "shake x is deterministic");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_y, r2.offset_y), "shake y is deterministic");
+
+    /* PARAMS override: amp = jitter px, speed = the quantize RATE -> same hash formula, tuned step. */
+    nt_ui_rich_fx_params_t p = {.amp = 5.0F, .speed = 60.0F};
+    const uint32_t step_p = (uint32_t)(int32_t)floorf(t * 60.0F);
+    const float ex_p = 5.0F * (fx_hash01(idx, step_p) - 0.5F) * 2.0F;
+    const float ey_p = 5.0F * (fx_hash01(idx, step_p + 0x1000U) - 0.5F) * 2.0F;
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_shake(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.offset_x, ex_p), "shake tuned x == amp*(hash(idx,floor(t*speed))-0.5)*2");
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.offset_y, ey_p), "shake tuned y == amp*(hash(+0x1000)-0.5)*2");
 }
 
-/* (9b') H3: shake is DEFINED + stable + bounded for NEGATIVE time (countdown/clock-offset clocks
+/* (9b') shake is DEFINED + stable + bounded for NEGATIVE time (countdown/clock-offset clocks
  * are reachable). The .c quantizes through a signed intermediate so there is no out-of-range
  * float->unsigned conversion UB; the result must equal the same signed-quantize formula. */
 static void test_fx_shake_negative_time_defined(void) {
@@ -516,7 +554,8 @@ static void test_fx_shake_negative_time_defined(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabsf(rn.offset_y) <= FX_SHAKE_AMP + 1e-3F, "shake y bounded for negative time");
 }
 
-/* (9c) rainbow REPLACES rgb with the hue curve (absolute tint, D-67-07) and keeps base alpha. */
+/* (9c) rainbow REPLACES rgb with the hue curve (absolute tint) and keeps base alpha. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-channel hue asserts + params speed override
 static void test_fx_rainbow_deterministic(void) {
     const float base_color[4] = {0.2F, 0.4F, 0.6F, 0.8F};
     const float xy[2] = {0.0F, 0.0F};
@@ -533,6 +572,15 @@ static void test_fx_rainbow_deterministic(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(r.color[2], rgb[2]), "rainbow b == hue curve");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.color[3], 0.8F), "rainbow keeps the base alpha (REPLACES rgb only)");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "rainbow keeps the atom visible");
+
+    /* PARAMS override: speed = hue turns/sec tunes the cycle (amp has no axis here -> ignored). */
+    nt_ui_rich_fx_params_t p = {.amp = 9.0F, .speed = 1.0F};
+    const float hue_p = ((float)idx * FX_RAINBOW_PHASE) + (t * 1.0F);
+    float rgb_p[3];
+    fx_hue_rgb(hue_p, rgb_p);
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_rainbow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[0], rgb_p[0]) && approx(tuned.color[1], rgb_p[1]) && approx(tuned.color[2], rgb_p[2]), "rainbow tuned == hue(idx*PHASE + t*speed)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[3], 0.8F), "rainbow tuned keeps the base alpha");
 }
 
 /* (9d) pulse breathes scale = 1 + AMP*sin(t*SPEED), within [1-AMP, 1+AMP], no tint/offset. */
@@ -548,6 +596,11 @@ static void test_fx_pulse_deterministic(void) {
     TEST_ASSERT_TRUE_MESSAGE(r.scale >= 1.0F - FX_PULSE_AMP - 1e-3F && r.scale <= 1.0F + FX_PULSE_AMP + 1e-3F, "pulse scale within [1-AMP, 1+AMP]");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "pulse has no offset");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "pulse keeps the atom visible");
+
+    /* PARAMS override: amp = scale delta, speed = rad/s -> same breathing formula, tuned constants. */
+    nt_ui_rich_fx_params_t p = {.amp = 0.5F, .speed = 2.0F};
+    const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_pulse(7U, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
+    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.scale, 1.0F + (0.5F * sinf(t * 2.0F))), "pulse tuned scale == 1 + amp*sin(t*speed)");
 }
 
 /* (9e) bounce hops always-upward (offset_y <= 0), bounded by AMP, with the closed-form
@@ -602,11 +655,14 @@ static void test_fx_glow_deterministic(void) {
     const float gt = 1.0F * (0.5F + (0.5F * sinf(t * 2.0F)));
     TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[0], base_color[0] + ((1.0F - base_color[0]) * gt)), "glow tuned r matches amp/speed override");
 
-    /* PARAMS amp > 1: the brighten factor clamps at 1 so rgb stays bounded by white (not over-driven). */
-    nt_ui_rich_fx_params_t over = {.amp = 2.0F, .speed = 0.0F}; /* speed 0 -> 0.5+0.5*sin(0)=0.5; 2*0.5=1.0 saturates the lerp */
+    /* PARAMS amp > 1: the brighten factor clamps at 1 so rgb stays bounded by white (not over-driven).
+     * speed<=0 selects the DEFAULT speed (FX_GLOW_SPEED), so the real factor is amp*(0.5+0.5*sin(t*SPEED)),
+     * NOT amp*0.5 -- assert against the real clamped formula. amp=2 drives g well past 1 -> clamp01 -> white. */
+    nt_ui_rich_fx_params_t over = {.amp = 2.0F, .speed = 0.0F};
     const nt_ui_rich_fx_result_t big = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &over);
+    const float g_over = rich_fx_clamp01_ref(2.0F * (0.5F + (0.5F * sinf(t * FX_GLOW_SPEED))));
     TEST_ASSERT_TRUE_MESSAGE(big.color[0] <= 1.0F + 1e-3F && big.color[1] <= 1.0F + 1e-3F && big.color[2] <= 1.0F + 1e-3F, "glow amp>1 stays bounded by white (clamp01)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(big.color[0], 1.0F) && approx(big.color[1], 1.0F) && approx(big.color[2], 1.0F), "glow amp=2 at sin=0 saturates rgb to white exactly");
+    TEST_ASSERT_TRUE_MESSAGE(approx(big.color[0], base_color[0] + ((1.0F - base_color[0]) * g_over)), "glow amp>1 matches the real clamped formula (speed<=0 -> default speed)");
 }
 
 /* (9g) sway shifts horizontally within [-AMP, AMP] via AMP*sin(t*SPEED + idx*PHASE); no y/tint.
@@ -776,7 +832,7 @@ static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_fx_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_push_effect(s_fx.ctx, effect_id); /* effect on TEXT + IMAGE together (D-67-17) */
+        nt_ui_rich_push_effect(s_fx.ctx, effect_id); /* effect on TEXT + IMAGE together */
         nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
         nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
         nt_ui_rich_text_n(s_fx.ctx, " B", 2);
@@ -790,7 +846,7 @@ static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float
 }
 
 /* (11) an effect on an IMAGE run shifts the image quad (vs no effect) AND the line/box layout
- * is identical with vs without the effect (visual-only, D-67-19). */
+ * is identical with vs without the effect (visual-only). */
 static void test_fx_image_shifts_quad_visual_only(void) {
     const nt_material_t mat = make_rich_image_material();
 
@@ -827,7 +883,7 @@ static void test_fx_fade_in_skips_image(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_total_h(s_fx.ctx) > 0.0F, "layout still solved with the box reserved");
 }
 
-/* ===== Links (FX-67-03) ===== */
+/* ===== Links ===== */
 
 static nt_pointer_t make_ptr(float x, float y, bool down, bool pressed, bool released) {
     nt_pointer_t p = {0};
@@ -972,7 +1028,7 @@ static void test_link_hover_and_click(void) {
     const float mx = link_miss_x();
 
     /* Warm-up frame: the link rects exist this frame, but the block's bbox is resolved from the
-     * PREV frame (D-67-23 two-pass), so hovering needs the block solved at least once. */
+     * PREV frame (two-pass), so hovering needs the block solved at least once. */
     nt_pointer_t over = make_ptr(hx, hy, false, false, false);
     (void)frame_link(&over);
 
@@ -1144,7 +1200,7 @@ static void test_link_hover_honors_block_transform(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.clicked_link, "transformed block: press+release at the drawn link position -> click");
 }
 
-/* ===== Custom OBJECT (FX-67-04) ===== */
+/* ===== Custom OBJECT ===== */
 
 #define OBJ_W 24.0F
 #define OBJ_H 18.0F
@@ -1406,7 +1462,7 @@ static nt_ui_rich_result_t frame_markup(const nt_pointer_t *p) {
 static void test_markup_e2e_emit_and_link(void) {
     const uint32_t link_id = nt_hash32("here", 4).value;
 
-    /* Warm-up frame so the prev-frame bbox the link hit-test needs is populated (D-67-23). */
+    /* Warm-up frame so the prev-frame bbox the link hit-test needs is populated. */
     nt_text_renderer_test_reset_call_counters();
     nt_pointer_t idle = make_ptr(0.0F, 0.0F, false, false, false);
     (void)frame_markup(&idle);
@@ -1427,7 +1483,7 @@ static void test_markup_e2e_emit_and_link(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(link_id, clk.clicked_link, "markup link clicked on press+release over its rect");
 }
 
-/* ===== Custom (game-supplied) effects (D-67-26) ===== */
+/* ===== Custom (game-supplied) effects ===== */
 
 /* A DISTINCTIVE user_data-DRIVEN custom effect: the offset is read from the game-registered
  * user_data (NOT a constant), so the test asserts the emitted box reflects that EXACT pointer's
