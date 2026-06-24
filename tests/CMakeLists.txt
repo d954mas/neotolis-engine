@@ -234,6 +234,18 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
+    # --- Graphics readback tests (CAP-01 nt_gfx_read_pixels) ---
+    # nt_gfx_stub bundles the shared nt_gfx.c (nt_gfx_read_pixels orchestration)
+    # with the synthetic readback backend, so it alone proves CAP-01 headless.
+    add_executable(test_gfx_read_pixels unit/test_gfx_read_pixels.c)
+    target_link_libraries(test_gfx_read_pixels PRIVATE nt_gfx_stub nt_log_stub unity)
+    nt_set_warning_flags(test_gfx_read_pixels)
+    nt_set_sanitizer_flags(test_gfx_read_pixels)
+    set_target_properties(test_gfx_read_pixels PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_gfx_read_pixels COMMAND test_gfx_read_pixels)
+
     # --- Graphics scissor/viewport tests ---
     # restore_gpu cases call into nt_sprite_renderer + nt_text_renderer; their
     # renderer libs (and transitive font/resource/hash/pool/material deps) are
