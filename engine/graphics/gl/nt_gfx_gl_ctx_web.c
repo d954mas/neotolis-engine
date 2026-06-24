@@ -3,6 +3,12 @@
 #include <emscripten.h>
 #include <emscripten/html5_webgl.h>
 
+/* The cap-probe EM_JS bodies below reach the Emscripten GL registry (GL.currentContext.GLctx). GL lives
+ * in library_webgl.js, force-linked by this TU's own emscripten_webgl_* C calls -- so it survives today.
+ * EM_JS_DEPS makes that implicit dependency explicit + Closure-kept, so moving context creation out of
+ * this file can't silently strip GL in release. */
+EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL")
+
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
