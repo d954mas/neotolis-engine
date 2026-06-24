@@ -132,16 +132,24 @@ def run(client: DevApiClient, save_dir=None) -> None:
     print(f"PASS[1/5] capture.frame: deferred-yield carried a decodable {img.width}x{img.height} PNG, not {{deferred:true}}.")
 
     # 2. capture.region: a sub-rect returns dims matching the rect (no resampling at scale 1). The rect
-    #    is ASYMMETRIC (rx!=ry implied by rw!=rh on a non-square fb) and straddles the host's two-tone
-    #    boundary (the centered fg box at fb/4..3fb/4) so the not-blank check has >=2 colors under Mesa
-    #    llvmpipe — AND a wrong region y-origin (top-left vs bottom-left) would change the captured
-    #    content, so this rect also exercises the region Y-flip contract.
+    #    spans the host's two-tone boundary (centered fg box at fb/4..3fb/4) so not-blank has >=2 colors
+    #    under Mesa llvmpipe. The dims + not-blank check is position-BLIND, so the region Y-origin is
+    #    verified SEPARATELY below (a flip passes dims+not-blank but lands the fg in the wrong band).
     rx, ry, rw, rh = 0, 0, fb_w * 3 // 4, fb_h * 3 // 4
     region = client.capture_region(rx, ry, rw, rh)
     region_img = pixel_health.check_payload(region, rw, rh)
+    # Region Y-origin: under the top-left contract the orange fg box sits in the LOWER band of this
+    # top-left crop (fg spans frame y fb_h/4..3fb_h/4; the top fb_h/4 rows are pure bg). Orange reads
+    # brighter than the blue bg, so the bottom half must out-mean the top half — a flipped (bottom-left)
+    # readback inverts this. Catches a region Y-flip regression the dims/not-blank check cannot see.
+    top_mean, bottom_mean = pixel_health.vertical_split_means(region_img)
+    assert bottom_mean > top_mean, (
+        f"capture.region y-origin looks flipped: top-half mean {top_mean:.1f} >= bottom-half "
+        f"{bottom_mean:.1f} (the orange foreground must sit in the lower band under top-left origin)"
+    )
     if save_dir:
         region_img.save(os.path.join(save_dir, "capture_region.png"))
-    print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}}: PNG dims match the rect ({rw}x{rh}), not-blank.")
+    print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}}: {rw}x{rh}, not-blank + Y-origin verified (fg in lower band).")
 
     # 3. scale 1/2 and 1/4 -> half / quarter dims (box-average downscale).
     half = client.capture_frame(scale=2)

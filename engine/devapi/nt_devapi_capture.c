@@ -24,9 +24,11 @@
 #define NT_DEVAPI_CAPTURE_MAX_PIXELS (4096ULL * 4096ULL)
 #endif
 
-/* The producer sizes rgba (w*h*4) and the PNG cap (rgb*1.5 + 1024 ~= w*h*6) in uint32. Prove that
-   stays free of wraparound for ANY -D-raised cap so the uint32 size math is provably safe. */
-_Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 6U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: w*h*6 would overflow the uint32 producer size math");
+/* The producer sizes rgba (w*h*4), the PNG cap (rgb*1.5 + 1024 ~= w*h*6), AND the base64 expansion
+   (b64_need = png_len*4/3, which at the worst-case png_cap is w*h*6 + ~1368) in uint32. Bound by *8 so
+   the LARGEST product (the base64 need, not just the PNG cap) stays free of wraparound for ANY -D-raised
+   cap — the uint32 size math is then provably safe end-to-end. */
+_Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: the base64 size expansion (~w*h*8) would overflow the uint32 producer size math");
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;

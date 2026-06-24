@@ -40,6 +40,18 @@ def check(img: Image.Image, expected_w: int, expected_h: int) -> None:
     assert float(np.ptp(arr)) > 0.0, "pixel-health: frame is a single uniform color (blank/frozen/empty screen)"
 
 
+def vertical_split_means(img: Image.Image) -> tuple:
+    """Return (top_half_mean, bottom_half_mean) of per-pixel mean intensity.
+
+    Lets a caller assert vertical ORIENTATION without importing numpy (D-10): a region Y-origin flip
+    (top-left vs bottom-left readback) swaps which half a known feature lands in, so the two means
+    invert. Returns plain floats so the numpy dependency stays confined to this module.
+    """
+    arr = np.asarray(img)
+    half = arr.shape[0] // 2
+    return float(arr[:half].mean()), float(arr[half:].mean())
+
+
 def check_payload(payload: dict, expected_w: int, expected_h: int) -> Image.Image:
     """Validate a {width,height,format:"png",data:<base64>} capture result end-to-end, return the image.
 
