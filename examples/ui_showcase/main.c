@@ -318,10 +318,7 @@ typedef struct {
     float hold_progress; /* latched hold_progress for the radial fill display */
 } radial_params_t;
 
-/* Rich Text tab: the GAME owns the effect clock (no engine global clock):
- * `time` accumulates from frame dt and feeds wave/rainbow (the typewriter is driven
- * by fmodf(time, 4), not a counter); `last_link`/`link_clicks` track <link> clicks for
- * the readout; `hover_*`/`latch_*` carry the per-front hover + "Accepted" reaction. */
+/* Rich Text tab: the GAME owns the effect clock (no engine global clock); `time` accumulates from frame dt. */
 typedef struct {
     float time;                /* seconds, accumulated from frame dt -> the game-passed effect clock */
     uint32_t last_link;        /* id of the last clicked <link> (0 = none yet) */
@@ -395,8 +392,7 @@ struct tab_state {
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
-    /* Rich Text tab: the game-owned effect clock + link latches/counter (no engine global
-     * clock exists; the game accumulates time from frame dt, see rich_params_t). */
+    /* Rich Text tab state (game-owned effect clock + link latches; see rich_params_t). */
     rich_params_t rich;
 };
 
@@ -1943,11 +1939,8 @@ typedef struct {
     uint32_t white_region;     /* resolved white-pixel region index */
     nt_material_t material;    /* the sprite material both objects bind */
     const float *clock;        /* &s_state.rich.time -- drives progress + spin */
-    /* <obj=cube/> renders a perspective cube into its inline box WITHOUT touching glViewport OR scissor: it
-     * projection-remaps the cube into the box's NDC sub-rect (VP_box = view_proj * world_mat4); the walker's
-     * scroll-clip scissor (already active) clips it to the panel. draw_fn has no ctx, so the frame UBO's
-     * view_proj + physical fb dims (for the box->NDC aspect) are stashed each frame BEFORE nt_ui_walk.
-     * world_mat4 arrives per-call via the draw_fn arg. */
+    /* draw_fn has no ctx: stash the frame UBO view_proj + physical fb dims each frame BEFORE
+     * nt_ui_walk (box->NDC aspect); world_mat4 arrives per-call. */
     struct {
         float view_proj[16]; /* the frame UBO ortho (LAYOUT -> clip, logical, no Y-flip) */
         float fb_w, fb_h;    /* physical framebuffer dims (box NDC half-extent -> px aspect) */
@@ -2023,12 +2016,8 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
     nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color));
 }
 
-/* TRUE 3D OBJECT: a perspective rotating cube rendered through nt_shape_renderer into the reserved
- * inline box -- the WidgetSpan killer-feature. The engine reserves a 2D box; the game paints full 3D.
- * NO glViewport hijack and NO scissor touch: the perspective cube is REMAPPED into the box's NDC
- * sub-rect (a clip-space pre-scale/offset) so it confines itself to the box, and the walker's
- * already-active scroll-clip scissor clips it to the panel -- the full-screen viewport is untouched
- * (no leak to collapse later UI). draw_fn gets LAYOUT (Y-down) box px + the frame world_mat4. */
+/* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
+ * active scroll-clip scissor clips it to the panel. draw_fn gets LAYOUT (Y-down) box px + frame world_mat4. */
 #define RICH_OBJ_CUBE 64.0F
 static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
     (void)user_data;

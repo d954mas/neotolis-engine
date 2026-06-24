@@ -1,4 +1,4 @@
-/* nt_ui_rich_text emit (plan-04): the widget declares ONE Clay FIXED block and self-emits
+/* nt_ui_rich_text emit: the widget declares ONE Clay FIXED block and self-emits
  * its solved TEXT atoms as positioned nt_text_renderer_draw_n spans during the walk. No GL:
  * the fixture's stub font (units_per_em=0) makes draw_n a counted no-op, so the walker-command
  * probe + the draw_n call counter prove emit without a real glyph atlas. Modeled on
@@ -1048,7 +1048,7 @@ static void test_link_hover_and_click(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.hovered_link, "release over link still hovers");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.clicked_link, "press+release on the SAME link -> clicked == id");
 
-    /* (c) press OUTSIDE all links, then release INSIDE a link -> NO false click (the BUG). */
+    /* (c) press OUTSIDE all links, then release INSIDE a link -> NO false click. */
     nt_pointer_t press_out = make_ptr(mx, hy, true, true, false);
     (void)frame_link(&press_out);
     nt_pointer_t rel_in2 = make_ptr(hx, hy, false, false, true);
@@ -1154,7 +1154,7 @@ static void test_link_no_union_across_gap(void) {
     /* Two disjoint rects for the same link (would be 1 if the union spanned the gap). */
     nt_ui_rich_result_t hov_gap = frame_link_gap(&idle);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_link_rect_count(s_fx.ctx), "[A][gap][A] -> two disjoint same-link rects (no union across the gap)");
-    /* Pointer over the GAP must NOT report the link (the bug widened A's rect across the gap). */
+    /* Pointer over the GAP must NOT report the link (no rect union across the non-link gap). */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, hov_gap.hovered_link, "pointer over the non-link gap -> hovered == 0");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, hov_gap.clicked_link, "pointer over the gap -> clicked == 0");
 
@@ -1188,7 +1188,7 @@ static void test_link_hover_honors_block_transform(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, hov.hovered_link, "transformed block: pointer at the drawn link position hovers the link");
 
     /* Negative: pointer at the OLD untransformed layout position now misses (it's no longer where
-     * the link is drawn). This is the bug the fix closes -- a flat-rect test would still hit here. */
+     * the link is drawn). A flat-rect hit-test would wrongly still hit here. */
     nt_pointer_t over_flat = make_ptr(local_hx, local_hy, false, false, false);
     nt_ui_rich_result_t miss = frame_link_xform(&over_flat);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, miss.hovered_link, "transformed block: pointer at the OLD flat-layout position misses (draw != flat-rect)");
@@ -1383,7 +1383,7 @@ static void stub_draw2(void *user_data, float x, float y, float w, float h, cons
 #define OBJ_XFORM_DX 120.0F
 #define OBJ_XFORM_DY 90.0F
 
-/* (15e) world_mat4 CONTENT, not just non-NULL (D-67-28): under a FIXED block carrying a HAS_TRANSFORM
+/* (15e) world_mat4 CONTENT, not just non-NULL: under a FIXED block carrying a HAS_TRANSFORM
  * translation (mirrors test_link_hover_honors_block_transform), an OBJECT must receive the SAME baked
  * world matrix every other emit in the block uses -- Y-flip baked in (world[5] < 0) and the block's
  * (DX,DY) translation present. Two objects in one block must get BYTE-EQUAL matrices. */
@@ -1534,9 +1534,8 @@ static void test_object_baseline_honours_ascent(void) {
     TEST_ASSERT_TRUE_MESSAGE(found, "solver placed the OBJECT atom");
 }
 
-/* REGRESSION (showcase Rich Text tab crashed): two nt_ui_rich_text widgets in ONE frame must
- * not trip the "rich-text calls do not nest" guard. The terminal call now releases pending_rich,
- * so the second begin starts clean. NO manual pending_rich nulling here -- that masking hid the bug. */
+/* Two nt_ui_rich_text widgets in ONE frame must not trip the "rich-text calls do not nest" guard:
+ * the terminal call releases pending_rich, so the second begin starts clean. No manual pending_rich nulling. */
 static void test_two_rich_text_blocks_one_frame_no_trap(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -1548,7 +1547,7 @@ static void test_two_rich_text_blocks_one_frame_no_trap(void) {
         nt_ui_rich_text_n(s_fx.ctx, "first block", 11);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_a").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
 
-        /* second rich-text widget, SAME frame -- this is the call that crashed the demo tab */
+        /* second rich-text widget, SAME frame */
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "second block", 12);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_b").id, NULL, &base, 400.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
@@ -1592,7 +1591,7 @@ static nt_ui_rich_result_t frame_markup(const nt_pointer_t *p) {
 }
 
 /* (16) the public markup entry emits text spans, sizes the FIXED block to container_w, and resolves
- * a link click via a warm prev-frame bbox. (No test called this public entry before.) */
+ * a link click via a warm prev-frame bbox. */
 static void test_markup_e2e_emit_and_link(void) {
     const uint32_t link_id = nt_hash32("here", 4).value;
 

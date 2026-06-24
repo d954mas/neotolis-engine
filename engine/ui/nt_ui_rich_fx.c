@@ -128,11 +128,8 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_
     const float amp = rich_fx_amp(p, RICH_FX_SHAKE_AMP);
     const float rate = rich_fx_speed(p, RICH_FX_SHAKE_RATE);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
-    /* Quantize time into discrete jitter steps. fmodf folds the phase into (-2^31, 2^31) BEFORE the
-     * int32 cast so BOTH directions are defined: float->int32 is UB outside [INT32_MIN,INT32_MAX], so a
-     * large positive time*rate (high speed over long runtime) would overflow without the fold. The
-     * signed intermediate then maps the negative half into the high uint32 range (countdown clocks).
-     * For any in-range phase (|.| < 2^31) fmodf is the identity, so the quantize is unchanged. */
+    /* fmodf folds the phase into (-2^31, 2^31) before the int32 cast: float->int32 is UB outside
+     * [INT32_MIN,INT32_MAX], so a large or negative time*rate would otherwise overflow. */
     const float phase = fmodf(floorf(time * rate), 2147483648.0F); /* (-2^31, 2^31) -> int32 cast defined */
     const uint32_t step = (uint32_t)(int32_t)phase;                /* quantize so it snaps per step */
     r.offset_x = amp * (rich_fx_hash01(atom_idx, step) - 0.5F) * 2.0F;

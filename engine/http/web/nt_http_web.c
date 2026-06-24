@@ -5,10 +5,8 @@
 /* ---- EM_JS fetch with AbortController ---- */
 
 /* clang-format off */
-/* Force-include the deps this TU's EM_JS uses. Composes across modules and survives Closure
- * (symbols land in the JS support library; bare names below minify consistently). UTF8ToString is a
- * JS library method ($-prefixed). HEAPU8 is an always-present heap-view global (no dep, not a $ lib
- * symbol). malloc (no leading _; the linker adds it) is kept as a wasm export for wasmExports['malloc']. */
+/* EM_JS_DEPS keeps these through Closure. malloc (linker-added, no leading _) is kept as a wasm
+ * export for wasmExports['malloc']; HEAPU8 is an always-present global (no dep). */
 EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")
 
 EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_ptr), {

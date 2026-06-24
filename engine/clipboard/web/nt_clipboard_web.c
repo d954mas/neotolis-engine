@@ -35,10 +35,8 @@ static void cache_store(const char *utf8) {
     s_cache[n] = '\0';
 }
 
-/* KEEPALIVE bridge: the DOM paste listener (EM_JS) hands us a stringToNewUTF8 heap pointer and
- * transfers ownership; we cache the text and free it here. C owns the free so JS needs no _free
- * export (free can't be force-kept as a wasm export through release DCE; malloc rides in on
- * $stringToNewUTF8's own deps). */
+/* EM_JS paste listener transfers ownership of a stringToNewUTF8 heap pointer; C frees it here
+ * (so JS needs no _free export). */
 EMSCRIPTEN_KEEPALIVE void nt_clipboard_web_on_paste(char *utf8) {
     cache_store(utf8);
     free(utf8);

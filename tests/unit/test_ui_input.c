@@ -984,7 +984,7 @@ static void test_drag_abandoned_on_focus_loss(void) {
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 
     /* Still held, drag the pointer far right while UNFOCUSED. The abandoned drag must NOT move the caret
-     * (pre-fix it would: the held-drag branch was not gated on focus). */
+     * (the held-drag branch is gated on focus). */
     nt_pointer_t drag_far = make_pointer(IN_X + IN_W - PAD_X - 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&drag_far, id, buf, sizeof buf, true, NULL);
     uint32_t caret1 = 99U;
@@ -1054,8 +1054,7 @@ static void test_tab_skips_disabled_field(void) {
     three_field_frame(&rel, ia, a, ib, b, false, ic, c);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 
-    /* Tab: B is disabled, so the seek must skip it and land on C (pre-fix the disabled B ate the seek
-     * and focus vanished). */
+    /* Tab: B is disabled, so the seek must skip it and land on C. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_TAB, true);
     three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c);
@@ -1080,8 +1079,7 @@ static void test_scroll_responsive_width(void) {
     grow_field_frame(&rel, id, buf, sizeof buf);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 
-    /* Jump the caret to END: the long line must scroll right to keep the caret in view. With FIXED-only
-     * scroll (pre-fix) inner_w was 0 here and scroll_x stayed pinned at 0. */
+    /* Jump the caret to END: the long (GROW-width) line must scroll right to keep the caret in view. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_END, true);
     grow_field_frame(&IDLE_PTR, id, buf, sizeof buf);

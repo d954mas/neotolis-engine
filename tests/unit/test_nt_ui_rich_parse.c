@@ -1,6 +1,5 @@
 /* Rich-text markup parser + tagset vocabulary. No GL: the parser writes a frame-scratch
- * run-list (read back via the build probes); the tagset is a plain owned struct.
- * Task 1 covers the tagset register/lookup; Tasks 2-3 add parser + malformed death tests. */
+ * run-list (read back via the build probes); the tagset is a plain owned struct. */
 
 #include <stdalign.h>
 #include <stdbool.h>

@@ -77,11 +77,8 @@ typedef struct {
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
 
 // #region oklab colour-ease (bg/border cross-fade)
-/* Perceptual bg/border cross-fade. The retained cell holds the CURRENT colour as OKLab (L,a,b) +
- * linear alpha for bg and border; each frame eases L,a,b in OKLab (perceptually uniform -> no muddy
- * sRGB midpoint) and alpha LINEARLY toward the resolved skin target, then converts back to sRGB.
- * First-touch / id-replace snaps cur=tgt (no flash), mirroring nt_ui_anim. Lives in the same
- * arena-backed per-id pool as the rich-text link cell / slider -- no heap. */
+/* Perceptual OKLab cross-fade: ease L,a,b in OKLab (no muddy sRGB midpoint), alpha linearly;
+ * first-touch snaps (no flash). Arena per-id cell, no heap. */
 #define NT_UI_INPUT_FADE_TAG NT_UI_STATE_TAG('i', 'f', 'a', 'd')
 
 typedef struct {
@@ -666,12 +663,8 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     nt_ui_clay_priv_close_element();
 }
 
-/* BATCHING COST: each field clips (this content-clip + a clipTo scissor per selection/text/caret float),
- * and every scissor boundary flushes the sprite+text batch -- so fields don't batch with each other
- * (~4 draw calls per focused field). This is inherent: the overlay needs floating (overlap) and a clipped
- * float carries its own scissor; the clip itself is REQUIRED (a field can straddle an outer scroll). The
- * cost is accepted -- it doesn't matter at typical field counts. Revisit only for UIs with hundreds of
- * visible fields. */
+/* Each field's content-clip + per-float scissor flushes the batch (~4 draw calls/focused field);
+ * the clip is required since a field can straddle an outer scroll. */
 /* Open a non-floating child that fills the field's content box and clips both axes (pad_x-inset
  * horizontally, full field height vertically). The selection/text/caret floats attach to it and clip to
  * its box; the walker further intersects that with the box's full ancestor chain (so an outer tab scroll

@@ -54,7 +54,7 @@ typedef struct {
 
 /* A solved, positioned atom (the solver's output, consumed by emit). TEXT atoms keep a
  * byte range into the shared buffer + the run's resolved font/size/color so emit can
- * draw_n the exact span; IMAGE/OBJECT reserve their box (emit lands in plans 05/07). */
+ * draw_n the exact span; IMAGE/OBJECT reserve their box. */
 typedef struct {
     nt_rich_atom_kind_t kind;
     float x;
@@ -73,7 +73,7 @@ typedef struct {
     uint8_t effect_id; /* stock effect catalog index from the run's style; 0 = none */
     uint32_t fx_idx;   /* stable per-block atom index fed to the effect curve (phase/stagger) */
     /* IMAGE/OBJECT box context. */
-    uint16_t run_idx; /* back-reference for the image/object emit (plans 05/07) */
+    uint16_t run_idx; /* back-reference for the image/object emit */
     uint32_t link_id; /* 0 = not a link */
 } nt_ui_rich_solved_atom_t;
 
@@ -1143,16 +1143,9 @@ static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, con
     a->link_id = run->link_id;
 }
 
-/* Split an over-long word (advance > container_w) at UTF-8 codepoint boundaries into chunks
- * each <= container_w, so no atom escapes the box (break-anywhere; CSS overflow-wrap:anywhere).
- *
- * Chunk width tracked by PREFIX-DIFFERENCE from chunk_start (the same technique
- * rich_emit_text_effected uses): cur_w = measure([chunk_start, i)) re-measures the whole prefix so
- * INTER-GLYPH KERNING is included -- an isolated per-codepoint sum drops the kerning the emitted
- * atom (also measured whole) and the rendered glyphs carry, letting a chunk exceed container_w under
- * a kerning font. prev_w = measure([chunk_start, last_boundary)) is the committed chunk width; on
- * commit the new chunk RE-SEEDS its prefix from last_boundary, so each chunk's width is the
- * standalone whole-chunk measure (matching how the emitted atom is measured and drawn). */
+/* Split an over-long word (advance > container_w) at codepoint boundaries into chunks each
+ * <= container_w (break-anywhere). Each chunk width is the WHOLE-prefix measure so inter-glyph
+ * kerning counts -- a per-codepoint sum drops kerning and overflows under a kerning font. */
 static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, float t_asc, float t_desc,
                                 const char *text, uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable) {
     uint32_t chunk_start = word_off;
@@ -1603,12 +1596,9 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
     st->emit_span_count++;
 }
 
-/* Emit one TEXT atom WITH an effect: per-glyph draw_n so the curve phase-shifts per glyph. VISUAL-
- * ONLY (shifts/tints/scales about the glyph center; pen advance unchanged). Per-glyph pen comes from
- * CUMULATIVE-prefix measures (not per-glyph re-measure) so sum(advances) == measure(whole) exactly --
- * a per-glyph re-measure drops inter-glyph kerning and the word would drift from its reserved box.
- * Cost is O(N^2) in atom length (each glyph re-measures the growing prefix), but an atom is bounded
- * to ONE word / break-anywhere line-chunk (<= container_w), so N is tiny in practice. */
+/* Emit one effected TEXT atom: per-glyph draw_n (curve phase-shifts per glyph), VISUAL-ONLY.
+ * Per-glyph pen uses cumulative-prefix measures so sum(advances)==measure(whole) (keeps kerning;
+ * stays in the reserved box). O(N^2) but N is one word/line-chunk, so tiny. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);

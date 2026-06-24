@@ -1,7 +1,6 @@
-/* SOLVER (plan-04): full word-wrap + baseline. Plan-03's three spike cases stay
- * green; plan-04 adds break-anywhere overflow, L/C/R alignment, and max-line-height
- * over asymmetric atoms. Deterministic via nt_font_test_set_metrics, no GL. The icon
- * is the 1x1 white region scaled up, so icon_w == scale exactly. */
+/* Full word-wrap + baseline solver: break-anywhere overflow, L/C/R alignment, max-line-height
+ * over asymmetric atoms. Deterministic via nt_font_test_set_metrics, no GL. The icon is the
+ * 1x1 white region scaled, so icon_w == scale. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -137,7 +136,7 @@ static void test_forced_wrap_keeps_icon_on_line1(void) {
     TEST_ASSERT_TRUE(icon_seen);
 }
 
-/* ---- plan-04: full solver generalizations ---- */
+/* ---- full solver generalizations ---- */
 
 #define RICH_ID 0x21C4U
 
@@ -312,8 +311,7 @@ static void assert_chunk_codepoint_safe(nt_ui_rich_test_atom_t a, float containe
 }
 
 /* (11) multibyte break-anywhere: an over-long word of 3-byte UTF-8 codepoints (U+20AC EURO SIGN,
- * "\xE2\x82\xAC") split by the box must cut only on codepoint boundaries. The codepoint-safe-break
- * claim was ASCII-only tested before. */
+ * "\xE2\x82\xAC") split by the box must cut only on codepoint boundaries. */
 static void test_break_anywhere_multibyte_codepoint_safe(void) {
     static const char euros[] = "\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC"; /* 6 euros = 18 bytes */
     const float container_w = 25.0F;                                                                        /* fits 2 euros (20px), not 3 (30px) per line */
