@@ -48,10 +48,6 @@ typedef struct {
     const float *custom_attrs;
     uint8_t custom_bytes;
     uint8_t geom_mode; /* NT_UI_IMAGE_GEOM_REGION | NT_UI_IMAGE_GEOM_GEOMETRY */
-    /* OPT-IN: fold accumulated parent opacity into a_tint.w at the walker. Only true for the
-     * rich inline-image path, where a_tint is a straight RGBA tint. Radial widgets use a_tint.w
-     * as a TINT-reveal strength (not alpha) and fade via color_packed/a_color instead. */
-    bool fold_opacity_into_a_tint;
     uint8_t flip_bits;
     uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
     uint16_t slice9_lrtb[4];

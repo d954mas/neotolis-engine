@@ -113,7 +113,7 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * the payload only carries a pointer, so plain images stay small. */
     nt_ui_image_custom_block_t *blk = NT_MEM_SCRATCH_ALLOC(nt_ui_image_custom_block_t);
     NT_ASSERT(blk != NULL && "nt_ui_image_custom: scratch alloc failed (block)");
-    *blk = (nt_ui_image_custom_block_t){.custom_bytes = img->custom_bytes, .geom_mode = img->geom_mode, .fold_opacity_into_a_tint = img->fold_opacity_into_a_tint};
+    *blk = (nt_ui_image_custom_block_t){.custom_bytes = img->custom_bytes, .geom_mode = img->geom_mode};
     memcpy(blk->custom_attrs, img->custom_attrs, img->custom_bytes);
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);

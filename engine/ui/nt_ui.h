@@ -92,9 +92,6 @@ typedef struct {
     float custom_attrs[16];
     uint8_t custom_bytes; /* > 0; the material declares this many per-vertex custom bytes. */
     uint8_t geom_mode;    /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
-    /* OPT-IN: fold parent opacity into a_tint.w. True only for rich inline images (straight RGBA
-     * tint); radial a_tint.w is a reveal strength, not alpha, and must not be folded. */
-    bool fold_opacity_into_a_tint;
 } nt_ui_image_custom_block_t;
 
 /* Pointed to by Clay_ImageElementConfig.imageData; must outlive the matching nt_ui_walk.
