@@ -30,16 +30,17 @@ target_link_libraries(bunnymark_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_entity nt_transform_comp nt_material_comp
     nt_drawable_comp nt_sprite_comp nt_atlas nt_sprite_renderer_xl
-    nt_debug_overlay nt_text_renderer nt_font
+    nt_debug_overlay nt_metrics nt_text_renderer nt_font
     nt_render nt_hash
 )
 # Generated asset headers from builder (bunnymark_assets.h etc.)
 target_include_directories(bunnymark_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 if(EMSCRIPTEN)
-    target_link_libraries(bunnymark_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
+    # nt_platform (memory probe for metrics mem_used) is distinct from nt_platform_web (window target).
+    target_link_libraries(bunnymark_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs)
 else()
-    target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs)
+    target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_platform)
 endif()
 
 nt_set_warning_flags(bunnymark_demo)
@@ -62,7 +63,7 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# HD pack guard (Open Q3 — HD art may not exist yet).
+# HD pack guard — HD art may not exist yet.
 # The demo ships SD-only when examples/bunnymark/raw/hd/ is absent. When the
 # user drops 5 PNGs in raw/hd/ and reconfigures, the HD branch in build_packs.c
 # emits bunnymark_hd.ntpack and main.c sees BUNNYMARK_HD_AVAILABLE = 1.

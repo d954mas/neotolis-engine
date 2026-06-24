@@ -162,6 +162,45 @@ void test_update_skips_clean(void) {
     ASSERT_FLOAT_NEAR(0.0F, wm[14]);
 }
 
+/* ---- Mutation setters (the safe write path: must set dirty) ---- */
+
+void test_set_position_writes_and_dirties(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_transform_comp_add(e);
+    nt_transform_comp_update(); /* clear dirty first */
+    TEST_ASSERT_FALSE(*nt_transform_comp_dirty(e));
+
+    nt_transform_comp_set_position(e, 4.0F, 5.0F, 6.0F);
+    ASSERT_FLOAT_NEAR(4.0F, nt_transform_comp_position(e)[0]);
+    ASSERT_FLOAT_NEAR(5.0F, nt_transform_comp_position(e)[1]);
+    ASSERT_FLOAT_NEAR(6.0F, nt_transform_comp_position(e)[2]);
+    TEST_ASSERT_TRUE(*nt_transform_comp_dirty(e)); /* the invariant the raw accessor would skip */
+}
+
+void test_set_scale_writes_and_dirties(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_transform_comp_add(e);
+    nt_transform_comp_update();
+    nt_transform_comp_set_scale(e, 2.0F, 3.0F, 4.0F);
+    ASSERT_FLOAT_NEAR(2.0F, nt_transform_comp_scale(e)[0]);
+    ASSERT_FLOAT_NEAR(4.0F, nt_transform_comp_scale(e)[2]);
+    TEST_ASSERT_TRUE(*nt_transform_comp_dirty(e));
+}
+
+void test_set_rotation_normalizes_and_dirties(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_transform_comp_add(e);
+    nt_transform_comp_update();
+    /* Non-unit quaternion -> stored as a unit versor. */
+    const float q[4] = {0.0F, 0.0F, 0.0F, 2.0F};
+    nt_transform_comp_set_rotation(e, q);
+    const float *r = nt_transform_comp_rotation(e);
+    float len = sqrtf((r[0] * r[0]) + (r[1] * r[1]) + (r[2] * r[2]) + (r[3] * r[3]));
+    ASSERT_FLOAT_NEAR(1.0F, len);
+    ASSERT_FLOAT_NEAR(1.0F, r[3]); /* (0,0,0,2) normalizes to identity (0,0,0,1) */
+    TEST_ASSERT_TRUE(*nt_transform_comp_dirty(e));
+}
+
 void test_entity_destroy_auto_removes_component(void) {
     nt_entity_t e = nt_entity_create();
     nt_transform_comp_add(e);
@@ -197,6 +236,9 @@ int main(void) {
     RUN_TEST(test_update_computes_world_matrix);
     RUN_TEST(test_update_clears_dirty);
     RUN_TEST(test_update_skips_clean);
+    RUN_TEST(test_set_position_writes_and_dirties);
+    RUN_TEST(test_set_scale_writes_and_dirties);
+    RUN_TEST(test_set_rotation_normalizes_and_dirties);
     RUN_TEST(test_entity_destroy_auto_removes_component);
     return UNITY_END();
 }

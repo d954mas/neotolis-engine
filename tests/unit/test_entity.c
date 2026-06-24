@@ -136,6 +136,78 @@ void test_entity_slot_zero_reserved(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT16(1, index);
 }
 
+/* ---- at_index enumeration accessor ---- */
+
+void test_entity_at_index_reproduces_live_set(void) {
+    /* Create 5, destroy #2 and #4, iterate slots: 1,3,5 live; rest invalid. */
+    nt_entity_t e[5];
+    for (int i = 0; i < 5; i++) {
+        e[i] = nt_entity_create();
+    }
+    nt_entity_destroy(e[1]);
+    nt_entity_destroy(e[3]);
+
+    int live_count = 0;
+    for (uint16_t i = 1; i <= nt_entity_max(); i++) {
+        nt_entity_t h = nt_entity_at_index(i);
+        if (h.id == 0) {
+            continue;
+        }
+        /* Returned handle must be live and carry the slot index. */
+        TEST_ASSERT_TRUE(nt_entity_is_alive(h));
+        TEST_ASSERT_EQUAL_UINT16(i, nt_entity_index(h));
+        live_count++;
+    }
+    /* 5 created - 2 destroyed = 3 live. */
+    TEST_ASSERT_EQUAL_INT(3, live_count);
+
+    /* The live handles match exactly slots of e[0], e[2], e[4]. */
+    TEST_ASSERT_EQUAL_UINT32(e[0].id, nt_entity_at_index(nt_entity_index(e[0])).id);
+    TEST_ASSERT_EQUAL_UINT32(e[2].id, nt_entity_at_index(nt_entity_index(e[2])).id);
+    TEST_ASSERT_EQUAL_UINT32(e[4].id, nt_entity_at_index(nt_entity_index(e[4])).id);
+}
+
+void test_entity_at_index_dead_slot_invalid(void) {
+    nt_entity_t a = nt_entity_create();
+    nt_entity_t b = nt_entity_create();
+    uint16_t b_index = nt_entity_index(b);
+    nt_entity_destroy(b);
+
+    /* Dead slot returns NT_ENTITY_INVALID — never a stale handle. */
+    nt_entity_t got = nt_entity_at_index(b_index);
+    TEST_ASSERT_EQUAL_UINT32(0, got.id);
+    /* The old saved handle is not alive. */
+    TEST_ASSERT_FALSE(nt_entity_is_alive(b));
+    /* Live slot still resolves. */
+    TEST_ASSERT_EQUAL_UINT32(a.id, nt_entity_at_index(nt_entity_index(a)).id);
+}
+
+void test_entity_at_index_slot_zero_invalid(void) {
+    nt_entity_t got = nt_entity_at_index(0);
+    TEST_ASSERT_EQUAL_UINT32(0, got.id);
+}
+
+void test_entity_at_index_out_of_range_invalid(void) {
+    nt_entity_t got = nt_entity_at_index((uint16_t)(nt_entity_max() + 1));
+    TEST_ASSERT_EQUAL_UINT32(0, got.id);
+}
+
+void test_entity_at_index_returns_new_after_recreate(void) {
+    nt_entity_t first = nt_entity_create();
+    uint16_t index = nt_entity_index(first);
+    nt_entity_destroy(first);
+
+    nt_entity_t second = nt_entity_create();
+    TEST_ASSERT_EQUAL_UINT16(index, nt_entity_index(second));
+
+    /* at_index returns the NEW handle (bumped generation), not the stale one. */
+    nt_entity_t got = nt_entity_at_index(index);
+    TEST_ASSERT_EQUAL_UINT32(second.id, got.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, got.id);
+    TEST_ASSERT_FALSE(nt_entity_is_alive(first));
+    TEST_ASSERT_TRUE(nt_entity_is_alive(got));
+}
+
 void test_entity_register_storage_and_destroy_cleanup(void) {
     nt_entity_register_storage(&(nt_comp_storage_reg_t){
         .name = "mock",
@@ -149,6 +221,65 @@ void test_entity_register_storage_and_destroy_cleanup(void) {
 
     TEST_ASSERT_TRUE(s_mock_on_destroy_called);
     TEST_ASSERT_EQUAL_UINT32(e.id, s_mock_destroyed_entity.id);
+}
+
+/* ---- Registry accessors: stable component id / has / component set ---- */
+
+static bool s_mock2_has_result = false;
+static bool mock2_has(nt_entity_t entity) {
+    (void)entity;
+    return s_mock2_has_result;
+}
+static void mock2_on_destroy(nt_entity_t entity) { (void)entity; }
+
+static void register_two_mocks(void) {
+    nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "mock", .has = mock_has, .on_destroy = mock_on_destroy});
+    nt_entity_register_storage(&(nt_comp_storage_reg_t){.name = "mock2", .has = mock2_has, .on_destroy = mock2_on_destroy});
+}
+
+void test_entity_storage_find_and_at(void) {
+    register_two_mocks();
+    TEST_ASSERT_EQUAL_UINT8(2, nt_entity_storage_count());
+    /* Stable id == registration order; name->id resolves once. */
+    TEST_ASSERT_EQUAL_UINT8(0, nt_entity_storage_find("mock"));
+    TEST_ASSERT_EQUAL_UINT8(1, nt_entity_storage_find("mock2"));
+    TEST_ASSERT_EQUAL_UINT8(NT_COMP_ID_INVALID, nt_entity_storage_find("absent"));
+    const nt_comp_storage_reg_t *r0 = nt_entity_storage_at(0);
+    TEST_ASSERT_NOT_NULL(r0);
+    TEST_ASSERT_EQUAL_STRING("mock", r0->name);
+    TEST_ASSERT_NULL(nt_entity_storage_at(2)); /* out of range */
+}
+
+void test_entity_has_comp_and_components(void) {
+    register_two_mocks();
+    nt_entity_t e = nt_entity_create();
+    nt_comp_id_t id0 = nt_entity_storage_find("mock");
+    nt_comp_id_t id1 = nt_entity_storage_find("mock2");
+
+    s_mock_has_result = false;
+    s_mock2_has_result = false;
+    TEST_ASSERT_FALSE(nt_entity_has_comp(e, id0));
+    TEST_ASSERT_EQUAL_UINT8(0, nt_entity_components(e, NULL, 0));
+
+    s_mock_has_result = true;
+    s_mock2_has_result = true;
+    TEST_ASSERT_TRUE(nt_entity_has_comp(e, id0));
+    TEST_ASSERT_TRUE(nt_entity_has_comp(e, id1));
+    nt_comp_id_t ids[2] = {0xFF, 0xFF};
+    TEST_ASSERT_EQUAL_UINT8(2, nt_entity_components(e, ids, 2));
+    TEST_ASSERT_EQUAL_UINT8(0, ids[0]); /* registration order */
+    TEST_ASSERT_EQUAL_UINT8(1, ids[1]);
+}
+
+void test_entity_components_truncation(void) {
+    register_two_mocks();
+    nt_entity_t e = nt_entity_create();
+    s_mock_has_result = true;
+    s_mock2_has_result = true;
+    /* max=1 writes the first present id but returns the TRUE total -> caller sees return > max. */
+    nt_comp_id_t one = 0xFF;
+    TEST_ASSERT_EQUAL_UINT8(2, nt_entity_components(e, &one, 1));
+    TEST_ASSERT_EQUAL_UINT8(0, one);
 }
 
 /* ---- Main ---- */
@@ -169,6 +300,14 @@ int main(void) {
     RUN_TEST(test_entity_index_extraction);
     RUN_TEST(test_entity_generation_extraction);
     RUN_TEST(test_entity_slot_zero_reserved);
+    RUN_TEST(test_entity_at_index_reproduces_live_set);
+    RUN_TEST(test_entity_at_index_dead_slot_invalid);
+    RUN_TEST(test_entity_at_index_slot_zero_invalid);
+    RUN_TEST(test_entity_at_index_out_of_range_invalid);
+    RUN_TEST(test_entity_at_index_returns_new_after_recreate);
     RUN_TEST(test_entity_register_storage_and_destroy_cleanup);
+    RUN_TEST(test_entity_storage_find_and_at);
+    RUN_TEST(test_entity_has_comp_and_components);
+    RUN_TEST(test_entity_components_truncation);
     return UNITY_END();
 }

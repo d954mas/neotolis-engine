@@ -14,6 +14,10 @@
 #define NT_RESOURCE_MAX_ASSETS 2048
 #endif
 
+/* nt_resource_pack_count()/_asset_count() return uint16_t, so an override past UINT16_MAX would wrap. */
+_Static_assert(NT_RESOURCE_MAX_PACKS > 0 && NT_RESOURCE_MAX_PACKS <= UINT16_MAX, "NT_RESOURCE_MAX_PACKS must be in (0, UINT16_MAX]");
+_Static_assert(NT_RESOURCE_MAX_ASSETS > 0 && NT_RESOURCE_MAX_ASSETS <= UINT16_MAX, "NT_RESOURCE_MAX_ASSETS must be in (0, UINT16_MAX]");
+
 #ifndef NT_RESOURCE_MAX_SLOTS
 #define NT_RESOURCE_MAX_SLOTS 2048
 #endif
@@ -198,6 +202,42 @@ void nt_resource_invalidate(uint8_t asset_type);
 /* ---- Debug: dump loaded pack contents to log ---- */
 
 void nt_resource_dump_pack(nt_hash32_t pack_id);
+
+/* ---- Enumeration accessors (compact POD; no internal struct crosses the boundary) ----
+ * `state` carries the nt_pack_state_t / nt_asset_state_t numeric value verbatim;
+ * the JSON layer maps it to a stable token. Accessors return false on out-of-range index. */
+
+typedef struct {
+    uint32_t id;          /* nt_hash32 value of pack name/path */
+    uint16_t pack_index;  /* raw packs[] slot index — same index space as nt_resource_asset_info_t.pack_index */
+    uint16_t asset_count; /* registered assets belonging to this pack */
+    int16_t priority;     /* higher wins on conflict, signed */
+    uint8_t state;        /* nt_pack_state_t value */
+    uint8_t mounted;      /* 1 if slot is mounted */
+} nt_resource_pack_info_t;
+
+typedef struct {
+    uint64_t resource_id; /* nt_hash64 value */
+    uint16_t pack_index;  /* index into the pack store (packs[]) */
+    uint8_t type;         /* nt_asset_type_t */
+    uint8_t state;        /* nt_asset_state_t value */
+} nt_resource_asset_info_t;
+
+/* Count of mounted packs; enumeration index runs 0..count-1. */
+uint16_t nt_resource_pack_count(void);
+bool nt_resource_pack_info(uint16_t i, nt_resource_pack_info_t *out);
+
+/* Count of registered assets; enumeration index runs 0..count-1. */
+uint16_t nt_resource_asset_count(void);
+bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out);
+
+#if NT_INTROSPECT_ENABLED
+/* Dev-only: the resource_id (nt_hash64 of the asset name) that published runtime `handle` for
+   `asset_type` (nt_asset_type_t), or 0 if no live slot publishes it (procedural / not resource-backed).
+   O(slots) scan of the canonical slot table — no separate index, no desync; introspection only, not a
+   hot path. Pair with nt_hash64_label() for the human name when NT_HASH_LABELS is built. */
+uint64_t nt_resource_source_of(uint8_t asset_type, uint32_t runtime_handle);
+#endif
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

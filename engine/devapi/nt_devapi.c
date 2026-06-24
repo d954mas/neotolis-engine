@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,7 +97,7 @@ static const char *resp_serialize(cJSON *tree) {
     return s_resp_buf;
 }
 
-/* cJSON_Add{String,Number,Bool}ToObject wrappers that assert success (OOM traps rather
+/* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success (OOM traps rather
    than silently dropping a field). Result captured first — NT_ASSERT compiles out at
    NT_ASSERT_MODE=0, so the call must not live inside the macro. */
 void devapi_add_string(cJSON *obj, const char *key, const char *value) {
@@ -115,6 +116,46 @@ void devapi_add_bool(cJSON *obj, const char *key, bool value) {
     cJSON *item = cJSON_AddBoolToObject(obj, key, value);
     NT_ASSERT(item != NULL);
     (void)item;
+}
+
+void devapi_add_null(cJSON *obj, const char *key) {
+    cJSON *item = cJSON_AddNullToObject(obj, key);
+    NT_ASSERT(item != NULL);
+    (void)item;
+}
+
+/* Require a finite, integer-valued number in [0, max_d], writing it to *out_d. Casting an
+   out-of-range/NaN/Inf double to unsigned is UB, so all checks run on the double before any cast. */
+static bool parse_number_exact(const cJSON *node, double max_d, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, double *out_d) {
+    if (!cJSON_IsNumber(node)) {
+        set_bad(err, message);
+        return false;
+    }
+    double d = node->valuedouble;
+    if (!isfinite(d) || d != floor(d) || d < 0.0 || d > max_d) {
+        set_bad(err, message);
+        return false;
+    }
+    *out_d = d;
+    return true;
+}
+
+bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint32_t *out) {
+    double d = 0.0;
+    if (!parse_number_exact(node, (double)max, err, set_bad, message, &d)) {
+        return false;
+    }
+    *out = (uint32_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
+    return true;
+}
+
+bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint16_t *out) {
+    double d = 0.0;
+    if (!parse_number_exact(node, (double)max, err, set_bad, message, &d)) {
+        return false;
+    }
+    *out = (uint16_t)d; /* d is integer-valued in [0, max] — the cast is exact and in range. */
+    return true;
 }
 
 /* Build an owned {ok:false,error} entry. code/message are copied by cJSON, not owned. */

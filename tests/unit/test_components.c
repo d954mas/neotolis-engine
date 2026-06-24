@@ -116,6 +116,15 @@ void test_drawable_set_visible_false(void) {
     TEST_ASSERT_FALSE(*nt_drawable_comp_visible(e));
 }
 
+void test_drawable_set_visible_setter(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_drawable_comp_add(e);
+    nt_drawable_comp_set_visible(e, false);
+    TEST_ASSERT_FALSE(*nt_drawable_comp_visible(e));
+    nt_drawable_comp_set_visible(e, true);
+    TEST_ASSERT_TRUE(*nt_drawable_comp_visible(e));
+}
+
 void test_drawable_set_tag(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
@@ -193,6 +202,7 @@ int main(void) {
     RUN_TEST(test_drawable_add_defaults_visible);
     RUN_TEST(test_drawable_add_defaults_color);
     RUN_TEST(test_drawable_set_visible_false);
+    RUN_TEST(test_drawable_set_visible_setter);
     RUN_TEST(test_drawable_set_tag);
     /* Cross-component */
     RUN_TEST(test_entity_destroy_removes_all_components);

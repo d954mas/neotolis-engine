@@ -202,9 +202,10 @@ segment, so an *isolated* `ui_text` segment is impossible. The Stress tab is
 therefore a **text-only** tab and surfaces the **frame** `gpu_ms` as the honest
 Slug-cost proxy — not a nested per-widget timing.
 
-**WebGL2 note:** `nt_debug_overlay_get_gpu_ms()` returns `-1.0` when the
-`EXT_disjoint_timer_query` extension is absent (common on WebGL2). The overlay
-guards `< 0` and shows `gpu: n/a` instead of garbage.
+**WebGL2 note:** the app pushes `gpu_ms < 0` into `nt_metrics` (read back via
+`nt_metrics_last().gpu_ms`) when the `EXT_disjoint_timer_query` extension is
+absent (common on WebGL2). The tab guards `< 0` and shows `gpu: n/a` instead of
+garbage.
 
 **Threshold is INFORMATIONAL only.** The historical target was `< 4 ms` of text
 GPU cost on a mid-tier mobile device. Exceeding it does **not** block this phase

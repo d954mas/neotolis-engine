@@ -14,6 +14,11 @@ target_link_libraries(devapi_host PRIVATE
     nt_ui
     nt_sprite_renderer nt_text_renderer nt_material nt_font nt_atlas nt_resource
     nt_http nt_fs
+    # Obs providers must trail their consumers above for GNU ld single-pass.
+    nt_metrics nt_log_ring
+    # entity.set reaches these via describe()/apply(); only nt_entity is transitive, so list explicitly.
+    nt_transform_comp nt_drawable_comp nt_comp_storage nt_entity nt_math
+    nt_platform
     nt_gfx)
 if(WIN32)
     # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link); nt_devapi (core) pulls it via nt_devapi_net.

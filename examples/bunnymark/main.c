@@ -31,6 +31,7 @@
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
+#include "metrics/nt_metrics.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -242,9 +243,25 @@ static void spawn_n_defold(uint32_t n) {
 
 /* ---- Frame callback ---- */
 
+/* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
+static float bunnymark_poll_gpu_ms(void) {
+    uint64_t gpu_ns = 0;
+    bool ready = false;
+    while (nt_gfx_poll_segment_time_ns("frame", &gpu_ns)) {
+        ready = true;
+    }
+    return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_debug_overlay_frame_begin();
+    /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
+    static double s_last_begin = 0.0;
+    double now = nt_time_now();
+    float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
+    s_last_begin = now;
+    double cpu_begin = now;
+
     nt_window_poll();
     nt_input_poll();
 
@@ -424,6 +441,10 @@ static void frame(void) {
      * em-height in world units, which == pixels here since ortho is 1:1.
      * Skipped on context_restored frames — text material's resolved shader
      * handles are stale until next frame's nt_material_step / nt_font_step. */
+    /* Publish demo counters into nt_metrics before the HUD reads them back via format_lines. */
+    nt_metrics_count("bunnies", (uint64_t)s_bunny_count);
+    nt_metrics_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
+
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     if (!g_nt_gfx.context_restored && text_info && text_info->ready) {
         const float overlay_size = 22.0F;
@@ -460,23 +481,34 @@ static void frame(void) {
     nt_gfx_end_segment();
     nt_gfx_end_frame();
 
-    nt_debug_overlay_count("bunnies", (uint64_t)s_bunny_count);
-    nt_debug_overlay_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
-    nt_debug_overlay_frame_end();
+    float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
+    /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
+       on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
+    static uint64_t s_mem_used;
+    static uint32_t s_mem_tick;
+    if ((s_mem_tick++ % 30U) == 0U) {
+        s_mem_used = nt_platform_memory_usage().used;
+    }
+    nt_metrics_frame_t mf = {
+        .frame_ms = frame_ms,
+        .cpu_ms = cpu_ms,
+        .gpu_ms = bunnymark_poll_gpu_ms(),
+        .draw_calls = nt_gfx_get_frame_draw_calls(),
+        .mem_used = s_mem_used,
+    };
+    nt_metrics_sample(&mf);
 
-    /* Throughput log — bunnymark owns its own format. nt_debug_overlay provides
-     * generic accessors; demo-specific fields (bunny count, atlas quality)
-     * come from local state. */
+    /* Throughput log — bunnymark owns its own format, reading the metrics it just pushed:
+     * demo-specific fields (bunny count, atlas quality) come from local state. */
     static uint32_t s_log_frame_counter;
     if ((++s_log_frame_counter % 60U) == 0U) {
-        const float gpu_ms = nt_debug_overlay_get_gpu_ms();
+        nt_metrics_frame_t last;
+        nt_metrics_last(&last);
         const char *atlas_str = s_hd_active ? "HD" : "SD";
-        if (gpu_ms < 0.0F) {
-            nt_log_info("fps=%.1f cpu=%.2fms gpu=N/A draws=%u bunnies=%u atlas=%s", (double)nt_debug_overlay_get_fps(), (double)nt_debug_overlay_get_cpu_ms(), nt_debug_overlay_get_draw_calls(),
-                        s_bunny_count, atlas_str);
+        if (last.gpu_ms < 0.0F) {
+            nt_log_info("fps=%.1f cpu=%.2fms gpu=N/A draws=%u bunnies=%u atlas=%s", (double)nt_metrics_fps(), (double)last.cpu_ms, last.draw_calls, s_bunny_count, atlas_str);
         } else {
-            nt_log_info("fps=%.1f cpu=%.2fms gpu=%.2fms draws=%u bunnies=%u atlas=%s", (double)nt_debug_overlay_get_fps(), (double)nt_debug_overlay_get_cpu_ms(), (double)gpu_ms,
-                        nt_debug_overlay_get_draw_calls(), s_bunny_count, atlas_str);
+            nt_log_info("fps=%.1f cpu=%.2fms gpu=%.2fms draws=%u bunnies=%u atlas=%s", (double)nt_metrics_fps(), (double)last.cpu_ms, (double)last.gpu_ms, last.draw_calls, s_bunny_count, atlas_str);
         }
     }
 
@@ -531,10 +563,9 @@ int main(void) {
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
-    /* Console throughput log every 60 frames (FPS, CPU/GPU ms, draws, bunnies,
-     * atlas quality) plus on-screen stats/controls overlay. */
-    nt_debug_overlay_desc_t stats_desc = nt_debug_overlay_desc_defaults();
-    nt_debug_overlay_init(&stats_desc);
+    /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
+    nt_metrics_init();
+    nt_debug_overlay_init(NULL);
 
     /* Frame rate cap removed: native engine loop runs uncapped (target_dt=0.0F).
      * dt-scaled physics already produces the same trajectories at any FPS. */

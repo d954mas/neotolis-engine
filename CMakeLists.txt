@@ -18,6 +18,14 @@ set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected in
 # The 0/1 define is attached PUBLIC to the nt_ui target inside engine/ui/CMakeLists.txt
 # so external consumers see the same value via target_link_libraries.
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
+# OFF compiles real no-op bodies (zero release footprint); default tracks NT_UI_DEBUG_TOOLS so the CI OFF mirror exercises the stub path.
+option(NT_LOG_RING_ENABLED "Build the dev-only nt_log_ring log-tail store." ${NT_UI_DEBUG_TOOLS})
+# Independent of NT_DEVAPI_ENABLED. OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror.
+option(NT_METRICS_ENABLED "Build the dev-only nt_metrics perf collector." ${NT_UI_DEBUG_TOOLS})
+# OFF compiles real no-op bodies; default tracks NT_UI_DEBUG_TOOLS for the CI OFF mirror. Set build-wide below so component describe()/registration agree without linking the module.
+option(NT_INTROSPECT_ENABLED "Build the dev-only entity introspection facility." ${NT_UI_DEBUG_TOOLS})
+# Set OFF for a read-only deployment tier; the devapi entity-write group hard-requires it. Build-wide below so component apply()/registration agree without linking introspect.
+option(NT_INTROSPECT_WRITE_ENABLED "Build the dev-only component write (apply) hooks." ${NT_INTROSPECT_ENABLED})
 # Master gate for the devapi command layer (engine/devapi). OFF excludes the
 # subdir entirely so release binaries contain zero devapi object code.
 option(NT_DEVAPI_ENABLED "Build the devapi command layer (engine/devapi)." OFF)
@@ -32,10 +40,14 @@ option(NT_DEVAPI_GROUP_DISCOVERY "Build the devapi discovery group (endpoints / 
 # -DNT_DEVAPI_ENABLED build stays lean and does not pull in UI debug tools; enable it explicitly,
 # together with NT_UI_DEBUG_TOOLS + NT_DEVAPI_GROUP_INPUT (a hard CMake guard enforces both).
 option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over the nt_ui probe)." OFF)
+# Default OFF (opt-in); enable with NT_METRICS_ENABLED + NT_LOG_RING_ENABLED so the sources it reads carry real bodies (a hard CMake guard enforces it).
+option(NT_DEVAPI_GROUP_OBS "Build the devapi obs group (log.*/perf.*/entity.*/resource.* reads)." OFF)
+# Default OFF so a deployment can expose read-only obs WITHOUT mutation. Hard-requires NT_INTROSPECT_WRITE_ENABLED.
+option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write group." OFF)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)
-    foreach(_grp CORE TIME INPUT DISCOVERY UI)
+    foreach(_grp CORE TIME INPUT DISCOVERY UI OBS ENTITY_WRITE)
         if(NT_DEVAPI_GROUP_${_grp})
             message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
                 "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "
@@ -48,6 +60,11 @@ set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full.
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()
+
+# Build-wide so a component's gated describe()/registration and the nt_introspect TU agree on the value
+# without the component linking the module (it calls the sink only through the passed vtable pointer).
+add_compile_definitions(NT_INTROSPECT_ENABLED=$<BOOL:${NT_INTROSPECT_ENABLED}>)
+add_compile_definitions(NT_INTROSPECT_WRITE_ENABLED=$<BOOL:${NT_INTROSPECT_WRITE_ENABLED}>)
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")

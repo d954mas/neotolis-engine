@@ -1,8 +1,10 @@
 #include "log/nt_log.h"
+#include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/console.h>
@@ -16,13 +18,67 @@
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
 #endif
 
-#ifndef NT_LOG_BUF_SIZE
-#define NT_LOG_BUF_SIZE 512
-#endif
+/* NT_LOG_BUF_SIZE is the public sink line cap, declared in nt_log.h. */
 
 static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 
 void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
+
+/* Fixed BSS sink registry, single-threaded; dev-only gating lives in the attached sink, not here. */
+#ifndef NT_LOG_MAX_SINKS
+#define NT_LOG_MAX_SINKS 4
+#endif
+static nt_log_sink_fn s_sinks[NT_LOG_MAX_SINKS];
+static void *s_sink_user[NT_LOG_MAX_SINKS];
+static uint8_t s_sink_count;
+
+void nt_log_add_sink(nt_log_sink_fn fn, void *user) {
+    NT_ASSERT(fn != NULL);
+    /* Idempotent: skip a duplicate (fn,user) slot — it would fan out every line twice. */
+    for (uint8_t i = 0; i < s_sink_count; i++) {
+        if (s_sinks[i] == fn && s_sink_user[i] == user) {
+            return;
+        }
+    }
+    NT_ASSERT(s_sink_count < NT_LOG_MAX_SINKS);
+    s_sinks[s_sink_count] = fn;
+    s_sink_user[s_sink_count] = user;
+    s_sink_count++;
+}
+
+void nt_log_remove_sink(nt_log_sink_fn fn, void *user) {
+    NT_ASSERT(fn != NULL);
+    for (uint8_t i = 0; i < s_sink_count; i++) {
+        if (s_sinks[i] == fn && s_sink_user[i] == user) {
+            /* Compact the tail to keep the array dense (fan-out order is irrelevant). */
+            for (uint8_t j = i + 1U; j < s_sink_count; j++) {
+                s_sinks[j - 1U] = s_sinks[j];
+                s_sink_user[j - 1U] = s_sink_user[j];
+            }
+            s_sink_count--;
+            s_sinks[s_sink_count] = NULL;
+            s_sink_user[s_sink_count] = NULL;
+            return;
+        }
+    }
+}
+
+/* Append "..." to a truncated msg on a UTF-8 codepoint boundary: cJSON later rejects a split
+   multibyte sequence when the line is serialized. buf must hold >= 4 bytes. */
+static void append_truncation_marker(char *buf, size_t cap) {
+    size_t end = cap - 4; /* room for "..." + NUL */
+    while (end > 0 && ((unsigned char)buf[end - 1] & 0xC0U) == 0x80U) {
+        end--;
+    }
+    /* A trailing lead byte here lost its continuation bytes to truncation -> orphan; drop it too. */
+    if (end > 0 && (unsigned char)buf[end - 1] >= 0xC0U) {
+        end--;
+    }
+    buf[end] = '.';
+    buf[end + 1] = '.';
+    buf[end + 2] = '.';
+    buf[end + 3] = '\0';
+}
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     static const char *const level_names[] = {"INFO", "WARN", "ERROR"};
@@ -34,10 +90,15 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
     va_start(args, fmt);
     int written = vsnprintf(msg, sizeof(msg), fmt, args);
     va_end(args);
-    if (written >= (int)sizeof(msg)) {
-        msg[sizeof(msg) - 4] = '.';
-        msg[sizeof(msg) - 3] = '.';
-        msg[sizeof(msg) - 2] = '.';
+    if (written < 0) {
+        msg[0] = '\0'; /* encoding error: forward an empty (NUL-terminated) line, never garbage */
+    } else if (written >= (int)sizeof(msg)) {
+        append_truncation_marker(msg, sizeof(msg));
+    }
+
+    /* Fan out to sinks (single-threaded). */
+    for (uint8_t i = 0; i < s_sink_count; i++) {
+        s_sinks[i](level, domain ? domain : "", msg, s_sink_user[i]);
     }
 
 #ifdef __EMSCRIPTEN__
@@ -93,7 +154,12 @@ bool nt_log_write_unique(nt_log_level_t level, const char *domain, const char *f
     if (written < 0) {
         return false;
     }
-    const size_t len = (written < (int)sizeof(msg)) ? (size_t)written : sizeof(msg) - 1;
+    /* Truncate before hashing so messages differing only past the cut dedup identically (and the
+       stored line stays valid UTF-8). */
+    if (written >= (int)sizeof(msg)) {
+        append_truncation_marker(msg, sizeof(msg));
+    }
+    const size_t len = strlen(msg);
     const uint64_t h = nt_hash64(msg, (uint32_t)len).value;
     for (uint32_t i = 0; i < s_unique_count; i++) {
         if (s_unique_hashes[i] == h) {

@@ -7,6 +7,9 @@
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
 #include "hash/nt_hash.h"
+#if NT_INTROSPECT_ENABLED || NT_INTROSPECT_WRITE_ENABLED
+#include "introspect/nt_introspect.h"
+#endif
 
 static nt_comp_storage_t s_storage;
 
@@ -47,6 +50,58 @@ static void drawable_on_destroy(nt_entity_t entity) {
     }
 }
 
+#if NT_INTROSPECT_ENABLED
+static void drawable_describe(nt_entity_t entity, nt_introspect_sink *s) {
+    s->field_bool(s, "visible", *nt_drawable_comp_visible(entity));
+    s->field_floats(s, "color", nt_drawable_comp_color(entity), 4);
+    /* tag: a game's semantic marker (e.g. nt_hash32_str("house")). Resolve to its string via the hash
+       label registry when available (NT_HASH_LABELS) so a bot reads "house", not just the hash. */
+    nt_hash32_t tag = *nt_drawable_comp_tag(entity);
+    if (tag.value != 0) {
+        s->field_u64(s, "tag", tag.value);
+        const char *name = nt_hash32_label(tag);
+        if (name != NULL) {
+            s->field_str(s, "tag_name", name);
+        }
+    }
+}
+#endif
+
+#if NT_INTROSPECT_WRITE_ENABLED
+/* color is intentionally STRICTER than nt_drawable_comp_set_color (which clamps only the packed byte
+   and would desync the raw float): reject out-of-[0,1] at the boundary so float and packed agree. */
+static bool drawable_apply(nt_entity_t entity, const char *key, const nt_write_value *v, bool dry_run, const char **err_msg) {
+    if (strcmp(key, "visible") == 0) {
+        if (v->kind != NT_WV_BOOL) {
+            *err_msg = "drawable.visible expects a bool";
+            return false;
+        }
+        if (!dry_run) {
+            nt_drawable_comp_set_visible(entity, v->as.b);
+        }
+        return true;
+    }
+    if (strcmp(key, "color") == 0) {
+        if (v->kind != NT_WV_VEC4) {
+            *err_msg = "drawable.color expects 4 numbers";
+            return false;
+        }
+        for (int i = 0; i < 4; i++) {
+            if (v->as.v[i] < 0.0F || v->as.v[i] > 1.0F) {
+                *err_msg = "drawable.color components must be in [0,1]";
+                return false;
+            }
+        }
+        if (!dry_run) {
+            nt_drawable_comp_set_color(entity, v->as.v[0], v->as.v[1], v->as.v[2], v->as.v[3]);
+        }
+        return true;
+    }
+    *err_msg = "unknown or read-only field for drawable";
+    return false;
+}
+#endif
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_drawable_comp_init(const nt_drawable_comp_desc_t *desc) {
@@ -73,6 +128,12 @@ nt_result_t nt_drawable_comp_init(const nt_drawable_comp_desc_t *desc) {
         .name = "drawable",
         .has = nt_drawable_comp_has,
         .on_destroy = drawable_on_destroy,
+#if NT_INTROSPECT_ENABLED
+        .describe = drawable_describe,
+#endif
+#if NT_INTROSPECT_WRITE_ENABLED
+        .apply = drawable_apply,
+#endif
     });
 
     return NT_OK;
@@ -132,6 +193,12 @@ void nt_drawable_comp_set_alpha(nt_entity_t entity, float a) {
     s_colors[idx][3] = a;
     float *c = s_colors[idx];
     s_colors_packed[idx] = pack_color_rgba(c[0], c[1], c[2], a);
+}
+
+void nt_drawable_comp_set_visible(nt_entity_t entity, bool visible) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    s_visible[idx] = visible;
 }
 
 /* ---- Bulk SoA view ---- */

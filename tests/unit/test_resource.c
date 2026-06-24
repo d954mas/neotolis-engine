@@ -2322,6 +2322,96 @@ void test_on_resolve_fires_on_invalidate(void) {
     (void)remove("build/test_inv_resolve.ntpack");
 }
 
+/* ---- Enumeration accessors ----
+ * These exercise ONLY public POD types from nt_resource.h (no NtPackMeta /
+ * NtAssetMeta crosses the boundary). */
+
+void test_pack_count_zero_when_empty(void) { TEST_ASSERT_EQUAL_UINT16(0, nt_resource_pack_count()); }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_pack_enumeration_matches_mounted(void) {
+    nt_hash32_t pid_a = nt_hash32_str("enum_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("enum_pack_b");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 3));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 7));
+
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_test_pack(2, &size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, size_a));
+    free(blob_a);
+
+    /* Two mounted packs enumerated. */
+    TEST_ASSERT_EQUAL_UINT16(2, nt_resource_pack_count());
+
+    bool saw_a = false;
+    bool saw_b = false;
+    for (uint16_t i = 0; i < nt_resource_pack_count(); i++) {
+        nt_resource_pack_info_t info;
+        memset(&info, 0xAB, sizeof(info));
+        TEST_ASSERT_TRUE(nt_resource_pack_info(i, &info));
+        TEST_ASSERT_EQUAL_UINT8(1, info.mounted);
+        if (info.id == pid_a.value) {
+            saw_a = true;
+            TEST_ASSERT_EQUAL_INT16(3, info.priority);
+            TEST_ASSERT_EQUAL_UINT16(2, info.asset_count); /* 2 assets parsed */
+        } else if (info.id == pid_b.value) {
+            saw_b = true;
+            TEST_ASSERT_EQUAL_INT16(7, info.priority);
+            TEST_ASSERT_EQUAL_UINT16(0, info.asset_count);
+        }
+    }
+    TEST_ASSERT_TRUE(saw_a);
+    TEST_ASSERT_TRUE(saw_b);
+}
+
+void test_pack_info_out_of_range_returns_false(void) {
+    nt_resource_pack_info_t info;
+    TEST_ASSERT_FALSE(nt_resource_pack_info(0, &info));
+
+    nt_hash32_t pid = nt_hash32_str("enum_oob_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL_UINT16(1, nt_resource_pack_count());
+    TEST_ASSERT_TRUE(nt_resource_pack_info(0, &info));
+    TEST_ASSERT_FALSE(nt_resource_pack_info(1, &info));
+}
+
+void test_pack_info_carries_state_token(void) {
+    nt_hash32_t pid = nt_hash32_str("enum_state_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    nt_resource_pack_info_t info;
+    TEST_ASSERT_TRUE(nt_resource_pack_info(0, &info));
+    /* Mounted-but-unparsed pack maps to the NONE state token verbatim. */
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_PACK_STATE_NONE, info.state);
+}
+
+void test_asset_enumeration_fields(void) {
+    nt_hash32_t pid = nt_hash32_str("enum_asset_pack");
+    nt_hash64_t rid = nt_hash64_str("enum_asset_res");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    TEST_ASSERT_EQUAL_UINT16(1, nt_resource_asset_count());
+
+    nt_resource_asset_info_t info;
+    memset(&info, 0xAB, sizeof(info));
+    TEST_ASSERT_TRUE(nt_resource_asset_info(0, &info));
+    TEST_ASSERT_EQUAL_UINT64(rid.value, info.resource_id);
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, info.type);
+    /* pack_index is a RAW packs[] slot (same space as nt_resource_pack_info_t.pack_index), not a dense
+       ordinal — assert it equals the owning pack's raw slot, which holds even after an unmount hole. */
+    nt_resource_pack_info_t pinfo;
+    TEST_ASSERT_TRUE(nt_resource_pack_info(0, &pinfo));
+    TEST_ASSERT_EQUAL_UINT16(pinfo.pack_index, info.pack_index);
+}
+
+void test_asset_info_out_of_range_returns_false(void) {
+    nt_resource_asset_info_t info;
+    TEST_ASSERT_EQUAL_UINT16(0, nt_resource_asset_count());
+    TEST_ASSERT_FALSE(nt_resource_asset_info(0, &info));
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -2461,6 +2551,14 @@ int main(void) {
     RUN_TEST(test_user_data_null_initially);
     RUN_TEST(test_on_resolve_fires_on_priority_change);
     RUN_TEST(test_on_resolve_fires_on_invalidate);
+
+    /* Enumeration accessors */
+    RUN_TEST(test_pack_count_zero_when_empty);
+    RUN_TEST(test_pack_enumeration_matches_mounted);
+    RUN_TEST(test_pack_info_out_of_range_returns_false);
+    RUN_TEST(test_pack_info_carries_state_token);
+    RUN_TEST(test_asset_enumeration_fields);
+    RUN_TEST(test_asset_info_out_of_range_returns_false);
 
     return UNITY_END();
 }

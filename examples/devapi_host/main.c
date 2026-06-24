@@ -3,10 +3,18 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
+#include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_net.h"
+#include "drawable_comp/nt_drawable_comp.h"
+#include "entity/nt_entity.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
+#include "log/nt_log_ring.h"
 #include "memory/nt_mem_scratch.h"
+#include "metrics/nt_metrics.h"
+#include "time/nt_time.h"
+#include "transform_comp/nt_transform_comp.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h" /* NT_UI_BUTTON_DEF for the registered-widget role. */
 #include "ui/nt_ui_scale.h"  /* nt_ui_compute_scale + nt_ui_viewport_from_scale for the scaled ctx. */
@@ -137,12 +145,15 @@ static void recover_on_disconnect(void) {
 }
 
 static void frame(void) {
+    /* Host owns measurement; nt_metrics only stores. */
+    static double s_last_begin = 0.0;
+    double now = nt_time_now();
+    float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
+    s_last_begin = now;
+    double cpu_begin = now;
+
     nt_window_poll();
-    /* Order matters: nt_devapi_update first runs net_poll (a command may enqueue into the
-       devapi input schedule), then ticks that schedule and — only on a real sim-advance — releases
-       due events into nt_input's immediate inject buffer. nt_input_poll next samples hardware AND
-       applies that whole buffer post-edge-clear, so an injected rising edge survives to this frame's
-       update. nt_input itself knows nothing about frames; the devapi layer owns the schedule. */
+    /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
     recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop. */
     nt_input_poll();
@@ -160,6 +171,34 @@ static void frame(void) {
         nt_window_swap_buffers();
     }
 
+    float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
+
+    /* Seed a user int + float channel so perf.* has something to observe. The user counter is named
+       frame_cpu_ms, not cpu_ms, so it does not shadow the fixed cpu_ms channel on the wire. */
+    static uint64_t s_frame_counter = 0;
+    s_frame_counter++;
+    nt_metrics_count("frames", s_frame_counter);
+    nt_metrics_count_f("frame_cpu_ms", (double)cpu_ms);
+
+    /* This host inits no gfx, so gpu_ms is the "no timer" sentinel and draw_calls is 0. */
+    /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
+       on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
+    static uint64_t s_mem_used;
+    static uint32_t s_mem_tick;
+    if ((s_mem_tick++ % 30U) == 0U) {
+        s_mem_used = nt_platform_memory_usage().used;
+    }
+    nt_metrics_frame_t mf = {
+        .frame_ms = frame_ms,
+        .cpu_ms = cpu_ms,
+        .gpu_ms = -1.0F,
+        .draw_calls = 0,
+        .mem_used = s_mem_used,
+        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
+        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+    };
+    nt_metrics_sample(&mf);
+
     /* No auto-exit: the driver owns quit (ESC for interactive, else subprocess kill; the bot's socket
        timeouts catch a hung host). A frame-count cap would also kill long stability sims. */
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -175,8 +214,13 @@ int main(void) {
     nt_result_t result = nt_engine_init(&config);
     if (result != NT_OK) {
         printf("Failed to initialize engine: error %d\n", result);
-        return 1;
+        return 1; /* nothing inited yet */
     }
+
+    /* Partial-init teardown ladder: each fail point jumps to the label that releases exactly what was
+       inited so far. The cleanup is written once and shared with the clean-exit path, so a future
+       subsystem can't be silently left out of an error path. status stays 1 until a clean run. */
+    int status = 1;
 
     g_nt_window.width = 800;
     g_nt_window.height = 600;
@@ -185,22 +229,21 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 
+    /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.
+       The obs devapi group self-registers under NT_DEVAPI_GROUP_OBS — no host register call. */
+    nt_log_ring_init();
+    nt_log_add_sink(nt_log_ring_sink, NULL);
+    nt_metrics_init();
+
     /* devapi wiring (game-layer consumer; no engine edits). */
     if (nt_devapi_init() != NT_OK) {
         printf("Failed to initialize devapi\n");
-        nt_input_shutdown();
-        nt_window_shutdown();
-        nt_engine_shutdown();
-        return 1;
+        goto shutdown_base;
     }
-    nt_result_t rr = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
-    if (rr != NT_OK) {
-        printf("[devapi_host] failed to register game.echo: error %d\n", rr);
-        nt_devapi_shutdown();
-        nt_input_shutdown();
-        nt_window_shutdown();
-        nt_engine_shutdown();
-        return 1;
+    result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
+    if (result != NT_OK) {
+        printf("[devapi_host] failed to register game.echo: error %d\n", result);
+        goto shutdown_devapi;
     }
 
     /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
@@ -208,25 +251,43 @@ int main(void) {
        self-register inside nt_devapi_register_ui under the gate. */
     nt_mem_scratch_init((size_t)64U * 1024U);
     nt_ui_module_init();
-    const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
-    s_hud_ctx = nt_ui_create_context(s_hud_arena, sizeof s_hud_arena, &ui_desc);
-    NT_ASSERT(s_hud_ctx != NULL && "devapi_host: failed to create hud UI context");
-    nt_devapi_ui_register_context("hud", s_hud_ctx);
+    {
+        const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
+        s_hud_ctx = nt_ui_create_context(s_hud_arena, sizeof s_hud_arena, &ui_desc);
+        NT_ASSERT(s_hud_ctx != NULL && "devapi_host: failed to create hud UI context");
+        nt_devapi_ui_register_context("hud", s_hud_ctx);
 
-    s_hud_scaled_ctx = nt_ui_create_context(s_hud_scaled_arena, sizeof s_hud_scaled_arena, &ui_desc);
-    NT_ASSERT(s_hud_scaled_ctx != NULL && "devapi_host: failed to create scaled hud UI context");
-    nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
-
-    uint16_t port = resolve_port();
-    if (!nt_devapi_net_start(port)) {
-        printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
-        nt_devapi_shutdown();
-        nt_input_shutdown();
-        nt_window_shutdown();
-        nt_engine_shutdown();
-        return 1;
+        s_hud_scaled_ctx = nt_ui_create_context(s_hud_scaled_arena, sizeof s_hud_scaled_arena, &ui_desc);
+        NT_ASSERT(s_hud_scaled_ctx != NULL && "devapi_host: failed to create scaled hud UI context");
+        nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
     }
-    printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
+
+    /* Seed entities so entity.list / entity.set have live data; the comp inits register each
+       component's describe()/apply(). */
+    nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
+    nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
+    nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});
+    {
+        nt_entity_t seed_a = nt_entity_create(); /* transform only */
+        nt_transform_comp_add(seed_a);
+        nt_transform_comp_set_position(seed_a, 1.0F, 2.0F, 3.0F);
+        nt_entity_t seed_b = nt_entity_create(); /* drawable only */
+        nt_drawable_comp_add(seed_b);
+        nt_entity_t seed_c = nt_entity_create(); /* both */
+        nt_transform_comp_add(seed_c);
+        nt_drawable_comp_add(seed_c);
+    }
+
+    {
+        uint16_t port = resolve_port();
+        if (!nt_devapi_net_start(port)) {
+            printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
+            goto shutdown_scene;
+        }
+        printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
+        /* Seed the log ring so log.tail has at least one entry the moment a bot connects. */
+        nt_log_info("devapi_host listening on 127.0.0.1:%u", port);
+    }
 
     /* Opt-in pre-loop gate so a bot can hand over setup before frame 0.
        Bounded; the host does NOT require a client to start. */
@@ -237,15 +298,22 @@ int main(void) {
     }
 
     nt_app_run(frame);
+    status = 0; /* clean run */
 
     nt_devapi_net_stop();
-    nt_devapi_shutdown();
+shutdown_scene: /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();
     nt_mem_scratch_shutdown();
+    nt_drawable_comp_shutdown();
+    nt_transform_comp_shutdown();
+    nt_entity_shutdown();
+shutdown_devapi:
+    nt_devapi_shutdown();
+shutdown_base:
     nt_input_shutdown();
     nt_window_shutdown();
     nt_engine_shutdown();
-    return 0;
+    return status;
 }
