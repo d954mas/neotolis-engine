@@ -16,6 +16,11 @@ DEFAULT_READ_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 # Matches the host's NT_DEVAPI_DEFAULT_PORT.
 DEFAULT_PORT = 17890
+# recv_line memory-safety bound: a single framed JSON line may not exceed this many bytes (D-07).
+# It is a framing-desync guard, NOT a protocol limit — raised from 1 MB to ~16 MB so a multi-MB base64
+# PNG (capture.frame at 1280x720 / photographic worst-case) fits one line. The C send path already
+# carries multi-MB; this lifts only the Python read cap. Still bounded, never unbounded.
+MAX_LINE_BYTES = 16 * 1024 * 1024
 
 
 class Transport(ABC):
@@ -70,7 +75,7 @@ class SocketTransport(Transport):
     def recv_line(self) -> str:
         # Bound the read so a desynced stream can never grow memory without limit.
         try:
-            line = self._f.readline(1_048_576)
+            line = self._f.readline(MAX_LINE_BYTES)
         except (socket.timeout, TimeoutError) as exc:
             # On py3.8 socket.timeout is NOT a TimeoutError subclass; normalize so callers catch
             # one type. A mid-read timeout also leaves the buffered reader in an undefined state,
@@ -80,7 +85,7 @@ class SocketTransport(Transport):
         if line == "":
             # Orderly disconnect: recv returned b"" (mirrors the server-side close path). Fail fast, never hang.
             raise ConnectionError("server closed the connection")
-        if len(line) >= 1_048_576 and not line.endswith("\n"):
+        if len(line) >= MAX_LINE_BYTES and not line.endswith("\n"):
             raise ConnectionError("oversized/unterminated line — framing desync")
         return line.rstrip("\r\n")
 

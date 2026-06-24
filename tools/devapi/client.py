@@ -437,5 +437,36 @@ class DevApiClient:
 
     # #endregion
 
+    # #region capture.* wrappers — deferred DATA commands; result() blocks until the pre-swap producer
+    # fills the payload (a render must happen), returning {width,height,format:"png",data:<base64>}.
+    def capture_frame(self, scale: Optional[int] = None) -> Dict[str, Any]:
+        """Capture the full framebuffer as a PNG (base64 in result.data).
+
+        DEFERRED: the command is withheld until the next pre-swap seam reads the freshly-rendered
+        framebuffer, so result() returns the real PNG payload (NOT {deferred:true}) — the drain-race
+        only resolves once a render advances. `scale` is the integer divisor {1,2,4} (1=full, 2=half,
+        4=quarter); omitted -> full resolution. Result: {width,height,format:"png",data:<base64>}.
+        """
+        params: Dict[str, Any] = {}
+        if scale is not None:
+            params["scale"] = scale
+        return self.result("capture.frame", params)
+
+    def capture_region(
+        self, x: int, y: int, w: int, h: int, scale: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Capture an (x,y,w,h) sub-rect of the framebuffer as a PNG (base64 in result.data).
+
+        DEFERRED like capture_frame. The rect is top-left origin, bounded to the framebuffer (an
+        out-of-bounds / zero-size / over-cap rect -> bad_params over the wire). `scale` is the integer
+        divisor {1,2,4} applied after the sub-rect crop. Result: {width,height,format:"png",data:<base64>}.
+        """
+        params: Dict[str, Any] = {"x": x, "y": y, "w": w, "h": h}
+        if scale is not None:
+            params["scale"] = scale
+        return self.result("capture.region", params)
+
+    # #endregion
+
     def close(self) -> None:
         self._transport.close()
