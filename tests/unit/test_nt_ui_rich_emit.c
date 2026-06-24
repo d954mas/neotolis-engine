@@ -485,20 +485,21 @@ static void frame_two_images(nt_material_t img_mat) {
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_sprite_renderer_test_reset_nonempty_flush_calls();
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (6c) TWO inline images in one block both emit via the immediate self-emit pass (image_emit_count == 2),
- * coalesced into ONE batch (set_material bound once in rich_emit_images, both quads accumulate in the same
- * staging buffer with no flush between them). The walk's terminal flush resets the live vertex count, so
- * coalescence is pinned via the last-emit probes: the SECOND image is a 4-vert region quad carrying the
- * correct full-opacity tint -- proving it emitted (with the right opacity-folded color) right after the
- * first, in the same bound-material batch. */
+/* (6c) TWO inline images in one block (one default band: both images on layer 1) COALESCE: set_material is
+ * bound once in rich_emit_images and both quads accumulate in the same staging batch with no flush between
+ * them, so the band's single sprite drain is ONE non-empty flush (not two). image_emit_count == 2 confirms
+ * both emitted; the second is a 4-vert region quad with the right full-opacity tint. */
 static void test_two_inline_images_coalesce(void) {
     const nt_material_t mat = make_rich_image_material();
     frame_two_images(mat);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the immediate pass");
+    /* ONE non-empty sprite flush across BOTH images of the single band -> they coalesced (no per-image flush). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_sprite_renderer_test_nonempty_flush_calls(), "two band images coalesce into ONE sprite batch (one non-empty flush, not two)");
     /* The LAST image emitted is a 4-vert region quad with the right tint (white, full opacity). */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "second image emits a 4-vert region quad");
     for (uint32_t v = 0; v < 4U; v++) {
@@ -2096,6 +2097,70 @@ static void test_font_rebinds_per_layer_for_shared_face(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_text_renderer_test_set_font_calls(), "one face across two layers -> set_font once per band (2), not once for the whole block");
 }
 
+/* Build two inline images on DISTINCT explicit layers: a red image on layer 0 (lower band) and a green
+ * image on layer 1 (higher band). Two populated sprite bands -> two per-band sprite drains; ascending emit
+ * means the layer-1 (green) image is the LAST one emitted. */
+static void frame_two_layer_images(nt_material_t img_mat) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = img_mat;
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_2li_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 0U);
+        nt_ui_rich_push_color(s_fx.ctx, 0xFF0000FFU); /* red (0xAABBGGRR): r=255 g=0 b=0 a=255 */
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_push_layer(s_fx.ctx, 1U);
+        nt_ui_rich_push_color(s_fx.ctx, 0xFF00FF00U); /* green: r=0 g=255 b=0 a=255 */
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_2li").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_sprite_renderer_test_reset_nonempty_flush_calls();
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (L5) LAYER DRAIN + Z-ORDER: a red image on layer 0 and a green image on layer 1 -> the self-emit drains
+ * each populated band separately (two non-empty sprite flushes, not one coalesced batch), and emits bands
+ * ASCENDING so the layer-1 (green) image is the LAST emitted. Pins the load-bearing per-band drain + z
+ * ordering that is otherwise visual-only. */
+static void test_layer_drain_orders_ascending(void) {
+    const nt_material_t mat = make_rich_image_material();
+    frame_two_layer_images(mat);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "two images on two layers both emit");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_sprite_renderer_test_nonempty_flush_calls(), "two populated bands -> one non-empty sprite drain per band (2)");
+    /* Ascending: the HIGHER band (layer 1, green) emits LAST, so the last-emit probe holds green. */
+    uint8_t col[4] = {0};
+    nt_sprite_renderer_test_last_emit_color(0U, col); /* 0xAABBGGRR -> r,g,b,a */
+    TEST_ASSERT_TRUE_MESSAGE(col[0] == 0U && col[1] == 255U && col[2] == 0U, "higher band (layer 1, green) emits LAST -> ascending band order");
+}
+
+/* (L6) DEFAULT mixed-block band cost: a no-<layer> text + image + object block resolves to per-kind bands
+ * (TEXT=0, IMAGE=1, OBJECT=2). Only the IMAGE band carries sprite content (text is stub-font no-op, object
+ * self-draws), so exactly ONE non-empty sprite drain occurs -- pins the per-band sprite cost so a regression
+ * to per-image or per-band-extra flushes can't pass unseen. */
+static void test_default_mixed_block_band_flush_count(void) {
+    nt_sprite_renderer_test_reset_nonempty_flush_calls();
+    frame_text_image_object(); /* one IMAGE atom (band 1); text band 0 + object band 2 emit no sprites */
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one inline image in the mixed block");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_sprite_renderer_test_nonempty_flush_calls(), "only the IMAGE band drains sprite content -> exactly one non-empty sprite flush");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -2110,6 +2175,8 @@ int main(void) {
     RUN_TEST(test_layer_override);
     RUN_TEST(test_font_group_per_layer);
     RUN_TEST(test_font_rebinds_per_layer_for_shared_face);
+    RUN_TEST(test_layer_drain_orders_ascending);
+    RUN_TEST(test_default_mixed_block_band_flush_count);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);

@@ -197,6 +197,9 @@ bool nt_sprite_renderer_test_initialized(void);
 /* Captured vertex/index count from last slice9 emit. */
 uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void);
 uint32_t nt_sprite_renderer_test_last_slice9_index_count(void);
+/* Flushes that replayed cmds (empty no-op flushes excluded). Lets rich z-layer tests pin per-band drains. */
+uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void);
+void nt_sprite_renderer_test_reset_nonempty_flush_calls(void);
 #endif
 // #endregion
 

@@ -97,6 +97,8 @@ static struct {
     /* Captured at end of emit_slice9. */
     uint32_t last_slice9_vertex_count;
     uint32_t last_slice9_index_count;
+    /* Flushes that ACTUALLY replayed cmds (past the empty early-return). Empty no-op flushes don't count. */
+    uint32_t test_nonempty_flush_calls;
 #endif
 } s_sprite;
 // #endregion
@@ -1300,6 +1302,9 @@ void nt_sprite_renderer_flush(void) {
         s_sprite.cmd_count = 0;
         return;
     }
+#ifdef NT_TEST_ACCESS
+    s_sprite.test_nonempty_flush_calls++; /* counted only on a real cmd replay (past the empty early-return) */
+#endif
 
     /* orphan_buffer asks the driver to allocate fresh storage instead of
      * mutating the bound VBO in place, so the GPU can keep consuming the
@@ -1465,5 +1470,7 @@ void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]) {
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
 uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void) { return s_sprite.last_slice9_vertex_count; }
 uint32_t nt_sprite_renderer_test_last_slice9_index_count(void) { return s_sprite.last_slice9_index_count; }
+uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void) { return s_sprite.test_nonempty_flush_calls; }
+void nt_sprite_renderer_test_reset_nonempty_flush_calls(void) { s_sprite.test_nonempty_flush_calls = 0; }
 #endif
 // #endregion

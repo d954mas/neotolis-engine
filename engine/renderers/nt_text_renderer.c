@@ -59,6 +59,8 @@ static struct {
      * matrix construction without needing a real font fixture. */
     float test_last_model[16];
     uint32_t test_draw_n_calls;
+    /* Flushes that ACTUALLY issued a draw (past the empty early-return). Empty no-op flushes don't count. */
+    uint32_t test_nonempty_flush_calls;
 #endif
 } s_text;
 
@@ -479,6 +481,9 @@ void nt_text_renderer_flush(void) {
 
     /* Single draw call per flush */
     nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
+#ifdef NT_TEST_ACCESS
+    s_text.test_nonempty_flush_calls++; /* counted only on a real draw (past the empty / no-pipeline early-outs) */
+#endif
 
     /* Reset staging buffer */
     s_text.vertex_count = 0;
@@ -498,7 +503,9 @@ void nt_text_renderer_test_reset_call_counters(void) {
     s_text.test_set_material_calls = 0;
     s_text.test_set_font_calls = 0;
     s_text.test_draw_n_calls = 0;
+    s_text.test_nonempty_flush_calls = 0;
 }
+uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_nonempty_flush_calls; }
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }

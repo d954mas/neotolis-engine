@@ -63,6 +63,8 @@ bool nt_text_renderer_test_initialized(void);
 uint32_t nt_text_renderer_test_set_material_calls(void);
 uint32_t nt_text_renderer_test_set_font_calls(void);
 void nt_text_renderer_test_reset_call_counters(void);
+/* Flushes that issued a real draw (empty no-op flushes excluded). Reset by reset_call_counters. */
+uint32_t nt_text_renderer_test_nonempty_flush_calls(void);
 /* Last model matrix passed to draw_n (captured even when font is empty / units_per_em=0).
  * Lets tests pin nt_ui's emit_text mat4 construction without needing a real font. */
 const float *nt_text_renderer_test_last_model(void);
