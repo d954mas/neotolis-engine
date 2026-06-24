@@ -10,6 +10,7 @@
 #include "hash/nt_hash.h"
 #include "introspect/nt_introspect.h"
 #include "log/nt_log_ring.h"
+#include "material/nt_material.h" /* NT_REF_MATERIAL label resolution in j_ref */
 #include "metrics/nt_metrics.h"
 #include "resource/nt_resource.h"
 
@@ -393,6 +394,17 @@ static void j_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, ui
     char hex[19];
     (void)snprintf(hex, sizeof(hex), "0x%" PRIx64, id);
     devapi_add_string(ref, "id", hex);
+    /* Resolve the material handle to its create-time label here — nt_material is already linked in the
+       obs sink, so material_comp can stay a bare handle emitter. */
+    if (kind == NT_REF_MATERIAL) {
+        nt_material_t mat = {.id = (uint32_t)id};
+        if (nt_material_valid(mat)) {
+            const nt_material_info_t *info = nt_material_get_info(mat);
+            if (info != NULL && info->label != NULL) {
+                devapi_add_string(ref, "label", info->label);
+            }
+        }
+    }
 }
 
 /* Resolving asset sink: a runtime handle -> its source resource_id (reverse scan) -> name (label),

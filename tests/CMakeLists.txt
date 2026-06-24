@@ -469,6 +469,7 @@ if(NOT EMSCRIPTEN)
             set(NT_DEVAPI_OBS_PROVIDER_LIBS
                 nt_log_ring nt_metrics
                 nt_introspect nt_entity
+                nt_material nt_pool
                 nt_resource nt_shared nt_hash
                 nt_http_stub nt_fs_stub
             )
@@ -570,8 +571,8 @@ if(NOT EMSCRIPTEN)
             target_link_libraries(test_devapi_obs PRIVATE
                 nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
                 nt_log_ring nt_metrics
-                nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_comp_storage
-                nt_resource nt_math nt_shared
+                nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp nt_comp_storage
+                nt_material nt_pool nt_resource nt_math nt_shared
                 nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
                 nt_core nt_log nt_hash unity
             )

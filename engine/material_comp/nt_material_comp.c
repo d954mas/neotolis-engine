@@ -24,9 +24,9 @@ static void material_on_destroy(nt_entity_t entity) {
 }
 
 #if NT_INTROSPECT_ENABLED
-/* Handle only: a material is runtime-constructed (no NT_ASSET_MATERIAL resource), so it has no
-   resource_id to reverse-resolve to a name. */
-static void material_describe(nt_entity_t entity, nt_introspect_sink *s) { s->field_ref(s, "handle", NT_REF_HANDLE, nt_material_comp_handle(entity)->id); }
+/* Runtime-constructed (no resource_id like mesh): emit a bare NT_REF_MATERIAL handle, not the label, so
+   material_comp never pulls the material runtime into its consumers — the resolving sink adds the label. */
+static void material_describe(nt_entity_t entity, nt_introspect_sink *s) { s->field_ref(s, "handle", NT_REF_MATERIAL, nt_material_comp_handle(entity)->id); }
 #endif
 
 /* ---- Lifecycle ---- */

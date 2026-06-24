@@ -104,6 +104,7 @@ if(NT_DEVAPI_GROUP_OBS)
     target_link_libraries(nt_devapi PRIVATE
         nt_log_ring nt_metrics
         nt_entity nt_resource nt_introspect nt_hash
+        nt_material # j_ref resolves an NT_REF_MATERIAL handle to its create-time label
     )
 endif()
 

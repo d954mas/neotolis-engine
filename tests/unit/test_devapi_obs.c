@@ -11,6 +11,8 @@
 /* clang-format off */
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "material/nt_material.h"
+#include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -41,12 +43,19 @@ void setUp(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_mesh_comp_init(&mdesc));
     nt_resource_desc_t rdesc = {0};
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_init(&rdesc));
+    /* material runtime + component, for the NT_REF_MATERIAL label-resolution test. */
+    nt_material_desc_t matdesc = nt_material_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_init(&matdesc));
+    nt_material_comp_desc_t mcdesc = nt_material_comp_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_comp_init(&mcdesc));
 
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
 }
 
 void tearDown(void) {
     nt_devapi_shutdown();
+    nt_material_comp_shutdown();
+    nt_material_shutdown();
     nt_resource_shutdown();
     nt_mesh_comp_shutdown();
     nt_drawable_comp_shutdown();
@@ -424,6 +433,35 @@ static void test_entity_query_all_any_none(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"all\":\"transform\"}}"));
 }
 
+/* Material's name is its create-time label (not a resource reverse-resolve like mesh) — the JSON sink
+   adds it for NT_REF_MATERIAL. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_entity_list_material_label(void) {
+    nt_material_create_desc_t md = {0};
+    md.vs = (nt_resource_t){.id = 1};
+    md.fs = (nt_resource_t){.id = 2};
+    md.label = "hero_mat";
+    nt_material_t mat = nt_material_create(&md);
+    TEST_ASSERT_TRUE(nt_material_valid(mat));
+
+    nt_entity_t e = nt_entity_create();
+    TEST_ASSERT_TRUE(nt_material_comp_add(e));
+    *nt_material_comp_handle(e) = mat;
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"component\":\"material\"}}"));
+    cJSON *r = result_of(root);
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint);
+    cJSON *ent = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(r, "entities"), 0);
+    cJSON *material = cJSON_GetObjectItemCaseSensitive(ent, "material");
+    TEST_ASSERT_TRUE(cJSON_IsObject(material));
+    /* handle is an NT_REF_MATERIAL ref: {ref:"material", id:"0x..", label:"hero_mat"}. */
+    cJSON *handle = cJSON_GetObjectItemCaseSensitive(material, "handle");
+    TEST_ASSERT_TRUE(cJSON_IsObject(handle));
+    TEST_ASSERT_EQUAL_STRING("material", cJSON_GetObjectItemCaseSensitive(handle, "ref")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("hero_mat", cJSON_GetObjectItemCaseSensitive(handle, "label")->valuestring);
+    cJSON_Delete(root);
+}
+
 /* entity.list `limit` is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX: a request for limit > cap clamps to
    the cap (at most cap entries emitted) while `total` stays the honest count. Needs > cap live
    entities, so this re-inits the entity system (and its dependent comp storages, in dep order) with a
@@ -692,6 +730,7 @@ int main(void) {
     RUN_TEST(test_entity_list_total_and_fields);
     RUN_TEST(test_entity_list_component_filter);
     RUN_TEST(test_entity_query_all_any_none);
+    RUN_TEST(test_entity_list_material_label);
     RUN_TEST(test_entity_list_limit_clamps_to_cap);
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);

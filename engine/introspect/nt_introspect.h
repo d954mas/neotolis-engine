@@ -33,6 +33,7 @@ typedef enum {
     NT_REF_ENTITY = 0,
     NT_REF_RESOURCE,
     NT_REF_HANDLE,
+    NT_REF_MATERIAL, /* runtime material handle; the resolving sink adds its create-time label */
 } nt_ref_kind_t;
 
 /* Format-agnostic visitor: describe() emits fields/groups, the concrete sink renders them. field_ref

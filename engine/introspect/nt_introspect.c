@@ -16,6 +16,8 @@ const char *nt_introspect_ref_kind_name(nt_ref_kind_t kind) {
         return "resource";
     case NT_REF_HANDLE:
         return "handle";
+    case NT_REF_MATERIAL:
+        return "material";
     }
     return "ref";
 }
