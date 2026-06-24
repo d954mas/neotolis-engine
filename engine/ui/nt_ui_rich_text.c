@@ -1,6 +1,11 @@
 /* Rich text: run-list SoA build + style-stack composition + builder + full
  * word-wrap/baseline/emit solver. */
 
+/* Markup is UNTRUSTED localization data: a malformed tag/value logs once + degrades
+ * (skip -> visible unstyled text), it never asserts. Distinct messages => distinct lines.
+ * Defined BEFORE any include so nt_log.h (pulled transitively) picks "ui.rich", not the module default. */
+#define NT_LOG_DOMAIN "ui.rich"
+
 #include "ui/nt_ui_rich_text.h"
 
 #include <math.h> /* isfinite (fail-early scale guards) */
@@ -10,6 +15,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "material/nt_material.h" /* nt_material_get_info: assert the image material is the plain u8 path */
 #include "memory/nt_mem_scratch.h"
 #include "renderers/nt_sprite_renderer.h" /* inline-image immediate emit (set_material + emit_region) */
@@ -552,19 +558,20 @@ static uint8_t rich_hex_nibble(char c) {
     return 0xFFU;
 }
 
-/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Asserts on malformed.
- * Returns opaque white on a bad length so the (assert-elided) OFF read can never run past [s,s+n). */
+/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Malformed (untrusted
+ * localization) -> log once + opaque white; the loop never reads past [s,s+n). */
 static uint32_t rich_parse_hex_color(const char *s, uint32_t n) {
-    NT_ASSERT(n == 7U && s[0] == '#' && "rich markup: <color=#hex> must be #RRGGBB");
-    /* HARD length guard (survives NT_ASSERT OFF): the loop below reads s[1..6], so a slice shorter
-     * than 7 would OOB without this. Bail to opaque white instead of dereferencing past `n`. */
     if (n != 7U || s[0] != '#') {
+        NT_LOG_WARN_UNIQUE("rich markup: <color=#hex> must be #RRGGBB, got '%.*s' -- skipped", (int)n, s);
         return 0xFFFFFFFFU;
     }
     uint32_t rgb = 0;
     for (uint32_t i = 1; i < 7U; i++) {
         const uint8_t nib = rich_hex_nibble(s[i]);
-        NT_ASSERT(nib != 0xFFU && "rich markup: malformed hex in <color=#..>");
+        if (nib == 0xFFU) {
+            NT_LOG_WARN_UNIQUE("rich markup: malformed hex in <color=%.*s> -- skipped", (int)n, s);
+            return 0xFFFFFFFFU;
+        }
         rgb = (rgb << 4) | nib;
     }
     const uint8_t r = (uint8_t)((rgb >> 16) & 0xFFU);
@@ -573,14 +580,13 @@ static uint32_t rich_parse_hex_color(const char *s, uint32_t n) {
     return ((uint32_t)0xFFU << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r; /* AABBGGRR */
 }
 
-/* Parse a decimal/float value [s,s+n) (e.g. "1.5"); asserts on a non-numeric body. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + NT_ASSERT validation branches
+/* Parse a decimal/float value [s,s+n) (e.g. "1.5"). Malformed (untrusted localization: empty or a
+ * non-numeric body) -> log once + safe default 0.0F (for amp/speed 0 means "use default"; the scale
+ * paths validate >0 before the builder). Never reads past [s,s+n). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + degrade branches
 static float rich_parse_float(const char *s, uint32_t n) {
-    NT_ASSERT(n > 0U && "rich markup: empty numeric value");
-    /* HARD empty guard (survives NT_ASSERT OFF): n==0 (<scale=>, <fx=wave amp=>) would read s[0] OOB
-     * below. Return a bounded 0.0F -- for amp/speed 0 means "use default" per the <=0 convention; for
-     * scale the push_scale>0 assert is the dev guard. */
     if (n == 0U) {
+        NT_LOG_WARN_UNIQUE("rich markup: empty numeric value -- using 0");
         return 0.0F;
     }
     float sign = 1.0F;
@@ -592,7 +598,10 @@ static float rich_parse_float(const char *s, uint32_t n) {
     float whole = 0.0F;
     bool any = false;
     for (; i < n && s[i] != '.'; i++) {
-        NT_ASSERT(s[i] >= '0' && s[i] <= '9' && "rich markup: non-numeric in value");
+        if (s[i] < '0' || s[i] > '9') {
+            NT_LOG_WARN_UNIQUE("rich markup: non-numeric value '%.*s' -- using 0", (int)n, s);
+            return 0.0F;
+        }
         whole = (whole * 10.0F) + (float)(s[i] - '0');
         any = true;
     }
@@ -600,13 +609,19 @@ static float rich_parse_float(const char *s, uint32_t n) {
     float scale = 1.0F;
     if (i < n && s[i] == '.') {
         for (i++; i < n; i++) {
-            NT_ASSERT(s[i] >= '0' && s[i] <= '9' && "rich markup: non-numeric fraction");
+            if (s[i] < '0' || s[i] > '9') {
+                NT_LOG_WARN_UNIQUE("rich markup: non-numeric value '%.*s' -- using 0", (int)n, s);
+                return 0.0F;
+            }
             scale *= 0.1F;
             frac += (float)(s[i] - '0') * scale;
             any = true;
         }
     }
-    NT_ASSERT(any && "rich markup: numeric value had no digits");
+    if (!any) {
+        NT_LOG_WARN_UNIQUE("rich markup: numeric value '%.*s' had no digits -- using 0", (int)n, s);
+        return 0.0F;
+    }
     return sign * (whole + frac);
 }
 
@@ -639,29 +654,28 @@ static rich_tag_kind_t rich_tag_kind(const char *name, uint32_t n) {
     return RICH_TAG_NONE;
 }
 
-/* Parse a bounded decimal uint8 layer [s,s+n) for <layer=N>. Returns AUTO on malformed/out-of-range
- * (empty, non-digit, or > NT_UI_RICH_LAYER_MAX) -- a hard skip that survives NT_ASSERT OFF (untrusted
- * markup). DEBUG asserts the malformed case so a developer typo traps at parse. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + NT_ASSERT validation branches (mirrors rich_parse_float)
+/* Parse a bounded decimal uint8 layer [s,s+n) for <layer=N>. Malformed/out-of-range (untrusted
+ * markup: empty, non-digit, or > NT_UI_RICH_LAYER_MAX) -> log once + AUTO (per-kind default), never OOB. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + degrade branches (mirrors rich_parse_float)
 static uint8_t rich_parse_layer(const char *s, uint32_t n) {
-    NT_ASSERT(n > 0U && "rich markup: <layer=> needs a value");
     if (n == 0U) {
+        NT_LOG_WARN_UNIQUE("rich markup: <layer=> needs a value -- using AUTO");
         return (uint8_t)NT_UI_RICH_LAYER_AUTO;
     }
     uint32_t v = 0;
     for (uint32_t i = 0; i < n; i++) {
-        NT_ASSERT(s[i] >= '0' && s[i] <= '9' && "rich markup: <layer=N> must be a decimal uint");
         if (s[i] < '0' || s[i] > '9') {
+            NT_LOG_WARN_UNIQUE("rich markup: <layer=%.*s> must be a decimal uint -- using AUTO", (int)n, s);
             return (uint8_t)NT_UI_RICH_LAYER_AUTO; /* non-numeric -> skip, never OOB */
         }
         v = (v * 10U) + (uint32_t)(s[i] - '0');
         if (v > NT_UI_RICH_LAYER_MAX) {
-            v = NT_UI_RICH_LAYER_MAX + 1U; /* saturate; the range assert below fires once */
+            v = NT_UI_RICH_LAYER_MAX + 1U; /* saturate; the range log below fires once */
             break;
         }
     }
-    NT_ASSERT(v <= NT_UI_RICH_LAYER_MAX && "rich markup: <layer=N> exceeds 254 (255 is the AUTO sentinel)");
     if (v > NT_UI_RICH_LAYER_MAX) {
+        NT_LOG_WARN_UNIQUE("rich markup: <layer=%.*s> exceeds 254 (255 is the AUTO sentinel) -- using AUTO", (int)n, s);
         return (uint8_t)NT_UI_RICH_LAYER_AUTO; /* clamp out-of-range to AUTO (per-kind default) */
     }
     return (uint8_t)v;
@@ -701,8 +715,8 @@ static uint8_t rich_parse_valign(const char *s, uint32_t n) {
  * bytes AFTER the region spec, including the leading space(s)). Each space-separated token is
  * `key=value` (key: scale|oy|valign). Writes through valign/oy/scale (left untouched when a key is
  * absent, so the caller's defaults stand). Malformed (no '=', bad float, unknown key/valign) ->
- * NT_ASSERT (fail-early) + a HARD skip that survives NT_ASSERT OFF (no OOB, never loops). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key NT_ASSERT validation (mirrors rich_parse_fx_params)
+ * log once + skip that token (no OOB, never loops; untrusted localization data). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key degrade (mirrors rich_parse_fx_params)
 static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *valign, float *oy, float *scale) {
     uint32_t i = 0;
     while (i < n) {
@@ -724,10 +738,10 @@ static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *va
                 break;
             }
         }
-        NT_ASSERT(eq < tlen && eq > 0U && "rich markup: <img k=v> attr needs key=value");
-        /* HARD guard (survives NT_ASSERT OFF): a token with no '=' leaves eq==tlen, so vvlen below
-         * underflows to UINT_MAX and the value readers run massively OOB. Skip such a token. */
-        if (eq >= tlen) {
+        /* A token with no '=' (eq==tlen) leaves vvlen = tlen-eq-1 underflowing to UINT_MAX, so the
+         * value readers would run massively OOB. Log once + skip such a token (untrusted data). */
+        if (eq >= tlen || eq == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <img k=v> attr needs key=value, got '%.*s' -- skipped", (int)tlen, s + tok);
             continue;
         }
         const char *key = s + tok;
@@ -739,13 +753,13 @@ static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *va
             *oy = rich_parse_float(vv, vvlen);
         } else if (rich_name_eq(key, eq, "valign")) {
             const uint8_t v = rich_parse_valign(vv, vvlen);
-            NT_ASSERT(v != 0xFFU && "rich markup: <img valign=> must be baseline|middle|top|bottom");
-            /* HARD guard (survives NT_ASSERT OFF): unknown keyword -> keep the default valign. */
             if (v != 0xFFU) {
                 *valign = (nt_rich_valign_t)v;
+            } else {
+                NT_LOG_WARN_UNIQUE("rich markup: <img valign=%.*s> must be baseline|middle|top|bottom -- kept default", (int)vvlen, vv);
             }
         } else {
-            NT_ASSERT(false && "rich markup: <img k=v> unknown attr key (use scale|oy|valign)");
+            NT_LOG_WARN_UNIQUE("rich markup: <img k=v> unknown attr key '%.*s' (use scale|oy|valign) -- skipped", (int)eq, key);
         }
     }
 }
@@ -753,15 +767,18 @@ static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *va
 /* Apply a self-closing `<img=...>`: `<img=region/>` -> default atlas; `<img=alias:region/>` ->
  * the tagset alias's atlas. An optional space-separated attr tail (`scale=`/`oy=`/`valign=`) follows
  * the region spec. The region name is always resolved by name (the atlas IS the registry). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + attr-tail + NT_ASSERT validation branches
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + attr-tail + degrade branches
 static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *val, uint32_t vlen) {
-    NT_ASSERT(base != NULL && "rich markup: <img=.../> needs a base style (default_atlas source)");
-    /* HARD guard (survives NT_ASSERT OFF): nt_ui_rich_begin EXPLICITLY allows base==NULL (text-only
-     * markup). An <img> in such markup has no default_atlas to resolve against -> skip, never deref. */
+    /* nt_ui_rich_begin EXPLICITLY allows base==NULL (text-only markup). An <img> in such markup has
+     * no default_atlas to resolve against -> log + skip (untrusted data), never deref. */
     if (base == NULL) {
+        NT_LOG_WARN_UNIQUE("rich markup: <img=%.*s/> needs a base style (no default_atlas) -- skipped", (int)vlen, val);
         return;
     }
-    NT_ASSERT(vlen > 0U && "rich markup: <img=...> needs a region");
+    if (vlen == 0U) {
+        NT_LOG_WARN_UNIQUE("rich markup: <img=...> needs a region -- skipped");
+        return;
+    }
     /* Split the value at the FIRST space into [region_spec, attr_tail]; the tail may be empty. */
     uint32_t region_spec_len = vlen;
     for (uint32_t i = 0; i < vlen; i++) {
@@ -772,9 +789,9 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     }
     const char *attr_tail = val + region_spec_len;
     const uint32_t attr_len = vlen - region_spec_len;
-    NT_ASSERT(region_spec_len > 0U && "rich markup: <img=...> needs a region before any attrs");
-    /* HARD guard (survives NT_ASSERT OFF): an empty region spec (leading space) resolves nothing. */
+    /* An empty region spec (leading space) resolves nothing -> log + skip. */
     if (region_spec_len == 0U) {
+        NT_LOG_WARN_UNIQUE("rich markup: <img=%.*s/> needs a region before any attrs -- skipped", (int)vlen, val);
         return;
     }
     /* Split on a single ':' -> alias:region (within the region spec only). */
@@ -789,31 +806,38 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     const char *region = val;
     uint32_t region_len = region_spec_len;
     if (colon < region_spec_len) {
-        NT_ASSERT(tagset != NULL && "rich markup: <img=alias:..> needs a tagset");
-        /* HARD guard (survives NT_ASSERT OFF): no tagset -> can't resolve the alias -> skip the
-         * image (mirrors the unresolved-name skip below). Plain <img=region/> never reaches here. */
+        /* No tagset -> can't resolve the alias -> log + skip the image (mirrors the unresolved-name
+         * skip below). Plain <img=region/> never reaches here. */
         if (tagset == NULL) {
+            NT_LOG_WARN_UNIQUE("rich markup: <img=%.*s/> alias needs a tagset -- skipped", (int)region_spec_len, val);
             return;
         }
         const uint64_t alias_hash = nt_hash64((const void *)val, colon).value;
-        /* Evaluate the side-effecting lookup OUTSIDE the assert: an OFF build elides the assert's
-         * argument, which would silently skip the atlas write. */
         const bool alias_ok = nt_ui_rich_tagset_lookup_atlas(tagset, alias_hash, &atlas);
-        NT_ASSERT(alias_ok && "rich markup: unknown <img> atlas alias");
-        /* HARD guard (survives NT_ASSERT OFF): unknown alias -> skip the image, never fall back to the
-         * default atlas with the wrong region (mirrors the unresolved-name skip in rich_emit_images). */
+        /* Unknown alias -> log + skip the image, never fall back to the default atlas with the wrong
+         * region (mirrors the unresolved-name skip in rich_emit_images). */
         if (!alias_ok) {
+            NT_LOG_WARN_UNIQUE("rich markup: unknown <img> atlas alias '%.*s' -- skipped", (int)colon, val);
             return;
         }
         region = val + colon + 1;
         region_len = region_spec_len - colon - 1;
-        NT_ASSERT(region_len > 0U && "rich markup: <img=alias:region/> empty region");
+        if (region_len == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <img=%.*s/> has an empty region after the alias -- skipped", (int)region_spec_len, val);
+            return;
+        }
     }
     /* Fallback defaults; the attr tail overrides any key it sets. */
     nt_rich_valign_t valign = NT_RICH_VALIGN_MIDDLE;
     float oy = 0.0F;
     float scale = 1.0F;
     rich_parse_img_attrs(attr_tail, attr_len, &valign, &oy, &scale);
+    /* Validate scale BEFORE the builder: rich_parse_float returns 0.0F on a bad/empty value, and the
+     * builder's own scale>0 assert would TRAP a direct-code 0. For untrusted markup, degrade to 1.0. */
+    if (!(scale > 0.0F) || !isfinite(scale)) {
+        NT_LOG_WARN_UNIQUE("rich markup: <img=%.*s/> scale must be finite > 0 -- using 1.0", (int)vlen, val);
+        scale = 1.0F;
+    }
     const uint64_t region_hash = nt_hash64((const void *)region, region_len).value;
     nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), valign, oy, scale);
 }
@@ -821,26 +845,25 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
 /* `<obj=name/>` self-close: a game-drawn WidgetSpan (measure_fn sizes the box, draw_fn paints it).
  * Name resolved via the tagset using the SAME hash as register_object_tag (nt_hash64_str -> the full
  * name bytes), which equals nt_hash64(val, vlen) here since [val,val+vlen) IS the name. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- mandated OFF-safe hard guards (empty name + unknown/NULL-measure) atop the asserts
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- empty name + unknown/NULL-measure degrade branches
 static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const char *val, uint32_t vlen) {
-    NT_ASSERT(tagset != NULL && "rich markup: <obj=.../> needs a tagset");
-    /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below would deref NULL on
-     * untrusted markup (<obj=x/> with a text-only, tagset-less config). Skip the object. */
+    /* No tagset -> the lookup below would deref NULL on untrusted markup (<obj=x/> with a text-only,
+     * tagset-less config). Log + skip the object. */
     if (tagset == NULL) {
+        NT_LOG_WARN_UNIQUE("rich markup: <obj=%.*s/> needs a tagset -- skipped", (int)vlen, val);
         return;
     }
-    /* HARD guard (survives NT_ASSERT OFF): empty name resolves nothing -> never push a bogus object. */
+    /* Empty name resolves nothing -> never push a bogus object. */
     if (vlen == 0U) {
-        NT_ASSERT(false && "rich markup: <obj/> needs a name");
+        NT_LOG_WARN_UNIQUE("rich markup: <obj/> needs a name -- skipped");
         return;
     }
     nt_ui_rich_tagset_object_t obj = {0};
-    /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the side effect. */
     const bool obj_ok = nt_ui_rich_tagset_lookup_object(tagset, nt_hash64((const void *)val, vlen).value, &obj);
-    NT_ASSERT(obj_ok && "rich markup: unknown <obj>");
-    /* HARD guard: unknown name or a (defensively) NULL measure_fn -> skip; nt_ui_rich_object asserts
+    /* Unknown name or a (defensively) NULL measure_fn -> log + skip; nt_ui_rich_object asserts
      * measure_fn != NULL, but register_object_tag rejects NULL measure so this only fires on miss. */
     if (!obj_ok || obj.measure_fn == NULL) {
+        NT_LOG_WARN_UNIQUE("rich markup: unknown <obj=%.*s/> -- skipped", (int)vlen, val);
         return;
     }
     nt_ui_rich_object(ctx, obj.measure_fn, obj.draw_fn, obj.user_data);
@@ -849,8 +872,8 @@ static void rich_parse_obj(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
 /* Parse the param tail of `<fx=name amp=8 speed=3>` ([s,s+n) = the bytes AFTER the name, including
  * the leading space(s)). Each space-separated token is `key=value` (key: amp|speed; value: float).
  * Writes into *out; returns true if >=1 param was set. Malformed (bad float, unknown key, no '=')
- * -> NT_ASSERT (fail-early). An empty/all-space tail sets nothing and returns false. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key NT_ASSERT validation
+ * -> log once + skip that token (untrusted localization). An empty/all-space tail returns false. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key degrade
 static bool rich_parse_fx_params(const char *s, uint32_t n, nt_ui_rich_fx_params_t *out) {
     bool any = false;
     uint32_t i = 0;
@@ -874,12 +897,11 @@ static bool rich_parse_fx_params(const char *s, uint32_t n, nt_ui_rich_fx_params
                 break;
             }
         }
-        NT_ASSERT(eq < tlen && eq > 0U && "rich markup: <fx=name k=v> param needs key=value");
-        /* HARD guard (survives NT_ASSERT OFF): a token with no '=' (<fx=wave amp>) leaves eq==tlen, so
-         * vvlen = tlen-eq-1 underflows to UINT_MAX and rich_parse_float(vv, UINT_MAX) reads massively
-         * OOB. eq==0 (<fx=wave =3>) gives an empty key that matches nothing -> the unknown-key assert,
-         * harmless. Skip a token that isn't key=value (i already sits at the separator/end). */
-        if (eq >= tlen) {
+        /* A token with no '=' (<fx=wave amp>) leaves eq==tlen, so vvlen = tlen-eq-1 underflows to
+         * UINT_MAX and rich_parse_float(vv, UINT_MAX) reads massively OOB. eq==0 (<fx=wave =3>) gives
+         * an empty key. Log once + skip a token that isn't key=value (untrusted data). */
+        if (eq >= tlen || eq == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <fx=name k=v> param needs key=value, got '%.*s' -- skipped", (int)tlen, s + tok);
             continue;
         }
         const char *key = s + tok;
@@ -887,21 +909,36 @@ static bool rich_parse_fx_params(const char *s, uint32_t n, nt_ui_rich_fx_params
         const uint32_t vvlen = tlen - eq - 1U;
         if (rich_name_eq(key, eq, "amp")) {
             out->amp = rich_parse_float(vv, vvlen);
+            any = true;
         } else if (rich_name_eq(key, eq, "speed")) {
             out->speed = rich_parse_float(vv, vvlen);
+            any = true;
         } else {
-            NT_ASSERT(false && "rich markup: <fx=name k=v> unknown param key (use amp|speed)");
+            NT_LOG_WARN_UNIQUE("rich markup: <fx=name k=v> unknown param key '%.*s' (use amp|speed) -- skipped", (int)eq, key);
         }
-        any = true;
     }
     return any;
 }
 
-/* Dispatch one OPEN tag `<name=value>` (value may be empty) onto the builder + tag stack. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- tag-kind switch + per-tag NT_ASSERT validation branches
+/* Dispatch one OPEN tag `<name=value>` (value may be empty) onto the builder + tag stack. Untrusted
+ * localization: an unknown name / unresolved value / missing value LOGS once + skips the tag (pushes
+ * no style); the matching close then no-ops, preserving the enclosing styles. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- tag-kind switch + per-tag degrade branches
 static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, const nt_ui_rich_tagset_t *tagset, const char *name, uint32_t nlen, const char *val, uint32_t vlen) {
     const rich_tag_kind_t kind = rich_tag_kind(name, nlen);
-    NT_ASSERT(kind != RICH_TAG_NONE && "rich markup: unknown tag");
+    /* Unknown tag name -> log + skip WITHOUT pushing the tag stack (so a later matching close, itself
+     * unknown, also no-ops). Never an assert: tag names come from untrusted markup. */
+    if (kind == RICH_TAG_NONE) {
+        NT_LOG_WARN_UNIQUE("rich markup: unknown tag '%.*s' -- skipped", (int)nlen, name);
+        return;
+    }
+    /* HARD cap (checked BEFORE the style push): untrusted nesting must not write past open_stack[], and
+     * the matching builder-style push must not over-cap rich_push_copy (whose assert is a code
+     * invariant we keep). Skip the whole over-deep tag -- no style push, no tag-stack record. */
+    if (ts_stack->depth >= NT_UI_RICH_PARSE_TAG_DEPTH) {
+        NT_LOG_WARN_UNIQUE("rich markup: tag nesting too deep (> %u) -- tag '%.*s' skipped", (unsigned)NT_UI_RICH_PARSE_TAG_DEPTH, (int)nlen, name);
+        return;
+    }
     /* Set true ONLY where a style is actually pushed below. A named-tag miss (unknown font/color/fx)
      * or a tagset-less skip leaves it false so the matching close does NOT pop the enclosing style. */
     bool pushed_style = false;
@@ -915,44 +952,52 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         pushed_style = true;
         break;
     case RICH_TAG_COLOR:
-        NT_ASSERT(vlen > 0U && "rich markup: <color=..> needs a value");
+        if (vlen == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <color=> needs a value -- skipped");
+            break;
+        }
         if (val[0] == '#') {
             nt_ui_rich_push_color(ctx, rich_parse_hex_color(val, vlen));
             pushed_style = true;
         } else {
-            NT_ASSERT(tagset != NULL && "rich markup: named <color> needs a tagset");
-            /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
+            /* No tagset -> the named-color lookup would deref NULL. Log + skip. */
             if (tagset == NULL) {
+                NT_LOG_WARN_UNIQUE("rich markup: named <color=%.*s> needs a tagset -- skipped", (int)vlen, val);
                 break;
             }
             uint32_t abgr = 0;
-            /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the write. */
             const bool color_ok = nt_ui_rich_tagset_lookup_color(tagset, nt_hash64((const void *)val, vlen).value, &abgr);
-            NT_ASSERT(color_ok && "rich markup: unknown color name");
-            /* HARD guard (survives NT_ASSERT OFF): unknown name -> never push the unresolved 0 colour. */
+            /* Unknown name -> never push the unresolved 0 colour. Log + skip. */
             if (!color_ok) {
+                NT_LOG_WARN_UNIQUE("rich markup: unknown color name '%.*s' -- skipped", (int)vlen, val);
                 break;
             }
             nt_ui_rich_push_color(ctx, abgr);
             pushed_style = true;
         }
         break;
-    case RICH_TAG_SCALE:
-        nt_ui_rich_push_scale(ctx, rich_parse_float(val, vlen));
+    case RICH_TAG_SCALE: {
+        /* Validate BEFORE the builder: rich_parse_float returns 0.0F on bad/empty, and push_scale's
+         * own >0 assert would TRAP a direct-code 0. For untrusted markup, degrade to identity 1.0. */
+        float mult = rich_parse_float(val, vlen);
+        if (!(mult > 0.0F) || !isfinite(mult)) {
+            NT_LOG_WARN_UNIQUE("rich markup: <scale=%.*s> must be finite > 0 -- using 1.0", (int)vlen, val);
+            mult = 1.0F;
+        }
+        nt_ui_rich_push_scale(ctx, mult);
         pushed_style = true;
         break;
+    }
     case RICH_TAG_FONT: {
-        NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <font=name> needs a tagset");
-        /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
-        if (tagset == NULL) {
+        if (vlen == 0U || tagset == NULL) {
+            NT_LOG_WARN_UNIQUE("rich markup: <font=%.*s> needs a tagset + name -- skipped", (int)vlen, val);
             break;
         }
         nt_font_t fam[4];
-        /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the family write. */
         const bool font_ok = nt_ui_rich_tagset_lookup_font(tagset, nt_hash64((const void *)val, vlen).value, fam);
-        NT_ASSERT(font_ok && "rich markup: unknown font name");
-        /* HARD guard (survives NT_ASSERT OFF): on a miss fam[4] is UNINITIALISED -> skip, never push garbage. */
+        /* On a miss fam[4] is UNINITIALISED -> skip, never push garbage. Log + skip. */
         if (!font_ok) {
+            NT_LOG_WARN_UNIQUE("rich markup: unknown font name '%.*s' -- skipped", (int)vlen, val);
             break;
         }
         nt_ui_rich_push_font(ctx, fam);
@@ -960,22 +1005,37 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         break;
     }
     case RICH_TAG_LINK: {
-        NT_ASSERT(vlen > 0U && "rich markup: <link=id> needs an id");
+        if (vlen == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <link=> needs an id -- skipped");
+            break;
+        }
         /* No nested links (HTML's no-nested-anchor rule): pending_link is a single scalar, so an inner
          * </link> would zero the outer's id -- text between the inner and outer close would silently
-         * lose the enclosing link. Reject loudly instead of composing wrong. */
+         * lose the enclosing link. Log + skip the inner link rather than compose wrong. */
+        bool nested = false;
         for (uint32_t d = 0; d < ts_stack->depth; d++) {
-            NT_ASSERT(ts_stack->open_stack[d].kind != RICH_TAG_LINK && "rich markup: nested <link> is not allowed");
+            if (ts_stack->open_stack[d].kind == RICH_TAG_LINK) {
+                nested = true;
+                break;
+            }
+        }
+        if (nested) {
+            NT_LOG_WARN_UNIQUE("rich markup: nested <link=%.*s> is not allowed -- skipped", (int)vlen, val);
+            break;
         }
         const uint32_t link_id = nt_hash32(val, vlen).value;
-        NT_ASSERT(link_id != 0U && "rich markup: <link=name> hashed to 0 (the none sentinel)");
+        /* A name that hashes to 0 collides with the none sentinel -> drop the link rather than mark a
+         * span as "no link". Log + skip (the text stays, just non-clickable). */
+        if (link_id == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <link=%.*s> hashed to 0 (the none sentinel) -- skipped", (int)vlen, val);
+            break;
+        }
         nt_ui_rich_link(ctx, link_id);
         break;
     }
     case RICH_TAG_EFFECT: {
-        NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <fx=name> needs a tagset");
-        /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
-        if (tagset == NULL) {
+        if (vlen == 0U || tagset == NULL) {
+            NT_LOG_WARN_UNIQUE("rich markup: <fx=%.*s> needs a tagset + name -- skipped", (int)vlen, val);
             break;
         }
         /* The value is `name` followed by space-separated `key=value` params (keys: amp, speed). Split
@@ -987,24 +1047,28 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
                 break;
             }
         }
-        NT_ASSERT(nlen_fx > 0U && "rich markup: <fx= ..> empty effect name");
+        if (nlen_fx == 0U) {
+            NT_LOG_WARN_UNIQUE("rich markup: <fx=%.*s> empty effect name -- skipped", (int)vlen, val);
+            break;
+        }
         nt_ui_rich_fx_params_t params = {0};
         const bool has_params = rich_parse_fx_params(val + nlen_fx, vlen - nlen_fx, &params);
 
         uint8_t effect_id = 0;
         nt_ui_rich_fx_fn fn = NULL;
         void *fx_user = NULL;
-        /* The lookup is the SOLE writer of effect_id/fn/fx_user -- evaluate it OUTSIDE the assert so an
-         * OFF build (which elides the assert arg) still resolves <fx=name> instead of silently no-effect. */
         const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, nlen_fx).value, &effect_id, &fn, &fx_user);
-        NT_ASSERT(fx_ok && "rich markup: unknown effect name");
-        /* HARD guard (survives NT_ASSERT OFF): unknown name -> never push effect_id 0 as a real effect. */
+        /* Unknown name -> never push effect_id 0 as a real effect. Log + skip. */
         if (!fx_ok) {
+            NT_LOG_WARN_UNIQUE("rich markup: unknown effect name '%.*s' -- skipped", (int)nlen_fx, val);
             break;
         }
         if (fn != NULL) {
-            /* Markup k=v params apply to STOCK effects only: a custom fn carries its own user_data. */
-            NT_ASSERT(!has_params && "rich markup: <fx=name k=v> params apply to STOCK effects only (custom fn carries its own user_data)");
+            /* Markup k=v params apply to STOCK effects only: a custom fn carries its own user_data.
+             * Log + push the custom fn IGNORING the params (the fn is valid, only the params don't apply). */
+            if (has_params) {
+                NT_LOG_WARN_UNIQUE("rich markup: <fx=%.*s k=v> params apply to STOCK effects only -- params ignored", (int)nlen_fx, val);
+            }
             nt_ui_rich_push_effect_fn(ctx, fn, fx_user); /* custom resolves before stock */
         } else if (has_params) {
             nt_ui_rich_push_effect_ex(ctx, effect_id, &params);
@@ -1015,42 +1079,51 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         break;
     }
     case RICH_TAG_LAYER:
-        NT_ASSERT(vlen > 0U && "rich markup: <layer=N> needs a value");
+        /* <layer=> with no value -> rich_parse_layer logs + returns AUTO (a valid no-op band). Still a
+         * style push (AUTO override) so the matching close balances; no separate empty-value skip. */
         nt_ui_rich_push_layer(ctx, rich_parse_layer(val, vlen));
         pushed_style = true;
         break;
     case RICH_TAG_NONE:
     default:
+        /* Unreachable: RICH_TAG_NONE is handled at the top. A genuine CODE invariant -> keep the assert. */
         NT_ASSERT(false && "rich markup: unreachable tag kind");
         break;
     }
-    /* link is a pending property, not a stack push -- closed by </link> clearing the pending id. */
-    NT_ASSERT(ts_stack->depth < NT_UI_RICH_PARSE_TAG_DEPTH && "rich markup: tag nesting too deep");
-    /* HARD cap (survives NT_ASSERT OFF): untrusted nesting must not write past open_stack[]. */
-    if (ts_stack->depth >= NT_UI_RICH_PARSE_TAG_DEPTH) {
-        return;
-    }
+    /* link is a pending property, not a stack push -- closed by </link> clearing the pending id.
+     * depth < NT_UI_RICH_PARSE_TAG_DEPTH is guaranteed by the top-of-function cap, so this record is
+     * always in-bounds and stays balanced with the builder style stack. */
     ts_stack->open_stack[ts_stack->depth].kind = kind;
     ts_stack->open_stack[ts_stack->depth].pushed_style = pushed_style;
     ts_stack->depth++;
 }
 
-/* Dispatch one CLOSE tag `</name>` -- must match the innermost open tag. */
+/* Dispatch one CLOSE tag `</name>` -- should match the innermost open tag. Untrusted localization:
+ * an unknown close name, an orphan close (no open), or a mismatched close LOGS once + no-ops (never
+ * an assert, never an OOB), so enclosing styles are preserved. */
 static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, const char *name, uint32_t nlen) {
     const rich_tag_kind_t kind = rich_tag_kind(name, nlen);
-    NT_ASSERT(kind != RICH_TAG_NONE && "rich markup: unknown close tag");
-    NT_ASSERT(ts_stack->depth > 0U && "rich markup: close tag with no open");
-    /* HARD underflow guard (survives NT_ASSERT OFF): an orphan close (</b> with no open) would do
-     * --depth on depth==0 -> wraps to UINT_MAX -> open_stack[UINT_MAX] OOB read. Bail before decrement. */
+    if (kind == RICH_TAG_NONE) {
+        NT_LOG_WARN_UNIQUE("rich markup: unknown close tag '</%.*s>' -- skipped", (int)nlen, name);
+        return;
+    }
+    /* An orphan close (</b> with no open) would do --depth on depth==0 -> wraps to UINT_MAX ->
+     * open_stack[UINT_MAX] OOB. Log + bail before the decrement. */
     if (ts_stack->depth == 0U) {
+        NT_LOG_WARN_UNIQUE("rich markup: close tag '</%.*s>' with no open -- skipped", (int)nlen, name);
         return;
     }
     const rich_tag_open_t top = ts_stack->open_stack[--ts_stack->depth];
-    NT_ASSERT(top.kind == kind && "rich markup: mismatched close tag");
+    /* Mismatched close (e.g. <b>..</i>): the tag structure is malformed data. We already popped the
+     * tag stack (the </i> closes the <b> slot), but balance the BUILDER on what the OPEN actually
+     * pushed (top), not on the close kind -- never an underflow-pop. Log it. */
+    if (top.kind != kind) {
+        NT_LOG_WARN_UNIQUE("rich markup: mismatched close '</%.*s>' -- closing the open tag instead", (int)nlen, name);
+    }
     /* Decide the pop on what the matching OPEN actually did, not the close tag's kind. <link> opens
      * as a pending field (no style entry) -> clear it. A named-tag MISS (unknown font/color/fx) or a
      * tagset-less skip opened WITHOUT a style push -> top.pushed_style is false -> pop nothing, or the
-     * close would pop the enclosing style (e.g. <b><font=typo>x</font>y</b> would lose y's bold in OFF).
+     * close would pop the enclosing style (e.g. <b><font=typo>x</font>y</b> would lose y's bold).
      * Pop ONLY when the open really pushed a style. For well-formed markup this matches the old path. */
     if (top.kind == RICH_TAG_LINK) {
         nt_ui_rich_link(ctx, 0U); /* clear the pending link id */
@@ -1059,17 +1132,25 @@ static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, con
     }
 }
 
-/* Assert a literal text segment is well-formed UTF-8: a localized/interpolated
- * string with a corrupt byte sequence traps at parse rather than feeding raw bytes downstream.
- * Bounded by n -- a trailing incomplete sequence (state != ACCEPT at the end) also asserts. */
-static void rich_assert_valid_utf8(const char *buf, uint32_t n) {
+/* Validate a literal text segment is well-formed UTF-8. A localized/interpolated string with a corrupt
+ * byte sequence is UNTRUSTED data: log once + report the segment must be SKIPPED (caller drops it),
+ * never feeding raw invalid bytes downstream. Bounded by n -- a trailing incomplete sequence
+ * (state != ACCEPT at the end) is also invalid. Returns true iff [buf,buf+n) is valid UTF-8. */
+static bool rich_text_segment_valid_utf8(const char *buf, uint32_t n) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t cp = 0;
     for (uint32_t i = 0; i < n; i++) {
         nt_utf8_decode(&state, &cp, (uint8_t)buf[i]);
-        NT_ASSERT(state != NT_UTF8_REJECT && "rich markup: invalid UTF-8 in text");
+        if (state == NT_UTF8_REJECT) {
+            NT_LOG_WARN_UNIQUE("rich markup: invalid UTF-8 in text -- segment skipped");
+            return false;
+        }
     }
-    NT_ASSERT(state == NT_UTF8_ACCEPT && "rich markup: truncated UTF-8 sequence in text");
+    if (state != NT_UTF8_ACCEPT) {
+        NT_LOG_WARN_UNIQUE("rich markup: truncated UTF-8 sequence in text -- segment skipped");
+        return false;
+    }
+    return true;
 }
 
 /* Expected total byte length of the UTF-8 sequence a lead byte begins (0 = not a lead byte). */
@@ -1091,7 +1172,7 @@ static uint32_t rich_utf8_seq_len(uint8_t lead) {
 
 /* Largest m <= n such that buf[0,m) ends on a COMPLETE UTF-8 codepoint boundary. A buffer-full
  * truncation can sever a multi-byte sequence mid-codepoint; trimming the partial tail keeps the
- * flushed run valid UTF-8 (else rich_assert_valid_utf8 TRAPS in FULL / feeds invalid bytes in OFF). */
+ * flushed run valid UTF-8 (else rich_text_segment_valid_utf8 would log+drop an otherwise-valid run). */
 static uint32_t rich_utf8_complete_prefix(const char *buf, uint32_t n) {
     uint32_t m = n;
     while (m > 0U && ((uint8_t)buf[m - 1U] & 0xC0U) == 0x80U) {
@@ -1128,9 +1209,8 @@ static void rich_flush_text(nt_ui_rich_state_t *st, uint32_t *seg_off) {
         st->text_len = *seg_off + kept;
         n = kept;
     }
-    if (n > 0U) {
-        rich_assert_valid_utf8(st->text + *seg_off, n);
-        rich_text_finalize_run(st, *seg_off, n);
+    if (n > 0U && rich_text_segment_valid_utf8(st->text + *seg_off, n)) {
+        rich_text_finalize_run(st, *seg_off, n); /* invalid UTF-8 -> skip the segment (logged), don't append */
     }
     *seg_off = st->text_len;
 }
@@ -1164,24 +1244,23 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
         }
         /* A '<' begins a tag. Flush any pending literal text first. */
         rich_flush_text(st, &seg_off);
-        /* Find the matching '>' (bounded by len -> a non-terminating '<' asserts, never loops). */
+        /* Find the matching '>' (bounded by len -> a non-terminating '<' stops, never loops). */
         size_t close = i + 1U;
         while (close < len && markup[close] != '>') {
             close++;
         }
-        /* HARD stop (survives NT_ASSERT OFF): no '>' before len -> body would start at markup+len and
-         * body[0] would read 1 byte OOB. Stop the tokenizer without dereferencing body. */
+        /* No '>' before len -> body would start at markup+len and body[0] would read 1 byte OOB.
+         * Untrusted localization: log + stop the tokenizer without dereferencing body. */
         if (close >= len) {
-            NT_ASSERT(false && "rich markup: unterminated tag (no '>')");
+            NT_LOG_WARN_UNIQUE("rich markup: unterminated tag (no '>') -- truncated");
             break;
         }
 
         const char *body = markup + i + 1U; /* between '<' and '>' */
         uint32_t blen = (uint32_t)(close - (i + 1U));
-        /* HARD guard: an empty `<>` has blen==0; body[0] below would read the '>' (harmless) but the
-         * tag is meaningless. Skip it past the '>' without dispatching, so OFF builds stay bounded. */
+        /* An empty `<>` is meaningless. Log + skip it past the '>' without dispatching. */
         if (blen == 0U) {
-            NT_ASSERT(false && "rich markup: empty tag <>");
+            NT_LOG_WARN_UNIQUE("rich markup: empty tag <> -- skipped");
             i = close + 1U;
             continue;
         }
@@ -1213,8 +1292,8 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
                 } else if (rich_name_eq(name, nlen, "obj")) {
                     rich_parse_obj(ctx, tagset, val, vlen);
                 } else {
-                    /* HARD skip (survives OFF): any other self-closing name is unsupported. */
-                    NT_ASSERT(false && "rich markup: only <img=.../> or <obj=.../> self-close");
+                    /* Any other self-closing name is unsupported markup -> log + skip. */
+                    NT_LOG_WARN_UNIQUE("rich markup: only <img=.../> or <obj=.../> self-close, got '%.*s' -- skipped", (int)nlen, name);
                 }
             } else {
                 rich_open_tag(ctx, &ts_stack, tagset, name, nlen, val, vlen);
@@ -1224,7 +1303,12 @@ void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, c
     }
     /* Flush the trailing literal text. */
     rich_flush_text(st, &seg_off);
-    NT_ASSERT(ts_stack.depth == 0U && "rich markup: unclosed tag(s) at end of string");
+    /* Unclosed tag(s) at end of string: untrusted localization left the tag stack non-empty. Each run
+     * already captured its composed style at append time (nt_ui_rich_end tolerates unbalanced pushes),
+     * so this is harmless -> log once + continue. */
+    if (ts_stack.depth != 0U) {
+        NT_LOG_WARN_UNIQUE("rich markup: %u unclosed tag(s) at end of string -- ignored", (unsigned)ts_stack.depth);
+    }
     nt_ui_rich_end(ctx);
 }
 // #endregion
