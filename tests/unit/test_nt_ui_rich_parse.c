@@ -325,6 +325,121 @@ static void parse_img_no_alias(const char *m) {
 }
 static void test_parse_img_unknown_alias_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_img_no_alias("<img=nope:region/>")); }
 
+/* (img-attrs) markup `<img=region scale=1.8 oy=-4 valign=middle/>` produces a run BYTE-IDENTICAL to the
+ * builder nt_ui_rich_image(ref, MIDDLE, -4, 1.8): same kind, same region ref, same scale/oy/valign. */
+static void test_parse_img_attrs_match_builder(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+
+    /* BUILDER: a single inline image with explicit scale/oy/valign. */
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_image(s_fx.ctx, nt_atlas_ref(s_fx.atlas.handle, h("heart")), NT_RICH_VALIGN_MIDDLE, -4.0F, 1.8F);
+    nt_ui_rich_end(s_fx.ctx);
+
+    const uint32_t b_runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, b_runs, "builder: one <img> -> one run");
+    const nt_atlas_region_ref_t b_ref = nt_ui_rich_test_run_image_ref(s_fx.ctx, 0);
+    const nt_rich_valign_t b_valign = nt_ui_rich_test_run_image_valign(s_fx.ctx, 0);
+    /* The bit-pattern of the run's scale/oy: byte-identity means the SAME float bits, so compare ints
+     * (UNITY_EXCLUDE_FLOAT precludes TEST_ASSERT_EQUAL_FLOAT). */
+    uint32_t b_scale_bits = 0;
+    uint32_t b_oy_bits = 0;
+    {
+        const float bs = nt_ui_rich_test_run_image_scale(s_fx.ctx, 0);
+        const float bo = nt_ui_rich_test_run_image_offset_y(s_fx.ctx, 0);
+        memcpy(&b_scale_bits, &bs, sizeof bs);
+        memcpy(&b_oy_bits, &bo, sizeof bo);
+    }
+
+    /* PARSER: byte-identical markup with the attr tail. */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    const char *m = "<img=heart scale=1.8 oy=-4 valign=middle/>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+
+    const uint32_t p_runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b_runs, p_runs, "parser run count == builder");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_RICH_ATOM_IMAGE, nt_ui_rich_test_run_kind(s_fx.ctx, 0), "parser run is an IMAGE");
+    const nt_atlas_region_ref_t p_ref = nt_ui_rich_test_run_image_ref(s_fx.ctx, 0);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b_ref.atlas.id, p_ref.atlas.id, "parser image atlas == builder");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b_ref.region, p_ref.region, "parser image region == builder");
+    uint32_t p_scale_bits = 0;
+    uint32_t p_oy_bits = 0;
+    {
+        const float ps = nt_ui_rich_test_run_image_scale(s_fx.ctx, 0);
+        const float po = nt_ui_rich_test_run_image_offset_y(s_fx.ctx, 0);
+        memcpy(&p_scale_bits, &ps, sizeof ps);
+        memcpy(&p_oy_bits, &po, sizeof po);
+    }
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(b_scale_bits, p_scale_bits, "parser image scale bits == builder (1.8)");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(b_oy_bits, p_oy_bits, "parser image oy bits == builder (-4)");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)b_valign, (uint8_t)nt_ui_rich_test_run_image_valign(s_fx.ctx, 0), "parser image valign == builder (MIDDLE)");
+}
+
+/* (img-attrs) a bare <img=heart/> (no attr tail) keeps the historical defaults: scale=1, oy=0, MIDDLE. */
+static void test_parse_img_no_attrs_defaults(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    const char *m = "<img=heart/>";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "bare <img=heart/> -> one run");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_RICH_ATOM_IMAGE, nt_ui_rich_test_run_kind(s_fx.ctx, 0), "bare <img> run is an IMAGE");
+    uint32_t scale_bits = 0;
+    uint32_t oy_bits = 0;
+    const float one = 1.0F;
+    const float zero = 0.0F;
+    uint32_t one_bits = 0;
+    uint32_t zero_bits = 0;
+    {
+        const float s = nt_ui_rich_test_run_image_scale(s_fx.ctx, 0);
+        const float o = nt_ui_rich_test_run_image_offset_y(s_fx.ctx, 0);
+        memcpy(&scale_bits, &s, sizeof s);
+        memcpy(&oy_bits, &o, sizeof o);
+        memcpy(&one_bits, &one, sizeof one);
+        memcpy(&zero_bits, &zero, sizeof zero);
+    }
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(one_bits, scale_bits, "bare <img> default scale == 1");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(zero_bits, oy_bits, "bare <img> default oy == 0");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_RICH_VALIGN_MIDDLE, (uint8_t)nt_ui_rich_test_run_image_valign(s_fx.ctx, 0), "bare <img> default valign == MIDDLE");
+}
+
+/* (img-attrs) a malformed attr float (<img=heart scale=abc/>) -> NT_ASSERT (fail-early). In OFF the
+ * rich_parse_float hard path returns a bounded 0.0F (the rich_image scale>0 assert is the dev guard);
+ * neither path reads OOB. */
+static void test_parse_img_bad_attr_float_asserts(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=abc/>", 22U));
+}
+
+/* (img-attrs) an unknown valign keyword (<img=heart valign=sideways/>) -> NT_ASSERT; OFF keeps MIDDLE. */
+static void test_parse_img_bad_valign_asserts(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart valign=sideways/>", 28U));
+}
+
+/* (img-attrs) an unknown attr key (<img=heart bogus=3/>) -> NT_ASSERT. */
+static void test_parse_img_unknown_attr_key_asserts(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart bogus=3/>", 20U));
+}
+
 /* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: each <b> pushes BOTH the parser
  * tag stack (NT_UI_RICH_PARSE_TAG_DEPTH) and the builder style stack (now PARSE_TAG_DEPTH+1); the
  * parser tag cap (the lower of the two) trips first. 40 > either cap, so the assert fires. */
@@ -713,6 +828,11 @@ int main(void) {
     RUN_TEST(test_parse_font_null_tagset_asserts);
     RUN_TEST(test_parse_fx_null_tagset_asserts);
     RUN_TEST(test_parse_img_unknown_alias_asserts);
+    RUN_TEST(test_parse_img_attrs_match_builder);
+    RUN_TEST(test_parse_img_no_attrs_defaults);
+    RUN_TEST(test_parse_img_bad_attr_float_asserts);
+    RUN_TEST(test_parse_img_bad_valign_asserts);
+    RUN_TEST(test_parse_img_unknown_attr_key_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
     RUN_TEST(test_parse_mixed_tag_stack_sync);

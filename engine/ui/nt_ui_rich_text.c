@@ -666,15 +666,101 @@ typedef struct {
     uint32_t depth;
 } rich_tag_stack_t;
 
+/* Map an <img valign=> keyword to its enum; 0xFF on unknown so the caller can hard-skip (OFF-safe). */
+static uint8_t rich_parse_valign(const char *s, uint32_t n) {
+    if (rich_name_eq(s, n, "baseline")) {
+        return (uint8_t)NT_RICH_VALIGN_BASELINE;
+    }
+    if (rich_name_eq(s, n, "middle")) {
+        return (uint8_t)NT_RICH_VALIGN_MIDDLE;
+    }
+    if (rich_name_eq(s, n, "top")) {
+        return (uint8_t)NT_RICH_VALIGN_TOP;
+    }
+    if (rich_name_eq(s, n, "bottom")) {
+        return (uint8_t)NT_RICH_VALIGN_BOTTOM;
+    }
+    return 0xFFU;
+}
+
+/* Parse the optional attribute tail of `<img=region scale=1.8 oy=-4 valign=middle/>` ([s,s+n) = the
+ * bytes AFTER the region spec, including the leading space(s)). Each space-separated token is
+ * `key=value` (key: scale|oy|valign). Writes through valign/oy/scale (left untouched when a key is
+ * absent, so the caller's defaults stand). Malformed (no '=', bad float, unknown key/valign) ->
+ * NT_ASSERT (fail-early) + a HARD skip that survives NT_ASSERT OFF (no OOB, never loops). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded token scan + per-key NT_ASSERT validation (mirrors rich_parse_fx_params)
+static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *valign, float *oy, float *scale) {
+    uint32_t i = 0;
+    while (i < n) {
+        while (i < n && s[i] == ' ') { /* skip the separator run */
+            i++;
+        }
+        if (i >= n) {
+            break;
+        }
+        const uint32_t tok = i;
+        while (i < n && s[i] != ' ') { /* span one key=value token */
+            i++;
+        }
+        const uint32_t tlen = i - tok;
+        uint32_t eq = tlen;
+        for (uint32_t k = 0; k < tlen; k++) {
+            if (s[tok + k] == '=') {
+                eq = k;
+                break;
+            }
+        }
+        NT_ASSERT(eq < tlen && eq > 0U && "rich markup: <img k=v> attr needs key=value");
+        /* HARD guard (survives NT_ASSERT OFF): a token with no '=' leaves eq==tlen, so vvlen below
+         * underflows to UINT_MAX and the value readers run massively OOB. Skip such a token. */
+        if (eq >= tlen) {
+            continue;
+        }
+        const char *key = s + tok;
+        const char *vv = s + tok + eq + 1U;
+        const uint32_t vvlen = tlen - eq - 1U;
+        if (rich_name_eq(key, eq, "scale")) {
+            *scale = rich_parse_float(vv, vvlen);
+        } else if (rich_name_eq(key, eq, "oy")) {
+            *oy = rich_parse_float(vv, vvlen);
+        } else if (rich_name_eq(key, eq, "valign")) {
+            const uint8_t v = rich_parse_valign(vv, vvlen);
+            NT_ASSERT(v != 0xFFU && "rich markup: <img valign=> must be baseline|middle|top|bottom");
+            /* HARD guard (survives NT_ASSERT OFF): unknown keyword -> keep the default valign. */
+            if (v != 0xFFU) {
+                *valign = (nt_rich_valign_t)v;
+            }
+        } else {
+            NT_ASSERT(false && "rich markup: <img k=v> unknown attr key (use scale|oy|valign)");
+        }
+    }
+}
+
 /* Apply a self-closing `<img=...>`: `<img=region/>` -> default atlas; `<img=alias:region/>` ->
- * the tagset alias's atlas. The region name is always resolved by name (the atlas IS the registry). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + NT_ASSERT validation branches
+ * the tagset alias's atlas. An optional space-separated attr tail (`scale=`/`oy=`/`valign=`) follows
+ * the region spec. The region name is always resolved by name (the atlas IS the registry). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + attr-tail + NT_ASSERT validation branches
 static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *val, uint32_t vlen) {
     NT_ASSERT(base != NULL && "rich markup: <img=.../> needs a base style (default_atlas source)");
     NT_ASSERT(vlen > 0U && "rich markup: <img=...> needs a region");
-    /* Split on a single ':' -> alias:region. */
-    uint32_t colon = vlen;
+    /* Split the value at the FIRST space into [region_spec, attr_tail]; the tail may be empty. */
+    uint32_t region_spec_len = vlen;
     for (uint32_t i = 0; i < vlen; i++) {
+        if (val[i] == ' ') {
+            region_spec_len = i;
+            break;
+        }
+    }
+    const char *attr_tail = val + region_spec_len;
+    const uint32_t attr_len = vlen - region_spec_len;
+    NT_ASSERT(region_spec_len > 0U && "rich markup: <img=...> needs a region before any attrs");
+    /* HARD guard (survives NT_ASSERT OFF): an empty region spec (leading space) resolves nothing. */
+    if (region_spec_len == 0U) {
+        return;
+    }
+    /* Split on a single ':' -> alias:region (within the region spec only). */
+    uint32_t colon = region_spec_len;
+    for (uint32_t i = 0; i < region_spec_len; i++) {
         if (val[i] == ':') {
             colon = i;
             break;
@@ -682,8 +768,8 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
     }
     nt_resource_t atlas = base->default_atlas.atlas;
     const char *region = val;
-    uint32_t region_len = vlen;
-    if (colon < vlen) {
+    uint32_t region_len = region_spec_len;
+    if (colon < region_spec_len) {
         NT_ASSERT(tagset != NULL && "rich markup: <img=alias:..> needs a tagset");
         /* HARD guard (survives NT_ASSERT OFF): no tagset -> can't resolve the alias -> skip the
          * image (mirrors the unresolved-name skip below). Plain <img=region/> never reaches here. */
@@ -701,11 +787,16 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
             return;
         }
         region = val + colon + 1;
-        region_len = vlen - colon - 1;
+        region_len = region_spec_len - colon - 1;
         NT_ASSERT(region_len > 0U && "rich markup: <img=alias:region/> empty region");
     }
+    /* Defaults match the historical hardcoded literals; the attr tail overrides any present key. */
+    nt_rich_valign_t valign = NT_RICH_VALIGN_MIDDLE;
+    float oy = 0.0F;
+    float scale = 1.0F;
+    rich_parse_img_attrs(attr_tail, attr_len, &valign, &oy, &scale);
     const uint64_t region_hash = nt_hash64((const void *)region, region_len).value;
-    nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+    nt_ui_rich_image(ctx, nt_atlas_ref(atlas, region_hash), valign, oy, scale);
 }
 
 /* `<obj=name/>` self-close: a game-drawn WidgetSpan (measure_fn sizes the box, draw_fn paints it).
@@ -2143,6 +2234,24 @@ nt_atlas_region_ref_t nt_ui_rich_test_run_image_ref(nt_ui_context_t *ctx, uint32
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(run < st->run_count);
     return st->runs[run].image_ref;
+}
+
+float nt_ui_rich_test_run_image_scale(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->runs[run].image_scale;
+}
+
+float nt_ui_rich_test_run_image_offset_y(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->runs[run].image_offset_y;
+}
+
+nt_rich_valign_t nt_ui_rich_test_run_image_valign(nt_ui_context_t *ctx, uint32_t run) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(run < st->run_count);
+    return st->runs[run].image_valign;
 }
 
 void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size) { rich_solve(ctx, rich_state(ctx), 0U, container_w, font_size, NT_RICH_ALIGN_LEFT); }

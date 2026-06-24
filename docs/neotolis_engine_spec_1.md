@@ -3150,7 +3150,14 @@ byte-identical run-list — one composition path, two front ends (D-67-02).
 directly off the markup, no tagset needed: `<b>`, `<i>`, `<scale=N>`,
 `<link=id>` (the id is hashed in place), `<color=#RRGGBB>` (hex literal read
 directly), and the default-atlas `<img=region/>` (region resolved by name
-against the base style's atlas). Only the **NAMED** resolves go through the
+against the base style's atlas). The `<img>` tag takes an optional
+space-separated attribute tail after the region spec —
+`<img=region scale=S oy=Y valign=V/>` — where `scale` is the size multiplier
+(float, default `1`), `oy` is the vertical pixel offset (float, default `0`),
+and `valign` is one of `baseline|middle|top|bottom` (default `middle`); these
+mirror the builder `nt_ui_rich_image(ref, valign, oy, scale)` args, so a tagged
+markup `<img>` and the builder call produce a byte-identical run. A malformed
+attr (bad float, unknown key, unknown valign) asserts (fail-early). Only the **NAMED** resolves go through the
 **tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
 `<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, stock effects
 only), an `<img=alias:region/>` atlas alias, and the self-closing

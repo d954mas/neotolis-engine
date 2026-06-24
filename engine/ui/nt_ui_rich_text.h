@@ -202,6 +202,10 @@ uint32_t nt_ui_rich_test_run_link(nt_ui_context_t *ctx, uint32_t run);
 uint32_t nt_ui_rich_test_run_text_len(nt_ui_context_t *ctx, uint32_t run);
 const char *nt_ui_rich_test_run_text(nt_ui_context_t *ctx, uint32_t run); /* NOT null-terminated; use with run_text_len */
 nt_atlas_region_ref_t nt_ui_rich_test_run_image_ref(nt_ui_context_t *ctx, uint32_t run);
+/* IMAGE run scale/oy/valign -- proves the markup <img scale=/oy=/valign=> attrs reach the run byte-identically. */
+float nt_ui_rich_test_run_image_scale(nt_ui_context_t *ctx, uint32_t run);
+float nt_ui_rich_test_run_image_offset_y(nt_ui_context_t *ctx, uint32_t run);
+nt_rich_valign_t nt_ui_rich_test_run_image_valign(nt_ui_context_t *ctx, uint32_t run);
 
 /* Solver probes. Positions resolved by nt_ui_rich_test_solve. */
 typedef struct {
