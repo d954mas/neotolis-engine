@@ -3297,6 +3297,15 @@ emit order. To give the game explicit control of overlap z, each atom carries a
   so band N fully lands before band N+1. The drain runs after **every** band incl. the
   last, making the block a self-contained z island regardless of the walker's global
   flush order.
+- **Within-band z (text < image < object).** Inside ONE band the self-emit drains
+  **text first** (`nt_text_renderer_flush`) so it lands *behind*, then emits the band's
+  images and objects and drains the sprite renderer — within-band draw order is
+  therefore **text behind images behind objects**, matching the per-kind default. To
+  control text-vs-image z explicitly, put them on **separate** layers (one band is one
+  cross-renderer flush boundary, not per-emit). **Caveat:** a shape-renderer object
+  (e.g. a 3D cube) drawn by an `<obj>` `draw_fn` **self-flushes** its own renderer, so
+  an object sharing a non-top band is best-effort z (the rich block sequences sprite +
+  text drains, not third-party renderer flushes).
 - **Cost.** A layer is an explicit **flush boundary** — it buys z-control, **not** a
   draw-call saving (each band adds one sprite+text flush). The font-group and
   image-coalesce DC wins are **within** a band and unchanged: the font gather is

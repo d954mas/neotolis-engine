@@ -1904,21 +1904,24 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     st->emit_span_count = 0;
     st->image_emit_count = 0; /* accumulates across layers (the per-layer rich_emit_images no longer resets it) */
 
-    /* LAYER-ORDERED emit: cross-renderer z is FLUSH order (UI is painter-order, depth off) and every walk
-     * barrier flushes sprite THEN text -- so within one batch text always lands on top of images, not
-     * reorderable. A LAYER is therefore an explicit flush boundary: emit ascending by layer and DRAIN
-     * (flush sprite+text) between bands so layer N fully lands before N+1. Layers buy z-control, not DC
-     * (the font-group + image-coalesce DC wins are WITHIN a layer). Drain after EVERY band incl. the last
-     * so the block is a self-contained z island regardless of the walker's global flush order. */
+    /* LAYER-ORDERED emit: cross-renderer z is FLUSH order (UI is painter-order, depth off). A LAYER is an
+     * explicit flush boundary: emit ascending by layer and DRAIN between bands so layer N fully lands before
+     * N+1. Within a band, flush text first (behind) then sprites/objects (front) so within-band z matches
+     * the per-kind default text<image<object. Layers buy z-control, not DC (the font-group + image-coalesce
+     * DC wins are WITHIN a layer). Drain after EVERY band incl. the last so the block is a self-contained z
+     * island regardless of the walker's global flush order. */
     uint8_t layers[NT_UI_RICH_MAX_LAYERS];
     const uint32_t layer_count = rich_gather_layers(st, layers);
     for (uint32_t li = 0; li < layer_count; li++) {
         const uint8_t L = layers[li];
-        rich_emit_text_layer(st, frame, box_x, box_y, L); /* text first (then images, then objects) within the band */
+        /* Within ONE band, draw order is text BEHIND images BEHIND objects (matches the per-kind default
+         * text<image<object): drain text first so it lands under the band's sprites/objects. */
+        rich_emit_text_layer(st, frame, box_x, box_y, L);
+        nt_text_renderer_flush(); /* text behind: land it before the band's sprites */
         rich_emit_images(st, frame, box_x, box_y, L);
         rich_emit_objects(st, frame, box_x, box_y, L);
-        nt_sprite_renderer_flush(); /* DRAIN: land this band before the next so layer order == z order */
-        nt_text_renderer_flush();
+        nt_sprite_renderer_flush(); /* DRAIN sprites: land this band before the next so layer order == z order */
+        nt_text_renderer_flush();   /* cheap safety drain in case an object draw_fn emitted text; no-op otherwise */
     }
 }
 // #endregion

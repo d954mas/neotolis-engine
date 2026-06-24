@@ -1964,6 +1964,21 @@ static void test_default_layers_by_kind(void) {
     TEST_ASSERT_TRUE_MESSAGE(saw_text && saw_image && saw_object, "all three kinds present");
 }
 
+/* Within-band emit-order recorder: at object draw_fn time, capture how many inline images have already
+ * emitted (image_emit_count). With the within-band order text->image->object, the object's draw_fn runs
+ * AFTER the band's image emitted, so it observes image_emit_count == 1. */
+static uint32_t s_order_img_at_object_draw;
+static void order_recording_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    (void)user_data;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color;
+    (void)world_mat4;
+    s_order_img_at_object_draw = nt_ui_rich_test_image_emit_count(s_fx.ctx);
+}
+
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
  * reports layer 5, not the per-kind default. Proves an explicit layer overrides the AUTO-by-kind rule. */
 static void test_layer_override(void) {
@@ -1976,6 +1991,7 @@ static void test_layer_override(void) {
     base.image_material = make_rich_image_material();
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
+    s_order_img_at_object_draw = 0xFFFFFFFFU; /* sentinel: stays unset if the object never draws */
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_lo_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -1984,6 +2000,7 @@ static void test_layer_override(void) {
         nt_ui_rich_text_n(s_fx.ctx, "X ", 2);
         nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
         nt_ui_rich_text_n(s_fx.ctx, " Y", 2);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, order_recording_draw, NULL); /* same <layer=5> band as text + image */
         nt_ui_rich_pop(s_fx.ctx);
         nt_ui_rich_end(s_fx.ctx);
         nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_lo").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
@@ -1993,10 +2010,14 @@ static void test_layer_override(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
-    TEST_ASSERT_TRUE_MESSAGE(n >= 3U, "override block placed text + image atoms");
+    TEST_ASSERT_TRUE_MESSAGE(n >= 4U, "override block placed text + image + object atoms");
     for (uint32_t i = 0; i < n; i++) {
         TEST_ASSERT_EQUAL_UINT8_MESSAGE(5U, nt_ui_rich_test_atom_layer(s_fx.ctx, i), "every enclosed atom (any kind) reports layer 5");
     }
+    /* WITHIN-BAND ORDER: in the single <layer=5> band the emit order is text -> image -> object, so the
+     * object's draw_fn ran AFTER the band's image emitted (image-before-object). image_emit_count is 1 at
+     * draw time (1 = the band's lone image already emitted; not the sentinel = the object did draw). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_order_img_at_object_draw, "within band: image emits BEFORE object (object draw_fn sees image_emit_count == 1)");
 }
 
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on
