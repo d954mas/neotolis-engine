@@ -2332,17 +2332,18 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     const rich_link_look_t look_b = rich_link_look(st->rich.hover_b == rich_link_quest(), st->rich.latch_b > 0.0F);
     const char *fx_open = look_b.emphasize ? "<fx=pulse>" : "";
     const char *fx_close = look_b.emphasize ? "</fx>" : "";
-    char markup[512];
-    (void)snprintf(markup, sizeof markup,
-                   "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
-                   "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
-                   "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
-                   "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
-                   "<fx=bounce>bounce </fx><fx=glow>glow </fx><fx=sway>sway</fx> "
-                   "<fx=wave amp=14 speed=5>BIG</fx>. "
-                   "<layer=3>Z-order: layer tag parses here too.</layer> "
-                   "%s<color=%s><link=quest>%s</link></color>%s",
-                   fx_open, look_b.mk_col, look_b.label, fx_close);
+    char markup[768]; /* must fit the whole literal + worst-case %s substitutions: truncation splits a tag and the parser asserts */
+    const int mk_n = snprintf(markup, sizeof markup,
+                              "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
+                              "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
+                              "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
+                              "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
+                              "<fx=bounce>bounce </fx><fx=glow>glow </fx><fx=sway>sway</fx> "
+                              "<fx=wave amp=14 speed=5>BIG</fx>. "
+                              "<layer=3>Z-order: layer tag parses here too.</layer> "
+                              "%s<color=%s><link=quest>%s</link></color>%s",
+                              fx_open, look_b.mk_col, look_b.label, fx_close);
+    NT_ASSERT(mk_n > 0 && (size_t)mk_n < sizeof markup && "rich markup snprintf truncated -- enlarge markup[]");
     const nt_ui_rich_style_t base = rich_base_style();
     nt_ui_rich_result_t res_b = {0};
     nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, strlen(markup), container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_b);
