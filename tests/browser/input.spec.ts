@@ -20,6 +20,12 @@ declare global {
 test('input field: real keydown (Cyrillic) + paste reaches the buffer and the render path', async ({ page }) => {
   await page.goto('/index.html');
 
+  // Frame barrier: wait for a real rendered frame. Every input event below is frame-synchronized through
+  // this so the engine drains it before the next -- robust at any FPS. Fixed-ms settles bunch on a slow
+  // (CI swiftshader) frame and drop modifier+key combos / leave a select-all unestablished, which is the
+  // CI-only failure this replaces (the typed text replaced only part of the prefill).
+  const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+
   // Boot gate: the wasm app sets __nt.ready after its first rendered frame.
   await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
 
@@ -28,58 +34,55 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
   await page.waitForFunction(() => window.__nt!.field_visible() === true, null, { timeout: 10_000 });
 
   // Focus the REAL widget by clicking its canvas CSS coordinates -> genuine pointerdown -> field focus.
-  // A single fast mouse.click() can land its pointerdown on a frame where the field is not yet
-  // hit-testable; a deliberate move + down + up with per-frame settles drives the genuine focus path.
   // Two passes give headroom against a rare cold-frame miss (the typing assert below is the real gate).
   const { x, y } = await page.evaluate(() => window.__nt!.field_css());
   for (let i = 0; i < 2; i++) {
     await page.mouse.move(x, y);
-    await page.waitForTimeout(20);
+    await frame();
     await page.mouse.down();
-    await page.waitForTimeout(50);
+    await frame();
     await page.mouse.up();
-    await page.waitForTimeout(70);
+    await frame();
   }
 
-  // The Cyrillic field starts pre-filled ("Привет, мир"); select-all so the typed text replaces it.
-  // Hold Control across its own poll frame: a fused press('Control+a') can drain the keyup before the
-  // engine sees 'A' held (synthetic events are drained per frame), so down/up explicitly with settles.
+  // Select-all so the typed text replaces the prefill ("Привет, мир"). Frame-sync each key so the engine
+  // drains Ctrl-down (ctrl_held) BEFORE 'a' (NT_KEY_A pressed -> select-all); a fixed settle here races
+  // the slow CI frame, leaving the selection unestablished so the type replaces only part of the prefill.
   await page.keyboard.down('Control');
-  await page.waitForTimeout(40);
-  await page.keyboard.press('a');
-  await page.waitForTimeout(40);
+  await frame();
+  await page.keyboard.down('a');
+  await frame();
+  await page.keyboard.up('a');
+  await frame();
   await page.keyboard.up('Control');
-  await page.waitForTimeout(40);
+  await frame();
 
   // Type 'Привет' via REAL keydown events on the canvas. Playwright's keyboard.type() maps chars to the
   // US physical layout and sends non-Latin (Cyrillic) via insertText -- which fires NO keydown, so the
   // engine's keydown->_ntCharBuf path never sees it. Dispatching genuine KeyboardEvent('keydown') with
   // the Cyrillic e.key drives the exact same listener a Cyrillic keyboard would (the path under test);
-  // only the event ORIGIN is synthetic, unavoidable for non-US chars in any headless harness. One char
-  // per poll-frame interval so the ring drains each; the first replaces the Ctrl+A selection.
-  await page.evaluate(async (text) => {
-    const canvas = document.querySelector('canvas')!;
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    for (const ch of text) {
-      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
-      await sleep(24);
-    }
-  }, 'Привет');
-  await page.waitForTimeout(60);
+  // only the event ORIGIN is synthetic, unavoidable for non-US chars. The first char replaces the
+  // select-all selection; frame-sync each so the char ring drains it.
+  for (const ch of 'Привет') {
+    await page.evaluate((k) => document.querySelector('canvas')!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })), ch);
+    await frame();
+  }
+  // Confirm the whole edit landed (catches a raced select-all/type deterministically) before pasting.
+  await expect.poll(() => page.evaluate(() => window.__nt!.input_buffer()), { timeout: 10_000 }).toBe('Привет');
 
   // Real clipboard paste path: write 'X' to the OS clipboard, then Ctrl+V. The genuine browser paste
-  // event (fired by Ctrl+V on the canvas) carries the OS clipboard text into the engine's `document`
-  // paste listener -> nt_clipboard cache; the field's Ctrl+V handler then reads the cache and inserts.
-  // (A synthetic ClipboardEvent does NOT work here: Ctrl+V triggers Chromium's own paste event which
-  // overwrites the cache with the real OS clipboard, so the OS clipboard must hold the text.)
+  // event (fired by Ctrl+V) carries the OS clipboard text into the engine's `document` paste listener ->
+  // nt_clipboard cache; the field's Ctrl+V handler then reads the cache and inserts. (A synthetic
+  // ClipboardEvent does NOT work: Ctrl+V triggers Chromium's own paste event which overwrites the cache
+  // with the real OS clipboard.) Frame-synced + sent ONCE, so the paste can't double-insert.
   await page.evaluate(() => navigator.clipboard.writeText('X'));
-  await page.waitForTimeout(60);
+  await frame();
   await page.keyboard.down('Control');
-  await page.waitForTimeout(50);
+  await frame();
   await page.keyboard.down('v');
-  await page.waitForTimeout(50);
+  await frame();
   await page.keyboard.up('v');
-  await page.waitForTimeout(50);
+  await frame();
   await page.keyboard.up('Control');
 
   // Assert the genuine game-owned buffer (exact match -- a silent drop or reorder fails).
