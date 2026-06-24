@@ -42,10 +42,58 @@ static void register_defer(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, defer_handler, NULL));
 }
 
+/* Synthetic payload producer — no GL, no capture group. Stands in for the Plan 05 capture producer:
+   builds a known {probe:"ok"} result so the payload-yield path is provable in a pure unit binary.
+   Reads a heap-owned ctx flag so the ctx-free lifecycle (set on defer, freed on yield/reset) is
+   exercised; freed-once is asserted by the global s_producer_ctx_freed counter under ASan/LSan. */
+static int s_producer_ctx_freed; /* incremented once per ctx free — proves no double / no leak. */
+
+static void synthetic_ctx_free(void *ctx) {
+    TEST_ASSERT_NOT_NULL(ctx);
+    s_producer_ctx_freed++;
+    free(ctx);
+}
+
+static cJSON *synthetic_producer(void *ctx) {
+    TEST_ASSERT_NOT_NULL(ctx);                /* the owned ctx must reach the producer. */
+    TEST_ASSERT_EQUAL_INT(0xA5, *(int *)ctx); /* and carry the handler-set sentinel. */
+    cJSON *result = cJSON_CreateObject();
+    TEST_ASSERT_NOT_NULL(result);
+    devapi_add_string(result, "probe", "ok");
+    return result; /* owned by the slot; transferred into the yield envelope by poll_response. */
+}
+
+/* Defers 1 frame WITH a synthetic result producer + an owned ctx (a heap int sentinel). */
+static bool defer_result_handler(const cJSON *params, cJSON *result_obj, nt_devapi_error *err, void *user_data) {
+    (void)params;
+    (void)result_obj;
+    (void)err;
+    (void)user_data;
+    int *ctx = (int *)malloc(sizeof(int));
+    TEST_ASSERT_NOT_NULL(ctx);
+    *ctx = 0xA5;
+    return nt_devapi_defer_current_with_result(1, synthetic_producer, ctx, synthetic_ctx_free);
+}
+
+static void register_defer_result(void) {
+    nt_devapi_command_desc desc = {
+        .method = "test.defer_result",
+        .group = "test",
+        .summary = "test-only deferred command with a synthetic result payload",
+        .params_shape = "{}",
+        .result_shape = "{probe:string}",
+        .frame_behavior = "deferred",
+        .side_effects = "none",
+    };
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, defer_result_handler, NULL));
+}
+
 void setUp(void) {
     g_nt_app.frame = 0; /* deferred targets are g_nt_app.frame + N — start each test at a known frame. */
+    s_producer_ctx_freed = 0;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     register_defer();
+    register_defer_result();
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -190,6 +238,83 @@ static void test_overflow_rejected_structured(void) {
     TEST_ASSERT_NULL(advance_frame()); /* frame=1; the live slot targets frame 1000, nothing pops yet */
 }
 
+/* Payload yield: defer-with-result, advance the frame, drive the pre-swap seam (fills the slot's
+   payload via the synthetic producer), then poll -> the entry carries the synthetic {probe:"ok"}
+   payload AND the correlated request_id, NOT the legacy {deferred:true}. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_payload_yield_via_producer(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":42}"));
+
+    g_nt_app.frame++;                /* reach the slot's 1-frame target. */
+    nt_devapi_capture_on_pre_swap(); /* GL-valid seam fills the payload (synthetic — no GL). */
+    /* The producer's input ctx is consumed + freed once at the seam (one-shot); the produced
+       payload now lives on the slot, to be yielded next. */
+    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed);
+
+    const char *resp = nt_devapi_poll_response();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_TRUE(cJSON_IsObject(result));
+    /* The stored payload was yielded, NOT the legacy {deferred:true}. */
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(result, "deferred"));
+    cJSON *probe = cJSON_GetObjectItemCaseSensitive(result, "probe");
+    TEST_ASSERT_TRUE(cJSON_IsString(probe));
+    TEST_ASSERT_EQUAL_STRING("ok", probe->valuestring);
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
+    TEST_ASSERT_TRUE(cJSON_IsNumber(id));
+    TEST_ASSERT_EQUAL_INT(42, id->valueint); /* request_id correlation preserved. */
+    cJSON_Delete(root);
+
+    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* still exactly once — yield does not re-free. */
+    TEST_ASSERT_NULL(nt_devapi_poll_response());    /* queue drained. */
+}
+
+/* Legacy regression: a plain nt_devapi_defer_current(1) slot (no producer) still yields the
+   content-free {deferred:true}; driving the pre-swap seam does not touch it (no producer). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_legacy_yield_unaffected(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":5,\"params\":{\"frames\":1}}"));
+
+    g_nt_app.frame++;
+    nt_devapi_capture_on_pre_swap(); /* a producer-less slot is untouched by the seam. */
+
+    const char *resp = nt_devapi_poll_response();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_TRUE(cJSON_IsObject(result));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "deferred"))); /* legacy shape intact */
+    TEST_ASSERT_EQUAL_INT(5, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+}
+
+/* Reset-no-leak: defer-with-result, fill the payload via the seam, then reset WITHOUT polling.
+   The seam already consumed the ctx; reset must free the unyielded owned PAYLOAD — LSan-clean
+   (the leak the reset-no-leak case guards is the filled-but-never-yielded payload). */
+static void test_reset_frees_filled_payload(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":1}"));
+    g_nt_app.frame++;
+    nt_devapi_capture_on_pre_swap();                /* payload now owned by the slot, unyielded. */
+    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* ctx already consumed/freed at the seam. */
+
+    nt_devapi_deferred_reset();                  /* must free the filled-but-unyielded payload (LSan). */
+    TEST_ASSERT_NULL(nt_devapi_poll_response()); /* slot cleared — nothing pending. */
+}
+
+/* Reset-no-leak before fill: defer-with-result then reset WITHOUT driving the seam. The unfilled
+   slot still owns its ctx (payload is NULL) — reset frees the ctx, no leak. */
+static void test_reset_frees_unfilled_ctx(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":2}"));
+    /* no frame advance, no pre-swap fill: producer never ran, payload stays NULL. */
+    nt_devapi_deferred_reset();
+    TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* the unrun producer's ctx is still freed. */
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_submit_defers_returns_null);
@@ -199,5 +324,9 @@ int main(void) {
     RUN_TEST(test_multi_slot_distinct_frames);
     RUN_TEST(test_deferred_in_batch_rejected);
     RUN_TEST(test_overflow_rejected_structured);
+    RUN_TEST(test_payload_yield_via_producer);
+    RUN_TEST(test_legacy_yield_unaffected);
+    RUN_TEST(test_reset_frees_filled_payload);
+    RUN_TEST(test_reset_frees_unfilled_ctx);
     return UNITY_END();
 }
