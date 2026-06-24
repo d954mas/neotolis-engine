@@ -160,6 +160,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # layer is enabled and only on native builds — gate on both.
     if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)
         add_subdirectory(examples/devapi_host)
+        # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
+        if(NT_DEVAPI_GROUP_CAPTURE)
+            add_subdirectory(examples/capture_host)
+        endif()
     endif()
     add_subdirectory(tests)
 
