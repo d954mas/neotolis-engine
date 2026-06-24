@@ -485,6 +485,9 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_ENTITY_WRITE)
             list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_ENTITY_WRITE=1)
         endif()
+        if(NT_DEVAPI_GROUP_CAPTURE)
+            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_CAPTURE=1)
+        endif()
 
         # When the obs group is compiled into nt_devapi, the registry's nt_devapi_register_obs() call
         # pulls nt_devapi_obs.c, which references the obs L1 providers (log ring/metrics/entity/
@@ -632,6 +635,27 @@ if(NOT EMSCRIPTEN)
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_ENTITY_WRITE=1
             )
             nt_setup_test_target(test_devapi_entity_write)
+        endif()
+
+        # L2 capture group (capture.frame / capture.region) via submit(): the FIRST deferred
+        # data-returning command. Links nt_gfx_stub (the synthetic readback feeds the real
+        # strip+box+fpng+base64 chain when the seam is driven manually — no GL, Pitfall 2) +
+        # nt_fpng (the real PNG encoder) + nt_app_stub (g_nt_app the deferred queue reads) +
+        # nt_window_stub (g_nt_window the handlers read for fb dims). Consumer-before-provider
+        # GNU-ld order: nt_devapi first, nt_gfx_stub/nt_fpng next, core/log trailing (Pitfall 3).
+        # The TU is #if-gated on NT_DEVAPI_GROUP_CAPTURE with an #else stub-main so a group-absent
+        # compile links clean (zero release delta).
+        if(NT_DEVAPI_GROUP_CAPTURE)
+            add_executable(test_devapi_capture unit/test_devapi_capture.c)
+            target_link_libraries(test_devapi_capture PRIVATE
+                nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
+                nt_gfx_stub nt_fpng nt_input_stub
+                ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity
+            )
+            target_compile_definitions(test_devapi_capture PRIVATE
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_CAPTURE=1
+            )
+            nt_setup_test_target(test_devapi_capture)
         endif()
     endif()
 

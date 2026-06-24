@@ -253,6 +253,14 @@ static void test_features_lists_active_groups(void) {
     TEST_ASSERT_FALSE(array_has_string(groups, "entity_write"));
 #endif
 
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+    /* capture.frame + capture.region collapse to one distinct group: capture. */
+    TEST_ASSERT_TRUE(array_has_string(groups, "capture"));
+    expected += 1; /* capture */
+#else
+    TEST_ASSERT_FALSE(array_has_string(groups, "capture"));
+#endif
+
     /* an absent group is not listed. */
     TEST_ASSERT_FALSE(array_has_string(groups, "phantom"));
     /* groups are distinct: each group's commands collapse to one entry. */
