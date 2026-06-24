@@ -22,6 +22,18 @@ if(WIN32)
     target_compile_definitions(capture_host PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# The shared nt_devapi lib compiles in whatever groups are enabled; with GROUP_UI / GROUP_OBS /
+# GROUP_ENTITY_WRITE on, linking nt_devapi pulls those groups' TUs whose externals (nt_ui_*, metrics,
+# entity comps) this CAPTURE-focused host deliberately does not provide. Keep the target CONFIGURED so
+# main.c stays in compile_commands.json (the project's "every .c is compiled" tidy invariant), but drop
+# it from the default `all` target in any non-capture-focused config so `cmake --build` does not try to
+# link it (GNU ld single-pass would fail). The capture-smoke CI job builds it explicitly with
+# `--target capture_host` (which ignores EXCLUDE_FROM_ALL); the all-groups native-debug-test exercises
+# the capture group via the test_devapi_capture unit test instead.
+if(NT_DEVAPI_GROUP_UI OR NT_DEVAPI_GROUP_OBS OR NT_DEVAPI_GROUP_ENTITY_WRITE)
+    set_target_properties(capture_host PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
+
 # Strict warning and sanitizer policy
 nt_set_warning_flags(capture_host)
 nt_set_sanitizer_flags(capture_host)

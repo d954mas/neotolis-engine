@@ -160,13 +160,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # layer is enabled and only on native builds — gate on both.
     if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)
         add_subdirectory(examples/devapi_host)
-        # capture_host is a CAPTURE-FOCUSED host: it links ONLY the CORE/DISCOVERY/TIME/CAPTURE providers
-        # (a real GL context + nt_gfx/nt_fpng), NOT the nt_ui / obs / entity-write provider chains. The
-        # shared nt_devapi lib compiles in whatever groups are enabled, so an all-groups build (e.g. CI
-        # native-debug-test) would leave this host's link missing the UI/obs/entity externals (GNU ld
-        # single-pass). Build it only in a capture-focused config — the capture-smoke CI job uses exactly
-        # that; the all-groups build exercises the capture group through test_devapi_capture instead.
-        if(NT_DEVAPI_GROUP_CAPTURE AND NOT NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_OBS AND NOT NT_DEVAPI_GROUP_ENTITY_WRITE)
+        # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
+        # Always configured when the capture group is on (so its main.c stays in compile_commands.json for
+        # clang-tidy — scripts/tidy.sh globs every .c and relies on it being compiled). It is a
+        # CAPTURE-focused host that does NOT link the nt_ui/obs/entity provider chains, so the example's
+        # own CMakeLists marks it EXCLUDE_FROM_ALL in all-groups configs to keep `cmake --build` from
+        # link-failing it (see examples/capture_host/CMakeLists.txt).
+        if(NT_DEVAPI_GROUP_CAPTURE)
             add_subdirectory(examples/capture_host)
         endif()
     endif()
