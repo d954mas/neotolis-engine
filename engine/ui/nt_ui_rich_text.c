@@ -1820,42 +1820,41 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
 }
 
 /* Font-grouped TEXT emit for ONE z-layer. The text renderer auto-flushes on every set_font change, so an
- * in-order walk of interleaved faces (R->B->R->I...) costs one text flush PER transition. Gather the
- * distinct fonts present IN THIS LAYER (<=4, bounded by the style's font_id[4]) and emit one pass per font
- * -> set_font is called once per distinct font in the layer. O(F*N), F<=4, no heap, no sort, solved[]
- * untouched. Visible result is identical (text is L-to-R non-overlapping; each atom keeps its own
- * shear/fx/position). */
+ * in-order walk of interleaved faces (R->B->R->I...) costs one text flush PER transition. Group by FIRST
+ * occurrence: when an atom is the first on the band with its font.id, set_font ONCE and emit ALL same-band
+ * atoms sharing it; later atoms with an already-emitted font are skipped (their pass already drew them).
+ * One set_font per DISTINCT font on the band, with NO distinct-font cap -> never drops (a block may carry
+ * >4 families via push_font / <font=name>). solved[] untouched, no heap, no sort. Visible result is
+ * identical (text is L-to-R non-overlapping; each atom keeps its own shear/fx/position). Common low-font
+ * content is ~O(F*N); the all-distinct worst case is O(N^2) but N (atoms per band) is small. */
 static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
-    nt_font_t fonts[4];
-    uint32_t font_count = 0;
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
         if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->layer != layer) {
             continue;
         }
-        bool seen = false;
-        for (uint32_t f = 0; f < font_count; f++) {
-            if (fonts[f].id == s->font.id) {
-                seen = true;
+        bool first = true; /* is this the FIRST same-band TEXT atom carrying s->font.id? */
+        for (uint32_t j = 0; j < i; j++) {
+            const nt_ui_rich_solved_atom_t *p = &st->solved[j];
+            if (p->kind == NT_RICH_ATOM_TEXT && p->text_len != 0U && p->layer == layer && p->font.id == s->font.id) {
+                first = false;
                 break;
             }
         }
-        if (!seen && font_count < 4U) {
-            fonts[font_count++] = s->font;
+        if (!first) {
+            continue; /* this font's pass already emitted every same-band atom that shares it */
         }
-    }
-    for (uint32_t f = 0; f < font_count; f++) {
-        nt_text_renderer_set_font(fonts[f]); /* once per distinct font in the layer: collapses per-transition flushes */
-        for (uint32_t i = 0; i < st->solved_count; i++) {
-            const nt_ui_rich_solved_atom_t *s = &st->solved[i];
-            if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->layer != layer || s->font.id != fonts[f].id) {
+        nt_text_renderer_set_font(s->font); /* once per distinct font on the band: collapses per-transition flushes */
+        for (uint32_t k = i; k < st->solved_count; k++) {
+            const nt_ui_rich_solved_atom_t *e = &st->solved[k];
+            if (e->kind != NT_RICH_ATOM_TEXT || e->text_len == 0U || e->layer != layer || e->font.id != s->font.id) {
                 continue; /* other kinds/layers/fonts -> their own pass */
             }
-            const bool shear = (s->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U;
-            if (s->effect_id == 0U) {
-                rich_emit_text_plain(st, frame, s, box_x, box_y, shear);
+            const bool shear = (e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U;
+            if (e->effect_id == 0U) {
+                rich_emit_text_plain(st, frame, e, box_x, box_y, shear);
             } else {
-                rich_emit_text_effected(st, frame, s, box_x, box_y, shear);
+                rich_emit_text_effected(st, frame, e, box_x, box_y, shear);
             }
         }
     }

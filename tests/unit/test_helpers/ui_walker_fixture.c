@@ -78,7 +78,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create >4 distinct stub fonts */
     nt_material_init(&(nt_material_desc_t){.max_materials = 32});
 
     /* Open a frame/pass so sprite/text renderers can draw_indexed without

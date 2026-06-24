@@ -272,6 +272,66 @@ static void test_emit_single_face_one_set_font(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_set_font_calls(), "single-face block calls set_font once (one distinct font)");
 }
 
+/* Build a block with SIX distinct font families on one band (one regular-face text run each), exceeding the
+ * old fonts[4] gather cap. Each push_font swaps the whole family; default variant=regular picks font_id[0]. */
+static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = fam[0];
+    for (int i = 0; i < 6; i++) {
+        nt_font_test_set_metrics(fam[i], 1000, 800, -200, 1000);
+    }
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_6f_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "a ", 2); /* family 0 (base) */
+        for (int i = 1; i < 6; i++) {
+            const nt_font_t family[4] = {fam[i], fam[i], fam[i], fam[i]};
+            nt_ui_rich_push_font(s_fx.ctx, family);
+            nt_ui_rich_text_n(s_fx.ctx, "x ", 2);
+            nt_ui_rich_pop(s_fx.ctx);
+        }
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_6f").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (1e) REGRESSION: a band with SIX distinct fonts (> the old fonts[4] cap) emits ALL six runs' text (one
+ * set_font per distinct font, NO drop). The pre-fix gather capped distinct fonts at 4 and silently dropped
+ * the 5th/6th fonts' atoms -> fewer spans than text atoms. Pin set_font==6 AND span_count==TEXT-atom count. */
+static void test_emit_more_than_four_fonts_no_drop(void) {
+    nt_font_t fam[6];
+    fam[0] = s_fx.stub_font;
+    for (int i = 1; i < 6; i++) {
+        fam[i] = make_stub_font();
+    }
+    nt_text_renderer_test_reset_call_counters();
+    frame_six_distinct_fonts(fam);
+
+    /* Count the band's TEXT atoms: every one must produce a span (no drop). */
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    uint32_t text_atoms = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (nt_ui_rich_test_atom(s_fx.ctx, i).kind == NT_RICH_ATOM_TEXT) {
+            text_atoms++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(6U, nt_text_renderer_test_set_font_calls(), "six distinct fonts -> set_font called six times (no cap)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(text_atoms, nt_ui_rich_test_emit_span_count(s_fx.ctx), "every TEXT atom emits a span -> no font dropped past 4");
+
+    for (int i = 1; i < 6; i++) {
+        nt_font_destroy(fam[i]);
+    }
+}
+
 /* ===== Inline IMAGE emit ===== */
 
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
@@ -2033,6 +2093,7 @@ int main(void) {
     RUN_TEST(test_double_walk_is_deterministic);
     RUN_TEST(test_emit_groups_text_by_font);
     RUN_TEST(test_emit_single_face_one_set_font);
+    RUN_TEST(test_emit_more_than_four_fonts_no_drop);
     RUN_TEST(test_default_layers_by_kind);
     RUN_TEST(test_layer_override);
     RUN_TEST(test_font_group_per_layer);
