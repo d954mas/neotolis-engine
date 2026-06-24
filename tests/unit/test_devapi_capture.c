@@ -17,6 +17,7 @@
 #include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
 #include "fpng/nt_fpng.h"
+#include "graphics/nt_gfx.h" /* g_nt_gfx.context_lost — the producer-failure (NULL) trigger. */
 #include "window/nt_window.h"
 #include "unity.h"
 /* clang-format on */
@@ -143,6 +144,53 @@ static void test_capture_region_dims_match_rect(void) {
     cJSON_Delete(root);
 }
 
+/* ---- Test 6: region + scale -> POST-scale dims (region scale=2 = rect / 2) ---- */
+
+static void test_capture_region_scale_halves_dims(void) {
+    cJSON *root = capture_yield("{\"method\":\"capture.region\",\"params\":{\"x\":8,\"y\":4,\"w\":32,\"h\":16,\"scale\":2}}");
+    cJSON *result = result_of(root);
+    /* scale applies AFTER the crop: post-scale dims = rect w/h / 2. */
+    TEST_ASSERT_EQUAL_INT(16, cJSON_GetObjectItemCaseSensitive(result, "width")->valueint);
+    TEST_ASSERT_EQUAL_INT(8, cJSON_GetObjectItemCaseSensitive(result, "height")->valueint);
+    TEST_ASSERT_EQUAL_STRING("png", cJSON_GetObjectItemCaseSensitive(result, "format")->valuestring);
+    cJSON_Delete(root);
+}
+
+/* ---- Test 7: degenerate scale>rect -> SYNCHRONOUS bad_params (post-#9, never {deferred:true}) ---- */
+
+static void test_capture_region_degenerate_scale_bad_params(void) {
+    /* w/scale==0 (3/4==0): the handler rejects synchronously, no defer, no image. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":3,\"h\":3,\"scale\":4}}"));
+}
+
+/* ---- Test 8: producer RAN but returned NULL -> {ok:true,result:{deferred:true}} with correlated id ----
+   Drives a lost context so nt_gfx_read_pixels returns false (finding #8) -> the producer yields NULL ->
+   the slot falls back to the legacy {deferred:true}, NOT a crash or a malformed payload. */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_capture_producer_failure_yields_deferred(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":42}"));
+    g_nt_gfx.context_lost = true; /* force the readback to fail -> producer returns NULL. */
+    g_nt_app.frame++;
+    nt_devapi_capture_on_pre_swap();
+    g_nt_gfx.context_lost = false; /* restore for any following test. */
+
+    const char *resp = nt_devapi_poll_response();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *result = result_of(root);
+    /* legacy deferred fallback: {deferred:true}, no png payload. */
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "deferred")));
+    TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(result, "data"));
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "request_id");
+    TEST_ASSERT_TRUE(cJSON_IsNumber(id));
+    TEST_ASSERT_EQUAL_INT(42, id->valueint); /* request_id correlation preserved on the failure path. */
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_capture_frame_bad_scale_bad_params);
@@ -151,6 +199,9 @@ int main(void) {
     RUN_TEST(test_capture_frame_seam_encode);
     RUN_TEST(test_capture_frame_scale_halves_dims);
     RUN_TEST(test_capture_region_dims_match_rect);
+    RUN_TEST(test_capture_region_scale_halves_dims);
+    RUN_TEST(test_capture_region_degenerate_scale_bad_params);
+    RUN_TEST(test_capture_producer_failure_yields_deferred);
     return UNITY_END();
 }
 
