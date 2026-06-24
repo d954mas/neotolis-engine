@@ -815,7 +815,6 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_rich_build
         test_nt_ui_rich_wrap
         test_nt_ui_rich_emit
-        test_nt_ui_rich_parse
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
     # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub
@@ -845,6 +844,20 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_nt_ui_stats PRIVATE ${_nt_ui_test_libs})
     target_compile_definitions(test_nt_ui_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_stats)
+
+    # The rich-text PARSER test installs a real log sink to prove malformed markup logs once per
+    # distinct message (nt_log_warn_unique dedup). It links the REAL nt_log impl instead of the no-op
+    # nt_log_stub the other ui tests use -- so nt_log_add_sink / nt_log_write_unique actually fan out.
+    # Provider (nt_log) trails its consumers; nt_hash/nt_core trail last (GNU-ld single-pass order).
+    string(REPLACE "nt_log_stub" "nt_log;nt_hash;nt_core" _nt_ui_rich_parse_libs "${_nt_ui_test_libs}")
+    add_executable(test_nt_ui_rich_parse
+        unit/test_nt_ui_rich_parse.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_rich_parse PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_rich_parse PRIVATE ${_nt_ui_rich_parse_libs})
+    target_compile_definitions(test_nt_ui_rich_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_rich_parse)
 
 endif()
 

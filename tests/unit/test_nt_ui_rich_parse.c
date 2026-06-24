@@ -4,12 +4,14 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
 #include "resource/nt_resource.h"
 #include "test_helpers/nt_assert_trap.h"
@@ -25,6 +27,36 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
+/* ---- test log sink: count WARN lines + record the last message ----
+ * Markup data errors now log-once-per-distinct-message (nt_log_warn_unique) instead of asserting.
+ * This sink counts every warn line the real nt_log fans out, so the dedup tests can assert "logged
+ * exactly once" / "two distinct errors -> two lines". Registered per-test (add in arrange, remove in
+ * the assert) so counts are local. nt_log_warn_unique dedups PROGRAM-WIDE + saturating, so the dedup
+ * tests must use message strings UNIQUE to this process (distinct bad tokens), never reused elsewhere. */
+#define SINK_MSG_CAP 256
+typedef struct {
+    uint32_t warn_count;
+    char last_msg[SINK_MSG_CAP];
+} test_log_sink_t;
+static test_log_sink_t s_sink;
+
+static void test_warn_sink(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    test_log_sink_t *s = (test_log_sink_t *)user;
+    if (level == NT_LOG_LEVEL_WARN && s != NULL) {
+        s->warn_count++;
+        (void)snprintf(s->last_msg, sizeof s->last_msg, "%s", msg ? msg : "");
+    }
+}
+
+static void sink_attach(void) {
+    s_sink.warn_count = 0;
+    s_sink.last_msg[0] = '\0';
+    nt_log_set_level(NT_LOG_LEVEL_INFO); /* ensure WARN is not filtered out */
+    nt_log_add_sink(test_warn_sink, &s_sink);
+}
+static void sink_detach(void) { nt_log_remove_sink(test_warn_sink, &s_sink); }
+
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -33,7 +65,10 @@ void setUp(void) {
     s_fx.ctx->rich_session_open = false;
 }
 
-void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
+void tearDown(void) {
+    sink_detach(); /* idempotent: a no-op when not attached */
+    ui_walker_fixture_shutdown(&s_fx);
+}
 
 static uint64_t h(const char *s) { return nt_hash64_str(s).value; }
 
@@ -190,30 +225,103 @@ static void parse_lit(const char *m) {
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m));
 }
 
-/* (5) unclosed tag at end of string -> NT_ASSERT. */
-static void test_parse_unclosed_tag_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<b>HP")); }
+/* (5) unclosed tag at end of string is UNTRUSTED data -> graceful: no trap, the run captured its
+ * composed style at append time, so "HP" is still bold (the <b> push stands). */
+static void test_parse_unclosed_tag_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<b>HP", 5U); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, runs, "unclosed <b>HP -> one text run, no trap");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_VARIANT_BOLD, nt_ui_rich_test_run_style(s_fx.ctx, 0).variant, "HP carries the bold push (run captured style at append)");
+}
 
-/* (6) mismatched close (<b>..</i>) -> NT_ASSERT. */
-static void test_parse_mismatched_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<b>HP</i>")); }
+/* (6) mismatched close (<b>HP</i>) -> graceful: no trap, the </i> closes the <b> slot (balance on the
+ * OPEN, never an underflow-pop). HP is bold; the stack returns to base. */
+static void test_parse_mismatched_close_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF112233U;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<b>HP</i>x", 10U); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "mismatched close produced runs, no trap");
+    const nt_ui_rich_style_t last = nt_ui_rich_test_run_style(s_fx.ctx, runs - 1U);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, last.variant, "trailing x is back at base (mismatched close still balanced the <b>)");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, last.color_abgr, "trailing x carries the base color");
+}
 
-/* (7) unknown CORE-shaped tag -> NT_ASSERT. */
-static void test_parse_unknown_tag_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<bogus>x</bogus>")); }
+/* (7) unknown tag (<bogus>x</bogus>) -> graceful: log + skip BOTH the open and the (unknown) close,
+ * so x carries the base style and the run-list is as-if the tag were absent. */
+static void test_parse_unknown_tag_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF445566U;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<bogus>x</bogus>", 16U); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, runs, "unknown tag skipped -> one text run for 'x'");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF445566U, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "x carries the base style (unknown tag pushed nothing)");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, nt_ui_rich_test_run_style(s_fx.ctx, 0).variant, "x is unstyled");
+}
 
-/* (8) malformed hex in <color=#..> -> NT_ASSERT. */
-static void test_parse_bad_hex_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<color=#zzz>x</color>")); }
+/* (8) malformed hex in <color=#..> -> graceful: log + opaque white (the parse degrades to a visible
+ * unstyled-white run rather than trapping). */
+static void test_parse_bad_hex_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zzz>x</color>", 21U); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, runs, "bad hex -> one text run (color pushed opaque white)");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFFFFFFFFU, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "bad hex degrades to opaque white");
+}
 
-/* (9) a close tag with no matching open -> NT_ASSERT. In NT_ASSERT OFF the close-tag hard guard
- * early-returns before --depth, so depth never wraps to UINT_MAX (no open_stack[UINT_MAX] OOB). */
-static void test_parse_orphan_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("HP</b>")); }
+/* (9) a close tag with no matching open (HP</b>) -> graceful: log + no-op, HP is the only run. */
+static void test_parse_orphan_close_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF778899U;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "HP</b>", 6U); /* no trap, no stack underflow */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, runs, "orphan close -> one text run for 'HP'");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF778899U, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "HP carries the base style");
+}
 
-/* (9b) a mismatched link/style close (<link=1></b>): top==LINK but the close kind==BOLD. In FULL this
- * traps on the mismatch assert; the fix also makes OFF pop on `top` (LINK -> clear pending), never
- * nt_ui_rich_pop (which would pop the base style past 0). */
-static void test_parse_mismatched_link_close_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<link=1></b>")); }
+/* (9b) a mismatched link/style close (<link=1></b>): top==LINK but the close kind==BOLD -> graceful:
+ * the close balances on `top` (LINK -> clear pending), never nt_ui_rich_pop past base. No trap. */
+static void test_parse_mismatched_link_close_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<link=1>x</b>y", 14U); /* no trap, no underflow-pop */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "mismatched link close produced runs, no trap");
+}
 
-/* (9c) an empty numeric value (<scale=>) -> NT_ASSERT. In OFF the rich_parse_float n==0 hard guard
- * returns a bounded 0.0F before any s[0] read (the push_scale>0 assert is the scale dev guard). */
-static void test_parse_empty_scale_value_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<scale=>x</scale>")); }
+/* (9c) an empty numeric value (<scale=>) -> graceful: rich_parse_float logs+returns 0.0F, then the
+ * SCALE path validates >0 and degrades to identity 1.0 BEFORE the builder (no <=0 font size, no trap). */
+static void test_parse_empty_scale_value_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.scale = 1.0F;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=>x</scale>y", 18U); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "empty <scale=> -> runs, no trap");
+    /* x is inside the (degraded-to-1.0) scale push: its scale must be base*1.0 == 1.0, never 0. */
+    const float sx = nt_ui_rich_test_run_style(s_fx.ctx, 0).scale;
+    TEST_ASSERT_TRUE_MESSAGE(sx > 0.5F && sx < 2.0F, "empty <scale=> degrades to identity (scale ~1, never 0)");
+}
 
 /* Parse a <fx=...> markup against a tagset that knows the stock "wave" + a custom "fade". */
 static void parse_fx(const char *m) {
@@ -235,21 +343,38 @@ static void test_parse_fx_params_ok(void) {
     TEST_ASSERT_TRUE_MESSAGE(true, "tuned <fx=...> markup parsed without an assert");
 }
 
-/* (8c) a bad float value in an fx param -> NT_ASSERT (fail-early). */
-static void test_parse_fx_bad_float_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp=8x>hi</fx>")); }
+/* (8c) a bad float value in an fx param -> graceful: rich_parse_float logs+returns 0.0F (= default),
+ * the <fx=wave> effect still pushes (the name resolved); "hi" is present. No trap. */
+static void test_parse_fx_bad_float_graceful(void) {
+    parse_fx("<fx=wave amp=8x>hi</fx>"); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "bad fx float degrades, effect still parses");
+}
 
-/* (8d) an unknown fx param key -> NT_ASSERT. */
-static void test_parse_fx_unknown_key_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave bogus=3>hi</fx>")); }
+/* (8d) an unknown fx param key -> graceful: log + skip the param, the effect still pushes. No trap. */
+static void test_parse_fx_unknown_key_graceful(void) {
+    parse_fx("<fx=wave bogus=3>hi</fx>"); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "unknown fx key skipped, effect still parses");
+}
 
-/* (8e) a param token with no '=' -> NT_ASSERT. */
-static void test_parse_fx_no_equals_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp>hi</fx>")); }
+/* (8e) a param token with no '=' -> graceful: log + skip the token, the effect still pushes. No trap. */
+static void test_parse_fx_no_equals_graceful(void) {
+    parse_fx("<fx=wave amp>hi</fx>"); /* no trap, no OOB underflow read */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "fx param with no '=' skipped, effect still parses");
+}
 
-/* (8f) k=v params on a CUSTOM-fn effect name -> NT_ASSERT (params apply to STOCK effects only). */
-static void test_parse_fx_params_on_custom_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=fade amp=8>hi</fx>")); }
+/* (8f) k=v params on a CUSTOM-fn effect name -> graceful: log + push the custom fn IGNORING the
+ * params (the fn is valid; only the params don't apply). No trap. */
+static void test_parse_fx_params_on_custom_graceful(void) {
+    parse_fx("<fx=fade amp=8>hi</fx>"); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "custom-fn fx with params still parses (params ignored)");
+}
 
-/* (8g) an empty fx param value (amp=) -> NT_ASSERT in FULL (rich_parse_float n>0). In OFF the n==0
- * hard guard returns 0.0F (= "use default") with no OOB read. */
-static void test_parse_fx_empty_value_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_fx("<fx=wave amp=>hi</fx>")); }
+/* (8g) an empty fx param value (amp=) -> graceful: rich_parse_float logs+returns 0.0F (= "use
+ * default"), the effect still pushes. No trap, no OOB read. */
+static void test_parse_fx_empty_value_graceful(void) {
+    parse_fx("<fx=wave amp=>hi</fx>"); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "empty fx value degrades to default, effect still parses");
+}
 
 /* Parse markup against a tagset that registers an OBJECT tag "widget". The parse-side name hash
  * (nt_hash64(val, vlen)) MUST equal the register-side hash (nt_hash64_str) or lookup_object misses. */
@@ -278,16 +403,45 @@ static void test_parse_obj_self_close_emits_object_run(void) {
     TEST_ASSERT_TRUE_MESSAGE(found_object, "<obj=widget/> produced a NT_RICH_ATOM_OBJECT run");
 }
 
-/* (8i) <obj=nope/> with a name not in the tagset -> NT_ASSERT (unknown object), and no bogus run. */
-static void test_parse_obj_unknown_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_obj("<obj=nope/>")); }
+/* (8i) <obj=nope/> with a name not in the tagset -> graceful: log + skip, no OBJECT run produced. */
+static void test_parse_obj_unknown_graceful(void) {
+    parse_obj("a<obj=nope/>b"); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_object = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_OBJECT) {
+            found_object = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(found_object, "unknown <obj> produced NO object run (skipped)");
+}
 
-/* (8j) <obj/> with an empty name -> NT_ASSERT; the hard guard returns without pushing a run. */
-static void test_parse_obj_empty_name_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_obj("<obj/>")); }
+/* (8j) <obj/> with an empty name -> graceful: log + skip, no OBJECT run. */
+static void test_parse_obj_empty_name_graceful(void) {
+    parse_obj("a<obj/>b"); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_object = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_OBJECT) {
+            found_object = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(found_object, "empty-name <obj/> produced NO object run (skipped)");
+}
 
-/* (8k) <obj=x/> with a NULL tagset (a legit text-only config) -> NT_ASSERT in FULL. The OFF hard guard
- * (if (tagset == NULL) return; before the lookup) can't be unit-tested -- no OFF ctest preset exists --
- * but it is OFF-safe by construction (early-return BEFORE nt_ui_rich_tagset_lookup_object derefs ts). */
-static void test_parse_obj_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<obj=x/>")); }
+/* (8k) <obj=x/> with a NULL tagset (a legit text-only config) -> graceful: log + skip (early-return
+ * BEFORE the lookup derefs the NULL tagset), no OBJECT run. No trap. */
+static void test_parse_obj_null_tagset_graceful(void) {
+    parse_lit("a<obj=x/>b"); /* tagset NULL; no trap, no NULL deref */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_object = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_OBJECT) {
+            found_object = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(found_object, "<obj> with NULL tagset produced NO object run (skipped)");
+}
 
 /* (8l) <img=alias:region/> with a NULL tagset -> NT_ASSERT in FULL (alias needs a tagset). Same OFF
  * hard guard (early-return inside the colon branch before nt_ui_rich_tagset_lookup_atlas derefs ts);
@@ -301,18 +455,57 @@ static void parse_img_null_tagset(const char *m) {
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
 }
-static void test_parse_img_alias_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_img_null_tagset("<img=a:b/>")); }
+/* (8l) <img=alias:region/> with a NULL tagset (alias needs a tagset) -> graceful: log + skip the
+ * image (early-return BEFORE the lookup derefs the NULL tagset), no IMAGE run. No trap. */
+static void test_parse_img_alias_null_tagset_graceful(void) {
+    parse_img_null_tagset("a<img=a:b/>b"); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_image = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_IMAGE) {
+            found_image = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(found_image, "<img=alias:..> with NULL tagset produced NO image run (skipped)");
+}
 
-/* (8m) named <color>/<font>/<fx> with a NULL tagset -> NT_ASSERT in FULL (the lookup needs a tagset).
- * The OFF hard guard (if (tagset == NULL) break; before the lookup) can't be unit-tested -- no OFF
- * ctest preset -- but is OFF-safe by construction (break BEFORE the lookup derefs ts). */
-static void test_parse_color_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<color=gold>x</color>")); }
-static void test_parse_font_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<font=mono>x</font>")); }
-static void test_parse_fx_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<fx=wave>x</fx>")); }
+/* (8m) named <color>/<font>/<fx> with a NULL tagset -> graceful: log + skip the tag (break BEFORE the
+ * lookup derefs the NULL tagset), so 'x' carries the base style. No trap. */
+static void test_parse_color_null_tagset_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF010203U;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=gold>x</color>", 21U); /* no trap, no NULL deref */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "named color w/ NULL tagset skipped -> one run");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF010203U, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "x carries the base color (named color skipped)");
+}
+static void test_parse_font_null_tagset_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    const nt_font_t base_face = {.id = 9};
+    for (uint32_t i = 0; i < 4U; i++) {
+        base.font_id[i] = base_face;
+    }
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<font=mono>x</font>", 19U); /* no trap, no NULL deref */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "named font w/ NULL tagset skipped -> one run");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(9U, nt_ui_rich_test_run_style(s_fx.ctx, 0).font_id[0].id, "x carries the base font (named font skipped)");
+}
+static void test_parse_fx_null_tagset_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<fx=wave>x</fx>", 15U); /* no trap, no NULL deref */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_run_count(s_fx.ctx), "named fx w/ NULL tagset skipped -> one run");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, nt_ui_rich_test_run_style(s_fx.ctx, 0).effect_id, "x carries no effect (fx skipped)");
+}
 
-/* (8n) <img=alias:region/> with a NON-null tagset that lacks the alias -> NT_ASSERT (unknown alias).
- * The OFF hard guard (if (!alias_ok) return;) skips the image instead of falling back to the default
- * atlas with the wrong region -- by-construction OFF-safe, not unit-testable without an OFF preset. */
+/* (8n) <img=alias:region/> with a NON-null tagset that lacks the alias -> graceful: log + skip the
+ * image (never fall back to the default atlas with the wrong region), no IMAGE run. No trap. */
 static void parse_img_no_alias(const char *m) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts); /* a valid tagset that registers NO atlas alias -> the alias lookup misses */
@@ -323,7 +516,17 @@ static void parse_img_no_alias(const char *m) {
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
 }
-static void test_parse_img_unknown_alias_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_img_no_alias("<img=nope:region/>")); }
+static void test_parse_img_unknown_alias_graceful(void) {
+    parse_img_no_alias("a<img=nope:region/>b"); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_image = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_IMAGE) {
+            found_image = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(found_image, "unknown <img> alias produced NO image run (skipped)");
+}
 
 /* (img-attrs) markup `<img=region scale=1.8 oy=-4 valign=middle/>` produces a run BYTE-IDENTICAL to the
  * builder nt_ui_rich_image(ref, MIDDLE, -4, 1.8): same kind, same region ref, same scale/oy/valign. */
@@ -408,42 +611,74 @@ static void test_parse_img_no_attrs_defaults(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_RICH_VALIGN_MIDDLE, (uint8_t)nt_ui_rich_test_run_image_valign(s_fx.ctx, 0), "bare <img> default valign == MIDDLE");
 }
 
-/* (img-attrs) a malformed attr float (<img=heart scale=abc/>) -> NT_ASSERT (fail-early). In OFF the
- * rich_parse_float hard path returns a bounded 0.0F (the rich_image scale>0 assert is the dev guard);
- * neither path reads OOB. */
-static void test_parse_img_bad_attr_float_asserts(void) {
+/* Probe the first IMAGE run's scale bits; returns true if an IMAGE run exists. */
+static bool first_image_scale(uint32_t *out_bits) {
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_IMAGE) {
+            const float s = nt_ui_rich_test_run_image_scale(s_fx.ctx, i);
+            memcpy(out_bits, &s, sizeof s);
+            return true;
+        }
+    }
+    return false;
+}
+
+/* (img-attrs) a malformed attr float (<img=heart scale=abc/>) -> graceful: rich_parse_float logs +
+ * returns 0.0F, then rich_parse_img validates scale>0 and degrades to 1.0 BEFORE the builder. The
+ * image is present with scale clamped to 1.0 -- never trapped, never a 0/NaN box. */
+static void test_parse_img_bad_attr_float_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=abc/>", 22U));
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=abc/>", 22U); /* no trap */
+    uint32_t scale_bits = 0;
+    uint32_t one_bits = 0;
+    const float one = 1.0F;
+    memcpy(&one_bits, &one, sizeof one);
+    TEST_ASSERT_TRUE_MESSAGE(first_image_scale(&scale_bits), "bad attr float still emits an IMAGE run (degraded)");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(one_bits, scale_bits, "bad scale degrades to 1.0 (not 0/NaN)");
 }
 
-/* (img-attrs) an unknown valign keyword (<img=heart valign=sideways/>) -> NT_ASSERT; OFF keeps MIDDLE. */
-static void test_parse_img_bad_valign_asserts(void) {
+/* (img-attrs) an unknown valign keyword (<img=heart valign=sideways/>) -> graceful: log + keep the
+ * default MIDDLE. The image is present. No trap. */
+static void test_parse_img_bad_valign_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart valign=sideways/>", 28U));
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart valign=sideways/>", 28U); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_image = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_IMAGE) {
+            found_image = true;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_RICH_VALIGN_MIDDLE, (uint8_t)nt_ui_rich_test_run_image_valign(s_fx.ctx, i), "bad valign keeps the default MIDDLE");
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_image, "bad valign still emits an IMAGE run");
 }
 
-/* (img-attrs) an unknown attr key (<img=heart bogus=3/>) -> NT_ASSERT. */
-static void test_parse_img_unknown_attr_key_asserts(void) {
+/* (img-attrs) an unknown attr key (<img=heart bogus=3/>) -> graceful: log + skip the attr, the image
+ * is present with default scale/valign. No trap. */
+static void test_parse_img_unknown_attr_key_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart bogus=3/>", 20U));
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart bogus=3/>", 20U); /* no trap */
+    uint32_t scale_bits = 0;
+    TEST_ASSERT_TRUE_MESSAGE(first_image_scale(&scale_bits), "unknown attr key still emits an IMAGE run (attr skipped)");
 }
 
-/* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: each <b> pushes BOTH the parser
- * tag stack (NT_UI_RICH_PARSE_TAG_DEPTH) and the builder style stack (now PARSE_TAG_DEPTH+1); the
- * parser tag cap (the lower of the two) trips first. 40 > either cap, so the assert fires. */
-static void test_parse_over_deep_style_stack_asserts(void) {
+/* (10) over-deep <b> nesting (40 > NT_UI_RICH_PARSE_TAG_DEPTH 32) -> graceful: the over-cap tag-depth
+ * guard logs + stops tracking further opens (the hard cap survives), never writing past open_stack[].
+ * No trap; the parse completes bounded. Pathological untrusted nesting must degrade, not crash. */
+static void test_parse_over_deep_style_stack_graceful(void) {
     char buf[256];
     uint32_t n = 0;
     for (uint32_t i = 0; i < 40U; i++) { /* 40 > NT_UI_RICH_PARSE_TAG_DEPTH (32) */
@@ -451,11 +686,12 @@ static void test_parse_over_deep_style_stack_asserts(void) {
         buf[n++] = 'b';
         buf[n++] = '>';
     }
-    buf[n] = '\0';
+    buf[n++] = 'x'; /* trailing text so a run is produced */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n));
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, n); /* no trap, no OOB */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "over-deep nesting parses bounded (no trap, run produced)");
 }
 
 /* (10c) cap-parity regression (#1+#2): a BALANCED <b>xN + </b>xN at N == the parser tag cap must
@@ -536,12 +772,11 @@ static void test_parse_mixed_tag_stack_sync(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, last.variant, "trailing text variant back at base");
 }
 
-/* (10e) named-tag MISS (#1): a tagset that knows OTHER names but not the requested one. An unknown
- * <font=typo>/<color=xyz>/<fx=bad> trips the lookup-miss NT_ASSERT in rich_open_tag (the DEBUG dev
- * signal -- kept). These are the no-push branches: in OFF the hard guard skips the tag WITHOUT a
- * style push, and the matching close (now pop-iff-pushed) must NOT pop the enclosing style. The OFF
- * graceful skip is verified by code review (the suite runs asserts-ON, exercising the trap side). */
-static void parse_named_miss(const char *m) {
+/* (10e) named-tag MISS: a tagset that knows OTHER names but not the requested one. An unknown
+ * <font=typo>/<color=xyz>/<fx=bad> is UNTRUSTED data -> log + skip (no style push), and the matching
+ * close (pop-iff-pushed) must NOT pop the enclosing style: <b><font=typo>x</font>y</b> keeps both x
+ * AND y bold. No trap. This is the headline graceful-skip case from the objective. */
+static void parse_named_miss(const char *m, nt_ui_rich_style_t *base) {
     nt_ui_rich_tagset_t ts;
     nt_ui_rich_tagset_init(&ts); /* valid tagset; registers names DISTINCT from the misses below */
     nt_ui_rich_tagset_register_color(&ts, "accent", 0xFFAABBCCU);
@@ -551,13 +786,28 @@ static void parse_named_miss(const char *m) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
+    nt_ui_rich_parse(s_fx.ctx, &ts, base, m, strlen(m));
 }
-static void test_parse_unknown_named_tags_assert(void) {
-    NT_TEST_EXPECT_ASSERT(parse_named_miss("<font=typo>x</font>"));  /* lookup_font miss -> no push */
-    NT_TEST_EXPECT_ASSERT(parse_named_miss("<color=xyz>x</color>")); /* lookup_color miss -> no push */
-    NT_TEST_EXPECT_ASSERT(parse_named_miss("<fx=bad>x</fx>"));       /* lookup_effect miss -> no push */
+static void test_parse_unknown_named_tags_graceful(void) {
+    /* <b><font=typo>x</font>y</b>: the unknown <font=typo> pushes nothing, its </font> pops nothing,
+     * so BOTH x and y stay bold (the enclosing <b> is preserved). */
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    parse_named_miss("<b><font=typo>x</font>y</b>", &base); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "unknown font miss -> runs, no trap");
+    for (uint32_t i = 0; i < runs; i++) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_VARIANT_BOLD, nt_ui_rich_test_run_style(s_fx.ctx, i).variant, "all text inside <b> stays bold (unknown <font> pushed/popped nothing)");
+    }
+
+    /* Unknown color/fx misses likewise skip without trapping; the text is preserved unstyled. */
+    nt_ui_rich_style_t base2 = nt_ui_rich_style_defaults();
+    base2.color_abgr = 0xFF0A0B0CU;
+    parse_named_miss("<color=xyz>x</color>", &base2); /* no trap */
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF0A0B0CU, nt_ui_rich_test_run_style(s_fx.ctx, 0).color_abgr, "unknown color miss keeps the base color");
+
+    nt_ui_rich_style_t base3 = nt_ui_rich_style_defaults();
+    parse_named_miss("<fx=bad>x</fx>", &base3); /* no trap */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, nt_ui_rich_test_run_style(s_fx.ctx, 0).effect_id, "unknown fx miss keeps no effect");
 }
 
 /* (10f) pop-iff-pushed correctness (#1): a WELL-FORMED <b><i>x</i>y</b> still composes byte-identically
@@ -582,29 +832,46 @@ static void test_parse_wellformed_nesting_pops_correctly(void) {
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, nt_ui_rich_test_run_style(s_fx.ctx, 2).color_abgr, "z carries the BASE color (stack balanced back to base)");
 }
 
-/* (17b) markup-path bad image scale (#3): <img=heart scale=0/> trips the nt_ui_rich_image scale>0
- * assert (DEBUG dev signal -- kept). In OFF the new hard clamp falls back to identity (1.0), so the
- * solver never multiplies the box dims by 0/NaN (verified by code; the suite exercises the trap). */
-static void test_parse_img_zero_scale_asserts(void) {
+/* (17b) markup-path bad image scale: <img=heart scale=0/> -> graceful: rich_parse_img validates
+ * scale>0 and degrades to identity 1.0 BEFORE the builder, so the solver never multiplies the box by
+ * 0. The image is present with scale clamped to 1.0. No trap. */
+static void test_parse_img_zero_scale_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=0/>", 20U));
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=0/>", 20U); /* no trap */
+    uint32_t scale_bits = 0;
+    uint32_t one_bits = 0;
+    const float one = 1.0F;
+    memcpy(&one_bits, &one, sizeof one);
+    TEST_ASSERT_TRUE_MESSAGE(first_image_scale(&scale_bits), "<img scale=0/> still emits an IMAGE run");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(one_bits, scale_bits, "<img scale=0/> degrades to scale 1.0 (never 0)");
 }
 
-/* (16b) <scale=0> / <scale=-1>: the push_scale>0 assert traps in FULL. In OFF the hard clamp falls
- * back to identity (no <=0 font size into nt_font_measure_n). */
-static void test_parse_scale_nonpositive_asserts(void) {
-    NT_TEST_EXPECT_ASSERT(parse_lit("<scale=0>x</scale>"));
-    NT_TEST_EXPECT_ASSERT(parse_lit("<scale=-1>x</scale>"));
+/* (16b) <scale=0> / <scale=-1>: the SCALE path validates >0 and degrades to identity 1.0 before the
+ * builder (no <=0 font size into nt_font_measure_n). No trap. */
+static void test_parse_scale_nonpositive_graceful(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.scale = 1.0F;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=0>x</scale>y", 19U); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).scale > 0.0F, "<scale=0> degrades to a positive scale (never 0)");
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=-1>x</scale>y", 20U); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).scale > 0.0F, "<scale=-1> degrades to a positive scale (never negative)");
 }
 
-/* (10b) nested <link> is rejected (HTML's no-nested-anchor rule): pending_link is a single scalar,
- * so an inner </link> would zero the outer's id and silently drop the enclosing link. A SINGLE link
- * around text parses fine; a second link opened inside the first traps in rich_open_tag. */
-static void test_parse_nested_link_asserts(void) {
+/* (10b) nested <link>: a single <link> around text parses fine; a second <link> opened inside the
+ * first is UNTRUSTED data -> log + skip the inner link (HTML's no-nested-anchor rule), no trap. The
+ * text is preserved; only the inner link is dropped. */
+static void test_parse_nested_link_graceful(void) {
     /* One link parses fine. */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -612,30 +879,39 @@ static void test_parse_nested_link_asserts(void) {
     nt_ui_rich_parse(s_fx.ctx, NULL, NULL, "<link=a>hi</link>", 17U);
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) == 1U, "single <link> around text -> one run");
 
-    /* A nested <link> inside an open <link> -> NT_ASSERT (loud, not silently wrong). */
-    NT_TEST_EXPECT_ASSERT(parse_lit("<link=a><link=b>hi</link></link>"));
+    /* A nested <link> inside an open <link> -> log + skip, no trap, text preserved. */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, "<link=a><link=b>hi</link></link>", 32U); /* no trap */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_count(s_fx.ctx) >= 1U, "nested <link> skipped gracefully, text preserved");
 }
 
 /* ---- bounded-scan robustness ---- */
 
-/* (11) a pathological non-terminating '<' string asserts on the unterminated tag and does NOT
- * loop forever or read past `len` -- the test completing proves the scan is bounded. */
+/* (11) a pathological non-terminating '<' string logs + stops at the unterminated tag and does NOT
+ * loop forever or read past `len` -- the test completing proves the scan is bounded. No trap. */
 static void test_parse_non_terminating_bounded(void) {
     char buf[64];
     memset(buf, '<', sizeof buf); /* "<<<<...<" -- no '>' anywhere */
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, sizeof buf));
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, buf, sizeof buf); /* no trap, no loop, no OOB */
+    TEST_ASSERT_TRUE_MESSAGE(true, "non-terminating '<' run is bounded (completed without trap/loop)");
 }
 
-/* (12) the scan respects `len`: a '<' at the very end with bytes BEYOND len must not be read.
- * We pass a len that stops before any '>' so the parser asserts on the bounded buffer, never
- * scanning into the trailing (out-of-range) bytes. */
+/* (12) the scan respects `len`: a '<' at the very end with bytes BEYOND len must not be read. A len
+ * that stops before any '>' -> the tokenizer logs + stops on the bounded buffer, never scanning into
+ * the trailing (out-of-range) bytes. No trap. */
 static void test_parse_len_bounded(void) {
     /* The full buffer is well-formed, but we lie about the length: only "<b" is in-bounds. */
     const char *full = "<b>ok</b>";
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, full, 2U)); /* only "<b" visible -> unterminated */
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, full, 2U); /* only "<b" visible -> unterminated, bounded */
+    TEST_ASSERT_TRUE_MESSAGE(true, "len-bounded scan stopped at the unterminated tag (no OOB, no trap)");
 }
 
 /* (13) a literal-< escape (\<) emits a real '<' in the text, not a tag start. */
@@ -651,13 +927,26 @@ static void test_parse_escape_literal_lt(void) {
     TEST_ASSERT_EQUAL_MEMORY("a<b", t, 3);
 }
 
-/* (14) invalid UTF-8 in a literal text segment -> NT_ASSERT. */
-static void test_parse_invalid_utf8_asserts(void) {
+/* (14) invalid UTF-8 in a literal text segment -> graceful: log + SKIP the malformed segment (never
+ * append the raw invalid bytes downstream). No trap. The whole single segment is dropped, so no run
+ * carries the bad bytes. */
+static void test_parse_invalid_utf8_graceful(void) {
     const char bad[] = {'h', 'i', (char)0xFF, 'x'}; /* 0xFF is never valid UTF-8 */
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad));
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, bad, sizeof bad); /* no trap */
+    /* The single text segment is invalid UTF-8 -> skipped entirely; no run contains the 0xFF byte. */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_TEXT) {
+            const char *t = nt_ui_rich_test_run_text(s_fx.ctx, i);
+            const uint32_t tl = nt_ui_rich_test_run_text_len(s_fx.ctx, i);
+            for (uint32_t k = 0; k < tl; k++) {
+                TEST_ASSERT_NOT_EQUAL_MESSAGE((char)0xFF, t[k], "no emitted run carries the invalid 0xFF byte (segment skipped)");
+            }
+        }
+    }
 }
 
 /* (14b) a buffer-full truncation that lands MID multibyte sequence must not sever a codepoint:
@@ -752,13 +1041,24 @@ static void rich_session_begin(void) {
     nt_ui_rich_begin(s_fx.ctx, &base);
 }
 
-/* (15) <img=.../> with a NULL base (no default_atlas source) -> NT_ASSERT in the parser. */
-static void test_parse_img_null_base_asserts(void) {
+/* (15) <img=.../> with a NULL base (no default_atlas source) is UNTRUSTED data (begin allows NULL
+ * base for text-only markup) -> graceful: log + skip the image; the surrounding text "a"/"b" remain.
+ * No trap, no IMAGE run. */
+static void test_parse_img_null_base_graceful(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
-    const char *m = "<img=icon/>";
-    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m)));
+    const char *m = "a<img=icon/>b";
+    nt_ui_rich_parse(s_fx.ctx, NULL, NULL, m, strlen(m)); /* no trap */
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    bool found_image = false;
+    for (uint32_t i = 0; i < runs; i++) {
+        if (nt_ui_rich_test_run_kind(s_fx.ctx, i) == NT_RICH_ATOM_IMAGE) {
+            found_image = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(found_image, "<img> with NULL base produced NO image run (skipped); surrounding text remains");
+    TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "surrounding text 'a'/'b' still produced run(s)");
 }
 
 /* (16) push_scale with a non-finite-or-non-positive multiplier -> NT_ASSERT (negative font size guard). */
@@ -847,12 +1147,103 @@ static void test_parse_layer_matches_builder(void) {
     }
 }
 
-/* (layer) <layer=N> hard guards survive: >254 traps in FULL; the empty/non-numeric forms trap too. */
-static void test_parse_layer_out_of_range_asserts(void) {
-    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=255>x</layer>")); /* 255 is the AUTO sentinel, not a valid explicit layer */
-    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=300>x</layer>")); /* > 254 */
-    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=>x</layer>"));    /* empty value */
-    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=ab>x</layer>"));  /* non-numeric */
+/* (layer) <layer=N> malformed/out-of-range -> graceful: log + AUTO (per-kind default), never a trap.
+ * 255 (the AUTO sentinel), >254, empty, and non-numeric all degrade to AUTO; the text is preserved. */
+static void test_parse_layer_out_of_range_graceful(void) {
+    const char *cases[] = {"<layer=255>x</layer>", "<layer=300>x</layer>", "<layer=>x</layer>", "<layer=ab>x</layer>"};
+    for (uint32_t c = 0; c < 4U; c++) {
+        nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+        nt_mem_scratch_reset();
+        s_fx.ctx->pending_rich = NULL;
+        s_fx.ctx->rich_session_open = false;
+        nt_ui_rich_parse(s_fx.ctx, NULL, &base, cases[c], strlen(cases[c])); /* no trap */
+        const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+        TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "malformed <layer=N> -> runs, no trap");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_LAYER_AUTO, nt_ui_rich_test_run_style(s_fx.ctx, 0).layer, "malformed <layer=N> degrades to AUTO");
+    }
+}
+
+/* ---- log mechanism: nt_log_warn_unique dedup ---- */
+
+/* (log-1) a malformed tag LOGS exactly ONE warn line; parsing the SAME bad string a SECOND time logs
+ * NOTHING new (nt_log_warn_unique dedups by the produced message, program-wide). Uses a bad-hex color
+ * UNIQUE to this process: the OPEN logs once (malformed hex) and the matching </color> is a KNOWN tag
+ * that balances the (opaque-white) push silently -> exactly one warn line, not two. */
+static void test_log_malformed_logs_once_per_unique(void) {
+    sink_attach();
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+
+    /* First sight of the bad-hex "#zqzqzq" -> exactly one warn line. */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zqzqzq>x</color>", 24U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_sink.warn_count, "first malformed parse logs exactly one warn line");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_sink.last_msg, "zqzqzq"), "the warn line carries the offending token");
+
+    /* Re-parse the IDENTICAL bad string -> the unique dedup swallows it (still 1 total). */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#zqzqzq>x</color>", 24U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_sink.warn_count, "re-parsing the same bad string logs nothing new (dedup by message)");
+    sink_detach();
+}
+
+/* (log-2) two DISTINCT bad values each log ONCE -> two warn lines (the dedup keys on the MESSAGE,
+ * which carries the offending token, so different tokens are different messages). Two process-unique
+ * bad-hex strings so neither was logged by an earlier test, and each </color> balances silently. */
+static void test_log_distinct_errors_each_log_once(void) {
+    sink_attach();
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#wqwqwq>x</color>", 24U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_sink.warn_count, "first distinct bad value -> one line");
+
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<color=#vqvqvq>x</color>", 24U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_sink.warn_count, "a SECOND distinct bad value -> a SECOND line (distinct message)");
+    sink_detach();
+}
+
+/* (log-3) WELL-FORMED markup logs NOTHING and produces the SAME run-list as the equivalent builder
+ * sequence (byte-identical happy path: no regression from the log+skip refactor). */
+static void test_log_wellformed_silent_and_byte_identical(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF112233U;
+
+    /* BUILDER: "a " then <b>"bold"</b> then " c". */
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "a ", 2);
+    nt_ui_rich_push_bold(s_fx.ctx);
+    nt_ui_rich_text_n(s_fx.ctx, "bold", 4);
+    nt_ui_rich_pop(s_fx.ctx);
+    nt_ui_rich_text_n(s_fx.ctx, " c", 2);
+    nt_ui_rich_end(s_fx.ctx);
+    const uint32_t b_runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    uint8_t b_variant[8] = {0};
+    for (uint32_t i = 0; i < b_runs && i < 8U; i++) {
+        b_variant[i] = nt_ui_rich_test_run_style(s_fx.ctx, i).variant;
+    }
+
+    /* PARSER: the byte-identical markup, with the sink attached to prove ZERO warn lines. */
+    sink_attach();
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, "a <b>bold</b> c", 15U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_sink.warn_count, "well-formed markup logs NOTHING");
+    const uint32_t p_runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b_runs, p_runs, "well-formed parser run count == builder (byte-identical)");
+    for (uint32_t i = 0; i < p_runs && i < 8U; i++) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(b_variant[i], nt_ui_rich_test_run_style(s_fx.ctx, i).variant, "well-formed parser run variant == builder");
+    }
+    sink_detach();
 }
 
 int main(void) {
@@ -864,53 +1255,56 @@ int main(void) {
     RUN_TEST(test_tagset_override_in_place);
     RUN_TEST(test_tagset_reset);
     RUN_TEST(test_tagset_empty_name_asserts);
-    RUN_TEST(test_parse_unclosed_tag_asserts);
-    RUN_TEST(test_parse_mismatched_close_asserts);
-    RUN_TEST(test_parse_unknown_tag_asserts);
-    RUN_TEST(test_parse_bad_hex_asserts);
-    RUN_TEST(test_parse_orphan_close_asserts);
-    RUN_TEST(test_parse_mismatched_link_close_asserts);
-    RUN_TEST(test_parse_empty_scale_value_asserts);
+    RUN_TEST(test_parse_unclosed_tag_graceful);
+    RUN_TEST(test_parse_mismatched_close_graceful);
+    RUN_TEST(test_parse_unknown_tag_graceful);
+    RUN_TEST(test_parse_bad_hex_graceful);
+    RUN_TEST(test_parse_orphan_close_graceful);
+    RUN_TEST(test_parse_mismatched_link_close_graceful);
+    RUN_TEST(test_parse_empty_scale_value_graceful);
     RUN_TEST(test_parse_fx_params_ok);
-    RUN_TEST(test_parse_fx_bad_float_asserts);
-    RUN_TEST(test_parse_fx_unknown_key_asserts);
-    RUN_TEST(test_parse_fx_no_equals_asserts);
-    RUN_TEST(test_parse_fx_params_on_custom_asserts);
-    RUN_TEST(test_parse_fx_empty_value_asserts);
+    RUN_TEST(test_parse_fx_bad_float_graceful);
+    RUN_TEST(test_parse_fx_unknown_key_graceful);
+    RUN_TEST(test_parse_fx_no_equals_graceful);
+    RUN_TEST(test_parse_fx_params_on_custom_graceful);
+    RUN_TEST(test_parse_fx_empty_value_graceful);
     RUN_TEST(test_parse_obj_self_close_emits_object_run);
-    RUN_TEST(test_parse_obj_unknown_asserts);
-    RUN_TEST(test_parse_obj_empty_name_asserts);
-    RUN_TEST(test_parse_obj_null_tagset_asserts);
-    RUN_TEST(test_parse_img_alias_null_tagset_asserts);
-    RUN_TEST(test_parse_color_null_tagset_asserts);
-    RUN_TEST(test_parse_font_null_tagset_asserts);
-    RUN_TEST(test_parse_fx_null_tagset_asserts);
-    RUN_TEST(test_parse_img_unknown_alias_asserts);
+    RUN_TEST(test_parse_obj_unknown_graceful);
+    RUN_TEST(test_parse_obj_empty_name_graceful);
+    RUN_TEST(test_parse_obj_null_tagset_graceful);
+    RUN_TEST(test_parse_img_alias_null_tagset_graceful);
+    RUN_TEST(test_parse_color_null_tagset_graceful);
+    RUN_TEST(test_parse_font_null_tagset_graceful);
+    RUN_TEST(test_parse_fx_null_tagset_graceful);
+    RUN_TEST(test_parse_img_unknown_alias_graceful);
     RUN_TEST(test_parse_img_attrs_match_builder);
     RUN_TEST(test_parse_img_no_attrs_defaults);
-    RUN_TEST(test_parse_img_bad_attr_float_asserts);
-    RUN_TEST(test_parse_img_bad_valign_asserts);
-    RUN_TEST(test_parse_img_unknown_attr_key_asserts);
-    RUN_TEST(test_parse_over_deep_style_stack_asserts);
+    RUN_TEST(test_parse_img_bad_attr_float_graceful);
+    RUN_TEST(test_parse_img_bad_valign_graceful);
+    RUN_TEST(test_parse_img_unknown_attr_key_graceful);
+    RUN_TEST(test_parse_over_deep_style_stack_graceful);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
     RUN_TEST(test_parse_mixed_tag_stack_sync);
-    RUN_TEST(test_parse_unknown_named_tags_assert);
+    RUN_TEST(test_parse_unknown_named_tags_graceful);
     RUN_TEST(test_parse_wellformed_nesting_pops_correctly);
-    RUN_TEST(test_parse_img_zero_scale_asserts);
-    RUN_TEST(test_parse_scale_nonpositive_asserts);
-    RUN_TEST(test_parse_nested_link_asserts);
+    RUN_TEST(test_parse_img_zero_scale_graceful);
+    RUN_TEST(test_parse_scale_nonpositive_graceful);
+    RUN_TEST(test_parse_nested_link_graceful);
     RUN_TEST(test_parse_non_terminating_bounded);
     RUN_TEST(test_parse_len_bounded);
     RUN_TEST(test_parse_escape_literal_lt);
-    RUN_TEST(test_parse_invalid_utf8_asserts);
+    RUN_TEST(test_parse_invalid_utf8_graceful);
     RUN_TEST(test_parse_utf8_truncation_codepoint_aware);
     RUN_TEST(test_parse_utf8_truncation_3byte_lead);
     RUN_TEST(test_parse_utf8_truncation_4byte_lead);
-    RUN_TEST(test_parse_img_null_base_asserts);
+    RUN_TEST(test_parse_img_null_base_graceful);
     RUN_TEST(test_push_scale_bad_mult_asserts);
     RUN_TEST(test_rich_image_bad_scale_asserts);
     RUN_TEST(test_rich_text_zero_id_asserts);
     RUN_TEST(test_parse_layer_matches_builder);
-    RUN_TEST(test_parse_layer_out_of_range_asserts);
+    RUN_TEST(test_parse_layer_out_of_range_graceful);
+    RUN_TEST(test_log_malformed_logs_once_per_unique);
+    RUN_TEST(test_log_distinct_errors_each_log_once);
+    RUN_TEST(test_log_wellformed_silent_and_byte_identical);
     return UNITY_END();
 }
