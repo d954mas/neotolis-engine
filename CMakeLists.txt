@@ -49,7 +49,7 @@ option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region gr
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)
-    foreach(_grp CORE TIME INPUT DISCOVERY UI OBS ENTITY_WRITE)
+    foreach(_grp CORE TIME INPUT DISCOVERY UI OBS ENTITY_WRITE CAPTURE)
         if(NT_DEVAPI_GROUP_${_grp})
             message(WARNING "NT_DEVAPI_GROUP_${_grp}=ON has no effect: NT_DEVAPI_ENABLED is OFF, so "
                 "the devapi command layer (and its groups) is not built. Set NT_DEVAPI_ENABLED=ON to "

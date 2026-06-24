@@ -117,7 +117,7 @@ endif()
 if(NT_DEVAPI_GROUP_CAPTURE)
     target_sources(nt_devapi PRIVATE nt_devapi_capture.c)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_CAPTURE=1)
-    target_link_libraries(nt_devapi PRIVATE nt_gfx nt_fpng nt_window_interface)
+    target_link_libraries(nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_window_interface)
 endif()
 
 # Entity-write group (entity.set): a dev-only DEBUG write over the component apply() hooks. Hard-requires

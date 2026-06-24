@@ -18,6 +18,9 @@ target_compile_options(nt_fpng PRIVATE -w)
 # MSVC enables them without a flag; WASM (EMSCRIPTEN) takes fpng's scalar path.
 if(NOT EMSCRIPTEN AND (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU"))
     target_compile_options(nt_fpng PRIVATE -msse4.1 -mpclmul)
+    # fpng type-puns uint32/uint64 through uint8_t* on the native unaligned-loads path
+    # (FPNG_USE_UNALIGNED_LOADS=1) — UB under default -fstrict-aliasing at -O2.
+    target_compile_options(nt_fpng PRIVATE -fno-strict-aliasing)
 endif()
 
 # Match ASAN runtime: release static CRT + _ITERATOR_DEBUG_LEVEL=0 in debug
