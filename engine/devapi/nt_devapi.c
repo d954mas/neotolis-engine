@@ -531,6 +531,15 @@ const char *nt_devapi_poll_response(void) {
         if (!slot_ready(&s_deferred[i])) {
             continue;
         }
+        /* Drain-race guard (T-69-06-RACE): a producer-slot is "ready" by frame deadline before the
+           pre-swap seam (nt_devapi_capture_on_pre_swap) has filled its payload — net_poll's drain runs
+           at frame start, the seam runs pre-swap at frame end. Yielding now would emit the legacy
+           {deferred:true} and lose the data. Withhold a ready slot whose producer is still pending
+           (payload NULL, producer present); the seam fills it this frame and the next drain yields the
+           real PNG. Producer-less slots (frame.wait/time.step) are unaffected. */
+        if (s_deferred[i].producer != NULL && s_deferred[i].payload == NULL) {
+            continue;
+        }
         cJSON *entry = serialize_slot(&s_deferred[i]);
         const char *out = resp_serialize(entry);
         cJSON_Delete(entry);
