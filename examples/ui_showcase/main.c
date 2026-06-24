@@ -2249,6 +2249,20 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
 
+    /* Z-LAYER overlap demo: a big heart icon pulled UP with a strong negative offset_y so its box
+     * overlaps the word right before it. Shown twice so the layer reorder is VISIBLE:
+     *  - DEFAULT: image (layer 1) draws OVER text (layer 0) -> the heart hides "OVER".
+     *  - <layer=5> on the word lifts it ABOVE the image (layer 1) -> "OVER" draws on top of the heart. */
+    RICH_TEXT_LIT(ctx, "Z-order: ");
+    RICH_TEXT_LIT(ctx, "OVER");
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BASELINE, -10.0F, 2.0F); /* big heart, ride up onto "OVER" */
+    RICH_TEXT_LIT(ctx, " vs ");
+    nt_ui_rich_push_layer(ctx, 5U); /* lift the word above the image's default layer 1 */
+    RICH_TEXT_LIT(ctx, "OVER");
+    nt_ui_rich_pop(ctx);                                                            /* layer */
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BASELINE, -10.0F, 2.0F); /* same big heart over the lifted word */
+    RICH_TEXT_LIT(ctx, ". ");
+
     /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
      * NO scale -- a scale would grow the line height and reflow the whole block on hover. */
     if (look.emphasize) {
@@ -2326,6 +2340,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                    "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
                    "<fx=bounce>bounce </fx><fx=glow>glow </fx><fx=sway>sway</fx> "
                    "<fx=wave amp=14 speed=5>BIG</fx>. "
+                   "<layer=3>Z-order: layer tag parses here too.</layer> "
                    "%s<color=%s><link=quest>%s</link></color>%s",
                    fx_open, look_b.mk_col, look_b.label, fx_close);
     const nt_ui_rich_style_t base = rich_base_style();
