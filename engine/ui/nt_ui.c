@@ -1723,7 +1723,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
-        counters->image_command_count++;
+        counters->image_command_count++; /* Clay IMAGE commands (nt_ui_image) only; inline rich images self-emit, not counted here */
         /* Per-element material override (radial reveal): .id==0 = base material.
          * Routed through prep so a shared override batches and the base<->override
          * boundary flushes exactly once. */
@@ -3174,6 +3174,9 @@ uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx) {
     return ctx->last_walk_rect_command_count;
 }
 
+/* Counts Clay IMAGE render-commands (nt_ui_image) only -- inline rich-text images self-emit inside the
+ * rich block's coalesced sprite batch (bypassing the CLAY_RENDER_COMMAND_TYPE_IMAGE branch) and are not
+ * counted here; nt_ui_rich_test_image_emit_count probes the rich-image count. */
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_image_command_count: ctx must be non-NULL");
     return ctx->last_walk_image_command_count;

@@ -508,6 +508,18 @@ static void test_two_inline_images_coalesce(void) {
     }
 }
 
+/* (6d) STATS CONTRACT: inline rich images self-emit inside the rich CUSTOM block's sprite batch, NOT as
+ * Clay IMAGE render-commands -- so a block with two inline images contributes 0 to the walk image-COMMAND
+ * count while the rich-image probe reports 2. Pins the documented getter contract (the name is COMMAND
+ * count; inline rich images are no longer Clay commands). */
+static void test_inline_images_not_in_image_command_count(void) {
+    const nt_material_t mat = make_rich_image_material();
+    frame_two_images(mat); /* [text][img][text][img][text] -- two inline images, no nt_ui_image */
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the rich self-emit (probe == 2)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_get_last_walk_image_command_count(s_fx.ctx), "inline rich images are NOT Clay IMAGE commands -> 0 image-command count");
+}
+
 /* (7) by-name resolve: <img by name_hash> resolves to the white region index (0) via
  * nt_atlas_ref + nt_atlas_resolve_ref -- no per-image registry. */
 static void test_inline_image_resolves_by_name(void) {
@@ -2101,6 +2113,7 @@ int main(void) {
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);
+    RUN_TEST(test_inline_images_not_in_image_command_count);
     RUN_TEST(test_inline_image_tint_packed);
     RUN_TEST(test_inline_image_resolves_by_name);
     RUN_TEST(test_inline_image_valign_y);

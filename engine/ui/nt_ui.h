@@ -460,6 +460,9 @@ float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx);
 /* Per-type command counts (pre-emit; use draw_calls for GPU cost). */
 uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx);
+/* Counts Clay IMAGE render-commands (nt_ui_image UI images) only. Inline rich-text images emit inside the
+ * rich block's coalesced sprite batch during its CUSTOM self-emit -- they are NOT Clay commands and do NOT
+ * count here (see nt_ui_rich_test_image_emit_count for the rich-image probe). */
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_text_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_border_command_count(const nt_ui_context_t *ctx);
