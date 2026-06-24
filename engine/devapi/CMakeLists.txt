@@ -7,8 +7,10 @@
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
     nt_devapi_registry.c
+    nt_devapi_base64.c
     nt_devapi.h
     nt_devapi_internal.h
+    nt_devapi_base64.h
     nt_devapi_stub.h
 )
 
