@@ -79,6 +79,7 @@ static void t_end_group(nt_introspect_sink *s) { text_append(as_text(s), "} "); 
 static void t_f32(nt_introspect_sink *s, const char *key, float v) { text_append(as_text(s), "%s=%g ", key, (double)v); }
 static void t_i64(nt_introspect_sink *s, const char *key, int64_t v) { text_append(as_text(s), "%s=%" PRId64 " ", key, v); }
 static void t_u64(nt_introspect_sink *s, const char *key, uint64_t v) { text_append(as_text(s), "%s=%" PRIu64 " ", key, v); }
+static void t_u64_hex(nt_introspect_sink *s, const char *key, uint64_t v) { text_append(as_text(s), "%s=0x%" PRIx64 " ", key, v); }
 static void t_bool(nt_introspect_sink *s, const char *key, bool v) { text_append(as_text(s), "%s=%d ", key, v ? 1 : 0); }
 
 static void t_floats(nt_introspect_sink *s, const char *key, const float *v, int count) {
@@ -97,7 +98,12 @@ static void t_floats(nt_introspect_sink *s, const char *key, const float *v, int
 static void t_str(nt_introspect_sink *s, const char *key, const char *v) { text_append(as_text(s), "%s=%s ", key, v != NULL ? v : "(null)"); }
 static void t_enum(nt_introspect_sink *s, const char *key, const char *token) { text_append(as_text(s), "%s=%s ", key, token != NULL ? token : "?"); }
 static void t_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, uint64_t id) { text_append(as_text(s), "%s=%s#0x%" PRIx64 " ", key, nt_introspect_ref_kind_name(kind), id); }
-static void t_asset(nt_introspect_sink *s, uint8_t asset_type, uint32_t handle) { text_append(as_text(s), "handle=%u type=%u ", (unsigned)handle, (unsigned)asset_type); }
+/* asset_type drives the resolving JSON sink's reverse-map; the flat text sink can't resolve, so it
+   emits only the handle (the enclosing component group already conveys the asset kind) — matching j_asset. */
+static void t_asset(nt_introspect_sink *s, uint8_t asset_type, uint32_t handle) {
+    (void)asset_type;
+    text_append(as_text(s), "handle=%u ", (unsigned)handle);
+}
 
 static void text_sink_init(text_sink_t *t, char *buf, size_t cap) {
     t->base = (nt_introspect_sink){
@@ -106,6 +112,7 @@ static void text_sink_init(text_sink_t *t, char *buf, size_t cap) {
         .field_f32 = t_f32,
         .field_i64 = t_i64,
         .field_u64 = t_u64,
+        .field_u64_hex = t_u64_hex,
         .field_bool = t_bool,
         .field_floats = t_floats,
         .field_str = t_str,

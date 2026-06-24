@@ -2399,8 +2399,11 @@ void test_asset_enumeration_fields(void) {
     TEST_ASSERT_TRUE(nt_resource_asset_info(0, &info));
     TEST_ASSERT_EQUAL_UINT64(rid.value, info.resource_id);
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, info.type);
-    /* Asset's pack_index points at an enumerable mounted pack. */
-    TEST_ASSERT_TRUE(info.pack_index < nt_resource_pack_count());
+    /* pack_index is a RAW packs[] slot (same space as nt_resource_pack_info_t.pack_index), not a dense
+       ordinal — assert it equals the owning pack's raw slot, which holds even after an unmount hole. */
+    nt_resource_pack_info_t pinfo;
+    TEST_ASSERT_TRUE(nt_resource_pack_info(0, &pinfo));
+    TEST_ASSERT_EQUAL_UINT16(pinfo.pack_index, info.pack_index);
 }
 
 void test_asset_info_out_of_range_returns_false(void) {

@@ -15,7 +15,7 @@
 #ifndef NT_LOG_RING_DEPTH
 #define NT_LOG_RING_DEPTH 1024
 #endif
-/* head/count are uint16_t and count saturates AT the depth, so an override past UINT16_MAX wraps. */
+/* head/count are uint16_t and count saturates AT the depth, so DEPTH must fit in uint16_t (asserted). */
 _Static_assert(NT_LOG_RING_DEPTH > 0 && NT_LOG_RING_DEPTH <= UINT16_MAX, "NT_LOG_RING_DEPTH must be in (0, UINT16_MAX]");
 
 /* Reuse nt_log's 512-byte truncation semantics for the message buffer. */

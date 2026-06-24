@@ -97,7 +97,7 @@ static const char *resp_serialize(cJSON *tree) {
     return s_resp_buf;
 }
 
-/* cJSON_Add{String,Number,Bool}ToObject wrappers that assert success (OOM traps rather
+/* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success (OOM traps rather
    than silently dropping a field). Result captured first — NT_ASSERT compiles out at
    NT_ASSERT_MODE=0, so the call must not live inside the macro. */
 void devapi_add_string(cJSON *obj, const char *key, const char *value) {
@@ -114,6 +114,12 @@ void devapi_add_number(cJSON *obj, const char *key, double value) {
 
 void devapi_add_bool(cJSON *obj, const char *key, bool value) {
     cJSON *item = cJSON_AddBoolToObject(obj, key, value);
+    NT_ASSERT(item != NULL);
+    (void)item;
+}
+
+void devapi_add_null(cJSON *obj, const char *key) {
+    cJSON *item = cJSON_AddNullToObject(obj, key);
     NT_ASSERT(item != NULL);
     (void)item;
 }

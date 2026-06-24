@@ -10,7 +10,7 @@
 
 nt_platform_mem_t nt_platform_memory_usage(void) {
     nt_platform_mem_t mem = {0};
-    PROCESS_MEMORY_COUNTERS pmc;
+    PROCESS_MEMORY_COUNTERS pmc = {0}; /* zero-init: under ASSERT_MODE=OFF a failed call must not read uninit stack */
     /* A syscall failure is a bug, not "0 bytes used" — assert rather than report a bogus figure. */
     BOOL ok = GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
     NT_ASSERT(ok && "GetProcessMemoryInfo failed");
@@ -57,7 +57,7 @@ nt_platform_mem_t nt_platform_memory_usage(void) {
 
 nt_platform_mem_t nt_platform_memory_usage(void) {
     nt_platform_mem_t mem = {0};
-    mach_task_basic_info_data_t info;
+    mach_task_basic_info_data_t info = {0}; /* zero-init: under ASSERT_MODE=OFF a failed call must not read uninit stack */
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
     /* A task_info failure is a bug, not "0 bytes" — assert rather than report a bogus figure. */
     kern_return_t kr = task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count);

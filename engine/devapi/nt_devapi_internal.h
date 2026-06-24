@@ -10,11 +10,12 @@
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 
-/* cJSON_Add{String,Number,Bool}ToObject wrappers that assert success — OOM traps
+/* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success — OOM traps
    (fail-early) instead of silently producing an incomplete response. */
 void devapi_add_string(cJSON *obj, const char *key, const char *value);
 void devapi_add_number(cJSON *obj, const char *key, double value);
 void devapi_add_bool(cJSON *obj, const char *key, bool value);
+void devapi_add_null(cJSON *obj, const char *key);
 
 /* Strict unsigned-integer param parsers: require a finite, integer-valued number in [0, max]
    (a blind cast of an out-of-range/NaN/Inf double to unsigned is UB). On violation they call

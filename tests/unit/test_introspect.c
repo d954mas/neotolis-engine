@@ -36,6 +36,7 @@ static void alpha_describe(nt_entity_t e, nt_introspect_sink *s) {
     s->field_enum(s, "state", "ready");
     s->field_ref(s, "tex", NT_REF_RESOURCE, 0x9AF3);
     s->field_asset(s, 1, 7);
+    s->field_u64_hex(s, "h", 0xFEEDFACECAFEBEEFULL); /* 64-bit opaque id: exact hex, not the lossy double channel */
     s->begin_group(s, "nested");
     s->field_u64(s, "inner", 1);
     s->end_group(s);
@@ -119,7 +120,9 @@ void test_introspect_all_primitives(void) {
     TEST_ASSERT_NOT_NULL(strstr(buf, "name=hi"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "state=ready"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "tex=resource#0x9af3"));
-    TEST_ASSERT_NOT_NULL(strstr(buf, "handle=7 type=1")); /* field_asset: handle + type in the text sink */
+    TEST_ASSERT_NOT_NULL(strstr(buf, "handle=7 "));            /* field_asset: handle only (type drives the JSON sink's reverse-map, not emitted) */
+    TEST_ASSERT_NULL(strstr(buf, "type="));                    /* the undocumented type= field is gone */
+    TEST_ASSERT_NOT_NULL(strstr(buf, "h=0xfeedfacecafebeef")); /* field_u64_hex: exact 64-bit hex, no precision loss */
     TEST_ASSERT_NOT_NULL(strstr(buf, "nested{"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "inner=1"));
 }

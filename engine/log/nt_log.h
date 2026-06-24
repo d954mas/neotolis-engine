@@ -36,6 +36,8 @@ void nt_log_remove_sink(nt_log_sink_fn fn, void *user);
 #ifndef NT_LOG_BUF_SIZE
 #define NT_LOG_BUF_SIZE 512
 #endif
+/* append_truncation_marker writes "..."+NUL at cap-4; a smaller buffer underflows the size_t index. */
+_Static_assert(NT_LOG_BUF_SIZE >= 4, "NT_LOG_BUF_SIZE must be >= 4 (room for the \"...\" truncation marker)");
 
 /* --- Single log function --- */
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);

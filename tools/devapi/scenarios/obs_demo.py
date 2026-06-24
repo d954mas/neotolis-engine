@@ -141,57 +141,63 @@ def check_perf_snapshot(client: DevApiClient) -> None:
     assert snap["gpu_ms"] is None, f"perf.snapshot.gpu_ms is {snap['gpu_ms']!r}, expected null (no GPU timer)"
     uc = snap["user_counters"]
     assert isinstance(uc, dict), f"perf.snapshot.user_counters is {uc!r}, expected an object"
-    # The host exercises a count("frames") + count_f("cpu_ms") every frame.
+    # The host exercises a count("frames") + count_f("frame_cpu_ms") every frame.
     assert "frames" in uc, f"perf.snapshot.user_counters missing the host 'frames' counter (got {sorted(uc)})"
-    # The host writes count_f("cpu_ms") every frame too, so it is an unconditional contract.
-    assert "cpu_ms" in uc, f"perf.snapshot.user_counters missing the host 'cpu_ms' counter (got {sorted(uc)})"
+    # The host writes count_f("frame_cpu_ms") every frame too (named so it does not shadow the fixed
+    # cpu_ms channel), so it is an unconditional contract.
+    assert "frame_cpu_ms" in uc, f"perf.snapshot.user_counters missing the host 'frame_cpu_ms' counter (got {sorted(uc)})"
     print(f"PASS[2/5] perf.snapshot: keys present, gpu_ms is null, user_counters={sorted(uc)}.")
 
 
 def check_perf_stats(client: DevApiClient) -> None:
     """3. perf.reset -> stepped run -> perf.stats: the windowed aggregate schema populates."""
     client.set_mode("manual")
-    client.result("perf.reset")
-    client.step(count=SAMPLE_FRAMES)  # fill the rings with real per-frame samples
-
-    stats = client.result("perf.stats", {"budget_ms": 16.67})
-    channels = stats.get("channels")
-    assert isinstance(channels, dict), f"perf.stats.channels is {channels!r}, expected an object"
-    assert "frame_ms" in channels, f"perf.stats.channels missing 'frame_ms' (got {sorted(channels)})"
-    _assert_stats_shape(channels, "frame_ms", require_samples=True)
-    for top in ("user_channels", "fps_low_1pct", "fps_low_01pct", "over_budget_pct", "budget_ms"):
-        assert top in stats, f"perf.stats missing top-level key {top!r} (got {sorted(stats)})"
-    # The host's count_f("cpu_ms") -> a user channel every frame; assert its aggregate schema too. This
-    # is an unconditional contract, not a best-effort check (the host writes cpu_ms on every frame).
-    user = stats["user_channels"]
-    assert isinstance(user, dict), f"perf.stats.user_channels is {user!r}, expected an object"
-    assert "cpu_ms" in user, f"perf.stats.user_channels missing the host 'cpu_ms' channel (got {sorted(user)})"
-    _assert_stats_shape(user, "cpu_ms", require_samples=True)
-
-    fm = channels["frame_ms"]
-    print(
-        f"PASS[3/5] perf.stats after step({SAMPLE_FRAMES}): frame_ms samples={fm['samples']} "
-        f"avg={fm['avg']:.3f} median={fm['median']:.3f} p95={fm['p95']:.3f} p99={fm['p99']:.3f} "
-        f"(observed, not pinned); over_budget_pct={stats['over_budget_pct']:.2f}."
-    )
-
-    # Bad budget_ms -> bad_params (finite + > 0 contract).
+    # Restore RUN no matter how the body exits — an assert/protocol error mid-body must not leave an
+    # attached host (the --no-launch path shares one) frozen in MANUAL.
     try:
-        client.result("perf.stats", {"budget_ms": -1.0})
-        raise AssertionError("perf.stats(budget_ms=-1) unexpectedly succeeded; expected bad_params")
-    except DevApiResultError as exc:
-        assert "bad_params" in str(exc), f"perf.stats(bad budget) raised {exc!r}, expected bad_params"
-    # Unknown channel -> bad_params.
-    try:
-        client.result("perf.stats", {"channels": ["not_a_channel"]})
-        raise AssertionError("perf.stats(channels=[not_a_channel]) unexpectedly succeeded; expected bad_params")
-    except DevApiResultError as exc:
-        assert "bad_params" in str(exc), f"perf.stats(unknown channel) raised {exc!r}, expected bad_params"
-    print("PASS[3b/5] perf.stats bad budget_ms + unknown channel -> bad_params.")
+        client.result("perf.reset")
+        client.step(count=SAMPLE_FRAMES)  # fill the rings with real per-frame samples
 
-    # Restore RUN so a follow-on session is not left frozen in MANUAL.
-    client.set_mode("run")
-    client.resume()
+        stats = client.result("perf.stats", {"budget_ms": 16.67})
+        channels = stats.get("channels")
+        assert isinstance(channels, dict), f"perf.stats.channels is {channels!r}, expected an object"
+        # frame_ms + the memory channels the host pushes every frame must all populate.
+        for ch in ("frame_ms", "mem_used", "scratch_hwm", "scratch_used"):
+            assert ch in channels, f"perf.stats.channels missing {ch!r} (got {sorted(channels)})"
+            _assert_stats_shape(channels, ch, require_samples=True)
+        for top in ("user_channels", "fps_low_1pct", "fps_low_01pct", "over_budget_pct", "budget_ms"):
+            assert top in stats, f"perf.stats missing top-level key {top!r} (got {sorted(stats)})"
+        # The host's count_f("frame_cpu_ms") -> a user channel every frame; assert its aggregate schema
+        # too. This is an unconditional contract (the host writes it on every frame).
+        user = stats["user_channels"]
+        assert isinstance(user, dict), f"perf.stats.user_channels is {user!r}, expected an object"
+        assert "frame_cpu_ms" in user, f"perf.stats.user_channels missing the host 'frame_cpu_ms' channel (got {sorted(user)})"
+        _assert_stats_shape(user, "frame_cpu_ms", require_samples=True)
+
+        fm = channels["frame_ms"]
+        print(
+            f"PASS[3/5] perf.stats after step({SAMPLE_FRAMES}): frame_ms samples={fm['samples']} "
+            f"avg={fm['avg']:.3f} median={fm['median']:.3f} p95={fm['p95']:.3f} p99={fm['p99']:.3f} "
+            f"(observed, not pinned); over_budget_pct={stats['over_budget_pct']:.2f}."
+        )
+
+        # Bad budget_ms -> bad_params (finite + > 0 contract).
+        try:
+            client.result("perf.stats", {"budget_ms": -1.0})
+            raise AssertionError("perf.stats(budget_ms=-1) unexpectedly succeeded; expected bad_params")
+        except DevApiResultError as exc:
+            assert "bad_params" in str(exc), f"perf.stats(bad budget) raised {exc!r}, expected bad_params"
+        # Unknown channel -> bad_params.
+        try:
+            client.result("perf.stats", {"channels": ["not_a_channel"]})
+            raise AssertionError("perf.stats(channels=[not_a_channel]) unexpectedly succeeded; expected bad_params")
+        except DevApiResultError as exc:
+            assert "bad_params" in str(exc), f"perf.stats(unknown channel) raised {exc!r}, expected bad_params"
+        print("PASS[3b/5] perf.stats bad budget_ms + unknown channel -> bad_params.")
+    finally:
+        # Restore RUN so a follow-on session is not left frozen in MANUAL.
+        client.set_mode("run")
+        client.resume()
 
 
 def check_entity_list(client: DevApiClient) -> None:

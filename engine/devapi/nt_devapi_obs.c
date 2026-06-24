@@ -131,11 +131,11 @@ static bool cmd_perf_snapshot(const cJSON *params, cJSON *result, nt_devapi_erro
     if (isfinite(last.frame_ms) && last.frame_ms > 0.0F) {
         devapi_add_number(result, "frame_ms", (double)last.frame_ms);
     } else {
-        cJSON_AddNullToObject(result, "frame_ms");
+        devapi_add_null(result, "frame_ms");
     }
     devapi_add_number(result, "cpu_ms", (double)last.cpu_ms);
     if (last.gpu_ms < 0.0F) {
-        cJSON_AddNullToObject(result, "gpu_ms");
+        devapi_add_null(result, "gpu_ms");
     } else {
         devapi_add_number(result, "gpu_ms", (double)last.gpu_ms);
     }
@@ -172,13 +172,13 @@ static void add_channel_stats(cJSON *parent, const char *name, const nt_metrics_
     NT_ASSERT(o != NULL);
     devapi_add_number(o, "samples", (double)st->samples);
     if (st->samples == 0U) {
-        cJSON_AddNullToObject(o, "avg");
-        cJSON_AddNullToObject(o, "min");
-        cJSON_AddNullToObject(o, "max");
-        cJSON_AddNullToObject(o, "median");
-        cJSON_AddNullToObject(o, "p95");
-        cJSON_AddNullToObject(o, "p99");
-        cJSON_AddNullToObject(o, "p99_9");
+        devapi_add_null(o, "avg");
+        devapi_add_null(o, "min");
+        devapi_add_null(o, "max");
+        devapi_add_null(o, "median");
+        devapi_add_null(o, "p95");
+        devapi_add_null(o, "p99");
+        devapi_add_null(o, "p99_9");
         return;
     }
     devapi_add_number(o, "avg", st->avg);
@@ -360,6 +360,13 @@ static void j_end_group(nt_introspect_sink *s) {
 static void j_f32(nt_introspect_sink *s, const char *key, float v) { devapi_add_number(json_top((obs_json_sink *)s), key, (double)v); }
 static void j_i64(nt_introspect_sink *s, const char *key, int64_t v) { devapi_add_number(json_top((obs_json_sink *)s), key, (double)v); }
 static void j_u64(nt_introspect_sink *s, const char *key, uint64_t v) { devapi_add_number(json_top((obs_json_sink *)s), key, (double)v); }
+/* 64-bit opaque id as a 0x-hex string: a JSON number is a double, so an id above 2^53 loses its low
+   bits (mirrors j_ref/resource_id). */
+static void j_u64_hex(nt_introspect_sink *s, const char *key, uint64_t v) {
+    char hex[19];
+    (void)snprintf(hex, sizeof(hex), "0x%016" PRIx64, v);
+    devapi_add_string(json_top((obs_json_sink *)s), key, hex);
+}
 static void j_bool(nt_introspect_sink *s, const char *key, bool v) { devapi_add_bool(json_top((obs_json_sink *)s), key, v); }
 
 static void j_floats(nt_introspect_sink *s, const char *key, const float *v, int count) {
@@ -373,8 +380,8 @@ static void j_floats(nt_introspect_sink *s, const char *key, const float *v, int
         (void)added;
     }
 }
-static void j_str(nt_introspect_sink *s, const char *key, const char *v) { cJSON_AddStringToObject(json_top((obs_json_sink *)s), key, v != NULL ? v : ""); }
-static void j_enum(nt_introspect_sink *s, const char *key, const char *token) { cJSON_AddStringToObject(json_top((obs_json_sink *)s), key, token != NULL ? token : ""); }
+static void j_str(nt_introspect_sink *s, const char *key, const char *v) { devapi_add_string(json_top((obs_json_sink *)s), key, v != NULL ? v : ""); }
+static void j_enum(nt_introspect_sink *s, const char *key, const char *token) { devapi_add_string(json_top((obs_json_sink *)s), key, token != NULL ? token : ""); }
 
 /* A ref is a typed id token, never expanded inline: {"ref":"<kind>","id":"0x..."}. Hex string id
    keeps the full 64 bits exact (a cJSON number is a double). */
@@ -382,10 +389,10 @@ static void j_ref(nt_introspect_sink *s, const char *key, nt_ref_kind_t kind, ui
     obs_json_sink *j = (obs_json_sink *)s;
     cJSON *ref = cJSON_AddObjectToObject(json_top(j), key);
     NT_ASSERT(ref != NULL);
-    cJSON_AddStringToObject(ref, "ref", nt_introspect_ref_kind_name(kind));
+    devapi_add_string(ref, "ref", nt_introspect_ref_kind_name(kind));
     char hex[19];
     (void)snprintf(hex, sizeof(hex), "0x%" PRIx64, id);
-    cJSON_AddStringToObject(ref, "id", hex);
+    devapi_add_string(ref, "id", hex);
 }
 
 /* Resolving asset sink: a runtime handle -> its source resource_id (reverse scan) -> name (label),
@@ -398,10 +405,10 @@ static void j_asset(nt_introspect_sink *s, uint8_t asset_type, uint32_t handle) 
     if (src != 0) {
         char hex[19];
         (void)snprintf(hex, sizeof(hex), "0x%" PRIx64, src);
-        cJSON_AddStringToObject(o, "resource", hex);
+        devapi_add_string(o, "resource", hex);
         const char *name = nt_hash64_label((nt_hash64_t){.value = src});
         if (name != NULL) {
-            cJSON_AddStringToObject(o, "name", name);
+            devapi_add_string(o, "name", name);
         }
     }
 }
@@ -413,6 +420,7 @@ static void obs_json_sink_init(obs_json_sink *j, cJSON *root) {
         .field_f32 = j_f32,
         .field_i64 = j_i64,
         .field_u64 = j_u64,
+        .field_u64_hex = j_u64_hex,
         .field_bool = j_bool,
         .field_floats = j_floats,
         .field_str = j_str,
@@ -444,6 +452,8 @@ static void add_entity_entry(cJSON *arr, nt_entity_t e) {
 #ifndef NT_DEVAPI_QUERY_MAX_TERMS
 #define NT_DEVAPI_QUERY_MAX_TERMS 16
 #endif
+/* n_all/n_any/n_none are uint8_t, so the cap must fit in uint8_t (else the counter wraps past it). */
+_Static_assert(NT_DEVAPI_QUERY_MAX_TERMS > 0 && NT_DEVAPI_QUERY_MAX_TERMS <= UINT8_MAX, "NT_DEVAPI_QUERY_MAX_TERMS must be in (0, UINT8_MAX]");
 
 /* Component-set filter: an entity passes if it has EVERY `all`, at least ONE `any` (when any present),
    and NONE of `none`. Component ids resolved once from names (never matched by string per entity). */

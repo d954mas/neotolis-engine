@@ -16,14 +16,14 @@
 #ifndef NT_METRICS_WINDOW
 #define NT_METRICS_WINDOW 256
 #endif
-/* head/count are uint16_t and count saturates AT the window, so an override past UINT16_MAX wraps. */
+/* head/count are uint16_t and count saturates AT the window, so WINDOW must fit in uint16_t (asserted). */
 _Static_assert(NT_METRICS_WINDOW > 0 && NT_METRICS_WINDOW <= UINT16_MAX, "NT_METRICS_WINDOW must be in (0, UINT16_MAX]");
 
 /* Max distinct user counters. Each carries one windowed ring + the last exact value. */
 #ifndef NT_METRICS_MAX_USER_CHANNELS
 #define NT_METRICS_MAX_USER_CHANNELS 16
 #endif
-/* nt_metrics_user_count() returns uint16_t, so an override past UINT16_MAX would wrap. */
+/* nt_metrics_user_count() returns uint16_t, so MAX_USER_CHANNELS must fit in uint16_t (asserted). */
 _Static_assert(NT_METRICS_MAX_USER_CHANNELS > 0 && NT_METRICS_MAX_USER_CHANNELS <= UINT16_MAX, "NT_METRICS_MAX_USER_CHANNELS must be in (0, UINT16_MAX]");
 
 #ifndef NT_METRICS_USER_NAME_MAX

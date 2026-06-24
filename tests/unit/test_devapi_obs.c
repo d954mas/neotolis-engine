@@ -233,21 +233,34 @@ static void test_perf_snapshot_user_counter_big_double_rounding(void) {
 #if NT_METRICS_ENABLED
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_perf_stats_channel_shape(void) {
-    /* Feed a known frame_ms set (1..10ms) through the real sample path so the aggregates populate. */
+    /* Feed a known set through the real sample path: frame_ms 1..10ms, plus non-zero mem_used + scratch
+       so those channels populate too (a regression dropping them would otherwise pass green). */
     for (int i = 1; i <= 10; i++) {
-        push_metrics_frame((float)i, 0.0F, -1.0F, 0U);
+        nt_metrics_frame_t f = {.frame_ms = (float)i, .cpu_ms = 0.0F, .gpu_ms = -1.0F, .draw_calls = 0U, .mem_used = 1000000ULL + (uint64_t)i, .scratch_hwm = 4096U, .scratch_used = 2048U};
+        nt_metrics_sample(&f);
     }
-    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"frame_ms\"]}}"));
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"perf.stats\",\"params\":{\"channels\":[\"frame_ms\",\"mem_used\",\"scratch_hwm\",\"scratch_used\"]}}"));
     cJSON *r = result_of(root);
     cJSON *channels = cJSON_GetObjectItemCaseSensitive(r, "channels");
     cJSON *fm = cJSON_GetObjectItemCaseSensitive(channels, "frame_ms");
     TEST_ASSERT_NOT_NULL(fm);
     TEST_ASSERT_EQUAL_INT(10, cJSON_GetObjectItemCaseSensitive(fm, "samples")->valueint);
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "avg")));
+    /* min/max are emitted per channel; assert them so a dropped aggregate is caught. */
+    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "min")));
+    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "max")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "median")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "p95")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "p99")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(fm, "p99_9")));
+    /* mem_used + scratch channels are pushed every frame; assert they populated with real data. */
+    cJSON *mu = cJSON_GetObjectItemCaseSensitive(channels, "mem_used");
+    TEST_ASSERT_EQUAL_INT(10, cJSON_GetObjectItemCaseSensitive(mu, "samples")->valueint);
+    TEST_ASSERT_TRUE(cJSON_GetObjectItemCaseSensitive(mu, "max")->valuedouble > 0.0);
+    cJSON *sh = cJSON_GetObjectItemCaseSensitive(channels, "scratch_hwm");
+    TEST_ASSERT_EQUAL_INT(10, cJSON_GetObjectItemCaseSensitive(sh, "samples")->valueint);
+    cJSON *su = cJSON_GetObjectItemCaseSensitive(channels, "scratch_used");
+    TEST_ASSERT_EQUAL_INT(10, cJSON_GetObjectItemCaseSensitive(su, "samples")->valueint);
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "fps_low_1pct")));
     TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(r, "over_budget_pct")));
     cJSON_Delete(root);

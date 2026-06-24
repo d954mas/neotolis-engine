@@ -37,13 +37,17 @@ typedef enum {
 
 /* Format-agnostic visitor: describe() emits fields/groups, the concrete sink renders them. field_ref
    and field_enum emit a stable token (never a raw pointer or enum value); field_floats reads `count`
-   (vec3/vec4/mat3/mat4); begin_group/end_group nest, bounded by NT_INTROSPECT_MAX_DEPTH. */
+   (vec3/vec4/mat3/mat4); begin_group/end_group nest — the resolving JSON sink caps nesting at
+   NT_INTROSPECT_MAX_DEPTH (describe() hooks are the only nesting source). */
 typedef struct nt_introspect_sink {
     void (*begin_group)(struct nt_introspect_sink *s, const char *key);
     void (*end_group)(struct nt_introspect_sink *s);
     void (*field_f32)(struct nt_introspect_sink *s, const char *key, float v);
     void (*field_i64)(struct nt_introspect_sink *s, const char *key, int64_t v);
     void (*field_u64)(struct nt_introspect_sink *s, const char *key, uint64_t v);
+    /* A 64-bit OPAQUE id (hash/handle), rendered as a 0x-hex string so the full 64 bits survive — a JSON
+       number is a double and would drop the low bits above 2^53. Use for ids, not countable quantities. */
+    void (*field_u64_hex)(struct nt_introspect_sink *s, const char *key, uint64_t v);
     void (*field_bool)(struct nt_introspect_sink *s, const char *key, bool v);
     void (*field_floats)(struct nt_introspect_sink *s, const char *key, const float *v, int count);
     void (*field_str)(struct nt_introspect_sink *s, const char *key, const char *v);

@@ -16,6 +16,8 @@
 #ifndef NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS
 #define NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS 16
 #endif
+/* Sizes the keys/vals stack arrays; a non-positive override would form a zero/negative-length array. */
+_Static_assert(NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS > 0, "NT_DEVAPI_ENTITY_WRITE_MAX_FIELDS must be > 0");
 /* Stringize the cap so the bad_params message tracks it (no macro expansion inside a string literal). */
 #define NT_DEVAPI_STR2(x) #x
 #define NT_DEVAPI_STR(x) NT_DEVAPI_STR2(x)
@@ -129,11 +131,17 @@ static bool apply_single(nt_entity_t e, nt_comp_apply_fn apply, const cJSON *par
     if (!parse_write_value(cJSON_GetObjectItemCaseSensitive(params, "value"), &wv, err)) {
         return false;
     }
+    /* Dry-run validate before the real write, so a hook that could fail mid-mutation never leaves a
+       partial state — the same whole-or-nothing contract the batch path uses, applied uniformly. */
     const char *msg = NULL;
-    if (!apply(e, jfield->valuestring, &wv, false, &msg)) {
+    if (!apply(e, jfield->valuestring, &wv, true, &msg)) {
         set_bad_params(err, msg != NULL ? msg : "entity.set: invalid field");
         return false;
     }
+    msg = NULL;
+    bool ok = apply(e, jfield->valuestring, &wv, false, &msg);
+    NT_ASSERT(ok && "entity.set: dry-run-validated field failed on apply");
+    (void)ok;
     cJSON_bool added = cJSON_AddItemToArray(applied, cJSON_CreateString(jfield->valuestring));
     NT_ASSERT(added);
     (void)added;

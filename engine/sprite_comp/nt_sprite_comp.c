@@ -144,7 +144,7 @@ static void sprite_describe(nt_entity_t entity, nt_introspect_sink *s) {
     s->field_floats(s, "origin", nt_sprite_comp_origin(entity), 2);
     uint64_t rh = *nt_sprite_comp_region_hash(entity);
     if (rh != 0) {
-        s->field_u64(s, "region_hash", rh);
+        s->field_u64_hex(s, "region_hash", rh); /* 64-bit name hash: exact hex, not the lossy double channel */
         const char *name = nt_hash64_label((nt_hash64_t){.value = rh});
         if (name != NULL) {
             s->field_str(s, "region", name);
