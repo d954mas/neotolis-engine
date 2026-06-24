@@ -243,8 +243,8 @@ static void frame_multi_face(const nt_font_t fam[4]) {
 }
 
 /* (1c) FONT-GROUPED emit: a block interleaving 4 distinct faces (R B R I R BI R, 7 transitions in source
- * order) calls set_font exactly 4 times -- once per DISTINCT font -- because emit groups atoms by font.id.
- * The pre-fix in-order walk would call it 7 times (once per transition); pinning 4 proves the collapse. */
+ * order) calls set_font exactly 4 times -- once per DISTINCT font, NOT once per transition (7) -- because
+ * emit groups atoms by font.id. Pinning 4 proves the per-transition flushes collapse. */
 static void test_emit_groups_text_by_font(void) {
     /* font pool cap is 4 and the fixture already holds slot 1 (stub_font): reuse it as the regular face,
      * create the other 3 distinct faces -> 4 distinct font.id within the cap. */
@@ -304,9 +304,9 @@ static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (1e) REGRESSION: a band with SIX distinct fonts (> the old fonts[4] cap) emits ALL six runs' text (one
- * set_font per distinct font, NO drop). The pre-fix gather capped distinct fonts at 4 and silently dropped
- * the 5th/6th fonts' atoms -> fewer spans than text atoms. Pin set_font==6 AND span_count==TEXT-atom count. */
+/* (1e) REGRESSION: a band with SIX distinct fonts emits ALL six runs' text -- one set_font per distinct
+ * font, NO cap, NO drop. Pin set_font==6 AND span_count==TEXT-atom count (every TEXT atom emits a span;
+ * none dropped past a font limit). */
 static void test_emit_more_than_four_fonts_no_drop(void) {
     nt_font_t fam[6];
     fam[0] = s_fx.stub_font;
@@ -459,8 +459,8 @@ static void test_inline_image_fades_with_parent_opacity(void) {
     }
 }
 
-/* Build [text][img][text][img][text]: two inline images in one block. They now emit IMMEDIATELY in the
- * self-emit (one sprite batch, set_material once) instead of two floating Clay children. */
+/* Build [text][img][text][img][text]: two inline images in one block. They emit immediately in the rich
+ * self-emit -- one sprite batch, set_material bound once. */
 static void frame_two_images(nt_material_t img_mat) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -2182,6 +2182,91 @@ static void test_default_mixed_block_band_flush_count(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_sprite_renderer_test_nonempty_flush_calls(), "only the IMAGE band drains sprite content -> exactly one non-empty sprite flush");
 }
 
+/* (L7) AUTO + explicit layers MIXED in one block: a <layer=5> text run, then plain (AUTO) text + AUTO
+ * image -> rich_effective_layer is per-ATOM. The wrapped run reports layer 5; the trailing AUTO text falls
+ * to the per-kind default 0; the AUTO image to 1. Pins that AUTO resolves per atom, not block-wide. */
+static void test_mixed_auto_and_explicit_layers(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = make_rich_image_material();
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_mix_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 5U);
+        nt_ui_rich_text_n(s_fx.ctx, "W ", 2); /* explicit layer 5 */
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "auto ", 5);                            /* AUTO text -> 0 */
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F); /* AUTO image -> 1 */
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_mix").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    bool saw_explicit = false;
+    bool saw_auto_text = false;
+    bool saw_auto_image = false;
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        const uint8_t layer = nt_ui_rich_test_atom_layer(s_fx.ctx, i);
+        if (a.kind == NT_RICH_ATOM_IMAGE) {
+            saw_auto_image = true;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, layer, "AUTO image atom resolves to per-kind default 1");
+        } else if (layer == 5U) {
+            saw_explicit = true; /* the <layer=5>-wrapped text run */
+        } else {
+            saw_auto_text = true;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, layer, "trailing AUTO text atom resolves to per-kind default 0");
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(saw_explicit && saw_auto_text && saw_auto_image, "block carried explicit-5 text + AUTO text + AUTO image");
+}
+
+/* (L8) CAP-16 HARD GUARD: a block with >16 DISTINCT push_layer values must not crash and must surface
+ * exactly NT_UI_RICH_MAX_LAYERS distinct layers (the OFF-mode over-cap drop path). Run under the assert
+ * trap so the DEBUG over-cap assert is caught, proving the hard skip survives. */
+static void frame_over_cap_layers(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_cap_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        for (uint8_t L = 0; L < 20U; L++) { /* 20 distinct layers > NT_UI_RICH_MAX_LAYERS (16) */
+            nt_ui_rich_push_layer(s_fx.ctx, L);
+            nt_ui_rich_text_n(s_fx.ctx, "z ", 2);
+            nt_ui_rich_pop(s_fx.ctx);
+        }
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_cap").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+static void test_over_cap_layers_hard_guard(void) {
+    /* DEBUG: the over-cap distinct-band assert fires in rich_gather_layers and the trap catches it. The
+     * out[NT_UI_RICH_MAX_LAYERS] scratch is the array the guard protects -- the hard `count >= cap` skip
+     * runs in OFF builds (no assert) too, so a >16-distinct-layer block never writes past out[] / crashes.
+     * (The atoms themselves are uncapped: every pushed layer reached its atom; the cap is on EMIT bands.) */
+    NT_TEST_EXPECT_ASSERT(frame_over_cap_layers());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -2198,6 +2283,8 @@ int main(void) {
     RUN_TEST(test_font_rebinds_per_layer_for_shared_face);
     RUN_TEST(test_layer_drain_orders_ascending);
     RUN_TEST(test_default_mixed_block_band_flush_count);
+    RUN_TEST(test_mixed_auto_and_explicit_layers);
+    RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);

@@ -3292,7 +3292,8 @@ emit order. To give the game explicit control of overlap z, each atom carries a
   rule, D-67-29).
 - **Layer-ordered self-emit.** The self-emit gathers the **distinct** layers present
   (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16` with a hard
-  drop guard), then for each band ascending emits `{font-grouped text → coalesced
+  drop guard — the over-cap distinct layers are dropped **by encounter order**, not by
+  value, and the drop asserts in DEBUG), then for each band ascending emits `{font-grouped text → coalesced
   images → objects}` and **DRAINs** (sprite flush + text flush) before the next band,
   so band N fully lands before band N+1. The drain runs after **every** band incl. the
   last, making the block a self-contained z island regardless of the walker's global

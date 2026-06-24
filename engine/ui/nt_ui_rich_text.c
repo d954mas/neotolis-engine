@@ -27,7 +27,8 @@
 #endif
 
 /* Distinct z-order bands the self-emit walks (each adds a sprite+text flush boundary). A block with more
- * distinct <layer>s than this drops the excess high layers rather than OOB the per-layer scratch. */
+ * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
+ * the per-layer scratch. */
 #ifndef NT_UI_RICH_MAX_LAYERS
 #define NT_UI_RICH_MAX_LAYERS 16
 #endif
@@ -144,7 +145,7 @@ typedef struct {
 
     /* ---- Inline-image emit ---- */
     nt_material_t image_material; /* base-style inline-image material (.id==0 -> no images) */
-    uint32_t image_emit_count;    /* IMAGE atoms declared as Clay children this call (probe) */
+    uint32_t image_emit_count;    /* IMAGE atoms emitted this call, post-walk (probe) */
     uint32_t image_region;        /* by-name resolved region index of the first IMAGE atom (probe) */
     float image_y;                /* solved y of the first IMAGE atom (probe) */
 } nt_ui_rich_state_t;
@@ -695,7 +696,7 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
         const bool alias_ok = nt_ui_rich_tagset_lookup_atlas(tagset, alias_hash, &atlas);
         NT_ASSERT(alias_ok && "rich markup: unknown <img> atlas alias");
         /* HARD guard (survives NT_ASSERT OFF): unknown alias -> skip the image, never fall back to the
-         * default atlas with the wrong region (mirrors the unresolved-name skip in rich_declare_inline_image). */
+         * default atlas with the wrong region (mirrors the unresolved-name skip in rich_emit_images). */
         if (!alias_ok) {
             return;
         }
@@ -1755,14 +1756,8 @@ static uint32_t rich_pack_tint(const float c[4]) {
  * frame->opacity itself (the self-emit has NO walker opacity fold -- mirrors rich_emit_objects). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
 static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
-    if (st->image_material.id == 0U) {
-        return; /* no base material -> text-only block, no images (mirrors the old floating-child gate) */
-    }
-    /* The plain u8 sprite path: no custom attrs. emit_region asserts the set_custom_attrs block matches
-     * the bound material's attr_map stride, so a custom-attr material would trap here -- the showcase binds
-     * s_sprite_material (attr_map_count==0); the assert documents that contract. */
-    const nt_material_info_t *mi = nt_material_get_info(st->image_material);
-    NT_ASSERT(mi != NULL && mi->attr_map_count == 0U && "rich inline-image material must be the plain u8 sprite path (attr_map_count==0)");
+    /* Material validity is a band-invariant -> the caller checks st->image_material once before the layer
+     * loop (id != 0, attr_map_count == 0); reaching here means it passed. */
     bool bound = false; /* per-call: each layer is its own drained batch -> rebind once per layer */
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
@@ -1861,8 +1856,10 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
 }
 
 /* Gather the DISTINCT layers present across the solved atoms, insertion-sorted ascending, into out[].
- * Capped at NT_UI_RICH_MAX_LAYERS with a HARD guard that survives NT_ASSERT OFF (drop the excess high
- * layers rather than OOB). Returns the count. */
+ * Capped at NT_UI_RICH_MAX_LAYERS with a HARD guard that survives NT_ASSERT OFF. The drop is by ENCOUNTER
+ * order (the 17th distinct layer seen, of any value), so over-cap content silently vanishes -- the assert
+ * fires in DEBUG; OFF keeps the hard skip rather than OOB. Returns the count. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one insertion-sort pass: dup-skip + cap-guard + shift
 static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_UI_RICH_MAX_LAYERS]) {
     uint32_t count = 0;
     for (uint32_t i = 0; i < st->solved_count; i++) {
@@ -1879,7 +1876,8 @@ static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_
             continue;
         }
         if (count >= NT_UI_RICH_MAX_LAYERS) {
-            continue; /* HARD cap (survives NT_ASSERT OFF): drop atoms in over-cap layers, never write past out[] */
+            NT_ASSERT(false && "rich distinct-layer count over NT_UI_RICH_MAX_LAYERS (raise the cap)");
+            continue; /* HARD skip (survives NT_ASSERT OFF): drop the over-cap distinct layer, never write past out[] */
         }
         for (uint32_t k = count; k > pos; k--) {
             out[k] = out[k - 1]; /* shift up to keep ascending order */
@@ -1887,6 +1885,7 @@ static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_
         out[pos] = L;
         count++;
     }
+    /* Structural invariant: the >= cap guard above makes overflow unreachable; this can never fire. */
     NT_ASSERT(count <= NT_UI_RICH_MAX_LAYERS && "rich layer gather overflow");
     return count;
 }
@@ -1904,6 +1903,17 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     st->emit_span_count = 0;
     st->image_emit_count = 0; /* accumulates across layers (the per-layer rich_emit_images no longer resets it) */
 
+    /* Inline-image material is a BAND-INVARIANT: validate it ONCE here, not per-band (rich_emit_images runs
+     * up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> text-only block, no images. The plain u8 sprite
+     * path requires attr_map_count==0 (emit_region bakes no custom-attr block); a NULL/custom-attr material
+     * is a HARD guard (survives NT_ASSERT OFF), keeping the assert for the fail-early dev signal. */
+    bool emit_images = false;
+    if (st->image_material.id != 0U) {
+        const nt_material_info_t *mi = nt_material_get_info(st->image_material);
+        NT_ASSERT(mi != NULL && mi->attr_map_count == 0U && "rich inline-image material must be the plain u8 sprite path (attr_map_count==0)");
+        emit_images = (mi != NULL && mi->attr_map_count == 0U);
+    }
+
     /* LAYER-ORDERED emit: cross-renderer z is FLUSH order (UI is painter-order, depth off). A LAYER is an
      * explicit flush boundary: emit ascending by layer and DRAIN between bands so layer N fully lands before
      * N+1. Within a band, flush text first (behind) then sprites/objects (front) so within-band z matches
@@ -1918,7 +1928,9 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
          * text<image<object): drain text first so it lands under the band's sprites/objects. */
         rich_emit_text_layer(st, frame, box_x, box_y, L);
         nt_text_renderer_flush(); /* text behind: land it before the band's sprites */
-        rich_emit_images(st, frame, box_x, box_y, L);
+        if (emit_images) {
+            rich_emit_images(st, frame, box_x, box_y, L);
+        }
         rich_emit_objects(st, frame, box_x, box_y, L);
         nt_sprite_renderer_flush(); /* DRAIN sprites: land this band before the next so layer order == z order */
         nt_text_renderer_flush();   /* cheap safety drain in case an object draw_fn emitted text; no-op otherwise */

@@ -230,7 +230,8 @@ float nt_ui_rich_test_total_h(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_emit_span_count(nt_ui_context_t *ctx);
 
 /* Inline-image emit probes. The solver records the first IMAGE atom's resolved
- * region + solved y; the emit counter tracks images declared this call. */
+ * region + solved y; the emit counter holds the IMAGE atoms emitted this call,
+ * valid post-walk (accumulated across z-bands in the self-emit). */
 uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx);
 float nt_ui_rich_test_image_y(nt_ui_context_t *ctx);
