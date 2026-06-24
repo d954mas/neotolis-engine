@@ -190,6 +190,92 @@ static void test_double_walk_is_deterministic(void) {
     TEST_ASSERT_TRUE_MESSAGE(spans_1 > 0U, "emit actually ran");
 }
 
+/* ===== Font-grouped text emit ===== */
+
+/* Make a distinct stub font (own pool slot -> own .id) so a multi-face block has real font transitions.
+ * units_per_em stays 0 so draw_n is a counted no-op (no glyph atlas needed). */
+static nt_font_t make_stub_font(void) {
+    return nt_font_create(&(nt_font_create_desc_t){
+        .curve_texture_width = 64,
+        .curve_texture_height = 64,
+        .band_texture_height = 16,
+        .band_count = 4,
+        .measure_cache_size = 0,
+    });
+}
+
+/* Build a block that interleaves the 4 font faces R B R I R BI R as separate runs (each <color>-split so
+ * the solver keeps them as distinct atoms). With 4 distinct fonts in the family, set_font must be called
+ * once PER DISTINCT FONT (4) -- NOT once per transition (7) -- proving the font-grouped multi-pass. */
+static void frame_multi_face(const nt_font_t fam[4]) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    for (int i = 0; i < 4; i++) {
+        base.font_id[i] = fam[i];
+        nt_font_test_set_metrics(fam[i], 1000, 800, -200, 1000);
+    }
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_mf_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        /* R B R I R BI R: 7 runs, 4 distinct faces, interleaved (forces transitions in source order). */
+        nt_ui_rich_text_n(s_fx.ctx, "r ", 2);
+        nt_ui_rich_push_bold(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "b ", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "r ", 2);
+        nt_ui_rich_push_italic(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "i ", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "r ", 2);
+        nt_ui_rich_push_bold(s_fx.ctx);
+        nt_ui_rich_push_italic(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "bi ", 3);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "r", 1);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_mf").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (1c) FONT-GROUPED emit: a block interleaving 4 distinct faces (R B R I R BI R, 7 transitions in source
+ * order) calls set_font exactly 4 times -- once per DISTINCT font -- because emit groups atoms by font.id.
+ * The pre-fix in-order walk would call it 7 times (once per transition); pinning 4 proves the collapse. */
+static void test_emit_groups_text_by_font(void) {
+    /* font pool cap is 4 and the fixture already holds slot 1 (stub_font): reuse it as the regular face,
+     * create the other 3 distinct faces -> 4 distinct font.id within the cap. */
+    nt_font_t fam[4];
+    fam[0] = s_fx.stub_font;
+    for (int i = 1; i < 4; i++) {
+        fam[i] = make_stub_font();
+    }
+    nt_text_renderer_test_reset_call_counters();
+    frame_multi_face(fam);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_set_font_calls(), "set_font called once per DISTINCT font (4), not once per transition (7)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "multi-face block still emits draw_n spans");
+
+    for (int i = 1; i < 4; i++) {
+        nt_font_destroy(fam[i]);
+    }
+}
+
+/* (1d) a SINGLE-face block (one font, two color runs) calls set_font exactly once (no per-run regression
+ * from the grouping pass -- distinct-font count is 1). */
+static void test_emit_single_face_one_set_font(void) {
+    nt_text_renderer_test_reset_call_counters();
+    frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* two color runs, ONE font */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_set_font_calls(), "single-face block calls set_font once (one distinct font)");
+}
+
 /* ===== Inline IMAGE emit ===== */
 
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
@@ -314,6 +400,55 @@ static void test_inline_image_fades_with_parent_opacity(void) {
         /* rgb unchanged (white), alpha = base 255 * parent 0.5 ~= 128 -- same fold as TEXT/sprites. */
         TEST_ASSERT_TRUE_MESSAGE(col[0] == 255U && col[1] == 255U && col[2] == 255U, "tint.rgb unchanged by opacity (white)");
         TEST_ASSERT_TRUE_MESSAGE(col[3] >= 126U && col[3] <= 130U, "tint.a halved (~128) under 0.5 opacity (image fades like TEXT)");
+    }
+}
+
+/* Build [text][img][text][img][text]: two inline images in one block. They now emit IMMEDIATELY in the
+ * self-emit (one sprite batch, set_material once) instead of two floating Clay children. */
+static void frame_two_images(nt_material_t img_mat) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = img_mat;
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_2img_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "A ", 2);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " B ", 3);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " C", 2);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_2img").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (6c) TWO inline images in one block both emit via the immediate self-emit pass (image_emit_count == 2),
+ * coalesced into ONE batch (set_material bound once in rich_emit_images, both quads accumulate in the same
+ * staging buffer with no flush between them). The walk's terminal flush resets the live vertex count, so
+ * coalescence is pinned via the last-emit probes: the SECOND image is a 4-vert region quad carrying the
+ * correct full-opacity tint -- proving it emitted (with the right opacity-folded color) right after the
+ * first, in the same bound-material batch. */
+static void test_two_inline_images_coalesce(void) {
+    const nt_material_t mat = make_rich_image_material();
+    frame_two_images(mat);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the immediate pass");
+    /* The LAST image emitted is a 4-vert region quad with the right tint (white, full opacity). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "second image emits a 4-vert region quad");
+    for (uint32_t v = 0; v < 4U; v++) {
+        uint8_t col[4] = {0};
+        nt_sprite_renderer_test_last_emit_color(v, col);
+        TEST_ASSERT_TRUE_MESSAGE(col[0] == 255U && col[1] == 255U && col[2] == 255U && col[3] == 255U, "second image tint == white, full opacity");
     }
 }
 
@@ -1711,8 +1846,11 @@ int main(void) {
     RUN_TEST(test_fixed_block_size_matches_solved);
     RUN_TEST(test_single_style_one_span_per_line);
     RUN_TEST(test_double_walk_is_deterministic);
+    RUN_TEST(test_emit_groups_text_by_font);
+    RUN_TEST(test_emit_single_face_one_set_font);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
+    RUN_TEST(test_two_inline_images_coalesce);
     RUN_TEST(test_inline_image_tint_packed);
     RUN_TEST(test_inline_image_resolves_by_name);
     RUN_TEST(test_inline_image_valign_y);

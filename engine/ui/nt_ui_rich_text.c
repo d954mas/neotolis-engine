@@ -6,13 +6,15 @@
 #include <math.h> /* isfinite (fail-early scale guards) */
 #include <string.h>
 
+#include "atlas/nt_atlas.h" /* inline-image region resolve + inverse-ppu (immediate emit) */
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
+#include "material/nt_material.h" /* nt_material_get_info: assert the image material is the plain u8 path */
 #include "memory/nt_mem_scratch.h"
+#include "renderers/nt_sprite_renderer.h" /* inline-image immediate emit (set_material + emit_region) */
 #include "renderers/nt_text_renderer.h"
 #include "ui/nt_ui_clay_impl.h"
-#include "ui/nt_ui_image.h" /* nt_ui_image_custom (inline-image emit path) */
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_rich_fx.h" /* per-atom effect ABI + stock catalog */
 #include "ui/nt_ui_rich_tagset.h"
@@ -1669,6 +1671,89 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
     }
 }
 
+/* Pack a normalized [0,1] RGBA float4 (text-renderer order) into 0xAABBGGRR for the u8 sprite tint. */
+static uint32_t rich_pack_tint(const float c[4]) {
+    const uint32_t r = (uint32_t)lrintf(nt_ui_clampf(c[0], 0.0F, 1.0F) * 255.0F);
+    const uint32_t g = (uint32_t)lrintf(nt_ui_clampf(c[1], 0.0F, 1.0F) * 255.0F);
+    const uint32_t b = (uint32_t)lrintf(nt_ui_clampf(c[2], 0.0F, 1.0F) * 255.0F);
+    const uint32_t a = (uint32_t)lrintf(nt_ui_clampf(c[3], 0.0F, 1.0F) * 255.0F);
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
+
+/* Inline IMAGE atoms: emit IMMEDIATELY in the self-emit via the sprite renderer so every inline image
+ * coalesces into ONE batch (set_material once, hoisted out of the loop) -- instead of one floating Clay
+ * child per image, each with its own clipTo scissor (a flush per image). The active scroll scissor is
+ * GL-live during the self-emit, so images clip to the panel automatically (an fx.scale>1 image loses its
+ * per-image self-clip-to-bbox -- it over-draws like OBJECT atoms do, consistent + acceptable). Tint folds
+ * frame->opacity itself (the self-emit has NO walker opacity fold -- mirrors rich_emit_objects). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
+static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y) {
+    st->image_emit_count = 0;
+    if (st->image_material.id == 0U) {
+        return; /* no base material -> text-only block, no images (mirrors the old floating-child gate) */
+    }
+    /* The plain u8 sprite path: no custom attrs. emit_region asserts the set_custom_attrs block matches
+     * the bound material's attr_map stride, so a custom-attr material would trap here -- the showcase binds
+     * s_sprite_material (attr_map_count==0); the assert documents that contract. */
+    const nt_material_info_t *mi = nt_material_get_info(st->image_material);
+    NT_ASSERT(mi != NULL && mi->attr_map_count == 0U && "rich inline-image material must be the plain u8 sprite path (attr_map_count==0)");
+    bool bound = false;
+    for (uint32_t i = 0; i < st->solved_count; i++) {
+        const nt_ui_rich_solved_atom_t *s = &st->solved[i];
+        if (s->kind != NT_RICH_ATOM_IMAGE) {
+            continue;
+        }
+        const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
+        if (run->image_ref.region == NT_ATLAS_INVALID_REGION || run->image_ref.atlas.id == 0U) {
+            continue; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
+        }
+        const nt_texture_region_t *reg = nt_atlas_get_region(run->image_ref.atlas, run->image_ref.region);
+        if (reg == NULL || reg->vertex_count == 0U) {
+            continue; /* tombstoned region -> skip */
+        }
+        float base_color[4];
+        rich_unpack_color(s->color, frame->opacity, base_color); /* fold parent opacity (no walker fold here) */
+        const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);
+        if (!fx.visible) {
+            continue; /* fade_in / typewriter: skip the image entirely until its window opens */
+        }
+        /* VISUAL-ONLY effect: scale the box about its center, shift by the effect offset (solved box stays
+         * the solver's). Same math as rich_emit_objects. */
+        const float scaled_w = s->w * fx.scale;
+        const float scaled_h = s->h * fx.scale;
+        const float bx = box_x + s->x + fx.offset_x + ((s->w - scaled_w) * 0.5F);
+        const float by = box_y + s->y + fx.offset_y + ((s->h - scaled_h) * 0.5F);
+
+        /* Build the sprite model exactly like emit_image: source (origin,origin) anchors at the box center,
+         * model = world x T(cx,cy) x S(sx,-sy,1) (source Y-up inverts before world maps to layout). */
+        const float ipu = nt_atlas_get_inverse_pixels_per_unit(run->image_ref.atlas);
+        const float src_w = (float)reg->source_w * ipu;
+        const float src_h = (float)reg->source_h * ipu;
+        if (!(src_w > 0.0F) || !(src_h > 0.0F)) {
+            continue; /* broken atlas data: skip rather than divide by zero */
+        }
+        const float sx_f = scaled_w / src_w;
+        const float sy_f = scaled_h / src_h;
+        const float cx = bx + (scaled_w * 0.5F);
+        const float cy = by + (scaled_h * 0.5F);
+        const float *world = frame->world_mat4;
+        float m[16];
+        for (int rr = 0; rr < 4; ++rr) {
+            m[rr] = sx_f * world[rr];
+            m[4 + rr] = -sy_f * world[4 + rr];
+            m[8 + rr] = world[8 + rr];
+            m[12 + rr] = (cx * world[rr]) + (cy * world[4 + rr]) + world[12 + rr];
+        }
+        if (!bound) {
+            nt_sprite_renderer_set_material(st->image_material); /* bind ONCE: all images coalesce into one batch */
+            bound = true;
+        }
+        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, rich_pack_tint(fx.color), 0U);
+        st->image_emit_count++;
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- distinct-font gather + one font-grouped pass per face, then image/object emit
 void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
     NT_ASSERT(st != NULL && "rich emit: NULL state");
@@ -1680,81 +1765,54 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     const float box_y = c->boundingBox.y;
 
     st->emit_span_count = 0;
+    /* Font-grouped MULTI-PASS: the text renderer auto-flushes on every set_font change, so an in-order
+     * walk of interleaved faces (R->B->R->I...) costs one text flush PER transition. Gather the distinct
+     * fonts first (<=4, bounded by the style's font_id[4]) and emit one pass per font -> set_font is called
+     * once per distinct font. O(F*N), F<=4, no heap, no sort, solved[] untouched. Visible result is
+     * identical (text is L-to-R non-overlapping; each atom keeps its own shear/fx/position). */
+    nt_font_t fonts[4];
+    uint32_t font_count = 0;
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
         if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U) {
-            continue; /* IMAGE -> image-emit region; OBJECT -> rich_emit_objects */
+            continue;
         }
-        nt_text_renderer_set_font(s->font);
-        const bool shear = (s->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U;
-        if (s->effect_id == 0U) {
-            rich_emit_text_plain(st, frame, s, box_x, box_y, shear);
-        } else {
-            rich_emit_text_effected(st, frame, s, box_x, box_y, shear);
+        bool seen = false;
+        for (uint32_t f = 0; f < font_count; f++) {
+            if (fonts[f].id == s->font.id) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen && font_count < 4U) {
+            fonts[font_count++] = s->font;
         }
     }
+    for (uint32_t f = 0; f < font_count; f++) {
+        nt_text_renderer_set_font(fonts[f]); /* once per distinct font: collapses per-transition flushes */
+        for (uint32_t i = 0; i < st->solved_count; i++) {
+            const nt_ui_rich_solved_atom_t *s = &st->solved[i];
+            if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->font.id != fonts[f].id) {
+                continue; /* IMAGE -> rich_emit_images; OBJECT -> rich_emit_objects; other fonts -> their pass */
+            }
+            const bool shear = (s->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U;
+            if (s->effect_id == 0U) {
+                rich_emit_text_plain(st, frame, s, box_x, box_y, shear);
+            } else {
+                rich_emit_text_effected(st, frame, s, box_x, box_y, shear);
+            }
+        }
+    }
+    rich_emit_images(st, frame, box_x, box_y);
     rich_emit_objects(st, frame, box_x, box_y);
 }
 // #endregion
 
-// #region image-emit
-/* Pack a normalized [0,1] RGBA float4 (text-renderer order) into 0xAABBGGRR for the u8 sprite tint. */
-static uint32_t rich_pack_tint(const float c[4]) {
-    const uint32_t r = (uint32_t)lrintf(nt_ui_clampf(c[0], 0.0F, 1.0F) * 255.0F);
-    const uint32_t g = (uint32_t)lrintf(nt_ui_clampf(c[1], 0.0F, 1.0F) * 255.0F);
-    const uint32_t b = (uint32_t)lrintf(nt_ui_clampf(c[2], 0.0F, 1.0F) * 255.0F);
-    const uint32_t a = (uint32_t)lrintf(nt_ui_clampf(c[3], 0.0F, 1.0F) * 255.0F);
-    return r | (g << 8) | (b << 16) | (a << 24);
-}
-
-/* Inline IMAGE atoms ride the PLAIN sprite path (nt_ui_image): the composed <color> x effect tint is
- * packed to a u8 sprite tint, the base sprite material textures the region, and the walker folds parent
- * opacity into the backgroundColor alpha exactly like every other UI sprite (no float4 a_tint / bespoke
- * material). Each image is a FLOATING child of the FIXED block, offset to the solved (x,y) -- so
- * wrap/baseline stay the solver's. */
-static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s) {
-    nt_ui_rich_run_t *run = &st->runs[s->run_idx];
-    if (run->image_ref.region == NT_ATLAS_INVALID_REGION || run->image_ref.atlas.id == 0U) {
-        return; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
-    }
-
-    /* Per-atom effect: VISUAL-ONLY transform (the solved box stays the solver's). */
-    float base_tint[4];
-    /* 1.0 here: the walker folds parent opacity into the tint alpha (backgroundColor.a) at emit, where
-     * the accumulated opacity is known -- the build-time walk has no opacity yet (matches the TEXT path). */
-    rich_unpack_color(s->color, 1.0F, base_tint);
-    const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_tint);
-    if (!fx.visible) {
-        return; /* fade_in / typewriter: skip the image entirely until its window opens */
-    }
-
-    /* Composed <color> x effect tint as a u8 sprite tint; parent opacity is folded by the walker. */
-    const nt_ui_image_style_t istyle = {.color_packed = rich_pack_tint(fx.color), .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
-
-    /* Position at the solved (x,y) + effect offset, scaling the box about its center. A floating
-     * child attached to the FIXED block's top-left, slid by the solver offset; render-only. */
-    const float scaled_w = s->w * fx.scale;
-    const float scaled_h = s->h * fx.scale;
-    nt_ui_transform_t tt = nt_ui_transform_defaults();
-    tt.offset_x = s->x + fx.offset_x + ((s->w - scaled_w) * 0.5F);
-    tt.offset_y = s->y + fx.offset_y + ((s->h - scaled_h) * 0.5F);
-    nt_ui_element_data_t *idata = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
-    NT_ASSERT(idata != NULL && "nt_ui_rich_text: scratch alloc failed (image data)");
-    *idata = (nt_ui_element_data_t){.user_data = NULL, .layer = 0U, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
-
-    const Clay_ElementDeclaration decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(scaled_w), CLAY_SIZING_FIXED(scaled_h)}},
-        /* clipTo=ATTACHED_PARENT: inherit the FIXED block's full clip chain (incl. an enclosing scroll) so
-         * the image is clipped to the panel -- without it a floating child escapes the scroll scissor. */
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
-    };
-    nt_ui_image(ctx, idata, &run->image_ref, &istyle, &decl);
-    st->image_emit_count++;
-}
-
+// #region fixed-block
 /* Declare the ONE measured Clay element hosting the solved run-list (never a per-run element); the
- * custom data routes the walk back to self-emit. Inline IMAGE atoms are FLOATING children of it. */
-static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
+ * custom data routes the walk back to self-emit. Inline IMAGE atoms are NOT Clay children -- they emit
+ * immediately in the self-emit (rich_emit_images), coalesced into one sprite batch. */
+static void rich_declare_fixed_block(nt_ui_rich_state_t *st, uint32_t id, const nt_ui_element_data_t *data) {
     nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
     NT_ASSERT(cd != NULL && "nt_ui_rich_text: scratch alloc failed (custom data)");
     *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_RICH_TEXT, .data = st};
@@ -1767,16 +1825,8 @@ static void rich_declare_fixed_block(nt_ui_context_t *ctx, nt_ui_rich_state_t *s
     decl.userData = (void *)data;
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(decl);
-    /* Inline images: FLOATING children declared inside the FIXED block scope. Only when the base
-     * style supplies a material (otherwise images are skipped -- text-only stays a single block). */
-    st->image_emit_count = 0;
-    if (st->image_material.id != 0U) {
-        for (uint32_t i = 0; i < st->solved_count; i++) {
-            if (st->solved[i].kind == NT_RICH_ATOM_IMAGE) {
-                rich_declare_inline_image(ctx, st, &st->solved[i]);
-            }
-        }
-    }
+    /* Inline images are NOT declared here -- they emit immediately in the self-emit (rich_emit_images),
+     * coalesced into one sprite batch instead of one floating Clay child + clipTo scissor per image. */
     nt_ui_clay_priv_close_element();
 }
 // #endregion
@@ -1881,7 +1931,7 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     st->time = time; /* game-owned animation clock; no global frame clock */
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
     rich_resolve_links(ctx, st, id); /* hover gates effects -> must precede emit */
-    rich_declare_fixed_block(ctx, st, id, data);
+    rich_declare_fixed_block(st, id, data);
     if (out != NULL) {
         rich_fill_result(st, out);
     }
@@ -1905,7 +1955,7 @@ void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_eleme
     st->time = time;
     rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
     rich_resolve_links(ctx, st, id);
-    rich_declare_fixed_block(ctx, st, id, data);
+    rich_declare_fixed_block(st, id, data);
     if (out != NULL) {
         rich_fill_result(st, out);
     }
