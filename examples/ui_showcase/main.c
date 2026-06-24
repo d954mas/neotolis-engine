@@ -2122,6 +2122,8 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", NT_UI_RICH_FX_ID_SWAY);
     /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
     nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
+    /* "pull" == the builder's push_effect_fn(rich_fx_pull_left): same heart nudge so both fronts overlap identically. */
+    nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "pull", rich_fx_pull_left, (void *)&s_rich_overlap_pull);
     nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_atlas_handle);
     /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
     nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
@@ -2361,7 +2363,8 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                               "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
                               "<fx=bounce>bounce </fx><fx=glow>glow </fx><fx=sway>sway</fx> "
                               "<fx=wave amp=14 speed=5>BIG</fx>. "
-                              "<layer=3>Z-order: layer tag parses here too.</layer> "
+                              "Z-layer  [img over text] LOVE<fx=pull><img=heart scale=1.8/></fx>"
+                              "   [text over img] <layer=3>LOVE</layer><fx=pull><img=heart scale=1.8/></fx>. "
                               "%s<color=%s><link=quest>%s</link></color>%s",
                               fx_open, look_b.mk_col, look_b.label, fx_close);
     NT_ASSERT(mk_n > 0 && (size_t)mk_n < sizeof markup && "rich markup snprintf truncated -- enlarge markup[]");
