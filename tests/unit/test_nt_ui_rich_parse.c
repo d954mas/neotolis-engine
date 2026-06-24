@@ -582,6 +582,18 @@ static void test_parse_wellformed_nesting_pops_correctly(void) {
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, nt_ui_rich_test_run_style(s_fx.ctx, 2).color_abgr, "z carries the BASE color (stack balanced back to base)");
 }
 
+/* (17b) markup-path bad image scale (#3): <img=heart scale=0/> trips the nt_ui_rich_image scale>0
+ * assert (DEBUG dev signal -- kept). In OFF the new hard clamp falls back to identity (1.0), so the
+ * solver never multiplies the box dims by 0/NaN (verified by code; the suite exercises the trap). */
+static void test_parse_img_zero_scale_asserts(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<img=heart scale=0/>", 20U));
+}
+
 /* (16b) <scale=0> / <scale=-1>: the push_scale>0 assert traps in FULL. In OFF the hard clamp falls
  * back to identity (no <=0 font size into nt_font_measure_n). */
 static void test_parse_scale_nonpositive_asserts(void) {
@@ -884,6 +896,7 @@ int main(void) {
     RUN_TEST(test_parse_mixed_tag_stack_sync);
     RUN_TEST(test_parse_unknown_named_tags_assert);
     RUN_TEST(test_parse_wellformed_nesting_pops_correctly);
+    RUN_TEST(test_parse_img_zero_scale_asserts);
     RUN_TEST(test_parse_scale_nonpositive_asserts);
     RUN_TEST(test_parse_nested_link_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);

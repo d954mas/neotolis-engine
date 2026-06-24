@@ -461,6 +461,12 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
 
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale) {
     NT_ASSERT(scale > 0.0F && isfinite(scale) && "rich image scale must be finite > 0 (negative -> negative Clay fixed size)");
+    /* HARD clamp (survives NT_ASSERT OFF): <img scale=0/-2/NaN/huge> feeds rich_parse_float straight
+     * here. In OFF the assert is elided, so a bad scale would multiply the box dims -> 0/NaN box into
+     * the solver. Fall back to identity (1.0) so OFF stays bounded, mirroring nt_ui_rich_push_scale. */
+    if (!(scale > 0.0F) || !isfinite(scale)) {
+        scale = 1.0F;
+    }
     nt_ui_rich_state_t *st = rich_state(ctx);
     const uint16_t style_idx = rich_intern_style(st, rich_style_top(st));
     nt_ui_rich_run_t *r = rich_new_run(st, NT_RICH_ATOM_IMAGE);
@@ -750,6 +756,11 @@ static void rich_parse_img_attrs(const char *s, uint32_t n, nt_rich_valign_t *va
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- alias-split scan + attr-tail + NT_ASSERT validation branches
 static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *val, uint32_t vlen) {
     NT_ASSERT(base != NULL && "rich markup: <img=.../> needs a base style (default_atlas source)");
+    /* HARD guard (survives NT_ASSERT OFF): nt_ui_rich_begin EXPLICITLY allows base==NULL (text-only
+     * markup). An <img> in such markup has no default_atlas to resolve against -> skip, never deref. */
+    if (base == NULL) {
+        return;
+    }
     NT_ASSERT(vlen > 0U && "rich markup: <img=...> needs a region");
     /* Split the value at the FIRST space into [region_spec, attr_tail]; the tail may be empty. */
     uint32_t region_spec_len = vlen;
