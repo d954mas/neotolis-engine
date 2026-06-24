@@ -66,14 +66,15 @@ static void frame(void) {
 
     if (nt_app_render_enabled()) {
         render_pattern();
-    }
 
-    /* Pre-swap capture seam (D-05): runs AFTER render work, BEFORE swap — the back buffer is GL-undefined
-       post-swap, so the producer's nt_gfx_read_pixels is only valid here. Mirrors devapi_host's
-       nt_metrics_sample placement. Slots without a producer (frame.wait/time.step) are untouched. */
-    nt_devapi_capture_on_pre_swap();
+        /* Pre-swap capture seam (D-05): runs AFTER render work, BEFORE swap — the back buffer is
+           GL-undefined post-swap, so the producer's nt_gfx_read_pixels is only valid here. Mirrors
+           devapi_host's nt_metrics_sample placement. Slots without a producer (frame.wait/time.step)
+           are untouched. GATED on render_enabled (same as render_pattern): with render off there is no
+           freshly-rendered frame to read (D-05), so the capture stays pending until a real frame draws
+           — never an ok:true stale/garbage frame. */
+        nt_devapi_capture_on_pre_swap();
 
-    if (nt_app_render_enabled()) {
         nt_window_swap_buffers();
     }
 
