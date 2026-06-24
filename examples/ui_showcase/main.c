@@ -1927,6 +1927,23 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     return r;
 }
 
+/* Visual-only horizontal nudge for the z-layer demo: inline images have no offset_x, but the demo needs a
+ * REAL same-line overlap (the image atom sits AFTER the word in the flow). Slides the image left by
+ * *user_data px so it lands on the preceding word; the layer then decides which is drawn on top. */
+static nt_ui_rich_fx_result_t rich_fx_pull_left(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                                void *user_data) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)time;
+    (void)hovered;
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    r.offset_x = (user_data != NULL) ? -(*(const float *)user_data) : -46.0F;
+    return r;
+}
+static const float s_rich_overlap_pull = 46.0F; /* px the heart slides left onto the word -- TWEAK if not centered */
+
 /* (b) GAME-DRAWN OBJECTS (<obj=name/> WidgetSpans). The first real OBJECT pixel draw: the engine
  * never touches these; draw_fn paints via the sprite renderer at the solver-reserved box. draw_fn has
  * NO ctx, so everything it needs is stashed here (read at emit; must outlive the frame -> file-scope). */
@@ -2249,18 +2266,22 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
 
-    /* Z-LAYER overlap demo: a big heart icon pulled UP with a strong negative offset_y so its box
-     * overlaps the word right before it. Shown twice so the layer reorder is VISIBLE:
-     *  - DEFAULT: image (layer 1) draws OVER text (layer 0) -> the heart hides "OVER".
-     *  - <layer=5> on the word lifts it ABOVE the image (layer 1) -> "OVER" draws on top of the heart. */
-    RICH_TEXT_LIT(ctx, "Z-order: ");
-    RICH_TEXT_LIT(ctx, "OVER");
-    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BASELINE, -10.0F, 2.0F); /* big heart, ride up onto "OVER" */
-    RICH_TEXT_LIT(ctx, " vs ");
-    nt_ui_rich_push_layer(ctx, 5U); /* lift the word above the image's default layer 1 */
-    RICH_TEXT_LIT(ctx, "OVER");
-    nt_ui_rich_pop(ctx);                                                            /* layer */
-    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BASELINE, -10.0F, 2.0F); /* same big heart over the lifted word */
+    /* Z-LAYER demo: the SAME heart+word overlap shown TWICE, identical except the word's layer.
+     * rich_fx_pull_left slides the heart left so it really lands ON the word (inline images have no offset_x).
+     *  - [img over text]: default layers (image=1 > text=0) -> the heart COVERS the word.
+     *  - [text over img]: <layer=3> lifts the word above the heart (1) -> the WORD covers the heart. */
+    RICH_TEXT_LIT(ctx, "Z-layer  [img over text] ");
+    RICH_TEXT_LIT(ctx, "LOVE");
+    nt_ui_rich_push_effect_fn(ctx, rich_fx_pull_left, (void *)&s_rich_overlap_pull);
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.8F); /* heart lands on "LOVE", default layer 1 -> on top */
+    nt_ui_rich_pop(ctx);                                                        /* effect */
+    RICH_TEXT_LIT(ctx, "   [text over img] ");
+    nt_ui_rich_push_layer(ctx, 3U); /* lift the word above the heart's default layer 1 */
+    RICH_TEXT_LIT(ctx, "LOVE");
+    nt_ui_rich_pop(ctx); /* layer */
+    nt_ui_rich_push_effect_fn(ctx, rich_fx_pull_left, (void *)&s_rich_overlap_pull);
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.8F); /* same heart, but the word now sits above it */
+    nt_ui_rich_pop(ctx);                                                        /* effect */
     RICH_TEXT_LIT(ctx, ". ");
 
     /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
