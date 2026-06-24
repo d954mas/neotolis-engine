@@ -626,6 +626,62 @@ static void test_rich_text_zero_id_asserts(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* (layer) parser <layer=N> produces a run-list BYTE-IDENTICAL to the builder push_layer(N): same run
+ * count, same per-run kind, and the same composed style.layer on every run. A <layer=5> wrap around mixed
+ * text must mint the same intervening runs the builder does (the parser drives the SAME builder). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- two authoring fronts built then compared run-by-run
+static void test_parse_layer_matches_builder(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF112233U;
+    const nt_font_t base_face = {.id = 7};
+    for (uint32_t i = 0; i < 4U; i++) {
+        base.font_id[i] = base_face;
+    }
+
+    /* BUILDER: "a " then <layer=5>"b "</layer> then "c". */
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "a ", 2);
+    nt_ui_rich_push_layer(s_fx.ctx, 5U);
+    nt_ui_rich_text_n(s_fx.ctx, "b ", 2);
+    nt_ui_rich_pop(s_fx.ctx);
+    nt_ui_rich_text_n(s_fx.ctx, "c", 1);
+    nt_ui_rich_end(s_fx.ctx);
+
+    const uint32_t b_runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3U, b_runs, "builder: a | <layer=5>b | c -> 3 runs");
+    uint8_t b_layer[8];
+    nt_rich_atom_kind_t b_kind[8];
+    for (uint32_t i = 0; i < b_runs; i++) {
+        b_layer[i] = nt_ui_rich_test_run_style(s_fx.ctx, i).layer;
+        b_kind[i] = nt_ui_rich_test_run_kind(s_fx.ctx, i);
+    }
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_LAYER_AUTO, b_layer[0], "run 0 outside <layer> is AUTO");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(5U, b_layer[1], "run 1 inside <layer=5> is 5");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_LAYER_AUTO, b_layer[2], "run 2 after </layer> is AUTO again");
+
+    /* PARSER: byte-identical markup of the same builder sequence. */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    const char *m = "a <layer=5>b </layer>c";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+
+    const uint32_t p_runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b_runs, p_runs, "parser run count == builder run count");
+    for (uint32_t i = 0; i < p_runs; i++) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(b_kind[i], nt_ui_rich_test_run_kind(s_fx.ctx, i), "parser run kind == builder");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(b_layer[i], nt_ui_rich_test_run_style(s_fx.ctx, i).layer, "parser run layer == builder (byte-identity)");
+    }
+}
+
+/* (layer) <layer=N> hard guards survive: >254 traps in FULL; the empty/non-numeric forms trap too. */
+static void test_parse_layer_out_of_range_asserts(void) {
+    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=255>x</layer>")); /* 255 is the AUTO sentinel, not a valid explicit layer */
+    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=300>x</layer>")); /* > 254 */
+    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=>x</layer>"));    /* empty value */
+    NT_TEST_EXPECT_ASSERT(parse_lit("<layer=ab>x</layer>"));  /* non-numeric */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tagset_font_register_lookup);
@@ -673,5 +729,7 @@ int main(void) {
     RUN_TEST(test_push_scale_bad_mult_asserts);
     RUN_TEST(test_rich_image_bad_scale_asserts);
     RUN_TEST(test_rich_text_zero_id_asserts);
+    RUN_TEST(test_parse_layer_matches_builder);
+    RUN_TEST(test_parse_layer_out_of_range_asserts);
     return UNITY_END();
 }

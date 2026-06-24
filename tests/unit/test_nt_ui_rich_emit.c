@@ -13,16 +13,12 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
-#include "core/nt_assert.h"
 #include "font/nt_font.h"
-#include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
-#include "nt_pack_format.h" /* NT_ASSET_SHADER_CODE */
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
-#include "resource/nt_resource.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -1839,6 +1835,195 @@ static void test_custom_fx_runs_via_markup(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "markup with custom + stock effects still emits text spans");
 }
 
+/* ===== Z-order layers ===== */
+
+/* Build text + inline image + object with NO <layer> -> the solver must assign the per-kind defaults
+ * TEXT=0, IMAGE=1, OBJECT=2 (ascending = further back -> further front). Walk so the atoms get solved. */
+static void frame_text_image_object(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = make_rich_image_material();
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_tio_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "T ", 2);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " ", 1);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, stub_draw, NULL);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_tio").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (L1) default layers by kind: with no <layer>, every TEXT atom reports layer 0, the IMAGE atom layer 1,
+ * the OBJECT atom layer 2 -- proving the AUTO sentinel resolves to the per-kind default at atom build. */
+static void test_default_layers_by_kind(void) {
+    frame_text_image_object();
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(n >= 3U, "block placed text + image + object atoms");
+    bool saw_text = false;
+    bool saw_image = false;
+    bool saw_object = false;
+    for (uint32_t i = 0; i < n; i++) {
+        const nt_ui_rich_test_atom_t a = nt_ui_rich_test_atom(s_fx.ctx, i);
+        const uint8_t layer = nt_ui_rich_test_atom_layer(s_fx.ctx, i);
+        if (a.kind == NT_RICH_ATOM_TEXT) {
+            saw_text = true;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, layer, "TEXT default layer == 0");
+        } else if (a.kind == NT_RICH_ATOM_IMAGE) {
+            saw_image = true;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, layer, "IMAGE default layer == 1");
+        } else {
+            saw_object = true;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(2U, layer, "OBJECT default layer == 2");
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(saw_text && saw_image && saw_object, "all three kinds present");
+}
+
+/* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
+ * reports layer 5, not the per-kind default. Proves an explicit layer overrides the AUTO-by-kind rule. */
+static void test_layer_override(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    base.image_material = make_rich_image_material();
+    const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_lo_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 5U);
+        nt_ui_rich_text_n(s_fx.ctx, "X ", 2);
+        nt_ui_rich_image(s_fx.ctx, ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        nt_ui_rich_text_n(s_fx.ctx, " Y", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_lo").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(n >= 3U, "override block placed text + image atoms");
+    for (uint32_t i = 0; i < n; i++) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(5U, nt_ui_rich_test_atom_layer(s_fx.ctx, i), "every enclosed atom (any kind) reports layer 5");
+    }
+}
+
+/* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on
+ * layer 1. The font-group gather is PER-LAYER, so set_font is called (distinct fonts in layer 0 = 2) +
+ * (distinct fonts in layer 1 = 2) = 4 -- proving the gather scopes to the band, not the whole block. */
+static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    for (int i = 0; i < 4; i++) {
+        base.font_id[i] = fam[i];
+        nt_font_test_set_metrics(fam[i], 1000, 800, -200, 1000);
+    }
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_ml_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        /* Layer 0: regular + bold faces. */
+        nt_ui_rich_push_layer(s_fx.ctx, 0U);
+        nt_ui_rich_text_n(s_fx.ctx, "r ", 2);
+        nt_ui_rich_push_bold(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "b ", 2);
+        nt_ui_rich_pop(s_fx.ctx); /* bold */
+        nt_ui_rich_pop(s_fx.ctx); /* layer 0 */
+        /* Layer 1: italic + bold-italic faces. */
+        nt_ui_rich_push_layer(s_fx.ctx, 1U);
+        nt_ui_rich_push_italic(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "i ", 2);
+        nt_ui_rich_push_bold(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "bi", 2);
+        nt_ui_rich_pop(s_fx.ctx); /* bold */
+        nt_ui_rich_pop(s_fx.ctx); /* italic */
+        nt_ui_rich_pop(s_fx.ctx); /* layer 1 */
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_ml").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (L3) a multi-face block SPLIT across two layers still font-groups within each band: layer 0 = {R,B},
+ * layer 1 = {I,BI} -> 4 distinct faces -> 4 set_font calls (no per-transition regression). The clean
+ * per-layer-rescoping proof (a SHARED face rebinding across bands) is test_font_rebinds_per_layer_for_shared_face;
+ * this one pins that the per-band font-group DC win survives the layer split. */
+static void test_font_group_per_layer(void) {
+    nt_font_t fam[4];
+    fam[0] = s_fx.stub_font;   /* R */
+    fam[1] = make_stub_font(); /* B */
+    fam[2] = make_stub_font(); /* I */
+    fam[3] = make_stub_font(); /* BI */
+
+    nt_text_renderer_test_reset_call_counters();
+    frame_multi_face_two_layers(fam);
+
+    /* Per-band gather: layer 0 = {R,B} (2) + layer 1 = {I,BI} (2) = 4 set_font calls. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_set_font_calls(), "font gather is per-layer: 2 fonts in band 0 + 2 in band 1 = 4 set_font calls");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "layered multi-face block still emits draw_n spans");
+
+    for (int i = 1; i < 4; i++) {
+        nt_font_destroy(fam[i]);
+    }
+}
+
+/* (L4) a SINGLE face reused across TWO layers calls set_font ONCE PER BAND (2 total), not once for the
+ * whole block (1) -- the clean proof that the gather re-scopes per layer (the same font.id rebinds in
+ * the second band because the first band drained between them). */
+static void test_font_rebinds_per_layer_for_shared_face(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+
+    nt_text_renderer_test_reset_call_counters();
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_sf_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 0U);
+        nt_ui_rich_text_n(s_fx.ctx, "a ", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_push_layer(s_fx.ctx, 1U);
+        nt_ui_rich_text_n(s_fx.ctx, "b", 1);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_sf").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_text_renderer_test_set_font_calls(), "one face across two layers -> set_font once per band (2), not once for the whole block");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_produces_text_spans);
@@ -1848,6 +2033,10 @@ int main(void) {
     RUN_TEST(test_double_walk_is_deterministic);
     RUN_TEST(test_emit_groups_text_by_font);
     RUN_TEST(test_emit_single_face_one_set_font);
+    RUN_TEST(test_default_layers_by_kind);
+    RUN_TEST(test_layer_override);
+    RUN_TEST(test_font_group_per_layer);
+    RUN_TEST(test_font_rebinds_per_layer_for_shared_face);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);
