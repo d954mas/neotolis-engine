@@ -790,7 +790,7 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
         region_len = region_spec_len - colon - 1;
         NT_ASSERT(region_len > 0U && "rich markup: <img=alias:region/> empty region");
     }
-    /* Defaults match the historical hardcoded literals; the attr tail overrides any present key. */
+    /* Fallback defaults; the attr tail overrides any key it sets. */
     nt_rich_valign_t valign = NT_RICH_VALIGN_MIDDLE;
     float oy = 0.0F;
     float scale = 1.0F;
@@ -1839,12 +1839,9 @@ static uint32_t rich_pack_tint(const float c[4]) {
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
-/* Inline IMAGE atoms: emit IMMEDIATELY in the self-emit via the sprite renderer so every inline image
- * coalesces into ONE batch (set_material once, hoisted out of the loop) -- instead of one floating Clay
- * child per image, each with its own clipTo scissor (a flush per image). The active scroll scissor is
- * GL-live during the self-emit, so images clip to the panel automatically (an fx.scale>1 image loses its
- * per-image self-clip-to-bbox -- it over-draws like OBJECT atoms do, consistent + acceptable). Tint folds
- * frame->opacity itself (the self-emit has NO walker opacity fold -- mirrors rich_emit_objects). */
+/* Emit immediately via the sprite renderer so all inline images coalesce into one batch (set_material once).
+ * The scroll scissor is GL-live during self-emit, so images clip to the panel automatically; fx.scale>1
+ * over-draws like OBJECT atoms (acceptable). Opacity is folded into the tint here -- no walker fold in self-emit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
 static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     /* Material validity is a band-invariant -> the caller checks st->image_material once before the layer
@@ -1905,14 +1902,8 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* Font-grouped TEXT emit for ONE z-layer. The text renderer auto-flushes on every set_font change, so an
- * in-order walk of interleaved faces (R->B->R->I...) costs one text flush PER transition. Group by FIRST
- * occurrence: when an atom is the first on the band with its font.id, set_font ONCE and emit ALL same-band
- * atoms sharing it; later atoms with an already-emitted font are skipped (their pass already drew them).
- * One set_font per DISTINCT font on the band, with NO distinct-font cap -> never drops (a block may carry
- * >4 families via push_font / <font=name>). solved[] untouched, no heap, no sort. Visible result is
- * identical (text is L-to-R non-overlapping; each atom keeps its own shear/fx/position). Common low-font
- * content is ~O(F*N); the all-distinct worst case is O(N^2) but N (atoms per band) is small. */
+/* Group same-band TEXT by font.id so set_font fires once per distinct font, not per face transition
+ * (the text renderer flushes on every set_font). No distinct-font cap -> a >4-family block never drops a face. */
 static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
@@ -1992,7 +1983,7 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     const float box_y = c->boundingBox.y;
 
     st->emit_span_count = 0;
-    st->image_emit_count = 0; /* accumulates across layers (the per-layer rich_emit_images no longer resets it) */
+    st->image_emit_count = 0; /* single reset point: rich_emit_images sums into this across all layer passes */
 
     /* Inline-image material is a BAND-INVARIANT: validate it ONCE here, not per-band (rich_emit_images runs
      * up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> text-only block, no images. The plain u8 sprite
@@ -2005,12 +1996,8 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
         emit_images = (mi != NULL && mi->attr_map_count == 0U);
     }
 
-    /* LAYER-ORDERED emit: cross-renderer z is FLUSH order (UI is painter-order, depth off). A LAYER is an
-     * explicit flush boundary: emit ascending by layer and DRAIN between bands so layer N fully lands before
-     * N+1. Within a band, flush text first (behind) then sprites/objects (front) so within-band z matches
-     * the per-kind default text<image<object. Layers buy z-control, not DC (the font-group + image-coalesce
-     * DC wins are WITHIN a layer). Drain after EVERY band incl. the last so the block is a self-contained z
-     * island regardless of the walker's global flush order. */
+    /* Cross-renderer z is flush order (painter-order, depth off): emit ascending by layer and drain after
+     * EVERY band so band N lands before N+1 and the block is a self-contained z island. */
     uint8_t layers[NT_UI_RICH_MAX_LAYERS];
     const uint32_t layer_count = rich_gather_layers(st, layers);
     for (uint32_t li = 0; li < layer_count; li++) {

@@ -2268,10 +2268,7 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_pop(ctx);
     RICH_TEXT_LIT(ctx, ". ");
 
-    /* Z-LAYER demo: the SAME heart+word overlap shown TWICE, identical except the word's layer.
-     * rich_fx_pull_left slides the heart left so it really lands ON the word (inline images have no offset_x).
-     *  - [img over text]: default layers (image=1 > text=0) -> the heart COVERS the word.
-     *  - [text over img]: <layer=3> lifts the word above the heart (1) -> the WORD covers the heart. */
+    /* Z-LAYER demo: same heart+word overlap twice, differing only by the word's layer (default image=1>text=0, then <layer=3> lifts text above the heart). */
     RICH_TEXT_LIT(ctx, "Z-layer  [img over text] ");
     RICH_TEXT_LIT(ctx, "LOVE");
     nt_ui_rich_push_effect_fn(ctx, rich_fx_pull_left, (void *)&s_rich_overlap_pull);

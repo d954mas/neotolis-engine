@@ -1303,7 +1303,7 @@ void nt_sprite_renderer_flush(void) {
         return;
     }
 #ifdef NT_TEST_ACCESS
-    s_sprite.test_nonempty_flush_calls++; /* counted only on a real cmd replay (past the empty early-return) */
+    s_sprite.test_nonempty_flush_calls++;
 #endif
 
     /* orphan_buffer asks the driver to allocate fresh storage instead of

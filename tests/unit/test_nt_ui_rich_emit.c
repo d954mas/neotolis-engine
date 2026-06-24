@@ -489,10 +489,8 @@ static void frame_two_images(nt_material_t img_mat) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (6c) TWO inline images in one block (one default band: both images on layer 1) COALESCE: set_material is
- * bound once in rich_emit_images and both quads accumulate in the same staging batch with no flush between
- * them, so the band's single sprite drain is ONE non-empty flush (not two). image_emit_count == 2 confirms
- * both emitted; the second is a 4-vert region quad with the right full-opacity tint. */
+/* (6c) two same-band inline images COALESCE: set_material binds once in rich_emit_images and both quads
+ * share one staging batch with no flush between them, so the band drains in ONE non-empty flush, not two. */
 static void test_two_inline_images_coalesce(void) {
     const nt_material_t mat = make_rich_image_material();
     frame_two_images(mat);
@@ -509,10 +507,8 @@ static void test_two_inline_images_coalesce(void) {
     }
 }
 
-/* (6d) STATS CONTRACT: inline rich images self-emit inside the rich CUSTOM block's sprite batch, NOT as
- * Clay IMAGE render-commands -- so a block with two inline images contributes 0 to the walk image-COMMAND
- * count while the rich-image probe reports 2. Pins the documented getter contract (the name is COMMAND
- * count; inline rich images are no longer Clay commands). */
+/* Inline rich images self-emit in the CUSTOM block's sprite batch, NOT as Clay IMAGE commands: a
+ * two-image block reports image-COMMAND count 0 while the rich-image probe reports 2. */
 static void test_inline_images_not_in_image_command_count(void) {
     const nt_material_t mat = make_rich_image_material();
     frame_two_images(mat); /* [text][img][text][img][text] -- two inline images, no nt_ui_image */
@@ -2062,10 +2058,8 @@ static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (L3) a multi-face block SPLIT across two layers still font-groups within each band: layer 0 = {R,B},
- * layer 1 = {I,BI} -> 4 distinct faces -> 4 set_font calls (no per-transition regression). The clean
- * per-layer-rescoping proof (a SHARED face rebinding across bands) is test_font_rebinds_per_layer_for_shared_face;
- * this one pins that the per-band font-group DC win survives the layer split. */
+/* (L3) font-group gather is per-band, not per-block: {R,B} on layer 0 + {I,BI} on layer 1
+ * still costs 4 set_font calls (the layer split does not collapse the per-band grouping). */
 static void test_font_group_per_layer(void) {
     nt_font_t fam[4];
     fam[0] = s_fx.stub_font;   /* R */
@@ -2154,10 +2148,8 @@ static void frame_two_layer_images(nt_material_t img_mat) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (L5) LAYER DRAIN + Z-ORDER: a red image on layer 0 and a green image on layer 1 -> the self-emit drains
- * each populated band separately (two non-empty sprite flushes, not one coalesced batch), and emits bands
- * ASCENDING so the layer-1 (green) image is the LAST emitted. Pins the load-bearing per-band drain + z
- * ordering that is otherwise visual-only. */
+/* (L5) per-band drain + ascending z (otherwise visual-only): a layer-0 red + layer-1 green image drain as
+ * two non-empty sprite flushes (not one coalesced batch), and ascending band order makes layer-1 green emit LAST. */
 static void test_layer_drain_orders_ascending(void) {
     const nt_material_t mat = make_rich_image_material();
     frame_two_layer_images(mat);
@@ -2170,10 +2162,8 @@ static void test_layer_drain_orders_ascending(void) {
     TEST_ASSERT_TRUE_MESSAGE(col[0] == 0U && col[1] == 255U && col[2] == 0U, "higher band (layer 1, green) emits LAST -> ascending band order");
 }
 
-/* (L6) DEFAULT mixed-block band cost: a no-<layer> text + image + object block resolves to per-kind bands
- * (TEXT=0, IMAGE=1, OBJECT=2). Only the IMAGE band carries sprite content (text is stub-font no-op, object
- * self-draws), so exactly ONE non-empty sprite drain occurs -- pins the per-band sprite cost so a regression
- * to per-image or per-band-extra flushes can't pass unseen. */
+/* (L6) default mixed block -> per-kind bands; only the IMAGE band carries sprites (text is stub-font no-op,
+ * object self-draws), so exactly ONE non-empty sprite drain occurs. */
 static void test_default_mixed_block_band_flush_count(void) {
     nt_sprite_renderer_test_reset_nonempty_flush_calls();
     frame_text_image_object(); /* one IMAGE atom (band 1); text band 0 + object band 2 emit no sprites */
@@ -2260,10 +2250,8 @@ static void frame_over_cap_layers(void) {
 }
 
 static void test_over_cap_layers_hard_guard(void) {
-    /* DEBUG: the over-cap distinct-band assert fires in rich_gather_layers and the trap catches it. The
-     * out[NT_UI_RICH_MAX_LAYERS] scratch is the array the guard protects -- the hard `count >= cap` skip
-     * runs in OFF builds (no assert) too, so a >16-distinct-layer block never writes past out[] / crashes.
-     * (The atoms themselves are uncapped: every pushed layer reached its atom; the cap is on EMIT bands.) */
+    /* Over-cap distinct-band assert fires in rich_gather_layers (trap catches it); the hard `count >= cap`
+     * skip also runs in assert-OFF builds, so a >16-distinct-layer block never writes past out[NT_UI_RICH_MAX_LAYERS]. */
     NT_TEST_EXPECT_ASSERT(frame_over_cap_layers());
 }
 

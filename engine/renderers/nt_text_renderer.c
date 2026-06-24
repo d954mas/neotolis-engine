@@ -59,7 +59,7 @@ static struct {
      * matrix construction without needing a real font fixture. */
     float test_last_model[16];
     uint32_t test_draw_n_calls;
-    /* Flushes that ACTUALLY issued a draw (past the empty early-return). Empty no-op flushes don't count. */
+    /* Counts flushes that issued a draw; empty no-op flushes excluded. */
     uint32_t test_nonempty_flush_calls;
 #endif
 } s_text;
@@ -482,7 +482,7 @@ void nt_text_renderer_flush(void) {
     /* Single draw call per flush */
     nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
 #ifdef NT_TEST_ACCESS
-    s_text.test_nonempty_flush_calls++; /* counted only on a real draw (past the empty / no-pipeline early-outs) */
+    s_text.test_nonempty_flush_calls++;
 #endif
 
     /* Reset staging buffer */
