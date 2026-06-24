@@ -635,6 +635,7 @@ static rich_tag_kind_t rich_tag_kind(const char *name, uint32_t n) {
 /* Parse a bounded decimal uint8 layer [s,s+n) for <layer=N>. Returns AUTO on malformed/out-of-range
  * (empty, non-digit, or > NT_UI_RICH_LAYER_MAX) -- a hard skip that survives NT_ASSERT OFF (untrusted
  * markup). DEBUG asserts the malformed case so a developer typo traps at parse. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-digit scan + NT_ASSERT validation branches (mirrors rich_parse_float)
 static uint8_t rich_parse_layer(const char *s, uint32_t n) {
     NT_ASSERT(n > 0U && "rich markup: <layer=> needs a value");
     if (n == 0U) {
@@ -1170,7 +1171,10 @@ static uint8_t rich_effective_layer(const nt_ui_rich_style_t *style, nt_rich_ato
     if (style->layer != (uint8_t)NT_UI_RICH_LAYER_AUTO) {
         return style->layer;
     }
-    return (kind == NT_RICH_ATOM_TEXT) ? 0U : (kind == NT_RICH_ATOM_IMAGE) ? 1U : 2U;
+    if (kind == NT_RICH_ATOM_TEXT) {
+        return 0U;
+    }
+    return (kind == NT_RICH_ATOM_IMAGE) ? 1U : 2U;
 }
 
 /* Append one TEXT chunk atom [off,off+len) measured under font/size. */
