@@ -661,8 +661,16 @@ static uint8_t rich_parse_layer(const char *s, uint32_t n) {
     return (uint8_t)v;
 }
 
+/* pushed_style records whether THIS open actually pushed a style entry (so close pops iff it did).
+ * A named-tag miss (unknown <font=>/<color=>/<fx=>) or <link> opens with NO style push -> false; its
+ * close must not pop the enclosing style (OFF-safe -- in DEBUG the miss already trapped at the open). */
 typedef struct {
-    rich_tag_kind_t open_stack[NT_UI_RICH_PARSE_TAG_DEPTH];
+    rich_tag_kind_t kind;
+    bool pushed_style;
+} rich_tag_open_t;
+
+typedef struct {
+    rich_tag_open_t open_stack[NT_UI_RICH_PARSE_TAG_DEPTH];
     uint32_t depth;
 } rich_tag_stack_t;
 
@@ -883,17 +891,23 @@ static bool rich_parse_fx_params(const char *s, uint32_t n, nt_ui_rich_fx_params
 static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, const nt_ui_rich_tagset_t *tagset, const char *name, uint32_t nlen, const char *val, uint32_t vlen) {
     const rich_tag_kind_t kind = rich_tag_kind(name, nlen);
     NT_ASSERT(kind != RICH_TAG_NONE && "rich markup: unknown tag");
+    /* Set true ONLY where a style is actually pushed below. A named-tag miss (unknown font/color/fx)
+     * or a tagset-less skip leaves it false so the matching close does NOT pop the enclosing style. */
+    bool pushed_style = false;
     switch (kind) {
     case RICH_TAG_BOLD:
         nt_ui_rich_push_bold(ctx);
+        pushed_style = true;
         break;
     case RICH_TAG_ITALIC:
         nt_ui_rich_push_italic(ctx);
+        pushed_style = true;
         break;
     case RICH_TAG_COLOR:
         NT_ASSERT(vlen > 0U && "rich markup: <color=..> needs a value");
         if (val[0] == '#') {
             nt_ui_rich_push_color(ctx, rich_parse_hex_color(val, vlen));
+            pushed_style = true;
         } else {
             NT_ASSERT(tagset != NULL && "rich markup: named <color> needs a tagset");
             /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
@@ -909,10 +923,12 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
                 break;
             }
             nt_ui_rich_push_color(ctx, abgr);
+            pushed_style = true;
         }
         break;
     case RICH_TAG_SCALE:
         nt_ui_rich_push_scale(ctx, rich_parse_float(val, vlen));
+        pushed_style = true;
         break;
     case RICH_TAG_FONT: {
         NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <font=name> needs a tagset");
@@ -929,6 +945,7 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
             break;
         }
         nt_ui_rich_push_font(ctx, fam);
+        pushed_style = true;
         break;
     }
     case RICH_TAG_LINK: {
@@ -937,7 +954,7 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
          * </link> would zero the outer's id -- text between the inner and outer close would silently
          * lose the enclosing link. Reject loudly instead of composing wrong. */
         for (uint32_t d = 0; d < ts_stack->depth; d++) {
-            NT_ASSERT(ts_stack->open_stack[d] != RICH_TAG_LINK && "rich markup: nested <link> is not allowed");
+            NT_ASSERT(ts_stack->open_stack[d].kind != RICH_TAG_LINK && "rich markup: nested <link> is not allowed");
         }
         const uint32_t link_id = nt_hash32(val, vlen).value;
         NT_ASSERT(link_id != 0U && "rich markup: <link=name> hashed to 0 (the none sentinel)");
@@ -983,11 +1000,13 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         } else {
             nt_ui_rich_push_effect(ctx, effect_id);
         }
+        pushed_style = true;
         break;
     }
     case RICH_TAG_LAYER:
         NT_ASSERT(vlen > 0U && "rich markup: <layer=N> needs a value");
         nt_ui_rich_push_layer(ctx, rich_parse_layer(val, vlen));
+        pushed_style = true;
         break;
     case RICH_TAG_NONE:
     default:
@@ -1000,7 +1019,9 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     if (ts_stack->depth >= NT_UI_RICH_PARSE_TAG_DEPTH) {
         return;
     }
-    ts_stack->open_stack[ts_stack->depth++] = kind;
+    ts_stack->open_stack[ts_stack->depth].kind = kind;
+    ts_stack->open_stack[ts_stack->depth].pushed_style = pushed_style;
+    ts_stack->depth++;
 }
 
 /* Dispatch one CLOSE tag `</name>` -- must match the innermost open tag. */
@@ -1013,15 +1034,17 @@ static void rich_close_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, con
     if (ts_stack->depth == 0U) {
         return;
     }
-    const rich_tag_kind_t top = ts_stack->open_stack[--ts_stack->depth];
-    NT_ASSERT(top == kind && "rich markup: mismatched close tag");
-    /* Decide the pop on what was actually OPENED (top), not the close tag's kind: a mismatched close
-     * like <link=1></b> (top==LINK, kind==BOLD) must not nt_ui_rich_pop() -- <link> pushed NO style
-     * entry (it's a pending field), so that would pop past base. For well-formed markup top==kind. */
-    if (top == RICH_TAG_LINK) {
+    const rich_tag_open_t top = ts_stack->open_stack[--ts_stack->depth];
+    NT_ASSERT(top.kind == kind && "rich markup: mismatched close tag");
+    /* Decide the pop on what the matching OPEN actually did, not the close tag's kind. <link> opens
+     * as a pending field (no style entry) -> clear it. A named-tag MISS (unknown font/color/fx) or a
+     * tagset-less skip opened WITHOUT a style push -> top.pushed_style is false -> pop nothing, or the
+     * close would pop the enclosing style (e.g. <b><font=typo>x</font>y</b> would lose y's bold in OFF).
+     * Pop ONLY when the open really pushed a style. For well-formed markup this matches the old path. */
+    if (top.kind == RICH_TAG_LINK) {
         nt_ui_rich_link(ctx, 0U); /* clear the pending link id */
-    } else {
-        nt_ui_rich_pop(ctx); /* style-stack pop */
+    } else if (top.pushed_style) {
+        nt_ui_rich_pop(ctx); /* style-stack pop -- balances the open's push */
     }
 }
 

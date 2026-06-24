@@ -536,6 +536,52 @@ static void test_parse_mixed_tag_stack_sync(void) {
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, last.variant, "trailing text variant back at base");
 }
 
+/* (10e) named-tag MISS (#1): a tagset that knows OTHER names but not the requested one. An unknown
+ * <font=typo>/<color=xyz>/<fx=bad> trips the lookup-miss NT_ASSERT in rich_open_tag (the DEBUG dev
+ * signal -- kept). These are the no-push branches: in OFF the hard guard skips the tag WITHOUT a
+ * style push, and the matching close (now pop-iff-pushed) must NOT pop the enclosing style. The OFF
+ * graceful skip is verified by code review (the suite runs asserts-ON, exercising the trap side). */
+static void parse_named_miss(const char *m) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts); /* valid tagset; registers names DISTINCT from the misses below */
+    nt_ui_rich_tagset_register_color(&ts, "accent", 0xFFAABBCCU);
+    const nt_font_t hdr[4] = {{.id = 21}, {.id = 22}, {.id = 23}, {.id = 24}};
+    nt_ui_rich_tagset_register_font(&ts, "hdr", hdr);
+    nt_ui_rich_tagset_register_effect(&ts, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
+}
+static void test_parse_unknown_named_tags_assert(void) {
+    NT_TEST_EXPECT_ASSERT(parse_named_miss("<font=typo>x</font>"));  /* lookup_font miss -> no push */
+    NT_TEST_EXPECT_ASSERT(parse_named_miss("<color=xyz>x</color>")); /* lookup_color miss -> no push */
+    NT_TEST_EXPECT_ASSERT(parse_named_miss("<fx=bad>x</fx>"));       /* lookup_effect miss -> no push */
+}
+
+/* (10f) pop-iff-pushed correctness (#1): a WELL-FORMED <b><i>x</i>y</b> still composes byte-identically
+ * -- every real push pops, the trailing 'y' is bold-not-italic, the final 'z' is back at base. Proves
+ * the pushed-flag refactor did not break well-formed nesting (no over-pop, no leaked push). */
+static void test_parse_wellformed_nesting_pops_correctly(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.color_abgr = 0xFF112233U;
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    /* x: bold+italic ; y: bold (italic popped) ; z: base (bold popped). */
+    const char *m = "<b><i>x</i>y</b>z";
+    nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
+
+    const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3U, runs, "<b><i>x</i>y</b>z -> three distinct-style runs");
+    const uint8_t bold_italic = (uint8_t)(NT_UI_RICH_VARIANT_BOLD | NT_UI_RICH_VARIANT_ITALIC);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(bold_italic, nt_ui_rich_test_run_style(s_fx.ctx, 0).variant, "x is bold+italic");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE((uint8_t)NT_UI_RICH_VARIANT_BOLD, nt_ui_rich_test_run_style(s_fx.ctx, 1).variant, "y is bold only (</i> popped italic)");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, nt_ui_rich_test_run_style(s_fx.ctx, 2).variant, "z is base (</b> popped bold)");
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, nt_ui_rich_test_run_style(s_fx.ctx, 2).color_abgr, "z carries the BASE color (stack balanced back to base)");
+}
+
 /* (16b) <scale=0> / <scale=-1>: the push_scale>0 assert traps in FULL. In OFF the hard clamp falls
  * back to identity (no <=0 font size into nt_font_measure_n). */
 static void test_parse_scale_nonpositive_asserts(void) {
@@ -836,6 +882,8 @@ int main(void) {
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
     RUN_TEST(test_parse_mixed_tag_stack_sync);
+    RUN_TEST(test_parse_unknown_named_tags_assert);
+    RUN_TEST(test_parse_wellformed_nesting_pops_correctly);
     RUN_TEST(test_parse_scale_nonpositive_asserts);
     RUN_TEST(test_parse_nested_link_asserts);
     RUN_TEST(test_parse_non_terminating_bounded);
