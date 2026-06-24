@@ -3174,23 +3174,25 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
 
 ## 32.3 Inline images ride the standard u8 sprite path
 
-An `<img>` atom is a **floating child** of the FIXED block, positioned at the
-solver's solved `(x, y)`, emitted through the plain `nt_ui_image` (the same
-floating region-image call regular UI icons use). The composed tint (the run's
-`<color>` × any per-atom effect tint) is packed to the standard **u8** sprite
-tint (`color_packed` → `backgroundColor`), the **base sprite material** textures
-the region, and the walker folds accumulated parent opacity into the
-`backgroundColor` alpha exactly like every other UI sprite and rich TEXT —
-there is **no** bespoke material, float4 `a_tint`, or custom-attr block. The
-single composed tint is invisible at u8 on an 8-bit display, so the earlier
-lossless-float4 path gave no benefit and was dropped. The floating child is
-declared with `.floating.clipTo = CLAY_CLIP_TO_ATTACHED_PARENT`, so it inherits
-the FIXED block's full clip chain (incl. an enclosing scroll) and is scissored
-to the panel/scroll — without it a floating child positioned at the solved
-`(x, y)` would **escape** the scroll scissor. Each clipped inline image therefore
-costs a scissor pair (a renderer flush) — the per-image batch cost. Images
-resolve **by atlas + region name** — the atlas IS the registry (see §32.5,
-D-67-13).
+An `<img>` atom is **NOT** a Clay child. It emits **immediately** in the rich
+block's CUSTOM self-emit (`rich_emit_images`) via
+`nt_sprite_renderer_emit_region`, positioned at the solver's solved `(x, y)`.
+The composed tint (the run's `<color>` × any per-atom effect tint) is packed to
+the standard **u8** sprite tint, the block's **image material** (the plain u8
+sprite path, `attr_map_count == 0`) textures the region, and the self-emit folds
+the parent opacity into the tint alpha exactly like rich TEXT — there is **no**
+bespoke material, float4 `a_tint`, or custom-attr block. The single composed
+tint is invisible at u8 on an 8-bit display, so the earlier lossless-float4 path
+gave no benefit and was dropped. `set_material` is bound **once per band** (the
+`bound` guard), so **all** of a band's inline images **coalesce into one sprite
+batch** — no per-image flush. Because the sprite renderer emits while the active
+**scroll scissor is GL-live** during the walk, the images are clipped to the
+panel/scroll automatically — by the live scissor, **not** a Clay
+`.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image
+self-clip-to-bbox and **over-draws** past its solved box (same as OBJECT atoms;
+consistent and accepted). Images resolve **by atlas + region name** — the atlas
+IS the registry (see §32.5, D-67-13). The per-band z-ordering / drain model that
+sequences these emits is **§32.4b** (D-67-29).
 
 ## 32.4 Effects (visual-only) and links
 
