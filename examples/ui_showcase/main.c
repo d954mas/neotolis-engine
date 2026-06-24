@@ -506,12 +506,6 @@ static nt_resource_t s_radial_image_fs_handle;
  * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
 static nt_resource_t s_radial_art_tex_handle;
-/* Rich-text inline-icon atlas (heart/gold named regions) + its texture + the textured-sprite FS
- * that multiplies by the lossless per-vertex a_tint (reuses sprite_radial.vert for a_tint @ loc 5). */
-static nt_resource_t s_icons_atlas_handle;
-static nt_resource_t s_icons_tex_handle;
-static nt_resource_t s_rich_image_fs_handle;
-
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 /* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
@@ -520,8 +514,8 @@ static nt_material_t s_radial_material;
 static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
 static nt_atlas_region_ref_t s_radial_art_ref;
-/* Rich-text inline-image material (textured sprite * a_tint) + the by-name refs into the icons atlas. */
-static nt_material_t s_rich_image_material;
+/* Rich-text inline-image by-name refs into the MAIN ui_showcase atlas (heart/gold). Inline images ride
+ * the standard u8 sprite path now -- no bespoke material; the rich base uses s_sprite_material. */
 static nt_atlas_region_ref_t s_rich_heart_ref;
 static nt_atlas_region_ref_t s_rich_gold_ref;
 /* Rich-text font family (variant slots R/B/I/BI -> real DejaVu faces). Index = NT_UI_RICH_VARIANT_*
@@ -2089,10 +2083,10 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
 }
 
 /* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
- * effects plus a custom effect fn, the icons atlas, and the rich font family. The CODE-FIRST builder
- * never touches the tagset -- it gets real values directly. */
+ * effects plus a custom effect fn, the inline-icon atlas alias, and the rich font family. The CODE-FIRST
+ * builder never touches the tagset -- it gets real values directly. */
 static void rich_ensure_setup(void) {
-    if (s_rich_ready || !s_rich_font_bound || s_rich_image_material.id == 0U) {
+    if (s_rich_ready || !s_rich_font_bound || s_sprite_material.id == 0U) {
         return;
     }
     nt_ui_rich_tagset_init(&s_rich_tagset);
@@ -2111,7 +2105,7 @@ static void rich_ensure_setup(void) {
     nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", NT_UI_RICH_FX_ID_SWAY);
     /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
     nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
-    nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_icons_atlas_handle);
+    nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_atlas_handle);
     /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
     nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
 
@@ -2137,8 +2131,8 @@ static nt_ui_rich_style_t rich_base_style(void) {
     }
     base.color_abgr = showcase_pack_clay_abgr(g_current->body->color);
     base.scale = 1.0F;
-    base.image_material = s_rich_image_material;
-    base.default_atlas = nt_atlas_ref(s_icons_atlas_handle, 0U); /* base atlas for <img=name/> by-name resolve */
+    base.image_material = s_sprite_material;               /* inline images ride the standard u8 sprite path */
+    base.default_atlas = nt_atlas_ref(s_atlas_handle, 0U); /* base atlas for <img=name/> by-name resolve */
     return base;
 }
 
@@ -3502,8 +3496,8 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region + rich-image = 9. */
-    nt_material_init(&(nt_material_desc_t){.max_materials = 9});
+    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region = 8. */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 8});
     /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
@@ -3558,13 +3552,10 @@ int main(int argc, char *argv[]) {
     s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
 
-    /* Rich-text inline-icon atlas + its texture + the textured-tint FS. The by-name refs resolve
-     * lazily (memoized on first emit) -- the atlas IS the registry. */
-    s_icons_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ICONS, NT_ASSET_ATLAS);
-    s_icons_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ICONS_TEX0, NT_ASSET_TEXTURE);
-    s_rich_image_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RICH_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
-    s_rich_heart_ref = nt_atlas_ref(s_icons_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ICONS_HEART.value);
-    s_rich_gold_ref = nt_atlas_ref(s_icons_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ICONS_GOLD.value);
+    /* Rich-text inline icons (heart/gold) live in the MAIN ui_showcase atlas now. The by-name refs
+     * resolve lazily (memoized on first emit) -- the atlas IS the registry. */
+    s_rich_heart_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_HEART.value);
+    s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
@@ -3653,25 +3644,6 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_radial_img_packed",
     });
 
-    /* Rich-text inline image: a textured sprite (icons atlas) * the lossless per-vertex a_tint.
-     * The 48 B custom block is {a_tint @5, a_uvrect @6, a_layout @7}; the walker fills a_uvrect /
-     * a_layout by name. Reuses sprite_radial.vert (a_tint @ loc 5); a_radial stays unbound. */
-    s_rich_image_material = nt_material_create(&(nt_material_create_desc_t){
-        .vs = s_radial_vs_handle,
-        .fs = s_rich_image_fs_handle,
-        .textures = {{.name = "u_texture", .resource = s_icons_tex_handle}},
-        .texture_count = 1,
-        .blend_mode = NT_BLEND_MODE_ALPHA,
-        .depth_test = false,
-        .depth_write = false,
-        .cull_mode = NT_CULL_NONE,
-        .attr_map[0] = {.stream_name = "a_tint", .location = 5},
-        .attr_map[1] = {.stream_name = "a_uvrect", .location = 6},
-        .attr_map[2] = {.stream_name = "a_layout", .location = 7},
-        .attr_map_count = 3,
-        .label = "ui_showcase_rich_image",
-    });
-
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ctx, s_text_material);
 
@@ -3725,7 +3697,6 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_destroy(s_radial_material);
-    nt_material_destroy(s_rich_image_material);
     for (int m = 0; m < 4; ++m) {
         nt_material_destroy(s_radial_image_material[m]);
     }

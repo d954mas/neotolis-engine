@@ -136,7 +136,6 @@ typedef struct {
     /* ---- Inline-image emit ---- */
     nt_material_t image_material; /* base-style inline-image material (.id==0 -> no images) */
     uint32_t image_emit_count;    /* IMAGE atoms declared as Clay children this call (probe) */
-    uint32_t image_block_bytes;   /* size of the last inline-image custom block (probe) */
     uint32_t image_region;        /* by-name resolved region index of the first IMAGE atom (probe) */
     float image_y;                /* solved y of the first IMAGE atom (probe) */
 } nt_ui_rich_state_t;
@@ -1699,47 +1698,38 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
 // #endregion
 
 // #region image-emit
-/* Inline IMAGE atoms ride the custom-attr sprite path (nt_ui_image_custom), geom_mode REGION, with
- * the {a_tint, a_uvrect, a_layout} block (a_uvrect/a_layout walker-filled by name). Each image is a
- * FLOATING child of the FIXED block, offset to the solved (x,y) -- so wrap/baseline stay the solver's. */
+/* Pack a normalized [0,1] RGBA float4 (text-renderer order) into 0xAABBGGRR for the u8 sprite tint. */
+static uint32_t rich_pack_tint(const float c[4]) {
+    const uint32_t r = (uint32_t)lrintf(nt_ui_clampf(c[0], 0.0F, 1.0F) * 255.0F);
+    const uint32_t g = (uint32_t)lrintf(nt_ui_clampf(c[1], 0.0F, 1.0F) * 255.0F);
+    const uint32_t b = (uint32_t)lrintf(nt_ui_clampf(c[2], 0.0F, 1.0F) * 255.0F);
+    const uint32_t a = (uint32_t)lrintf(nt_ui_clampf(c[3], 0.0F, 1.0F) * 255.0F);
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
+
+/* Inline IMAGE atoms ride the PLAIN sprite path (nt_ui_image): the composed <color> x effect tint is
+ * packed to a u8 sprite tint, the base sprite material textures the region, and the walker folds parent
+ * opacity into the backgroundColor alpha exactly like every other UI sprite (no float4 a_tint / bespoke
+ * material). Each image is a FLOATING child of the FIXED block, offset to the solved (x,y) -- so
+ * wrap/baseline stay the solver's. */
 static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s) {
-    const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
+    nt_ui_rich_run_t *run = &st->runs[s->run_idx];
     if (run->image_ref.region == NT_ATLAS_INVALID_REGION || run->image_ref.atlas.id == 0U) {
         return; /* unresolved name -> no-art early-out (mirror nt_ui_fill/radial), not OOB UVs */
     }
 
     /* Per-atom effect: VISUAL-ONLY transform (the solved box stays the solver's). */
     float base_tint[4];
-    /* 1.0 here: parent opacity is folded into a_tint alpha at the walker (build_custom_block),
-     * where the post-bake accumulated opacity is known -- the build-time walk has no opacity yet. */
+    /* 1.0 here: the walker folds parent opacity into the tint alpha (backgroundColor.a) at emit, where
+     * the accumulated opacity is known -- the build-time walk has no opacity yet (matches the TEXT path). */
     rich_unpack_color(s->color, 1.0F, base_tint);
     const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_tint);
     if (!fx.visible) {
         return; /* fade_in / typewriter: skip the image entirely until its window opens */
     }
 
-    /* attr_map order {a_tint, a_uvrect, a_layout}: a_tint = effect tint; a_uvrect/a_layout {0}, walker-filled. */
-    float blk[12];
-    memset(blk, 0, sizeof blk);
-    blk[0] = fx.color[0]; /* a_tint @ 0..3 (effect color; identity == base tint) */
-    blk[1] = fx.color[1];
-    blk[2] = fx.color[2];
-    blk[3] = fx.color[3];
-    st->image_block_bytes = (uint32_t)sizeof blk;
-
-    static const char *const attr_names[] = {"a_tint", "a_uvrect", "a_layout", NULL};
-    const nt_ui_image_custom_t img = {
-        .atlas = run->image_ref.atlas,
-        .region_index = run->image_ref.region,
-        .material = st->image_material,
-        .custom_attrs = blk,
-        .custom_bytes = (uint8_t)sizeof blk,
-        .attr_names = attr_names,
-        .geom_mode = NT_UI_IMAGE_GEOM_REGION,
-        .fold_opacity_into_a_tint = true, /* a_tint is a straight RGBA tint here; fade alpha with parent opacity */
-        .slice9_scale = 1.0F,
-        .color_packed = 0xFFFFFFFFU, /* tint lives in a_tint, not color_packed */
-    };
+    /* Composed <color> x effect tint as a u8 sprite tint; parent opacity is folded by the walker. */
+    const nt_ui_image_style_t istyle = {.color_packed = rich_pack_tint(fx.color), .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
 
     /* Position at the solved (x,y) + effect offset, scaling the box about its center. A floating
      * child attached to the FIXED block's top-left, slid by the solver offset; render-only. */
@@ -1758,7 +1748,7 @@ static void rich_declare_inline_image(nt_ui_context_t *ctx, nt_ui_rich_state_t *
          * the image is clipped to the panel -- without it a floating child escapes the scroll scissor. */
         .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
     };
-    nt_ui_image_custom(ctx, idata, &img, &decl);
+    nt_ui_image(ctx, idata, &run->image_ref, &istyle, &decl);
     st->image_emit_count++;
 }
 
@@ -2002,7 +1992,6 @@ float nt_ui_rich_test_total_h(nt_ui_context_t *ctx) { return rich_state(ctx)->to
 uint32_t nt_ui_rich_test_emit_span_count(nt_ui_context_t *ctx) { return rich_state(ctx)->emit_span_count; }
 
 uint32_t nt_ui_rich_test_image_emit_count(nt_ui_context_t *ctx) { return rich_state(ctx)->image_emit_count; }
-uint32_t nt_ui_rich_test_image_block_bytes(nt_ui_context_t *ctx) { return rich_state(ctx)->image_block_bytes; }
 uint32_t nt_ui_rich_test_image_region(nt_ui_context_t *ctx) { return rich_state(ctx)->image_region; }
 float nt_ui_rich_test_image_y(nt_ui_context_t *ctx) { return rich_state(ctx)->image_y; }
 

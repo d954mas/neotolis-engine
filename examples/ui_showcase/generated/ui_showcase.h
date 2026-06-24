@@ -7,13 +7,11 @@
 
 /* --- TEXTURE --- */
 #define ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0 ((nt_hash64_t){0x1CB24C1D6C3C74EFULL}) /* ui_showcase_atlas/tex0 */
-#define ASSET_TEXTURE_UI_SHOWCASE_ICONS_TEX0 ((nt_hash64_t){0xF1D17A3D055711ECULL}) /* ui_showcase_icons/tex0 */
 #define ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0 ((nt_hash64_t){0x086706E397DD0EE1ULL}) /* ui_showcase_radial_art/tex0 */
 
 /* --- SHADER --- */
 #define ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG ((nt_hash64_t){0x1CBD5703DB548D54ULL}) /* assets/shaders/radial.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG ((nt_hash64_t){0x6117F8B5C957DCF7ULL}) /* assets/shaders/radial_image.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_RICH_IMAGE_FRAG ((nt_hash64_t){0x01DA09BDCEC2FF2FULL}) /* assets/shaders/rich_image.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
@@ -29,7 +27,6 @@
 
 /* --- ATLAS --- */
 #define ASSET_ATLAS_UI_SHOWCASE_ATLAS ((nt_hash64_t){0xD10A933806EA38F3ULL}) /* ui_showcase_atlas */
-#define ASSET_ATLAS_UI_SHOWCASE_ICONS ((nt_hash64_t){0xDA1E60AEB70557D0ULL}) /* ui_showcase_icons */
 #define ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART ((nt_hash64_t){0x82C43D6417B38E06ULL}) /* ui_showcase_radial_art */
 
 /* --- ATLAS_REGION --- */
@@ -46,6 +43,8 @@
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CARET ((nt_hash64_t){0x6F948F023CA82818ULL}) /* ui_showcase_atlas/caret */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK ((nt_hash64_t){0x24D04B5060D94AAAULL}) /* ui_showcase_atlas/checkmark */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHEVRON_DOWN ((nt_hash64_t){0x261814C1E743E9FCULL}) /* ui_showcase_atlas/chevron_down */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD ((nt_hash64_t){0x11BC737C9AB940E9ULL}) /* ui_showcase_atlas/gold */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_HEART ((nt_hash64_t){0x55874DF1F139ABBAULL}) /* ui_showcase_atlas/heart */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY ((nt_hash64_t){0x8BCA833565A72C8EULL}) /* ui_showcase_atlas/icon_bunny */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BEIGE ((nt_hash64_t){0x0AE1CE33078EC907ULL}) /* ui_showcase_atlas/panel_beige */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE ((nt_hash64_t){0xD19BE6D11F48A883ULL}) /* ui_showcase_atlas/panel_blue */
@@ -56,15 +55,12 @@
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_THUMB ((nt_hash64_t){0x04116FA511D32E10ULL}) /* ui_showcase_atlas/thumb */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_TRACK_OFF ((nt_hash64_t){0x50419D86161F9647ULL}) /* ui_showcase_atlas/track_off */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_TRACK_ON ((nt_hash64_t){0x672BE88EE8BF9CFEULL}) /* ui_showcase_atlas/track_on */
-#define ASSET_ATLAS_REGION_UI_SHOWCASE_ICONS_GOLD ((nt_hash64_t){0x11BC737C9AB940E9ULL}) /* ui_showcase_icons/gold */
-#define ASSET_ATLAS_REGION_UI_SHOWCASE_ICONS_HEART ((nt_hash64_t){0x55874DF1F139ABBAULL}) /* ui_showcase_icons/heart */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART ((nt_hash64_t){0xA7F6C36083803A17ULL}) /* ui_showcase_radial_art/radial_art */
 
 #if NT_HASH_LABELS
 static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/radial.frag");
     (void)nt_hash64_str("assets/shaders/radial_image.frag");
-    (void)nt_hash64_str("assets/shaders/rich_image.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
     (void)nt_hash64_str("assets/shaders/sprite.frag");
@@ -89,6 +85,8 @@ static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("ui_showcase_atlas/caret");
     (void)nt_hash64_str("ui_showcase_atlas/checkmark");
     (void)nt_hash64_str("ui_showcase_atlas/chevron_down");
+    (void)nt_hash64_str("ui_showcase_atlas/gold");
+    (void)nt_hash64_str("ui_showcase_atlas/heart");
     (void)nt_hash64_str("ui_showcase_atlas/icon_bunny");
     (void)nt_hash64_str("ui_showcase_atlas/panel_beige");
     (void)nt_hash64_str("ui_showcase_atlas/panel_blue");
@@ -100,10 +98,6 @@ static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("ui_showcase_atlas/thumb");
     (void)nt_hash64_str("ui_showcase_atlas/track_off");
     (void)nt_hash64_str("ui_showcase_atlas/track_on");
-    (void)nt_hash64_str("ui_showcase_icons");
-    (void)nt_hash64_str("ui_showcase_icons/gold");
-    (void)nt_hash64_str("ui_showcase_icons/heart");
-    (void)nt_hash64_str("ui_showcase_icons/tex0");
     (void)nt_hash64_str("ui_showcase_radial_art");
     (void)nt_hash64_str("ui_showcase_radial_art/radial_art");
     (void)nt_hash64_str("ui_showcase_radial_art/tex0");

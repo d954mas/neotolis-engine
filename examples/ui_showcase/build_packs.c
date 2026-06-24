@@ -93,10 +93,7 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
-    /* Rich-text inline image: textured sprite * the per-vertex a_tint (lossless run <color>);
-     * reuses sprite_radial.vert for its a_tint @ loc 5 attr (a_radial stays unused). */
-    nt_builder_add_shader(ctx, "assets/shaders/rich_image.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 8 (sprite + slug_text + radial vs/fs + radial_image fs + rich_image fs)\n");
+    (void)printf("  Shaders added: 7 (sprite + slug_text + radial vs/fs + radial_image fs)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel
@@ -218,7 +215,32 @@ int main(int argc, char *argv[]) {
     icon_opts.name = "icon_bunny";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/icon_bunny.png", &icon_opts);
 
-    (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon\n", PANEL_BORDER, BUTTON_BORDER);
+    /* Rich-text inline icons (named regions for <img=name/> by-name resolve). Two 16x16 fully-opaque
+     * solid-color icons: "heart" (red) + "gold" (amber). Solid color so nothing trims; the rich demo
+     * tints them via <color> on the standard u8 sprite path. The atlas-wide padding/extrude (2/1)
+     * gives each a bleed border so the scaled inline icon never edge-bleeds its neighbour. */
+    enum { ICON_DIM = 16 };
+    static uint8_t icon_heart[ICON_DIM * ICON_DIM * 4];
+    static uint8_t icon_gold[ICON_DIM * ICON_DIM * 4];
+    for (int i = 0; i < ICON_DIM * ICON_DIM; ++i) {
+        uint8_t *h = &icon_heart[(size_t)i * 4U];
+        h[0] = 220;
+        h[1] = 40;
+        h[2] = 60;
+        h[3] = 255;
+        uint8_t *g = &icon_gold[(size_t)i * 4U];
+        g[0] = 250;
+        g[1] = 200;
+        g[2] = 60;
+        g[3] = 255;
+    }
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "heart";
+    nt_builder_atlas_add_raw(ctx, icon_heart, ICON_DIM, ICON_DIM, &opts);
+    opts.name = "gold";
+    nt_builder_atlas_add_raw(ctx, icon_gold, ICON_DIM, ICON_DIM, &opts);
+
+    (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon + heart/gold inline icons\n", PANEL_BORDER, BUTTON_BORDER);
 
     /* White pixel for UI rects (panel backgrounds, tab list). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
@@ -289,61 +311,6 @@ int main(int argc, char *argv[]) {
     radial_sprite.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
     nt_builder_atlas_add_raw(ctx, radial_art, RADIAL_ART_DIM, RADIAL_ART_DIM, &radial_sprite);
     (void)printf("  Atlas 'ui_showcase_radial_art': radial_art %dx%d (full-bleed, UV [0,1])\n", RADIAL_ART_DIM, RADIAL_ART_DIM);
-
-    nt_builder_end_atlas(ctx);
-    // #endregion
-
-    // #region atlas: rich-text inline icons (named regions for <img=name/> by-name resolve)
-    /* Inline rich-text images resolve by atlas+region NAME (the atlas IS the registry).
-     * A dedicated small icon atlas with named regions ("heart","gold") feeds both the rich-text
-     * demo tab and the no-GL emit test's by-name resolve. extrude=1 duplicates each region's edge
-     * texel into a 1px border so LINEAR sampling at a region edge reads its own texel, never the
-     * neighbour — the region UV stays inside the interior (away from the bleed border). */
-    nt_atlas_opts_t icons_atlas_opts = nt_atlas_opts_defaults();
-    icons_atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
-    icons_atlas_opts.allow_transform = false;
-    icons_atlas_opts.padding = 2;
-    icons_atlas_opts.margin = 0;
-    icons_atlas_opts.extrude = 1;
-    icons_atlas_opts.power_of_two = false;
-    icons_atlas_opts.premultiplied = true;
-    icons_atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
-    icons_atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
-    icons_atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
-    icons_atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
-    icons_atlas_opts.gen_mipmaps = false;
-
-    nt_builder_begin_atlas(ctx, "ui_showcase_icons", &icons_atlas_opts);
-
-    /* Two 16x16 fully-opaque solid-color icons: "heart" (red) + "gold" (amber). Solid color so
-     * nothing trims; the demo tints them via a_tint to prove the lossless per-image tint path. */
-    enum { ICON_DIM = 16 };
-    static uint8_t icon_heart[ICON_DIM * ICON_DIM * 4];
-    static uint8_t icon_gold[ICON_DIM * ICON_DIM * 4];
-    for (int i = 0; i < ICON_DIM * ICON_DIM; ++i) {
-        uint8_t *h = &icon_heart[(size_t)i * 4U];
-        h[0] = 220;
-        h[1] = 40;
-        h[2] = 60;
-        h[3] = 255;
-        uint8_t *g = &icon_gold[(size_t)i * 4U];
-        g[0] = 250;
-        g[1] = 200;
-        g[2] = 60;
-        g[3] = 255;
-    }
-    nt_atlas_sprite_opts_t icon_heart_opts = nt_atlas_sprite_opts_defaults();
-    icon_heart_opts.name = "heart";
-    icon_heart_opts.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
-    icon_heart_opts.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
-    nt_builder_atlas_add_raw(ctx, icon_heart, ICON_DIM, ICON_DIM, &icon_heart_opts);
-
-    nt_atlas_sprite_opts_t icon_gold_opts = nt_atlas_sprite_opts_defaults();
-    icon_gold_opts.name = "gold";
-    icon_gold_opts.shape = NT_ATLAS_SPRITE_SHAPE_RECT;
-    icon_gold_opts.allow_rotate = NT_ATLAS_SPRITE_ROTATE_NO;
-    nt_builder_atlas_add_raw(ctx, icon_gold, ICON_DIM, ICON_DIM, &icon_gold_opts);
-    (void)printf("  Atlas 'ui_showcase_icons': heart + gold %dx%d (inline rich-text icons)\n", ICON_DIM, ICON_DIM);
 
     nt_builder_end_atlas(ctx);
     // #endregion

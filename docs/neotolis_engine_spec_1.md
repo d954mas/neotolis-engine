@@ -3172,22 +3172,25 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   custom-walk via `NT_UI_CUSTOM_TYPE_RICH_TEXT`. Keeping text under one measured
   block is what lets the whole paragraph wrap and align as a unit.
 
-## 32.3 Inline images ride the custom-attr sprite path
+## 32.3 Inline images ride the standard u8 sprite path
 
 An `<img>` atom is a **floating child** of the FIXED block, positioned at the
-solver's solved `(x, y)`, emitted through the existing `nt_ui_image_custom`
-(`geom_mode = REGION`) — the same Phase-31 custom-attr sprite path the radial
-widgets use. The floating child is declared with
-`.floating.clipTo = CLAY_CLIP_TO_ATTACHED_PARENT`, so it inherits the FIXED
-block's full clip chain (incl. an enclosing scroll) and is scissored to the
-panel/scroll — without it a floating child positioned at the solved `(x, y)`
-would **escape** the scroll scissor. Each clipped inline image therefore costs a
-scissor pair (a renderer flush) — the per-image batch cost. The 48 B block is
-`{a_tint, a_uvrect, a_layout}`: `a_tint` is the
-run's **lossless** float4 tint (a `<color>` around an `<img>` survives at full
-precision, not the u8 vertex-color path); `a_uvrect` / `a_layout` are walker-
-filled by name. Images resolve **by atlas + region name** — the atlas IS the
-registry (see §32.5, D-67-13).
+solver's solved `(x, y)`, emitted through the plain `nt_ui_image` (the same
+floating region-image call regular UI icons use). The composed tint (the run's
+`<color>` × any per-atom effect tint) is packed to the standard **u8** sprite
+tint (`color_packed` → `backgroundColor`), the **base sprite material** textures
+the region, and the walker folds accumulated parent opacity into the
+`backgroundColor` alpha exactly like every other UI sprite and rich TEXT —
+there is **no** bespoke material, float4 `a_tint`, or custom-attr block. The
+single composed tint is invisible at u8 on an 8-bit display, so the earlier
+lossless-float4 path gave no benefit and was dropped. The floating child is
+declared with `.floating.clipTo = CLAY_CLIP_TO_ATTACHED_PARENT`, so it inherits
+the FIXED block's full clip chain (incl. an enclosing scroll) and is scissored
+to the panel/scroll — without it a floating child positioned at the solved
+`(x, y)` would **escape** the scroll scissor. Each clipped inline image therefore
+costs a scissor pair (a renderer flush) — the per-image batch cost. Images
+resolve **by atlas + region name** — the atlas IS the registry (see §32.5,
+D-67-13).
 
 ## 32.4 Effects (visual-only) and links
 
@@ -3277,9 +3280,9 @@ points; flagged here so code and spec do not silently drift:
   object tag.
 - **D-67-17 — effects are per-ATOM, not #184's per-glyph/TEXT-only.** An effect
   attaches to ANY run kind via `effect_id` and applies to TEXT (per-glyph),
-  IMAGE (a_tint + quad), AND OBJECT (draw box) — the "text + gold icon wave
-  together" case. The per-glyph explode is preserved for TEXT as a quality path,
-  but the effect model is per-atom across kinds.
+  IMAGE (offset/scale the quad + the composed u8 tint), AND OBJECT (draw box) —
+  the "text + gold icon wave together" case. The per-glyph explode is preserved
+  for TEXT as a quality path, but the effect model is per-atom across kinds.
 - **D-67-21 — alignment is per-block,** not per-run: one `nt_rich_align_t`
   (L/C/R) offsets each solved line; there is no per-run horizontal alignment.
 - **D-67-22 — image vertical alignment is a `valign` enum**

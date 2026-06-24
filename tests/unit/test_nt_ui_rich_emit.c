@@ -40,55 +40,12 @@ static ui_walker_fixture_t s_fx;
 /* White region's name_hash in the minimal fixture atlas (ui_atlas.c "WHITEENU"). */
 #define FX_WHITE_NAME_HASH 0x57484954454E4555ULL
 
-static uint32_t s_vpack_counter;
-
-/* A rich-image material: attr_map {a_tint @5, a_uvrect @6, a_layout @7} -- the 48 B
- * inline-image custom block (a_tint lossless float4 + a_uvrect/a_layout walker-filled). */
-static nt_material_t make_rich_image_material(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "rich_img_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "rich_img_fs"});
-
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "rich_img_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "rich_img_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "rich_img_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-
-    const nt_hash32_t pid = nt_hash32_str(pack_name);
-    const nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    const nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-    const nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    const nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
-    nt_material_create_desc_t desc;
-    memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
-    desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
-    desc.attr_map[0].stream_name = "a_tint";
-    desc.attr_map[0].location = 5;
-    desc.attr_map[1].stream_name = "a_uvrect";
-    desc.attr_map[1].location = 6;
-    desc.attr_map[2].stream_name = "a_layout";
-    desc.attr_map[2].location = 7;
-    desc.attr_map_count = 3;
-    desc.label = "rich_image_test_material";
-
-    const nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
-    return mat;
-}
+/* Inline rich images now ride the PLAIN u8 sprite path: the gate only needs a valid base
+ * material (nt_ui_image renders via the walker's base sprite material, not a per-image one).
+ * The fixture already binds a standard sprite material, so reuse it. */
+static nt_material_t make_rich_image_material(void) { return s_fx.sprite_material; }
 
 void setUp(void) {
-    s_vpack_counter = 0;
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -236,7 +193,7 @@ static void test_double_walk_is_deterministic(void) {
 /* ===== Inline IMAGE emit ===== */
 
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
- * The image rides the rich_image material with a 48 B {a_tint,a_uvrect,a_layout} block. */
+ * The image rides the plain u8 sprite path (composed <color> packed to the sprite tint). */
 static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign, uint32_t tint_abgr) {
     /* Fresh frame: free the per-call rich scratch. pending_rich is released by the terminal
      * nt_ui_rich_text and re-zeroed by nt_ui_begin, so no manual clear is needed here. */
@@ -271,7 +228,7 @@ static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign
 }
 
 /* (5) [text][image][text]: the image emits >=1 sprite (4-vert region quad) AND the text
- * emits draw_n spans on the same line. The image rides nt_ui_image_custom (sprite emit),
+ * emits draw_n spans on the same line. The image rides the plain nt_ui_image sprite emit,
  * text rides draw_n -- both present. */
 static void test_inline_image_emits_sprite_and_text(void) {
     const nt_material_t mat = make_rich_image_material();
@@ -280,34 +237,33 @@ static void test_inline_image_emits_sprite_and_text(void) {
 
     /* Text spans for "A " and " B" (image splits the run anyway -> two text runs). */
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "inline-image line still emits text draw_n spans");
-    /* The image emitted a region quad (4 verts) carrying the custom block. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "inline image emits a 4-vert region quad via nt_ui_image_custom");
+    /* The image emitted a region quad (4 verts) via the standard sprite path. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "inline image emits a 4-vert region quad via nt_ui_image");
     /* The widget reports exactly one inline image emitted. */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "exactly one IMAGE atom emitted");
 }
 
-/* (6) the inline image's custom block carries a_tint as a lossless float4 (the run's tint),
- * at block offset 0 (attr_map order {a_tint,a_uvrect,a_layout}); the block is 48 B. */
-static void test_inline_image_a_tint_lossless(void) {
+/* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
+ * <color> r=255 g=128 b=0 a=255 emits that per-vertex color on the region quad (the walker
+ * packs the run tint into backgroundColor -> a_color, no float4 custom block anymore). */
+static void test_inline_image_tint_packed(void) {
     const nt_material_t mat = make_rich_image_material();
     /* 0xAABBGGRR: r=255 g=128 b=0 a=255 -> orange, alpha 1. */
     frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFF0080FFU);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad");
     for (uint32_t v = 0; v < 4U; v++) {
-        float out[4] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 4); /* a_tint @ floats 0..3 */
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 1.0F), "a_tint.r == 255/255");
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 128.0F / 255.0F), "a_tint.g == 128/255");
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.0F), "a_tint.b == 0/255");
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 1.0F), "a_tint.a == 255/255");
+        uint8_t col[4] = {0};
+        nt_sprite_renderer_test_last_emit_color(v, col); /* 0xAABBGGRR byte order: r,g,b,a */
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(255U, col[0], "tint.r == 255");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(128U, col[1], "tint.g == 128");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, col[2], "tint.b == 0");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(255U, col[3], "tint.a == 255 (full opacity)");
     }
-    /* The block is 48 B = 3 FLOAT4 (a_tint + a_uvrect + a_layout). */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(48U, nt_ui_rich_test_image_block_bytes(s_fx.ctx), "inline-image custom block is 48 B (3 attrs)");
 }
 
 /* Build [text][image][text] under a rich block carrying `opacity`; walk once. The image's
- * a_tint alpha must fade with the parent opacity (folded at the walker), matching the text path. */
+ * sprite tint alpha must fade with the parent opacity (folded at the walker), matching the text path. */
 static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -335,28 +291,29 @@ static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (6b) the inline image's a_tint alpha fades with the parent opacity: a fully-opaque white run
- * under a 0.5-opacity rich block emits a_tint.a == 0.5 (base_alpha 1.0 * parent 0.5), matching the
- * TEXT path's opacity fold. At opacity 1.0 the a_tint stays lossless 1.0 (no fade). */
+/* (6b) the inline image's sprite tint alpha fades with the parent opacity: a fully-opaque white run
+ * under a 0.5-opacity rich block emits a_color.a == ~128 (base 255 * parent 0.5), matching the
+ * TEXT/sprite opacity fold (the walker folds accum_opacity into backgroundColor.a). At opacity 1.0
+ * the tint stays full (no fade). */
 static void test_inline_image_fades_with_parent_opacity(void) {
     const nt_material_t mat = make_rich_image_material();
 
     frame_image_with_opacity(mat, 1.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 1)");
     for (uint32_t v = 0; v < 4U; v++) {
-        float out[4] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 1.0F), "a_tint.a == 1.0 at full opacity (lossless)");
+        uint8_t col[4] = {0};
+        nt_sprite_renderer_test_last_emit_color(v, col);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(255U, col[3], "tint.a == 255 at full opacity");
     }
 
     frame_image_with_opacity(mat, 0.5F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 0.5)");
     for (uint32_t v = 0; v < 4U; v++) {
-        float out[4] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
-        /* rgb unchanged (white), alpha = base 1.0 * parent 0.5 -- same fold as TEXT. */
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 1.0F) && approx(out[1], 1.0F) && approx(out[2], 1.0F), "a_tint.rgb unchanged by opacity (white)");
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 0.5F), "a_tint.a == base_alpha * parent_opacity (image fades like TEXT)");
+        uint8_t col[4] = {0};
+        nt_sprite_renderer_test_last_emit_color(v, col);
+        /* rgb unchanged (white), alpha = base 255 * parent 0.5 ~= 128 -- same fold as TEXT/sprites. */
+        TEST_ASSERT_TRUE_MESSAGE(col[0] == 255U && col[1] == 255U && col[2] == 255U, "tint.rgb unchanged by opacity (white)");
+        TEST_ASSERT_TRUE_MESSAGE(col[3] >= 126U && col[3] <= 130U, "tint.a halved (~128) under 0.5 opacity (image fades like TEXT)");
     }
 }
 
@@ -818,7 +775,7 @@ static void test_fx_push_effect_ex_null_stock_id(void) {
 }
 
 /* Build [text][image][text] with a per-atom EFFECT applied to the whole block. The image run
- * carries the effect_id; emit folds the wave offset into the image quad + the tint into a_tint. */
+ * carries the effect_id; emit folds the wave offset into the image quad + the tint into the sprite color. */
 static void frame_effected_image(nt_material_t img_mat, uint8_t effect_id, float time) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -1756,7 +1713,7 @@ int main(void) {
     RUN_TEST(test_double_walk_is_deterministic);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
-    RUN_TEST(test_inline_image_a_tint_lossless);
+    RUN_TEST(test_inline_image_tint_packed);
     RUN_TEST(test_inline_image_resolves_by_name);
     RUN_TEST(test_inline_image_valign_y);
     RUN_TEST(test_fx_wave_deterministic);
