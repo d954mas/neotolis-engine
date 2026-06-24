@@ -494,6 +494,11 @@ jobs:
           bash scripts/check_no_real_impl_links.sh
           bash scripts/check_link_failure_loud.sh
 
+      # An EM_JS body using a JS runtime helper must self-declare EM_JS_DEPS, else Closure strips it in
+      # wasm-release (invisible to debug/native). Caught here at lint time, not at release runtime.
+      - name: Run EM_JS_DEPS guard
+        run: bash scripts/check_emjs_deps.sh
+
       # devapi + ui/obs groups ON so all devapi TUs (incl. nt_devapi_ui.c + nt_devapi_obs.c) are in compile_commands.json.
       # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
       # GROUP_UI / GROUP_OBS opt-in off) they would be linted with wrong flags or missing.
