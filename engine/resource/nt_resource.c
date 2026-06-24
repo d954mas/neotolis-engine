@@ -1317,6 +1317,101 @@ nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id) {
     return (nt_pack_state_t)s_resource.packs[idx].pack_state;
 }
 
+/* ---- Enumeration accessors: emit compact POD over the internal store ---- */
+
+uint16_t nt_resource_pack_count(void) {
+    uint16_t count = 0;
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        if (s_resource.packs[i].mounted == 1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool nt_resource_pack_info(uint16_t i, nt_resource_pack_info_t *out) {
+    if (!out) {
+        return false;
+    }
+    uint16_t seen = 0;
+    for (uint16_t slot = 0; slot < NT_RESOURCE_MAX_PACKS; slot++) {
+        const NtPackMeta *pack = &s_resource.packs[slot];
+        if (pack->mounted != 1) {
+            continue;
+        }
+        if (seen == i) {
+            uint16_t asset_count = 0;
+            for (uint32_t a = 0; a < s_resource.asset_hwm; a++) {
+                if (s_resource.assets[a].resource_id != 0 && s_resource.assets[a].pack_index == slot) {
+                    asset_count++;
+                }
+            }
+            *out = (nt_resource_pack_info_t){
+                .id = pack->pack_id,
+                .pack_index = slot, /* raw packs[] slot — matches NtAssetMeta.pack_index space */
+                .asset_count = asset_count,
+                .priority = pack->priority,
+                .state = pack->pack_state,
+                .mounted = 1,
+            };
+            return true;
+        }
+        seen++;
+    }
+    return false;
+}
+
+uint16_t nt_resource_asset_count(void) {
+    uint16_t count = 0;
+    for (uint32_t a = 0; a < s_resource.asset_hwm; a++) {
+        if (s_resource.assets[a].resource_id != 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
+    if (!out) {
+        return false;
+    }
+    uint16_t seen = 0;
+    for (uint32_t a = 0; a < s_resource.asset_hwm; a++) {
+        const NtAssetMeta *meta = &s_resource.assets[a];
+        if (meta->resource_id == 0) {
+            continue;
+        }
+        if (seen == i) {
+            *out = (nt_resource_asset_info_t){
+                .resource_id = meta->resource_id,
+                .pack_index = meta->pack_index,
+                .type = meta->asset_type,
+                .state = meta->state,
+            };
+            return true;
+        }
+        seen++;
+    }
+    return false;
+}
+
+#if NT_INTROSPECT_ENABLED
+uint64_t nt_resource_source_of(uint8_t asset_type, uint32_t runtime_handle) {
+    if (runtime_handle == 0) {
+        return 0;
+    }
+    /* Scan the canonical slot table (no separate index to desync). A slot publishes one runtime handle
+       per resource_id; handles are unique per gfx object, so the first match is the source. */
+    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+        const NtResourceSlot *slot = &s_resource.slots[si];
+        if (slot->resource_id != 0 && slot->asset_type == asset_type && slot->runtime_handle == runtime_handle) {
+            return slot->resource_id;
+        }
+    }
+    return 0;
+}
+#endif
+
 void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t *total) {
     int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {

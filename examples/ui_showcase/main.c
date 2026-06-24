@@ -47,7 +47,9 @@
 
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
+#include "metrics/nt_metrics.h"
 #include "nt_pack_format.h"
+#include "time/nt_time.h"
 
 #include "ui_showcase_assets.h"
 
@@ -2733,7 +2735,9 @@ static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = {200.0F, 210.0F, 220.0F, 255.0F}};
 
-    const float gpu_ms = nt_debug_overlay_get_gpu_ms();
+    nt_metrics_frame_t last;
+    nt_metrics_last(&last);
+    const float gpu_ms = last.gpu_ms;
     if (gpu_ms < 0.0F) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "frame gpu: n/a (timer extension absent)", g_current->caption);
     } else {
@@ -2851,7 +2855,9 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
         }
     }
 
-    const float gpu_ms = nt_debug_overlay_get_gpu_ms();
+    nt_metrics_frame_t last;
+    nt_metrics_last(&last);
+    const float gpu_ms = last.gpu_ms;
     if (gpu_ms < 0.0F) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "frame gpu: n/a", g_current->caption);
     } else {
@@ -2960,7 +2966,9 @@ static void declare_header(nt_ui_context_t *ctx) {
             g_current = (g_current == &g_dark) ? &g_light : &g_dark;
         }
 
-        const float gpu_ms = nt_debug_overlay_get_gpu_ms();
+        nt_metrics_frame_t last;
+        nt_metrics_last(&last);
+        const float gpu_ms = last.gpu_ms;
         if (gpu_ms < 0.0F) {
             (void)snprintf(buf, sizeof buf, "draw calls: %u   gpu: n/a", nt_ui_get_last_walk_draw_calls(ctx));
         } else {
@@ -3171,9 +3179,25 @@ EM_JS(void, nt_test_install_hooks, (void), {
 // #endregion
 
 // #region frame
+/* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
+static float showcase_poll_gpu_ms(void) {
+    uint64_t gpu_ns = 0;
+    bool ready = false;
+    while (nt_gfx_poll_segment_time_ns("frame", &gpu_ns)) {
+        ready = true;
+    }
+    return ready ? (float)((double)gpu_ns / 1.0e6) : -1.0F;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_debug_overlay_frame_begin();
+    /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
+    static double s_last_begin = 0.0;
+    double now = nt_time_now();
+    float frame_ms = (s_last_begin > 0.0) ? (float)((now - s_last_begin) * 1000.0) : -1.0F;
+    s_last_begin = now;
+    double cpu_begin = now;
+
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -3418,7 +3442,25 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_segment();
     nt_gfx_end_frame();
-    nt_debug_overlay_frame_end();
+
+    float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
+    /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
+       on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
+    static uint64_t s_mem_used;
+    static uint32_t s_mem_tick;
+    if ((s_mem_tick++ % 30U) == 0U) {
+        s_mem_used = nt_platform_memory_usage().used;
+    }
+    nt_metrics_frame_t mf = {
+        .frame_ms = frame_ms,
+        .cpu_ms = cpu_ms,
+        .gpu_ms = showcase_poll_gpu_ms(),
+        .draw_calls = nt_gfx_get_frame_draw_calls(),
+        .mem_used = s_mem_used,
+        .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
+        .scratch_used = (uint32_t)nt_mem_scratch_used(),
+    };
+    nt_metrics_sample(&mf);
 
     nt_window_swap_buffers();
 }
@@ -3653,8 +3695,9 @@ int main(int argc, char *argv[]) {
 
     nt_resource_set_activate_time_budget(0);
 
-    nt_debug_overlay_desc_t stats_desc = nt_debug_overlay_desc_defaults();
-    nt_debug_overlay_init(&stats_desc);
+    /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
+    nt_metrics_init();
+    nt_debug_overlay_init(NULL);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();

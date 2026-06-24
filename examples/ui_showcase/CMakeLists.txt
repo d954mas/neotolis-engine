@@ -9,7 +9,7 @@ target_link_libraries(ui_showcase PRIVATE
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
     nt_shape_renderer
-    nt_render nt_hash nt_mem_scratch nt_debug_overlay
+    nt_render nt_hash nt_mem_scratch nt_debug_overlay nt_metrics
 )
 # Generated asset headers from builder (ui_showcase_assets.h etc.)
 target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
@@ -17,9 +17,10 @@ target_include_directories(ui_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gene
 # nt_clipboard (real, per platform): nt_ui links nt_clipboard_interface; the exe picks the
 # real impl so Ctrl+C/X/V work in the Input tab. web = async cache-on-paste, native = glfw.
 if(EMSCRIPTEN)
-    target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_clipboard)
+    target_link_libraries(ui_showcase PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard)
 else()
-    target_link_libraries(ui_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard)
+    # nt_platform supplies nt_platform_memory_usage for the metrics mem_used channel.
+    target_link_libraries(ui_showcase PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard nt_platform)
 endif()
 
 nt_set_warning_flags(ui_showcase)

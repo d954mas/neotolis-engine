@@ -10,11 +10,19 @@
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 
-/* cJSON_Add{String,Number,Bool}ToObject wrappers that assert success — OOM traps
+/* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success — OOM traps
    (fail-early) instead of silently producing an incomplete response. */
 void devapi_add_string(cJSON *obj, const char *key, const char *value);
 void devapi_add_number(cJSON *obj, const char *key, double value);
 void devapi_add_bool(cJSON *obj, const char *key, bool value);
+void devapi_add_null(cJSON *obj, const char *key);
+
+/* Strict unsigned-integer param parsers: require a finite, integer-valued number in [0, max]
+   (a blind cast of an out-of-range/NaN/Inf double to unsigned is UB). On violation they call
+   set_bad(err, message) and return false, else write the parsed value to *out. */
+typedef void (*nt_devapi_bad_params_fn)(nt_devapi_error *err, const char *message);
+bool nt_devapi_parse_u32_param_exact(const cJSON *node, uint32_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint32_t *out);
+bool nt_devapi_parse_u16_param_exact(const cJSON *node, uint16_t max, nt_devapi_error *err, nt_devapi_bad_params_fn set_bad, const char *message, uint16_t *out);
 
 /* One registered command. The 7 descriptor strings are strdup-owned copies
    freed at shutdown; handler + user_data are stored verbatim. */
@@ -166,6 +174,19 @@ void nt_devapi_input_reset(void);
    (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
 #ifdef NT_DEVAPI_GROUP_UI
 void nt_devapi_register_ui(void);
+#endif
+
+/* Observability group registrar (per-group #ifdef). Defined in nt_devapi_obs.c, invoked from
+   nt_devapi_init under the same compile gate. The obs group is pure immediate reads — it
+   registers NO tick/reset hook. */
+#ifdef NT_DEVAPI_GROUP_OBS
+void nt_devapi_register_obs(void);
+#endif
+
+/* Entity-write group registrar (per-group #ifdef). Defined in nt_devapi_entity_write.c, invoked from
+   nt_devapi_init under the same compile gate. A dev-only DEBUG write; registers no tick/reset hook. */
+#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
+void nt_devapi_register_entity_write(void);
 #endif
 
 /* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from

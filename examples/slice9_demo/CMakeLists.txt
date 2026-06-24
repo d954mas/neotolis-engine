@@ -8,16 +8,17 @@ target_link_libraries(slice9_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_sprite_renderer nt_text_renderer nt_font nt_ui
-    nt_render nt_hash nt_mem_scratch nt_debug_overlay
+    nt_render nt_hash nt_mem_scratch nt_debug_overlay nt_metrics
 )
 # Generated asset headers from builder (slice9_demo_assets.h etc.)
 target_include_directories(slice9_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 
 # nt_ui calls nt_clipboard_* (no text field here, but the symbols must resolve); stub = no exports.
 if(EMSCRIPTEN)
-    target_link_libraries(slice9_demo PRIVATE nt_platform_web nt_gfx nt_http nt_fs nt_clipboard_stub)
+    target_link_libraries(slice9_demo PRIVATE nt_platform_web nt_platform nt_gfx nt_http nt_fs nt_clipboard_stub)
 else()
-    target_link_libraries(slice9_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub)
+    # nt_platform supplies nt_platform_memory_usage for the metrics mem_used channel.
+    target_link_libraries(slice9_demo PRIVATE nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform)
 endif()
 
 nt_set_warning_flags(slice9_demo)

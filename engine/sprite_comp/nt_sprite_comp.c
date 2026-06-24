@@ -8,6 +8,10 @@
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
 #include "resource/nt_resource.h"
+#if NT_INTROSPECT_ENABLED
+#include "hash/nt_hash.h"
+#include "introspect/nt_introspect.h"
+#endif
 
 /* ---- Static state ---- */
 
@@ -130,6 +134,28 @@ static void sprite_on_destroy(nt_entity_t entity) {
     }
 }
 
+#if NT_INTROSPECT_ENABLED
+static void sprite_describe(nt_entity_t entity, nt_introspect_sink *s) {
+    /* atlas is the resource HANDLE (slot+generation), not a name-hash resource_id — emit it as a handle,
+       since `resource` on the obs surface always means an nt_hash64 name hash (joinable with resource.list). */
+    s->field_ref(s, "atlas", NT_REF_HANDLE, nt_sprite_comp_atlas(entity)->id);
+    s->field_bool(s, "resolved", nt_sprite_comp_is_resolved(entity));
+    s->field_u64(s, "flags", *nt_sprite_comp_flags(entity));
+    s->field_floats(s, "origin", nt_sprite_comp_origin(entity), 2);
+    uint64_t rh = *nt_sprite_comp_region_hash(entity);
+    if (rh != 0) {
+        s->field_u64_hex(s, "region_hash", rh); /* 64-bit name hash: exact hex, not the lossy double channel */
+        const char *name = nt_hash64_label((nt_hash64_t){.value = rh});
+        if (name != NULL) {
+            s->field_str(s, "region", name);
+        }
+    }
+    if (nt_sprite_comp_is_resolved(entity)) {
+        s->field_u64(s, "region_index", *nt_sprite_comp_region_index(entity));
+    }
+}
+#endif
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
@@ -172,6 +198,9 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
         .name = "sprite",
         .has = nt_sprite_comp_has,
         .on_destroy = sprite_on_destroy,
+#if NT_INTROSPECT_ENABLED
+        .describe = sprite_describe,
+#endif
     });
 
     s_last_publication_epoch = 0;

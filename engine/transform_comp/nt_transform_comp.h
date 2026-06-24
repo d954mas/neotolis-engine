@@ -38,6 +38,14 @@ float *nt_transform_comp_scale(nt_entity_t entity);    /* vec3 */
 bool *nt_transform_comp_dirty(nt_entity_t entity);
 const float *nt_transform_comp_world_matrix(nt_entity_t entity); /* mat4, read-only */
 
+/* ---- Field mutation (safe write path: sets dirty so the world matrix recomputes next update) ---- */
+
+void nt_transform_comp_set_position(nt_entity_t entity, float x, float y, float z);
+void nt_transform_comp_set_scale(nt_entity_t entity, float x, float y, float z);
+/* Normalizes q into a unit quaternion. Caller MUST reject a degenerate q first (cglm snaps ||q||~0 to
+   identity silently). */
+void nt_transform_comp_set_rotation(nt_entity_t entity, const float q[4]);
+
 /* ---- System ---- */
 
 void nt_transform_comp_update(void);

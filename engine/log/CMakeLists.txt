@@ -14,10 +14,24 @@ nt_add_module(nt_log LOG_DOMAIN "log"
 target_link_libraries(nt_log PUBLIC nt_log_interface)
 
 # Real impl dedups nt_log_write_unique by xxHash64 of the message; the stub stays dep-free.
-target_link_libraries(nt_log PRIVATE nt_hash)
+# nt_core supplies nt_assert_handler for the NT_ASSERT in nt_log_add_sink.
+target_link_libraries(nt_log PRIVATE nt_hash nt_core)
 
 nt_add_module(nt_log_stub LOG_DOMAIN "log_stub"
     stub/nt_log_stub.c
     nt_log.h
 )
 target_link_libraries(nt_log_stub PUBLIC nt_log_interface)
+
+# Dev-only log-tail ring. NT_LOG_RING_ENABLED is PUBLIC so consumers match the impl
+# (real bodies vs no-op stubs for the release/OFF mirror).
+nt_add_module(nt_log_ring LOG_DOMAIN "log_ring"
+    nt_log_ring.c
+    nt_log_ring.h
+)
+target_link_libraries(nt_log_ring PUBLIC nt_log_interface)
+if(NT_LOG_RING_ENABLED)
+    target_compile_definitions(nt_log_ring PUBLIC NT_LOG_RING_ENABLED=1)
+else()
+    target_compile_definitions(nt_log_ring PUBLIC NT_LOG_RING_ENABLED=0)
+endif()

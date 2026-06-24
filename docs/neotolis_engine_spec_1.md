@@ -2598,7 +2598,9 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 ## 24.4 Debug overlay
 
-Recommended stats: frame time, fixed step count, draw call count, batch count, loaded resource count, active pack count, temp memory usage, audio voice count.
+`nt_debug_overlay` is a **pure consumer** of `nt_metrics` (§24.9): it formats an on-screen HUD (`nt_debug_overlay_format_lines` / `nt_debug_overlay_draw`) from `nt_metrics_fps()`, the last frame's cpu/gpu/draw_calls via `nt_metrics_last()`, and the user counters via `nt_metrics_user_count()` / `nt_metrics_user_get()`. It owns **no** measurement and **no** counter storage — the host pushes per-frame data into `nt_metrics` and the overlay reads it back. Because of that dependency, a CMake `FATAL_ERROR` guard requires `NT_UI_DEBUG_TOOLS` to be built with `NT_METRICS_ENABLED` (with metrics OFF the overlay would format from no-op stubs — an empty HUD); the production default (`NT_UI_DEBUG_TOOLS=OFF`) defaults metrics OFF too, so it never trips.
+
+Recommended stats: frame time, fps, cpu/gpu time, draw call count, plus any game-supplied user counters.
 
 ## 24.5 Developer API (devapi)
 
@@ -2689,6 +2691,47 @@ A bot reads and drives UI through the devapi `ui.*` command group — a thin L2 
 | `ui.scroll` | `{id\|{x,y}, dx?, dy?, ctx?}` | `{queued}` | resolve target → center → synthetic move there + wheel(`dx`,`dy`) notches |
 | `ui.drag` | `{from, to, frames?, ctx?}` | `{queued}` | resolve `from`/`to` → down@from + `frames` interpolated moves + up@to (handler expands the path; `frames` ≥ 1 and DoS-capped — a 0-frame drag emits no move so the inject up lands at `from`, not `to`, and is rejected `bad_params`) |
 
+## 24.9 Observability (devapi `log.*` / `perf.*` / `entity.*` / `resource.*`)
+
+**`nt_metrics` is the Layer-1 perf SOURCE OF TRUTH.** The host measures the frame (it owns the loop / has time control) and pushes one `nt_metrics_frame_t` per frame into `nt_metrics_sample()` — `frame_ms`, `cpu_ms`, `gpu_ms` (`< 0` sentinel = no timer), `draw_calls`, memory, scratch — and sets game user counters via `nt_metrics_count` / `nt_metrics_count_f`. `nt_metrics` does the rest: it derives a rolling `fps`, windows every host-pushed channel for percentile aggregates (`pool_occupancy` is currently **unsampled** — no portable provider exists yet, so it reports `samples:0` / null aggregates until one does), stores the last-pushed frame for the immediate snapshot view, and keys user counters by the **full** 64-bit name hash with an **exact** tagged value (uint64 counts keep full precision past 2^53, floats keep their double). It reads **no** clock and references **no** other engine module — pure storage + math (its only deps are `nt_core` + `nt_hash`). Both `nt_debug_overlay` (§24.4) and the devapi `perf.*` group are **consumers** that read from `nt_metrics`.
+
+> This supersedes the earlier "overlay measures the frame, `nt_metrics` pulls from the overlay getters" model: the dependency is now inverted — the host pushes raw data into `nt_metrics`, and the overlay + `perf.*` read it. There is one perf store, fed once per frame by the host.
+
+A bot inspects engine state through the devapi **obs** command group — a thin L2 veneer that serializes the dev-only log ring, the `nt_metrics` perf collector, and the entity/resource enumeration accessors. Every obs command is a **pure immediate read**: it serializes the live L1 state on the same `submit` call and returns synchronously — **nothing in this group ever defers** (no `frame.wait`-style continuation), so all are `frame_behavior: any` with no side effect except `perf.reset`. Untrusted bot input is range/type-checked and returns `bad_params`; only host-call invariants assert.
+
+**The command group:**
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `log.tail` | `{n?, level?}` | `{entries:[{level,domain,msg}]}` | **READ** newest-first ring entries, up to `n` (integer `[0, NT_LOG_RING_DEPTH]`, default full depth), optionally filtered to `level` ≥ `info\|warn\|error` |
+| `perf.snapshot` | `{}` | `{fps,frame_ms\|null,cpu_ms,gpu_ms\|null,draw_calls,user_counters:object}` | **READ** `nt_metrics`' last-pushed frame: `fps` is the rolling avg, `frame_ms` the real last frame time (distinct from `cpu_ms`), JSON `null` until the first valid frame (the host pushes `<= 0` before any `dt`), like `gpu_ms`; `gpu_ms` JSON `null` when the host pushed the `< 0` sentinel; `user_counters` carry their exact stored value (counts above 2^53 lose low bits to the JSON IEEE-754 double — a wire-format limit, not a store defect) |
+| `perf.stats` | `{channels?, budget_ms?}` | `{channels:object,user_channels:object,fps_low_1pct,fps_low_01pct,over_budget_pct,budget_ms}` | **READ** windowed `nt_metrics` aggregates (`samples`/`avg`/`min`/`max`/`median`/`p95`/`p99`/`p99_9`; null aggregates when `samples:0`) per requested-or-all fixed channels + user channels; `budget_ms` (finite, > 0, default 16.67) drives `over_budget_pct` and is echoed back |
+| `perf.reset` | `{}` | `{reset:true}` | clear the metrics window (counts → 0) without tearing down state |
+| `entity.list` | `{offset?, limit?, component?, all?, any?, none?}` | `{total,entities:[{id,index,generation,enabled,<component>:{...}}]}` | **READ** live entities: core fields (`id`/`index`/`generation`/`enabled`) plus **each present component as a named group** by the generic `nt_entity_introspect` walk — a component with no `describe()` still emits an empty `{}` (presence visible; a marker component is filterable + shown). The obs layer names no component, so a new one appears here with zero edits. Component-set filter: an entity passes if it has **every** `all` + **at least one** `any` (when present) + **none** of `none` (`component:"x"` is sugar for `all:["x"]`); an unknown component → `bad_params`. No world matrix; fully paginated against the honest `total` (two heap-free passes) |
+| `resource.list` | `{offset?, limit?, pack_id?, include_assets?}` | `{total,packs:[{id,state,priority,asset_count}],assets?:[{resource_id,type,state,pack_index}],asset_total?,assets_truncated?}` | **READ** mounted packs (paginated with `total`); a flat `assets[]` only when `include_assets`. `pack_id` filters **both** packs and assets. `resource_id` is a `0x`-hex string (a 64-bit hash can't round-trip through a JSON double); `pack_index` is the raw packs[] slot (not the public `pack_id`); the flat `assets[]` is DoS-capped, with `asset_total`/`assets_truncated` reporting the honest scope vs the emitted prefix |
+
+`offset`/`limit` (and `n`, `pack_id`) are parsed **exactly**: a non-finite, fractional, or out-of-range number is `bad_params`, never silently truncated.
+
+**Component group contents + dev-only asset names.** Each component's `describe()` fills its named group (e.g. `transform:{position,rotation,scale}`, `drawable:{visible,color,tag,tag_name?}`). Identity of a backing asset is resolved WITHOUT per-component storage: a resource-backed component (mesh) emits its runtime handle via the introspection sink's `field_asset`, and the **devapi JSON sink** reverse-maps it through `nt_resource_source_of` (an O(slots) dev-only scan of the canonical slot table — no separate index, no desync) to the source `resource` id (hex), then to a human `name` via the `nt_hash` label registry when built with `NT_HASH_LABELS`. The resource/hash deps live in the devapi sink, so components stay decoupled from the resource system. A hash a component owns directly (a `drawable.tag`, a `sprite.region_hash`) resolves to its string the same way via `nt_hash*_label`; a 64-bit such hash (`sprite.region_hash`) is itself emitted as a `0x`-hex string (like `resource_id`, via the sink's `field_u64_hex`) so its full width survives the JSON double. A **runtime-constructed** asset (`material`) has no `resource_id` to reverse-resolve, so its name is the create-time `label` it carries: the component emits an `NT_REF_MATERIAL` handle and the **devapi JSON sink** maps it to that `label` via `nt_material_get_info` (the component stays decoupled from the material runtime — the text sink shows the handle only, no resolve, mirroring `field_asset`).
+
+**OFF semantics — dev-only, compiled out.** The whole obs group is gated by `NT_DEVAPI_GROUP_OBS` (default **OFF**, opt-in). When off, `nt_devapi_obs.c` is not compiled, the commands are **absent** from the registry (a `log.tail`/`perf.stats`/… request returns `unknown_method`), and the discovery surface does not list them. As with all of devapi it also vanishes entirely when `NT_DEVAPI_ENABLED` is OFF.
+
+**Build deps are hard, not silent.** A CMake `FATAL_ERROR` guard (mirroring the `ui` group's DEBUG_TOOLS guard) requires `NT_DEVAPI_GROUP_OBS` to be built with `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, **and** `NT_INTROSPECT_ENABLED` ON — those carry the real log-ring, metrics, and entity-introspection bodies the group reads (`perf.*` reads `nt_metrics` directly now; `entity.list` walks components through `nt_introspect`; the group does **not** link `nt_debug_overlay`, which is a sibling consumer, not a provider). With any dep OFF the group would link no-op stubs (an always-empty `log.tail`, a zero `perf.stats`, a core-fields-only `entity.list`) — a vacuously-passing false green — so configure fails fast instead. A second guard ties the debug overlay to metrics: `NT_UI_DEBUG_TOOLS` ⇒ `NT_METRICS_ENABLED` (the overlay HUD consumes `nt_metrics`). `NT_UI_DEBUG_TOOLS=ON` defaults all of `NT_LOG_RING_ENABLED` / `NT_METRICS_ENABLED` / `NT_INTROSPECT_ENABLED` on.
+
+### The `entity_write` group — a dev-only DEBUG write (`entity.set`)
+
+Symmetric to `entity.list` reads, the **`entity_write`** group adds **`entity.set`**: a bot writes a writable field of one component on a live entity. It is the inverse of the read introspection — instead of a component's `describe()` pushing values out to a sink, the component's `apply()` hook receives an already-typed value and writes it **through the component's real setter** (which maintains the engine invariants: the transform dirty flag, the drawable packed-RGBA8 mirror, quaternion normalization). cJSON is parsed into a neutral `nt_write_value` (number→F32, bool→BOOL, array[3]→VEC3, array[4]→VEC4) **inside devapi**; the component never sees cJSON, exactly as the read JSON sink keeps cJSON inside devapi.
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `entity.set` | `{id, component, field, value}` or `{id, component, fields:{...}}` | `{component, fields:[string]}` | **WRITE** one writable field, or a whole-or-nothing batch of one component's fields, through `apply()`. Immediate (a field write is idempotent state, not an edge — `transform world_matrix` recomputes next update). Single field is atomic; a batch validates every field (parse + `dry_run` apply) before mutating any, so a bad field leaves nothing written |
+
+**Not a control path.** `entity.set` maintains *engine* invariants but bypasses *game* logic (collision, rules) — it is for debugging, tests, and visual tuning, not for driving the game. Game control flows through the game's own semantic devapi commands.
+
+**Writable ⊆ readable, enforced structurally.** The writable field set IS the `apply()` hook's accepted-key set: a field with no case (e.g. `world_matrix`, derived/read-only) falls through to `bad_params`; core `id`/`generation`/`index` have no component route at all. Untrusted input is fully validated before any mutation (kind, arity, finiteness, range, non-degenerate quaternion) → `bad_params`, never a trap; a stale/dead handle is `bad_params`, not an assert. The wire is intentionally stricter than the raw setter where needed (colour rejected outside `[0,1]` so the float and the packed byte cannot desync).
+
+**Own deployment tier.** `entity.set` is its own group `NT_DEVAPI_GROUP_ENTITY_WRITE` (default **OFF**), independent of `obs` — three tiers: no devapi / read-only (obs) / read-write (obs + entity_write). A `FATAL_ERROR` guard requires `NT_INTROSPECT_WRITE_ENABLED` (the component `apply()` hooks); with it OFF every component is read-only, so `entity.set` could only ever return `bad_params` — a false surface.
+
 ---
 
 # 25. Engine/Game Boundary
@@ -2757,7 +2800,9 @@ engine/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
     ui/
     font/
-    debug_overlay/          # dev HUD (frame time / draw calls / element count)
+    debug_overlay/          # dev HUD — consumes nt_metrics (frame time / draw calls / user counters)
+    metrics/                # L1 perf source of truth (host pushes per-frame data; overlay + perf.* read)
+    platform/               # OS process/memory probes; native/ web/ (configure-time split; header is core/nt_platform.h)
     resources/
     packs/
     formats/

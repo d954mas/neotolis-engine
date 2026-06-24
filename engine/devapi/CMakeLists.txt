@@ -82,6 +82,47 @@ if(NT_DEVAPI_GROUP_UI)
     target_link_libraries(nt_devapi PRIVATE nt_ui_interface nt_window_interface)
 endif()
 
+# The obs READ surface (log.tail / perf.stats) serializes the dev-only nt_log_ring + nt_metrics. With
+# either dep OFF those compile to no-op stubs (empty log.tail, zero perf.stats) — a vacuously-passing
+# "false green". Hard-fail so GROUP_OBS can never link the stub bodies; enable both deps with it.
+if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED OR NOT NT_INTROSPECT_ENABLED))
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_OBS requires NT_LOG_RING_ENABLED, NT_METRICS_ENABLED and "
+        "NT_INTROSPECT_ENABLED (the obs group reads the dev-only log ring + metrics collector and walks "
+        "entities through nt_introspect; with any dep OFF it would link no-op stubs — empty log.tail / "
+        "zero perf.stats / core-fields-only entity.list — a false green). Enable all, e.g. "
+        "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON (or "
+        "NT_UI_DEBUG_TOOLS=ON, which defaults all three).")
+endif()
+
+# Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads. entity.* walks via nt_introspect
+# and pulls no specific component — components self-register a describe(), so a host/test links the
+# concrete ones. GNU-ld single-pass: nt_devapi (consumer) precedes these provider libs on the exe link
+# line, nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
+if(NT_DEVAPI_GROUP_OBS)
+    target_sources(nt_devapi PRIVATE nt_devapi_obs.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_OBS=1)
+    target_link_libraries(nt_devapi PRIVATE
+        nt_log_ring nt_metrics
+        nt_entity nt_resource nt_introspect nt_hash
+        nt_material # j_ref resolves an NT_REF_MATERIAL handle to its create-time label
+    )
+endif()
+
+# Entity-write group (entity.set): a dev-only DEBUG write over the component apply() hooks. Hard-requires
+# NT_INTROSPECT_WRITE_ENABLED (else every component is read-only — see the guard below). Links nt_entity
+# (resolution + the storage registry holding the apply hooks); the host/test links the writable components.
+if(NT_DEVAPI_GROUP_ENTITY_WRITE AND NOT NT_INTROSPECT_WRITE_ENABLED)
+    message(FATAL_ERROR "NT_DEVAPI_GROUP_ENTITY_WRITE requires NT_INTROSPECT_WRITE_ENABLED (the component "
+        "apply() hooks). With it OFF every component is read-only, so entity.set could only return "
+        "bad_params. Enable it, e.g. -DNT_INTROSPECT_WRITE_ENABLED=ON (or NT_UI_DEBUG_TOOLS=ON).")
+endif()
+
+if(NT_DEVAPI_GROUP_ENTITY_WRITE)
+    target_sources(nt_devapi PRIVATE nt_devapi_entity_write.c)
+    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_ENTITY_WRITE=1)
+    target_link_libraries(nt_devapi PRIVATE nt_entity)
+endif()
+
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 
 # nt_devapi_net -- native loopback TCP transport. Separate target so a core-only consumer pulls no

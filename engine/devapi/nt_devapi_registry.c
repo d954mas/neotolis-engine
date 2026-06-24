@@ -91,6 +91,12 @@ nt_result_t nt_devapi_init(void) {
 #ifdef NT_DEVAPI_GROUP_UI
     nt_devapi_register_ui();
 #endif
+#ifdef NT_DEVAPI_GROUP_OBS
+    nt_devapi_register_obs();
+#endif
+#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
+    nt_devapi_register_entity_write();
+#endif
 #ifdef NT_DEVAPI_GROUP_DISCOVERY
     nt_devapi_register_discovery();
 #endif

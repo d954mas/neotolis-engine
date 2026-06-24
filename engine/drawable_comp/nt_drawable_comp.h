@@ -30,6 +30,7 @@ const float *nt_drawable_comp_color(nt_entity_t entity); /* read-only float[4] r
 void nt_drawable_comp_set_color(nt_entity_t entity, float r, float g, float b, float a);
 /* Single-channel alpha shortcut — one sparse lookup, packs once. */
 void nt_drawable_comp_set_alpha(nt_entity_t entity, float a);
+void nt_drawable_comp_set_visible(nt_entity_t entity, bool visible);
 
 /* Bulk SoA view — pointers stable for module lifetime, values shift on add/remove. */
 typedef struct {
