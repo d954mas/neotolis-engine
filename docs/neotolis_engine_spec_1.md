@@ -3267,6 +3267,42 @@ D-67-13).
   render with — so a custom object honours opacity / `<color>` / effects consistently
   (AGENTS.md "if sprites have it, UI images need it too").
 
+## 32.4b Per-atom z-layers (explicit draw order)
+
+UI is **painter-order** (depth test off). Cross-renderer z is therefore **flush
+order**, and every walk barrier flushes **sprite then text** — so within a single
+batch text always lands *on top of* images, and the two are **not reorderable** by
+emit order. To give the game explicit control of overlap z, each atom carries a
+**layer** (z-order band):
+
+- **Default by kind** (no `<layer>`): `TEXT = 0`, `IMAGE = 1`, `OBJECT = 2`
+  (ascending = further back → further front). So by default text draws *behind*
+  images, which draw *behind* objects. The `nt_ui_rich_style_t.layer` field
+  (offset 42, one byte stolen from the old `_pad[2]`; the struct stays 48 B) holds
+  the sentinel **`255` (AUTO)** until an explicit layer is pushed; the per-kind
+  default is resolved at atom build.
+- **`<layer=N>` / `nt_ui_rich_push_layer(N)`** (N = 0..254): every enclosed atom of
+  **any** kind takes layer N, overriding the per-kind default. `</layer>` /
+  `nt_ui_rich_pop` restores. The parser drives the same builder, so `<layer=N>`
+  produces a **byte-identical** run-list to `push_layer(N)`. Malformed / out-of-range
+  (`255`, `>254`, empty, non-numeric) is a builder-validate assert in DEBUG and a
+  **hard skip to AUTO** that survives `NT_ASSERT` OFF (untrusted-markup hard-guard
+  rule, D-67-29).
+- **Layer-ordered self-emit.** The self-emit gathers the **distinct** layers present
+  (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16` with a hard
+  drop guard), then for each band ascending emits `{font-grouped text → coalesced
+  images → objects}` and **DRAINs** (sprite flush + text flush) before the next band,
+  so band N fully lands before band N+1. The drain runs after **every** band incl. the
+  last, making the block a self-contained z island regardless of the walker's global
+  flush order.
+- **Cost.** A layer is an explicit **flush boundary** — it buys z-control, **not** a
+  draw-call saving (each band adds one sprite+text flush). The font-group and
+  image-coalesce DC wins are **within** a band and unchanged: the font gather is
+  per-band (a shared face rebinds once per band), image coalescing is per-band. Use
+  distinct layers only where explicit overlap z is needed; non-overlapping content on
+  one default layer pays nothing extra. The per-band `set_material` calls stay direct
+  (the walker bind cache is untouched).
+
 ## 32.5 Spec ↔ #184-proposal divergences (per AGENTS.md)
 
 The shipped feature deliberately diverges from the original #184 proposal on eight
@@ -3328,3 +3364,14 @@ points; flagged here so code and spec do not silently drift:
   The signature is finalized within Phase 67 (the `color` arg then `world_mat4` were
   added on this unmerged branch before merge — no external consumer, no ABI break). No
   layout change; it only adds emit-time arguments the engine already had on hand.
+- **D-67-29 — per-atom z-layers buy overlap order via a flush boundary, not a DC saving.**
+  Because UI is painter-order and cross-renderer z is **flush order** (every barrier
+  flushes sprite then text), within a batch text is fixed *over* images and the two are
+  not reorderable. A `layer` (§32.4b) is therefore an explicit flush boundary: the
+  self-emit walks distinct layers ascending and **drains** (sprite+text flush) between
+  bands so band N lands before N+1. Defaults are per-kind `TEXT<IMAGE<OBJECT`; `<layer=N>`
+  (0..254, `255`=AUTO sentinel) overrides any kind. The `layer` byte was stolen from the
+  style's `_pad[2]` so the **48 B ABI is unchanged**. Layers cost one flush per band (the
+  font-group + image-coalesce DC wins stay *within* a band); they are spent only where
+  explicit overlap z is wanted. Out-of-range/malformed `<layer>` asserts in DEBUG and hard-
+  skips to AUTO under `NT_ASSERT` OFF (untrusted-markup hard-guard rule).
