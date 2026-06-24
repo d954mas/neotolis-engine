@@ -70,6 +70,16 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_TIME_WAIT_MAX_SECONDS 4.0
 #endif
 
+/* A pre-swap payload producer: invoked at the GL-valid seam (nt_devapi_capture_on_pre_swap) to
+   build the slot's owned result object. Returns an owned cJSON* (the {width,height,format,data}
+   capture payload) or NULL on producer failure (slot then yields the legacy {deferred:true}).
+   `ctx` is the producer-owned param block stored with the slot; the core never inspects it. */
+typedef cJSON *(*nt_devapi_payload_producer_fn)(void *ctx);
+
+/* Frees a producer's owned ctx block. Called exactly once per slot (on yield or reset); NULL when
+   the ctx is not heap-owned. Distinct from nt_devapi_hook_fn — it takes the ctx pointer. */
+typedef void (*nt_devapi_ctx_free_fn)(void *ctx);
+
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
@@ -78,6 +88,12 @@ typedef struct nt_devapi_deferred_slot {
     uint32_t target_frame; /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
     bool by_time;          /* selects which deadline field slot_ready compares. */
     bool in_use;
+    /* Result-payload continuation (capture-style commands). producer fills `payload` at the
+       pre-swap seam; the core names no capture symbol — the producer is supplied by the handler. */
+    nt_devapi_payload_producer_fn producer;  /* NULL for legacy frame.wait/time.step slots. */
+    void *producer_ctx;                      /* owned param block; freed via producer_ctx_free. */
+    nt_devapi_ctx_free_fn producer_ctx_free; /* frees producer_ctx on yield/reset; NULL if ctx is unowned. */
+    cJSON *payload;                          /* owned serialized capture result; NULL until the seam fills it. */
 } nt_devapi_deferred_slot;
 
 /* Mark the in-flight command as deferred: submit() returns NULL and the response is yielded once
@@ -89,6 +105,21 @@ bool nt_devapi_defer_current(int frames);
    `seconds` past submit. For time.wait (RUN, where dt is variable so a frame count can't be
    precomputed). Must be called from inside a handler dispatch. */
 bool nt_devapi_defer_current_time(double seconds);
+
+/* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the pre-swap
+   seam (nt_devapi_capture_on_pre_swap) the producer fills the slot's owned payload, which
+   poll_response then yields as the ok-entry result (instead of the legacy {deferred:true}). The
+   first deferred command that RETURNS data (capture.frame, D-05). `ctx` is the producer's owned
+   param block; `ctx_free` frees it on yield/reset (NULL if ctx is not heap-owned). The core never
+   names the capture group — the handler supplies the producer (zero release delta when absent).
+   Must be called from inside a handler dispatch. */
+bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free);
+
+/* Host-facing pre-swap seam: for each in-use slot whose target frame has arrived AND that carries a
+   producer, run the producer once to fill the slot's payload. Call once per frame after render work,
+   BEFORE swap (D-05 — the GL read is only valid here; the back buffer is undefined post-swap). Slots
+   without a producer (frame.wait/time.step) are untouched. Idempotent per slot (fills only once). */
+void nt_devapi_capture_on_pre_swap(void);
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */
