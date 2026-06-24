@@ -106,10 +106,15 @@ typedef struct {
     float scale;                         /* 36: accumulated x multiplier */
     uint8_t variant;                     /* 40: NT_UI_RICH_VARIANT_* -> selects font_id[] */
     uint8_t effect_id;                   /* 41: stock effect catalog index; 0 = none */
-    uint8_t _pad[2];                     /* 42: alignment pad to the 4-byte material handle */
+    uint8_t layer;                       /* 42: z-order band; 255 (AUTO) -> per-kind default (TEXT<IMAGE<OBJECT) */
+    uint8_t _pad;                        /* 43: alignment pad to the 4-byte material handle */
     nt_material_t image_material;        /* 44: inline-image custom-attr material; .id==0 = no inline images */
 } nt_ui_rich_style_t;
-_Static_assert(sizeof(nt_ui_rich_style_t) == 48, "nt_ui_rich_style_t stable ABI (16 ref + 4 font + u32 + f32 + variant/effect + material)");
+_Static_assert(sizeof(nt_ui_rich_style_t) == 48, "nt_ui_rich_style_t stable ABI (16 ref + 4 font + u32 + f32 + variant/effect/layer + material)");
+
+/* Layer (z-order band) sentinel + range. AUTO -> rich_build_atoms picks the per-kind default. */
+#define NT_UI_RICH_LAYER_AUTO 255U /* style.layer default; resolves to TEXT=0/IMAGE=1/OBJECT=2 at atom build */
+#define NT_UI_RICH_LAYER_MAX 254U  /* highest explicit <layer=N> */
 
 /* Use instead of bare {0} -- color_abgr=0 renders fully transparent. */
 nt_ui_rich_style_t nt_ui_rich_style_defaults(void);
@@ -137,6 +142,9 @@ void nt_ui_rich_push_font(nt_ui_context_t *ctx, const nt_font_t font_id[4]);
 void nt_ui_rich_push_bold(nt_ui_context_t *ctx);
 void nt_ui_rich_push_italic(nt_ui_context_t *ctx);
 void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id);
+/* Push a z-order LAYER (0..254) for the enclosed atoms; the self-emit draws ascending by layer with a
+ * flush between bands so a lower layer fully lands before a higher one. 255 == AUTO (per-kind default). */
+void nt_ui_rich_push_layer(nt_ui_context_t *ctx, uint8_t layer);
 /* Push a game-supplied CUSTOM effect fn (resolved at emit, BEFORE the stock catalog). The
  * (fn,user_data) is captured into a per-call fixed-cap table; the composed style carries a
  * custom effect_id index into it. fn must be non-NULL. */
@@ -233,6 +241,8 @@ uint32_t nt_ui_rich_test_clicked_link(nt_ui_context_t *ctx);
 uint32_t nt_ui_rich_test_link_rect_count(nt_ui_context_t *ctx);
 /* The solver effect_id carried by a solved atom (0 = none) -- proves effects ride the solved stream. */
 uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom);
+/* The EFFECTIVE z-order layer of a solved atom (AUTO already resolved to the per-kind default). */
+uint8_t nt_ui_rich_test_atom_layer(nt_ui_context_t *ctx, uint32_t atom);
 /* The private parser matched-open-tag depth cap, so the at-cap sweep can't drift from a hand-copied literal. */
 uint32_t nt_ui_rich_test_parse_tag_depth(void);
 #endif

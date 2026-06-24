@@ -26,6 +26,12 @@
 #define NT_UI_RICH_DEFAULT_FONT_SIZE 16.0F
 #endif
 
+/* Distinct z-order bands the self-emit walks (each adds a sprite+text flush boundary). A block with more
+ * distinct <layer>s than this drops the excess high layers rather than OOB the per-layer scratch. */
+#ifndef NT_UI_RICH_MAX_LAYERS
+#define NT_UI_RICH_MAX_LAYERS 16
+#endif
+
 // #region data-model
 /* Frame-scratch run-list SoA. Parallel arrays bump-allocated by nt_ui_rich_begin;
  * stale after the next nt_mem_scratch_reset. A run only starts when the COMPOSED
@@ -73,6 +79,7 @@ typedef struct {
     uint32_t text_len;
     uint8_t flags;     /* NT_UI_RICH_RUN_SYNTH_ITALIC -> shear at emit */
     uint8_t effect_id; /* stock effect catalog index from the run's style; 0 = none */
+    uint8_t layer;     /* EFFECTIVE z-order band (AUTO already resolved to the per-kind default) */
     uint32_t fx_idx;   /* stable per-block atom index fed to the effect curve (phase/stagger) */
     /* IMAGE/OBJECT box context. */
     uint16_t run_idx; /* back-reference for the image/object emit */
@@ -155,6 +162,7 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
     s.scale = 1.0F;
     s.variant = 0;
     s.effect_id = 0;
+    s.layer = (uint8_t)NT_UI_RICH_LAYER_AUTO; /* per-kind default until an explicit <layer=N> */
     return s;
 }
 
@@ -208,7 +216,7 @@ static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_
 
 /* Member-wise equality: scale is float; object-rep compare is UB. */
 static bool rich_style_eq(const nt_ui_rich_style_t *a, const nt_ui_rich_style_t *b) {
-    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->variant != b->variant || a->effect_id != b->effect_id || a->image_material.id != b->image_material.id) {
+    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer || a->image_material.id != b->image_material.id) {
         return false;
     }
     for (uint32_t i = 0; i < 4U; i++) {
@@ -321,6 +329,12 @@ void nt_ui_rich_push_effect(nt_ui_context_t *ctx, uint8_t effect_id) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
     rich_style_top(st)->effect_id = effect_id;
+}
+
+void nt_ui_rich_push_layer(nt_ui_context_t *ctx, uint8_t layer) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_push_copy(st);
+    rich_style_top(st)->layer = layer; /* 255 (AUTO) is a valid no-op override; resolved per-kind at atom build */
 }
 
 /* Intern a custom (fn,user_data) into the per-call table; returns its custom effect_id (base +
@@ -496,6 +510,7 @@ typedef enum {
     RICH_TAG_FONT,
     RICH_TAG_LINK,
     RICH_TAG_EFFECT, /* <fx=name> via the tagset; pushes effect_id */
+    RICH_TAG_LAYER,  /* <layer=N> intrinsic numeric; pushes the z-order band */
     RICH_TAG_NONE,
 } rich_tag_kind_t;
 
@@ -611,7 +626,37 @@ static rich_tag_kind_t rich_tag_kind(const char *name, uint32_t n) {
     if (rich_name_eq(name, n, "fx")) {
         return RICH_TAG_EFFECT;
     }
+    if (rich_name_eq(name, n, "layer")) {
+        return RICH_TAG_LAYER;
+    }
     return RICH_TAG_NONE;
+}
+
+/* Parse a bounded decimal uint8 layer [s,s+n) for <layer=N>. Returns AUTO on malformed/out-of-range
+ * (empty, non-digit, or > NT_UI_RICH_LAYER_MAX) -- a hard skip that survives NT_ASSERT OFF (untrusted
+ * markup). DEBUG asserts the malformed case so a developer typo traps at parse. */
+static uint8_t rich_parse_layer(const char *s, uint32_t n) {
+    NT_ASSERT(n > 0U && "rich markup: <layer=> needs a value");
+    if (n == 0U) {
+        return (uint8_t)NT_UI_RICH_LAYER_AUTO;
+    }
+    uint32_t v = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        NT_ASSERT(s[i] >= '0' && s[i] <= '9' && "rich markup: <layer=N> must be a decimal uint");
+        if (s[i] < '0' || s[i] > '9') {
+            return (uint8_t)NT_UI_RICH_LAYER_AUTO; /* non-numeric -> skip, never OOB */
+        }
+        v = (v * 10U) + (uint32_t)(s[i] - '0');
+        if (v > NT_UI_RICH_LAYER_MAX) {
+            v = NT_UI_RICH_LAYER_MAX + 1U; /* saturate; the range assert below fires once */
+            break;
+        }
+    }
+    NT_ASSERT(v <= NT_UI_RICH_LAYER_MAX && "rich markup: <layer=N> exceeds 254 (255 is the AUTO sentinel)");
+    if (v > NT_UI_RICH_LAYER_MAX) {
+        return (uint8_t)NT_UI_RICH_LAYER_AUTO; /* clamp out-of-range to AUTO (per-kind default) */
+    }
+    return (uint8_t)v;
 }
 
 typedef struct {
@@ -847,6 +892,10 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         }
         break;
     }
+    case RICH_TAG_LAYER:
+        NT_ASSERT(vlen > 0U && "rich markup: <layer=N> needs a value");
+        nt_ui_rich_push_layer(ctx, rich_parse_layer(val, vlen));
+        break;
     case RICH_TAG_NONE:
     default:
         NT_ASSERT(false && "rich markup: unreachable tag kind");
@@ -1080,6 +1129,7 @@ typedef struct {
     uint32_t text_len;
     uint8_t flags;
     uint8_t effect_id; /* stock effect catalog index from the run's style; 0 = none */
+    uint8_t layer;     /* EFFECTIVE z-order band (per-kind default already resolved from style.layer AUTO) */
     uint16_t run_idx;
     uint32_t link_id;
 } rich_atom_t;
@@ -1115,9 +1165,17 @@ static void rich_text_metrics(nt_font_t font, float size, float *out_asc, float 
     *out_desc = -(float)m.descent * px;
 }
 
+/* Resolve a style's z-order band: AUTO -> per-kind default (TEXT<IMAGE<OBJECT); else the explicit layer. */
+static uint8_t rich_effective_layer(const nt_ui_rich_style_t *style, nt_rich_atom_kind_t kind) {
+    if (style->layer != (uint8_t)NT_UI_RICH_LAYER_AUTO) {
+        return style->layer;
+    }
+    return (kind == NT_RICH_ATOM_TEXT) ? 0U : (kind == NT_RICH_ATOM_IMAGE) ? 1U : 2U;
+}
+
 /* Append one TEXT chunk atom [off,off+len) measured under font/size. */
-static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, float t_asc, float t_desc,
-                                uint32_t off, uint32_t len, float advance, bool breakable_before, uint16_t run_idx) {
+static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, uint8_t layer, float t_asc,
+                                float t_desc, uint32_t off, uint32_t len, float advance, bool breakable_before, uint16_t run_idx) {
     NT_ASSERT(*n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
     /* HARD cap (survives NT_ASSERT OFF): atom stream is content-proportional but capped at
      * NT_UI_RICH_MAX_GLYPHS; drop atoms past the cap rather than write past out[]. */
@@ -1137,6 +1195,7 @@ static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, con
     a->size = size;
     a->color = color;
     a->effect_id = effect_id;
+    a->layer = layer;
     a->text_off = off;
     a->text_len = len;
     a->flags = run->flags;
@@ -1147,8 +1206,8 @@ static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, con
 /* Split an over-long word (advance > container_w) at codepoint boundaries into chunks each
  * <= container_w (break-anywhere). Each chunk width is the WHOLE-prefix measure so inter-glyph
  * kerning counts -- a per-codepoint sum drops kerning and overflows under a kerning font. */
-static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, float t_asc, float t_desc,
-                                const char *text, uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable) {
+static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, uint8_t layer, float t_asc,
+                                float t_desc, const char *text, uint32_t word_off, uint32_t word_len, float container_w, uint16_t run_idx, bool first_breakable) {
     uint32_t chunk_start = word_off;
     uint32_t i = word_off;
     const uint32_t word_end = word_off + word_len;
@@ -1169,7 +1228,7 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
         if (cur_w > container_w && last_boundary > chunk_start) {
             /* Commit the chunk up to the previous boundary; restart the new chunk at this glyph. */
             const uint32_t clen = last_boundary - chunk_start;
-            rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, t_asc, t_desc, chunk_start, clen, prev_w, emitted ? true : first_breakable, run_idx);
+            rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, layer, t_asc, t_desc, chunk_start, clen, prev_w, emitted ? true : first_breakable, run_idx);
             emitted = true;
             chunk_start = last_boundary;
             /* Re-seed the prefix from the new chunk_start: re-measure [chunk_start, i) so the carried
@@ -1182,7 +1241,7 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
     /* Trailing chunk (or the whole word if it never exceeded). */
     if (chunk_start < word_end) {
         const uint32_t clen = word_end - chunk_start;
-        rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, t_asc, t_desc, chunk_start, clen, cur_w, emitted ? true : first_breakable, run_idx);
+        rich_push_text_atom(out, n, cap, run, font, size, color, effect_id, layer, t_asc, t_desc, chunk_start, clen, cur_w, emitted ? true : first_breakable, run_idx);
     }
 }
 
@@ -1199,6 +1258,7 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
         if (run->kind == NT_RICH_ATOM_TEXT) {
             bool synth = false;
             const nt_font_t font = rich_resolve_font(style, &synth);
+            const uint8_t layer = rich_effective_layer(style, NT_RICH_ATOM_TEXT);
             float t_asc = 0.0F;
             float t_desc = 0.0F;
             rich_text_metrics(font, size, &t_asc, &t_desc);
@@ -1218,9 +1278,9 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
                 const bool breakable = (n > 0U);
                 /* OVERFLOW POLICY: a single word wider than the box breaks anywhere. */
                 if (advance > container_w && container_w > 0.0F) {
-                    rich_break_anywhere(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, t_asc, t_desc, st->text, word_start, word_len, container_w, (uint16_t)ri, breakable);
+                    rich_break_anywhere(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, layer, t_asc, t_desc, st->text, word_start, word_len, container_w, (uint16_t)ri, breakable);
                 } else {
-                    rich_push_text_atom(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, t_asc, t_desc, word_start, word_len, advance, breakable, (uint16_t)ri);
+                    rich_push_text_atom(out, &n, cap, run, font, size, style->color_abgr, style->effect_id, layer, t_asc, t_desc, word_start, word_len, advance, breakable, (uint16_t)ri);
                 }
             }
         } else if (run->kind == NT_RICH_ATOM_IMAGE) {
@@ -1245,6 +1305,7 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             a->offset_y = run->image_offset_y;
             a->color = style->color_abgr; /* the run's tint -> the inline image's lossless a_tint */
             a->effect_id = style->effect_id;
+            a->layer = rich_effective_layer(style, NT_RICH_ATOM_IMAGE);
             a->breakable_before = true; /* image: break opportunity on both sides */
             a->run_idx = (uint16_t)ri;
             a->link_id = run->link_id;
@@ -1272,6 +1333,7 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float 
             a->valign = NT_RICH_VALIGN_BASELINE;
             a->color = style->color_abgr;
             a->effect_id = style->effect_id;
+            a->layer = rich_effective_layer(style, NT_RICH_ATOM_OBJECT);
             a->breakable_before = true; /* object: break opportunity on both sides */
             a->run_idx = (uint16_t)ri;
             a->link_id = run->link_id;
@@ -1484,6 +1546,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             s->size = a->size;
             s->color = a->color;
             s->effect_id = a->effect_id;
+            s->layer = a->layer;
             /* Running glyph index: the effect curve phase advances monotonically across the block
              * (per-glyph for TEXT, one step per image/object) so adjacent words don't repeat phase. */
             s->fx_idx = glyph_cursor;
@@ -1645,11 +1708,11 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
 /* OBJECT atoms: the game's own draw_fn at the solved box, in the FIXED block's
  * absolute LAYOUT coords. The engine never draws the object itself (renderer-agnostic).
  * The per-atom effect shifts/scales the box about its center; not-visible skips the call. */
-static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y) {
+static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
-        if (s->kind != NT_RICH_ATOM_OBJECT) {
-            continue;
+        if (s->kind != NT_RICH_ATOM_OBJECT || s->layer != layer) {
+            continue; /* only this z-band's objects (the caller walks bands ascending) */
         }
         const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
         if (run->object_draw == NULL) {
@@ -1687,8 +1750,7 @@ static uint32_t rich_pack_tint(const float c[4]) {
  * per-image self-clip-to-bbox -- it over-draws like OBJECT atoms do, consistent + acceptable). Tint folds
  * frame->opacity itself (the self-emit has NO walker opacity fold -- mirrors rich_emit_objects). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
-static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y) {
-    st->image_emit_count = 0;
+static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     if (st->image_material.id == 0U) {
         return; /* no base material -> text-only block, no images (mirrors the old floating-child gate) */
     }
@@ -1697,11 +1759,11 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
      * s_sprite_material (attr_map_count==0); the assert documents that contract. */
     const nt_material_info_t *mi = nt_material_get_info(st->image_material);
     NT_ASSERT(mi != NULL && mi->attr_map_count == 0U && "rich inline-image material must be the plain u8 sprite path (attr_map_count==0)");
-    bool bound = false;
+    bool bound = false; /* per-call: each layer is its own drained batch -> rebind once per layer */
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
-        if (s->kind != NT_RICH_ATOM_IMAGE) {
-            continue;
+        if (s->kind != NT_RICH_ATOM_IMAGE || s->layer != layer) {
+            continue; /* only this z-band's images (coalesced within the band) */
         }
         const nt_ui_rich_run_t *run = &st->runs[s->run_idx];
         if (run->image_ref.region == NT_ATLAS_INVALID_REGION || run->image_ref.atlas.id == 0U) {
@@ -1753,28 +1815,18 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- distinct-font gather + one font-grouped pass per face, then image/object emit
-void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
-    nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
-    NT_ASSERT(st != NULL && "rich emit: NULL state");
-    if (!st->solved_ready) {
-        return;
-    }
-    const Clay_RenderCommand *c = (const Clay_RenderCommand *)frame->clay_cmd;
-    const float box_x = c->boundingBox.x; /* FIXED block origin in LAYOUT (Y-down) */
-    const float box_y = c->boundingBox.y;
-
-    st->emit_span_count = 0;
-    /* Font-grouped MULTI-PASS: the text renderer auto-flushes on every set_font change, so an in-order
-     * walk of interleaved faces (R->B->R->I...) costs one text flush PER transition. Gather the distinct
-     * fonts first (<=4, bounded by the style's font_id[4]) and emit one pass per font -> set_font is called
-     * once per distinct font. O(F*N), F<=4, no heap, no sort, solved[] untouched. Visible result is
-     * identical (text is L-to-R non-overlapping; each atom keeps its own shear/fx/position). */
+/* Font-grouped TEXT emit for ONE z-layer. The text renderer auto-flushes on every set_font change, so an
+ * in-order walk of interleaved faces (R->B->R->I...) costs one text flush PER transition. Gather the
+ * distinct fonts present IN THIS LAYER (<=4, bounded by the style's font_id[4]) and emit one pass per font
+ * -> set_font is called once per distinct font in the layer. O(F*N), F<=4, no heap, no sort, solved[]
+ * untouched. Visible result is identical (text is L-to-R non-overlapping; each atom keeps its own
+ * shear/fx/position). */
+static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     nt_font_t fonts[4];
     uint32_t font_count = 0;
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
-        if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U) {
+        if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->layer != layer) {
             continue;
         }
         bool seen = false;
@@ -1789,11 +1841,11 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
         }
     }
     for (uint32_t f = 0; f < font_count; f++) {
-        nt_text_renderer_set_font(fonts[f]); /* once per distinct font: collapses per-transition flushes */
+        nt_text_renderer_set_font(fonts[f]); /* once per distinct font in the layer: collapses per-transition flushes */
         for (uint32_t i = 0; i < st->solved_count; i++) {
             const nt_ui_rich_solved_atom_t *s = &st->solved[i];
-            if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->font.id != fonts[f].id) {
-                continue; /* IMAGE -> rich_emit_images; OBJECT -> rich_emit_objects; other fonts -> their pass */
+            if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->layer != layer || s->font.id != fonts[f].id) {
+                continue; /* other kinds/layers/fonts -> their own pass */
             }
             const bool shear = (s->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U;
             if (s->effect_id == 0U) {
@@ -1803,8 +1855,68 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
             }
         }
     }
-    rich_emit_images(st, frame, box_x, box_y);
-    rich_emit_objects(st, frame, box_x, box_y);
+}
+
+/* Gather the DISTINCT layers present across the solved atoms, insertion-sorted ascending, into out[].
+ * Capped at NT_UI_RICH_MAX_LAYERS with a HARD guard that survives NT_ASSERT OFF (drop the excess high
+ * layers rather than OOB). Returns the count. */
+static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_UI_RICH_MAX_LAYERS]) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < st->solved_count; i++) {
+        const uint8_t L = st->solved[i].layer;
+        uint32_t pos = 0;
+        bool dup = false;
+        while (pos < count && out[pos] < L) {
+            pos++;
+        }
+        if (pos < count && out[pos] == L) {
+            dup = true;
+        }
+        if (dup) {
+            continue;
+        }
+        if (count >= NT_UI_RICH_MAX_LAYERS) {
+            continue; /* HARD cap (survives NT_ASSERT OFF): drop atoms in over-cap layers, never write past out[] */
+        }
+        for (uint32_t k = count; k > pos; k--) {
+            out[k] = out[k - 1]; /* shift up to keep ascending order */
+        }
+        out[pos] = L;
+        count++;
+    }
+    NT_ASSERT(count <= NT_UI_RICH_MAX_LAYERS && "rich layer gather overflow");
+    return count;
+}
+
+void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
+    nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
+    NT_ASSERT(st != NULL && "rich emit: NULL state");
+    if (!st->solved_ready) {
+        return;
+    }
+    const Clay_RenderCommand *c = (const Clay_RenderCommand *)frame->clay_cmd;
+    const float box_x = c->boundingBox.x; /* FIXED block origin in LAYOUT (Y-down) */
+    const float box_y = c->boundingBox.y;
+
+    st->emit_span_count = 0;
+    st->image_emit_count = 0; /* accumulates across layers (the per-layer rich_emit_images no longer resets it) */
+
+    /* LAYER-ORDERED emit: cross-renderer z is FLUSH order (UI is painter-order, depth off) and every walk
+     * barrier flushes sprite THEN text -- so within one batch text always lands on top of images, not
+     * reorderable. A LAYER is therefore an explicit flush boundary: emit ascending by layer and DRAIN
+     * (flush sprite+text) between bands so layer N fully lands before N+1. Layers buy z-control, not DC
+     * (the font-group + image-coalesce DC wins are WITHIN a layer). Drain after EVERY band incl. the last
+     * so the block is a self-contained z island regardless of the walker's global flush order. */
+    uint8_t layers[NT_UI_RICH_MAX_LAYERS];
+    const uint32_t layer_count = rich_gather_layers(st, layers);
+    for (uint32_t li = 0; li < layer_count; li++) {
+        const uint8_t L = layers[li];
+        rich_emit_text_layer(st, frame, box_x, box_y, L); /* text first (then images, then objects) within the band */
+        rich_emit_images(st, frame, box_x, box_y, L);
+        rich_emit_objects(st, frame, box_x, box_y, L);
+        nt_sprite_renderer_flush(); /* DRAIN: land this band before the next so layer order == z order */
+        nt_text_renderer_flush();
+    }
 }
 // #endregion
 
@@ -2053,6 +2165,12 @@ uint8_t nt_ui_rich_test_atom_effect_id(nt_ui_context_t *ctx, uint32_t atom) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(atom < st->solved_count);
     return st->solved[atom].effect_id;
+}
+
+uint8_t nt_ui_rich_test_atom_layer(nt_ui_context_t *ctx, uint32_t atom) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    NT_ASSERT(atom < st->solved_count);
+    return st->solved[atom].layer;
 }
 
 uint32_t nt_ui_rich_test_parse_tag_depth(void) { return NT_UI_RICH_PARSE_TAG_DEPTH; }
