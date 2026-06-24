@@ -131,11 +131,17 @@ def run(client: DevApiClient, save_dir=None) -> None:
         img.save(os.path.join(save_dir, "capture_frame.png"))
     print(f"PASS[1/5] capture.frame: deferred-yield carried a decodable {img.width}x{img.height} PNG, not {{deferred:true}}.")
 
-    # 2. capture.region: a sub-rect returns dims matching the rect (no resampling at scale 1).
-    rx, ry, rw, rh = fb_w // 4, fb_h // 4, fb_w // 2, fb_h // 2
+    # 2. capture.region: a sub-rect returns dims matching the rect (no resampling at scale 1). The rect
+    #    is ASYMMETRIC (rx!=ry implied by rw!=rh on a non-square fb) and straddles the host's two-tone
+    #    boundary (the centered fg box at fb/4..3fb/4) so the not-blank check has >=2 colors under Mesa
+    #    llvmpipe — AND a wrong region y-origin (top-left vs bottom-left) would change the captured
+    #    content, so this rect also exercises the region Y-flip contract.
+    rx, ry, rw, rh = 0, 0, fb_w * 3 // 4, fb_h * 3 // 4
     region = client.capture_region(rx, ry, rw, rh)
-    pixel_health.check_payload(region, rw, rh)
-    print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}}: PNG dims match the rect ({rw}x{rh}).")
+    region_img = pixel_health.check_payload(region, rw, rh)
+    if save_dir:
+        region_img.save(os.path.join(save_dir, "capture_region.png"))
+    print(f"PASS[2/5] capture.region {{x:{rx},y:{ry},w:{rw},h:{rh}}}: PNG dims match the rect ({rw}x{rh}), not-blank.")
 
     # 3. scale 1/2 and 1/4 -> half / quarter dims (box-average downscale).
     half = client.capture_frame(scale=2)
@@ -144,19 +150,21 @@ def run(client: DevApiClient, save_dir=None) -> None:
     pixel_health.check_payload(quarter, fb_w // 4, fb_h // 4)
     print(f"PASS[3/5] capture.frame scale 1/2 -> {fb_w // 2}x{fb_h // 2}, 1/4 -> {fb_w // 4}x{fb_h // 4}.")
 
-    # 4. Bad params -> bad_params over the wire (never an assert / crash on untrusted bot input).
-    for params, label in (
-        ({"scale": 3}, "capture.frame scale=3"),
-        ({"x": 0, "y": 0, "w": fb_w + 1, "h": fb_h}, "capture.region w>fb_w"),
-        ({"x": 0, "y": 0, "w": 0, "h": fb_h}, "capture.region w=0"),
+    # 4. Bad params -> bad_params over the wire (never an assert / crash on untrusted bot input). Carry
+    #    the wire method EXPLICITLY in the tuple (not inferred from the label). Both axes are proven
+    #    OOB over the real framebuffer: w>fb_w (X) and h>fb_h (Y) (AGENTS.md axis-swap guidance).
+    for method, params, label in (
+        ("capture.frame", {"scale": 3}, "capture.frame scale=3"),
+        ("capture.region", {"x": 0, "y": 0, "w": fb_w + 1, "h": fb_h}, "capture.region w>fb_w"),
+        ("capture.region", {"x": 0, "y": 0, "w": fb_w, "h": fb_h + 1}, "capture.region h>fb_h"),
+        ("capture.region", {"x": 0, "y": 0, "w": 0, "h": fb_h}, "capture.region w=0"),
     ):
-        method = "capture.frame" if "frame" in label else "capture.region"
         try:
             client.result(method, params)
             raise AssertionError(f"{label} unexpectedly succeeded; expected bad_params")
         except DevApiResultError as exc:
             assert "bad_params" in str(exc), f"{label} raised {exc!r}, expected bad_params"
-    print("PASS[4/5] bad params (scale=3, region w>fb_w, region w=0) -> bad_params over the wire.")
+    print("PASS[4/5] bad params (scale=3, region w>fb_w, region h>fb_h, region w=0) -> bad_params over the wire.")
 
     # 5. Pixel-health summary: the full-frame image already passed decode + dims + not-blank above.
     print("PASS[5/5] pixel-health: decode + dims + not-blank held on every captured frame (D-09).")

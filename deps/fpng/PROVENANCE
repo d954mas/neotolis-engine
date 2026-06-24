@@ -18,7 +18,9 @@ How obtained:
   commit SHA via https://api.github.com/repos/richgel999/fpng/commits/main
 
 Notes:
-  - SSE4.1 path is gated on x86/x64 detection; scalar fallback elsewhere. Define
-    FPNG_NO_SSE=1 to force scalar (the EMSCRIPTEN/WASM path — Phase 70).
+  - SSE4.1 path is gated on x86/x64 detection (FPNG_X86_OR_X64_CPU). On a non-x86
+    target (EMSCRIPTEN/WASM — Phase 70) FPNG_X86_OR_X64_CPU==0, so fpng takes the
+    scalar path automatically — NO flag is needed. FPNG_NO_SSE=1 only forces the
+    scalar path on an x86 host (do not add it for the WASM build — it is redundant).
   - The std::vector<uint8_t> output never crosses the C boundary; the engine/fpng
     C-API wrapper memcpy's into a caller buffer.
