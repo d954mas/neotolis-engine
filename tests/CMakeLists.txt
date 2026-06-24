@@ -246,6 +246,23 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx_read_pixels COMMAND test_gfx_read_pixels)
 
+    # --- DevAPI base64 util (CAP-02) ---
+    # Pure encoder: compile nt_devapi_base64.c directly + link only unity (no
+    # devapi core, no NT_DEVAPI_ENABLED gate). NT_ENGINE_ROOT resolves the
+    # "devapi/nt_devapi_base64.h" include without pulling an engine lib.
+    add_executable(test_devapi_base64
+        unit/test_devapi_base64.c
+        "${NT_ENGINE_ROOT}/engine/devapi/nt_devapi_base64.c"
+    )
+    target_include_directories(test_devapi_base64 PRIVATE "${NT_ENGINE_ROOT}/engine")
+    target_link_libraries(test_devapi_base64 PRIVATE unity)
+    nt_set_warning_flags(test_devapi_base64)
+    nt_set_sanitizer_flags(test_devapi_base64)
+    set_target_properties(test_devapi_base64 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_devapi_base64 COMMAND test_devapi_base64)
+
     # --- Graphics scissor/viewport tests ---
     # restore_gpu cases call into nt_sprite_renderer + nt_text_renderer; their
     # renderer libs (and transitive font/resource/hash/pool/material deps) are
