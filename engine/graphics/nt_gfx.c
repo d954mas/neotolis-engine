@@ -289,6 +289,11 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
     if (w <= 0 || h <= 0) {
         return false;
     }
+    /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
+       early-returns on this. Producer treats false as failure -> NULL -> {deferred:true}. */
+    if (g_nt_gfx.context_lost) {
+        return false;
+    }
     /* Compute in uint64_t so w*h*4 cannot overflow before the cap check. */
     uint64_t need = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U;
     if (need > (uint64_t)out_cap) {

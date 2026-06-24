@@ -24,6 +24,10 @@
 #define NT_DEVAPI_CAPTURE_MAX_PIXELS (4096ULL * 4096ULL)
 #endif
 
+/* The producer sizes rgba (w*h*4) and the PNG cap (rgb*1.5 + 1024 ~= w*h*6) in uint32. Prove that
+   stays free of wraparound for ANY -D-raised cap so the uint32 size math is provably safe. */
+_Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 6U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: w*h*6 would overflow the uint32 producer size math");
+
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
@@ -104,7 +108,7 @@ static cJSON *capture_produce(void *vctx) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;
     if (out_w == 0U || out_h == 0U) {
-        return NULL; /* scale larger than the rect — degenerate, no image. */
+        return NULL; /* defensive only: the handlers reject scale>rect synchronously (bad_params). */
     }
 
     uint32_t rgba_len = c->w * c->h * 4U;
@@ -176,12 +180,14 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
     return true;
 }
 
-/* Defer with a producer carrying the captured rect + factor. Capture resolves after ~1 render (D-05). */
-static bool defer_capture(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t factor) {
+/* Defer with a producer carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
+   rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
+   top-left sub-rect matching the documented contract. Capture resolves after ~1 render (D-05). */
+static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor) {
     capture_ctx *ctx = (capture_ctx *)malloc(sizeof(capture_ctx));
     NT_ASSERT(ctx != NULL); /* OOM is a host-side fault, not bot input. */
     ctx->x = x;
-    ctx->y = y;
+    ctx->y = gl_y;
     ctx->w = w;
     ctx->h = h;
     ctx->factor = factor;
@@ -204,6 +210,10 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
     }
     if ((uint64_t)fb_w * (uint64_t)fb_h > NT_DEVAPI_CAPTURE_MAX_PIXELS) {
         set_bad_params(err, "capture.frame: framebuffer exceeds the capture pixel cap");
+        return false;
+    }
+    if (fb_w / factor == 0U || fb_h / factor == 0U) {
+        set_bad_params(err, "capture.frame: scale larger than capture region");
         return false;
     }
     return defer_capture(0U, 0U, fb_w, fb_h, factor);
@@ -245,7 +255,15 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
         set_bad_params(err, "capture.region: rect exceeds the capture pixel cap");
         return false;
     }
-    return defer_capture(x, y, w, h, factor);
+    if (w / factor == 0U || h / factor == 0U) {
+        set_bad_params(err, "capture.region: scale larger than capture region");
+        return false;
+    }
+    /* The docstring contract is top-left origin; glReadPixels reads bottom-left. Convert the rect's
+       top-left y to a GL bottom-left y (h<=fb_h-y already proven) so the row-flip yields a top-left
+       sub-rect. Full-frame (capture.frame) is unchanged: fb_h-(0+fb_h)==0. */
+    uint32_t gl_y = fb_h - (y + h);
+    return defer_capture(x, gl_y, w, h, factor);
 }
 // #endregion
 

@@ -112,7 +112,13 @@ bool nt_devapi_defer_current_time(double seconds);
    first deferred command that RETURNS data (capture.frame, D-05). `ctx` is the producer's owned
    param block; `ctx_free` frees it on yield/reset (NULL if ctx is not heap-owned). The core never
    names the capture group — the handler supplies the producer (zero release delta when absent).
-   Must be called from inside a handler dispatch. */
+   Must be called from inside a handler dispatch.
+
+   CONTRACT: a producer-bearing slot is withheld until the pre-swap seam fills it — poll_response
+   never yields {deferred:true} for it (that would re-introduce T-69-06-RACE). So the HOST MUST call
+   nt_devapi_capture_on_pre_swap every frame after render work; if it never runs, the slot stalls the
+   queue (bounded per-session by close_client -> nt_devapi_deferred_reset). The managed host calls the
+   seam unconditionally, so this is an enforced invariant, not a runtime fallback. */
 bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free);
 
 /* Host-facing pre-swap seam: for each in-use slot whose target frame has arrived AND that carries a
