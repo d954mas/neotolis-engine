@@ -304,6 +304,28 @@ static void parse_img_null_tagset(const char *m) {
 }
 static void test_parse_img_alias_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_img_null_tagset("<img=a:b/>")); }
 
+/* (8m) named <color>/<font>/<fx> with a NULL tagset -> NT_ASSERT in FULL (the lookup needs a tagset).
+ * The OFF hard guard (if (tagset == NULL) break; before the lookup) can't be unit-tested -- no OFF
+ * ctest preset -- but is OFF-safe by construction (break BEFORE the lookup derefs ts). */
+static void test_parse_color_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<color=gold>x</color>")); }
+static void test_parse_font_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<font=mono>x</font>")); }
+static void test_parse_fx_null_tagset_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_lit("<fx=wave>x</fx>")); }
+
+/* (8n) <img=alias:region/> with a NON-null tagset that lacks the alias -> NT_ASSERT (unknown alias).
+ * The OFF hard guard (if (!alias_ok) return;) skips the image instead of falling back to the default
+ * atlas with the wrong region -- by-construction OFF-safe, not unit-testable without an OFF preset. */
+static void parse_img_no_alias(const char *m) {
+    nt_ui_rich_tagset_t ts;
+    nt_ui_rich_tagset_init(&ts); /* a valid tagset that registers NO atlas alias -> the alias lookup misses */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.default_atlas.atlas = s_fx.atlas.handle;
+    nt_ui_rich_parse(s_fx.ctx, &ts, &base, m, strlen(m));
+}
+static void test_parse_img_unknown_alias_asserts(void) { NT_TEST_EXPECT_ASSERT(parse_img_no_alias("<img=nope:region/>")); }
+
 /* (10) over-deep <b> nesting -> NT_ASSERT before overflow. NOTE: each <b> pushes BOTH the parser
  * tag stack (NT_UI_RICH_PARSE_TAG_DEPTH) and the builder style stack (now PARSE_TAG_DEPTH+1); the
  * parser tag cap (the lower of the two) trips first. 40 > either cap, so the assert fires. */
@@ -632,6 +654,10 @@ int main(void) {
     RUN_TEST(test_parse_obj_empty_name_asserts);
     RUN_TEST(test_parse_obj_null_tagset_asserts);
     RUN_TEST(test_parse_img_alias_null_tagset_asserts);
+    RUN_TEST(test_parse_color_null_tagset_asserts);
+    RUN_TEST(test_parse_font_null_tagset_asserts);
+    RUN_TEST(test_parse_fx_null_tagset_asserts);
+    RUN_TEST(test_parse_img_unknown_alias_asserts);
     RUN_TEST(test_parse_over_deep_style_stack_asserts);
     RUN_TEST(test_parse_balanced_at_cap_stays_synced);
     RUN_TEST(test_parse_mixed_tag_stack_sync);

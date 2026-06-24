@@ -647,6 +647,11 @@ static void rich_parse_img(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tags
          * argument, which would silently skip the atlas write. */
         const bool alias_ok = nt_ui_rich_tagset_lookup_atlas(tagset, alias_hash, &atlas);
         NT_ASSERT(alias_ok && "rich markup: unknown <img> atlas alias");
+        /* HARD guard (survives NT_ASSERT OFF): unknown alias -> skip the image, never fall back to the
+         * default atlas with the wrong region (mirrors the unresolved-name skip in rich_declare_inline_image). */
+        if (!alias_ok) {
+            return;
+        }
         region = val + colon + 1;
         region_len = vlen - colon - 1;
         NT_ASSERT(region_len > 0U && "rich markup: <img=alias:region/> empty region");
@@ -752,10 +757,18 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
             nt_ui_rich_push_color(ctx, rich_parse_hex_color(val, vlen));
         } else {
             NT_ASSERT(tagset != NULL && "rich markup: named <color> needs a tagset");
+            /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
+            if (tagset == NULL) {
+                break;
+            }
             uint32_t abgr = 0;
             /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the write. */
             const bool color_ok = nt_ui_rich_tagset_lookup_color(tagset, nt_hash64((const void *)val, vlen).value, &abgr);
             NT_ASSERT(color_ok && "rich markup: unknown color name");
+            /* HARD guard (survives NT_ASSERT OFF): unknown name -> never push the unresolved 0 colour. */
+            if (!color_ok) {
+                break;
+            }
             nt_ui_rich_push_color(ctx, abgr);
         }
         break;
@@ -764,10 +777,18 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
         break;
     case RICH_TAG_FONT: {
         NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <font=name> needs a tagset");
+        /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
+        if (tagset == NULL) {
+            break;
+        }
         nt_font_t fam[4];
         /* Lookup OUTSIDE the assert -- an OFF build elides the assert arg, dropping the family write. */
         const bool font_ok = nt_ui_rich_tagset_lookup_font(tagset, nt_hash64((const void *)val, vlen).value, fam);
         NT_ASSERT(font_ok && "rich markup: unknown font name");
+        /* HARD guard (survives NT_ASSERT OFF): on a miss fam[4] is UNINITIALISED -> skip, never push garbage. */
+        if (!font_ok) {
+            break;
+        }
         nt_ui_rich_push_font(ctx, fam);
         break;
     }
@@ -786,6 +807,10 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
     }
     case RICH_TAG_EFFECT: {
         NT_ASSERT(vlen > 0U && tagset != NULL && "rich markup: <fx=name> needs a tagset");
+        /* HARD guard (survives NT_ASSERT OFF): no tagset -> the lookup below derefs NULL. */
+        if (tagset == NULL) {
+            break;
+        }
         /* The value is `name` followed by space-separated `key=value` params (keys: amp, speed). Split
          * the name off the first space; the remainder (if any) parses into nt_ui_rich_fx_params_t. */
         uint32_t nlen_fx = vlen;
@@ -806,6 +831,10 @@ static void rich_open_tag(nt_ui_context_t *ctx, rich_tag_stack_t *ts_stack, cons
          * OFF build (which elides the assert arg) still resolves <fx=name> instead of silently no-effect. */
         const bool fx_ok = nt_ui_rich_tagset_lookup_effect_fn(tagset, nt_hash64((const void *)val, nlen_fx).value, &effect_id, &fn, &fx_user);
         NT_ASSERT(fx_ok && "rich markup: unknown effect name");
+        /* HARD guard (survives NT_ASSERT OFF): unknown name -> never push effect_id 0 as a real effect. */
+        if (!fx_ok) {
+            break;
+        }
         if (fn != NULL) {
             /* Markup k=v params apply to STOCK effects only: a custom fn carries its own user_data. */
             NT_ASSERT(!has_params && "rich markup: <fx=name k=v> params apply to STOCK effects only (custom fn carries its own user_data)");

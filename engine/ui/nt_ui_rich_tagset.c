@@ -129,6 +129,9 @@ void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *
 // #region lookup
 bool nt_ui_rich_tagset_lookup_font(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_font_t out_family[4]) {
     NT_ASSERT(ts != NULL && out_family != NULL);
+    if (ts == NULL || out_family == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
+        return false;
+    }
     for (uint32_t i = 0; i < ts->font_count; i++) {
         if (ts->fonts[i].name_hash == name_hash) {
             memcpy(out_family, ts->fonts[i].family, sizeof ts->fonts[i].family);
@@ -154,6 +157,9 @@ bool nt_ui_rich_tagset_lookup_atlas(const nt_ui_rich_tagset_t *ts, uint64_t name
 
 bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint32_t *out_color_abgr) {
     NT_ASSERT(ts != NULL && out_color_abgr != NULL);
+    if (ts == NULL || out_color_abgr == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
+        return false;
+    }
     for (uint32_t i = 0; i < ts->color_count; i++) {
         if (ts->colors[i].name_hash == name_hash) {
             *out_color_abgr = ts->colors[i].color_abgr;
@@ -165,6 +171,9 @@ bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name
 
 bool nt_ui_rich_tagset_lookup_effect(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint8_t *out_effect_id) {
     NT_ASSERT(ts != NULL && out_effect_id != NULL);
+    if (ts == NULL || out_effect_id == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
+        return false;
+    }
     for (uint32_t i = 0; i < ts->effect_count; i++) {
         if (ts->effects[i].name_hash == name_hash && ts->effects[i].fn == NULL) {
             *out_effect_id = ts->effects[i].effect_id; /* stock entries only (a custom entry misses) */
@@ -176,6 +185,9 @@ bool nt_ui_rich_tagset_lookup_effect(const nt_ui_rich_tagset_t *ts, uint64_t nam
 
 bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint8_t *out_effect_id, nt_ui_rich_fx_fn *out_fn, void **out_user) {
     NT_ASSERT(ts != NULL && out_effect_id != NULL && out_fn != NULL && out_user != NULL);
+    if (ts == NULL || out_effect_id == NULL || out_fn == NULL || out_user == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
+        return false;
+    }
     for (uint32_t i = 0; i < ts->effect_count; i++) {
         if (ts->effects[i].name_hash == name_hash) {
             *out_effect_id = ts->effects[i].effect_id;
