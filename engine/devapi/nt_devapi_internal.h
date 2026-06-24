@@ -226,4 +226,11 @@ void nt_devapi_register_entity_write(void);
 void nt_devapi_register_discovery(void);
 #endif
 
+/* Capture group registrar (per-group #ifdef). Defined in nt_devapi_capture.c, invoked from
+   nt_devapi_init under the same compile gate. capture.frame/region are the first DEFERRED
+   data-returning commands; the producer they supply runs at nt_devapi_capture_on_pre_swap. */
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+void nt_devapi_register_capture(void);
+#endif
+
 #endif /* NT_DEVAPI_INTERNAL_H */

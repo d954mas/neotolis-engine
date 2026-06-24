@@ -44,6 +44,8 @@ option(NT_DEVAPI_GROUP_UI "Build the devapi ui.* group (UI tree extraction over 
 option(NT_DEVAPI_GROUP_OBS "Build the devapi obs group (log.*/perf.*/entity.*/resource.* reads)." OFF)
 # Default OFF so a deployment can expose read-only obs WITHOUT mutation. Hard-requires NT_INTROSPECT_WRITE_ENABLED.
 option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write group." OFF)
+# Default OFF (opt-in); the first DEFERRED data-returning group — links nt_gfx (readback) + nt_fpng (PNG encode).
+option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region group (PNG framebuffer capture)." OFF)
 
 # Group flags are inert when NT_DEVAPI_ENABLED is OFF (subdir not built). Warn, don't error.
 if(NOT NT_DEVAPI_ENABLED)

@@ -100,6 +100,9 @@ nt_result_t nt_devapi_init(void) {
 #ifdef NT_DEVAPI_GROUP_DISCOVERY
     nt_devapi_register_discovery();
 #endif
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+    nt_devapi_register_capture();
+#endif
 
     return NT_OK;
 }
