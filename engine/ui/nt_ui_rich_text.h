@@ -122,12 +122,9 @@ typedef struct {
 } nt_ui_rich_object_measure_t;
 
 typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_data);
-/* color is the ABSOLUTE resolved RGBA (run <color> + folded opacity + fx tint) -- the SAME color
- * the TEXT/IMAGE paths use. Modulate the custom draw by it so OBJECT honours opacity/<color>/fx.
- * x,y,w,h are LAYOUT (logical, Clay Y-down) px. world_mat4 maps a LAYOUT point -> world EXACTLY
- * like every other engine emit (the default 2D ctx bakes the screen Y-flip into it): multiply your
- * positions by it (emit_geometry world arg) or compose it on the LEFT of your model so the object
- * lands under the UI's transform incl. the Y-flip -- passing identity mirrors the object vertically. */
+/* color is the ABSOLUTE resolved RGBA (honours opacity/<color>/fx) -- modulate the draw by it.
+ * x,y,w,h are LAYOUT (Clay Y-down) px; apply world_mat4 (it bakes the screen Y-flip) to every
+ * position or compose it on the LEFT of your model -- passing identity Y-mirrors the object. */
 typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]);
 
 /* ---- Builder (code-first push/pop) ---- */
@@ -165,11 +162,9 @@ typedef struct {
 } nt_ui_rich_result_t;
 
 /* ---- Runtime markup parser (the SECOND authoring front) ---- */
-/* Parses `<tag>...</tag>` + self-closing `<img=region/>` by DRIVING the shared builder -- the
- * run-list is byte-identical to the equivalent builder calls (no second composition path).
- * Intrinsic tags: `<b>` `<i>` `<color=#hex>` `<scale=N>` `<font=name>` `<link=id>` `<img=.../>`;
- * names resolve via `tagset` (NULL when only intrinsic tags are used). Malformed markup asserts
- * (builder-validates); the scan is `len`-bounded so adversarial input can't OOB/loop. */
+/* Drives the shared builder -> the run-list is byte-identical to the equivalent builder calls.
+ * Names resolve via `tagset` (NULL when only intrinsic tags are used). The scan is `len`-bounded
+ * so adversarial input can't OOB/loop; malformed markup asserts (builder-validates). */
 void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *markup, size_t len);
 
 /* Convenience entry: parse the markup, then solve + emit it as a wrapped block (parse -> the
