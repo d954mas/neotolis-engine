@@ -11,6 +11,7 @@
  */
 
 #include <math.h>
+#include <stddef.h> /* NULL (nt_color_parse_hex) */
 #include <stdbool.h>
 #include <stdint.h>
 
