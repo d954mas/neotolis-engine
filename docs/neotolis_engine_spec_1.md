@@ -3157,12 +3157,15 @@ space-separated attribute tail after the region spec —
 and `valign` is one of `baseline|middle|top|bottom` (default `middle`); these
 mirror the builder `nt_ui_rich_image(ref, valign, oy, scale)` args, so a tagged
 markup `<img>` and the builder call produce a byte-identical run. A malformed
-attr (bad float, unknown key, unknown valign) asserts (fail-early). Only the **NAMED** resolves go through the
+attr (bad float, unknown key, unknown valign) is **logged once (`nt_log_warn_unique`) and skipped** —
+markup is untrusted localization DATA, so a bad value degrades gracefully (the rest renders) and never
+asserts; the code-first builder, being trusted game code, still asserts. Only the **NAMED** resolves go through the
 **tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
 `<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, stock effects
 only), an `<img=alias:region/>` atlas alias, and the self-closing
 `<obj=name/>` (a game-drawn WidgetSpan resolved like `<img=alias:region/>`) —
-passing one of these with a `NULL` tagset asserts. A tagset is therefore required only when the markup uses those named
+passing one of these with a `NULL` tagset (or an unresolved name) is **logged once and skipped** — the tag
+drops and the surrounding text still renders. A tagset is therefore required only when the markup uses those named
 forms; pure-intrinsic markup parses with a `NULL` tagset.
 
 ## 32.2 Design: flat run-list → solver → one FIXED block
@@ -3247,7 +3250,8 @@ sequences these emits is **§32.4b** (D-67-29).
   custom-fx table as game-supplied fns (a tuned effect carries an `effect_id >=
   NT_UI_RICH_FX_CUSTOM_BASE`). Markup `k=v` params apply to **stock effects only** —
   a `<fx=name>` resolving to a custom fn carries that fn's own `user_data`, so
-  passing `k=v` on a custom name fails-early (D-67-27). This **revises** the original
+  passing `k=v` on a custom name is **logged once (`nt_log_warn_unique`) and the params ignored** (D-67-27).
+  This **revises** the original
   #184/D-67 stance that per-effect tuning was compile-time constants and NOT tag
   params; the catalogue constants are now the defaults.
 - **Stock + custom effect catalog (extensible).** A stock catalogue

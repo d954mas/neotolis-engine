@@ -27,9 +27,6 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
-/* NT_UI_RICH_DEFAULT_FONT_SIZE (the default for style.font_size, seeded by nt_ui_rich_style_defaults)
- * lives in the header now that the base size is a style field, not a hardcoded solver input. */
-
 /* Distinct z-order bands the self-emit walks (each adds a sprite+text flush boundary). A block with more
  * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
  * the per-layer scratch. */
@@ -2109,7 +2106,7 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     st->image_emit_count = 0; /* single reset point: rich_emit_images sums into this across all layer passes */
 
     rich_resolve_materials(st, frame->ctx);           /* style override, else ctx default (resolved in place) */
-    nt_text_renderer_set_material(st->text_material); /* resolved text material; emit_custom no longer pre-binds */
+    nt_text_renderer_set_material(st->text_material); /* resolved text material: style override or ctx default */
 
     /* Inline-image material is a BAND-INVARIANT: validate the RESOLVED material ONCE here, not per-band
      * (rich_emit_images runs up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> neither style nor ctx
@@ -2288,6 +2285,7 @@ void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_eleme
     nt_ui_rich_parse(ctx, tagset, style, markup, len); /* parse opens its own begin/end */
     nt_ui_rich_state_t *st = rich_state(ctx);
     st->image_material = style->image_material;
+    st->text_material = style->text_material; /* markup honors the style override too (else falls to ctx default) */
     st->time = time;
     rich_solve(ctx, st, id, container_w, align);
     rich_resolve_links(ctx, st, id);

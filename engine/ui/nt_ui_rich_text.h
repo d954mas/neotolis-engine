@@ -182,7 +182,8 @@ typedef struct {
 /* ---- Runtime markup parser (the SECOND authoring front) ---- */
 /* Drives the shared builder -> the run-list is byte-identical to the equivalent builder calls.
  * Names resolve via `tagset` (NULL when only intrinsic tags are used). The scan is `len`-bounded
- * so adversarial input can't OOB/loop; malformed markup asserts (builder-validates). */
+ * so adversarial input can't OOB/loop. Markup is untrusted localization DATA: a malformed tag/value
+ * logs once (nt_log_warn_unique) + skips, never asserts (the builder/front API still asserts). */
 void nt_ui_rich_parse(nt_ui_context_t *ctx, const nt_ui_rich_tagset_t *tagset, const nt_ui_rich_style_t *base, const char *markup, size_t len);
 
 /* Convenience entry: parse the markup, then solve + emit it as a wrapped block (parse -> the

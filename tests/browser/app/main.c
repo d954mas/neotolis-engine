@@ -302,7 +302,7 @@ static void frame(void) {
               .backgroundColor = {18.0F, 20.0F, 26.0F, 255.0F}}) {
             /* Surface 1: Cyrillic input field. */
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cyrillic (multi-byte UTF-8)", &s_caption);
-            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, NULL, &s_input_style,
+            (void)nt_ui_input_text(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_input_cyrillic, s_state.cyrillic, sizeof s_state.cyrillic, &(nt_ui_input_props_t){0}, &s_input_style,
                                    &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(320), CLAY_SIZING_FIXED(40)}}}, true, NULL);
 
             /* Surface 2: rich-text block with one clickable link. */
