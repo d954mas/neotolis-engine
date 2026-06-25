@@ -108,6 +108,10 @@ typedef struct {
 } nt_ui_rich_link_rect_t;
 
 typedef struct {
+    /* Resolved per-call caps (desc override or NT_UI_RICH_MAX_* default); bound the three scratch arrays. */
+    uint32_t max_runs;
+    uint32_t max_styles;
+    uint32_t max_text_bytes;
     /* Run list. */
     nt_ui_rich_run_t *runs;
     uint32_t run_count;
@@ -245,11 +249,11 @@ static uint16_t rich_intern_style(nt_ui_rich_state_t *st, const nt_ui_rich_style
             return (uint16_t)i;
         }
     }
-    NT_ASSERT(st->style_count < NT_UI_RICH_MAX_STYLES && "rich style table overflow");
+    NT_ASSERT(st->style_count < st->max_styles && "rich style table overflow");
     /* HARD cap (survives NT_ASSERT OFF): untrusted markup can mint many distinct composed styles;
      * once full, reuse the last slot rather than write past styles[] (a wrong tint beats an OOB). */
-    if (st->style_count >= NT_UI_RICH_MAX_STYLES) {
-        return (uint16_t)(NT_UI_RICH_MAX_STYLES - 1U);
+    if (st->style_count >= st->max_styles) {
+        return (uint16_t)(st->max_styles - 1U);
     }
     st->styles[st->style_count] = *s;
     return (uint16_t)(st->style_count++);
@@ -264,11 +268,11 @@ static bool rich_run_extends_text(const nt_ui_rich_state_t *st, uint16_t style_i
 }
 
 static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_t kind) {
-    NT_ASSERT(st->run_count < NT_UI_RICH_MAX_RUNS && "rich run-list overflow");
+    NT_ASSERT(st->run_count < st->max_runs && "rich run-list overflow");
     /* HARD cap (survives NT_ASSERT OFF): the parser appends one run per style change in untrusted
      * markup. Once full, overwrite the last slot rather than index past runs[] -- callers only
      * memset+fill the returned pointer, so the worst OFF outcome is a dropped run, never an OOB. */
-    const uint32_t idx = (st->run_count < NT_UI_RICH_MAX_RUNS) ? st->run_count++ : (NT_UI_RICH_MAX_RUNS - 1U);
+    const uint32_t idx = (st->run_count < st->max_runs) ? st->run_count++ : (st->max_runs - 1U);
     nt_ui_rich_run_t *r = &st->runs[idx];
     memset(r, 0, sizeof *r);
     r->kind = kind;
@@ -283,9 +287,17 @@ void nt_ui_rich_begin(nt_ui_context_t *ctx, const nt_ui_rich_style_t *base) {
 
     nt_ui_rich_state_t *st = NT_MEM_SCRATCH_ALLOC(nt_ui_rich_state_t);
     memset(st, 0, sizeof *st);
-    st->runs = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_run_t, NT_UI_RICH_MAX_RUNS);
-    st->styles = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_style_t, NT_UI_RICH_MAX_STYLES);
-    st->text = NT_MEM_SCRATCH_ALLOC_ARRAY(char, NT_UI_RICH_MAX_TEXT_BYTES);
+    /* Resolve per-block caps: desc value or the compile-time #define default (0 -> #define, always > 0). */
+    const uint32_t max_runs = ctx->rich_max_runs ? ctx->rich_max_runs : (uint32_t)NT_UI_RICH_MAX_RUNS;
+    const uint32_t max_styles = ctx->rich_max_styles ? ctx->rich_max_styles : (uint32_t)NT_UI_RICH_MAX_STYLES;
+    const uint32_t max_text_bytes = ctx->rich_max_text_bytes ? ctx->rich_max_text_bytes : (uint32_t)NT_UI_RICH_MAX_TEXT_BYTES;
+    NT_ASSERT(max_runs > 0U && max_styles > 0U && max_text_bytes > 0U && "nt_ui_rich_begin: resolved caps must be > 0");
+    st->max_runs = max_runs;
+    st->max_styles = max_styles;
+    st->max_text_bytes = max_text_bytes;
+    st->runs = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_run_t, max_runs);
+    st->styles = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_style_t, max_styles);
+    st->text = NT_MEM_SCRATCH_ALLOC_ARRAY(char, max_text_bytes);
     /* solved[]/links[] are sized to the actual content at solve time (content-proportional,
      * not the full glyph cap) -- keeps the per-call scratch footprint tiny for a label. */
 
@@ -455,11 +467,11 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
         return;
     }
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(st->text_len + len <= NT_UI_RICH_MAX_TEXT_BYTES && "rich text buffer overflow");
+    NT_ASSERT(st->text_len + len <= st->max_text_bytes && "rich text buffer overflow");
     /* HARD overflow guard (survives NT_ASSERT OFF + cannot wrap): on wasm32 size_t is 32-bit, so
      * `text_len + len` can wrap past the cap and bypass the assert. Subtraction-form bound: reject
      * any len past the cap, and any len that would not fit the remaining room, before the memcpy. */
-    if (len > (size_t)NT_UI_RICH_MAX_TEXT_BYTES || st->text_len > NT_UI_RICH_MAX_TEXT_BYTES - (uint32_t)len) {
+    if (len > (size_t)st->max_text_bytes || st->text_len > st->max_text_bytes - (uint32_t)len) {
         return;
     }
 
@@ -1174,11 +1186,11 @@ static uint32_t rich_utf8_complete_prefix(const char *buf, uint32_t n) {
 }
 
 /* Append one literal byte directly into the run-list text buffer (no intermediate stack copy).
- * Hitting the shared 4KB cap on long UNTRUSTED markup is graceful truncation, not a dev error: drop
- * the byte (no write past text[NT_UI_RICH_MAX_TEXT_BYTES]). rich_flush_text trims any partial trailing
+ * Hitting the shared text cap on long UNTRUSTED markup is graceful truncation, not a dev error: drop
+ * the byte (no write past text[st->max_text_bytes]). rich_flush_text trims any partial trailing
  * codepoint a cap-truncation may have left, so a severed multi-byte sequence never reaches the validator. */
 static void rich_parse_append_byte(nt_ui_rich_state_t *st, char b) {
-    if (st->text_len >= NT_UI_RICH_MAX_TEXT_BYTES) {
+    if (st->text_len >= st->max_text_bytes) {
         return;
     }
     st->text[st->text_len++] = b;

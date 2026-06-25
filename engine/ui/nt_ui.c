@@ -269,6 +269,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->state_pool = (nt_ui_state_cell_t *)((char *)arena + after_interactive);
     ctx->state_slots = state_slots;
     ctx->state_probe_max = state_probe_max;
+    /* Raw (0 = default); nt_ui_rich_begin resolves against NT_UI_RICH_MAX_* so no rich-header coupling here. */
+    ctx->rich_max_runs = desc->rich_max_runs;
+    ctx->rich_max_styles = desc->rich_max_styles;
+    ctx->rich_max_text_bytes = desc->rich_max_text_bytes;
     memset(ctx->state_pool, 0, sizeof(nt_ui_state_cell_t) * state_slots);
     const size_t after_state = after_interactive + state_pool_bytes;
 #if NT_UI_DEBUG_TOOLS

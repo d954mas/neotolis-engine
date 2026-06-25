@@ -243,6 +243,12 @@ typedef struct {
     uint32_t state_slots;
     /* Linear-probe window for the state pool; 1..state_slots. 0 = default NT_UI_STATE_PROBE_MAX. */
     uint32_t state_probe_max;
+    /* Per-rich-BLOCK frame-scratch caps; each 0 = compile-time NT_UI_RICH_MAX_* default. Rich blocks
+     * coexist (deferred Clay-walker emit) so the cost is per-block-cap x blocks-per-frame -- lower
+     * them for a memory-constrained / labels-only context. */
+    uint32_t rich_max_runs;
+    uint32_t rich_max_styles;
+    uint32_t rich_max_text_bytes;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
@@ -251,8 +257,11 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
         .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
-        .state_slots = 0U,     /* 0 = compile-time NT_UI_STATE_SLOTS default */
-        .state_probe_max = 0U, /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
+        .state_slots = 0U,         /* 0 = compile-time NT_UI_STATE_SLOTS default */
+        .state_probe_max = 0U,     /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
+        .rich_max_runs = 0U,       /* 0 = compile-time NT_UI_RICH_MAX_RUNS default */
+        .rich_max_styles = 0U,     /* 0 = compile-time NT_UI_RICH_MAX_STYLES default */
+        .rich_max_text_bytes = 0U, /* 0 = compile-time NT_UI_RICH_MAX_TEXT_BYTES default */
     };
 }
 

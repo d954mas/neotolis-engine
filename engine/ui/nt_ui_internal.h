@@ -237,6 +237,12 @@ struct nt_ui_context {
     uint32_t focus_tab_seek;
     uint32_t focus_first_id;
     uint32_t wheel_candidate_count;
+    /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
+     * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
+     * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
+    uint32_t rich_max_runs;
+    uint32_t rich_max_styles;
+    uint32_t rich_max_text_bytes;
     /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
     int16_t modal_zband_stride;
     uint16_t wheel_depth;
