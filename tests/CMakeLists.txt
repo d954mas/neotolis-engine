@@ -25,6 +25,10 @@ if(NOT EMSCRIPTEN)
     # --- Color math tests (header-only nt_color.h; no lib, just the engine include root) ---
     add_executable(test_nt_color unit/test_nt_color.c)
     target_link_libraries(test_nt_color PRIVATE unity)
+    # nt_color.h uses powf/cbrtf; standalone (no engine lib), so GNU ld needs libm explicitly (Windows has it in the CRT).
+    if(NOT WIN32)
+        target_link_libraries(test_nt_color PRIVATE m)
+    endif()
     target_include_directories(test_nt_color PRIVATE "${CMAKE_SOURCE_DIR}/engine")
     nt_set_warning_flags(test_nt_color)
     nt_set_sanitizer_flags(test_nt_color)
