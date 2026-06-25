@@ -2492,6 +2492,46 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     // #endregion
 
+    /* #region alignment (LEFT / CENTER / RIGHT) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "5) Alignment: the SAME line in three blocks of equal width (560px), aligned left / center / right -- the line shifts within the block.",
+                g_current->body);
+    {
+        /* Each block is container_w wide (explicit), so the solver offsets the line within it (rich_align_ox). */
+        const nt_ui_rich_style_t al_base = rich_base_style();
+        const char *al_l = "LEFT -- this line sits at the start.";
+        const char *al_c = "CENTER -- this line sits in the middle.";
+        const char *al_r = "RIGHT -- this line sits at the end.";
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_align_l"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &al_base, al_l, strlen(al_l), container_w, NT_RICH_ALIGN_LEFT, st->rich.time,
+                               NULL);
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_align_c"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &al_base, al_c, strlen(al_c), container_w, NT_RICH_ALIGN_CENTER, st->rich.time,
+                               NULL);
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_align_r"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &al_base, al_r, strlen(al_r), container_w, NT_RICH_ALIGN_RIGHT, st->rich.time,
+                               NULL);
+    }
+    // #endregion
+
+    /* #region valign (PER-IMAGE vertical alignment against the line) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "5b) Vertical (valign), per-image: a TALL reference icon stretches the line, then the SAME small heart at baseline / middle / top / bottom sits at four distinct heights. (Equal icons "
+                "that dominate the line collapse the modes -- valign only matters when the line is taller than the image.)",
+                g_current->body);
+    {
+        const nt_ui_rich_style_t va_base = rich_base_style();
+        nt_ui_rich_begin(ctx, &va_base);
+        nt_ui_rich_image(ctx, s_rich_gold_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 3.0F); /* tall ref: makes line ascent+descent exceed the small hearts so their valigns separate */
+        RICH_TEXT_LIT(ctx, "  base ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BASELINE, 0.0F, 1.0F);
+        RICH_TEXT_LIT(ctx, "  mid ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        RICH_TEXT_LIT(ctx, "  top ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_TOP, 0.0F, 1.0F);
+        RICH_TEXT_LIT(ctx, "  bot ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BOTTOM, 0.0F, 1.0F);
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_valign"), NT_UI_DATA_LAYER(LAYER_TEXT), &va_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
+    }
+    // #endregion
+
     /* Two-pass, PER FRONT: each link's own prev-frame hover styles its own next frame, so the two
      * on-screen links react INDEPENDENTLY (hovering one no longer lights the other). */
     st->rich.hover_a = res_a.hovered_link;
