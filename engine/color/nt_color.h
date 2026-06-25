@@ -11,8 +11,8 @@
  */
 
 #include <math.h>
-#include <stddef.h> /* NULL (nt_color_parse_hex) */
 #include <stdbool.h>
+#include <stddef.h> /* NULL (nt_color_parse_hex) */
 #include <stdint.h>
 
 /* Saturate a [0,1] channel. */
