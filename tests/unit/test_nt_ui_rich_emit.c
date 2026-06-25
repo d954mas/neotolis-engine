@@ -325,8 +325,8 @@ static void test_emit_real_italic_face_no_oblique(void) {
     }
 }
 
-/* Build a block with SIX distinct font families on one band (one regular-face text run each), exceeding the
- * old fonts[4] gather cap. Each push_font swaps the whole family; default variant=regular picks font_id[0]. */
+/* Build a block with SIX distinct font families on one band (one regular-face text run each), more than
+ * any per-block font array could hold. Each push_font swaps the whole family; default variant=regular picks font_id[0]. */
 static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -449,7 +449,7 @@ static void test_inline_image_defaults_material_from_ctx(void) {
 
 /* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
  * <color> r=255 g=128 b=0 a=255 emits that per-vertex color on the region quad (the walker
- * packs the run tint into backgroundColor -> a_color, no float4 custom block anymore). */
+ * packs the run tint into backgroundColor -> a_color, not a float4 custom block). */
 static void test_inline_image_tint_packed(void) {
     const nt_material_t mat = make_rich_image_material();
     /* 0xAABBGGRR: r=255 g=128 b=0 a=255 -> orange, alpha 1. */
@@ -1726,7 +1726,7 @@ static void test_object_baseline_honours_ascent(void) {
      * text asc = 12.8, text desc = 3.2, text line height = 16. */
     const float text_asc = 800.0F / 1000.0F * FONT_SIZE_DEFAULT;  /* 12.8 */
     const float text_desc = 200.0F / 1000.0F * FONT_SIZE_DEFAULT; /* 3.2 */
-    /* The fix: line asc = max(text_asc, obj_ascent); line desc = max(text_desc, obj_h - obj_ascent). */
+    /* Expected line metrics: line asc = max(text_asc, obj_ascent); line desc = max(text_desc, obj_h - obj_ascent). */
     const float exp_asc = (text_asc > OBJ_ASC_ASCENT) ? text_asc : OBJ_ASC_ASCENT; /* 12.8 */
     const float exp_obj_desc = OBJ_ASC_H - OBJ_ASC_ASCENT;                         /* 6.0 */
     const float exp_desc = (text_desc > exp_obj_desc) ? text_desc : exp_obj_desc;  /* 6.0 */

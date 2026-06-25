@@ -28,7 +28,7 @@ alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
 /* ---- test log sink: count WARN lines + record the last message ----
- * Markup data errors now log-once-per-distinct-message (nt_log_warn_unique) instead of asserting.
+ * Markup data errors log-once-per-distinct-message via nt_log_warn_unique (they do not assert).
  * This sink counts every warn line the real nt_log fans out, so the dedup tests can assert "logged
  * exactly once" / "two distinct errors -> two lines". Registered per-test (add in arrange, remove in
  * the assert) so counts are local. nt_log_warn_unique dedups PROGRAM-WIDE + saturating, so the dedup

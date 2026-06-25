@@ -80,7 +80,6 @@ static bool parse_tail_n(const cJSON *jn, uint16_t *out, nt_devapi_error *err) {
     return nt_devapi_parse_u16_param_exact(jn, NT_LOG_RING_DEPTH, err, set_bad_params, "log.tail: n must be an integer in [0, NT_LOG_RING_DEPTH]", out);
 }
 
-/* Serialize one tail buffer into the entries array. */
 static void add_log_entries(cJSON *result, const nt_log_ring_entry_t *tail, uint16_t got) {
     cJSON *arr = cJSON_AddArrayToObject(result, "entries");
     NT_ASSERT(arr != NULL);
@@ -681,7 +680,6 @@ static bool resolve_pack_filter(const cJSON *params, bool *out_filter, uint16_t 
     return true;
 }
 
-/* Serialize one asset entry into the assets array. */
 static void add_asset_entry(cJSON *assets, const nt_resource_asset_info_t *ai) {
     cJSON *o = cJSON_CreateObject();
     NT_ASSERT(o != NULL);

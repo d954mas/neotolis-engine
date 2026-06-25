@@ -89,9 +89,8 @@ typedef struct {
     nt_oklab_t bd; /* current eased border colour */
 } input_fade_cell_t;
 
-/* Eased OKLab cell -> Clay_Color (0..255) via the packed gamut-clamp path, so the cross-fade
- * stays byte-identical to the pre-shared oklab_to_color. Skins are opaque; a translucent fade
- * would premultiply rgb by alpha around the lerp to avoid edge fringe. */
+/* Eased OKLab cell -> Clay_Color (0..255) via the packed gamut-clamp path. Skins are opaque; a
+ * translucent fade would premultiply rgb by alpha around the lerp to avoid edge fringe. */
 static inline Clay_Color oklab_to_clay(nt_oklab_t o) { return nt_ui_unpack_abgr(nt_color_oklab_to_packed(o)); }
 // #endregion
 
@@ -684,8 +683,7 @@ static const nt_ui_input_skin_t *resolve_skin(const nt_ui_input_style_t *style, 
 // #region input_text step helpers
 /* Shared per-frame working set threaded through the four step helpers below (focus_step/edit_step/
  * scroll_step/emit_field). Pointer-passed so the helpers stay static (inlined, one TU) without an
- * unwieldy parameter list. The const inputs (ctx/data/style/props/buffer...) plus the live state slot
- * `st` and the derived per-frame locals (font, line_h, cur_len, focused, in, bb, claimed_now). */
+ * unwieldy parameter list. */
 typedef struct {
     nt_ui_context_t *ctx;
     const nt_ui_element_data_t *data;
@@ -1217,7 +1215,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     NT_ASSERT(memchr(buffer, '\0', buffer_size) != NULL && "nt_ui_input_text: buffer must be NUL-terminated within buffer_size");
 
     /* Thin orchestrator over the four static step helpers (focus → edit → scroll → emit); the per-frame
-     * working set is threaded through the input_frame_t. ABI + semantics unchanged from the inline body. */
+     * working set is threaded through the input_frame_t. */
     input_frame_t f;
     memset(&f, 0, sizeof f); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
     f.ctx = ctx;

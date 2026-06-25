@@ -206,12 +206,9 @@ static void test_last_frame_snapshot(void) {
 
 /* ---- user counters: full-name hash keying via the REAL public path ---- */
 
-/* NT_METRICS_USER_NAME_MAX is 32, so the display name truncates to the first 31 chars. Two names
-   LONGER than 31 chars that differ WITHIN the first 31 must (a) truncate to DISTINCT displays and
-   (b) carry distinct full 64-bit hashes — so they land in two counters, each holding its own value.
-   This exercises the >31-char truncation path under hash keying; it would FAIL a buggy
-   strcmp-on-truncated-name impl only if the names collided after truncation (see the next test),
-   so the partner is the genuine truncation+display coverage. Driven through nt_metrics_count. */
+/* NT_METRICS_USER_NAME_MAX is 32, so displays truncate to 31 chars. Two >31-char names differing
+   within the first 31 must truncate to distinct displays AND carry distinct full 64-bit hashes,
+   so they land in two separate counters. Driven through nt_metrics_count. */
 static void test_user_counters_long_truncated_distinct(void) {
     /* 40 chars each, differ at index 4 (well inside the first 31) -> distinct 31-char displays. */
     const char *a = "physA_substep_accumulator_milliseconds_x";

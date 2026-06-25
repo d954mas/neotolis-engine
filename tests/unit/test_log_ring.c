@@ -228,8 +228,7 @@ static void test_truncation_marker_ascii(void) {
 }
 
 /* Multibyte overflow: a >512-byte line of repeated "é" (0xC3 0xA9) truncates mid-sequence; the stored
-   line must stay valid UTF-8 (no trailing continuation byte, no orphaned lead byte before the marker).
-   FAILS against the old continuation-only walk-back, PASSES after the lead-byte strip. */
+   line must stay valid UTF-8 (no trailing continuation byte, no orphaned lead byte before the marker). */
 static void test_truncation_marker_utf8_boundary(void) {
     /* 400 * 2 bytes = 800 bytes > 512: truncation point lands inside an "é" for at least one offset. */
     char big[1024];

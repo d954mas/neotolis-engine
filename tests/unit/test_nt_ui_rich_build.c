@@ -397,8 +397,8 @@ static void test_runtime_text_cap_respected(void) {
     TEST_ASSERT_EQUAL_UINT32(9U, nt_ui_rich_test_run_text_len(s_fx.ctx, 0));
 }
 
-/* desc rich_max_* == 0 behaves identically to before: a block near the #define default still builds.
- * Pins the "0 -> compile-time default" rule (byte-identical to the pre-feature path). */
+/* desc rich_max_* == 0 falls back to the compile-time #define caps; a block near the default still builds.
+ * Pins the "0 -> compile-time default" cap-resolution rule. */
 static void test_default_caps_when_desc_zero(void) {
     nt_ui_context_t *deflt = make_capped_ctx(0U, 0U, 0U); /* all 0 -> #defines */
     /* A run count well above any small custom cap but within the #define (256) builds cleanly. */
