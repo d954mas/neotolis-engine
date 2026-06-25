@@ -121,11 +121,9 @@ _Static_assert(sizeof(nt_ui_rich_style_t) == 48, "nt_ui_rich_style_t in-memory s
 #define NT_UI_RICH_LAYER_AUTO 255U /* style.layer default; resolves to TEXT=0/IMAGE=1/OBJECT=2 at atom build */
 #define NT_UI_RICH_LAYER_MAX 254U  /* highest explicit <layer=N> */
 
-/* Default for style.font_size: nt_ui_rich_style_defaults() seeds it here so the prior 16 px baseline
- * holds unless a caller overrides the field. <scale> multiplies it; absolute per-run <size=N> is deferred. */
-#ifndef NT_UI_RICH_DEFAULT_FONT_SIZE
+/* Default seeded into style.font_size by nt_ui_rich_style_defaults(); override at runtime via the field
+ * (no compile-time knob -- font_size is a per-call style field). <scale> multiplies it; <size=N> deferred. */
 #define NT_UI_RICH_DEFAULT_FONT_SIZE 16.0F
-#endif
 
 /* Use instead of bare {0} -- color_abgr=0 renders fully transparent. */
 nt_ui_rich_style_t nt_ui_rich_style_defaults(void);
