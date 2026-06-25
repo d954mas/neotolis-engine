@@ -2022,10 +2022,12 @@ static void test_default_layers_by_kind(void) {
     TEST_ASSERT_TRUE_MESSAGE(saw_text && saw_image && saw_object, "all three kinds present");
 }
 
-/* Within-band emit-order recorder: at object draw_fn time, capture how many inline images have already
- * emitted (image_emit_count). With the within-band order text->image->object, the object's draw_fn runs
- * AFTER the band's image emitted, so it observes image_emit_count == 1. */
+/* Within-band emit-order recorder: at object draw_fn time, capture (a) how many inline images have already
+ * emitted (image_emit_count) and (b) the sprite renderer's STAGED vertex count. With the within-band order
+ * text->image->object AND the flush-images-before-objects barrier, the object's draw_fn runs after the band's
+ * image emitted AND was drained -> image_emit_count == 1 and staged sprite count == 0 (image landed under it). */
 static uint32_t s_order_img_at_object_draw;
+static uint32_t s_order_sprite_staged_at_object_draw;
 static void order_recording_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
     (void)user_data;
     (void)x;
@@ -2035,6 +2037,7 @@ static void order_recording_draw(void *user_data, float x, float y, float w, flo
     (void)color;
     (void)world_mat4;
     s_order_img_at_object_draw = nt_ui_rich_test_image_emit_count(s_fx.ctx);
+    s_order_sprite_staged_at_object_draw = nt_sprite_renderer_test_vertex_count();
 }
 
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
@@ -2049,7 +2052,8 @@ static void test_layer_override(void) {
     base.image_material = make_rich_image_material();
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
-    s_order_img_at_object_draw = 0xFFFFFFFFU; /* sentinel: stays unset if the object never draws */
+    s_order_img_at_object_draw = 0xFFFFFFFFU;           /* sentinel: stays unset if the object never draws */
+    s_order_sprite_staged_at_object_draw = 0xFFFFFFFFU; /* sentinel: must become 0 (images drained) if the object draws */
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_lo_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -2076,6 +2080,9 @@ static void test_layer_override(void) {
      * object's draw_fn ran AFTER the band's image emitted (image-before-object). image_emit_count is 1 at
      * draw time (1 = the band's lone image already emitted; not the sentinel = the object did draw). */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_order_img_at_object_draw, "within band: image emits BEFORE object (object draw_fn sees image_emit_count == 1)");
+    /* And the band's image was FLUSHED before the object's opaque draw_fn, not left staged: the sprite
+     * staging is empty at draw time, so the image lands UNDER whatever the object draws (z barrier). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_order_sprite_staged_at_object_draw, "band images drained BEFORE the object draw_fn (staged sprite vertex count == 0)");
 }
 
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on

@@ -2126,16 +2126,18 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     const uint32_t layer_count = rich_gather_layers(st, layers);
     for (uint32_t li = 0; li < layer_count; li++) {
         const uint8_t L = layers[li];
-        /* Within ONE band, draw order is text BEHIND images BEHIND objects (matches the per-kind default
-         * text<image<object): drain text first so it lands under the band's sprites/objects. */
+        /* Within ONE band, kinds stack text < image < object: flush each batch BEFORE the next kind so it
+         * lands under it (painter-order). Mirrors emit_text's flush-sprites-before-text barrier -- an object
+         * draw_fn is opaque, so the band's images MUST be drained before it runs, not after. */
         rich_emit_text_layer(st, frame, box_x, box_y, L);
-        nt_text_renderer_flush(); /* text behind: land it before the band's sprites */
+        nt_text_renderer_flush(); /* text behind: land it before the band's images */
         if (emit_images) {
             rich_emit_images(st, frame, box_x, box_y, L);
         }
+        nt_sprite_renderer_flush(); /* images behind: drain them BEFORE the objects' opaque draw_fns */
         rich_emit_objects(st, frame, box_x, box_y, L);
-        nt_sprite_renderer_flush(); /* DRAIN sprites: land this band before the next so layer order == z order */
-        nt_text_renderer_flush();   /* cheap safety drain in case an object draw_fn emitted text; no-op otherwise */
+        nt_sprite_renderer_flush(); /* safety drain: an object draw_fn that emitted UI sprites; no-op otherwise */
+        nt_text_renderer_flush();   /* safety drain: an object draw_fn that emitted text; no-op otherwise */
     }
 }
 // #endregion
