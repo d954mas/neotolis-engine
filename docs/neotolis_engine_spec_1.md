@@ -3178,6 +3178,12 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   `CLAY_SIZING_FIXED` Clay element (D-67-03); text emits during that element's
   custom-walk via `NT_UI_CUSTOM_TYPE_RICH_TEXT`. Keeping text under one measured
   block is what lets the whole paragraph wrap and align as a unit.
+- **Base font size is a STYLE FIELD.** `nt_ui_rich_style_t.font_size` (px, > 0)
+  mirrors `nt_ui_label_style_t.font_size` — the base size lives in the style, not a
+  per-call param. `nt_ui_rich_style_defaults()` seeds it from
+  `NT_UI_RICH_DEFAULT_FONT_SIZE` (16). Per-run `<scale>` *multiplies* it (the relative
+  model is unchanged): `size = style.font_size × composed scale`. Per-run **absolute**
+  `<size=N>` stays deferred (D-67-30).
 
 ## 32.3 Inline images ride the standard u8 sprite path
 
@@ -3394,3 +3400,13 @@ points; flagged here so code and spec do not silently drift:
   font-group + image-coalesce DC wins stay *within* a band); they are spent only where
   explicit overlap z is wanted. Out-of-range/malformed `<layer>` asserts in DEBUG and hard-
   skips to AUTO under `NT_ASSERT` OFF (untrusted-markup hard-guard rule).
+- **D-67-30 — block base font size is a STYLE FIELD (label consistency).** `font_size`
+  is a field on `nt_ui_rich_style_t` (px, > 0, asserted in `nt_ui_rich_style_defaults()`),
+  mirroring `nt_ui_label_style_t.font_size` — the label keeps its base size IN its style,
+  and rich text now matches. The two public entries (`nt_ui_rich_text`,
+  `nt_ui_rich_text_markup`) take NO `font_size` param; the base size travels in the `style`
+  arg and the solver reads `style.font_size` per run. `<scale>` *multiplies* it (relative
+  model unchanged); per-run **absolute** `<size=N>` stays deferred. The field grows the
+  in-memory style struct to **56 B** (was 48) — it is never serialized (in-memory only), so
+  the `_Static_assert` tracks the new sizeof. `NT_UI_RICH_DEFAULT_FONT_SIZE` (16) is the
+  seeded default for the field (moved to the header so callers can reference it).

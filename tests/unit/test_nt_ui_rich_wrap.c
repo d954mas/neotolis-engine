@@ -360,8 +360,39 @@ static void test_break_anywhere_chunk_width_is_whole_measure(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(8U, consumed, "all 8 chars covered across chunks");
 }
 
+/* Build one text run "AAAA" off the defaults base (font_size seeded by nt_ui_rich_style_defaults). */
+static void build_single_text(const char *s, size_t len) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, s, len);
+    nt_ui_rich_end(s_fx.ctx);
+}
+
+/* font_size is now a STYLE FIELD (injected into the interned styles by the test-solve). Solving the
+ * SAME one-run content at size 8 vs 16 must scale the solved height and atom width exactly 2:1 --
+ * proving font_size flows from the style through the solver (advance = size/2/char is linear in size). */
+static void test_font_size_style_field_scales_solve(void) {
+    build_single_text("AAAA", 4);
+    nt_ui_rich_test_solve(s_fx.ctx, 10000.0F, 8.0F); /* wide: one line */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_line_count(s_fx.ctx));
+    const float h8 = nt_ui_rich_test_total_h(s_fx.ctx);
+    const float w8 = nt_ui_rich_test_atom(s_fx.ctx, 0).w;
+
+    build_single_text("AAAA", 4);
+    nt_ui_rich_test_solve(s_fx.ctx, 10000.0F, 16.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_line_count(s_fx.ctx));
+    const float h16 = nt_ui_rich_test_total_h(s_fx.ctx);
+    const float w16 = nt_ui_rich_test_atom(s_fx.ctx, 0).w;
+
+    TEST_ASSERT_TRUE_MESSAGE(h8 > 0.0F && w8 > 0.0F, "size 8 solves a positive height/width");
+    TEST_ASSERT_TRUE_MESSAGE(approx(h16, 2.0F * h8), "block height scales 2:1 with style.font_size (8 -> 16)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(w16, 2.0F * w8), "atom-0 width scales 2:1 with style.font_size (8 -> 16)");
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_font_size_style_field_scales_solve);
     RUN_TEST(test_mixed_run_advance_sums);
     RUN_TEST(test_icon_baseline_vs_middle_delta);
     RUN_TEST(test_forced_wrap_keeps_icon_on_line1);

@@ -27,11 +27,8 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
-/* Default px font size the public widget feeds the solver when a run carries no per-run
- * size (size lives in the style scale multiplier; absolute <size> is deferred). */
-#ifndef NT_UI_RICH_DEFAULT_FONT_SIZE
-#define NT_UI_RICH_DEFAULT_FONT_SIZE 16.0F
-#endif
+/* NT_UI_RICH_DEFAULT_FONT_SIZE (the default for style.font_size, seeded by nt_ui_rich_style_defaults)
+ * lives in the header now that the base size is a style field, not a hardcoded solver input. */
 
 /* Distinct z-order bands the self-emit walks (each adds a sprite+text flush boundary). A block with more
  * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
@@ -175,6 +172,7 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
     memset(&s, 0, sizeof s);
     s.color_abgr = 0xFFFFFFFFU;
     s.scale = 1.0F;
+    s.font_size = NT_UI_RICH_DEFAULT_FONT_SIZE; /* base px; <scale> multiplies it. Mirrors nt_ui_label_style_t.font_size. */
     s.variant = 0;
     s.effect_id = 0;
     s.layer = (uint8_t)NT_UI_RICH_LAYER_AUTO; /* per-kind default until an explicit <layer=N> */
@@ -231,7 +229,8 @@ static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_
 
 /* Member-wise equality: scale is float; object-rep compare is UB. */
 static bool rich_style_eq(const nt_ui_rich_style_t *a, const nt_ui_rich_style_t *b) {
-    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer || a->image_material.id != b->image_material.id) {
+    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->font_size != b->font_size || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer ||
+        a->image_material.id != b->image_material.id) {
         return false;
     }
     for (uint32_t i = 0; i < 4U; i++) {
@@ -1461,12 +1460,12 @@ static void rich_break_anywhere(rich_atom_t *out, uint32_t *n, uint32_t cap, con
 /* Build the atom stream from the run-list. TEXT runs split into word atoms; an over-long
  * word break-anywhere-splits against container_w; IMAGE atoms are one unbreakable box. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- word-split + overflow policy
-static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float font_size, float container_w, rich_atom_t *out, uint32_t cap) {
+static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich_atom_t *out, uint32_t cap) {
     uint32_t n = 0;
     for (uint32_t ri = 0; ri < st->run_count; ri++) {
         const nt_ui_rich_run_t *run = &st->runs[ri];
         const nt_ui_rich_style_t *style = &st->styles[run->style_idx];
-        const float size = font_size * style->scale;
+        const float size = style->font_size * style->scale; /* base size lives in the run's interned style */
 
         if (run->kind == NT_RICH_ATOM_TEXT) {
             bool synth = false;
@@ -1688,7 +1687,7 @@ static float rich_resolve_width(nt_ui_context_t *ctx, uint32_t id, float contain
 /* The full solve: width resolve -> atom build -> greedy wrap -> per-line baseline + align.
  * Writes st->solved[], st->line_count, st->links[], st->total_w/h. NO heap (scratch atoms). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- two-pass solve, regioned
-static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, float container_w, float font_size, nt_rich_align_t align) {
+static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id, float container_w, nt_rich_align_t align) {
     const float box_w = rich_resolve_width(ctx, id, container_w);
 
     /* Content-proportional upper bound: break-anywhere splits to at most one atom per text
@@ -1700,7 +1699,7 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
     rich_atom_t *atoms = NT_MEM_SCRATCH_ALLOC_ARRAY(rich_atom_t, atom_cap);
     st->solved = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_solved_atom_t, atom_cap);
     st->links = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_ui_rich_link_rect_t, NT_UI_RICH_MAX_LINKS);
-    const uint32_t na = rich_build_atoms(st, font_size, box_w, atoms, atom_cap);
+    const uint32_t na = rich_build_atoms(st, box_w, atoms, atom_cap);
     st->line_count = rich_break_lines(atoms, na, box_w);
 
     st->solved_count = 0;
@@ -2245,7 +2244,7 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
     nt_ui_rich_state_t *st = rich_state(ctx);
     st->image_material = style->image_material;
     st->time = time; /* game-owned animation clock; no global frame clock */
-    rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
+    rich_solve(ctx, st, id, container_w, align);
     rich_resolve_links(ctx, st, id); /* hover gates effects -> must precede emit */
     rich_declare_fixed_block(st, id, data);
     if (out != NULL) {
@@ -2269,7 +2268,7 @@ void nt_ui_rich_text_markup(nt_ui_context_t *ctx, uint32_t id, const nt_ui_eleme
     nt_ui_rich_state_t *st = rich_state(ctx);
     st->image_material = style->image_material;
     st->time = time;
-    rich_solve(ctx, st, id, container_w, NT_UI_RICH_DEFAULT_FONT_SIZE, align);
+    rich_solve(ctx, st, id, container_w, align);
     rich_resolve_links(ctx, st, id);
     rich_declare_fixed_block(st, id, data);
     if (out != NULL) {
@@ -2349,9 +2348,25 @@ nt_rich_valign_t nt_ui_rich_test_run_image_valign(nt_ui_context_t *ctx, uint32_t
     return st->runs[run].image_valign;
 }
 
-void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size) { rich_solve(ctx, rich_state(ctx), 0U, container_w, font_size, NT_RICH_ALIGN_LEFT); }
+/* font_size is now a style field; inject it into the interned run styles (what the solver reads) so the
+ * test entries can keep driving size by argument without a per-call solver param. */
+static void rich_test_apply_font_size(nt_ui_rich_state_t *st, float font_size) {
+    for (uint32_t i = 0; i < st->style_count; i++) {
+        st->styles[i].font_size = font_size;
+    }
+}
 
-void nt_ui_rich_test_solve_ex(nt_ui_context_t *ctx, uint32_t id, float container_w, float font_size, nt_rich_align_t align) { rich_solve(ctx, rich_state(ctx), id, container_w, font_size, align); }
+void nt_ui_rich_test_solve(nt_ui_context_t *ctx, float container_w, float font_size) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_test_apply_font_size(st, font_size);
+    rich_solve(ctx, st, 0U, container_w, NT_RICH_ALIGN_LEFT);
+}
+
+void nt_ui_rich_test_solve_ex(nt_ui_context_t *ctx, uint32_t id, float container_w, float font_size, nt_rich_align_t align) {
+    nt_ui_rich_state_t *st = rich_state(ctx);
+    rich_test_apply_font_size(st, font_size);
+    rich_solve(ctx, st, id, container_w, align);
+}
 
 uint32_t nt_ui_rich_test_line_count(nt_ui_context_t *ctx) { return rich_state(ctx)->line_count; }
 uint32_t nt_ui_rich_test_atom_count(nt_ui_context_t *ctx) { return rich_state(ctx)->solved_count; }
