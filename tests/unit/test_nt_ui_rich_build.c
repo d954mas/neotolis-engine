@@ -305,6 +305,125 @@ static void test_markup_img_alias(void) {
     TEST_ASSERT_EQUAL_HEX64(gold, parser.img_hash[0]);
 }
 
+/* ---- Per-context runtime rich caps (desc override; 0 = compile-time #define) ---- */
+/* A second ctx on its own arena with a SMALL rich cap. The fixture already init'd every module +
+ * the scratch; the rich caps size frame-scratch, not this arena, so a default-size arena is fine. */
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_small_arena[NT_UI_TEST_ARENA_SIZE];
+
+static nt_ui_context_t *make_capped_ctx(uint32_t runs, uint32_t styles, uint32_t text_bytes) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.rich_max_runs = runs;
+    desc.rich_max_styles = styles;
+    desc.rich_max_text_bytes = text_bytes;
+    nt_ui_context_t *ctx = nt_ui_create_context(s_small_arena, sizeof s_small_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+    ctx->pending_rich = NULL;
+    ctx->rich_session_open = false;
+    return ctx;
+}
+
+/* Emit n distinct-style TEXT runs (each a new color -> no dedup merge). */
+static void emit_distinct_runs(nt_ui_context_t *ctx, uint32_t n) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_begin(ctx, &base);
+    for (uint32_t i = 0; i < n; i++) {
+        nt_ui_rich_push_color(ctx, 0xFF000000U | (i + 1U)); /* distinct composed style each time */
+        nt_ui_rich_text_n(ctx, "x", 1);
+        nt_ui_rich_pop(ctx);
+    }
+    nt_ui_rich_end(ctx);
+}
+
+/* The RUNTIME run cap (not the #define) bounds the builder: a small-cap ctx asserts when built past
+ * its cap, while the DEFAULT ctx (desc 0) accepts a run count above that small cap. */
+static void test_runtime_run_cap_respected(void) {
+    nt_ui_context_t *small = make_capped_ctx(4U, 32U, 4096U);
+    /* At-cap builds fine (4 distinct runs into a cap-4 list). */
+    emit_distinct_runs(small, 4U);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_ui_rich_test_run_count(small));
+
+    /* One past the runtime cap trips the overflow guard -- pinned to the RUNTIME value (4), not the
+     * #define (256, which the default ctx would accept). */
+    small->pending_rich = NULL;
+    small->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT(emit_distinct_runs(small, 5U));
+
+    /* The trap longjmp'd mid-session; release the lock before reusing the ctx. */
+    small->pending_rich = NULL;
+    small->rich_session_open = false;
+    nt_ui_destroy_context(small);
+
+    /* The DEFAULT-cap fixture ctx (desc 0 -> #define 256) accepts the same 5 runs without asserting. */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    emit_distinct_runs(s_fx.ctx, 5U);
+    TEST_ASSERT_EQUAL_UINT32(5U, nt_ui_rich_test_run_count(s_fx.ctx));
+}
+
+/* The RUNTIME text-byte cap bounds the shared buffer: appending past the small cap asserts, while
+ * the same bytes fit the default-cap ctx. */
+static void test_runtime_text_cap_respected(void) {
+    nt_ui_context_t *small = make_capped_ctx(256U, 32U, 8U);
+    /* 8 bytes fit exactly. */
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    nt_ui_rich_begin(small, &base);
+    nt_ui_rich_text_n(small, "12345678", 8);
+    nt_ui_rich_end(small);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(small));
+
+    /* 9 bytes overflow the runtime cap (8) -> assert. The #define (4096) would accept it. */
+    small->pending_rich = NULL;
+    small->rich_session_open = false;
+    nt_mem_scratch_reset(); /* fresh scratch for the new begin's arrays */
+    small->pending_rich = NULL;
+    small->rich_session_open = false;
+    NT_TEST_EXPECT_ASSERT({
+        nt_ui_rich_begin(small, &base);
+        nt_ui_rich_text_n(small, "123456789", 9);
+    });
+
+    small->pending_rich = NULL;
+    small->rich_session_open = false;
+    nt_ui_destroy_context(small);
+
+    /* Default-cap ctx accepts the 9 bytes. */
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "123456789", 9);
+    nt_ui_rich_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(9U, nt_ui_rich_test_run_text_len(s_fx.ctx, 0));
+}
+
+/* desc rich_max_* == 0 behaves identically to before: a block near the #define default still builds.
+ * Pins the "0 -> compile-time default" rule (byte-identical to the pre-feature path). */
+static void test_default_caps_when_desc_zero(void) {
+    nt_ui_context_t *deflt = make_capped_ctx(0U, 0U, 0U); /* all 0 -> #defines */
+    /* A run count well above any small custom cap but within the #define (256) builds cleanly. */
+    emit_distinct_runs(deflt, 32U);
+    TEST_ASSERT_EQUAL_UINT32(32U, nt_ui_rich_test_run_count(deflt));
+
+    /* A text block near the default 4096 cap fits. */
+    deflt->pending_rich = NULL;
+    deflt->rich_session_open = false;
+    nt_mem_scratch_reset();
+    deflt->pending_rich = NULL;
+    deflt->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    static char big[2000];
+    memset(big, 'a', sizeof big);
+    nt_ui_rich_begin(deflt, &base);
+    nt_ui_rich_text_n(deflt, big, sizeof big);
+    nt_ui_rich_end(deflt);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)sizeof big, nt_ui_rich_test_run_text_len(deflt, 0));
+
+    deflt->pending_rich = NULL;
+    deflt->rich_session_open = false;
+    nt_ui_destroy_context(deflt);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scale_multiplies);
@@ -315,5 +434,8 @@ int main(void) {
     RUN_TEST(test_markup_equals_builder_core);
     RUN_TEST(test_markup_equals_builder_full);
     RUN_TEST(test_markup_img_alias);
+    RUN_TEST(test_runtime_run_cap_respected);
+    RUN_TEST(test_runtime_text_cap_respected);
+    RUN_TEST(test_default_caps_when_desc_zero);
     return UNITY_END();
 }
