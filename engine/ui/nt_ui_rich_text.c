@@ -45,8 +45,11 @@
  * stale after the next nt_mem_scratch_reset. A run only starts when the COMPOSED
  * style differs from the current run (dedup against the style table). */
 
-#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap (parser) */
-/* +1 over the parser tag cap so a balanced push/pop chain at max nesting never pops the base style. */
+#ifndef NT_UI_RICH_PARSE_TAG_DEPTH
+#define NT_UI_RICH_PARSE_TAG_DEPTH 32 /* matched open-tag stack depth cap (parser); -D-overridable */
+#endif
+/* Derived, NOT independently overridable: +1 over the parser tag cap so a balanced push/pop chain at max
+ * nesting never pops the base style. Keeping it derived means a custom PARSE_TAG_DEPTH can't break the invariant. */
 #define NT_UI_RICH_STACK_DEPTH (NT_UI_RICH_PARSE_TAG_DEPTH + 1) /* push/pop nesting per call */
 
 typedef struct {
