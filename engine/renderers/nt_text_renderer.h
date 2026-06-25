@@ -50,6 +50,13 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
  * (kept across restore_gpu, cleared on cold init/shutdown). */
 void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
 
+/* Synthetic-oblique shear for faux-italic: subsequent draws lean in text-local space (x += shear*y about
+ * the baseline) so a family with no italic face can still slant. The shear is folded into the model on the
+ * CPU per vertex, so it costs no flush and mixes freely within one batch. 0 (default) = upright. Sticky like
+ * the depth bias (kept across restore_gpu, cleared on cold init/shutdown) — set it back to 0 when done so it
+ * does not leak onto unrelated text. */
+void nt_text_renderer_set_oblique(float shear);
+
 void nt_text_renderer_flush(void);
 
 // #region test_access
@@ -70,6 +77,7 @@ uint32_t nt_text_renderer_test_nonempty_flush_calls(void);
 const float *nt_text_renderer_test_last_model(void);
 uint32_t nt_text_renderer_test_draw_n_calls(void);
 float nt_text_renderer_test_glyph_depth_bias(void);
+float nt_text_renderer_test_oblique(void);
 /* Currently bound material id (0 = none) — lets tests prove a dispatch path bound a pipeline. */
 uint32_t nt_text_renderer_test_material_id(void);
 #endif

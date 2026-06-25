@@ -1846,25 +1846,23 @@ static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const n
 }
 
 /* Per-span model mat4 for draw_n: LAYOUT pen (ox,oy) -> world, with the text Y-up <-> Clay Y-down
- * flip on col1 (mirrors emit_text in nt_ui.c). `shear` folds synthetic-italic lean (k*col0) into col1. */
-static void rich_span_model(const float world[16], float ox, float oy, bool shear, float out[16]) {
+ * flip on col1 (mirrors emit_text in nt_ui.c). Synthetic-italic lean is applied by the text renderer
+ * (nt_text_renderer_set_oblique), not baked here -> faux-italic is ONE mechanism for every text caller. */
+static void rich_span_model(const float world[16], float ox, float oy, float out[16]) {
     const float sign_y = -1.0F;
-    const float k = shear ? 0.2F : 0.0F; /* synthetic-italic shear factor */
     for (int rr = 0; rr < 4; ++rr) {
-        const float col0 = world[rr];     /* text-local +x */
-        const float col1 = world[4 + rr]; /* text-local +y (pre Y-flip) */
-        out[rr] = col0;
-        out[4 + rr] = (sign_y * col1) + (k * col0); /* Y-flip + shear lean */
+        out[rr] = world[rr];
+        out[4 + rr] = sign_y * world[4 + rr]; /* Y-flip */
         out[8 + rr] = world[8 + rr];
         out[12 + rr] = (ox * world[rr]) + (oy * world[4 + rr]) + world[12 + rr];
     }
 }
 
 /* Emit one TEXT atom WITHOUT an effect: one span per atom (batch-friendly). */
-static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
+static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
     const float baseline_y = box_y + s->y + s->asc; /* solved y is glyph-box top */
     float model[16];
-    rich_span_model(frame->world_mat4, box_x + s->x, baseline_y, shear, model);
+    rich_span_model(frame->world_mat4, box_x + s->x, baseline_y, model);
     float color[4];
     rich_unpack_color(s->color, frame->opacity, color);
     nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, color, 0.0F, 0.0F);
@@ -1874,7 +1872,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
 /* Emit one effected TEXT atom: per-glyph draw_n (curve phase-shifts per glyph), VISUAL-ONLY.
  * Per-glyph pen uses cumulative-prefix measures so sum(advances)==measure(whole) (keeps kerning;
  * stays in the reserved box). O(N^2) but N is one word/line-chunk, so tiny. */
-static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, bool shear) {
+static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
     float base_color[4];
     rich_unpack_color(s->color, frame->opacity, base_color);
     const uint32_t a0 = s->text_off; /* atom byte start: prefix measures are relative to it (kerning chain) */
@@ -1907,7 +1905,7 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
             const float scaled_x = cx - ((gw * 0.5F) * fx.scale);
             const float baseline_y = box_y + s->y + s->asc + fx.offset_y;
             float model[16];
-            rich_span_model(frame->world_mat4, box_x + scaled_x + fx.offset_x, baseline_y, shear, model);
+            rich_span_model(frame->world_mat4, box_x + scaled_x + fx.offset_x, baseline_y, model);
             nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, fx.color, 0.0F, 0.0F);
             st->emit_span_count++;
         }
@@ -2033,14 +2031,17 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
             if (e->kind != NT_RICH_ATOM_TEXT || e->text_len == 0U || e->layer != layer || e->font.id != s->font.id) {
                 continue; /* other kinds/layers/fonts -> their own pass */
             }
-            const bool shear = (e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U;
+            /* Faux-italic for a run whose family lacks an italic face: the renderer shears the model
+             * (per run, no flush). Non-italic runs set 0 so the lean never carries between runs. */
+            nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
             if (e->effect_id == 0U) {
-                rich_emit_text_plain(st, frame, e, box_x, box_y, shear);
+                rich_emit_text_plain(st, frame, e, box_x, box_y);
             } else {
-                rich_emit_text_effected(st, frame, e, box_x, box_y, shear);
+                rich_emit_text_effected(st, frame, e, box_x, box_y);
             }
         }
     }
+    nt_text_renderer_set_oblique(0.0F); /* leave upright: don't lean object-drawn text or the next walker element */
 }
 
 /* Gather the DISTINCT layers present across the solved atoms, insertion-sorted ascending, into out[].

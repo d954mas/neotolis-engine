@@ -43,6 +43,9 @@ static struct {
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
      * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
     float glyph_depth_bias;
+    /* Synthetic-oblique shear folded into the model in draw_n (faux-italic lean: x += oblique*y about the
+     * baseline). 0 = upright. Same logical-state lifetime as glyph_depth_bias. */
+    float oblique;
 
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
@@ -194,8 +197,8 @@ void nt_text_renderer_restore_gpu(void) {
         return;
     }
     /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
-     * glyph_depth_bias) is left untouched, so it survives by default — no save/restore list to forget
-     * when a field is added. */
+     * glyph_depth_bias, oblique) is left untouched, so it survives by default — no save/restore list to
+     * forget when a field is added. */
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
@@ -356,6 +359,19 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         return;
     }
 
+    /* Fold synthetic-oblique into the model once (constant for the whole call): col0/col1 of the already
+     * Y-flipped model ARE the text-local axes, so out.col1 += oblique*col0 leans x by oblique*y about the
+     * baseline — reproduces a caller-baked lean for ANY caller's matrix. */
+    const float *m = model;
+    float oblique_model[16];
+    if (s_text.oblique != 0.0F) {
+        memcpy(oblique_model, model, sizeof oblique_model);
+        for (int r = 0; r < 4; ++r) {
+            oblique_model[4 + r] += s_text.oblique * model[r];
+        }
+        m = oblique_model;
+    }
+
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -408,7 +424,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x, pen_y, color, band_count, glyph_bias);
+            emit_quad(g, m, scale, pen_x, pen_y, color, band_count, glyph_bias);
             glyph_bias += s_text.glyph_depth_bias;
         }
 
@@ -422,6 +438,12 @@ void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
     NT_ASSERT(s_text.initialized);
     NT_ASSERT(isfinite(bias_per_glyph) && "nt_text_renderer_set_glyph_depth_bias: bias must be finite");
     s_text.glyph_depth_bias = bias_per_glyph; /* signed: subtracted from NDC z in the VS */
+}
+
+void nt_text_renderer_set_oblique(float shear) {
+    NT_ASSERT(s_text.initialized);
+    NT_ASSERT(isfinite(shear) && "nt_text_renderer_set_oblique: shear must be finite");
+    s_text.oblique = shear; /* folded into the model in draw_n; no flush -- CPU-baked per vertex, mixes in a batch */
 }
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
@@ -509,6 +531,7 @@ uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_n
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
+float nt_text_renderer_test_oblique(void) { return s_text.oblique; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 #endif
 // #endregion

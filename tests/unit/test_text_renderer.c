@@ -510,6 +510,50 @@ void test_glyph_depth_bias_resets_on_reinit(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_glyph_depth_bias() == 0.0F);
 }
 
+/* ---- synthetic-oblique (faux-italic) ---- */
+
+/* set_oblique shears the model so a glyph's top edge shifts +x relative to its bottom (lean about the
+ * baseline). 0 = upright: top and bottom share x under the identity model. The test font 'A' spans
+ * em y -200..800 → ~33px tall at size 32, so oblique 0.5 leans the top ~16px. */
+void test_oblique_leans_glyph_top(void) {
+    nt_text_renderer_set_oblique(0.0F); /* explicit upright (init already zeroed it) */
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_glyph_count());
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    float bl_x = 0.0F; /* vertex 0 = BL */
+    float tl_x = 0.0F; /* vertex 3 = TL */
+    memcpy(&bl_x, v + 0, sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * 72U), sizeof(float));
+    TEST_ASSERT_TRUE(bl_x == tl_x); /* upright: no shear -> top and bottom share x exactly */
+
+    nt_text_renderer_flush();
+    nt_text_renderer_set_oblique(0.5F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.5F);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    v = (const uint8_t *)nt_text_renderer_test_vertices();
+    memcpy(&bl_x, v + 0, sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * 72U), sizeof(float));
+    TEST_ASSERT_TRUE_MESSAGE(tl_x > bl_x + 1.0F, "oblique leans the glyph top toward +x");
+
+    nt_text_renderer_set_oblique(0.0F); /* restore upright for test isolation */
+}
+
+/* Renderer state, not a file-static: survives a GPU context-loss restore like material/font/depth-bias. */
+void test_oblique_persists_across_restore(void) {
+    nt_text_renderer_set_oblique(0.25F); /* exactly representable, so == is safe */
+    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.25F);
+    nt_text_renderer_set_oblique(0.0F);
+}
+
+/* Cold shutdown/init clears it (test isolation; no lean leaks across renderer reinit). */
+void test_oblique_resets_on_reinit(void) {
+    nt_text_renderer_set_oblique(0.25F);
+    nt_text_renderer_shutdown();
+    nt_text_renderer_init();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -533,6 +577,9 @@ int main(void) {
     RUN_TEST(test_rich_atom_cap_below_text_staging_cap);
     RUN_TEST(test_glyph_depth_bias_persists_across_restore);
     RUN_TEST(test_glyph_depth_bias_resets_on_reinit);
+    RUN_TEST(test_oblique_leans_glyph_top);
+    RUN_TEST(test_oblique_persists_across_restore);
+    RUN_TEST(test_oblique_resets_on_reinit);
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();

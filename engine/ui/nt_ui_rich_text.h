@@ -79,7 +79,10 @@ _Static_assert(sizeof(nt_ui_rich_fx_params_t) == 8, "nt_ui_rich_fx_params_t stab
 #define NT_UI_RICH_VARIANT_ITALIC (1U << 1)
 
 /* Run flag bits. */
-#define NT_UI_RICH_RUN_SYNTH_ITALIC (1U << 0) /* italic requested but no italic family member -> shear at emit */
+#define NT_UI_RICH_RUN_SYNTH_ITALIC (1U << 0) /* italic requested but no italic family member -> faux-italic lean */
+
+/* Faux-italic lean fed to nt_text_renderer_set_oblique for a SYNTH_ITALIC run (text-local x += k*y). */
+#define NT_UI_RICH_SYNTH_ITALIC_SHEAR 0.2F
 
 /* Image vertical alignment against the line. */
 typedef enum {
