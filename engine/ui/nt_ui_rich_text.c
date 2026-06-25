@@ -13,6 +13,7 @@
 
 #include "atlas/nt_atlas.h" /* inline-image region resolve + inverse-ppu (immediate emit) */
 #include "clay.h"
+#include "color/nt_color.h" /* nt_color_unpack/pack/parse_hex: shared packed<->float color math */
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -1931,15 +1932,6 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
     }
 }
 
-/* Pack a normalized [0,1] RGBA float4 (text-renderer order) into 0xAABBGGRR for the u8 sprite tint. */
-static uint32_t rich_pack_tint(const float c[4]) {
-    const uint32_t r = (uint32_t)lrintf(nt_ui_clampf(c[0], 0.0F, 1.0F) * 255.0F);
-    const uint32_t g = (uint32_t)lrintf(nt_ui_clampf(c[1], 0.0F, 1.0F) * 255.0F);
-    const uint32_t b = (uint32_t)lrintf(nt_ui_clampf(c[2], 0.0F, 1.0F) * 255.0F);
-    const uint32_t a = (uint32_t)lrintf(nt_ui_clampf(c[3], 0.0F, 1.0F) * 255.0F);
-    return r | (g << 8) | (b << 16) | (a << 24);
-}
-
 /* Emit immediately via the sprite renderer so all inline images coalesce into one batch (set_material once).
  * The scroll scissor is GL-live during self-emit, so images clip to the panel automatically; fx.scale>1
  * over-draws like OBJECT atoms (acceptable). Opacity is folded into the tint here -- no walker fold in self-emit. */
@@ -1998,7 +1990,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
             nt_sprite_renderer_set_material(st->image_material); /* bind ONCE: all images coalesce into one batch */
             bound = true;
         }
-        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, rich_pack_tint(fx.color), 0U);
+        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U);
         st->image_emit_count++;
     }
 }
