@@ -5,6 +5,10 @@
 /* ---- EM_JS fetch with AbortController ---- */
 
 /* clang-format off */
+/* EM_JS_DEPS keeps these through Closure. malloc (linker-added, no leading _) is kept as a wasm
+ * export for wasmExports['malloc']; HEAPU8 is an always-present global (no dep). */
+EM_JS_DEPS(nt_http_web, "$UTF8ToString,malloc")
+
 EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_ptr), {
     var url = UTF8ToString(url_ptr);
 

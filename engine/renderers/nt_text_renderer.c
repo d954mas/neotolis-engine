@@ -43,6 +43,9 @@ static struct {
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
      * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
     float glyph_depth_bias;
+    /* Synthetic-oblique shear folded into the model in draw_n (faux-italic lean: x += oblique*y about the
+     * baseline). 0 = upright. Same logical-state lifetime as glyph_depth_bias. */
+    float oblique;
 
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
@@ -59,6 +62,12 @@ static struct {
      * matrix construction without needing a real font fixture. */
     float test_last_model[16];
     uint32_t test_draw_n_calls;
+    /* Largest oblique seen at a draw_n entry since the last counter reset. Lets emit tests pin the
+     * SYNTH_ITALIC -> set_oblique wiring end-to-end even with a glyph-less stub font (draw_n early-outs
+     * before emitting, but the lean value is still observed here). */
+    float test_max_oblique;
+    /* Counts flushes that issued a draw; empty no-op flushes excluded. */
+    uint32_t test_nonempty_flush_calls;
 #endif
 } s_text;
 
@@ -192,8 +201,8 @@ void nt_text_renderer_restore_gpu(void) {
         return;
     }
     /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
-     * glyph_depth_bias) is left untouched, so it survives by default — no save/restore list to forget
-     * when a field is added. */
+     * glyph_depth_bias, oblique) is left untouched, so it survives by default — no save/restore list to
+     * forget when a field is added. */
     destroy_gpu_resources();
     create_gpu_resources();
     s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
@@ -335,6 +344,9 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 #ifdef NT_TEST_ACCESS
     memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
     s_text.test_draw_n_calls++;
+    if (s_text.oblique > s_text.test_max_oblique) {
+        s_text.test_max_oblique = s_text.oblique; /* observe the lean even when the stub font emits nothing */
+    }
 #endif
     if (len == 0U || utf8 == NULL) {
         return;
@@ -352,6 +364,19 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     NT_ASSERT(slot != NULL);
     if (!slot) {
         return;
+    }
+
+    /* Fold synthetic-oblique into the model once (constant for the whole call): col0/col1 of the already
+     * Y-flipped model ARE the text-local axes, so out.col1 += oblique*col0 leans x by oblique*y about the
+     * baseline — reproduces a caller-baked lean for ANY caller's matrix. */
+    const float *m = model;
+    float oblique_model[16];
+    if (s_text.oblique != 0.0F) {
+        memcpy(oblique_model, model, sizeof oblique_model);
+        for (int r = 0; r < 4; ++r) {
+            oblique_model[4 + r] += s_text.oblique * model[r];
+        }
+        m = oblique_model;
     }
 
     uint32_t state = NT_UTF8_ACCEPT;
@@ -406,7 +431,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x, pen_y, color, band_count, glyph_bias);
+            emit_quad(g, m, scale, pen_x, pen_y, color, band_count, glyph_bias);
             glyph_bias += s_text.glyph_depth_bias;
         }
 
@@ -420,6 +445,12 @@ void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
     NT_ASSERT(s_text.initialized);
     NT_ASSERT(isfinite(bias_per_glyph) && "nt_text_renderer_set_glyph_depth_bias: bias must be finite");
     s_text.glyph_depth_bias = bias_per_glyph; /* signed: subtracted from NDC z in the VS */
+}
+
+void nt_text_renderer_set_oblique(float shear) {
+    NT_ASSERT(s_text.initialized);
+    NT_ASSERT(isfinite(shear) && "nt_text_renderer_set_oblique: shear must be finite");
+    s_text.oblique = shear; /* folded into the model in draw_n; no flush -- CPU-baked per vertex, mixes in a batch */
 }
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
@@ -479,6 +510,9 @@ void nt_text_renderer_flush(void) {
 
     /* Single draw call per flush */
     nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
+#ifdef NT_TEST_ACCESS
+    s_text.test_nonempty_flush_calls++;
+#endif
 
     /* Reset staging buffer */
     s_text.vertex_count = 0;
@@ -498,9 +532,15 @@ void nt_text_renderer_test_reset_call_counters(void) {
     s_text.test_set_material_calls = 0;
     s_text.test_set_font_calls = 0;
     s_text.test_draw_n_calls = 0;
+    s_text.test_max_oblique = 0.0F;
+    s_text.test_nonempty_flush_calls = 0;
 }
+uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_nonempty_flush_calls; }
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
+float nt_text_renderer_test_oblique(void) { return s_text.oblique; }
+float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }
+uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 #endif
 // #endregion

@@ -1120,16 +1120,6 @@ static Clay_Color cdv_config_color(uint8_t type) {
     }
 }
 
-/* Unpacks 0xAABBGGRR. */
-static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
-    Clay_Color c;
-    c.r = (float)(packed & 0xFFU);
-    c.g = (float)((packed >> 8) & 0xFFU);
-    c.b = (float)((packed >> 16) & 0xFFU);
-    c.a = (float)((packed >> 24) & 0xFFU);
-    return c;
-}
-
 /* CLAY_TEXT routes userData to TEXT; everything else routes to SHARED. */
 static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement *el) {
     (void)ctx;
@@ -1418,7 +1408,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                                       CLAY_TEXT_CONFIG({.textColor = config_color, .fontSize = font_sz, .userData = debug_text_data}));
                         }
                         if (wdef != NULL && wdef->name != NULL) {
-                            Clay_Color wbg = cdv_widget_color_from_packed(wdef->pill_color);
+                            Clay_Color wbg = nt_ui_unpack_abgr(wdef->pill_color);
                             CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}),
                                       CLAY_TEXT_CONFIG({.textColor = wbg, .fontSize = font_sz, .userData = debug_text_data}));
                         }

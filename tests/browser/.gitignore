@@ -1,0 +1,9 @@
+# Playwright run artifacts (browser binaries live in ~/.cache/ms-playwright, not here).
+/test-results/
+/playwright-report/
+/blob-report/
+/.cache/
+
+# Track THIS lockfile (root .gitignore ignores package-lock.json globally). CI runs `npm ci`
+# against it for a reproducible, supply-chain-pinned @playwright/test install (T-67-02-SC).
+!package-lock.json

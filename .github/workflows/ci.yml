@@ -494,6 +494,11 @@ jobs:
           bash scripts/check_no_real_impl_links.sh
           bash scripts/check_link_failure_loud.sh
 
+      # An EM_JS body using a JS runtime helper must self-declare EM_JS_DEPS, else Closure strips it in
+      # wasm-release (invisible to debug/native). Caught here at lint time, not at release runtime.
+      - name: Run EM_JS_DEPS guard
+        run: bash scripts/check_emjs_deps.sh
+
       # devapi + ui/obs groups ON so all devapi TUs (incl. nt_devapi_ui.c + nt_devapi_obs.c) are in compile_commands.json.
       # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
       # GROUP_UI / GROUP_OBS opt-in off) they would be linted with wrong flags or missing.
@@ -502,6 +507,75 @@ jobs:
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
+
+  browser-test:
+    name: Browser Smoke (input)
+    runs-on: ubuntu-latest
+    needs: wasm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create LFS file list
+        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
+
+      - uses: actions/cache@v4
+        with:
+          path: .git/lfs/objects
+          key: lfs-${{ hashFiles('.lfs-assets-id') }}
+
+      - name: Pull LFS files
+        run: git lfs pull
+
+      - name: Install native build deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
+
+      - name: Read emsdk version
+        id: emsdk-version
+        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ steps.emsdk-version.outputs.version }}
+          actions-cache-folder: 'emsdk-cache'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The browser_smoke test app reuses the ui_showcase pack (same assets), but the pack is not a CI
+      # artifact, so produce it here: build the native pack builder, run it to emit ui_showcase.ntpack,
+      # THEN configure+build the wasm browser_smoke target (its CMake copies the pack into assets/).
+      # The pack must exist before the wasm configure so the copy custom-command is set up.
+      - name: Configure native debug
+        run: cmake --preset native-debug
+
+      - name: Build + run ui_showcase pack builder
+        run: |
+          cmake --build --preset native-debug --target build_ui_showcase_packs
+          ./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase
+
+      - name: Build browser_smoke wasm (debug)
+        run: |
+          emcmake cmake --preset wasm-debug
+          cmake --build --preset wasm-debug --target browser_smoke
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/browser/package-lock.json') }}
+
+      - name: Install Playwright (pinned via lockfile) + Chromium
+        run: |
+          cd tests/browser
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run browser smoke test
+        run: cd tests/browser && npx playwright test
 
   deploy:
     name: Deploy

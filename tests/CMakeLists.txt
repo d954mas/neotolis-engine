@@ -22,6 +22,21 @@ if(NOT EMSCRIPTEN)
         endif()
     endforeach()
 
+    # --- Color math tests (header-only nt_color.h; no lib, just the engine include root) ---
+    add_executable(test_nt_color unit/test_nt_color.c)
+    target_link_libraries(test_nt_color PRIVATE unity)
+    # nt_color.h uses powf/cbrtf; standalone (no engine lib), so GNU ld needs libm explicitly (Windows has it in the CRT).
+    if(NOT WIN32)
+        target_link_libraries(test_nt_color PRIVATE m)
+    endif()
+    target_include_directories(test_nt_color PRIVATE "${CMAKE_SOURCE_DIR}/engine")
+    nt_set_warning_flags(test_nt_color)
+    nt_set_sanitizer_flags(test_nt_color)
+    set_target_properties(test_nt_color PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_nt_color COMMAND test_nt_color)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 
@@ -812,6 +827,9 @@ if(NOT EMSCRIPTEN)
         test_ui_tabbar
         test_ui_tooltip
         test_ui_radial
+        test_nt_ui_rich_build
+        test_nt_ui_rich_wrap
+        test_nt_ui_rich_emit
     )
     # Inspector + hit-zone tests are always compiled; their bodies are guarded
     # by `#if NT_UI_DEBUG_TOOLS` internally so OFF builds compile to a stub
@@ -841,6 +859,20 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_nt_ui_stats PRIVATE ${_nt_ui_test_libs})
     target_compile_definitions(test_nt_ui_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_nt_ui_stats)
+
+    # The rich-text PARSER test installs a real log sink to prove malformed markup logs once per
+    # distinct message (nt_log_warn_unique dedup). It links the REAL nt_log impl instead of the no-op
+    # nt_log_stub the other ui tests use -- so nt_log_add_sink / nt_log_write_unique actually fan out.
+    # Provider (nt_log) trails its consumers; nt_hash/nt_core trail last (GNU-ld single-pass order).
+    string(REPLACE "nt_log_stub" "nt_log;nt_hash;nt_core" _nt_ui_rich_parse_libs "${_nt_ui_test_libs}")
+    add_executable(test_nt_ui_rich_parse
+        unit/test_nt_ui_rich_parse.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_rich_parse PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_rich_parse PRIVATE ${_nt_ui_rich_parse_libs})
+    target_compile_definitions(test_nt_ui_rich_parse PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_rich_parse)
 
 endif()
 

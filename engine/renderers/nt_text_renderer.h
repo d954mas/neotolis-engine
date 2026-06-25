@@ -50,6 +50,13 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
  * (kept across restore_gpu, cleared on cold init/shutdown). */
 void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph);
 
+/* Synthetic-oblique shear for faux-italic: subsequent draws lean in text-local space (x += shear*y about
+ * the baseline) so a family with no italic face can still slant. The shear is folded into the model on the
+ * CPU per vertex, so it costs no flush and mixes freely within one batch. 0 (default) = upright. Sticky like
+ * the depth bias (kept across restore_gpu, cleared on cold init/shutdown) — set it back to 0 when done so it
+ * does not leak onto unrelated text. */
+void nt_text_renderer_set_oblique(float shear);
+
 void nt_text_renderer_flush(void);
 
 // #region test_access
@@ -63,11 +70,19 @@ bool nt_text_renderer_test_initialized(void);
 uint32_t nt_text_renderer_test_set_material_calls(void);
 uint32_t nt_text_renderer_test_set_font_calls(void);
 void nt_text_renderer_test_reset_call_counters(void);
+/* Flushes that issued a real draw (empty no-op flushes excluded). Reset by reset_call_counters. */
+uint32_t nt_text_renderer_test_nonempty_flush_calls(void);
 /* Last model matrix passed to draw_n (captured even when font is empty / units_per_em=0).
  * Lets tests pin nt_ui's emit_text mat4 construction without needing a real font. */
 const float *nt_text_renderer_test_last_model(void);
 uint32_t nt_text_renderer_test_draw_n_calls(void);
 float nt_text_renderer_test_glyph_depth_bias(void);
+float nt_text_renderer_test_oblique(void);
+/* Largest oblique observed at a draw_n entry since the last reset_call_counters — pins the
+ * SYNTH_ITALIC -> set_oblique wiring through the emit path (stub font emits no glyphs). */
+float nt_text_renderer_test_max_oblique(void);
+/* Currently bound material id (0 = none) — lets tests prove a dispatch path bound a pipeline. */
+uint32_t nt_text_renderer_test_material_id(void);
 #endif
 // #endregion
 

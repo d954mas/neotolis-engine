@@ -778,6 +778,49 @@ static void test_radial_image_fill_emit(void) {
     TEST_ASSERT_TRUE(approx(out[1], start + (fill * sweep))); /* fill->angle */
 }
 
+/* Drive a radial_image nested under a parent CLAY carrying `opacity`, so the walker's accum_opacity
+ * reaches build_custom_block. Same shape as radial_image_walk but with an opacity-bearing wrapper. */
+static void radial_image_walk_under_opacity(nt_atlas_region_ref_t *ref, nt_ui_radial_image_style_t *style, float opacity) {
+    nt_ui_transform_t identity = nt_ui_transform_defaults();
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("ri_op_root"), .userData = (void *)NT_UI_DATA_XFORM(0U, &identity, opacity), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {
+        const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}};
+        nt_ui_radial_image(s_fx.ctx, NULL, ref, 0.25F, 1.75F, style, &decl);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (f) REGRESSION: parent opacity must NOT corrupt radial_image's a_tint.w (the TINT reveal strength,
+ * not alpha). Under a 0.5-opacity parent the reveal strength stays intact; the REAL alpha fades via
+ * color_packed -> a_color (~128). Mirrors the rich inline-image opacity fade, but radial opts OUT of
+ * the a_tint fold so its reveal-mix amount is preserved. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_radial_image_opacity_preserves_tint_strength(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_TINT);
+    style.tint_strength = 0.6F; /* defaults to 0.6, asserted below as the un-faded value */
+
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    radial_image_walk_under_opacity(&ref, &style, 0.5F);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    for (uint32_t v = 0; v < 4U; v++) {
+        float out[8] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        /* a_tint.w (float 7) = tint_strength: UNCHANGED by parent opacity (no fold for radial). */
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[7], 0.6F), "a_tint.w (tint_strength) UNCHANGED under 0.5 opacity");
+
+        /* The REAL alpha fades via color_packed -> a_color (0xFF default -> ~128 at 0.5). */
+        uint8_t col[4] = {0};
+        nt_sprite_renderer_test_last_emit_color(v, col);
+        TEST_ASSERT_TRUE_MESSAGE(col[3] >= 126 && col[3] <= 130, "a_color.a halved (~128) under 0.5 opacity");
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_route_a_custom_binds_radial_material);
@@ -799,5 +842,6 @@ int main(void) {
     RUN_TEST(test_radial_image_packed_region_bakes_uvrect);
     RUN_TEST(test_radial_image_style_abi);
     RUN_TEST(test_radial_image_fill_emit);
+    RUN_TEST(test_radial_image_opacity_preserves_tint_strength);
     return UNITY_END();
 }

@@ -11,6 +11,7 @@
  * the global input char ring (nt_input_buffer_char); physical keys via the
  * set_key/poll edge path. */
 
+#include <math.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -101,6 +102,18 @@ static const Clay_RenderCommand *find_first_image_cmd(const nt_ui_context_t *ctx
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+/* The field-root RECTANGLE render command (the full-field-width flat bg rect), or NULL. The caret and
+ * selection rects are narrow floats; the field bg is the one whose width matches IN_W. */
+static const Clay_RenderCommand *find_field_bg_rect(const nt_ui_context_t *ctx) {
+    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->boundingBox.width >= IN_W - 1.0F) {
             return c;
         }
     }
@@ -971,7 +984,7 @@ static void test_drag_abandoned_on_focus_loss(void) {
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 
     /* Still held, drag the pointer far right while UNFOCUSED. The abandoned drag must NOT move the caret
-     * (pre-fix it would: the held-drag branch was not gated on focus). */
+     * (the held-drag branch is gated on focus). */
     nt_pointer_t drag_far = make_pointer(IN_X + IN_W - PAD_X - 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&drag_far, id, buf, sizeof buf, true, NULL);
     uint32_t caret1 = 99U;
@@ -1041,8 +1054,7 @@ static void test_tab_skips_disabled_field(void) {
     three_field_frame(&rel, ia, a, ib, b, false, ic, c);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 
-    /* Tab: B is disabled, so the seek must skip it and land on C (pre-fix the disabled B ate the seek
-     * and focus vanished). */
+    /* Tab: B is disabled, so the seek must skip it and land on C. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_TAB, true);
     three_field_frame(&IDLE_PTR, ia, a, ib, b, false, ic, c);
@@ -1067,8 +1079,7 @@ static void test_scroll_responsive_width(void) {
     grow_field_frame(&rel, id, buf, sizeof buf);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 
-    /* Jump the caret to END: the long line must scroll right to keep the caret in view. With FIXED-only
-     * scroll (pre-fix) inner_w was 0 here and scroll_x stayed pinned at 0. */
+    /* Jump the caret to END: the long (GROW-width) line must scroll right to keep the caret in view. */
     nt_input_poll();
     nt_input_set_key(NT_KEY_END, true);
     grow_field_frame(&IDLE_PTR, id, buf, sizeof buf);
@@ -1105,6 +1116,284 @@ static void test_offscreen_clip_scissor_balanced(void) {
         }
     }
     TEST_ASSERT_EQUAL_INT_MESSAGE(ends, starts, "offscreen clip must emit balanced SCISSOR_START/END");
+}
+
+/* ---- Test 38: state_speed > 0 cross-fades the bg between skin states (mid-transition color sits
+ * strictly between the idle and focused bg for at least one frame); state_speed == 0 snaps instantly. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_eases_bg_color(void) {
+    char buf[8] = {0};
+    /* Idle bg = 0x20 grey, focused bg = 0x30 grey (defaults). A cross-fade lands strictly between. */
+    const float idle_r = (float)0x20;
+    const float focused_r = (float)0x30;
+
+    /* --- state_speed == 0 (default): focusing snaps the bg to the focused color the same frame. --- */
+    {
+        const uint32_t id = nt_ui_id("snap");
+        s_style.state_speed = 0.0F;
+        warmup_focus(id, buf, sizeof buf); /* leaves the field focused */
+        TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+        (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+        const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL_MESSAGE(rc, "field must emit a flat bg RECTANGLE");
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)focused_r, (int)rc->renderData.rectangle.backgroundColor.r, "state_speed==0 must snap bg to the focused skin");
+    }
+
+    /* --- state_speed > 0: the slot retains the idle color, so focusing eases toward focused; the first
+     * post-focus frame's bg is strictly between idle and focused. --- */
+    {
+        const uint32_t id = nt_ui_id("ease");
+        char eb[8] = {0};
+        s_style.state_speed = 10.0F; /* k = 10 * 0.016 = 0.16 per frame -> partial step, not a full snap */
+
+        /* Render unfocused frames so the cross-fade anim slot is created + settled at the idle bg. */
+        (void)field_frame(&IDLE_PTR, id, eb, sizeof eb, true, NULL);
+        (void)field_frame(&IDLE_PTR, id, eb, sizeof eb, true, NULL);
+        const Clay_RenderCommand *r_idle = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(r_idle);
+        /* OKLab round-trip (sRGB->linear->cbrt->back) is exact only to ~1 unit on a settled value. */
+        TEST_ASSERT_TRUE_MESSAGE(fabsf(r_idle->renderData.rectangle.backgroundColor.r - idle_r) <= 1.5F, "settled unfocused bg must be the idle skin color");
+
+        /* Press to focus: the slot now eases from idle toward focused. */
+        nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+        (void)field_frame(&press, id, eb, sizeof eb, true, NULL);
+        TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+        const Clay_RenderCommand *r_mid = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(r_mid);
+        const float mid_r = r_mid->renderData.rectangle.backgroundColor.r;
+        TEST_ASSERT_TRUE_MESSAGE(mid_r > idle_r && mid_r < focused_r, "state_speed>0 must cross-fade bg strictly between idle and focused for >=1 frame");
+    }
+
+    s_style.state_speed = 0.0F; /* restore the default for any later test sharing s_style */
+}
+
+/* Reference OKLab math (mirrors engine/ui/nt_ui_input.c) so the test can compute the EXPECTED
+ * perceptual interpolant independently of the engine and prove it != the naive sRGB midpoint.
+ * Per-term parens are omitted on the 3x3 matrix multiplies (matrix form is the readable shape here). */
+static float t_s2l(float c) { return (c <= 0.04045F) ? (c / 12.92F) : powf((c + 0.055F) / 1.055F, 2.4F); }
+static float t_l2s(float c) { return (c <= 0.0031308F) ? (c * 12.92F) : ((1.055F * powf(c, 1.0F / 2.4F)) - 0.055F); }
+static float t_clamp01(float c) {
+    if (c < 0.0F) {
+        return 0.0F;
+    }
+    return (c > 1.0F) ? 1.0F : c;
+}
+
+typedef struct {
+    float l, a, b;
+} t_oklab;
+
+// NOLINTBEGIN(readability-math-missing-parentheses)
+
+static t_oklab t_to_oklab(uint32_t packed) {
+    const float r = t_s2l((float)(packed & 0xFFU) / 255.0F);
+    const float g = t_s2l((float)((packed >> 8) & 0xFFU) / 255.0F);
+    const float b = t_s2l((float)((packed >> 16) & 0xFFU) / 255.0F);
+    const float lc = 0.4122214708F * r + 0.5363325363F * g + 0.0514459929F * b;
+    const float mc = 0.2119034982F * r + 0.6806995451F * g + 0.1073969566F * b;
+    const float sc = 0.0883024619F * r + 0.2817188376F * g + 0.6299787005F * b;
+    const float L = cbrtf(lc);
+    const float M = cbrtf(mc);
+    const float S = cbrtf(sc);
+    return (t_oklab){
+        .l = 0.2104542553F * L + 0.7936177850F * M - 0.0040720468F * S,
+        .a = 1.9779984951F * L - 2.4285922050F * M + 0.4505937099F * S,
+        .b = 0.0259040371F * L + 0.7827717662F * M - 0.8086757660F * S,
+    };
+}
+
+static void t_from_oklab(t_oklab o, float *R, float *G, float *B) {
+    const float l_ = o.l + 0.3963377774F * o.a + 0.2158037573F * o.b;
+    const float m_ = o.l - 0.1055613458F * o.a - 0.0638541728F * o.b;
+    const float s_ = o.l - 0.0894841775F * o.a - 1.2914855480F * o.b;
+    const float l = l_ * l_ * l_;
+    const float m = m_ * m_ * m_;
+    const float s = s_ * s_ * s_;
+    float r = 4.0767416621F * l - 3.3077115913F * m + 0.2309699292F * s;
+    float g = -1.2684380046F * l + 2.6097574011F * m - 0.3413193965F * s;
+    float b = -0.0041960863F * l - 0.7034186147F * m + 1.7076147010F * s;
+    *R = t_clamp01(t_l2s(r)) * 255.0F;
+    *G = t_clamp01(t_l2s(g)) * 255.0F;
+    *B = t_clamp01(t_l2s(b)) * 255.0F;
+}
+// NOLINTEND(readability-math-missing-parentheses)
+
+/* ---- The eased bg midpoint is the OKLab interpolation of from/to, NOT the naive sRGB midpoint. A
+ * single ease step with k = state_speed*frame_dt = 0.5 lands cur exactly halfway: from + (to-from)*0.5
+ * in OKLab. The from/to pair (saturated blue -> yellow) has OKLab-mid clearly off the sRGB-mid on every
+ * channel, so the rendered rect must match the OKLab-mid and differ from the sRGB-mid. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_oklab_midpoint(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("oklab_mid");
+    /* frame_dt is 0.016 (field_frame); state_speed*dt = 0.5 -> first eased frame == exact OKLab mid. */
+    s_style.state_speed = 0.5F / 0.016F;
+    const uint32_t from = 0xFFE04020U; /* saturated blue (0xAABBGGRR: r=0x20 g=0x40 b=0xE0) */
+    const uint32_t to = 0xFF20C0E0U;   /* saturated yellow (r=0xE0 g=0xC0 b=0x20) */
+    s_style.skin[NT_UI_INPUT_IDLE].bg_color = from;
+    s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = to;
+
+    /* Settle unfocused so the cell holds the idle (from) colour. */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+
+    /* Focus: the first eased frame steps cur from `from` toward `to` by k=0.5 -> exact OKLab midpoint. */
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(rc);
+    const Clay_Color got = rc->renderData.rectangle.backgroundColor;
+
+    /* Expected OKLab midpoint, computed independently. */
+    const t_oklab of = t_to_oklab(from);
+    const t_oklab ot = t_to_oklab(to);
+    const t_oklab mid = {(of.l + ot.l) * 0.5F, (of.a + ot.a) * 0.5F, (of.b + ot.b) * 0.5F};
+    float er = 0.0F;
+    float eg = 0.0F;
+    float eb = 0.0F;
+    t_from_oklab(mid, &er, &eg, &eb);
+    /* OKLab mid ~ (120.4, 143.8, 166.7) vs sRGB mid (128,128,128). The rendered rect matches OKLab. */
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.r - er) <= 1.5F, "eased bg.r matches the OKLab midpoint");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.g - eg) <= 1.5F, "eased bg.g matches the OKLab midpoint");
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.b - eb) <= 1.5F, "eased bg.b matches the OKLab midpoint");
+
+    /* And it is NOT the naive sRGB midpoint: blue channel differs by ~39 units (167 vs 128). */
+    const float srgb_mid_b = 128.0F;
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(got.b - srgb_mid_b) > 10.0F, "OKLab midpoint must differ from the naive sRGB midpoint (no muddy lerp)");
+
+    init_style(); /* restore the shared style for later tests */
+}
+
+/* ---- The colour-ease cell persists across frames: ONE cell is reused (state-pool occupancy does not
+ * grow per frame once warm) and the eased bg.r moves MONOTONICALLY toward the focused target, staying
+ * in [0,255] -- proving the cell retains its in-flight OKLab colour rather than re-snapping. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_state_speed_cell_reuse(void) {
+    char buf[8] = {0};
+    const uint32_t id = nt_ui_id("reuse");
+    s_style.state_speed = 4.0F; /* slow ease so several intermediate frames are observable */
+    /* Idle 0x20 grey -> focused 0xD0 grey: bg.r climbs from 32 toward 208. */
+    const float focused_r = (float)0xD0;
+    s_style.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFD0D0D0U;
+
+    /* Warm: two settled unfocused frames create the cell once. */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    const uint32_t slots_warm = nt_ui_state_used_slots(s_fx.ctx);
+
+    /* Focus, then ease over many frames. The cell must be REUSED each frame (occupancy flat), and the
+     * eased bg.r must be non-decreasing toward the focused target (monotone ease == persisted cell). */
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+
+    float prev_r = -1.0F;
+    for (int frame = 0; frame < 16; ++frame) {
+        (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+        const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
+        TEST_ASSERT_NOT_NULL(rc);
+        const float r = rc->renderData.rectangle.backgroundColor.r;
+        TEST_ASSERT_TRUE_MESSAGE(r >= 0.0F && r <= 255.0F, "eased bg.r stays in [0,255]");
+        TEST_ASSERT_TRUE_MESSAGE(r >= prev_r - 0.5F, "eased bg.r is monotone toward the focused target (cell persisted, not re-snapped)");
+        TEST_ASSERT_TRUE_MESSAGE(r <= focused_r + 0.5F, "eased bg.r never overshoots the focused target");
+        prev_r = r;
+    }
+
+    /* The whole focus-and-ease run reused ONE cell: state-pool occupancy did not grow per frame. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(slots_warm, nt_ui_state_used_slots(s_fx.ctx), "re-solving the field reuses one colour-ease cell (no per-frame cell leak / occupancy growth)");
+
+    init_style(); /* restore the shared style */
+}
+
+/* ---- edit_step inserts at a UTF-8 multibyte boundary; the caret lands ON a codepoint boundary
+ * (never mid-sequence). Insert 'X' between two Cyrillic codepoints and read the caret via the probe:
+ * it must be 3 (after 'А' + 'X'), a valid boundary, and the 4 surrounding bytes stay a valid UTF-8 run. ---- */
+static void test_edit_step_insert_caret_on_codepoint_boundary(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1"); /* "Аб" */
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END);        /* caret = 4 */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_ARROW_LEFT); /* caret = 2 (one codepoint left) */
+
+    nt_input_poll();                     /* clear the held ARROW_LEFT so its auto-repeat can't re-fire on the insert frame */
+    nt_input_buffer_char((uint32_t)'X'); /* splice 'X' between 'А' and 'б' */
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+
+    /* 'X' spliced between 'А' and 'б' -> the buffer is a valid UTF-8 run. */
+    TEST_ASSERT_EQUAL_STRING("\xD0\x90X\xD0\xB1", buf);
+
+    /* The caret sits AFTER the inserted single-byte 'X', i.e. byte 3 -- on a codepoint boundary. */
+    uint32_t caret = 99U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(3U, caret, "caret lands on the codepoint boundary after the inserted 'X'");
+
+    /* The byte at the caret is a valid lead (not a 10xxxxxx continuation): no mid-sequence split. */
+    TEST_ASSERT_NOT_EQUAL_UINT8_MESSAGE(0x80U, (uint8_t)buf[caret] & 0xC0U, "caret byte is not a UTF-8 continuation byte");
+}
+
+/* ---- edit_step backspace deletes ACROSS a whole multibyte char and leaves the caret on a
+ * codepoint boundary (the prev-boundary walk skips the continuation byte). After deleting 'б' the
+ * caret is 2 (the 'А' boundary), and the buffer is the single valid 2-byte 'А'. ---- */
+static void test_edit_step_backspace_across_multibyte_caret_boundary(void) {
+    char buf[32];
+    strcpy(buf, "\xD0\x90\xD0\xB1"); /* "Аб" */
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END); /* caret = 4 */
+
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE); /* delete 'б' (2 bytes) */
+
+    uint32_t caret = 99U;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, caret, "backspace across a 2-byte char lands the caret on the prev codepoint boundary");
+    TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(buf)); /* only 'А' remains */
+    TEST_ASSERT_EQUAL_UINT8(0xD0U, (uint8_t)buf[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x90U, (uint8_t)buf[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00U, (uint8_t)buf[2]);
+
+    /* A second backspace clears 'А' and the caret returns to 0. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_BACKSPACE);
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, &caret, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, caret, "caret at buffer start after the buffer empties");
+}
+
+/* ---- scroll_step caret-follow on a FIXED-width field. A line wider than the inner content box
+ * scrolls right when the caret jumps to END (caret near the right edge -> scroll_x > 0 so it stays
+ * visible), and scrolls back to 0 when the caret returns HOME (left edge in view again). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_scroll_step_caret_follow_fixed_width(void) {
+    char buf[64];
+    /* IN_W=240, pad_x=6 -> inner ~228px. 30 glyphs * 10px = 300px >> inner, so END must scroll. */
+    strcpy(buf, "abcdefghijklmnopqrstuvwxyz0123");
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+
+    /* HOME first: caret at 0, the left edge is visible, scroll pinned at 0. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+    float scroll_home = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_home));
+    /* scroll_x is clamped >= 0; HOME keeps the left edge in view so it sits at (effectively) 0. */
+    TEST_ASSERT_TRUE_MESSAGE(scroll_home >= 0.0F && scroll_home < 0.5F, "caret at HOME keeps scroll pinned at 0");
+
+    /* END: the caret is past the right edge of the inner box, so scroll_step slides the view right. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_END);
+    float scroll_end = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_end));
+    TEST_ASSERT_TRUE_MESSAGE(scroll_end > 0.0F, "caret at END scrolls the view so the caret stays visible");
+
+    /* The caret's right edge must sit within the inner content width (caret visible, not scissored). */
+    const float inner_w = IN_W - (PAD_X * 2.0F);
+    const float caret_px = (float)strlen(buf) * GLYPH_W; /* prefix width to the end caret */
+    const float caret_right_in_view = (caret_px + s_style.caret_width) - scroll_end;
+    TEST_ASSERT_TRUE_MESSAGE(caret_right_in_view <= inner_w + 0.5F, "the end caret's right edge stays within the inner content box");
+
+    /* Back HOME: the left edge re-enters view, scroll collapses to 0 again. */
+    (void)key_frame(id, buf, sizeof buf, NT_KEY_HOME);
+    float scroll_back = -1.0F;
+    TEST_ASSERT_TRUE(nt_ui_input_test_state(s_fx.ctx, id, NULL, NULL, &scroll_back));
+    TEST_ASSERT_TRUE_MESSAGE(scroll_back >= 0.0F && scroll_back < 0.5F, "returning HOME scrolls the view back to 0");
 }
 
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
@@ -1186,6 +1475,12 @@ int main(void) {
     RUN_TEST(test_tab_skips_disabled_field);
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
+    RUN_TEST(test_state_speed_eases_bg_color);
+    RUN_TEST(test_state_speed_oklab_midpoint);
+    RUN_TEST(test_state_speed_cell_reuse);
+    RUN_TEST(test_edit_step_insert_caret_on_codepoint_boundary);
+    RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
+    RUN_TEST(test_scroll_step_caret_follow_fixed_width);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

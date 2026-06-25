@@ -25,6 +25,13 @@
 #define HEADER_DIR "examples/ui_showcase/generated"
 #define FONT_PATH "examples/ui_showcase/raw/font.ttf"
 
+/* Rich-text family: DejaVu R/B/I/BI faces (real bold + oblique, full Cyrillic). The rich tab binds
+ * these to variant slots so <b>/<i> select a real face instead of synth-shear. */
+#define FONT_RICH_R_PATH "examples/ui_showcase/raw/font_dejavu_r.ttf"
+#define FONT_RICH_B_PATH "examples/ui_showcase/raw/font_dejavu_b.ttf"
+#define FONT_RICH_I_PATH "examples/ui_showcase/raw/font_dejavu_i.ttf"
+#define FONT_RICH_BI_PATH "examples/ui_showcase/raw/font_dejavu_bi.ttf"
+
 /* Demo-only Cyrillic block: the engine is codepoint-agnostic; the SHOWCASE bakes Latin +
  * Cyrillic so the Input tab's Cyrillic field renders real multi-byte UTF-8 glyphs, not tofu. */
 #define CHARSET_CYRILLIC "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя"
@@ -208,7 +215,32 @@ int main(int argc, char *argv[]) {
     icon_opts.name = "icon_bunny";
     nt_builder_atlas_add(ctx, "examples/ui_showcase/raw/icon_bunny.png", &icon_opts);
 
-    (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon\n", PANEL_BORDER, BUTTON_BORDER);
+    /* Rich-text inline icons (named regions for <img=name/> by-name resolve). Two 16x16 fully-opaque
+     * solid-color icons: "heart" (red) + "gold" (amber). Solid color so nothing trims; the rich demo
+     * tints them via <color> on the standard u8 sprite path. The atlas-wide padding/extrude (2/1)
+     * gives each a bleed border so the scaled inline icon never edge-bleeds its neighbour. */
+    enum { ICON_DIM = 16 };
+    static uint8_t icon_heart[ICON_DIM * ICON_DIM * 4];
+    static uint8_t icon_gold[ICON_DIM * ICON_DIM * 4];
+    for (int i = 0; i < ICON_DIM * ICON_DIM; ++i) {
+        uint8_t *h = &icon_heart[(size_t)i * 4U];
+        h[0] = 220;
+        h[1] = 40;
+        h[2] = 60;
+        h[3] = 255;
+        uint8_t *g = &icon_gold[(size_t)i * 4U];
+        g[0] = 250;
+        g[1] = 200;
+        g[2] = 60;
+        g[3] = 255;
+    }
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "heart";
+    nt_builder_atlas_add_raw(ctx, icon_heart, ICON_DIM, ICON_DIM, &opts);
+    opts.name = "gold";
+    nt_builder_atlas_add_raw(ctx, icon_gold, ICON_DIM, ICON_DIM, &opts);
+
+    (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon + heart/gold inline icons\n", PANEL_BORDER, BUTTON_BORDER);
 
     /* White pixel for UI rects (panel backgrounds, tab list). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
@@ -290,6 +322,13 @@ int main(int argc, char *argv[]) {
                             .resource_name = "ui_showcase/font",
                         });
     (void)printf("  Font (ASCII + Cyrillic) added: ui_showcase/font\n");
+
+    /* Rich-text family: four real faces, same small ASCII+Cyrillic subset, one per variant slot. */
+    nt_builder_add_font(ctx, FONT_RICH_R_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_r"});
+    nt_builder_add_font(ctx, FONT_RICH_B_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_b"});
+    nt_builder_add_font(ctx, FONT_RICH_I_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_i"});
+    nt_builder_add_font(ctx, FONT_RICH_BI_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII CHARSET_CYRILLIC, .resource_name = "ui_showcase/font_rich_bi"});
+    (void)printf("  Rich-text family (DejaVu R/B/I/BI) added: ui_showcase/font_rich_{r,b,i,bi}\n");
     // #endregion
 
     // #region finish + codegen

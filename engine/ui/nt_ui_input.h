@@ -61,6 +61,12 @@ typedef struct {
     float border_width;                               /* border thickness px (0 = no border); per-skin border_color sets the color */
     float pad_x;                                      /* horizontal inner padding px (text origin + clip bound) */
     float pad_y;                                      /* vertical padding px: UNUSED -- the line is auto-centered, vertical margin = (field_h - line_h)/2 */
+    /* bg/border cross-fade speed across skin states; 0 = instant snap. Eased in OKLab (perceptual --
+     * no muddy/dark midpoint); alpha eased linearly. A bg/border that appears or disappears between
+     * states cross-fades its alpha too (no snap-on-toggle). Skins are opaque, so alpha is exact; a
+     * translucent cross-fade would premultiply rgb by alpha to avoid edge fringe. Flat-color path only
+     * (a sprite bg snaps). */
+    float state_speed;
 } nt_ui_input_style_t;
 _Static_assert(sizeof(nt_ui_input_style_t) >= sizeof(nt_ui_input_skin_t) * NT_UI_INPUT_STATE_COUNT, "nt_ui_input_style_t holds the full skin array");
 

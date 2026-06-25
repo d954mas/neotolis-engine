@@ -25,9 +25,9 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include <stdio.h>
 #include <string.h>
 
+#include "color/nt_color.h"
 #include "core/nt_align.h"
 #include "core/nt_assert.h"
-#include "core/nt_clamp.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
@@ -269,6 +269,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->state_pool = (nt_ui_state_cell_t *)((char *)arena + after_interactive);
     ctx->state_slots = state_slots;
     ctx->state_probe_max = state_probe_max;
+    /* Raw (0 = default); nt_ui_rich_begin resolves against NT_UI_RICH_MAX_* so no rich-header coupling here. */
+    ctx->rich_max_runs = desc->rich_max_runs;
+    ctx->rich_max_styles = desc->rich_max_styles;
+    ctx->rich_max_text_bytes = desc->rich_max_text_bytes;
     memset(ctx->state_pool, 0, sizeof(nt_ui_state_cell_t) * state_slots);
     const size_t after_state = after_interactive + state_pool_bytes;
 #if NT_UI_DEBUG_TOOLS
@@ -493,6 +497,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     /* Reset so a button begin that asserted mid-flight can't wedge subsequent frames. */
     ctx->pending_button.active = false;
 
+    /* Same guard for rich-text: an unbalanced begin (no terminal text call) must not poison the
+     * next frame's no-nest assert, and pending_rich must not dangle into freed scratch next frame. */
+    ctx->pending_rich = NULL;
+    ctx->rich_session_open = false;
+
     /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
      * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
     if (ctx->use_raycast_input) {
@@ -590,13 +599,12 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region helpers_color_pack
-/* Clay's RGBA floats are 0..255 unclamped. */
+/* Clay's RGBA floats are 0..255 unclamped; scale to [0,1] and pack through the canonical
+ * nt_color (Clay-free) home. Byte-identical to the prior nt_clamp_f_to_u8 path: the c/255*255
+ * round-trip + round-to-nearest reproduces the same byte for every Clay float. */
 static inline uint32_t nt_color_pack_clay(Clay_Color c) {
-    uint32_t r = nt_clamp_f_to_u8(c.r);
-    uint32_t g = nt_clamp_f_to_u8(c.g);
-    uint32_t b = nt_clamp_f_to_u8(c.b);
-    uint32_t a = nt_clamp_f_to_u8(c.a);
-    return r | (g << 8) | (b << 16) | (a << 24);
+    const float rgba[4] = {c.r / 255.0F, c.g / 255.0F, c.b / 255.0F, c.a / 255.0F};
+    return nt_color_pack(rgba);
 }
 // #endregion
 
@@ -1217,8 +1225,9 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out
 }
 
 /* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
- * by attr_map offset (attr_map = single source of truth, no magic slots). Returns
- * float count. */
+ * by attr_map offset (attr_map = single source of truth, no magic slots). Radial widgets fade via
+ * color_packed/a_color (the walker's backgroundColor fold), never via a_tint -- a_tint.w is a reveal
+ * strength, not alpha. Returns float count. */
 static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]) {
     NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
     const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
@@ -1532,11 +1541,23 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     nt_text_renderer_flush();
     /* Handler binds its OWN material; reset the cache so the next dispatch rebinds. */
     sprite_bind_barrier(bind);
+
+    nt_ui_custom_frame_t frame;
+    frame.ctx = ctx;
+    frame.clay_cmd = (const void *)c;
+    memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
+    frame.opacity = opacity;
+
+    /* Rich-text self-emits its solved text spans through the text renderer (ONE
+     * measured FIXED block hosts the wrapped run-list); the game handler owns every other
+     * CUSTOM element. */
+    if (cd->type == NT_UI_CUSTOM_TYPE_RICH_TEXT) {
+        /* Self-emit resolves + binds its own text material now that it reads ctx via frame->ctx:
+         * the block's style override, or the ctx->text_material default. */
+        nt_ui_rich_internal_emit_custom(&frame, cd->data);
+        return;
+    }
     if (ctx->custom_fn != NULL) {
-        nt_ui_custom_frame_t frame;
-        frame.clay_cmd = (const void *)c;
-        memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
-        frame.opacity = opacity;
         ctx->custom_fn(&frame, ctx->custom_user);
     }
 }
@@ -1705,7 +1726,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
-        counters->image_command_count++;
+        counters->image_command_count++; /* Clay IMAGE commands (nt_ui_image) only; inline rich images self-emit, not counted here */
         /* Per-element material override (radial reveal): .id==0 = base material.
          * Routed through prep so a shared override batches and the base<->override
          * boundary flushes exactly once. */
@@ -2335,6 +2356,45 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
     return true;
 }
 
+/* Map device pointer (px,py) → element-LOCAL Clay-layout coords (lx,ly) via the element's baked
+ * transform (slot already validated by the caller). Mirrors the resolve-time path: 3D ctx unprojects
+ * through inv_view_proj + intersects the widget plane (raycast_hit); 2D ctx applies the inverse 2×2
+ * affine. Returns false only when a 3D ray misses the plane (parallel/behind); 2D always maps.
+ * Single source of truth so the standard widget hit-test AND rich-text link hit-test share it. */
+static bool map_pointer_to_local(const nt_ui_context_t *ctx, const nt_ui_baked_xform_t *b, int32_t slot, float px, float py, float screen_w, float screen_h, float *out_lx, float *out_ly,
+                                 float *out_t) {
+    if (ctx->use_raycast_input) {
+        /* Inspector widgets (layer 240-255) hit-test against the ortho overlay so they hit at
+         * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
+        const float *iv = ctx->inv_view_proj;
+#if NT_UI_DEBUG_TOOLS
+        if (ctx->hit_layer[slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
+            iv = ctx->inv_inspector_view_proj;
+        }
+#else
+        (void)slot;
+#endif
+        return raycast_hit(iv, b, px, py, screen_w, screen_h, out_lx, out_ly, out_t);
+    }
+    (void)slot;
+    (void)screen_w;
+    (void)screen_h;
+    const float det = (b->m[0] * b->m[5]) - (b->m[4] * b->m[1]);
+    NT_ASSERT(det != 0.0F && "map_pointer_to_local: element has singular affine");
+    const float inv_a = b->m[5] / det;
+    const float inv_b = -b->m[4] / det;
+    const float inv_c = -b->m[1] / det;
+    const float inv_d = b->m[0] / det;
+    const float rx = px - b->m[12];
+    const float ry = py - b->m[13];
+    *out_lx = (inv_a * rx) + (inv_b * ry);
+    *out_ly = (inv_c * rx) + (inv_d * ry);
+    if (out_t != NULL) {
+        *out_t = 0.0F; /* 2D ctx has no depth */
+    }
+    return true;
+}
+
 /* out_t / out_zindex (both nullable, valid only when this returns true): out_t = world distance from
  * the near plane to the hit in 3D ctx (0 in 2D); out_zindex = the hit element's effective Clay zIndex
  * (its floating tree-root's), used for 2D front-most arbitration. */
@@ -2376,32 +2436,8 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     }
     float lx;
     float ly;
-    if (ctx->use_raycast_input) {
-        /* Inspector widgets (layer 240-255) hit-test against the ortho overlay so they hit at
-         * screen pixels regardless of the game's view_proj; game widgets use the user view_proj. */
-        const float *iv = ctx->inv_view_proj;
-#if NT_UI_DEBUG_TOOLS
-        if (ctx->hit_layer[slot] >= NT_UI_LAYER_DEBUG_HIGHLIGHT) {
-            iv = ctx->inv_inspector_view_proj;
-        }
-#endif
-        if (!raycast_hit(iv, &b, px, py, screen_w, screen_h, &lx, &ly, out_t)) {
-            return false;
-        }
-    } else {
-        const float det = (b.m[0] * b.m[5]) - (b.m[4] * b.m[1]);
-        NT_ASSERT(det != 0.0F && "ui_hit_test: element has singular affine");
-        const float inv_a = b.m[5] / det;
-        const float inv_b = -b.m[4] / det;
-        const float inv_c = -b.m[1] / det;
-        const float inv_d = b.m[0] / det;
-        const float rx = px - b.m[12];
-        const float ry = py - b.m[13];
-        lx = (inv_a * rx) + (inv_b * ry);
-        ly = (inv_c * rx) + (inv_d * ry);
-        if (out_t != NULL) {
-            *out_t = 0.0F; /* 2D ctx has no depth */
-        }
+    if (!map_pointer_to_local(ctx, &b, slot, px, py, screen_w, screen_h, &lx, &ly, out_t)) {
+        return false;
     }
 
     const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
@@ -2418,6 +2454,52 @@ bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px,
     const bool hit = ui_hit_test(ctx, id, px, py, pad_lrtb, NULL, NULL);
     Clay_SetCurrentContext(saved);
     return hit;
+}
+
+/* Inner resolve for nt_ui_internal_pointer_to_local — caller owns the Clay current-ctx scope.
+ * Same id-resolve + staleness + clip-chain gate as ui_hit_test, then maps the pointer to local. */
+static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly) {
+    if (id == 0U) {
+        return false;
+    }
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return false;
+    }
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (slot < 0 || slot >= (int32_t)ctx->max_elements) {
+        return false;
+    }
+    if (ctx->hit_generation[slot] != ctx->current_generation) {
+        return false; /* not re-declared this frame (same staleness contract as ui_hit_test) */
+    }
+    float screen_w = 0.0F;
+    float screen_h = 0.0F;
+    if (ctx->use_raycast_input) {
+        NT_ASSERT(ctx->view_proj_set && "nt_ui_internal_pointer_to_local: 3D ctx but nt_ui_set_view_proj was not called this frame");
+        screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
+        screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
+    }
+    if (!hit_clip_chain(ctx, ctx->hit_clip_parent_id[slot], (int32_t)ctx->max_elements, px, py, screen_w, screen_h)) {
+        return false;
+    }
+    const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
+    return map_pointer_to_local(ctx, &b, slot, px, py, screen_w, screen_h, out_lx, out_ly, NULL);
+}
+
+/* Map device pointer (px,py) into element `id`'s LOCAL Clay-layout coords (lx,ly), using the SAME
+ * baked-transform path as ui_hit_test (clip-chain gate + inverse-affine / raycast). Used by rich-text
+ * link hit-test so a transformed/raycast block resolves links where it DRAWS them, not at the flat
+ * layout rect. Returns false (and leaves out_lx/out_ly untouched) when the id isn't this-frame-resolvable,
+ * the clip chain rejects the pointer, or a 3D ray misses the block plane. */
+bool nt_ui_internal_pointer_to_local(nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_pointer_to_local: ctx must be non-NULL");
+    NT_ASSERT(out_lx != NULL && out_ly != NULL && "nt_ui_internal_pointer_to_local: out args must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    const bool ok = pointer_to_local_resolved(ctx, id, px, py, out_lx, out_ly);
+    Clay_SetCurrentContext(saved);
+    return ok;
 }
 
 #if NT_UI_DEBUG_TOOLS
@@ -3095,6 +3177,9 @@ uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx) {
     return ctx->last_walk_rect_command_count;
 }
 
+/* Counts Clay IMAGE render-commands (nt_ui_image) only -- inline rich-text images self-emit inside the
+ * rich block's coalesced sprite batch (bypassing the CLAY_RENDER_COMMAND_TYPE_IMAGE branch) and are not
+ * counted here; nt_ui_rich_test_image_emit_count probes the rich-image count. */
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_image_command_count: ctx must be non-NULL");
     return ctx->last_walk_image_command_count;

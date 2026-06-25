@@ -8,6 +8,7 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "color/nt_color.h" /* canonical packed<->float color home (Clay-free) */
 #include "core/nt_assert.h" /* NT_ASSERT_MODE/NT_ASSERT_OFF gate the debug-only combo dup-key window */
 #include "font/nt_font.h"
 #include "input/nt_input.h"
@@ -79,13 +80,18 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B"
  * Callers (walker, hit-test, debug_zone fill) inline this indexing directly. */
 
 /* Packed 0xAABBGGRR -> Clay_Color (0..255), literal (no sentinel). Callers that
- * treat 0xFFFFFFFF as "no tint" must guard it before calling. */
+ * treat 0xFFFFFFFF as "no tint" must guard it before calling. Routes the packed
+ * layout through nt_color (the canonical home) then scales [0,1]->0..255; the
+ * byte/255*255 round-trip is exact for all 256 byte values, so output is
+ * byte-identical to a direct byte extract. */
 static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
+    float rgba[4];
+    nt_color_unpack(packed, rgba);
     return (Clay_Color){
-        .r = (float)(packed & 0xFFU),
-        .g = (float)((packed >> 8) & 0xFFU),
-        .b = (float)((packed >> 16) & 0xFFU),
-        .a = (float)((packed >> 24) & 0xFFU),
+        .r = rgba[0] * 255.0F,
+        .g = rgba[1] * 255.0F,
+        .b = rgba[2] * 255.0F,
+        .a = rgba[3] * 255.0F,
     };
 }
 
@@ -231,6 +237,12 @@ struct nt_ui_context {
     uint32_t focus_tab_seek;
     uint32_t focus_first_id;
     uint32_t wheel_candidate_count;
+    /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
+     * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
+     * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
+    uint32_t rich_max_runs;
+    uint32_t rich_max_styles;
+    uint32_t rich_max_text_bytes;
     /* Per-depth modal z-band stride; resolved + validated in create_context (> 0). */
     int16_t modal_zband_stride;
     uint16_t wheel_depth;
@@ -296,6 +308,15 @@ struct nt_ui_context {
         uint32_t dup_key_ids[NT_UI_COMBO_DUP_KEY_WINDOW]; /* first-N key-stable row ids; scanned for a duplicate key */
 #endif
     } pending_combo;
+
+    /* Rich-text builder scratch (frame-scratch nt_ui_rich_state_t*, void* to keep this header
+     * widget-agnostic). nt_ui_rich_begin allocates + parks it here; the builder calls read it; end
+     * (and the solver) consume it. Stays set past the terminal as the "last rich state" handle
+     * for test probes; re-zeroed each frame by nt_ui_begin. */
+    void *pending_rich;
+    /* The no-nest guard: true only between nt_ui_rich_begin and its terminal/end. Separate from
+     * pending_rich so a completed session releases the lock while probes can still read the state. */
+    bool rich_session_open;
 
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
@@ -513,6 +534,12 @@ void nt_ui_internal_emit_filled_quad_m(nt_resource_t atlas, uint32_t region, con
 
 void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, const float model[16], uint32_t color);
 
+/* Rich-text CUSTOM self-emit: the walker dispatches a NT_UI_CUSTOM_TYPE_RICH_TEXT command here
+ * (data = the solved nt_ui_rich_state_t parked on ctx->pending_rich). Iterates the solved TEXT
+ * atoms and emits each line-fragment as one nt_text_renderer_draw_n span positioned off the
+ * FIXED block's LAYOUT bbox + world_mat4. Read-only on the state so the emit is re-walk safe. */
+void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data);
+
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
 
@@ -528,5 +555,11 @@ void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
 /* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */
 bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
+
+/* Map device pointer (px,py) into element `id`'s LOCAL Clay-layout coords via the element's baked
+ * transform — the SAME inverse-affine / raycast path as the standard widget hit-test. Sets the Clay
+ * current-ctx internally. false => not resolvable this frame / clipped out / 3D ray misses the plane
+ * (out args untouched). Used by rich-text link hit-test so transformed/raycast blocks hit where they draw. */
+bool nt_ui_internal_pointer_to_local(nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly);
 
 #endif /* NT_UI_INTERNAL_H */

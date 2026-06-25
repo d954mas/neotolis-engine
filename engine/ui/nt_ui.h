@@ -127,16 +127,20 @@ typedef struct {
     void *data;
 } nt_ui_custom_data_t;
 
-#define NT_UI_CUSTOM_TYPE_NONE 0 /* engine anchor: skip, bbox only */
-#define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
+#define NT_UI_CUSTOM_TYPE_NONE 0      /* engine anchor: skip, bbox only */
+#define NT_UI_CUSTOM_TYPE_GAME 1      /* game handler */
+#define NT_UI_CUSTOM_TYPE_RICH_TEXT 2 /* rich-text widget self-emit (solved span draw_n) */
 
 /* Frame snapshot passed to the CUSTOM handler.
+ *   ctx        — the UI context (read-only): lets a handler read state/material defaults + viewport
+ *                without closing over it. Opaque to game handlers (the full struct is engine-internal).
  *   clay_cmd   — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
  *   world_mat4 — column-major mat4 taking LAYOUT point → world (parent chain).
  *                Default 2D ctx bakes the screen Y-flip (LAYOUT Y-down → GL Y-up) into world_mat4;
  *                3D ctx (use_raycast_input) leaves it unflipped — the handler composes view_proj as needed.
  *   opacity    — accumulated [0..1]; multiply into alpha. */
 typedef struct {
+    const nt_ui_context_t *ctx;
     const void *clay_cmd;
     float world_mat4[16];
     float opacity;
@@ -242,6 +246,12 @@ typedef struct {
     uint32_t state_slots;
     /* Linear-probe window for the state pool; 1..state_slots. 0 = default NT_UI_STATE_PROBE_MAX. */
     uint32_t state_probe_max;
+    /* Per-rich-BLOCK frame-scratch caps; each 0 = compile-time NT_UI_RICH_MAX_* default. Rich blocks
+     * coexist (deferred Clay-walker emit) so the cost is per-block-cap x blocks-per-frame -- lower
+     * them for a memory-constrained / labels-only context. */
+    uint32_t rich_max_runs;
+    uint32_t rich_max_styles;
+    uint32_t rich_max_text_bytes;
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
@@ -250,8 +260,11 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
         .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
-        .state_slots = 0U,     /* 0 = compile-time NT_UI_STATE_SLOTS default */
-        .state_probe_max = 0U, /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
+        .state_slots = 0U,         /* 0 = compile-time NT_UI_STATE_SLOTS default */
+        .state_probe_max = 0U,     /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
+        .rich_max_runs = 0U,       /* 0 = compile-time NT_UI_RICH_MAX_RUNS default */
+        .rich_max_styles = 0U,     /* 0 = compile-time NT_UI_RICH_MAX_STYLES default */
+        .rich_max_text_bytes = 0U, /* 0 = compile-time NT_UI_RICH_MAX_TEXT_BYTES default */
     };
 }
 
@@ -459,6 +472,9 @@ float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_anim_collision_count(const nt_ui_context_t *ctx);
 /* Per-type command counts (pre-emit; use draw_calls for GPU cost). */
 uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx);
+/* Counts Clay IMAGE render-commands (nt_ui_image UI images) only. Inline rich-text images emit inside the
+ * rich block's coalesced sprite batch during its CUSTOM self-emit -- they are NOT Clay commands and do NOT
+ * count here (see nt_ui_rich_test_image_emit_count for the rich-image probe). */
 uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_text_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_border_command_count(const nt_ui_context_t *ctx);

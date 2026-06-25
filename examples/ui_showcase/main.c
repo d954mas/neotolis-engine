@@ -16,6 +16,7 @@
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "render/nt_render_defs.h"
+#include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -33,6 +34,9 @@
 #include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_radial.h"
 #include "ui/nt_ui_radial_image.h"
+#include "ui/nt_ui_rich_fx.h"
+#include "ui/nt_ui_rich_tagset.h"
+#include "ui/nt_ui_rich_text.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
@@ -312,6 +316,15 @@ typedef struct {
     float hold_progress; /* latched hold_progress for the radial fill display */
 } radial_params_t;
 
+/* Rich Text tab: the GAME owns the effect clock (no engine global clock); `time` accumulates from frame dt. */
+typedef struct {
+    float time;                /* seconds, accumulated from frame dt -> the game-passed effect clock */
+    uint32_t last_link;        /* id of the last clicked <link> (0 = none yet) */
+    uint32_t link_clicks;      /* total link clicks shown in the readout */
+    uint32_t hover_a, hover_b; /* link hovered last frame, PER FRONT -> styles this frame (two-pass, independent) */
+    float latch_a, latch_b;    /* "Accepted" reaction seconds remaining, per front */
+} rich_params_t;
+
 /* Dropdown tab: game-owned selection + open flags. */
 typedef struct {
     int fruit_sel; /* short list selection */
@@ -377,6 +390,8 @@ struct tab_state {
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
+    /* Rich Text tab state (game-owned effect clock + link latches; see rich_params_t). */
+    rich_params_t rich;
 };
 
 static struct tab_state s_state = {
@@ -399,6 +414,7 @@ static struct tab_state s_state = {
     .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
     .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
+    .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hover_a = 0U, .hover_b = 0U, .latch_a = 0.0F, .latch_b = 0.0F},
 };
 // #endregion
 
@@ -476,6 +492,8 @@ static nt_resource_t s_sprite_fs_handle;
 static nt_resource_t s_text_vs_handle;
 static nt_resource_t s_text_fs_handle;
 static nt_resource_t s_font_resource;
+/* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
+static nt_resource_t s_rich_font_resource[4];
 /* Radial: shared extended-layout VS + flat SDF FS + textured reveal FS. */
 static nt_resource_t s_radial_vs_handle;
 static nt_resource_t s_radial_fs_handle;
@@ -484,7 +502,6 @@ static nt_resource_t s_radial_image_fs_handle;
  * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
 static nt_resource_t s_radial_art_tex_handle;
-
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 /* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
@@ -493,6 +510,17 @@ static nt_material_t s_radial_material;
 static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
 static nt_atlas_region_ref_t s_radial_art_ref;
+/* Rich-text inline-image by-name refs into the MAIN ui_showcase atlas (heart/gold). Inline images ride
+ * the standard u8 sprite path now -- no bespoke material; the rich base uses s_sprite_material. */
+static nt_atlas_region_ref_t s_rich_heart_ref;
+static nt_atlas_region_ref_t s_rich_gold_ref;
+/* Rich-text font family (variant slots R/B/I/BI -> real DejaVu faces). Index = NT_UI_RICH_VARIANT_*
+ * bitmask: [0]=R, [1]=Bold, [2]=Italic, [3]=Bold-Italic (matches rich_resolve_font). */
+static nt_font_t s_rich_font[4];
+static bool s_rich_font_bound; /* all 4 family faces attached to their handles */
+/* The markup-front vocabulary: named colors + the stock effects + the icons atlas alias. */
+static nt_ui_rich_tagset_t s_rich_tagset;
+static bool s_rich_ready;
 static nt_font_t s_font;
 
 static bool s_atlas_bound;
@@ -537,6 +565,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_rich(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st);
@@ -563,6 +592,8 @@ static const showcase_entry_t g_tabs[] = {
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
+    {"Rich Text", "Styled multi-run text + inline icons + bold/italic + wave/typewriter effects + a clickable link, via BOTH the code-first builder AND the runtime markup parser.",
+     "examples/ui_showcase/main.c:render_rich", render_rich, NULL},
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
     {"Tooltip", "Timed hover reveal on popup-core (no catcher, never blocks clicks).", "examples/ui_showcase/main.c:render_tooltip", render_tooltip, NULL},
     {"Menu", "Two context menus (global + zone-bound) with nested submenus: mouse-aim, edge-flip, kbd-nav.", "examples/ui_showcase/main.c:render_menu", render_menu, NULL},
@@ -1049,6 +1080,14 @@ static void try_bind_resources(void) {
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("ui_showcase: font bound at slot 0");
+    }
+    if (!s_rich_font_bound && nt_resource_is_ready(s_rich_font_resource[0]) && nt_resource_is_ready(s_rich_font_resource[1]) && nt_resource_is_ready(s_rich_font_resource[2]) &&
+        nt_resource_is_ready(s_rich_font_resource[3])) {
+        for (uint32_t i = 0; i < 4U; i++) {
+            nt_font_add(s_rich_font[i], s_rich_font_resource[i]);
+        }
+        s_rich_font_bound = true;
+        nt_log_info("ui_showcase: rich-text family R/B/I/BI bound");
     }
 }
 // #endregion
@@ -1629,6 +1668,15 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — four side-by-side demos, not deep nesting
 /* HSV(h,1,1) -> 0xAABBGGRR. The dense grid colors each radial per-widget through this
  * (standard sprite color rides v_color), so many distinct colors still batch to one draw. */
+/* Pack a Clay_Color (0..255 floats) into 0xAABBGGRR, the convention rich-text color_abgr expects. */
+static uint32_t showcase_pack_clay_abgr(Clay_Color c) {
+    const uint32_t r = (uint32_t)(c.r + 0.5F);
+    const uint32_t g = (uint32_t)(c.g + 0.5F);
+    const uint32_t b = (uint32_t)(c.b + 0.5F);
+    const uint32_t a = (uint32_t)(c.a + 0.5F);
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
 static uint32_t showcase_hue_abgr(float h) {
     const float x = h * 6.0F;
     const int i = (int)x;
@@ -1840,6 +1888,652 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
     // #endregion
 }
+
+// #region Rich Text tab (RICH/MARK/FX -- both authoring fronts)
+/* The demo link id. Both fronts must resolve to the SAME value: the builder calls
+ * nt_ui_rich_link(ctx, nt_hash32_str("quest")) and the markup writes <link=quest> -- the parser
+ * hashes the link value with nt_hash32(val, vlen), and nt_hash32_str(s) == nt_hash32(s, strlen(s)),
+ * so both land on the same id. (Runtime hash, not a compile-time constant -> use the inline call.) */
+static inline uint32_t rich_link_quest(void) { return nt_hash32_str("quest").value; }
+
+/* (a) PARAMETERIZED custom effect: the game passes tunables through user_data. Must outlive the
+ * frame (read at emit), so the instance is file-scope, not a stack temp. */
+typedef struct {
+    float speed;     /* breathe rate (rad/s) */
+    float min_alpha; /* opacity floor -- never fully gone, so no blank gap */
+} rich_fade_params_t;
+static const rich_fade_params_t s_rich_fade_params = {.speed = 2.2F, .min_alpha = 0.15F};
+
+/* A LOOPING opacity fade (the stock fade_in is one-shot -> it freezes on the gallery's continuous
+ * clock). atom_idx-INDEPENDENT: atom_idx here is the GLOBAL block index, so a per-glyph stagger
+ * would push this late word past its window and blank it (that staggered reveal is the typewriter). */
+static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                             void *user_data) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)hovered;
+    const rich_fade_params_t *p = (const rich_fade_params_t *)user_data;
+    const float speed = (p != NULL) ? p->speed : 2.2F;
+    const float min_a = (p != NULL) ? p->min_alpha : 0.15F;
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    const float a = min_a + ((1.0F - min_a) * (0.5F + (0.5F * sinf(time * speed))));
+    r.color[3] = base_color[3] * a; /* a >= min_a, so visible stays true (identity) */
+    return r;
+}
+
+/* Visual-only horizontal nudge for the z-layer demo: inline images have no offset_x, but the demo needs a
+ * REAL same-line overlap (the image atom sits AFTER the word in the flow). Slides the image left by
+ * *user_data px so it lands on the preceding word; the layer then decides which is drawn on top. */
+static nt_ui_rich_fx_result_t rich_fx_pull_left(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+                                                void *user_data) {
+    (void)atom_idx;
+    (void)kind;
+    (void)base_xy;
+    (void)base_wh;
+    (void)time;
+    (void)hovered;
+    nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
+    r.offset_x = (user_data != NULL) ? -(*(const float *)user_data) : -46.0F;
+    return r;
+}
+static const float s_rich_overlap_pull = 46.0F; /* px the heart slides left onto the word -- TWEAK if not centered */
+
+/* (b) GAME-DRAWN OBJECTS (<obj=name/> WidgetSpans). The first real OBJECT pixel draw: the engine
+ * never touches these; draw_fn paints via the sprite renderer at the solver-reserved box. draw_fn has
+ * NO ctx, so everything it needs is stashed here (read at emit; must outlive the frame -> file-scope). */
+typedef struct {
+    nt_resource_t white_atlas; /* solid-fill source (the showcase atlas) */
+    uint32_t white_region;     /* resolved white-pixel region index */
+    nt_material_t material;    /* the sprite material both objects bind */
+    const float *clock;        /* &s_state.rich.time -- drives progress + spin */
+    /* draw_fn has no ctx: stash the frame UBO view_proj + physical fb dims each frame BEFORE
+     * nt_ui_walk (box->NDC aspect); world_mat4 arrives per-call. */
+    struct {
+        float view_proj[16]; /* the frame UBO ortho (LAYOUT -> clip, logical, no Y-flip) */
+        float fb_w, fb_h;    /* physical framebuffer dims (box NDC half-extent -> px aspect) */
+    } cube_view;
+} rich_obj_demo_t;
+static rich_obj_demo_t s_rich_obj_demo;
+
+/* draw_fn receives RGBA in 0..1 (the resolved <color> + folded opacity + fx tint). Pack to 0xAABBGGRR. */
+static uint32_t rich_obj_pack_color(const float color[4]) {
+    const uint32_t r = (uint32_t)((color[0] * 255.0F) + 0.5F);
+    const uint32_t g = (uint32_t)((color[1] * 255.0F) + 0.5F);
+    const uint32_t b = (uint32_t)((color[2] * 255.0F) + 0.5F);
+    const uint32_t a = (uint32_t)((color[3] * 255.0F) + 0.5F);
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+#define RICH_OBJ_BAR_W 160.0F
+#define RICH_OBJ_BAR_H 14.0F
+#define RICH_OBJ_SPIN 24.0F
+
+/* LIVE PROGRESS BAR: a dim track + a bright value rect filled to `progress` of the width. */
+static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
+}
+static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
+    /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
+    nt_sprite_renderer_set_material(d->material);
+    const float t = (d->clock != NULL) ? *d->clock : 0.0F;
+    const float progress = 0.5F + (0.5F * sinf(t * 1.5F)); /* loops 0..1 */
+    const uint32_t value_col = rich_obj_pack_color(color);
+    /* Track: same color at ~25% alpha so it tints/fades with the text. */
+    float track[4] = {color[0], color[1], color[2], color[3] * 0.25F};
+    const uint32_t track_col = rich_obj_pack_color(track);
+    const float track_pos[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+    const float fill_w = w * progress;
+    const float fill_pos[4][2] = {{x, y}, {x + fill_w, y}, {x + fill_w, y + h}, {x, y + h}};
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    /* Emit THROUGH world_mat4 (byte-identical to emit_custom_geometry) so the bar lands under the
+     * UI transform incl. the Y-flip. */
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col);
+}
+
+/* SPINNING ICON: a white quad rotated about its own center (the icon texture was intentionally
+ * dropped). A true 3D cube is the SAME hook with the game's own 3D render into the box -- this 2D
+ * rotation proves the mechanism. */
+static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
+}
+static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
+    nt_sprite_renderer_set_material(d->material);
+    const float t = (d->clock != NULL) ? *d->clock : 0.0F;
+    /* Rotate the box corners about the box centre in LAYOUT space, then emit through world_mat4 (the proven
+     * emit_geometry path -- explicit corners set the exact size, unlike emit_region's native-source size). */
+    const float cx = x + (w * 0.5F);
+    const float cy = y + (h * 0.5F);
+    const float hw = w * 0.5F;
+    const float hh = h * 0.5F;
+    const float cs = cosf(t * 2.0F);
+    const float sn = sinf(t * 2.0F);
+    const float dx[4] = {-hw, hw, hw, -hw}; /* TL, TR, BR, BL */
+    const float dy[4] = {-hh, -hh, hh, hh};
+    float pos[4][2];
+    for (int i = 0; i < 4; ++i) {
+        pos[i][0] = cx + (dx[i] * cs) - (dy[i] * sn);
+        pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
+    }
+    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color));
+}
+
+/* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
+ * active scroll-clip scissor clips it to the panel. draw_fn gets LAYOUT (Y-down) box px + frame world_mat4. */
+#define RICH_OBJ_CUBE 64.0F
+static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
+    (void)user_data;
+    /* Square box; ascent ~0.6*h centres the cube on the text line (not floating high above it). */
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 40.0F};
+}
+static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
+    if (w <= 0.0F || h <= 0.0F) {
+        return;
+    }
+    /* VP_box = view_proj * world_mat4 maps a LAYOUT box corner -> clip. In this 2D ortho path w_clip==1,
+     * so clip.xy IS ndc. world_mat4 Y-flips, so the box TOP maps ABOVE the box BOTTOM (top>bottom). */
+    mat4 vp_box;
+    glm_mat4_mul((vec4 *)d->cube_view.view_proj, (vec4 *)world_mat4, vp_box);
+    vec4 tl;
+    vec4 br;
+    glm_mat4_mulv(vp_box, (vec4){x, y, 0.0F, 1.0F}, tl);
+    glm_mat4_mulv(vp_box, (vec4){x + w, y + h, 0.0F, 1.0F}, br);
+    const float left = tl[0];
+    const float right = br[0];
+    const float top = tl[1];
+    const float bottom = br[1];
+    const float center_x = (left + right) * 0.5F;
+    const float center_y = (top + bottom) * 0.5F;
+    const float half_x = (right - left) * 0.5F;
+    const float half_y = (top - bottom) * 0.5F; /* > 0: top>bottom after the Y-flip */
+
+    /* Remap R applied in CLIP space BEFORE the perspective divide: clip'.x = half_x*clip.x + center_x*clip.w,
+     * clip'.y = half_y*clip.y + center_y*clip.w, z/w pass through -> the cube's [-1,1] NDC lands in the box. */
+    mat4 remap;
+    glm_mat4_identity(remap);
+    remap[0][0] = half_x;
+    remap[1][1] = half_y;
+    remap[3][0] = center_x;
+    remap[3][1] = center_y;
+
+    /* Box pixel aspect: NDC half-extents are resolution-independent, so multiply by fb to get px aspect. */
+    const float aspect = (fabsf(half_x) * d->cube_view.fb_w) / (fabsf(half_y) * d->cube_view.fb_h);
+    mat4 view;
+    mat4 proj;
+    mat4 persp_vp;
+    mat4 cube_vp;
+    glm_lookat((vec3){0.0F, 0.0F, 3.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
+    glm_perspective(glm_rad(50.0F), aspect, 0.1F, 100.0F, proj);
+    glm_mat4_mul(proj, view, persp_vp);
+    glm_mat4_mul(remap, persp_vp, cube_vp); /* R * perspective * lookat */
+
+    const float t = (d->clock != NULL) ? *d->clock : 0.0F;
+    versor q;
+    glm_quatv(q, t * 1.2F, (vec3){0.3F, 1.0F, 0.2F});
+    const float rot[4] = {q[0], q[1], q[2], q[3]};
+
+    /* NO scissor manipulation: the clip-space remap already confines the cube to its box NDC sub-rect, and
+     * the walker's enclosing scroll-clip scissor is still active during the custom emit (emit_custom does
+     * not touch it) -> the cube is clipped to the panel for free. Rely on that scissor; don't touch GL
+     * scissor here (it would leak to later UI). Viewport is also untouched (no leak). */
+    /* Depth write into the SHARED default-fb depth buffer is safe ONLY because every showcase UI pipeline
+     * is depth-test/write off: the cube's writes never occlude later UI, and depth is cleared to 1.0 at
+     * begin_pass. */
+    nt_shape_renderer_set_depth(true);
+    nt_shape_renderer_set_vp((const float *)cube_vp);
+    /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text.
+     * size 1.5 (not 1.0) so the cube fills more of its reserved box -- a unit cube projects to only ~36%. */
+    nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.5F, 1.5F, 1.5F}, rot, color);
+    nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
+}
+
+/* SHEAR SWEEP: the SAME word drawn at oblique 0.1/0.2/0.3/0.4 via nt_text_renderer_set_oblique, proving
+ * faux-italic is a free renderer lean at ANY angle (the rich markup path is fixed at 0.2). The label column
+ * stays upright; only the sample leans -- demonstrates set_oblique toggling per draw_n with no flush. */
+#define RICH_OBJ_SWEEP_W 360.0F
+#define RICH_OBJ_SWEEP_H 112.0F
+static nt_ui_rich_object_measure_t rich_obj_oblique_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SWEEP_W, .height = RICH_OBJ_SWEEP_H, .ascent = 20.0F};
+}
+/* LAYOUT(Y-down) pen -> world text model with the text Y-up<->layout Y-down flip on col1 (mirrors the
+ * engine's rich_span_model). The lean is added by set_oblique, NOT baked here. */
+static void rich_obj_text_model(const float world[16], float ox, float oy, float out[16]) {
+    for (int r = 0; r < 4; ++r) {
+        out[r] = world[r];
+        out[4 + r] = -world[4 + r]; /* Y-flip */
+        out[8 + r] = world[8 + r];
+        out[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
+    }
+}
+static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    (void)user_data;
+    (void)w;
+    (void)h;
+    if (s_rich_font[0].id == 0U) {
+        return; /* family not bound yet */
+    }
+    static const float shears[4] = {0.1F, 0.2F, 0.3F, 0.4F};
+    const float size = 18.0F;
+    const float line_h = 26.0F;
+    const float label_col = 104.0F;            /* upright label column width (px) */
+    nt_text_renderer_set_font(s_rich_font[0]); /* regular face -> the slant is purely synthetic */
+    for (int i = 0; i < 4; ++i) {
+        char label[16];
+        const int ln = snprintf(label, sizeof label, "shear %.1f", (double)shears[i]);
+        const float baseline = y + size + ((float)i * line_h);
+        float model[16];
+        rich_obj_text_model(world_mat4, x, baseline, model);
+        nt_text_renderer_set_oblique(0.0F); /* label stays upright */
+        nt_text_renderer_draw_n(label, (size_t)ln, model, size, color, 0.0F, 0.0F);
+        rich_obj_text_model(world_mat4, x + label_col, baseline, model);
+        nt_text_renderer_set_oblique(shears[i]); /* sample leans -- no flush between the two draws */
+        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, color, 0.0F, 0.0F);
+    }
+    nt_text_renderer_set_oblique(0.0F); /* MUST reset: this object-only block has no rich text pass to do it */
+}
+
+/* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
+ * effects plus a custom effect fn, the inline-icon atlas alias, and the rich font family. The CODE-FIRST
+ * builder never touches the tagset -- it gets real values directly. */
+static void rich_ensure_setup(void) {
+    if (s_rich_ready || !s_rich_font_bound || s_sprite_material.id == 0U) {
+        return;
+    }
+    nt_ui_rich_tagset_init(&s_rich_tagset);
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "gold", 0xFF3CC8FAU);  /* 0xAABBGGRR amber */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "link", 0xFFE0A040U);  /* resting link blue (matches the builder raw value) */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "cyan", 0xFFF0C84BU);  /* hover highlight */
+    nt_ui_rich_tagset_register_color(&s_rich_tagset, "green", 0xFF50C878U); /* accepted state */
+    /* All eight stock effects so <fx=name> resolves in the markup front. */
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "wave", NT_UI_RICH_FX_ID_WAVE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "shake", NT_UI_RICH_FX_ID_SHAKE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "rainbow", NT_UI_RICH_FX_ID_RAINBOW);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "pulse", NT_UI_RICH_FX_ID_PULSE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "fade_in", NT_UI_RICH_FX_ID_FADE_IN);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "bounce", NT_UI_RICH_FX_ID_BOUNCE);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "glow", NT_UI_RICH_FX_ID_GLOW);
+    nt_ui_rich_tagset_register_effect(&s_rich_tagset, "sway", NT_UI_RICH_FX_ID_SWAY);
+    /* A game-supplied custom effect: a looping fade (stock fade_in is one-shot). Demos register_effect_fn. */
+    nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "fade", rich_loop_fade, (void *)&s_rich_fade_params);
+    /* "pull" == the builder's push_effect_fn(rich_fx_pull_left): same heart nudge so both fronts overlap identically. */
+    nt_ui_rich_tagset_register_effect_fn(&s_rich_tagset, "pull", rich_fx_pull_left, (void *)&s_rich_overlap_pull);
+    nt_ui_rich_tagset_register_atlas(&s_rich_tagset, "icons", s_atlas_handle);
+    /* The rich family under <font=rich> -> all four real faces select per <b>/<i>. */
+    nt_ui_rich_tagset_register_font(&s_rich_tagset, "rich", s_rich_font);
+
+    /* GAME-DRAWN OBJECT tags (<obj=loadbar/>, <obj=spin/>): resolve the region index once and stash
+     * everything draw_fn needs (it gets no ctx). */
+    s_rich_obj_demo.white_atlas = s_atlas_handle;
+    s_rich_obj_demo.white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS__WHITE.value);
+    s_rich_obj_demo.material = s_sprite_material;
+    s_rich_obj_demo.clock = &s_state.rich.time;
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "loadbar", rich_obj_bar_measure, rich_obj_bar_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "spin", rich_obj_spin_measure, rich_obj_spin_draw, &s_rich_obj_demo);
+    nt_ui_rich_tagset_register_object_tag(&s_rich_tagset, "cube", rich_obj_cube_measure, rich_obj_cube_draw, &s_rich_obj_demo);
+
+    s_rich_ready = true;
+}
+
+/* The base composed style shared by both fronts: the four real faces in their variant slots, the body
+ * text color, and the inline-image material + the icons atlas as the default by-name image source. */
+static nt_ui_rich_style_t rich_base_style(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    for (uint32_t i = 0; i < 4U; i++) {
+        base.font_id[i] = s_rich_font[i]; /* R/B/I/BI -> real DejaVu faces */
+    }
+    base.color_abgr = showcase_pack_clay_abgr(g_current->body->color);
+    /* image_material/text_material left 0: rich defaults them from ctx (nt_ui_set_sprite_material /
+     * nt_ui_set_text_material). Set a field only to override the material for THIS block. */
+    base.default_atlas = nt_atlas_ref(s_atlas_handle, 0U); /* base atlas for <img=name/> by-name resolve */
+    return base;
+}
+
+/* Drift-proof literal push: sizeof-1 byte count from the literal itself, so a hand-counted length can
+ * never go stale. Only valid for a string LITERAL (sizeof on a char* would measure the pointer). */
+#define RICH_TEXT_LIT(ctx, lit) nt_ui_rich_text_n((ctx), (lit), (uint32_t)(sizeof(lit) - 1U))
+
+/* Per-frame dynamic link presentation. The link reacts to LAST frame's hover + a post-click latch:
+ * both fronts read the SAME values so the builder == markup parity holds while the link still
+ * animates. color is AABBGGRR; scale is the rich push_scale multiplier; label is the visible text. */
+typedef struct {
+    uint32_t color;     /* link run color this frame */
+    const char *label;  /* "[Accept quest]" normally; "[OK Accepted]" during the latch */
+    const char *mk_col; /* markup color NAME matching `color` (cyan/green/link) for the <color=..> tag */
+    bool emphasize;     /* apply the visual-only pulse on hover/accept -- NO scale, so the line never reflows */
+} rich_link_look_t;
+
+/* Per-front: hovered/accepted come from THIS front's own prev-frame result, so the two on-screen links
+ * react INDEPENDENTLY. Feedback is colour + a visual-only pulse -- never a scale (a scale would grow the
+ * line height and shift the whole block on hover). */
+static rich_link_look_t rich_link_look(bool hovered, bool accepted) {
+    rich_link_look_t look;
+    if (accepted) {
+        look.color = 0xFF50C878U; /* green */
+        look.label = "[OK Accepted]";
+        look.mk_col = "green";
+        look.emphasize = true;
+    } else if (hovered) {
+        look.color = 0xFFF0C84BU; /* cyan highlight */
+        look.label = "[Accept quest]";
+        look.mk_col = "cyan";
+        look.emphasize = true;
+    } else {
+        look.color = 0xFFE0A040U; /* resting link blue */
+        look.label = "[Accept quest]";
+        look.mk_col = "link"; /* tagset "link" == 0xFFE0A040 so markup matches the builder's raw value */
+        look.emphasize = false;
+    }
+    return look;
+}
+
+/* Code-first push/pop builder. Demos: real R/B/I/BI faces, a scaled-up title word, an effects gallery
+ * (7 stock effects + a custom looping-fade fn, one per labelled word), two inline icons, and a
+ * clickable <link> that brightens + pulses on hover and flips to a green "Accepted" latch on click.
+ * The markup front below rebuilds the SAME content so the two stay parallel as the link animates. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- linear builder script: many runs, no deep nesting
+static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t look, const nt_ui_rich_style_t *base) {
+    nt_ui_rich_begin(ctx, base);
+
+    /* Title line: a big scaled word + real bold / italic / bold-italic faces. */
+    nt_ui_rich_push_scale(ctx, 1.6F);
+    nt_ui_rich_push_color(ctx, 0xFF3C3CDCU); /* crimson */
+    nt_ui_rich_push_bold(ctx);
+    RICH_TEXT_LIT(ctx, "DRAKE");
+    nt_ui_rich_pop(ctx); /* bold */
+    nt_ui_rich_pop(ctx); /* color */
+    nt_ui_rich_pop(ctx); /* scale */
+    RICH_TEXT_LIT(ctx, " quest -- faces: regular ");
+    nt_ui_rich_push_bold(ctx);
+    RICH_TEXT_LIT(ctx, "bold");
+    nt_ui_rich_pop(ctx); /* bold */
+    RICH_TEXT_LIT(ctx, " ");
+    nt_ui_rich_push_italic(ctx);
+    RICH_TEXT_LIT(ctx, "italic");
+    nt_ui_rich_pop(ctx); /* italic */
+    RICH_TEXT_LIT(ctx, " ");
+    nt_ui_rich_push_bold(ctx);
+    nt_ui_rich_push_italic(ctx);
+    RICH_TEXT_LIT(ctx, "bold-italic");
+    nt_ui_rich_pop(ctx); /* italic */
+    nt_ui_rich_pop(ctx); /* bold */
+    RICH_TEXT_LIT(ctx, ". ");
+
+    /* Reward run: the gold icon + a smaller "gold" word + the heart icon. */
+    nt_ui_rich_push_color(ctx, 0xFF3CC8FAU); /* gold */
+    nt_ui_rich_image(ctx, s_rich_gold_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+    nt_ui_rich_push_scale(ctx, 0.85F);
+    RICH_TEXT_LIT(ctx, " 100 gold ");
+    nt_ui_rich_pop(ctx); /* scale */
+    nt_ui_rich_pop(ctx); /* color */
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+    RICH_TEXT_LIT(ctx, ". Effects: ");
+
+    /* Effects gallery: 7 stock effects + a custom looping-fade fn, one per labelled word, same clock. */
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_WAVE);
+    RICH_TEXT_LIT(ctx, "wave ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SHAKE);
+    RICH_TEXT_LIT(ctx, "shake ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_RAINBOW);
+    RICH_TEXT_LIT(ctx, "rainbow ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+    RICH_TEXT_LIT(ctx, "pulse ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect_fn(ctx, rich_loop_fade, (void *)&s_rich_fade_params); /* custom fade, tuned via user_data */
+    RICH_TEXT_LIT(ctx, "fade ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_BOUNCE);
+    RICH_TEXT_LIT(ctx, "bounce ");
+    nt_ui_rich_pop(ctx);
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_GLOW);
+    nt_ui_rich_push_color(ctx, 0xFF2A5A7AU); /* dark amber: glow brightens toward white, so a dark base shows the pulse */
+    RICH_TEXT_LIT(ctx, "glow ");
+    nt_ui_rich_pop(ctx); /* color */
+    nt_ui_rich_pop(ctx); /* effect */
+    nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SWAY);
+    RICH_TEXT_LIT(ctx, "sway");
+    nt_ui_rich_pop(ctx);
+    RICH_TEXT_LIT(ctx, " ");
+    /* A TUNED stock wave: big amplitude + faster speed via push_effect_ex (markup parity: <fx=wave amp=14 speed=5>). */
+    const nt_ui_rich_fx_params_t big_wave = {.amp = 14.0F, .speed = 5.0F};
+    nt_ui_rich_push_effect_ex(ctx, NT_UI_RICH_FX_ID_WAVE, &big_wave);
+    RICH_TEXT_LIT(ctx, "BIG");
+    nt_ui_rich_pop(ctx);
+    RICH_TEXT_LIT(ctx, ". ");
+
+    /* Z-LAYER demo: same heart+word overlap twice, differing only by the word's layer (default image=1>text=0, then <layer=3> lifts text above the heart). */
+    RICH_TEXT_LIT(ctx, "Z-layer  [img over text] ");
+    RICH_TEXT_LIT(ctx, "LOVE");
+    nt_ui_rich_push_effect_fn(ctx, rich_fx_pull_left, (void *)&s_rich_overlap_pull);
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.8F); /* heart lands on "LOVE", default layer 1 -> on top */
+    nt_ui_rich_pop(ctx);                                                        /* effect */
+    RICH_TEXT_LIT(ctx, "   [text over img] ");
+    nt_ui_rich_push_layer(ctx, 3U); /* lift the word above the heart's default layer 1 */
+    RICH_TEXT_LIT(ctx, "LOVE");
+    nt_ui_rich_pop(ctx); /* layer */
+    nt_ui_rich_push_effect_fn(ctx, rich_fx_pull_left, (void *)&s_rich_overlap_pull);
+    nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.8F); /* same heart, but the word now sits above it */
+    nt_ui_rich_pop(ctx);                                                        /* effect */
+    RICH_TEXT_LIT(ctx, ". ");
+
+    /* Interactive link: brightens + a visual-only pulse on hover, green "Accepted" latch on click.
+     * NO scale -- a scale would grow the line height and reflow the whole block on hover. */
+    if (look.emphasize) {
+        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_PULSE);
+    }
+    nt_ui_rich_push_color(ctx, look.color);
+    nt_ui_rich_link(ctx, rich_link_quest());
+    nt_ui_rich_text_n(ctx, look.label, strlen(look.label));
+    nt_ui_rich_link(ctx, 0U); /* end link -- set/clear pending field, NOT a style push */
+    nt_ui_rich_pop(ctx);      /* color */
+    if (look.emphasize) {
+        nt_ui_rich_pop(ctx); /* effect */
+    }
+
+    nt_ui_rich_end(ctx);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
+static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[128];
+    rich_ensure_setup();
+    if (!s_rich_ready) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "rich-text font / material not ready", g_current->caption);
+        return;
+    }
+
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rich text: real bold/italic/bold-italic faces + scaled words + 7 stock effects + a custom looping-fade fn + inline icons + a clickable link.",
+                g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The SAME content is authored two ways: the code-first push/pop builder, then the runtime <markup> parser.", g_current->caption);
+
+    /* The block wraps at this width; narrow the window to watch the wrap re-flow (no atom escapes). */
+    const float container_w = 560.0F;
+
+    /* #region code-first builder */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1) Code-first builder (nt_ui_rich_begin / push_* / text_n / image / link / end):", g_current->body);
+    nt_ui_rich_result_t res_a = {0};
+    const nt_ui_rich_style_t base_a = rich_base_style();
+    const rich_link_look_t look_a = rich_link_look(st->rich.hover_a == rich_link_quest(), st->rich.latch_a > 0.0F);
+    render_rich_builder_block(ctx, look_a, &base_a);
+    nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_builder"), NT_UI_DATA_LAYER(LAYER_TEXT), &base_a, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_a);
+    // #endregion
+
+    /* #region runtime markup parser */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "2) Runtime markup parser (nt_ui_rich_text_markup, a CONTENT parser -- like a localized format string):", g_current->body);
+    /* Rebuilt each frame so the link's color/label tracks THIS front's OWN hover+click (independent of
+     * front 1). Frame-local stack buffer -- no heap. Colour + a visual-only pulse, never a scale. */
+    const rich_link_look_t look_b = rich_link_look(st->rich.hover_b == rich_link_quest(), st->rich.latch_b > 0.0F);
+    const char *fx_open = look_b.emphasize ? "<fx=pulse>" : "";
+    const char *fx_close = look_b.emphasize ? "</fx>" : "";
+    char markup[768]; /* must fit the whole literal + worst-case %s substitutions: truncation splits a tag and the parser asserts */
+    const int mk_n = snprintf(markup, sizeof markup,
+                              "<scale=1.6><b><color=#DC3C3C>DRAKE</color></b></scale> quest -- faces: regular "
+                              "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
+                              "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
+                              "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
+                              "<fx=bounce>bounce </fx><fx=glow><color=#7A5A2A>glow </color></fx><fx=sway>sway</fx> "
+                              "<fx=wave amp=14 speed=5>BIG</fx>. "
+                              "Z-layer  [img over text] LOVE<fx=pull><img=heart scale=1.8/></fx>"
+                              "   [text over img] <layer=3>LOVE</layer><fx=pull><img=heart scale=1.8/></fx>. "
+                              "%s<color=%s><link=quest>%s</link></color>%s",
+                              fx_open, look_b.mk_col, look_b.label, fx_close);
+    NT_ASSERT(mk_n > 0 && (size_t)mk_n < sizeof markup && "rich markup snprintf truncated -- enlarge markup[]");
+    const nt_ui_rich_style_t base = rich_base_style();
+    nt_ui_rich_result_t res_b = {0};
+    nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_markup"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &base, markup, strlen(markup), container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_b);
+    // #endregion
+
+    /* #region game-drawn objects (<obj=name/> WidgetSpans -- the FIRST real OBJECT pixel draw) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "2b) Game-drawn objects (<obj=name/>): the game's own draw_fn paints a LIVE progress bar + a spinning icon inline; text wraps around the reserved box.", g_current->body);
+    {
+        const char *obj_src = "Loading <obj=loadbar/> spinning <obj=spin/> -- drawn by the game, sized by the solver.";
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), obj_src, g_current->caption);
+        const nt_ui_rich_style_t obj_base = rich_base_style();
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_objects"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &obj_base, obj_src, strlen(obj_src), container_w, NT_RICH_ALIGN_LEFT,
+                               st->rich.time, NULL);
+    }
+    /* TRUE 3D: the same WidgetSpan hook, but draw_fn renders a perspective rotating cube through
+     * nt_shape_renderer into the reserved box -- the renderer-agnostic proof (2D bar -> 2D spin -> 3D cube). */
+    {
+        const char *cube_src = "True 3D -- a spinning <color=cyan>cube</color> rendered into the inline box: <obj=cube/>";
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), cube_src, g_current->caption);
+        const nt_ui_rich_style_t cube_base = rich_base_style();
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_cube"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &cube_base, cube_src, strlen(cube_src), container_w, NT_RICH_ALIGN_LEFT,
+                               st->rich.time, NULL);
+    }
+    // #endregion
+
+    /* #region typewriter reveal (fade_in stock effect: staggered per-glyph, driven by the clock) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "3) Typewriter (the fade_in stock effect staggers each glyph's reveal off the same game clock; loops):", g_current->body);
+    {
+        nt_ui_rich_style_t tw = rich_base_style();
+        nt_ui_rich_begin(ctx, &tw);
+        nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_FADE_IN);
+        RICH_TEXT_LIT(ctx, "The drake stirs... glyphs reveal one by one.");
+        nt_ui_rich_pop(ctx);
+        nt_ui_rich_end(ctx);
+        /* The clock loops ~every 4s so the reveal replays; tw_time = time within the loop window. */
+        const float tw_time = fmodf(st->rich.time, 4.0F);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_typewriter"), NT_UI_DATA_LAYER(LAYER_TEXT), &tw, container_w, NT_RICH_ALIGN_LEFT, tw_time, NULL);
+    }
+    // #endregion
+
+    /* #region synthetic (faux) italic */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "4) Synthetic italic: a family with NO italic face shears the regular face on <i> (faux-italic) instead of swapping glyphs. Real-vs-faux, then a shear-angle sweep.", g_current->body);
+    {
+        const nt_ui_rich_style_t si_base = rich_base_style();
+        nt_font_t noital[4] = {0}; /* R + B only -- no italic / bold-italic face -> <i> synthesizes the lean */
+        noital[0] = s_rich_font[0];
+        noital[1] = s_rich_font[1];
+        nt_ui_rich_begin(ctx, &si_base);
+        RICH_TEXT_LIT(ctx, "real italic ");
+        nt_ui_rich_push_italic(ctx); /* full family has the italic face -> real glyphs */
+        RICH_TEXT_LIT(ctx, "Sphinx");
+        nt_ui_rich_pop(ctx);
+        RICH_TEXT_LIT(ctx, "    faux italic ");
+        nt_ui_rich_push_font(ctx, noital);
+        nt_ui_rich_push_italic(ctx); /* no italic face -> shear the regular face */
+        RICH_TEXT_LIT(ctx, "Sphinx");
+        nt_ui_rich_pop(ctx); /* italic */
+        nt_ui_rich_pop(ctx); /* font */
+        RICH_TEXT_LIT(ctx, "    faux bold-italic ");
+        nt_ui_rich_push_font(ctx, noital);
+        nt_ui_rich_push_bold(ctx);
+        nt_ui_rich_push_italic(ctx); /* no bold-italic face -> shear the BOLD face */
+        RICH_TEXT_LIT(ctx, "Sphinx");
+        nt_ui_rich_pop(ctx); /* italic */
+        nt_ui_rich_pop(ctx); /* bold */
+        nt_ui_rich_pop(ctx); /* font */
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_faux_italic"), NT_UI_DATA_LAYER(LAYER_TEXT), &si_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
+    }
+    {
+        /* Shear-angle sweep: the SAME word at oblique 0.1/0.2/0.3/0.4 via set_oblique (markup is fixed at 0.2). */
+        nt_ui_rich_style_t sweep_base = rich_base_style();
+        nt_ui_rich_begin(ctx, &sweep_base);
+        nt_ui_rich_object(ctx, rich_obj_oblique_measure, rich_obj_oblique_draw, NULL);
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_oblique_sweep"), NT_UI_DATA_LAYER(LAYER_TEXT), &sweep_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
+    }
+    // #endregion
+
+    /* #region alignment (LEFT / CENTER / RIGHT) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "5) Alignment: the SAME line in three blocks of equal width (560px), aligned left / center / right -- the line shifts within the block.",
+                g_current->body);
+    {
+        /* Each block is container_w wide (explicit), so the solver offsets the line within it (rich_align_ox). */
+        const nt_ui_rich_style_t al_base = rich_base_style();
+        const char *al_l = "LEFT -- this line sits at the start.";
+        const char *al_c = "CENTER -- this line sits in the middle.";
+        const char *al_r = "RIGHT -- this line sits at the end.";
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_align_l"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &al_base, al_l, strlen(al_l), container_w, NT_RICH_ALIGN_LEFT, st->rich.time,
+                               NULL);
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_align_c"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &al_base, al_c, strlen(al_c), container_w, NT_RICH_ALIGN_CENTER, st->rich.time,
+                               NULL);
+        nt_ui_rich_text_markup(ctx, nt_ui_id("showcase/rich_align_r"), NT_UI_DATA_LAYER(LAYER_TEXT), &s_rich_tagset, &al_base, al_r, strlen(al_r), container_w, NT_RICH_ALIGN_RIGHT, st->rich.time,
+                               NULL);
+    }
+    // #endregion
+
+    /* #region valign (PER-IMAGE vertical alignment against the line) */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "5b) Vertical (valign), per-image: a TALL reference icon stretches the line, then the SAME small heart at baseline / middle / top / bottom sits at four distinct heights. (Equal icons "
+                "that dominate the line collapse the modes -- valign only matters when the line is taller than the image.)",
+                g_current->body);
+    {
+        const nt_ui_rich_style_t va_base = rich_base_style();
+        nt_ui_rich_begin(ctx, &va_base);
+        nt_ui_rich_image(ctx, s_rich_gold_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 3.0F); /* tall ref: makes line ascent+descent exceed the small hearts so their valigns separate */
+        RICH_TEXT_LIT(ctx, "  base ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BASELINE, 0.0F, 1.0F);
+        RICH_TEXT_LIT(ctx, "  mid ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_MIDDLE, 0.0F, 1.0F);
+        RICH_TEXT_LIT(ctx, "  top ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_TOP, 0.0F, 1.0F);
+        RICH_TEXT_LIT(ctx, "  bot ");
+        nt_ui_rich_image(ctx, s_rich_heart_ref, NT_RICH_VALIGN_BOTTOM, 0.0F, 1.0F);
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_valign"), NT_UI_DATA_LAYER(LAYER_TEXT), &va_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
+    }
+    // #endregion
+
+    /* Two-pass, PER FRONT: each link's own prev-frame hover styles its own next frame, so the two
+     * on-screen links react INDEPENDENTLY (hovering one no longer lights the other). */
+    st->rich.hover_a = res_a.hovered_link;
+    st->rich.hover_b = res_b.hovered_link;
+
+    /* Link reaction: latch the clicked link, arm the per-front "Accepted" reaction, bump the counter. */
+    if (res_a.clicked_link != 0U) {
+        st->rich.last_link = res_a.clicked_link;
+        st->rich.link_clicks++;
+        st->rich.latch_a = 1.2F;
+    }
+    if (res_b.clicked_link != 0U) {
+        st->rich.last_link = res_b.clicked_link;
+        st->rich.link_clicks++;
+        st->rich.latch_b = 1.2F;
+    }
+    const uint32_t hov_now = (res_a.hovered_link != 0U) ? res_a.hovered_link : res_b.hovered_link;
+    (void)snprintf(buf, sizeof buf, "clock: %.1fs   link hover: 0x%X   last clicked: 0x%X   clicks: %u", (double)st->rich.time, hov_now, st->rich.last_link, st->rich.link_clicks);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "Hover a link -- it brightens + pulses (no layout shift); click it -- green [OK Accepted] ~1s + the counter ticks. The two links react independently. Press T for palette.",
+                g_current->caption);
+}
+// #endregion
 
 /* Dropdown tab: the IMMEDIATE combo (begin/selectable/end). A short list, a long (scrolling) list to
  * exercise the scroll path + edge-flip-up near the bottom border, and a custom-trigger / custom-row combo
@@ -2598,6 +3292,16 @@ static void frame(void) {
         }
     }
 
+    /* Rich-text effect clock: the GAME accumulates time from frame dt (no engine global clock)
+     * and passes it into the rich-text calls -- wave/rainbow/fade_in read it. */
+    s_state.rich.time += g_nt_app.dt;
+    if (s_state.rich.latch_a > 0.0F) {
+        s_state.rich.latch_a -= g_nt_app.dt; /* decay the per-front post-click "Accepted" reaction */
+    }
+    if (s_state.rich.latch_b > 0.0F) {
+        s_state.rich.latch_b -= g_nt_app.dt;
+    }
+
     if (!s_atlas_bound) {
         try_bind_resources();
         if (s_atlas_bound) {
@@ -2697,6 +3401,15 @@ static void frame(void) {
 
         nt_ui_end(s_ctx);
 
+        /* Stash what the <obj=cube/> draw_fn needs (it has no ctx): view_proj (the frame UBO ortho) to remap
+         * the cube into its box NDC (VP_box = view_proj * world_mat4) + the physical fb dims for the box->NDC
+         * aspect. NO viewport/scissor touch in the draw -> nothing else to stash. */
+        {
+            memcpy(s_rich_obj_demo.cube_view.view_proj, vp, 64);
+            s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
+            s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
+        }
+
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
@@ -2778,10 +3491,12 @@ int main(int argc, char *argv[]) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode + 1 packed-region material = 8. */
-    nt_material_init(&(nt_material_desc_t){.max_materials = 9});
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
+    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region = 8. */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 8});
+    /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
+    nt_shape_renderer_init(); /* <obj=cube/> renders a real 3D cube into its inline box (embedded shaders). */
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
@@ -2820,6 +3535,10 @@ int main(int argc, char *argv[]) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
+    s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
+    s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
+    s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
+    s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
     /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
     s_radial_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
     s_radial_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
@@ -2827,6 +3546,11 @@ int main(int argc, char *argv[]) {
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
     s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
+
+    /* Rich-text inline icons (heart/gold) live in the MAIN ui_showcase atlas now. The by-name refs
+     * resolve lazily (memoized on first emit) -- the atlas IS the registry. */
+    s_rich_heart_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_HEART.value);
+    s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_sprite_vs_handle,
@@ -2925,6 +3649,16 @@ int main(int argc, char *argv[]) {
         .band_count = 8,
         .measure_cache_size = 256,
     });
+    /* One handle per rich-text face; each holds its own glyph-curve atlas. */
+    for (uint32_t i = 0; i < 4U; i++) {
+        s_rich_font[i] = nt_font_create(&(nt_font_create_desc_t){
+            .curve_texture_width = 1024,
+            .curve_texture_height = 512,
+            .band_texture_height = 256,
+            .band_count = 8,
+            .measure_cache_size = 256,
+        });
+    }
 
     nt_resource_set_activate_time_budget(0);
 
@@ -2945,7 +3679,11 @@ int main(int argc, char *argv[]) {
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
+    nt_shape_renderer_shutdown();
     nt_font_destroy(s_font);
+    for (uint32_t i = 0; i < 4U; i++) {
+        nt_font_destroy(s_rich_font[i]);
+    }
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);

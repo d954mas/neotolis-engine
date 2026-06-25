@@ -388,6 +388,58 @@ void test_draw_n_does_not_over_read(void) {
     TEST_ASSERT_EQUAL_MEMORY(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
 }
 
+/* ---- C10: a single large rich block routes ALL its glyphs through this shared text-renderer staging
+ * buffer during emit_custom self-emit. A run whose glyph total approaches/exceeds the staging cap must
+ * NOT overflow the fixed staging arrays: emit_quad flushes at the NT_TEXT_RENDERER_MAX_GLYPHS boundary,
+ * so glyph_count never exceeds the cap and vertex_count never exceeds MAX_VERTICES.
+ *
+ * Cap interaction (documented): a single rich block caps its ATOM stream at NT_UI_RICH_MAX_GLYPHS (2048),
+ * but a non-effect run emits ALL its glyphs through ONE draw_n span -- so the glyph total a single span
+ * pushes into staging is bounded by the run's text length, NOT by the atom cap. The text-renderer
+ * staging cap (4096) is therefore the binding overflow guard for a big paragraph, exercised here by a
+ * single draw_n far larger than the cap. ---- */
+void test_draw_n_large_run_flushes_at_staging_cap(void) {
+    nt_text_renderer_flush(); /* start from an empty staging buffer */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    /* A single run well past the renderer cap (no \n -> one continuous span, like a big rich line).
+     * The synthetic font has 'A' as a real glyph (advance 500), so every char stages a quad. */
+    const uint32_t over_cap = (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS + 137U; /* deliberately past the cap */
+    char *big = (char *)malloc((size_t)over_cap + 1U);
+    TEST_ASSERT_NOT_NULL(big);
+    memset(big, 'A', over_cap);
+    big[over_cap] = '\0';
+
+    /* One draw_n with the whole oversized run. emit_quad must flush at the cap so neither staging
+     * array overflows; the call must not trap or write OOB. */
+    nt_text_renderer_draw_n(big, (size_t)over_cap, s_identity, 32.0F, s_white, 0.0F, 0.0F);
+
+    /* After the call the staging buffer holds only the post-flush remainder -- bounded by the cap. */
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_glyph_count() <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS, "glyph_count never exceeds the staging cap (flush-at-boundary kept it bounded)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_vertex_count() <= (uint32_t)NT_TEXT_RENDERER_MAX_VERTICES, "vertex_count never exceeds MAX_VERTICES (4 per glyph, bounded by the cap)");
+
+    /* A second draw of a small run on top still stays bounded (the renderer recovered cleanly). */
+    nt_text_renderer_draw_n("ABC", 3U, s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_glyph_count() <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS, "staging stays bounded after a follow-up draw");
+
+    nt_text_renderer_flush();
+    free(big);
+}
+
+/* ---- The actual safety net for a single rich TEXT run is the renderer's SELF-FLUSH at the staging cap
+ * (test_draw_n_large_run_flushes_at_staging_cap), NOT a cap ratio: a non-effect run emits at most one
+ * glyph per codepoint, so a single run's worst-case glyph total is bounded by its byte count
+ * (NT_UI_RICH_MAX_TEXT_BYTES, one glyph per byte upper bound). That cap EQUALS the renderer staging cap
+ * (NT_TEXT_RENDERER_MAX_GLYPHS), so a single max run sits right at the boundary -- the self-flush, not
+ * headroom, is what keeps it bounded. Pin <= here (mirrored literal; this TU does not link nt_ui) so a
+ * future bump of either cap that pushed the text-byte cap ABOVE the renderer cap (where a single run
+ * could overrun BEFORE the flush) trips this gate. ---- */
+#define NT_UI_RICH_MAX_TEXT_BYTES_MIRROR 4096U /* must match NT_UI_RICH_MAX_TEXT_BYTES in ui/nt_ui_rich_text.h */
+void test_rich_atom_cap_below_text_staging_cap(void) {
+    TEST_ASSERT_TRUE_MESSAGE(NT_UI_RICH_MAX_TEXT_BYTES_MIRROR <= (uint32_t)NT_TEXT_RENDERER_MAX_GLYPHS,
+                             "rich text-byte cap (1 glyph/byte upper bound for one run) must not exceed the renderer staging cap; the renderer self-flush is the real net");
+}
+
 /* ---- Benchmark cases (printed as [BENCH] lines; cover draw hot-loop perf) ---- */
 
 static void bench_draw_short_warm(void) {
@@ -458,6 +510,50 @@ void test_glyph_depth_bias_resets_on_reinit(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_glyph_depth_bias() == 0.0F);
 }
 
+/* ---- synthetic-oblique (faux-italic) ---- */
+
+/* set_oblique shears the model so a glyph's top edge shifts +x relative to its bottom (lean about the
+ * baseline). 0 = upright: top and bottom share x under the identity model. The test font 'A' spans
+ * em y -200..800 → ~33px tall at size 32, so oblique 0.5 leans the top ~16px. */
+void test_oblique_leans_glyph_top(void) {
+    nt_text_renderer_set_oblique(0.0F); /* explicit upright (init already zeroed it) */
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_glyph_count());
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    float bl_x = 0.0F; /* vertex 0 = BL */
+    float tl_x = 0.0F; /* vertex 3 = TL */
+    memcpy(&bl_x, v + 0, sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * 72U), sizeof(float));
+    TEST_ASSERT_TRUE(bl_x == tl_x); /* upright: no shear -> top and bottom share x exactly */
+
+    nt_text_renderer_flush();
+    nt_text_renderer_set_oblique(0.5F);
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.5F);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    v = (const uint8_t *)nt_text_renderer_test_vertices();
+    memcpy(&bl_x, v + 0, sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * 72U), sizeof(float));
+    TEST_ASSERT_TRUE_MESSAGE(tl_x > bl_x + 1.0F, "oblique leans the glyph top toward +x");
+
+    nt_text_renderer_set_oblique(0.0F); /* restore upright for test isolation */
+}
+
+/* Renderer state, not a file-static: survives a GPU context-loss restore like material/font/depth-bias. */
+void test_oblique_persists_across_restore(void) {
+    nt_text_renderer_set_oblique(0.25F); /* exactly representable, so == is safe */
+    nt_text_renderer_restore_gpu();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.25F);
+    nt_text_renderer_set_oblique(0.0F);
+}
+
+/* Cold shutdown/init clears it (test isolation; no lean leaks across renderer reinit). */
+void test_oblique_resets_on_reinit(void) {
+    nt_text_renderer_set_oblique(0.25F);
+    nt_text_renderer_shutdown();
+    nt_text_renderer_init();
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -477,8 +573,13 @@ int main(void) {
     RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_line_leading_advances_pen_y);
     RUN_TEST(test_draw_n_does_not_over_read);
+    RUN_TEST(test_draw_n_large_run_flushes_at_staging_cap);
+    RUN_TEST(test_rich_atom_cap_below_text_staging_cap);
     RUN_TEST(test_glyph_depth_bias_persists_across_restore);
     RUN_TEST(test_glyph_depth_bias_resets_on_reinit);
+    RUN_TEST(test_oblique_leans_glyph_top);
+    RUN_TEST(test_oblique_persists_across_restore);
+    RUN_TEST(test_oblique_resets_on_reinit);
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();
