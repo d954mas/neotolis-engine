@@ -52,6 +52,55 @@ static inline uint32_t nt_color_pack(const float rgba[4]) {
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
+/* One hex nibble 0..15; 0xFF on a non-hex char. */
+static inline uint8_t nt_color_hex_nibble(char c) {
+    if (c >= '0' && c <= '9') {
+        return (uint8_t)(c - '0');
+    }
+    if (c >= 'a' && c <= 'f') {
+        return (uint8_t)(c - 'a' + 10);
+    }
+    if (c >= 'A' && c <= 'F') {
+        return (uint8_t)(c - 'A' + 10);
+    }
+    return 0xFFU;
+}
+
+/* Parse "#RRGGBB" (n==7, alpha forced 0xFF) or "#RRGGBBAA" (n==9) into packed 0xAABBGGRR.
+ * PURE: no logging, no asserts, no side effects. Returns false (out untouched) on any malformed
+ * input -- wrong length, missing '#', or a non-hex digit. Reads only [s, s+n); s may be
+ * non-NUL-terminated. Callers layer their own validation/defaults/logging on top. */
+static inline bool nt_color_parse_hex(const char *s, uint32_t n, uint32_t *out_packed) {
+    if (s == NULL || out_packed == NULL || (n != 7U && n != 9U) || s[0] != '#') {
+        return false;
+    }
+    uint32_t v = 0U; /* accumulates RRGGBB[AA] big-endian */
+    for (uint32_t i = 1U; i < n; i++) {
+        const uint8_t nib = nt_color_hex_nibble(s[i]);
+        if (nib == 0xFFU) {
+            return false;
+        }
+        v = (v << 4) | nib;
+    }
+    uint32_t r;
+    uint32_t g;
+    uint32_t b;
+    uint32_t a;
+    if (n == 7U) {
+        r = (v >> 16) & 0xFFU;
+        g = (v >> 8) & 0xFFU;
+        b = v & 0xFFU;
+        a = 0xFFU;
+    } else {
+        r = (v >> 24) & 0xFFU;
+        g = (v >> 16) & 0xFFU;
+        b = (v >> 8) & 0xFFU;
+        a = v & 0xFFU;
+    }
+    *out_packed = r | (g << 8) | (b << 16) | (a << 24); /* 0xAABBGGRR */
+    return true;
+}
+
 /* Björn Ottosson sRGB transfer (0..1 channel). */
 static inline float nt_color_srgb_to_linear(float c) { return (c <= 0.04045F) ? (c / 12.92F) : powf((c + 0.055F) / 1.055F, 2.4F); }
 static inline float nt_color_linear_to_srgb(float c) { return (c <= 0.0031308F) ? (c * 12.92F) : ((1.055F * powf(c, 1.0F / 2.4F)) - 0.055F); }

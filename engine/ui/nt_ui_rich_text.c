@@ -546,38 +546,21 @@ static bool rich_name_eq(const char *s, uint32_t n, const char *lit) {
     return lit[i] == '\0';
 }
 
-/* One hex nibble; 0xFF on a non-hex char. */
-static uint8_t rich_hex_nibble(char c) {
-    if (c >= '0' && c <= '9') {
-        return (uint8_t)(c - '0');
-    }
-    const char l = rich_lc(c);
-    if (l >= 'a' && l <= 'f') {
-        return (uint8_t)(l - 'a' + 10);
-    }
-    return 0xFFU;
-}
-
-/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Malformed (untrusted
- * localization) -> log once + opaque white; the loop never reads past [s,s+n). */
+/* Parse "#RRGGBB" (6 hex digits) into packed AABBGGRR (alpha forced opaque). Markup accepts ONLY
+ * #RRGGBB (not #RRGGBBAA) -- length/format is gated here so the two malformed-cases keep distinct
+ * warnings; nt_color_parse_hex owns the pure nibble scan. Malformed (untrusted localization) ->
+ * log once + opaque white. */
 static uint32_t rich_parse_hex_color(const char *s, uint32_t n) {
     if (n != 7U || s[0] != '#') {
         NT_LOG_WARN_UNIQUE("rich markup: <color=#hex> must be #RRGGBB, got '%.*s' -- skipped", (int)n, s);
         return 0xFFFFFFFFU;
     }
-    uint32_t rgb = 0;
-    for (uint32_t i = 1; i < 7U; i++) {
-        const uint8_t nib = rich_hex_nibble(s[i]);
-        if (nib == 0xFFU) {
-            NT_LOG_WARN_UNIQUE("rich markup: malformed hex in <color=%.*s> -- skipped", (int)n, s);
-            return 0xFFFFFFFFU;
-        }
-        rgb = (rgb << 4) | nib;
+    uint32_t packed = 0U;
+    if (!nt_color_parse_hex(s, n, &packed)) {
+        NT_LOG_WARN_UNIQUE("rich markup: malformed hex in <color=%.*s> -- skipped", (int)n, s);
+        return 0xFFFFFFFFU;
     }
-    const uint8_t r = (uint8_t)((rgb >> 16) & 0xFFU);
-    const uint8_t g = (uint8_t)((rgb >> 8) & 0xFFU);
-    const uint8_t b = (uint8_t)(rgb & 0xFFU);
-    return ((uint32_t)0xFFU << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r; /* AABBGGRR */
+    return packed;
 }
 
 /* Parse a decimal/float value [s,s+n) (e.g. "1.5"). Malformed (untrusted localization: empty or a
@@ -1816,12 +1799,12 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
 // #endregion
 
 // #region emit
-/* Unpack a packed AABBGGRR color into a normalized RGBA float4 (text renderer order). */
+/* Unpack a packed AABBGGRR color into a normalized RGBA float4 (text renderer order), then fold
+ * opacity into alpha. nt_color_unpack owns the packed->[0,1] math (R,G,B,A order matches); the
+ * opacity multiply is rich-specific so this stays a thin wrapper. */
 static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
-    out[0] = (float)(abgr & 0xFFU) / 255.0F;
-    out[1] = (float)((abgr >> 8) & 0xFFU) / 255.0F;
-    out[2] = (float)((abgr >> 16) & 0xFFU) / 255.0F;
-    out[3] = ((float)((abgr >> 24) & 0xFFU) / 255.0F) * opacity;
+    nt_color_unpack(abgr, out);
+    out[3] *= opacity;
 }
 
 /* Evaluate the per-atom effect -> visual-only transform; effect_id 0 / unregistered -> identity. */

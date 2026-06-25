@@ -174,6 +174,81 @@ void test_byte_identity_input_fade(void) {
     }
 }
 
+/* ---- hex parse ---- */
+
+/* #RRGGBB -> 0xAABBGGRR, alpha forced opaque. */
+void test_parse_hex_rrggbb(void) {
+    uint32_t p = 0U;
+    TEST_ASSERT_TRUE(nt_color_parse_hex("#FF8040", 7U, &p));
+    TEST_ASSERT_EQUAL_HEX32(0xFF4080FFU, p); /* R=FF G=80 B=40 A=FF */
+    TEST_ASSERT_TRUE(nt_color_parse_hex("#0a0B0c", 7U, &p));
+    TEST_ASSERT_EQUAL_HEX32(0xFF0C0B0AU, p); /* mixed-case nibbles */
+}
+
+/* #RRGGBBAA -> 0xAABBGGRR with explicit alpha. */
+void test_parse_hex_rrggbbaa(void) {
+    uint32_t p = 0U;
+    TEST_ASSERT_TRUE(nt_color_parse_hex("#FF804080", 9U, &p));
+    TEST_ASSERT_EQUAL_HEX32(0x804080FFU, p); /* R=FF G=80 B=40 A=80 */
+    TEST_ASSERT_TRUE(nt_color_parse_hex("#00000000", 9U, &p));
+    TEST_ASSERT_EQUAL_HEX32(0x00000000U, p);
+}
+
+/* Malformed -> false, out untouched. */
+void test_parse_hex_malformed(void) {
+    uint32_t p = 0xDEADBEEFU;
+    TEST_ASSERT_FALSE(nt_color_parse_hex("FF8040", 6U, &p));   /* no '#' / wrong len */
+    TEST_ASSERT_FALSE(nt_color_parse_hex("#FF804", 6U, &p));   /* 5 digits */
+    TEST_ASSERT_FALSE(nt_color_parse_hex("#FF80GG", 7U, &p));  /* non-hex digit */
+    TEST_ASSERT_FALSE(nt_color_parse_hex("#FF8040A", 8U, &p)); /* len 8 unsupported */
+    TEST_ASSERT_FALSE(nt_color_parse_hex(NULL, 7U, &p));
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEFU, p); /* untouched on every failure */
+}
+
+/* Byte-identity pin: reproduce the EXACT packed values the pre-migration rich_parse_hex_color
+ * produced for #RRGGBB markup (captured from the old code before routing through nt_color). */
+void test_parse_hex_rich_byte_identity(void) {
+    const struct {
+        const char *s;
+        uint32_t expect;
+    } pins[] = {
+        {"#FF8040", 0xFF4080FFU}, {"#000000", 0xFF000000U}, {"#FFFFFF", 0xFFFFFFFFU}, {"#123456", 0xFF563412U},
+        {"#0a0B0c", 0xFF0C0B0AU}, {"#FF0000", 0xFF0000FFU}, {"#00FF00", 0xFF00FF00U}, {"#0000FF", 0xFFFF0000U},
+    };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        uint32_t p = 0U;
+        TEST_ASSERT_TRUE(nt_color_parse_hex(pins[i].s, 7U, &p));
+        TEST_ASSERT_EQUAL_HEX32(pins[i].expect, p);
+    }
+}
+
+/* Byte-identity pin: rich_unpack_color folds opacity into alpha over nt_color_unpack. This
+ * reproduces the old rich math (R,G,B from byte/255, A = byte/255 * opacity) so the migration
+ * stays pinned to the text/image/object tint values. */
+void test_rich_unpack_color_byte_identity(void) {
+    const uint32_t samples[] = {0xFF80B0E0U, 0x8040C0FFU, 0xFFFFFFFFU, 0x00000000U};
+    const float opacities[] = {1.0F, 0.5F, 0.25F};
+    for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); i++) {
+        for (size_t j = 0; j < sizeof(opacities) / sizeof(opacities[0]); j++) {
+            const uint32_t abgr = samples[i];
+            const float op = opacities[j];
+            float got[4];
+            nt_color_unpack(abgr, got);
+            got[3] *= op;
+            /* old reference math */
+            const float want[4] = {
+                (float)(abgr & 0xFFU) / 255.0F,
+                (float)((abgr >> 8) & 0xFFU) / 255.0F,
+                (float)((abgr >> 16) & 0xFFU) / 255.0F,
+                ((float)((abgr >> 24) & 0xFFU) / 255.0F) * op,
+            };
+            for (int k = 0; k < 4; k++) {
+                TEST_ASSERT_TRUE(approx(got[k], want[k], 0.0F)); /* bit-exact */
+            }
+        }
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_pack_unpack_roundtrip);
@@ -187,5 +262,10 @@ int main(void) {
     RUN_TEST(test_oklab_lerp_t1_reaches_target);
     RUN_TEST(test_oklab_lerp_t_half_midpoint);
     RUN_TEST(test_byte_identity_input_fade);
+    RUN_TEST(test_parse_hex_rrggbb);
+    RUN_TEST(test_parse_hex_rrggbbaa);
+    RUN_TEST(test_parse_hex_malformed);
+    RUN_TEST(test_parse_hex_rich_byte_identity);
+    RUN_TEST(test_rich_unpack_color_byte_identity);
     return UNITY_END();
 }
