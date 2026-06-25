@@ -81,7 +81,7 @@ typedef struct {
     uint32_t line;
     /* TEXT placement context. */
     nt_font_t font;
-    float size;        /* px (font_size * style scale) */
+    float size;        /* px (resolved font_size) */
     uint32_t color;    /* AABBGGRR */
     uint32_t text_off; /* byte range into st->text */
     uint32_t text_len;
@@ -171,8 +171,7 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
     nt_ui_rich_style_t s;
     memset(&s, 0, sizeof s);
     s.color_abgr = 0xFFFFFFFFU;
-    s.scale = 1.0F;
-    s.font_size = NT_UI_RICH_DEFAULT_FONT_SIZE; /* base px; <scale> multiplies it. Mirrors nt_ui_label_style_t.font_size. */
+    s.font_size = NT_UI_RICH_DEFAULT_FONT_SIZE; /* resolved px; <scale> multiplies it. Mirrors nt_ui_label_style_t.font_size. */
     s.variant = 0;
     s.effect_id = 0;
     s.layer = (uint8_t)NT_UI_RICH_LAYER_AUTO; /* per-kind default until an explicit <layer=N> */
@@ -227,9 +226,9 @@ static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_
     return s->font_id[0];
 }
 
-/* Member-wise equality: scale is float; object-rep compare is UB. */
+/* Member-wise equality: font_size is float; object-rep compare is UB. */
 static bool rich_style_eq(const nt_ui_rich_style_t *a, const nt_ui_rich_style_t *b) {
-    if (a->color_abgr != b->color_abgr || a->scale != b->scale || a->font_size != b->font_size || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer ||
+    if (a->color_abgr != b->color_abgr || a->font_size != b->font_size || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer ||
         a->image_material.id != b->image_material.id) {
         return false;
     }
@@ -315,14 +314,14 @@ void nt_ui_rich_push_color(nt_ui_context_t *ctx, uint32_t color_abgr) {
 void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult) {
     NT_ASSERT(mult > 0.0F && isfinite(mult) && "rich scale must be finite > 0 (zero/negative -> negative font size)");
     /* HARD clamp (survives NT_ASSERT OFF): <scale=0> / <scale=-2> feed a non-positive mult here. In OFF
-     * the assert is elided, so style.scale would go <=0 -> size = font_size*scale <= 0 into nt_font_measure_n.
-     * Fall back to identity (1.0) so OFF stays bounded like every other markup path. */
+     * the assert is elided, so a non-positive mult would drive font_size <= 0 -> size <= 0 into nt_font_measure_n.
+     * Fall back to identity (1.0) so font_size stays positive, bounded like every other markup path. */
     if (!(mult > 0.0F) || !isfinite(mult)) {
         mult = 1.0F;
     }
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
-    rich_style_top(st)->scale *= mult; /* multiplicative */
+    rich_style_top(st)->font_size *= mult; /* multiplicative; folds into the resolved size */
 }
 
 void nt_ui_rich_push_font(nt_ui_context_t *ctx, const nt_font_t font_id[4]) {
@@ -1465,7 +1464,7 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
     for (uint32_t ri = 0; ri < st->run_count; ri++) {
         const nt_ui_rich_run_t *run = &st->runs[ri];
         const nt_ui_rich_style_t *style = &st->styles[run->style_idx];
-        const float size = style->font_size * style->scale; /* base size lives in the run's interned style */
+        const float size = style->font_size; /* resolved size lives in the run's interned style (<scale> already folded in at build) */
 
         if (run->kind == NT_RICH_ATOM_TEXT) {
             bool synth = false;

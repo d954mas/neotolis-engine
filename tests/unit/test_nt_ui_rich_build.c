@@ -44,7 +44,7 @@ static void family(nt_font_t out[4], uint32_t r, uint32_t b, uint32_t i, uint32_
     out[3] = (nt_font_t){.id = bi};
 }
 
-/* (1) push_scale(1.5) then push_scale(2.0) -> composed scale 3.0 (x multiplies). */
+/* (1) push_scale(1.5) then push_scale(2.0) -> font_size folds the product (16 * 3.0 == 48). */
 static void test_scale_multiplies(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     nt_ui_rich_begin(s_fx.ctx, &base);
@@ -55,7 +55,7 @@ static void test_scale_multiplies(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_count(s_fx.ctx));
     nt_ui_rich_style_t s = nt_ui_rich_test_run_style(s_fx.ctx, 0);
-    TEST_ASSERT_TRUE_MESSAGE(approx(s.scale, 3.0F), "1.5 * 2.0 == 3.0 (multiplicative)");
+    TEST_ASSERT_TRUE_MESSAGE(approx(s.font_size, 16.0F * 3.0F), "16 * 1.5 * 2.0 == 48 (scale folds into resolved font_size)");
 }
 
 /* (2) innermost color override wins; pop restores the previous. */
@@ -271,8 +271,8 @@ static void test_markup_equals_builder_full(void) {
     snapshot_runs(s_fx.ctx, &parser);
 
     assert_snapshots_identical(&builder, &parser);
-    /* scale folds into font size, not a run field -- assert the composed scale matches. */
-    TEST_ASSERT_TRUE(approx(nt_ui_rich_test_run_style(s_fx.ctx, 1).scale, 1.5F));
+    /* scale folds into the resolved font_size -- the <scale=1.5> run is 16 * 1.5 == 24. */
+    TEST_ASSERT_TRUE(approx(nt_ui_rich_test_run_style(s_fx.ctx, 1).font_size, 16.0F * 1.5F));
 }
 
 /* <img=alias:region/> resolves the alias via the tagset to a different atlas than the default. */

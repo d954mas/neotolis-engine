@@ -311,16 +311,15 @@ static void test_parse_mismatched_link_close_graceful(void) {
  * SCALE path validates >0 and degrades to identity 1.0 BEFORE the builder (no <=0 font size, no trap). */
 static void test_parse_empty_scale_value_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.scale = 1.0F;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=>x</scale>y", 18U); /* no trap */
     const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
     TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "empty <scale=> -> runs, no trap");
-    /* x is inside the (degraded-to-1.0) scale push: its scale must be base*1.0 == 1.0, never 0. */
-    const float sx = nt_ui_rich_test_run_style(s_fx.ctx, 0).scale;
-    TEST_ASSERT_TRUE_MESSAGE(sx > 0.5F && sx < 2.0F, "empty <scale=> degrades to identity (scale ~1, never 0)");
+    /* x is inside the (degraded-to-1.0) scale push: font_size must stay base*1.0 == 16, never 0. */
+    const float sx = nt_ui_rich_test_run_style(s_fx.ctx, 0).font_size;
+    TEST_ASSERT_TRUE_MESSAGE(sx > 15.9F && sx < 16.1F, "empty <scale=> degrades to identity (font_size stays base 16, never 0)");
 }
 
 /* Parse a <fx=...> markup against a tagset that knows the stock "wave" + a custom "fade". */
@@ -749,7 +748,6 @@ static void test_parse_mixed_tag_stack_sync(void) {
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.color_abgr = 0xFF112233U; /* distinguishable from the accent push */
-    base.scale = 1.0F;
     const nt_font_t base_face = {.id = 7};
     for (uint32_t i = 0; i < 4U; i++) {
         base.font_id[i] = base_face; /* a base family distinct from "hdr" */
@@ -766,8 +764,8 @@ static void test_parse_mixed_tag_stack_sync(void) {
     TEST_ASSERT_TRUE_MESSAGE(runs >= 1U, "mixed-tag markup produced the trailing-text run");
     const nt_ui_rich_style_t last = nt_ui_rich_test_run_style(s_fx.ctx, runs - 1U);
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFF112233U, last.color_abgr, "trailing text carries the BASE color (style stack synced past <link>)");
-    const float scale_err = (last.scale > 1.0F) ? (last.scale - 1.0F) : (1.0F - last.scale);
-    TEST_ASSERT_TRUE_MESSAGE(scale_err < 1e-3F, "trailing text carries the BASE scale (no leaked <scale> push)");
+    const float size_err = (last.font_size > 16.0F) ? (last.font_size - 16.0F) : (16.0F - last.font_size);
+    TEST_ASSERT_TRUE_MESSAGE(size_err < 1e-3F, "trailing text carries the BASE font_size (no leaked <scale> push)");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(7U, last.font_id[0].id, "trailing text carries the BASE font (no leaked <font> push)");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, last.variant, "trailing text variant back at base");
 }
@@ -854,18 +852,17 @@ static void test_parse_img_zero_scale_graceful(void) {
  * builder (no <=0 font size into nt_font_measure_n). No trap. */
 static void test_parse_scale_nonpositive_graceful(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.scale = 1.0F;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=0>x</scale>y", 19U); /* no trap */
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).scale > 0.0F, "<scale=0> degrades to a positive scale (never 0)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).font_size > 0.0F, "<scale=0> degrades to identity (font_size stays positive, never 0)");
 
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, "<scale=-1>x</scale>y", 20U); /* no trap */
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).scale > 0.0F, "<scale=-1> degrades to a positive scale (never negative)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_run_style(s_fx.ctx, 0).font_size > 0.0F, "<scale=-1> degrades to identity (font_size stays positive, never negative)");
 }
 
 /* (10b) nested <link>: a single <link> around text parses fine; a second <link> opened inside the

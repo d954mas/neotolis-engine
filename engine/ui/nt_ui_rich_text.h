@@ -98,22 +98,21 @@ typedef enum {
 
 /* ---- The dedup'd composed style (the run_style[] target) ---- */
 /* default_atlas (nt_atlas_region_ref_t) leads with a uint64 -> 8-byte alignment,
- * so the struct rounds up to 48 (the 4-byte color/scale/variant tail pads out). */
+ * so the struct rounds up to 48 (the 4-byte color/font_size/variant tail pads out). */
 typedef struct {
     nt_atlas_region_ref_t default_atlas; /*  0: base-style default image atlas */
     nt_font_t font_id[4];                /* 16: R/B/I/BI variants */
     uint32_t color_abgr;                 /* 32: innermost <color> override */
-    float scale;                         /* 36: accumulated x multiplier */
-    float font_size;                     /* 40: base px size (> 0), mirrors nt_ui_label_style_t.font_size; <scale> multiplies it */
-    uint8_t variant;                     /* 44: NT_UI_RICH_VARIANT_* -> selects font_id[] */
-    uint8_t effect_id;                   /* 45: stock effect catalog index; 0 = none */
-    uint8_t layer;                       /* 46: z-order band; 255 (AUTO) -> per-kind default (TEXT<IMAGE<OBJECT) */
-    uint8_t _pad;                        /* 47: alignment pad to the 4-byte material handle */
-    nt_material_t image_material;        /* 48: inline-image custom-attr material; .id==0 = no inline images */
+    float font_size;                     /* 36: RESOLVED px size (> 0); <scale> multiplies it, a future <size> sets it absolute */
+    uint8_t variant;                     /* 40: NT_UI_RICH_VARIANT_* -> selects font_id[] */
+    uint8_t effect_id;                   /* 41: stock effect catalog index; 0 = none */
+    uint8_t layer;                       /* 42: z-order band; 255 (AUTO) -> per-kind default (TEXT<IMAGE<OBJECT) */
+    uint8_t _pad;                        /* 43: alignment pad to the 4-byte material handle */
+    nt_material_t image_material;        /* 44: inline-image custom-attr material; .id==0 = no inline images */
 } nt_ui_rich_style_t;
 /* In-memory only (never serialized); the leading default_atlas uint64 forces 8-byte alignment so the
- * 52 data bytes round up to 56. */
-_Static_assert(sizeof(nt_ui_rich_style_t) == 56, "nt_ui_rich_style_t in-memory size (16 ref + 4 font + u32 + 2 f32 + variant/effect/layer/pad + material, 8-byte aligned)");
+ * 44 data bytes round up to 48. */
+_Static_assert(sizeof(nt_ui_rich_style_t) == 48, "nt_ui_rich_style_t in-memory size (16 ref + 4 font + u32 + f32 + variant/effect/layer/pad + material, 8-byte aligned)");
 
 /* Layer (z-order band) sentinel + range. AUTO -> rich_build_atoms picks the per-kind default. */
 #define NT_UI_RICH_LAYER_AUTO 255U /* style.layer default; resolves to TEXT=0/IMAGE=1/OBJECT=2 at atom build */
