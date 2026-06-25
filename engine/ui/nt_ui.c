@@ -25,9 +25,9 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include <stdio.h>
 #include <string.h>
 
+#include "color/nt_color.h"
 #include "core/nt_align.h"
 #include "core/nt_assert.h"
-#include "core/nt_clamp.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
@@ -595,13 +595,12 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region helpers_color_pack
-/* Clay's RGBA floats are 0..255 unclamped. */
+/* Clay's RGBA floats are 0..255 unclamped; scale to [0,1] and pack through the canonical
+ * nt_color (Clay-free) home. Byte-identical to the prior nt_clamp_f_to_u8 path: the c/255*255
+ * round-trip + round-to-nearest reproduces the same byte for every Clay float. */
 static inline uint32_t nt_color_pack_clay(Clay_Color c) {
-    uint32_t r = nt_clamp_f_to_u8(c.r);
-    uint32_t g = nt_clamp_f_to_u8(c.g);
-    uint32_t b = nt_clamp_f_to_u8(c.b);
-    uint32_t a = nt_clamp_f_to_u8(c.a);
-    return r | (g << 8) | (b << 16) | (a << 24);
+    const float rgba[4] = {c.r / 255.0F, c.g / 255.0F, c.b / 255.0F, c.a / 255.0F};
+    return nt_color_pack(rgba);
 }
 // #endregion
 

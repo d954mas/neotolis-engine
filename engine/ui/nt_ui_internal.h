@@ -8,6 +8,7 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "color/nt_color.h" /* canonical packed<->float color home (Clay-free) */
 #include "core/nt_assert.h" /* NT_ASSERT_MODE/NT_ASSERT_OFF gate the debug-only combo dup-key window */
 #include "font/nt_font.h"
 #include "input/nt_input.h"
@@ -79,13 +80,18 @@ _Static_assert(sizeof(nt_ui_dfs_frame_t) == 80, "nt_ui_dfs_frame_t fixed at 80B"
  * Callers (walker, hit-test, debug_zone fill) inline this indexing directly. */
 
 /* Packed 0xAABBGGRR -> Clay_Color (0..255), literal (no sentinel). Callers that
- * treat 0xFFFFFFFF as "no tint" must guard it before calling. */
+ * treat 0xFFFFFFFF as "no tint" must guard it before calling. Routes the packed
+ * layout through nt_color (the canonical home) then scales [0,1]->0..255; the
+ * byte/255*255 round-trip is exact for all 256 byte values, so output is
+ * byte-identical to a direct byte extract. */
 static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
+    float rgba[4];
+    nt_color_unpack(packed, rgba);
     return (Clay_Color){
-        .r = (float)(packed & 0xFFU),
-        .g = (float)((packed >> 8) & 0xFFU),
-        .b = (float)((packed >> 16) & 0xFFU),
-        .a = (float)((packed >> 24) & 0xFFU),
+        .r = rgba[0] * 255.0F,
+        .g = rgba[1] * 255.0F,
+        .b = rgba[2] * 255.0F,
+        .a = rgba[3] * 255.0F,
     };
 }
 

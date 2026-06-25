@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "clipboard/nt_clipboard.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
@@ -78,82 +79,20 @@ static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id,
 
 // #region oklab colour-ease (bg/border cross-fade)
 /* Perceptual OKLab cross-fade: ease L,a,b in OKLab (no muddy sRGB midpoint), alpha linearly;
- * first-touch snaps (no flash). Arena per-id cell, no heap. */
+ * first-touch snaps (no flash). Arena per-id cell, no heap. The OKLab/sRGB math lives in
+ * color/nt_color.h (Clay-free, shared); the Clay_Color boundary stays local here. */
 #define NT_UI_INPUT_FADE_TAG NT_UI_STATE_TAG('i', 'f', 'a', 'd')
 
 typedef struct {
-    float l, a, b, alpha; /* OKLab L,a,b + LINEAR (0..1) alpha */
-} oklab_t;
-
-typedef struct {
-    bool seen;  /* false until the first ease snaps cur=tgt (no-flash first-touch) */
-    oklab_t bg; /* current eased bg colour */
-    oklab_t bd; /* current eased border colour */
+    bool seen;     /* false until the first ease snaps cur=tgt (no-flash first-touch) */
+    nt_oklab_t bg; /* current eased bg colour */
+    nt_oklab_t bd; /* current eased border colour */
 } input_fade_cell_t;
 
-/* Björn Ottosson sRGB transfer (0..1 channel). */
-static inline float srgb_to_linear(float c) { return (c <= 0.04045F) ? (c / 12.92F) : powf((c + 0.055F) / 1.055F, 2.4F); }
-static inline float linear_to_srgb(float c) { return (c <= 0.0031308F) ? (c * 12.92F) : ((1.055F * powf(c, 1.0F / 2.4F)) - 0.055F); }
-static inline float clamp01(float c) {
-    if (c < 0.0F) {
-        return 0.0F;
-    }
-    return (c > 1.0F) ? 1.0F : c;
-}
-
-/* The OKLab forward/backward transforms are 3x3 matrix multiplies; per-term parens would only obscure
- * the dot-products (readability-math-missing-parentheses fights the matrix form here). */
-// NOLINTBEGIN(readability-math-missing-parentheses)
-
-/* sRGB 0xAABBGGRR -> OKLab (L,a,b) + linear alpha. `present`==false yields the target's L,a,b at
- * alpha 0 so an appearing/disappearing channel cross-fades its alpha instead of snapping. */
-static oklab_t color_to_oklab(uint32_t packed, bool present) {
-    const Clay_Color c = nt_ui_unpack_abgr(packed);
-    const float r = srgb_to_linear(c.r / 255.0F);
-    const float g = srgb_to_linear(c.g / 255.0F);
-    const float b = srgb_to_linear(c.b / 255.0F);
-    const float lc = 0.4122214708F * r + 0.5363325363F * g + 0.0514459929F * b;
-    const float mc = 0.2119034982F * r + 0.6806995451F * g + 0.1073969566F * b;
-    const float sc = 0.0883024619F * r + 0.2817188376F * g + 0.6299787005F * b;
-    const float L = cbrtf(lc);
-    const float M = cbrtf(mc);
-    const float S = cbrtf(sc);
-    return (oklab_t){
-        .l = 0.2104542553F * L + 0.7936177850F * M - 0.0040720468F * S,
-        .a = 1.9779984951F * L - 2.4285922050F * M + 0.4505937099F * S,
-        .b = 0.0259040371F * L + 0.7827717662F * M - 0.8086757660F * S,
-        .alpha = present ? (c.a / 255.0F) : 0.0F,
-    };
-}
-
-/* OKLab (L,a,b) + linear alpha -> Clay_Color (0..255). Opaque input is exact; a translucent
- * cross-fade would premultiply rgb by alpha around the lerp to avoid edge fringe (skins are opaque). */
-static Clay_Color oklab_to_color(oklab_t o) {
-    const float l_ = o.l + 0.3963377774F * o.a + 0.2158037573F * o.b;
-    const float m_ = o.l - 0.1055613458F * o.a - 0.0638541728F * o.b;
-    const float s_ = o.l - 0.0894841775F * o.a - 1.2914855480F * o.b;
-    const float l = l_ * l_ * l_;
-    const float m = m_ * m_ * m_;
-    const float s = s_ * s_ * s_;
-    float r = 4.0767416621F * l - 3.3077115913F * m + 0.2309699292F * s;
-    float g = -1.2684380046F * l + 2.6097574011F * m - 0.3413193965F * s;
-    float b = -0.0041960863F * l - 0.7034186147F * m + 1.7076147010F * s;
-    /* Gamut clamp: out-of-sRGB OKLab interpolants can land slightly outside [0,1]. */
-    r = clamp01(linear_to_srgb(r));
-    g = clamp01(linear_to_srgb(g));
-    b = clamp01(linear_to_srgb(b));
-    const float a = clamp01(o.alpha);
-    return (Clay_Color){.r = r * 255.0F, .g = g * 255.0F, .b = b * 255.0F, .a = a * 255.0F};
-}
-// NOLINTEND(readability-math-missing-parentheses)
-
-/* cur += (tgt - cur) * k for all four lanes (L,a,b eased perceptually; alpha eased linearly). */
-static inline void oklab_ease(oklab_t *cur, oklab_t tgt, float k) {
-    cur->l += (tgt.l - cur->l) * k;
-    cur->a += (tgt.a - cur->a) * k;
-    cur->b += (tgt.b - cur->b) * k;
-    cur->alpha += (tgt.alpha - cur->alpha) * k;
-}
+/* Eased OKLab cell -> Clay_Color (0..255) via the packed gamut-clamp path, so the cross-fade
+ * stays byte-identical to the pre-shared oklab_to_color. Skins are opaque; a translucent fade
+ * would premultiply rgb by alpha around the lerp to avoid edge fringe. */
+static inline Clay_Color oklab_to_clay(nt_oklab_t o) { return nt_ui_unpack_abgr(nt_color_oklab_to_packed(o)); }
 // #endregion
 
 // #region utf8 helpers
@@ -1142,8 +1081,8 @@ static void emit_field(input_frame_t *f) {
          * bg/border as OKLab + linear alpha; a skin-state change ramps them toward the new colour over
          * state_speed. A channel that appears/disappears cross-fades its ALPHA (target colour at alpha 0
          * for an absent channel), so toggles fade too -- no snap. */
-        const oklab_t bg_t = color_to_oklab(skin->bg_color, has_bg);
-        const oklab_t bd_t = color_to_oklab(skin->border_color, has_border);
+        const nt_oklab_t bg_t = nt_color_packed_to_oklab(skin->bg_color, has_bg);
+        const nt_oklab_t bd_t = nt_color_packed_to_oklab(skin->border_color, has_border);
         input_fade_cell_t *cell = (input_fade_cell_t *)nt_ui_state(ctx, nt_ui_derived_id(id, NT_UI_INPUT_FADE_SALT), (uint32_t)sizeof *cell, NT_UI_INPUT_FADE_TAG);
         if (!cell->seen) {
             /* First-touch / id-replace: snap cur=target, no flash. */
@@ -1155,15 +1094,15 @@ static void emit_field(input_frame_t *f) {
             if (k > 1.0F) {
                 k = 1.0F; /* cap a large dt*state_speed overshoot (first-frame no-flash is the !seen snap above) */
             }
-            oklab_ease(&cell->bg, bg_t, k);
-            oklab_ease(&cell->bd, bd_t, k);
+            nt_color_oklab_lerp(&cell->bg, bg_t, k);
+            nt_color_oklab_lerp(&cell->bd, bd_t, k);
         }
         if (has_bg) {
-            root.backgroundColor = oklab_to_color(cell->bg);
+            root.backgroundColor = oklab_to_clay(cell->bg);
         }
         if (has_border) {
             root.border = (Clay_BorderElementConfig){
-                .color = oklab_to_color(cell->bd),
+                .color = oklab_to_clay(cell->bd),
                 .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
         }
     } else {
