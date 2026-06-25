@@ -2099,6 +2099,52 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
     nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
 }
 
+/* SHEAR SWEEP: the SAME word drawn at oblique 0.1/0.2/0.3/0.4 via nt_text_renderer_set_oblique, proving
+ * faux-italic is a free renderer lean at ANY angle (the rich markup path is fixed at 0.2). The label column
+ * stays upright; only the sample leans -- demonstrates set_oblique toggling per draw_n with no flush. */
+#define RICH_OBJ_SWEEP_W 360.0F
+#define RICH_OBJ_SWEEP_H 112.0F
+static nt_ui_rich_object_measure_t rich_obj_oblique_measure(void *user_data) {
+    (void)user_data;
+    return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SWEEP_W, .height = RICH_OBJ_SWEEP_H, .ascent = 20.0F};
+}
+/* LAYOUT(Y-down) pen -> world text model with the text Y-up<->layout Y-down flip on col1 (mirrors the
+ * engine's rich_span_model). The lean is added by set_oblique, NOT baked here. */
+static void rich_obj_text_model(const float world[16], float ox, float oy, float out[16]) {
+    for (int r = 0; r < 4; ++r) {
+        out[r] = world[r];
+        out[4 + r] = -world[4 + r]; /* Y-flip */
+        out[8 + r] = world[8 + r];
+        out[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
+    }
+}
+static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+    (void)user_data;
+    (void)w;
+    (void)h;
+    if (s_rich_font[0].id == 0U) {
+        return; /* family not bound yet */
+    }
+    static const float shears[4] = {0.1F, 0.2F, 0.3F, 0.4F};
+    const float size = 18.0F;
+    const float line_h = 26.0F;
+    const float label_col = 104.0F;            /* upright label column width (px) */
+    nt_text_renderer_set_font(s_rich_font[0]); /* regular face -> the slant is purely synthetic */
+    for (int i = 0; i < 4; ++i) {
+        char label[16];
+        const int ln = snprintf(label, sizeof label, "shear %.1f", (double)shears[i]);
+        const float baseline = y + size + ((float)i * line_h);
+        float model[16];
+        rich_obj_text_model(world_mat4, x, baseline, model);
+        nt_text_renderer_set_oblique(0.0F); /* label stays upright */
+        nt_text_renderer_draw_n(label, (size_t)ln, model, size, color, 0.0F, 0.0F);
+        rich_obj_text_model(world_mat4, x + label_col, baseline, model);
+        nt_text_renderer_set_oblique(shears[i]); /* sample leans -- no flush between the two draws */
+        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, color, 0.0F, 0.0F);
+    }
+    nt_text_renderer_set_oblique(0.0F); /* MUST reset: this object-only block has no rich text pass to do it */
+}
+
 /* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
  * effects plus a custom effect fn, the inline-icon atlas alias, and the rich font family. The CODE-FIRST
  * builder never touches the tagset -- it gets real values directly. */
@@ -2402,6 +2448,46 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
         /* The clock loops ~every 4s so the reveal replays; tw_time = time within the loop window. */
         const float tw_time = fmodf(st->rich.time, 4.0F);
         nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_typewriter"), NT_UI_DATA_LAYER(LAYER_TEXT), &tw, container_w, NT_RICH_ALIGN_LEFT, tw_time, NULL);
+    }
+    // #endregion
+
+    /* #region synthetic (faux) italic */
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
+                "4) Synthetic italic: a family with NO italic face shears the regular face on <i> (faux-italic) instead of swapping glyphs. Real-vs-faux, then a shear-angle sweep.", g_current->body);
+    {
+        const nt_ui_rich_style_t si_base = rich_base_style();
+        nt_font_t noital[4] = {0}; /* R + B only -- no italic / bold-italic face -> <i> synthesizes the lean */
+        noital[0] = s_rich_font[0];
+        noital[1] = s_rich_font[1];
+        nt_ui_rich_begin(ctx, &si_base);
+        RICH_TEXT_LIT(ctx, "real italic ");
+        nt_ui_rich_push_italic(ctx); /* full family has the italic face -> real glyphs */
+        RICH_TEXT_LIT(ctx, "Sphinx");
+        nt_ui_rich_pop(ctx);
+        RICH_TEXT_LIT(ctx, "    faux italic ");
+        nt_ui_rich_push_font(ctx, noital);
+        nt_ui_rich_push_italic(ctx); /* no italic face -> shear the regular face */
+        RICH_TEXT_LIT(ctx, "Sphinx");
+        nt_ui_rich_pop(ctx); /* italic */
+        nt_ui_rich_pop(ctx); /* font */
+        RICH_TEXT_LIT(ctx, "    faux bold-italic ");
+        nt_ui_rich_push_font(ctx, noital);
+        nt_ui_rich_push_bold(ctx);
+        nt_ui_rich_push_italic(ctx); /* no bold-italic face -> shear the BOLD face */
+        RICH_TEXT_LIT(ctx, "Sphinx");
+        nt_ui_rich_pop(ctx); /* italic */
+        nt_ui_rich_pop(ctx); /* bold */
+        nt_ui_rich_pop(ctx); /* font */
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_faux_italic"), NT_UI_DATA_LAYER(LAYER_TEXT), &si_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
+    }
+    {
+        /* Shear-angle sweep: the SAME word at oblique 0.1/0.2/0.3/0.4 via set_oblique (markup is fixed at 0.2). */
+        nt_ui_rich_style_t sweep_base = rich_base_style();
+        nt_ui_rich_begin(ctx, &sweep_base);
+        nt_ui_rich_object(ctx, rich_obj_oblique_measure, rich_obj_oblique_draw, NULL);
+        nt_ui_rich_end(ctx);
+        nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_oblique_sweep"), NT_UI_DATA_LAYER(LAYER_TEXT), &sweep_base, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, NULL);
     }
     // #endregion
 
