@@ -22,6 +22,17 @@ if(NOT EMSCRIPTEN)
         endif()
     endforeach()
 
+    # --- Color math tests (header-only nt_color.h; no lib, just the engine include root) ---
+    add_executable(test_nt_color unit/test_nt_color.c)
+    target_link_libraries(test_nt_color PRIVATE unity)
+    target_include_directories(test_nt_color PRIVATE "${CMAKE_SOURCE_DIR}/engine")
+    nt_set_warning_flags(test_nt_color)
+    nt_set_sanitizer_flags(test_nt_color)
+    set_target_properties(test_nt_color PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_nt_color COMMAND test_nt_color)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 
