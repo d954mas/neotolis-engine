@@ -78,6 +78,9 @@ const float *nt_text_renderer_test_last_model(void);
 uint32_t nt_text_renderer_test_draw_n_calls(void);
 float nt_text_renderer_test_glyph_depth_bias(void);
 float nt_text_renderer_test_oblique(void);
+/* Largest oblique observed at a draw_n entry since the last reset_call_counters — pins the
+ * SYNTH_ITALIC -> set_oblique wiring through the emit path (stub font emits no glyphs). */
+float nt_text_renderer_test_max_oblique(void);
 /* Currently bound material id (0 = none) — lets tests prove a dispatch path bound a pipeline. */
 uint32_t nt_text_renderer_test_material_id(void);
 #endif

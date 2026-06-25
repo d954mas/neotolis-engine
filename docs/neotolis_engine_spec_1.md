@@ -3184,6 +3184,15 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   `NT_UI_RICH_DEFAULT_FONT_SIZE` (16). Per-run `<scale>` *multiplies* it (the relative
   model is unchanged): `size = style.font_size × composed scale`. Per-run **absolute**
   `<size=N>` stays deferred (D-67-30).
+- **Synthetic italic (faux-italic).** An italic-requested run whose resolved family has no italic
+  face (the `BI→B→R` variant fallback drops the italic member) raises
+  `NT_UI_RICH_RUN_SYNTH_ITALIC`; the emit pass leans it via
+  `nt_text_renderer_set_oblique(NT_UI_RICH_SYNTH_ITALIC_SHEAR)` (0.2 — text-local `x += k·y` about
+  the baseline) instead of a real italic glyph. The shear is **renderer-level state** (sibling of
+  `glyph_depth_bias`; survives `restore_gpu`, cleared on cold init) folded into the model on the CPU
+  per draw — no flush, mixes within one batch — and the pass resets it to 0 so the lean never leaks
+  onto later text. Bold has no free analog (weight is contour *coverage*, not an affine transform);
+  synthetic bold is deferred to #253.
 
 ## 32.3 Inline images ride the standard u8 sprite path
 

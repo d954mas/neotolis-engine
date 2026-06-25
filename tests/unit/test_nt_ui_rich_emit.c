@@ -272,6 +272,59 @@ static void test_emit_single_face_one_set_font(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_set_font_calls(), "single-face block calls set_font once (one distinct font)");
 }
 
+/* Build a block whose LAST run is italic on a family with NO italic face -> NT_UI_RICH_RUN_SYNTH_ITALIC.
+ * Italic is last so a MISSING reset would leave the renderer at the shear, not 0 -- making the leak guard
+ * observable after the walk. */
+static void frame_synth_italic(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font; /* only the regular face; font_id[1..3] stay {0} -> no italic member */
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_si_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_text_n(s_fx.ctx, "up ", 3); /* upright run */
+        nt_ui_rich_push_italic(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "lean", 4); /* italic, no italic face -> synthetic shear */
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_si").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+}
+
+/* (1f) WIRING + LEAK-GUARD: an italic run on a family with no italic face raises NT_UI_RICH_RUN_SYNTH_ITALIC,
+ * which the emit pass feeds to nt_text_renderer_set_oblique as NT_UI_RICH_SYNTH_ITALIC_SHEAR, then resets to
+ * 0 at end of pass. Pins both halves: the shear reaches the renderer, and it does NOT leak past the block. */
+static void test_emit_synth_italic_wires_and_resets_oblique(void) {
+    nt_text_renderer_test_reset_call_counters();
+    frame_synth_italic();
+    TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_oblique(), NT_UI_RICH_SYNTH_ITALIC_SHEAR), "SYNTH_ITALIC run feeds NT_UI_RICH_SYNTH_ITALIC_SHEAR to the renderer during emit");
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_oblique() == 0.0F, "emit resets oblique to 0 after the pass (no lean leak onto the next caller)");
+}
+
+/* (1g) NEGATIVE: a family WITH a real italic face uses it -> no synthetic shear ever reaches the renderer. */
+static void test_emit_real_italic_face_no_oblique(void) {
+    nt_font_t fam[4];
+    fam[0] = s_fx.stub_font;
+    for (int i = 1; i < 4; i++) {
+        fam[i] = make_stub_font();
+    }
+    nt_text_renderer_test_reset_call_counters();
+    frame_multi_face(fam); /* pushes italic / bold-italic against a family that HAS those faces */
+    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_oblique() == 0.0F, "real italic face -> no synthetic shear reaches the renderer");
+    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
+    for (int i = 1; i < 4; i++) {
+        nt_font_destroy(fam[i]);
+    }
+}
+
 /* Build a block with SIX distinct font families on one band (one regular-face text run each), exceeding the
  * old fonts[4] gather cap. Each push_font swaps the whole family; default variant=regular picks font_id[0]. */
 static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
@@ -2264,6 +2317,8 @@ int main(void) {
     RUN_TEST(test_double_walk_is_deterministic);
     RUN_TEST(test_emit_groups_text_by_font);
     RUN_TEST(test_emit_single_face_one_set_font);
+    RUN_TEST(test_emit_synth_italic_wires_and_resets_oblique);
+    RUN_TEST(test_emit_real_italic_face_no_oblique);
     RUN_TEST(test_emit_more_than_four_fonts_no_drop);
     RUN_TEST(test_default_layers_by_kind);
     RUN_TEST(test_layer_override);

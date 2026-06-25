@@ -62,6 +62,10 @@ static struct {
      * matrix construction without needing a real font fixture. */
     float test_last_model[16];
     uint32_t test_draw_n_calls;
+    /* Largest oblique seen at a draw_n entry since the last counter reset. Lets emit tests pin the
+     * SYNTH_ITALIC -> set_oblique wiring end-to-end even with a glyph-less stub font (draw_n early-outs
+     * before emitting, but the lean value is still observed here). */
+    float test_max_oblique;
     /* Counts flushes that issued a draw; empty no-op flushes excluded. */
     uint32_t test_nonempty_flush_calls;
 #endif
@@ -340,6 +344,9 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 #ifdef NT_TEST_ACCESS
     memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
     s_text.test_draw_n_calls++;
+    if (s_text.oblique > s_text.test_max_oblique) {
+        s_text.test_max_oblique = s_text.oblique; /* observe the lean even when the stub font emits nothing */
+    }
 #endif
     if (len == 0U || utf8 == NULL) {
         return;
@@ -525,6 +532,7 @@ void nt_text_renderer_test_reset_call_counters(void) {
     s_text.test_set_material_calls = 0;
     s_text.test_set_font_calls = 0;
     s_text.test_draw_n_calls = 0;
+    s_text.test_max_oblique = 0.0F;
     s_text.test_nonempty_flush_calls = 0;
 }
 uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_nonempty_flush_calls; }
@@ -532,6 +540,7 @@ const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_mo
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
 float nt_text_renderer_test_oblique(void) { return s_text.oblique; }
+float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }
 uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
 #endif
 // #endregion
