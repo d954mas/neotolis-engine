@@ -2297,8 +2297,10 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     RICH_TEXT_LIT(ctx, "bounce ");
     nt_ui_rich_pop(ctx);
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_GLOW);
+    nt_ui_rich_push_color(ctx, 0xFF2A5A7AU); /* dark amber: glow brightens toward white, so a dark base shows the pulse */
     RICH_TEXT_LIT(ctx, "glow ");
-    nt_ui_rich_pop(ctx);
+    nt_ui_rich_pop(ctx); /* color */
+    nt_ui_rich_pop(ctx); /* effect */
     nt_ui_rich_push_effect(ctx, NT_UI_RICH_FX_ID_SWAY);
     RICH_TEXT_LIT(ctx, "sway");
     nt_ui_rich_pop(ctx);
@@ -2380,7 +2382,7 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
                               "<b>bold</b> <i>italic</i> <b><i>bold-italic</i></b>. "
                               "<color=gold><img=gold/><scale=0.85> 100 gold </scale></color><img=heart/>. Effects: "
                               "<fx=wave>wave </fx><fx=shake>shake </fx><fx=rainbow>rainbow </fx><fx=pulse>pulse </fx><fx=fade>fade </fx>"
-                              "<fx=bounce>bounce </fx><fx=glow>glow </fx><fx=sway>sway</fx> "
+                              "<fx=bounce>bounce </fx><fx=glow><color=#7A5A2A>glow </color></fx><fx=sway>sway</fx> "
                               "<fx=wave amp=14 speed=5>BIG</fx>. "
                               "Z-layer  [img over text] LOVE<fx=pull><img=heart scale=1.8/></fx>"
                               "   [text over img] <layer=3>LOVE</layer><fx=pull><img=heart scale=1.8/></fx>. "
