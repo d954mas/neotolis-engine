@@ -1,61 +1,61 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 78ce729
+# Commit: 0da5eb1
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 184 B
-Import               430 B
-Function             109 B
+Import               416 B
+Function              95 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                65 B
-Elem                  63 B
-Code               77086 B
-Data                8954 B
-Custom              4770 B
+Elem                  39 B
+Code               63690 B
+Data                8724 B
+Custom              3461 B
 ---------------- ----------
-TOTAL              91682 B
+TOTAL              76695 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-23990 B   main
-18994 B   frame
- 3103 B   fmt_fp
- 2624 B   printf_core
- 2327 B   nt_input_web_on_blur
- 2041 B   __rem_pio2f
- 1296 B   nt_gfx_make_pipeline
- 1264 B   nt_shape_renderer_flush
- 1239 B   nt_hash32_str
-  775 B   nt_gfx_bind_pipeline
-  716 B   nt_input_web_on_pointer_move
-  677 B   nt_input_web_on_pointer_down
-  650 B   pop_arg_long_double
-  576 B   transform_apply
-  555 B   emmalloc_memalign
-  540 B   push_instance
-  516 B   claim_more_memory
-  512 B   __memcpy
-  486 B   nt_log_write
-  464 B   emit_wire_edge
-  464 B   vsnprintf
-  415 B   attempt_allocate
-  414 B   nt_drawable_comp_set_color
-  385 B   __dynamic_cast
-  382 B   sinf
-  381 B   nt_gfx_make_buffer
+18540 B   frame
+13086 B   main
+ 3002 B   fmt_fp
+ 2603 B   printf_core
+ 2358 B   nt_input_web_on_blur
+ 1843 B   __rem_pio2f
+ 1283 B   nt_gfx_make_pipeline
+ 1260 B   nt_hash32_str
+ 1246 B   nt_shape_renderer_flush
+  819 B   nt_input_web_on_pointer_move
+  779 B   nt_input_web_on_pointer_down
+  723 B   nt_gfx_bind_pipeline
+  690 B   pop_arg_long_double
+  578 B   transform_apply
+  540 B   claim_more_memory
+  519 B   __memcpy
+  501 B   emmalloc_memalign
+  457 B   nt_log_write
+  434 B   vsnprintf
+  416 B   push_instance
+  409 B   attempt_allocate
+  385 B   sinf
   377 B   nt_app_web_frame
-  370 B   __memset
-  362 B   cosf
+  377 B   nt_gfx_make_buffer
+  368 B   __memset
+  359 B   cosf
+  349 B   nt_input_web_on_pointer_up
+  348 B   emit_wire_edge
   340 B   emmalloc_free
+  313 B   nt_gfx_bind_instance_buffer
 
-Total functions: 108
-Total code size: 76912 B
+Total functions: 94
+Total code size: 63536 B
 
 ## Per-Module Contributions
 
@@ -63,60 +63,60 @@ Total code size: 76912 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 2418 B
-libnt_core.a                2422 B
-libnt_drawable_comp.a       5684 B
-libnt_gfx.a                54562 B
-libnt_input.a              18370 B
-libnt_log.a                11884 B
-libnt_shape_renderer.a   1140902 B
-libnt_transform_comp.a      6916 B
-libnt_window.a              3940 B
+libnt_app.a                 2666 B
+libnt_core.a                2628 B
+libnt_drawable_comp.a       5530 B
+libnt_gfx.a                54290 B
+libnt_input.a              19520 B
+libnt_log.a                11954 B
+libnt_shape_renderer.a   1140976 B
+libnt_transform_comp.a      6872 B
+libnt_window.a              4028 B
 ------------------------ ----------
-TOTAL (linked)           1247098 B
+TOTAL (linked)           1248464 B
 
 Not linked to spinning_cube:
-libnt_app_stub.a            2370 B
-libnt_atlas.a               6894 B
-libnt_basisu_transcoder.a 1329370 B
-libnt_clipboard.a           6578 B
-libnt_clipboard_stub.a       738 B
-libnt_comp_storage.a        1930 B
-libnt_debug_overlay.a       2110 B
-libnt_entity.a              6292 B
-libnt_font.a              198350 B
-libnt_fs.a                  2620 B
-libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           31234 B
-libnt_hash.a                4028 B
-libnt_http.a                5984 B
-libnt_http_stub.a           3210 B
-libnt_input_stub.a         22180 B
-libnt_introspect.a          4910 B
-libnt_log_ring.a          595306 B
-libnt_log_stub.a             642 B
-libnt_material.a            4338 B
-libnt_material_comp.a       2190 B
-libnt_mem_scratch.a         1918 B
-libnt_mesh_comp.a           2052 B
-libnt_mesh_renderer.a       7960 B
-libnt_metrics.a            57030 B
-libnt_platform.a             730 B
-libnt_pool.a                1278 B
-libnt_render.a              5910 B
-libnt_resource.a          189038 B
-libnt_sort.a                 366 B
-libnt_sprite_comp.a         9980 B
-libnt_sprite_renderer.a    48096 B
-libnt_text_renderer.a    1236522 B
-libnt_time.a                 868 B
-libnt_ui.a                566306 B
-libnt_ui_stub.a             1230 B
-libnt_utf8.a                1000 B
-libnt_window_stub.a         1838 B
+libnt_app_stub.a            2620 B
+libnt_atlas.a               6728 B
+libnt_basisu_transcoder.a 1305734 B
+libnt_clipboard.a           6906 B
+libnt_clipboard_stub.a       840 B
+libnt_comp_storage.a        2008 B
+libnt_debug_overlay.a       2212 B
+libnt_entity.a              6348 B
+libnt_font.a              197560 B
+libnt_fs.a                  2706 B
+libnt_fs_stub.a             2706 B
+libnt_gfx_stub.a           31220 B
+libnt_hash.a                4108 B
+libnt_http.a                6188 B
+libnt_http_stub.a           3242 B
+libnt_input_stub.a         23432 B
+libnt_introspect.a          5080 B
+libnt_log_ring.a          595390 B
+libnt_log_stub.a             746 B
+libnt_material.a            4428 B
+libnt_material_comp.a       2302 B
+libnt_mem_scratch.a         2016 B
+libnt_mesh_comp.a           2164 B
+libnt_mesh_renderer.a       8060 B
+libnt_metrics.a            56720 B
+libnt_platform.a             824 B
+libnt_pool.a                1376 B
+libnt_render.a              5436 B
+libnt_resource.a          187138 B
+libnt_sort.a                 470 B
+libnt_sprite_comp.a        10010 B
+libnt_sprite_renderer.a    48294 B
+libnt_text_renderer.a    1237154 B
+libnt_time.a                 900 B
+libnt_ui.a                603580 B
+libnt_ui_stub.a             1324 B
+libnt_utf8.a                1098 B
+libnt_window_stub.a         1888 B
 
 
 ## Data Segments Summary
 
 Segments: 26
-Total data size: 8774 B
+Total data size: 8544 B
