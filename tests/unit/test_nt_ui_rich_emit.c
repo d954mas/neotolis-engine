@@ -438,6 +438,15 @@ static void test_inline_image_emits_sprite_and_text(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "exactly one IMAGE atom emitted");
 }
 
+/* (5b) MATERIAL DEFAULT: a block that leaves image_material UNSET (id==0) inherits ctx->sprite_material
+ * (nt_ui_set_sprite_material) -- the image still emits its region quad via the ctx default, no per-block set. */
+static void test_inline_image_defaults_material_from_ctx(void) {
+    nt_text_renderer_test_reset_call_counters();
+    frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU); /* image_material left unset */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "unset image_material -> image emits via the ctx->sprite_material default");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
+}
+
 /* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
  * <color> r=255 g=128 b=0 a=255 emits that per-vertex color on the region quad (the walker
  * packs the run tint into backgroundColor -> a_color, no float4 custom block anymore). */
@@ -2329,6 +2338,7 @@ int main(void) {
     RUN_TEST(test_mixed_auto_and_explicit_layers);
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
+    RUN_TEST(test_inline_image_defaults_material_from_ctx);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);
     RUN_TEST(test_inline_images_not_in_image_command_count);

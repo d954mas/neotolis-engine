@@ -1543,6 +1543,7 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     sprite_bind_barrier(bind);
 
     nt_ui_custom_frame_t frame;
+    frame.ctx = ctx;
     frame.clay_cmd = (const void *)c;
     memcpy(frame.world_mat4, world_mat4, sizeof frame.world_mat4);
     frame.opacity = opacity;
@@ -1551,9 +1552,8 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
      * measured FIXED block hosts the wrapped run-list); the game handler owns every other
      * CUSTOM element. */
     if (cd->type == NT_UI_CUSTOM_TYPE_RICH_TEXT) {
-        /* Rich self-emit uses the text pipeline but has no ctx; bind here like emit_text,
-         * else a rich-only frame (or a post-inspector dispatch) draws with id==0 / a stale material. */
-        nt_text_renderer_set_material(ctx->text_material);
+        /* Self-emit resolves + binds its own text material now that it reads ctx via frame->ctx:
+         * the block's style override, or the ctx->text_material default. */
         nt_ui_rich_internal_emit_custom(&frame, cd->data);
         return;
     }

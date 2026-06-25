@@ -132,12 +132,15 @@ typedef struct {
 #define NT_UI_CUSTOM_TYPE_RICH_TEXT 2 /* rich-text widget self-emit (solved span draw_n) */
 
 /* Frame snapshot passed to the CUSTOM handler.
+ *   ctx        — the UI context (read-only): lets a handler read state/material defaults + viewport
+ *                without closing over it. Opaque to game handlers (the full struct is engine-internal).
  *   clay_cmd   — opaque Clay_RenderCommand*; boundingBox is in LAYOUT (Y-down).
  *   world_mat4 — column-major mat4 taking LAYOUT point → world (parent chain).
  *                Default 2D ctx bakes the screen Y-flip (LAYOUT Y-down → GL Y-up) into world_mat4;
  *                3D ctx (use_raycast_input) leaves it unflipped — the handler composes view_proj as needed.
  *   opacity    — accumulated [0..1]; multiply into alpha. */
 typedef struct {
+    const nt_ui_context_t *ctx;
     const void *clay_cmd;
     float world_mat4[16];
     float opacity;

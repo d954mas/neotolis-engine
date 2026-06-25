@@ -154,8 +154,10 @@ typedef struct {
     uint32_t hovered_link; /* the link id under the pointer this call (0 = none); gates effects */
     uint32_t clicked_link; /* the link id clicked this call (0 = none) */
 
+    /* ---- Materials (resolved at emit: style override or ctx default) ---- */
+    nt_material_t text_material; /* base-style text material (.id==0 -> ctx->text_material) */
     /* ---- Inline-image emit ---- */
-    nt_material_t image_material; /* base-style inline-image material (.id==0 -> no images) */
+    nt_material_t image_material; /* base-style inline-image material (.id==0 -> ctx->sprite_material) */
     uint32_t image_emit_count;    /* IMAGE atoms emitted this call, post-walk (probe) */
     uint32_t image_region;        /* by-name resolved region index of the first IMAGE atom (probe) */
     float image_y;                /* solved y of the first IMAGE atom (probe) */
@@ -229,7 +231,7 @@ static nt_font_t rich_resolve_font(const nt_ui_rich_style_t *s, bool *out_synth_
 /* Member-wise equality: font_size is float; object-rep compare is UB. */
 static bool rich_style_eq(const nt_ui_rich_style_t *a, const nt_ui_rich_style_t *b) {
     if (a->color_abgr != b->color_abgr || a->font_size != b->font_size || a->variant != b->variant || a->effect_id != b->effect_id || a->layer != b->layer ||
-        a->image_material.id != b->image_material.id) {
+        a->image_material.id != b->image_material.id || a->text_material.id != b->text_material.id) {
         return false;
     }
     for (uint32_t i = 0; i < 4U; i++) {
@@ -2079,6 +2081,20 @@ static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_
     return count;
 }
 
+/* Resolve block materials in place: the style overrides; an unset (id==0) field falls back to the ctx
+ * default (text -> ctx->text_material, image -> ctx->sprite_material). st is per-call scratch, never reused. */
+static void rich_resolve_materials(nt_ui_rich_state_t *st, const nt_ui_context_t *ctx) {
+    if (ctx == NULL) {
+        return;
+    }
+    if (st->text_material.id == 0U) {
+        st->text_material = ctx->text_material;
+    }
+    if (st->image_material.id == 0U) {
+        st->image_material = ctx->sprite_material;
+    }
+}
+
 void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
     NT_ASSERT(st != NULL && "rich emit: NULL state");
@@ -2092,10 +2108,14 @@ void nt_ui_rich_internal_emit_custom(const nt_ui_custom_frame_t *frame, void *da
     st->emit_span_count = 0;
     st->image_emit_count = 0; /* single reset point: rich_emit_images sums into this across all layer passes */
 
-    /* Inline-image material is a BAND-INVARIANT: validate it ONCE here, not per-band (rich_emit_images runs
-     * up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> text-only block, no images. The plain u8 sprite
-     * path requires attr_map_count==0 (emit_region bakes no custom-attr block); a NULL/custom-attr material
-     * is a HARD guard (survives NT_ASSERT OFF), keeping the assert for the fail-early dev signal. */
+    rich_resolve_materials(st, frame->ctx);           /* style override, else ctx default (resolved in place) */
+    nt_text_renderer_set_material(st->text_material); /* resolved text material; emit_custom no longer pre-binds */
+
+    /* Inline-image material is a BAND-INVARIANT: validate the RESOLVED material ONCE here, not per-band
+     * (rich_emit_images runs up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> neither style nor ctx
+     * gave a sprite material, so skip images. The plain u8 sprite path requires attr_map_count==0
+     * (emit_region bakes no custom-attr block); a NULL/custom-attr material is a HARD guard (survives
+     * NT_ASSERT OFF), keeping the assert for the fail-early dev signal. */
     bool emit_images = false;
     if (st->image_material.id != 0U) {
         const nt_material_info_t *mi = nt_material_get_info(st->image_material);
@@ -2243,6 +2263,7 @@ void nt_ui_rich_text(nt_ui_context_t *ctx, uint32_t id, const nt_ui_element_data
 
     nt_ui_rich_state_t *st = rich_state(ctx);
     st->image_material = style->image_material;
+    st->text_material = style->text_material;
     st->time = time; /* game-owned animation clock; no global frame clock */
     rich_solve(ctx, st, id, container_w, align);
     rich_resolve_links(ctx, st, id); /* hover gates effects -> must precede emit */

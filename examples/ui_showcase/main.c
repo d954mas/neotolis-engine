@@ -2195,7 +2195,8 @@ static nt_ui_rich_style_t rich_base_style(void) {
         base.font_id[i] = s_rich_font[i]; /* R/B/I/BI -> real DejaVu faces */
     }
     base.color_abgr = showcase_pack_clay_abgr(g_current->body->color);
-    base.image_material = s_sprite_material;               /* inline images ride the standard u8 sprite path */
+    /* image_material/text_material left 0: rich defaults them from ctx (nt_ui_set_sprite_material /
+     * nt_ui_set_text_material). Set a field only to override the material for THIS block. */
     base.default_atlas = nt_atlas_ref(s_atlas_handle, 0U); /* base atlas for <img=name/> by-name resolve */
     return base;
 }
