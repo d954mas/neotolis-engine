@@ -115,11 +115,4 @@ if(EMSCRIPTEN)
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"
     )
-    # Test-only: gate the window.__nt smoke-test surface (input.spec.ts hooks + bbox->CSS mapping)
-    # behind a define so the deployed/public showcase ships NO test scaffolding. The browser-test CI
-    # job configures with -DNT_SHOWCASE_TEST_HOOKS=ON; normal/deploy builds leave it OFF.
-    option(NT_SHOWCASE_TEST_HOOKS "Compile the ui_showcase window.__nt browser-test hooks." OFF)
-    if(NT_SHOWCASE_TEST_HOOKS)
-        target_compile_definitions(ui_showcase PRIVATE NT_SHOWCASE_TEST_HOOKS)
-    endif()
 endif()

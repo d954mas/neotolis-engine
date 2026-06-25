@@ -61,10 +61,6 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt smoke-test hooks */
-#endif
-
 #include "clay.h"
 // #endregion
 
@@ -2346,18 +2342,6 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_end(ctx);
 }
 
-#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
-/* The code-first block's quest <link> BLOCK-LOCAL rect (from res_a.first_link_rect), stashed at the
- * rich_text call and mapped to CSS px against the block bbox each frame -- so rich.spec.ts does ONE
- * precise pointerdown->up at the link center (a HARD-asserted gate, not a band sweep). */
-static float s_nt_rich_link_local[4]; /* {x, y, w, h} block-local px of the first link */
-static int s_nt_rich_link_present;    /* the code-first block resolved a first link this frame */
-static float s_nt_rich_link_css_x;    /* link center + size in CSS px (canvas-relative) */
-static float s_nt_rich_link_css_y;
-static float s_nt_rich_link_css_w;
-static float s_nt_rich_link_css_h;
-#endif
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[128];
@@ -2381,14 +2365,6 @@ static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     const rich_link_look_t look_a = rich_link_look(st->rich.hover_a == rich_link_quest(), st->rich.latch_a > 0.0F);
     render_rich_builder_block(ctx, look_a, &base_a);
     nt_ui_rich_text(ctx, nt_ui_id("showcase/rich_builder"), NT_UI_DATA_LAYER(LAYER_TEXT), &base_a, container_w, NT_RICH_ALIGN_LEFT, st->rich.time, &res_a);
-#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
-    /* Stash the quest link's block-local rect for the per-frame CSS map (rich.spec.ts clicks it). */
-    s_nt_rich_link_present = (res_a.first_link != 0U) ? 1 : 0;
-    s_nt_rich_link_local[0] = res_a.first_link_rect[0];
-    s_nt_rich_link_local[1] = res_a.first_link_rect[1];
-    s_nt_rich_link_local[2] = res_a.first_link_rect[2];
-    s_nt_rich_link_local[3] = res_a.first_link_rect[3];
-#endif
     // #endregion
 
     /* #region runtime markup parser */
@@ -3232,109 +3208,6 @@ static void declare_props_panel(nt_ui_context_t *ctx) {
 }
 // #endregion
 
-// #region web test hooks (window.__nt) -- web build only, gated behind NT_SHOWCASE_TEST_HOOKS so the
-// deployed/public showcase carries NO test scaffolding; the browser-test build defines the macro.
-#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
-/* Headless-browser smoke test surface (tests/browser/input.spec.ts). Exposes the bare minimum the
- * Playwright test needs to drive the REAL keydown/paste path and read genuine state -- the input
- * field's game-owned buffer + the walker text-command count + the field's on-canvas CSS rect (so the
- * test clicks the real widget to focus it). Test-only; leaks no engine internals. */
-static int s_nt_ready;         /* set after the first rendered frame */
-static float s_nt_field_css_x; /* Cyrillic field center, CSS px (canvas-relative) */
-static float s_nt_field_css_y;
-static int s_nt_field_visible; /* the field was laid out this frame (Input tab active) */
-
-/* Rich-text smoke surface (tests/browser/rich.spec.ts): the code-first rich block's on-canvas CSS
- * rect (so the test can click inside it to hit the inline <link>), the block's visibility this frame,
- * and the game-owned link-click counter -- proving rich self-emit + link interaction reach the real
- * web render/input path. Populated each frame the Rich tab is active. */
-static float s_nt_rich_css_x; /* code-first rich block center, CSS px */
-static float s_nt_rich_css_y;
-static float s_nt_rich_css_w; /* block width/height in CSS px (the test clicks within it) */
-static float s_nt_rich_css_h;
-static int s_nt_rich_visible; /* the rich block was laid out this frame (Rich tab active) */
-
-EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
-
-/* Pointer to the Cyrillic field's game-owned buffer (UTF-8, NUL-terminated). JS decodes it. */
-EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.input.cyrillic; }
-
-/* Walker text-command count from the last frame -- proves the typed text reached the render path. */
-EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
-
-EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
-EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
-EMSCRIPTEN_KEEPALIVE int nt_test_field_visible(void) { return s_nt_field_visible; }
-
-/* Select the Input tab (so the field is laid out + clickable). Index resolved by render fn, not pinned. */
-EMSCRIPTEN_KEEPALIVE void nt_test_open_input_tab(void) {
-    for (int i = 0; i < TAB_COUNT; ++i) {
-        if (g_tabs[i].render == render_input) {
-            s_active_tab = i;
-            return;
-        }
-    }
-}
-
-/* Select the Rich Text tab (so the rich block is laid out + self-emits). Index resolved by render fn. */
-EMSCRIPTEN_KEEPALIVE void nt_test_open_rich_tab(void) {
-    for (int i = 0; i < TAB_COUNT; ++i) {
-        if (g_tabs[i].render == render_rich) {
-            s_active_tab = i;
-            return;
-        }
-    }
-}
-
-EMSCRIPTEN_KEEPALIVE int nt_test_rich_visible(void) { return s_nt_rich_visible; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_x(void) { return s_nt_rich_css_x; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_y(void) { return s_nt_rich_css_y; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_w(void) { return s_nt_rich_css_w; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_css_h(void) { return s_nt_rich_css_h; }
-
-/* The quest <link>'s on-canvas CSS rect (center x/y + w/h) -- the spec clicks its center for a
- * deterministic link hit. present==0 when the link hasn't resolved a rect yet (rich block not laid out). */
-EMSCRIPTEN_KEEPALIVE int nt_test_rich_link_present(void) { return s_nt_rich_link_present; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_x(void) { return s_nt_rich_link_css_x; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_y(void) { return s_nt_rich_link_css_y; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_w(void) { return s_nt_rich_link_css_w; }
-EMSCRIPTEN_KEEPALIVE float nt_test_rich_link_css_h(void) { return s_nt_rich_link_css_h; }
-
-/* Total <link> clicks the rich blocks have registered (game-owned counter) -- a click on the inline
- * link bumps it, proving the link-interaction path reached the real browser render+input. */
-EMSCRIPTEN_KEEPALIVE unsigned int nt_test_rich_link_clicks(void) { return s_state.rich.link_clicks; }
-
-/* clang-format off */
-/* Force-include UTF8ToString for the readout below. Gated with the hooks so the deployed showcase
- * (NT_SHOWCASE_TEST_HOOKS OFF) carries no test-only dep. The C getters are KEEPALIVE (live as bare
- * _name in the glue scope); bare access + EM_JS_DEPS is Closure-safe, no exported-methods list. */
-EM_JS_DEPS(nt_showcase_test_hooks, "$UTF8ToString")
-
-EM_JS(void, nt_test_install_hooks, (void), {
-    window.__nt = {
-        get ready() { return _nt_test_ready() !== 0; },
-        input_buffer: function() { return UTF8ToString(_nt_test_input_buffer()); },
-        walk_text_cmd_count: function() { return _nt_test_walk_text_cmd_count() >>> 0; },
-        open_input_tab: function() { _nt_test_open_input_tab(); },
-        field_visible: function() { return _nt_test_field_visible() !== 0; },
-        field_css: function() {
-            return { x: _nt_test_field_css_x(), y: _nt_test_field_css_y() };
-        },
-        open_rich_tab: function() { _nt_test_open_rich_tab(); },
-        rich_visible: function() { return _nt_test_rich_visible() !== 0; },
-        rich_css: function() {
-            return { x: _nt_test_rich_css_x(), y: _nt_test_rich_css_y(), w: _nt_test_rich_css_w(), h: _nt_test_rich_css_h() };
-        },
-        rich_link_css: function() {
-            return { present: _nt_test_rich_link_present() !== 0, x: _nt_test_rich_link_css_x(), y: _nt_test_rich_link_css_y(), w: _nt_test_rich_link_css_w(), h: _nt_test_rich_link_css_h() };
-        },
-        rich_link_clicks: function() { return _nt_test_rich_link_clicks() >>> 0; }
-    };
-})
-/* clang-format on */
-#endif /* __EMSCRIPTEN__ && NT_SHOWCASE_TEST_HOOKS */
-// #endregion
-
 // #region frame
 /* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
 static float showcase_poll_gpu_ms(void) {
@@ -3537,49 +3410,6 @@ static void frame(void) {
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
-
-#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
-        /* Web smoke-test surface: map the Cyrillic field's logical bbox -> canvas CSS px so the
-         * Playwright test clicks the real widget (driving the genuine pointerdown->focus path). UI
-         * logical -> framebuffer px (offset + ui*scale) -> CSS px (/dpr). Clay bbox + fb are both
-         * Y-down, matching nt_input_web's css->fb map (no Y-flip). */
-        {
-            const nt_ui_bbox_t fb = nt_ui_get_bbox(s_ctx, s_id_input_cyrillic);
-            s_nt_field_visible = fb.found ? 1 : 0;
-            if (fb.found) {
-                const float dpr = (g_nt_window.dpr > 0.0F) ? g_nt_window.dpr : 1.0F;
-                const float cx_fb = scale.offset_x + (fb.x + fb.width * 0.5F) * scale.scale_x;
-                const float cy_fb = scale.offset_y + (fb.y + fb.height * 0.5F) * scale.scale_y;
-                s_nt_field_css_x = cx_fb / dpr;
-                s_nt_field_css_y = cy_fb / dpr;
-            }
-            s_nt_ready = 1;
-        }
-        /* Rich Text tab: map the code-first rich block's logical bbox -> canvas CSS px so the spec can
-         * click inside it (the inline <link> sits within this rect). Same UI->fb->CSS map as the field. */
-        {
-            const nt_ui_bbox_t rb = nt_ui_get_bbox(s_ctx, nt_ui_id("showcase/rich_builder"));
-            s_nt_rich_visible = rb.found ? 1 : 0;
-            if (rb.found) {
-                const float dpr = (g_nt_window.dpr > 0.0F) ? g_nt_window.dpr : 1.0F;
-                const float cx_fb = scale.offset_x + (rb.x + rb.width * 0.5F) * scale.scale_x;
-                const float cy_fb = scale.offset_y + (rb.y + rb.height * 0.5F) * scale.scale_y;
-                s_nt_rich_css_x = cx_fb / dpr;
-                s_nt_rich_css_y = cy_fb / dpr;
-                s_nt_rich_css_w = (rb.width * scale.scale_x) / dpr;
-                s_nt_rich_css_h = (rb.height * scale.scale_y) / dpr;
-                /* Quest link: block-local rect + block origin -> CSS px center/size (same UI->fb->CSS map). */
-                if (s_nt_rich_link_present) {
-                    const float lcx_fb = scale.offset_x + (rb.x + s_nt_rich_link_local[0] + s_nt_rich_link_local[2] * 0.5F) * scale.scale_x;
-                    const float lcy_fb = scale.offset_y + (rb.y + s_nt_rich_link_local[1] + s_nt_rich_link_local[3] * 0.5F) * scale.scale_y;
-                    s_nt_rich_link_css_x = lcx_fb / dpr;
-                    s_nt_rich_link_css_y = lcy_fb / dpr;
-                    s_nt_rich_link_css_w = (s_nt_rich_link_local[2] * scale.scale_x) / dpr;
-                    s_nt_rich_link_css_h = (s_nt_rich_link_local[3] * scale.scale_y) / dpr;
-                }
-            }
-        }
-#endif /* __EMSCRIPTEN__ && NT_SHOWCASE_TEST_HOOKS */
 
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
@@ -3836,10 +3666,6 @@ int main(int argc, char *argv[]) {
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
-#endif
-
-#if defined(__EMSCRIPTEN__) && defined(NT_SHOWCASE_TEST_HOOKS)
-    nt_test_install_hooks(); /* window.__nt smoke-test surface (test-only) */
 #endif
 
     nt_log_info("ui_showcase: starting (T=palette, D=inspector, Esc unfocus/quit)");
