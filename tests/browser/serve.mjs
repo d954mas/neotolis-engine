@@ -1,4 +1,4 @@
-// Minimal static server for the ui_showcase wasm build. Adds COOP/COEP (cross-origin isolation,
+// Minimal static server for the browser_smoke wasm build. Adds COOP/COEP (cross-origin isolation,
 // harmless for the single-threaded baseline build, required if a threaded build is ever served),
 // keeps every response same-origin (CORP same-origin to match the require-corp embedder policy --
 // the test is a representative single-origin load, not cross-origin), and the correct
@@ -11,10 +11,10 @@ import { dirname } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Build dir: env override (CI) or the local wasm-debug example output.
+// Build dir: env override (NT_SHOWCASE_DIR) or the local browser_smoke wasm-debug output.
 const ROOT =
   process.env.NT_SHOWCASE_DIR ||
-  join(__dirname, '..', '..', 'build', 'examples', 'ui_showcase', 'wasm-debug');
+  join(__dirname, '..', '..', 'build', 'tests', 'browser', 'app', 'wasm-debug');
 const PORT = Number(process.env.NT_SHOWCASE_PORT || 8123);
 
 const MIME = {

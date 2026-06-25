@@ -1,17 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-// Window hooks the ui_showcase web build exposes (examples/ui_showcase/main.c, gated behind
-// NT_SHOWCASE_TEST_HOOKS). The rich-text surface mirrors the input surface: switch to the Rich tab,
-// read the block's on-canvas CSS rect, the per-frame walker text-command count, the game-owned
-// <link> click counter, and the quest link's EXACT on-canvas CSS rect (so the click is precise).
+// Window hooks the browser_smoke web build exposes (tests/browser/app/main.c, #ifdef __EMSCRIPTEN__).
+// The rich-text block is always laid out (no tabs): read the per-frame walker text-command count, the
+// game-owned <link> click counter, and the quest link's EXACT on-canvas CSS rect (so the click is precise).
 declare global {
   interface Window {
     __nt?: {
       ready: boolean;
       walk_text_cmd_count(): number;
-      open_rich_tab(): void;
-      rich_visible(): boolean;
-      rich_css(): { x: number; y: number; w: number; h: number };
       rich_link_css(): { present: boolean; x: number; y: number; w: number; h: number };
       rich_link_clicks(): number;
     };
@@ -27,14 +23,9 @@ test('rich text: self-emit reaches the web render path (emit count > 0) and the 
   // Boot gate: the wasm app sets __nt.ready after its first rendered frame.
   await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
 
-  // Switch to the Rich Text tab, then wait until the code-first rich block reports a measured bbox
-  // (laid out + self-emitting this frame).
-  await page.evaluate(() => window.__nt!.open_rich_tab());
-  await page.waitForFunction(() => window.__nt!.rich_visible() === true, null, { timeout: 10_000 });
-
-  // PRIMARY assertion: the rich tab emitted text commands end-to-end in real Chromium. The rich blocks
-  // dominate this tab's text, so a positive count proves the solved spans reached the walker's text path
-  // (a silent emit failure -- e.g. the CUSTOM dispatch not rebinding the text material -- would read 0).
+  // PRIMARY assertion: the app emitted text commands end-to-end in real Chromium. A positive count proves
+  // the solved rich spans reached the walker's text path (a silent emit failure -- e.g. the CUSTOM dispatch
+  // not rebinding the text material -- would read 0).
   await expect
     .poll(() => page.evaluate(() => window.__nt!.walk_text_cmd_count()), { timeout: 10_000 })
     .toBeGreaterThan(0);

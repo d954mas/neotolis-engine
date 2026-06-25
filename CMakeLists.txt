@@ -154,6 +154,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/slice9_demo)
     add_subdirectory(examples/ui_3d_demo)
     add_subdirectory(examples/ui_showcase)
+    # Minimal standalone web smoke-test app (window.__nt hooks the browser specs drive).
+    add_subdirectory(tests/browser/app)
     # devapi host links nt_devapi (+ nt_devapi_net.c) which exist only when the
     # layer is enabled and only on native builds — gate on both.
     if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)

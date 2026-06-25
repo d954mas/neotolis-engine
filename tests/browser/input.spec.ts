@@ -1,13 +1,12 @@
 import { test, expect } from '@playwright/test';
 
-// Window hooks the ui_showcase web build exposes (examples/ui_showcase/main.c, #ifdef __EMSCRIPTEN__).
+// Window hooks the browser_smoke web build exposes (tests/browser/app/main.c, #ifdef __EMSCRIPTEN__).
 declare global {
   interface Window {
     __nt?: {
       ready: boolean;
       input_buffer(): string;
       walk_text_cmd_count(): number;
-      open_input_tab(): void;
       field_visible(): boolean;
       field_css(): { x: number; y: number };
     };
@@ -15,8 +14,8 @@ declare global {
 }
 
 // FIRST headless-browser smoke test: a real Chromium drives the genuine web input + clipboard path
-// (keydown incl. Cyrillic -> _ntCharBuf ring; DOM paste -> nt_clipboard cache) against the actual
-// ui_showcase build. No DOM stubbing -- the layer under test is the real engine glue.
+// (keydown incl. Cyrillic -> _ntCharBuf ring; DOM paste -> nt_clipboard cache) against the
+// browser_smoke test app. No DOM stubbing -- the layer under test is the real engine glue.
 test('input field: real keydown (Cyrillic) + paste reaches the buffer and the render path', async ({ page }) => {
   await page.goto('/index.html');
 
@@ -29,8 +28,7 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
   // Boot gate: the wasm app sets __nt.ready after its first rendered frame.
   await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
 
-  // Switch to the Input tab so the field is laid out, then wait until it reports a measured bbox.
-  await page.evaluate(() => window.__nt!.open_input_tab());
+  // The field is always laid out (no tabs in browser_smoke); wait until it reports a measured bbox.
   await page.waitForFunction(() => window.__nt!.field_visible() === true, null, { timeout: 10_000 });
 
   // Focus the REAL widget by clicking its canvas CSS coordinates -> genuine pointerdown -> field focus.

@@ -545,9 +545,10 @@ jobs:
         with:
           node-version: '20'
 
-      # ui_showcase is not built in the wasm job (its pack is not a CI artifact), so produce it here:
-      # build the native pack builder, run it to emit ui_showcase.ntpack, then build the wasm target
-      # (its CMake copies the pack into the preset's assets/). Debug preset keeps the build fast.
+      # The browser_smoke test app reuses the ui_showcase pack (same assets), but the pack is not a CI
+      # artifact, so produce it here: build the native pack builder, run it to emit ui_showcase.ntpack,
+      # THEN configure+build the wasm browser_smoke target (its CMake copies the pack into assets/).
+      # The pack must exist before the wasm configure so the copy custom-command is set up.
       - name: Configure native debug
         run: cmake --preset native-debug
 
@@ -556,10 +557,10 @@ jobs:
           cmake --build --preset native-debug --target build_ui_showcase_packs
           ./build/examples/ui_showcase/native-debug/build_ui_showcase_packs build/examples/ui_showcase
 
-      - name: Build ui_showcase wasm (debug, with browser-test hooks)
+      - name: Build browser_smoke wasm (debug)
         run: |
-          emcmake cmake --preset wasm-debug -DNT_SHOWCASE_TEST_HOOKS=ON
-          cmake --build --preset wasm-debug --target ui_showcase
+          emcmake cmake --preset wasm-debug
+          cmake --build --preset wasm-debug --target browser_smoke
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
