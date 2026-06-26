@@ -9,6 +9,9 @@
 /* Stable machine error tokens, shared by the dispatch core and discovery handlers. */
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
+/* A deferred DATA producer (capture.*) ran and failed (readback / encode / OOM). Distinct from the
+   content-free legacy {deferred:true} yield, so a client never sees ok:true without the result shape. */
+#define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
 
 /* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success — OOM traps
    (fail-early) instead of silently producing an incomplete response. */
@@ -83,17 +86,20 @@ typedef void (*nt_devapi_ctx_free_fn)(void *ctx);
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
-    cJSON *id;             /* owned duplicate of request_id (number or string); NULL if absent. */
-    double target_time;    /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
-    uint32_t target_frame; /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
-    bool by_time;          /* selects which deadline field slot_ready compares. */
-    bool in_use;
+    /* 8-byte members first (pointers + double) so the trailing small fields pack with minimal padding. */
+    cJSON *id;          /* owned duplicate of request_id (number or string); NULL if absent. */
+    double target_time; /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
     /* Result-payload continuation (capture-style commands). producer fills `payload` at the
        pre-swap seam; the core names no capture symbol — the producer is supplied by the handler. */
     nt_devapi_payload_producer_fn producer;  /* NULL for legacy frame.wait/time.step slots. */
     void *producer_ctx;                      /* owned param block; freed via producer_ctx_free. */
     nt_devapi_ctx_free_fn producer_ctx_free; /* frees producer_ctx on yield/reset; NULL if ctx is unowned. */
     cJSON *payload;                          /* owned serialized capture result; NULL until the seam fills it. */
+    uint32_t target_frame;                   /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
+    bool by_time;                            /* selects which deadline field slot_ready compares. */
+    bool in_use;
+    bool is_data; /* a DATA (producer-bearing) slot: outlives `producer` (cleared at the seam) so a
+                     producer-ran-but-failed slot yields capture_failed, not the legacy {deferred:true}. */
 } nt_devapi_deferred_slot;
 
 /* Mark the in-flight command as deferred: submit() returns NULL and the response is yielded once
@@ -121,6 +127,11 @@ bool nt_devapi_defer_current_time(double seconds);
    nt_devapi_deferred_reset). A capture therefore resolves on the next RENDERED frame, not merely the
    next frame — the managed host gates the seam on render-enabled (see examples/capture_host). */
 bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free);
+
+/* Count of in-flight DATA (producer-bearing) deferred slots not yet drained. A data group (capture)
+   uses it to cap concurrent captures independently of the shared deferred-queue size, bounding the
+   per-seam encode burst + held-payload memory a single client flood can trigger. */
+int nt_devapi_deferred_data_inflight(void);
 
 /* The host-facing pre-swap seam (nt_devapi_capture_on_pre_swap) is a PUBLIC host contract — declared in
    the public capture header so a host drives captures without reaching into this internal header. */

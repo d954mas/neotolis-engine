@@ -100,9 +100,21 @@ static void slot_clear(nt_devapi_deferred_slot *slot) {
     }
     slot_release_producer(slot);
     slot->in_use = false;
+    slot->is_data = false;
     slot->target_frame = 0;
     slot->target_time = 0.0;
     slot->by_time = false;
+}
+
+/* Count in-flight DATA slots (producer-bearing, not yet drained) so a data group can cap concurrency. */
+int nt_devapi_deferred_data_inflight(void) {
+    int n = 0;
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        if (s_deferred[i].in_use && s_deferred[i].is_data) {
+            n++;
+        }
+    }
+    return n;
 }
 
 /* Free owned ids/payloads/ctx + clear the queue. Called from shutdown so init->shutdown->init is
@@ -293,7 +305,8 @@ static bool deferred_enqueue(const cJSON *req, const deferred_continuation *cont
         s_deferred[i].producer = cont->producer; /* NULL for legacy content-free defers. */
         s_deferred[i].producer_ctx = cont->producer_ctx;
         s_deferred[i].producer_ctx_free = cont->producer_ctx_free;
-        s_deferred[i].payload = NULL; /* filled at the pre-swap seam, if a producer is present. */
+        s_deferred[i].payload = NULL;                     /* filled at the pre-swap seam, if a producer is present. */
+        s_deferred[i].is_data = (cont->producer != NULL); /* outlives `producer` for the failure-vs-legacy split. */
         s_deferred[i].in_use = true;
         return true;
     }
@@ -501,19 +514,25 @@ void nt_devapi_capture_on_pre_swap(void) {
    filled payload becomes the ok-entry result; absent payload falls back to the legacy
    {deferred:true}. Mirrors the id transfer so reset never double-frees. */
 static cJSON *serialize_slot(nt_devapi_deferred_slot *slot) {
-    cJSON *result_obj;
+    cJSON *entry;
     if (slot->payload != NULL) {
-        result_obj = slot->payload; /* transfer ownership into the entry. */
-        slot->payload = NULL;       /* so slot_clear doesn't double-free. */
+        cJSON *result_obj = slot->payload; /* transfer ownership into the entry. */
+        slot->payload = NULL;              /* so slot_clear doesn't double-free. */
+        entry = make_ok_entry(result_obj);
+    } else if (slot->is_data) {
+        /* A DATA slot resolved with NO payload: its producer ran and FAILED (readback/encode/OOM).
+           Yield a distinguishable error envelope, NOT the content-free legacy {deferred:true} — so a
+           client never sees ok:true without the documented {width,height,format,data} shape. */
+        entry = make_error_entry(NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
     } else {
         /* Legacy content-free yield (frame.wait/time.step) — unchanged. */
-        result_obj = cJSON_CreateObject();
+        cJSON *result_obj = cJSON_CreateObject();
         NT_ASSERT(result_obj != NULL);
         devapi_add_bool(result_obj, "deferred", true);
+        entry = make_ok_entry(result_obj);
     }
-    cJSON *entry = make_ok_entry(result_obj); /* takes ownership of result_obj. */
     if (slot->id != NULL) {
-        attach_request_id(entry, slot->id); /* transfer ownership into the tree. */
+        attach_request_id(entry, slot->id); /* transfer ownership into the tree (ok or error entry). */
         slot->id = NULL;                    /* so slot_clear doesn't double-free. */
     }
     return entry;

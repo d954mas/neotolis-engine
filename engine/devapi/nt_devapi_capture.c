@@ -30,6 +30,15 @@
    cap — the uint32 size math is then provably safe end-to-end. */
 _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: the base64 size expansion (~w*h*8) would overflow the uint32 producer size math");
 
+/* Cap concurrent in-flight captures independently of the shared deferred queue (NT_DEVAPI_MAX_DEFERRED).
+   Without it a single client flood could queue up to the full queue of captures that the pre-swap seam
+   then encodes synchronously in one frame (render-thread stall) and holds as that many base64 payloads
+   (memory spike). 8 bounds the per-seam encode burst + held memory while leaving generous pipelining.
+   -D overridable. */
+#ifndef NT_DEVAPI_CAPTURE_MAX_INFLIGHT
+#define NT_DEVAPI_CAPTURE_MAX_INFLIGHT 8
+#endif
+
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
@@ -185,7 +194,11 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
 /* Defer with a producer carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
    rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
    top-left sub-rect matching the documented contract. Capture resolves after ~1 render (D-05). */
-static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor) {
+static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
+    if (nt_devapi_deferred_data_inflight() >= NT_DEVAPI_CAPTURE_MAX_INFLIGHT) {
+        set_bad_params(err, "capture: too many captures in flight — drain pending results before requesting more");
+        return false;
+    }
     capture_ctx *ctx = (capture_ctx *)malloc(sizeof(capture_ctx));
     NT_ASSERT(ctx != NULL); /* OOM is a host-side fault, not bot input. */
     ctx->x = x;
@@ -218,7 +231,7 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
         set_bad_params(err, "capture.frame: scale larger than capture region");
         return false;
     }
-    return defer_capture(0U, 0U, fb_w, fb_h, factor);
+    return defer_capture(0U, 0U, fb_w, fb_h, factor, err);
 }
 
 /* capture.region {x,y,w,h,scale?}: validates the rect against the framebuffer (overflow-safe) then
@@ -265,7 +278,7 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
        top-left y to a GL bottom-left y (h<=fb_h-y already proven) so the row-flip yields a top-left
        sub-rect. Full-frame (capture.frame) is unchanged: fb_h-(0+fb_h)==0. */
     uint32_t gl_y = fb_h - (y + h);
-    return defer_capture(x, gl_y, w, h, factor);
+    return defer_capture(x, gl_y, w, h, factor, err);
 }
 // #endregion
 

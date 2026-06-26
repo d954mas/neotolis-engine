@@ -16,11 +16,14 @@ DEFAULT_READ_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 # Matches the host's NT_DEVAPI_DEFAULT_PORT.
 DEFAULT_PORT = 17890
-# recv_line memory-safety bound: a single framed JSON line may not exceed this many bytes (D-07).
-# It is a framing-desync guard, NOT a protocol limit — raised from 1 MB to ~16 MB so a multi-MB base64
-# PNG (capture.frame at 1280x720 / photographic worst-case) fits one line. The C send path already
-# carries multi-MB; this lifts only the Python read cap. Still bounded, never unbounded.
-MAX_LINE_BYTES = 16 * 1024 * 1024
+# recv_line memory-safety bound: a single framed JSON line may not exceed this many CHARACTERS (D-07).
+# The socket is read in text mode, so readline()/len() count characters; the capture payload is pure
+# ASCII (base64 + JSON structure), so 1 char == 1 byte and this is an exact byte bound for it (multi-
+# byte UTF-8, which no capture command frames, would be looser but still finite). It is a framing-desync
+# guard, NOT a protocol limit. Sized to COVER the engine's capture pixel cap so the client can always
+# read what the server can produce: NT_DEVAPI_CAPTURE_MAX_PIXELS = 4096*4096 worst-case (incompressible)
+# base64 PNG is ~px*6 ~= 100 MB, so 112 MB leaves margin. Still bounded, never unbounded.
+MAX_LINE_BYTES = 112 * 1024 * 1024
 
 
 class Transport(ABC):
