@@ -165,6 +165,17 @@ static void test_capture_region_degenerate_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":3,\"h\":3,\"scale\":4}}"));
 }
 
+/* ---- Test 7b: scale that does not EVENLY divide the dims -> bad_params (not a silent edge crop) ----
+   Distinct from the degenerate case above: here floor(6/4)==1 is non-zero, so old floor-div would have
+   ACCEPTED it and silently dropped the 2 remainder pixels per axis. Option B rejects it instead. */
+static void test_capture_nondividing_scale_bad_params(void) {
+    /* region 6x6 scale 4: 6%4==2 (non-zero floor, but not an even divide) -> bad_params. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":6,\"h\":6,\"scale\":4}}"));
+    /* frame: a framebuffer not divisible by the scale is rejected too (whole-frame edge crop). */
+    g_nt_window.fb_width = 66U; /* 66 % 4 == 2; setUp restores CAP_FB_W before the next test. */
+    assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":4}}"));
+}
+
 /* ---- Test 8: producer RAN but returned NULL -> {ok:false,error:capture_failed} with correlated id ----
    Drives a lost context so nt_gfx_read_pixels returns false -> the producer yields NULL -> the DATA slot
    resolves as a distinguishable capture_failed error (NOT the content-free legacy {deferred:true}, NOT a
@@ -306,6 +317,7 @@ int main(void) {
     RUN_TEST(test_capture_region_dims_match_rect);
     RUN_TEST(test_capture_region_scale_halves_dims);
     RUN_TEST(test_capture_region_degenerate_scale_bad_params);
+    RUN_TEST(test_capture_nondividing_scale_bad_params);
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_inflight_cap_rejects_flood);
     RUN_TEST(test_capture_pixel_cap_bad_params);

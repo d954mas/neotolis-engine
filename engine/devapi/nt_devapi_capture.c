@@ -114,7 +114,7 @@ static cJSON *capture_produce(void *vctx) {
     uint32_t out_w = c->w / c->factor;
     uint32_t out_h = c->h / c->factor;
     if (out_w == 0U || out_h == 0U) {
-        return NULL; /* defensive only: the handlers reject scale>rect synchronously (bad_params). */
+        return NULL; /* defensive only: the handlers reject non-dividing scale synchronously (bad_params). */
     }
 
     uint32_t rgba_len = c->w * c->h * 4U;
@@ -230,8 +230,8 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
         set_bad_params(err, "capture.frame: framebuffer exceeds the capture pixel cap");
         return false;
     }
-    if (fb_w / factor == 0U || fb_h / factor == 0U) {
-        set_bad_params(err, "capture.frame: scale larger than capture region");
+    if (fb_w % factor != 0U || fb_h % factor != 0U) {
+        set_bad_params(err, "capture.frame: scale must evenly divide the framebuffer dimensions");
         return false;
     }
     return defer_capture(0U, 0U, fb_w, fb_h, factor, err);
@@ -273,8 +273,8 @@ static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_err
         set_bad_params(err, "capture.region: rect exceeds the capture pixel cap");
         return false;
     }
-    if (w / factor == 0U || h / factor == 0U) {
-        set_bad_params(err, "capture.region: scale larger than capture region");
+    if (w % factor != 0U || h % factor != 0U) {
+        set_bad_params(err, "capture.region: scale must evenly divide w and h");
         return false;
     }
     /* The docstring contract is top-left origin; glReadPixels reads bottom-left. Convert the rect's
