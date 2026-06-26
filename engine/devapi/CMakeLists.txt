@@ -1,14 +1,16 @@
-# Each NT_DEVAPI_GROUP_<X> switch gates a whole group (sources + defines + deps).
-# OFF -> the core/net carry zero symbols of that group. ON without its engine impl fails at link.
+# Devapi is a framework lib (nt_devapi) + one library per command group (nt_devapi_<group>) + a bundle
+# (nt_devapi_default). A host links nt_devapi plus only the groups it wants, so it pulls only those
+# groups' engine deps (a capture-only host links nt_devapi_capture -> nt_gfx/nt_fpng, never nt_ui). A
+# full host links nt_devapi_default (every compiled-in group + nt_devapi_register_default()). Each
+# NT_DEVAPI_GROUP_<X> option gates building that group's library.
 
-# nt_devapi -- transport-agnostic, self-describing command core (dev-only, gated by NT_DEVAPI_ENABLED).
-# The ALWAYS-compiled base is just the framework: dispatch + self-describing registry + lifecycle-hook
-# registry. Command groups are added by the per-group if() blocks below.
+# nt_devapi -- the framework ONLY: dispatch + self-describing registry + lifecycle-hook registry +
+# base64 + the host-facing registration API (nt_devapi_groups.h). It references NO group, so any set of
+# group libs can link it without conflict (this is what removed the all-groups link collision).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
     nt_devapi_registry.c
     nt_devapi_base64.c
-    nt_devapi_default.c
     nt_devapi.h
     nt_devapi_groups.h
     nt_devapi_internal.h
@@ -23,31 +25,34 @@ target_link_libraries(nt_devapi PUBLIC nt_core cjson PRIVATE nt_log_interface nt
 # Master gate: this CMakeLists only runs when enabled, so define is always 1 here.
 target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_ENABLED=1)
 
-# Core group: ping / engine.info / view. nt_window_interface is its only engine dep (view reads
-# g_nt_window). OFF -> the core/net carry no window symbols and the core handlers compile out.
+# --- Per-group libraries. Each PUBLIC-links nt_devapi, carries its own engine deps, and sets its
+#     NT_DEVAPI_GROUP_<X> define PUBLIC so a consumer (and nt_devapi_default below) sees the gate. The
+#     group's deps propagate to the linking exe (a static lib's PRIVATE deps become link-only usage
+#     requirements), so the exe needs only to pick the swappable *_interface impls (nt_gfx/nt_ui/...).
+
+# Core group: ping / engine.info / view. view reads g_nt_window -> nt_window_interface.
 if(NT_DEVAPI_GROUP_CORE)
-    target_sources(nt_devapi PRIVATE nt_devapi_core.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_CORE=1)
-    target_link_libraries(nt_devapi PRIVATE nt_window_interface)
+    nt_add_module(nt_devapi_core LOG_DOMAIN "devapi" nt_devapi_core.c)
+    target_link_libraries(nt_devapi_core PUBLIC nt_devapi PRIVATE nt_window_interface)
+    target_compile_definitions(nt_devapi_core PUBLIC NT_DEVAPI_GROUP_CORE=1)
 endif()
 
-# Time group (time.*/render.*/frame.*): nt_gfx_interface is its only added dep (render.info reads
-# draw_calls); nt_app_interface is already a base dep.
+# Time group (time.*/render.*/frame.*): render.info reads draw_calls -> nt_gfx_interface.
 if(NT_DEVAPI_GROUP_TIME)
-    target_sources(nt_devapi PRIVATE nt_devapi_time.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_TIME=1)
-    target_link_libraries(nt_devapi PRIVATE nt_gfx_interface)
+    nt_add_module(nt_devapi_time LOG_DOMAIN "devapi" nt_devapi_time.c)
+    target_link_libraries(nt_devapi_time PUBLIC nt_devapi PRIVATE nt_gfx_interface)
+    target_compile_definitions(nt_devapi_time PUBLIC NT_DEVAPI_GROUP_TIME=1)
 endif()
 
 # Discovery group: endpoints / command.describe / features. Reads only the registry (no engine dep).
 if(NT_DEVAPI_GROUP_DISCOVERY)
-    target_sources(nt_devapi PRIVATE nt_devapi_discovery.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_DISCOVERY=1)
+    nt_add_module(nt_devapi_discovery LOG_DOMAIN "devapi" nt_devapi_discovery.c)
+    target_link_libraries(nt_devapi_discovery PUBLIC nt_devapi)
+    target_compile_definitions(nt_devapi_discovery PUBLIC NT_DEVAPI_GROUP_DISCOVERY=1)
 endif()
 
 # The ui group delegates inject scheduling to the input group's single scheduler (one scheduler, one
-# cap <= the immediate buffer — so two sibling groups can never over-subscribe the 256-slot buffer).
-# That hard dependency is explicit: ui without input would link-fail on the reuse wrappers.
+# cap <= the immediate buffer), so nt_devapi_ui hard-links nt_devapi_input. Fail early if UI lacks INPUT.
 if(NT_DEVAPI_GROUP_UI AND NOT NT_DEVAPI_GROUP_INPUT)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT (ui.click/drag/scroll reuse the input group's inject scheduler).")
 endif()
@@ -59,36 +64,27 @@ if(NT_DEVAPI_GROUP_UI AND NOT NT_UI_DEBUG_TOOLS)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS (the ui probe is DEBUG_TOOLS-gated).")
 endif()
 
-# NT_INPUT_AUTOMATION_ENABLED is driven by (input OR ui): both groups need nt_input's inject symbols
-# (input directly, ui via the input scheduler's reuse wrappers), so the value must be set once when
-# EITHER is on. PUBLIC so it matches the consumer's nt_input.
-if(NT_DEVAPI_GROUP_INPUT OR NT_DEVAPI_GROUP_UI)
-    target_compile_definitions(nt_devapi PUBLIC NT_INPUT_AUTOMATION_ENABLED=1)
-    target_link_libraries(nt_devapi PRIVATE nt_input_interface)
-endif()
-
-# Input group: sources + NT_DEVAPI_GROUP_INPUT. (NT_INPUT_AUTOMATION_ENABLED + nt_input dep are set
-# by the OR block above, shared with the ui group.)
+# Input group: the synthetic-input scheduler + input.* veneer. NT_INPUT_AUTOMATION_ENABLED is PUBLIC so
+# every consumer (and the ui group, which reuses the scheduler) sees nt_input's inject API decls.
 if(NT_DEVAPI_GROUP_INPUT)
-    target_sources(nt_devapi PRIVATE nt_devapi_input.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_INPUT=1)
+    nt_add_module(nt_devapi_input LOG_DOMAIN "devapi" nt_devapi_input.c)
+    target_link_libraries(nt_devapi_input PUBLIC nt_devapi nt_input_interface)
+    target_compile_definitions(nt_devapi_input PUBLIC NT_DEVAPI_GROUP_INPUT=1 NT_INPUT_AUTOMATION_ENABLED=1)
 endif()
 
-# UI group: read veneer over nt_ui_probe_collect + write veneer that delegates inject scheduling to the
-# input group's scheduler. Links HEADER-ONLY nt_ui_interface (the exe picks nt_ui or nt_ui_stub, like
-# nt_input_interface) + nt_window_interface for the coordinate-space metadata (g_nt_window).
+# UI group: read veneer over nt_ui_probe_collect + write veneer delegating to the input scheduler.
+# PUBLIC nt_devapi_input (the reuse wrappers live there); nt_ui_interface header-only (exe picks the
+# impl); nt_window_interface for the coordinate-space metadata. NT_DEVAPI_GROUP_UI is PUBLIC because the
+# host-facing nt_devapi_ui_register_context is gated by it in the public nt_devapi.h.
 if(NT_DEVAPI_GROUP_UI)
-    target_sources(nt_devapi PRIVATE nt_devapi_ui.c)
-    # PUBLIC: nt_devapi_ui_register_context (host-facing) is gated by NT_DEVAPI_GROUP_UI in the public
-    # nt_devapi.h, so a consumer (the host) must see the same gate to call it. (The input group has no
-    # host-facing registrar, hence its gate stays PRIVATE.)
-    target_compile_definitions(nt_devapi PUBLIC NT_DEVAPI_GROUP_UI=1)
-    target_link_libraries(nt_devapi PRIVATE nt_ui_interface nt_window_interface)
+    nt_add_module(nt_devapi_ui LOG_DOMAIN "devapi" nt_devapi_ui.c)
+    target_link_libraries(nt_devapi_ui PUBLIC nt_devapi nt_devapi_input nt_ui_interface PRIVATE nt_window_interface)
+    target_compile_definitions(nt_devapi_ui PUBLIC NT_DEVAPI_GROUP_UI=1)
 endif()
 
 # The obs READ surface (log.tail / perf.stats) serializes the dev-only nt_log_ring + nt_metrics. With
-# either dep OFF those compile to no-op stubs (empty log.tail, zero perf.stats) — a vacuously-passing
-# "false green". Hard-fail so GROUP_OBS can never link the stub bodies; enable both deps with it.
+# any dep OFF those compile to no-op stubs (a vacuously-passing "false green"). Hard-fail so GROUP_OBS
+# can never link the stub bodies; enable all the deps with it.
 if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED OR NOT NT_INTROSPECT_ENABLED))
     message(FATAL_ERROR "NT_DEVAPI_GROUP_OBS requires NT_LOG_RING_ENABLED, NT_METRICS_ENABLED and "
         "NT_INTROSPECT_ENABLED (the obs group reads the dev-only log ring + metrics collector and walks "
@@ -99,33 +95,21 @@ if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED OR
 endif()
 
 # Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads. entity.* walks via nt_introspect
-# and pulls no specific component — components self-register a describe(), so a host/test links the
-# concrete ones. GNU-ld single-pass: nt_devapi (consumer) precedes these provider libs on the exe link
-# line, nt_core/nt_log_* last — see the per-test link lines in tests/CMakeLists.txt.
+# and pulls no specific component — components self-register a describe(), so the host/test links the
+# concrete ones. nt_introspect precedes nt_entity (consumer before provider, GNU-ld single pass).
 if(NT_DEVAPI_GROUP_OBS)
-    target_sources(nt_devapi PRIVATE nt_devapi_obs.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_OBS=1)
-    target_link_libraries(nt_devapi PRIVATE
+    nt_add_module(nt_devapi_obs LOG_DOMAIN "devapi" nt_devapi_obs.c)
+    target_link_libraries(nt_devapi_obs PUBLIC nt_devapi PRIVATE
         nt_log_ring nt_metrics
-        nt_entity nt_resource nt_introspect nt_hash
+        nt_introspect nt_entity nt_resource nt_hash
         nt_material # j_ref resolves an NT_REF_MATERIAL handle to its create-time label
     )
-endif()
-
-# Capture group (capture.frame / capture.region): the first DEFERRED data-returning commands. The seam
-# producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
-# base64 (already in the always-compiled base). GNU-ld single-pass: nt_devapi (consumer) precedes the
-# nt_gfx/nt_fpng provider libs on the exe link line (GNU ld single-pass: consumer before provider);
-# core/log trail last — see tests.
-if(NT_DEVAPI_GROUP_CAPTURE)
-    target_sources(nt_devapi PRIVATE nt_devapi_capture.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_CAPTURE=1)
-    target_link_libraries(nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_window_interface)
+    target_compile_definitions(nt_devapi_obs PUBLIC NT_DEVAPI_GROUP_OBS=1)
 endif()
 
 # Entity-write group (entity.set): a dev-only DEBUG write over the component apply() hooks. Hard-requires
-# NT_INTROSPECT_WRITE_ENABLED (else every component is read-only — see the guard below). Links nt_entity
-# (resolution + the storage registry holding the apply hooks); the host/test links the writable components.
+# NT_INTROSPECT_WRITE_ENABLED (else every component is read-only). Links nt_entity (resolution + the
+# storage registry holding the apply hooks); the host/test links the writable components.
 if(NT_DEVAPI_GROUP_ENTITY_WRITE AND NOT NT_INTROSPECT_WRITE_ENABLED)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_ENTITY_WRITE requires NT_INTROSPECT_WRITE_ENABLED (the component "
         "apply() hooks). With it OFF every component is read-only, so entity.set could only return "
@@ -133,10 +117,30 @@ if(NT_DEVAPI_GROUP_ENTITY_WRITE AND NOT NT_INTROSPECT_WRITE_ENABLED)
 endif()
 
 if(NT_DEVAPI_GROUP_ENTITY_WRITE)
-    target_sources(nt_devapi PRIVATE nt_devapi_entity_write.c)
-    target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_ENTITY_WRITE=1)
-    target_link_libraries(nt_devapi PRIVATE nt_entity)
+    nt_add_module(nt_devapi_entity_write LOG_DOMAIN "devapi" nt_devapi_entity_write.c)
+    target_link_libraries(nt_devapi_entity_write PUBLIC nt_devapi PRIVATE nt_entity)
+    target_compile_definitions(nt_devapi_entity_write PUBLIC NT_DEVAPI_GROUP_ENTITY_WRITE=1)
 endif()
+
+# Capture group (capture.frame / capture.region): the first DEFERRED data-returning commands. The seam
+# producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
+# base64 (in the framework). nt_devapi_capture.h is the host-facing pre-swap-seam header.
+if(NT_DEVAPI_GROUP_CAPTURE)
+    nt_add_module(nt_devapi_capture LOG_DOMAIN "devapi" nt_devapi_capture.c nt_devapi_capture.h)
+    target_link_libraries(nt_devapi_capture PUBLIC nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_window_interface)
+    target_compile_definitions(nt_devapi_capture PUBLIC NT_DEVAPI_GROUP_CAPTURE=1)
+endif()
+
+# nt_devapi_default -- the "register every compiled-in group" bundle. Links every enabled group lib (so
+# a host linking it gets all groups + their deps) and provides nt_devapi_register_default(). The group
+# libs' PUBLIC NT_DEVAPI_GROUP_<X> defines reach nt_devapi_default.c here, gating its register calls.
+nt_add_module(nt_devapi_default LOG_DOMAIN "devapi" nt_devapi_default.c)
+target_link_libraries(nt_devapi_default PUBLIC nt_devapi)
+foreach(_grp core time discovery input ui obs entity_write capture)
+    if(TARGET nt_devapi_${_grp})
+        target_link_libraries(nt_devapi_default PUBLIC nt_devapi_${_grp})
+    endif()
+endforeach()
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 

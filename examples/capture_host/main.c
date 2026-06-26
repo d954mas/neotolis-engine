@@ -98,13 +98,18 @@ int main(void) {
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .depth = true});
     /* No nt_fpng_init here: the capture group inits its own encoder dependency at nt_devapi_init. */
 
-    /* devapi wiring: init builds the framework, then register the compiled-in groups; the host wires
-       the pre-swap capture seam below. */
+    /* devapi wiring: init builds the framework, then this capture-focused host registers ONLY the groups
+       it wires -- capture + core/discovery/time/input -- so it links no nt_ui/obs/entity. The pre-swap
+       capture seam is installed below. */
     if (nt_devapi_init() != NT_OK) {
         printf("Failed to initialize devapi\n");
         goto shutdown_gfx;
     }
-    nt_devapi_register_default();
+    nt_devapi_register_core();
+    nt_devapi_register_discovery();
+    nt_devapi_register_time();
+    nt_devapi_register_input();
+    nt_devapi_register_capture();
 
     {
         uint16_t port = resolve_port();

@@ -25,7 +25,8 @@
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_register_default();           /* re-registers input -> resets the schedule */
+    nt_devapi_register_input();             /* re-registers input -> resets the schedule */
+    nt_devapi_register_discovery();         /* the test verifies input.* via endpoints / command.describe */
     nt_input_init();                        /* clean immediate buffer + key/pointer state */
     g_nt_window.fb_height = TEST_FB_HEIGHT; /* deterministic basis for the Y-up flip */
 }

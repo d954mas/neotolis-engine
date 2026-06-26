@@ -161,11 +161,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)
         add_subdirectory(examples/devapi_host)
         # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
-        # Always configured when the capture group is on (so its main.c stays in compile_commands.json for
-        # clang-tidy — scripts/tidy.sh globs every .c and relies on it being compiled). It is a
-        # CAPTURE-focused host that does NOT link the nt_ui/obs/entity provider chains, so the example's
-        # own CMakeLists marks it EXCLUDE_FROM_ALL in all-groups configs to keep `cmake --build` from
-        # link-failing it (see examples/capture_host/CMakeLists.txt).
+        # It links only the devapi group libs it wires (capture + core/discovery/time/input), never the
+        # nt_ui/obs/entity chains, so it builds cleanly in any config (no all-groups collision).
         if(NT_DEVAPI_GROUP_CAPTURE)
             add_subdirectory(examples/capture_host)
         endif()

@@ -25,7 +25,7 @@ void setUp(void) {
     g_nt_window.dpr = 2.5F; /* fractional on purpose: catches int-truncation of dpr. */
 
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_register_default(); /* registers the compiled-in groups (incl. core). */
+    nt_devapi_register_core();
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }

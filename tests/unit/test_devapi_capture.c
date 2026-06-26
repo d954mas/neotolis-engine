@@ -31,7 +31,7 @@ void setUp(void) {
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_register_default();
+    nt_devapi_register_capture();
     nt_devapi_capture_arm(); /* mark capture-capable: the test drives the seam directly, no window hook. */
 }
 
@@ -234,7 +234,7 @@ static void test_capture_pixel_cap_bad_params(void) {
 static void test_capture_unarmed_host_unavailable(void) {
     nt_devapi_shutdown();                       /* disarms the seam (resp_reset). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* unarmed: no seam call follows. */
-    nt_devapi_register_default();               /* capture registered but NOT armed. */
+    nt_devapi_register_capture();               /* capture registered but NOT armed. */
     const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\"}");
     TEST_ASSERT_NOT_NULL(resp); /* synchronous reject, not a deferred NULL. */
     cJSON *root = cJSON_Parse(resp);

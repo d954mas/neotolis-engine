@@ -39,7 +39,6 @@ static void register_ok(void) {
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_register_default();
     register_ok();
 }
 

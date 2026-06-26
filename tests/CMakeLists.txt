@@ -458,57 +458,10 @@ if(NOT EMSCRIPTEN)
 
     # --- DevAPI module tests (NT_DEVAPI_ENABLED-gated) ---
     if(NT_DEVAPI_ENABLED)
-        # Active-group define list, driven by the SAME NT_DEVAPI_GROUP_<X> options that gate the
-        # nt_devapi lib. The per-group NT_DEVAPI_GROUP_<X> compile defines are PRIVATE to nt_devapi, so a
-        # test linking the lib cannot see them — the discovery test re-derives the active set here and
-        # #ifdef-gates its per-group assertions + expected count against it. Each group-specific test
-        # target is itself gated on its option below, so a group-OFF config drops the tests that need it.
-        set(NT_DEVAPI_ACTIVE_GROUP_DEFS "")
-        if(NT_DEVAPI_GROUP_CORE)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_CORE=1)
-        endif()
-        if(NT_DEVAPI_GROUP_TIME)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_TIME=1)
-        endif()
-        if(NT_DEVAPI_GROUP_DISCOVERY)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_DISCOVERY=1)
-        endif()
-        if(NT_DEVAPI_GROUP_INPUT)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_INPUT=1)
-        endif()
-        if(NT_DEVAPI_GROUP_UI)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_UI=1)
-        endif()
-        if(NT_DEVAPI_GROUP_OBS)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_OBS=1)
-        endif()
-        if(NT_DEVAPI_GROUP_ENTITY_WRITE)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_ENTITY_WRITE=1)
-        endif()
-        if(NT_DEVAPI_GROUP_CAPTURE)
-            list(APPEND NT_DEVAPI_ACTIVE_GROUP_DEFS NT_DEVAPI_GROUP_CAPTURE=1)
-        endif()
-
-        # When the obs group is compiled into nt_devapi, the registry's nt_devapi_register_obs() call
-        # pulls nt_devapi_obs.c, which references the obs L1 providers (log ring/metrics/entity/
-        # components/resource — NOT the overlay; it is a sibling consumer of metrics, not an obs
-        # provider). Static linking drags this chain into EVERY test that links nt_devapi + inits it,
-        # not just the obs test. List the providers (+ resource's http/fs stubs) so the
-        # group-independent devapi tests still link. Empty when OBS is OFF.
-        # GNU-ld single-pass: these trail nt_devapi and precede nt_core/nt_log_stub on each link line.
-        set(NT_DEVAPI_OBS_PROVIDER_LIBS "")
-        if(NT_DEVAPI_GROUP_OBS)
-            # obs.o now references nt_introspect + nt_entity for the entity walk (no longer
-            # nt_transform_comp/nt_drawable_comp/nt_comp_storage/nt_math — the components self-register, so
-            # obs names none). nt_introspect precedes nt_entity (consumer before provider, GNU-ld single pass).
-            set(NT_DEVAPI_OBS_PROVIDER_LIBS
-                nt_log_ring nt_metrics
-                nt_introspect nt_entity
-                nt_material nt_pool
-                nt_resource nt_shared nt_hash
-                nt_http_stub nt_fs_stub
-            )
-        endif()
+        # Each devapi test links nt_devapi (framework) + only the group lib(s) it exercises, so it pulls
+        # only those groups' providers. A group lib's PUBLIC NT_DEVAPI_GROUP_<X> define + its PRIVATE deps
+        # propagate to the test, so no per-test group defines or provider lists are needed here. The
+        # discovery test links the nt_devapi_default bundle (every group) and gets every group define.
 
         # registry register / dup-reject / owned-copy survival. Group-independent (registers its own
         # commands; the only built-in method it names is in a submit-before-init death test that
@@ -516,7 +469,7 @@ if(NOT EMSCRIPTEN)
         # nt_core before nt_log_stub: nt_core references nt_log_write and nothing earlier does,
         # so on GNU ld (left-to-right) the log impl must trail nt_core or it is dropped.
         add_executable(test_devapi_registry unit/test_devapi_registry.c unit/test_helpers/nt_assert_trap.c)
-        target_link_libraries(test_devapi_registry PRIVATE nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_registry PRIVATE nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
         # unit/ on the include path so nt_assert_trap.c resolves "test_helpers/nt_assert_trap.h" (death tests).
         target_include_directories(test_devapi_registry PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
         target_compile_definitions(test_devapi_registry PRIVATE
@@ -527,7 +480,7 @@ if(NOT EMSCRIPTEN)
         # submit() envelope, request_id echo, unknown-method, batch order +
         # continue-on-error, pointer lifetime (ASan via sanitizer flags). Group-independent.
         add_executable(test_devapi_envelope unit/test_devapi_envelope.c)
-        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_envelope PRIVATE nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_envelope PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
         )
@@ -536,7 +489,7 @@ if(NOT EMSCRIPTEN)
         # deferred-response mechanism: submit()->NULL on defer, K-1 NULL polls, K-th yields
         # the {ok,result,request_id} envelope, overflow rejected (ASan via sanitizer flags). Group-independent.
         add_executable(test_devapi_deferred unit/test_devapi_deferred.c)
-        target_link_libraries(test_devapi_deferred PRIVATE nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+        target_link_libraries(test_devapi_deferred PRIVATE nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
         target_compile_definitions(test_devapi_deferred PRIVATE
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
         )
@@ -546,9 +499,9 @@ if(NOT EMSCRIPTEN)
         # test asserts it against nt_engine_version_string() directly. Needs the core group.
         if(NT_DEVAPI_GROUP_CORE)
             add_executable(test_devapi_core unit/test_devapi_core.c)
-            target_link_libraries(test_devapi_core PRIVATE nt_devapi nt_ui_stub cjson nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_core PRIVATE nt_devapi_core cjson nt_window_stub nt_app_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_core PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_CORE=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_core)
         endif()
@@ -558,9 +511,9 @@ if(NOT EMSCRIPTEN)
         # #ifdef-gate its per-group `features` assertions + expected group count.
         if(NT_DEVAPI_GROUP_DISCOVERY)
             add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
-            target_link_libraries(test_devapi_discovery PRIVATE nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_discovery PRIVATE nt_devapi_default cjson nt_ui_stub nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_discovery PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 ${NT_DEVAPI_ACTIVE_GROUP_DEFS}
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_discovery)
         endif()
@@ -571,9 +524,9 @@ if(NOT EMSCRIPTEN)
         # (nt_gfx_get_frame_draw_calls -> 0 for render.info; the light gfx stub, no font/material chain).
         if(NT_DEVAPI_GROUP_TIME)
             add_executable(test_devapi_time unit/test_devapi_time.c)
-            target_link_libraries(test_devapi_time PRIVATE nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_time PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_TIME=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_time)
         endif()
@@ -585,9 +538,9 @@ if(NOT EMSCRIPTEN)
         # (net_poll + advance-gated schedule tick keyed off g_nt_app.frame), not just the schedule TU.
         if(NT_DEVAPI_GROUP_INPUT)
             add_executable(test_devapi_input unit/test_devapi_input.c)
-            target_link_libraries(test_devapi_input PRIVATE nt_devapi_net nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_input PRIVATE nt_devapi_net nt_devapi_input nt_devapi_discovery cjson nt_window_stub nt_app_stub nt_input_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_input PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_INPUT=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_input)
         endif()
@@ -604,7 +557,7 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_OBS)
             add_executable(test_devapi_obs unit/test_devapi_obs.c)
             target_link_libraries(test_devapi_obs PRIVATE
-                nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
+                nt_devapi_obs nt_devapi_discovery cjson nt_window_stub nt_app_stub
                 nt_log_ring nt_metrics
                 nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp nt_comp_storage
                 nt_material nt_pool nt_resource nt_math nt_shared
@@ -612,7 +565,7 @@ if(NOT EMSCRIPTEN)
                 nt_core nt_log nt_hash unity
             )
             target_compile_definitions(test_devapi_obs PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_OBS=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_obs)
         endif()
@@ -624,15 +577,14 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_ENTITY_WRITE)
             add_executable(test_devapi_entity_write unit/test_devapi_entity_write.c)
             target_link_libraries(test_devapi_entity_write PRIVATE
-                nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
-                nt_log_ring nt_metrics
+                nt_devapi_entity_write cjson nt_window_stub nt_app_stub
                 nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
                 nt_resource nt_math nt_shared
                 nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
-                nt_core nt_log nt_hash unity
+                nt_core nt_log_stub nt_hash unity
             )
             target_compile_definitions(test_devapi_entity_write PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_ENTITY_WRITE=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_entity_write)
         endif()
@@ -648,12 +600,11 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_CAPTURE)
             add_executable(test_devapi_capture unit/test_devapi_capture.c)
             target_link_libraries(test_devapi_capture PRIVATE
-                nt_devapi nt_ui_stub cjson nt_window_stub nt_app_stub
-                nt_gfx_stub nt_fpng nt_input_stub
-                ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core nt_log_stub unity
+                nt_devapi_capture cjson nt_window_stub nt_app_stub
+                nt_gfx_stub nt_fpng nt_core nt_log_stub unity
             )
             target_compile_definitions(test_devapi_capture PRIVATE
-                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_CAPTURE=1
+                _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
             nt_setup_test_target(test_devapi_capture)
         endif()
@@ -809,15 +760,14 @@ if(NOT EMSCRIPTEN)
         )
         target_include_directories(test_devapi_ui PRIVATE ${_nt_ui_test_helper_includes})
         target_link_libraries(test_devapi_ui PRIVATE
-            nt_devapi_net nt_devapi cjson
+            nt_devapi_net nt_devapi_ui cjson
             nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
             nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay
             nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub
-            ${NT_DEVAPI_OBS_PROVIDER_LIBS} nt_core
-            nt_http_stub nt_fs_stub nt_log_stub unity
+            nt_core nt_http_stub nt_fs_stub nt_log_stub unity
         )
         target_compile_definitions(test_devapi_ui PRIVATE
-            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1 NT_DEVAPI_GROUP_UI=1 NT_DEVAPI_GROUP_INPUT=1
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
         )
         nt_setup_test_target(test_devapi_ui)
     endif()

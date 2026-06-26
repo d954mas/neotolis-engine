@@ -138,7 +138,8 @@ void setUp(void) {
     /* nt_devapi_init re-registers the ui group, which CLEARS the host ctx table — so register the
        ctx AFTER init, every test, or ui.* would see an empty table. */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_register_default();
+    nt_devapi_register_input(); /* ui.* delegates scheduling to the input group + the test drives input.* */
+    nt_devapi_register_ui();
     nt_input_init();
     nt_devapi_ui_register_context("hud", s_fx.ctx);
 
