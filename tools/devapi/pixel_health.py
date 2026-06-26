@@ -52,6 +52,30 @@ def vertical_split_means(img: Image.Image) -> tuple:
     return float(arr[:half].mean()), float(arr[half:].mean())
 
 
+def horizontal_split_means(img: Image.Image) -> tuple:
+    """Return (left_half_mean, right_half_mean) of per-pixel mean intensity (D-10, numpy stays here).
+
+    Symmetric to vertical_split_means for the horizontal axis: a region X-origin error (reading from
+    the wrong column) shifts which half a known feature lands in, inverting the two means.
+    """
+    arr = np.asarray(img)
+    half = arr.shape[1] // 2
+    return float(arr[:, :half].mean()), float(arr[:, half:].mean())
+
+
+def center_channel_means(img: Image.Image) -> tuple:
+    """Return (r, g, b) means of the image's central quarter (D-10, numpy stays here).
+
+    For a host whose foreground sits in the center, this samples the fg color so a caller can assert
+    channel ORDER (RGB vs BGR): a red/blue swap in the GL readback or the RGB strip inverts r vs b,
+    which the channel-symmetric not-blank / split-mean checks cannot see.
+    """
+    arr = np.asarray(img)
+    h, w = arr.shape[0], arr.shape[1]
+    c = arr[h // 4:h * 3 // 4, w // 4:w * 3 // 4]
+    return float(c[..., 0].mean()), float(c[..., 1].mean()), float(c[..., 2].mean())
+
+
 def check_payload(payload: dict, expected_w: int, expected_h: int) -> Image.Image:
     """Validate a {width,height,format:"png",data:<base64>} capture result end-to-end, return the image.
 

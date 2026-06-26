@@ -126,6 +126,14 @@ def run(client: DevApiClient, save_dir=None) -> None:
     full = client.capture_frame()
     assert full.get("deferred") is not True, "capture.frame returned {deferred:true} — the producer never ran (drain-race)"
     img = pixel_health.check_payload(full, fb_w, fb_h)
+    # Channel order (RGB vs BGR): the host's centered foreground box is R-dominant orange; a red/blue
+    # swap in the GL readback or the RGB strip would invert it and slip past every channel-symmetric
+    # check (not-blank, split-means). Sample the central fg and assert it reads red-dominant.
+    r_mean, _g_mean, b_mean = pixel_health.center_channel_means(img)
+    assert r_mean > b_mean, (
+        f"capture channel order looks swapped (RGB vs BGR): center-fg mean R={r_mean:.1f} <= B={b_mean:.1f} "
+        "(the orange foreground must be red-dominant)"
+    )
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
         img.save(os.path.join(save_dir, "capture_frame.png"))
@@ -146,6 +154,17 @@ def run(client: DevApiClient, save_dir=None) -> None:
     assert bottom_mean > top_mean, (
         f"capture.region y-origin looks flipped: top-half mean {top_mean:.1f} >= bottom-half "
         f"{bottom_mean:.1f} (the orange foreground must sit in the lower band under top-left origin)"
+    )
+    # Region X-origin: a rect straddling the fg box's RIGHT edge — its left half lands inside the orange
+    # fg, its right half in the blue bg, so left must out-mean right. A dropped/shifted x crop offset
+    # would move the fg and invert this. Symmetric to the Y-origin check; the stub-backed C tests cannot
+    # see the x offset (the stub discards x/y), so this is the only end-to-end x-origin guard.
+    xr, xy, xw, xh = fb_w // 2, fb_h // 4, fb_w // 2, fb_h // 2
+    xspan_img = pixel_health.check_payload(client.capture_region(xr, xy, xw, xh), xw, xh)
+    left_mean, right_mean = pixel_health.horizontal_split_means(xspan_img)
+    assert left_mean > right_mean, (
+        f"capture.region x-origin looks shifted: left-half mean {left_mean:.1f} <= right-half "
+        f"{right_mean:.1f} (the fg box's left portion must dominate a rect straddling its right edge)"
     )
     if save_dir:
         region_img.save(os.path.join(save_dir, "capture_region.png"))

@@ -498,6 +498,12 @@ jobs:
       - name: Install capture-path Python deps (Pillow + numpy)
         run: python3 -m pip install --user -r tools/devapi/requirements-capture.txt
 
+      # Hermetic pixel-health self-test (no GL/socket): exercises pixel_health's negative branches
+      # (not-blank, dims, orientation, channel-order) with synthetic PNGs, so a silent weakening of the
+      # capture safety net fails here, not only in the heavyweight live UAT below.
+      - name: Pixel-health self-test (hermetic)
+        run: python3 tools/devapi/scenarios/pixel_health_selftest.py
+
       # capture_host is a CAPTURE-focused host (CORE/DISCOVERY/TIME/CAPTURE groups only) so it links only
       # the providers those groups need — the full-group native-debug build would couple it to nt_ui/metrics
       # it never inits. Default presets stay OFF (zero release delta); this is an opt-in dev-only build.
