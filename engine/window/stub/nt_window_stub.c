@@ -13,7 +13,7 @@ void nt_window_set_fullscreen(bool fullscreen) { (void)fullscreen; }
 
 /* ---- Presentation ---- */
 
-void nt_window_swap_buffers(void) { /* No-op */ }
+void nt_window_swap_buffers(void) { nt_window_run_pre_swap_hooks(); }
 
 void nt_window_set_vsync(nt_vsync_t mode) { (void)mode; }
 

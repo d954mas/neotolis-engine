@@ -66,15 +66,10 @@ static void frame(void) {
 
     if (nt_app_render_enabled()) {
         render_pattern();
-
-        /* Pre-swap capture seam (D-05): runs AFTER render work, BEFORE swap — the back buffer is
-           GL-undefined post-swap, so the producer's nt_gfx_read_pixels is only valid here. Mirrors
-           devapi_host's nt_metrics_sample placement. Slots without a producer (frame.wait/time.step)
-           are untouched. GATED on render_enabled (same as render_pattern): with render off there is no
-           freshly-rendered frame to read (D-05), so the capture stays pending until a real frame draws
-           — never an ok:true stale/garbage frame. */
-        nt_devapi_capture_on_pre_swap();
-
+        /* The capture seam runs INSIDE nt_window_swap_buffers (registered once via
+           nt_devapi_capture_install_seam): post-render, pre-swap, where nt_gfx_read_pixels is GL-valid
+           (D-05). Gated implicitly with rendering — render off => no swap => seam doesn't run => a
+           capture stays pending until a real frame draws (never an ok:true stale/garbage frame). */
         nt_window_swap_buffers();
     }
 
@@ -127,11 +122,10 @@ int main(void) {
         printf("[capture_host] no client yet; per-frame accept continues\n");
     }
 
-    /* Arm the capture seam before serving frames (F2): this no-op seam call (no slots yet) marks the host
-       as capture-capable, so a bot that connects + captures on frame 0 gets a real capture, not a spurious
-       capture_unavailable. A host that never calls the seam (e.g. devapi_host) stays unarmed and rejects
-       captures cleanly instead of hanging. */
-    nt_devapi_capture_on_pre_swap();
+    /* Install the capture seam ONCE: registers it as a window pre-swap hook (so the frame loop just
+       renders + swaps, no per-frame seam call) and marks this host capture-capable. A host that skips
+       this (e.g. devapi_host) rejects captures with capture_unavailable instead of hanging (F2). */
+    nt_devapi_capture_install_seam();
 
     nt_app_run(frame);
     status = 0; /* clean run */

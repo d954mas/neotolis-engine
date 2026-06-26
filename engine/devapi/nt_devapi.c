@@ -40,8 +40,9 @@ static void resp_reserve(size_t need) {
    pointer into s_resp_buf; the envelope is serialized at yield time. */
 static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
 
-/* True once the pre-swap seam has run at least once: proves the running host drives captures. Reset only
-   on shutdown (NOT on close_client) so a reconnecting client on a capture host stays armed (F2). */
+/* True once a host has installed the capture seam (nt_devapi_capture_install_seam -> nt_devapi_capture_arm):
+   proves the running host drives captures. Reset only on shutdown (NOT on close_client) so a reconnecting
+   client on a capture host stays armed (F2). A host that never installs the seam rejects captures cleanly. */
 static bool s_capture_seam_armed;
 
 /* Set around the handler call in dispatch_one so nt_devapi_defer_current can signal the
@@ -121,6 +122,7 @@ int nt_devapi_deferred_data_inflight(void) {
     return n;
 }
 
+void nt_devapi_capture_arm(void) { s_capture_seam_armed = true; }
 bool nt_devapi_capture_seam_armed(void) { return s_capture_seam_armed; }
 
 /* Free owned ids/payloads/ctx + clear the queue. Called from shutdown so init->shutdown->init is
@@ -504,7 +506,6 @@ static bool slot_ready(const nt_devapi_deferred_slot *slot) {
 
 void nt_devapi_capture_on_pre_swap(void) {
     NT_ASSERT(nt_devapi_initialized());
-    s_capture_seam_armed = true; /* the host drives the seam -> captures can resolve (F2 capability gate). */
     /* Fill every ready producer-slot's payload at the GL-valid seam (D-05). The GL read MUST happen
        here, before swap — poll_response runs after the frame, where the back buffer is undefined.
        Idempotent per slot: producer is cleared after one run, so a re-call this frame is a no-op. */

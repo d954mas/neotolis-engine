@@ -136,11 +136,12 @@ bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_
    per-seam encode burst + held-payload memory a single client flood can trigger. */
 int nt_devapi_deferred_data_inflight(void);
 
-/* True once the host has called the pre-swap seam at least once — i.e. the running host actually drives
-   captures. A host built with the capture group but NO seam call (e.g. devapi_host, which inits no GL)
-   stays false, so the capture handler rejects synchronously (capture_unavailable) instead of deferring a
-   slot that would never resolve. Stays true across render-off windows: a capture then legitimately
-   stalls until render resumes (the armed host IS capable — see the seam contract above). */
+/* nt_devapi_capture_arm marks the running host as capture-capable (called from the capture group's
+   nt_devapi_capture_install_seam, which also registers the seam as a window pre-swap hook). A host that
+   never installs the seam (e.g. devapi_host, which inits no GL) stays unarmed, so the capture handler
+   rejects synchronously (capture_unavailable) instead of deferring a slot that would never resolve.
+   Armed stays true across render-off windows: a capture then legitimately stalls until render resumes. */
+void nt_devapi_capture_arm(void);
 bool nt_devapi_capture_seam_armed(void);
 
 /* The host-facing pre-swap seam (nt_devapi_capture_on_pre_swap) is a PUBLIC host contract — declared in

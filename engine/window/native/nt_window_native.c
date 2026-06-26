@@ -266,7 +266,10 @@ void nt_window_set_fullscreen(bool fullscreen) {
 
 /* ---- Presentation ---- */
 
-void nt_window_swap_buffers(void) { glfwSwapBuffers(s_glfw_window); }
+void nt_window_swap_buffers(void) {
+    nt_window_run_pre_swap_hooks(); /* fill any pre-swap consumers (capture seam) while the back buffer is valid. */
+    glfwSwapBuffers(s_glfw_window);
+}
 
 void nt_window_set_vsync(nt_vsync_t mode) {
     switch (mode) {

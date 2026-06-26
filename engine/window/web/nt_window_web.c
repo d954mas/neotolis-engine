@@ -71,7 +71,7 @@ void nt_window_set_fullscreen(bool fullscreen) {
 
 /* ---- Presentation ---- */
 
-void nt_window_swap_buffers(void) { /* No-op: browser swaps after rAF return */ }
+void nt_window_swap_buffers(void) { nt_window_run_pre_swap_hooks(); /* browser swaps after the rAF return; run pre-swap consumers first. */ }
 
 void nt_window_set_vsync(nt_vsync_t mode) { (void)mode; /* No-op: browser controls vsync */ }
 

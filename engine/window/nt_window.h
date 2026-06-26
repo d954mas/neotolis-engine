@@ -44,6 +44,15 @@ void nt_window_set_fullscreen(bool fullscreen);
 void nt_window_swap_buffers(void);
 void nt_window_set_vsync(nt_vsync_t mode);
 
+/* ---- Pre-swap hooks ---- */
+
+/* A hook run by nt_window_swap_buffers JUST BEFORE the platform buffer swap, while the freshly-rendered
+   back buffer is still valid (the GL-valid seam the devapi capture group needs). A system registers once
+   at startup; the host then just renders + swaps as usual — there is no per-frame hook call to forget. */
+typedef void (*nt_window_pre_swap_hook_fn)(void);
+void nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn); /* idempotent for the same fn. */
+void nt_window_run_pre_swap_hooks(void);                         /* invoked by each backend's swap_buffers. */
+
 /* ---- Close management ---- */
 
 bool nt_window_should_close(void);

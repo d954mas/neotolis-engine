@@ -31,7 +31,7 @@ void setUp(void) {
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_capture_on_pre_swap(); /* arm the capture seam (F2): stand in for a host that drives it. */
+    nt_devapi_capture_arm(); /* mark capture-capable (F2): the test drives the seam directly, no window hook. */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
