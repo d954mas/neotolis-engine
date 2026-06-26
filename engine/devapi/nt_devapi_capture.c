@@ -328,12 +328,4 @@ void nt_devapi_register_capture(void) {
     }
 }
 
-void nt_devapi_capture_install_seam(void) {
-    /* Register the capture seam as a window pre-swap hook (so a host that renders + swaps drives captures
-       with NO per-frame call to forget) and mark this host capture-capable. Idempotent. A host that never
-       calls this stays unarmed, so captures reject with capture_unavailable instead of hanging (F2). */
-    nt_window_add_pre_swap_hook(nt_devapi_capture_on_pre_swap);
-    nt_devapi_capture_arm();
-}
-
 #endif /* NT_DEVAPI_GROUP_CAPTURE */
