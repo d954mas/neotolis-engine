@@ -1,9 +1,9 @@
 add_executable(capture_host main.c)
 
 # capture_host owns a REAL nt_gfx context (devapi_host inits none, Pitfall 2) and calls the pre-swap
-# capture seam (nt_devapi_capture_on_pre_swap, declared in devapi/nt_devapi_internal.h — reachable via
-# nt_devapi's PUBLIC engine/ include root). The capture group itself is gated by NT_DEVAPI_GROUP_CAPTURE
-# on the nt_devapi build, so configure with -DNT_DEVAPI_GROUP_CAPTURE=ON.
+# capture seam (nt_devapi_capture_on_pre_swap, declared in the PUBLIC devapi/nt_devapi_capture.h —
+# reachable via nt_devapi's PUBLIC engine/ include root). The capture group itself is gated by
+# NT_DEVAPI_GROUP_CAPTURE on the nt_devapi build, so configure with -DNT_DEVAPI_GROUP_CAPTURE=ON.
 #
 # GNU ld is single-pass: list every CONSUMER before its PROVIDER. nt_devapi (references nt_gfx readback,
 # nt_fpng encode, the window symbols) precedes nt_gfx / nt_fpng; core/log trail last (Pitfall 3).
