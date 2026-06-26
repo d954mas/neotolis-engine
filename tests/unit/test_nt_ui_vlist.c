@@ -14,6 +14,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -207,6 +208,91 @@ static void test_vlist_one_clip(void) {
     TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 3U), VL_SCRL_TAG));
 }
 
+/* ---- (h) regression: nested vlists swept back and forth must never crash build_tree ----
+ * The Phase-70 QA crash: scrolling a 10k-row vlist back and forth saturates Clay's PERSISTENT
+ * element hashmap (one permanent slot per distinct id, cap == maxElementCount) with the vlist's
+ * distinct per-row ids. Once full, Clay__AddHashMapItem stops refreshing existing entries, so a
+ * scroll container's stored layoutElement goes STALE; the floating scrollbar's resolved parent
+ * index then no longer precedes the bar and build_tree used to NT_ASSERT-trap. vlist_x is declared
+ * AFTER vlist_y so its container's declaration index shifts with vlist_y's (position-dependent)
+ * rendered-row count — that is what lets a stale (saturation-frame) parent index exceed the bar's
+ * current index. The fix degrades to an identity seed; this asserts both no-trap and that the
+ * degrade path actually ran (so the test cannot pass vacuously). */
+#define VL_OUTER_ID 0x0C0FFEE1U
+#define VL_Y_ID 0x0C0FFEE2U
+#define VL_X_ID 0x0C0FFEE3U
+#define VL_BIG_COUNT 10000U
+#define VL_BIG_ROW_H 34.0F
+#define VL_BIG_COL_W 80.0F
+
+static void vlist_nested_sweep_frame(float pos_y) {
+    nt_mem_scratch_reset(); /* per-frame UI scratch (element_data/payloads), exactly like the app loop */
+    nt_pointer_t p = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+
+    /* Pin vlist_y's offset so the window is deterministic (the state cell exists from frame 2 on).
+     * pos==target==raw, vel 0, no gesture flags -> the integrator's in-bounds clamp holds it. */
+    nt_ui_scroll_state_t *vs = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, VL_Y_ID);
+    if (vs != NULL) {
+        vs->pos[1] = pos_y;
+        vs->target[1] = pos_y;
+        vs->raw[1] = pos_y;
+        vs->vel[0] = 0.0F;
+        vs->vel[1] = 0.0F;
+        vs->flags = 0U;
+    }
+
+    nt_ui_scroll_style_t outer = nt_ui_scroll_style_defaults(); /* ALWAYS bar => a floating tree root */
+    nt_ui_vlist_style_t vst = nt_ui_vlist_style_defaults();     /* owned scroll: ALWAYS bar */
+    const Clay_ElementDeclaration ydecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
+    const Clay_ElementDeclaration xdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(60.0F)}}};
+
+    CLAY({.id = CLAY_ID("vlsweep_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(400.0F)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, VL_OUTER_ID, &outer, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6}}) {
+            const nt_ui_vlist_range_t ry = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_Y_ID, VL_BIG_COUNT, VL_BIG_ROW_H, NT_UI_AXIS_Y, &vst, &ydecl);
+            for (uint32_t i = ry.first; i <= ry.last && i < VL_BIG_COUNT; ++i) {
+                CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(s_fx.ctx, i)}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(VL_BIG_ROW_H)}}}) {}
+            }
+            nt_ui_vlist_end(s_fx.ctx);
+
+            const nt_ui_vlist_range_t rx = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_X_ID, VL_BIG_COUNT, VL_BIG_COL_W, NT_UI_AXIS_X, &vst, &xdecl);
+            for (uint32_t i = rx.first; i <= rx.last && i < VL_BIG_COUNT; ++i) {
+                CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(s_fx.ctx, i)}, .layout = {.sizing = {CLAY_SIZING_FIXED(VL_BIG_COL_W), CLAY_SIZING_GROW(0)}}}) {}
+            }
+            nt_ui_vlist_end(s_fx.ctx);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_vlist_nested_scroll_reversals_no_crash(void) {
+    nt_ui_internal_test_reset_stale_floating_parent_count();
+
+    const float content = (float)VL_BIG_COUNT * VL_BIG_ROW_H; /* 340000 */
+    const float maxpos = -(content - VL_VIEW);                /* most-negative offset (fully scrolled) */
+
+    /* Frame 1 establishes dims (the pin is a no-op: the state cell is created during this frame). */
+    vlist_nested_sweep_frame(0.0F);
+
+    /* Sweep vlist_y top<->bottom repeatedly. With steps this fine the windows do not overlap, so each
+     * frame contributes ~viewport-worth of NEW distinct row ids; one sweep already far exceeds the
+     * default 1024-id hashmap. The top/mid/bottom rendered-row-count variation then makes a stale
+     * parent index exceed its bar index on many post-saturation frames. */
+    const int steps = 200;
+    for (int rev = 0; rev < 4; ++rev) {
+        for (int k = 0; k <= steps; ++k) {
+            const float t = (float)k / (float)steps;
+            const float frac = ((rev & 1) == 0) ? t : (1.0F - t); /* alternate sweep direction */
+            vlist_nested_sweep_frame(maxpos * frac);
+        }
+    }
+
+    /* Survived every frame without the build_tree trap, AND the saturation/degrade path actually ran. */
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_internal_test_stale_floating_parent_count() > 0U, "regression failed to reproduce Clay hashmap saturation -> stale floating parent");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vlist_window_midscroll);
@@ -217,5 +303,6 @@ int main(void) {
     RUN_TEST(test_vlist_axis_x_layout);
     RUN_TEST(test_vlist_spacer_content_size);
     RUN_TEST(test_vlist_one_clip);
+    RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
     return UNITY_END();
 }

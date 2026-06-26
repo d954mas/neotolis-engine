@@ -524,6 +524,10 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx);
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
 int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);
+/* Times build_tree took the stale-floating-parent degrade (Clay element-hashmap saturation), so a
+ * regression test can prove it hit the non-crashing path. Process-global; reset before measuring. */
+uint32_t nt_ui_internal_test_stale_floating_parent_count(void);
+void nt_ui_internal_test_reset_stale_floating_parent_count(void);
 #endif
 
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */

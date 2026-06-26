@@ -505,6 +505,17 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     }
 }
 
+#ifdef NT_TEST_ACCESS
+/* Counts build_tree's stale-floating-parent degrade (Clay hashmap saturation) so the vlist
+ * regression test can prove it exercised the non-crashing path, not just that it didn't trap. */
+static uint32_t s_bt_stale_floating_parent = 0U;
+uint32_t nt_ui_internal_test_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
+void nt_ui_internal_test_reset_stale_floating_parent_count(void) { s_bt_stale_floating_parent = 0U; }
+#define NT_BT_COUNT_STALE_FLOATING_PARENT() (s_bt_stale_floating_parent++)
+#else
+#define NT_BT_COUNT_STALE_FLOATING_PARENT() ((void)0)
+#endif
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && ctx->clay != NULL && "build_tree: ctx + clay required");
@@ -560,14 +571,17 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                 seed = identity;
             } else {
                 const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
-                if (p_elem_idx < 0 || p_elem_idx >= N) {
-                    NT_ASSERT(false && "build_tree: parent elem_idx out of bounds");
-                    seed = identity;
-                } else {
-                    /* Floating parent must precede child in declaration order or seed would be identity. */
-                    NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must precede child in declaration order (Clay invariant broken)");
+                /* A real floating parent is baked already, so it must precede this root: 0 <= p < elem_idx
+                 * (and thus p < N). Anything else means Clay returned a STALE layoutElement — its persistent
+                 * element hashmap saturated with a big virtual list's distinct per-row ids (cap ==
+                 * maxElementCount) and stopped refreshing entries. Degrade to identity (the && short-circuit
+                 * keeps tree_baked[p] in range → memory-safe), never crash. */
+                if (p_elem_idx >= 0 && p_elem_idx < elem_idx) {
                     seed = ctx->tree_baked[p_elem_idx];
                     seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
+                } else {
+                    seed = identity;
+                    NT_BT_COUNT_STALE_FLOATING_PARENT();
                 }
             }
         }
