@@ -96,6 +96,23 @@ static void test_vlist_window_degenerate_safe(void) {
     TEST_ASSERT_TRUE(r.first <= r.last);
 }
 
+/* ---- (c2) invalid stride (item_extent+gap <= 0 or NaN): safe window -> zero spacers ----
+ * vlist_begin clamps the full stride (item_extent + gap) to safe_extent before deriving the window and
+ * the leading/trailing spacers. The pure probe stands in for that window math: a non-positive / NaN
+ * stride collapses to {0,0}, so leading (first*safe_extent) and trailing ((count-1-last)*safe_extent)
+ * are 0 -- never a negative or NaN FIXED spacer. (begin also asserts the bad stride in debug; see the
+ * death tests below. The clamp is the real guard in NT_ASSERT_MODE=OFF.) */
+static void test_vlist_window_bad_stride_safe(void) {
+    /* item_extent=10, gap=-20 -> stride -10: safe single in-range item, never negative. */
+    nt_ui_vlist_range_t r = nt_ui_vlist_test_window(-100.0F, 200.0F, 10.0F + (-20.0F), 100U, 2);
+    TEST_ASSERT_EQUAL_UINT32(0U, r.first);
+    TEST_ASSERT_EQUAL_UINT32(0U, r.last);
+    /* NaN stride -> same safe collapse (the !(x > 0) guard also rejects NaN). */
+    r = nt_ui_vlist_test_window(-100.0F, 200.0F, NAN, 100U, 2);
+    TEST_ASSERT_EQUAL_UINT32(0U, r.first);
+    TEST_ASSERT_EQUAL_UINT32(0U, r.last);
+}
+
 /* ---- (d) per-id stability / distinctness / no adjacent-base collision (window <= ring) ---- */
 static void test_vlist_item_id_recycle(void) {
     const uint32_t base = 0x7711U;
@@ -354,11 +371,32 @@ static void test_vlist_degrade_backstop_on_saturation(void) {
     TEST_ASSERT_TRUE_MESSAGE(degrades > 0U, "absolute-id sweep must reproduce Clay hashmap saturation -> build_tree degrade backstop");
 }
 
+/* ---- Death tests (NT_ASSERT_FULL only): begin signals a developer error on a bad stride ---- */
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* A non-finite / non-positive stride (item_extent + gap) fires the developer-signal assert ON TOP of
+ * the silent clamp. The assert fires before the owned scroll opens, so the frame stays balanced. */
+static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_extent, float gap) {
+    nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
+    st.gap = gap;
+    const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
+    nt_pointer_t p = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+    CLAY({.id = (Clay_ElementId){.id = root_id}, .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
+        NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 100U, item_extent, NT_UI_AXIS_Y, &st, &decl));
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_vlist_begin_negative_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_neg"), 10.0F, -20.0F); }
+static void test_vlist_begin_nan_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_nan"), 10.0F, NAN); }
+#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_vlist_window_midscroll);
     RUN_TEST(test_vlist_window_edge_clamp);
     RUN_TEST(test_vlist_window_degenerate_safe);
+    RUN_TEST(test_vlist_window_bad_stride_safe);
     RUN_TEST(test_vlist_item_id_recycle);
     RUN_TEST(test_vlist_item_id_ring);
     RUN_TEST(test_vlist_axis_y_layout);
@@ -368,5 +406,9 @@ int main(void) {
     RUN_TEST(test_vlist_window_ring_clamp);
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
     RUN_TEST(test_vlist_degrade_backstop_on_saturation);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_vlist_begin_negative_gap_asserts);
+    RUN_TEST(test_vlist_begin_nan_gap_asserts);
+#endif
     return UNITY_END();
 }

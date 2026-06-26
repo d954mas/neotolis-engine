@@ -86,6 +86,11 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
 
     const nt_ui_vlist_style_t st = (style != NULL) ? *style : nt_ui_vlist_style_defaults();
     const float extent = item_extent + st.gap; /* gap folds into the stride so content == count*extent exactly */
+    /* Clamp the FULL stride: a negative or NaN gap can drive extent <= 0, which would otherwise emit a
+     * negative/NaN FIXED spacer in vlist_end. safe_extent (not the assert) is the real guard — NT_ASSERT
+     * vanishes in NT_ASSERT_MODE=OFF — and feeds the window, both spacers, and pending_vlist.extent. */
+    const float safe_extent = (isfinite(extent) && extent > 0.0F) ? extent : 0.0F;
+    NT_ASSERT(isfinite(extent) && extent > 0.0F && "nt_ui_vlist_begin: item_extent+gap must be finite and > 0");
 
     /* Exactly ONE scroll (one Clay clip) per vlist — never one clip per row (memory clay_scroll_container_gc).
      * Axis selects the scroll axis + the inner layoutDirection (Pitfall 6: an X list needs LEFT_TO_RIGHT). */
@@ -103,7 +108,7 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(ctx, id);
     const float pos = (s != NULL) ? s->pos[(axis == NT_UI_AXIS_X) ? 0 : 1] : 0.0F;
 
-    nt_ui_vlist_range_t r = vlist_window(pos, viewport, extent, count, st.overscan);
+    nt_ui_vlist_range_t r = vlist_window(pos, viewport, safe_extent, count, st.overscan);
 
     /* Hard window cap: with ring recycling, two SIMULTANEOUSLY-visible rows sharing a ring slot would
      * declare the same Clay id -> CLAY_ERROR_TYPE_DUPLICATE_ID. Clamp the visible window to ring-1 so
@@ -117,13 +122,13 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
 
     const bool empty = (r.first > r.last);
 
-    vlist_emit_spacer((uint8_t)axis, empty ? 0.0F : ((float)r.first * extent));
+    vlist_emit_spacer((uint8_t)axis, empty ? 0.0F : ((float)r.first * safe_extent));
 
     ctx->pending_vlist.base_id = id;
     ctx->pending_vlist.count = count;
     ctx->pending_vlist.last = r.last;
     ctx->pending_vlist.ring = st.id_ring;
-    ctx->pending_vlist.extent = extent;
+    ctx->pending_vlist.extent = safe_extent;
     ctx->pending_vlist.axis = (uint8_t)axis;
     ctx->pending_vlist.empty = empty;
     ctx->pending_vlist.active = true;
