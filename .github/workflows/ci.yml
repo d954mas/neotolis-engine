@@ -475,16 +475,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
-        with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
-
-      - name: Pull LFS files
-        run: git lfs pull
+      # No git-LFS pull: capture_host renders a deterministic glClear+scissor pattern and loads no asset
+      # packs, so this job never reads the LFS-tracked assets (Sponza). Checkout's pointer files suffice.
 
       # libgl1-mesa-dri provides the llvmpipe software GL driver so xvfb's headless X server gives
       # capture_host a real (software-rendered) GL context — the live capture UAT needs a real readback.

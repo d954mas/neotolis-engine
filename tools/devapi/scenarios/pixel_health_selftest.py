@@ -40,6 +40,12 @@ def _payload(arr):
     return {"width": w, "height": h, "format": "png", "data": _png_b64(arr)}
 
 
+def _payload_mismatched(reported_w, reported_h, png_arr):
+    """A payload whose REPORTED dims are decoupled from the actual PNG pixel dims — a producer that
+    encodes a wrong-sized image yet reports the expected size, which only check()'s decoded-dims guard catches."""
+    return {"width": reported_w, "height": reported_h, "format": "png", "data": _png_b64(png_arr)}
+
+
 def _two_tone(w, h):
     """Centered orange fg box on a blue field (the host's pattern), HxWx3 uint8."""
     arr = np.full((h, w, 3), BLUE, dtype=np.uint8)
@@ -66,6 +72,12 @@ def main():
     # 2. dims: check_payload must FAIL on a wrong reported size, pass on the right one.
     _expect_assert(lambda: pixel_health.check_payload(_payload(two), 61, 40), "wrong-width dims")
     pixel_health.check_payload(_payload(two), 60, 40)
+
+    # 2b. decoded-vs-reported mismatch: the REPORTED dims match expected (so check_payload's reported-dims
+    #     assert passes), but the PNG decodes to a different size -> check()'s DECODED-dims assert must fire.
+    #     Without this case a producer that lies about its size (reports 60x40, encodes 30x20) slips through.
+    _expect_assert(lambda: pixel_health.check_payload(_payload_mismatched(60, 40, _two_tone(30, 20)), 60, 40),
+                   "decoded-vs-reported dims mismatch")
 
     # 3. vertical orientation: fg in the lower half -> bottom>top; its flip -> top>bottom.
     lower = np.full((40, 60, 3), BLUE, dtype=np.uint8)
