@@ -1296,7 +1296,7 @@ static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_toggle, "Dark mode", &st->toggle_value, g_current->toggle, &row, true);
 
     /* Tristate "select all": the GAME aggregates the children into the parent each frame -- all on =>
-     * ON, all off => OFF, otherwise the indeterminate MIXED dash (D-70-04: MIXED is game-set only).
+     * ON, all off => OFF, otherwise the indeterminate MIXED dash (MIXED is game-set only).
      * Clicking the parent resolves ON/OFF (nt_ui_checkbox_tri never produces MIXED); the game then
      * writes every child to match. */
     static const char *const sel_labels[4] = {"Notifications", "Auto-update", "Telemetry", "Beta features"};

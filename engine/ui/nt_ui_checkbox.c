@@ -235,7 +235,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     // #region value-row + state pick
     /* Non-const row so the resolve memoizes into the style-owned cell refs.
      * Any non-1/non-2 value coerces to unchecked -> row is bounded to the three
-     * known arrays (no over-index even on a corrupt value, T-70-01). */
+     * known arrays (no over-index even on a corrupt value). */
     nt_ui_cb_state_t *row = style->unchecked;
     if (row_idx == 1) {
         row = style->checked;
@@ -391,7 +391,7 @@ bool nt_ui_checkbox_tri(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     cb_core(ctx, data, label_layer, id, label, row_idx, false, &NT_UI_CHECKBOX_TRI_DEF, style, decl, enabled, &clicked);
     if (clicked) {
         /* Click resolves any non-ON (OFF or MIXED) to ON, else toggles ON->OFF.
-         * NEVER writes MIXED -- MIXED is a game-set display state only (D-70-04). */
+         * NEVER writes MIXED -- MIXED is a game-set display state only. */
         *value = (*value == NT_UI_TRI_ON) ? NT_UI_TRI_OFF : NT_UI_TRI_ON;
         return true;
     }

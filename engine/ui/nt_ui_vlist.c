@@ -13,7 +13,7 @@
 // #region window_math
 /* Pure, bounds-safe window derivation shared by begin + the test probe. All clamps are HARD
  * guards (not asserts): asserts vanish in NT_ASSERT_MODE=OFF, but a bad count/extent must never
- * over-read the spacer/state index (threat T-70-03). double avoids float blow-up on huge counts.
+ * over-read the spacer/state index. double avoids float blow-up on huge counts.
  * pos_on_axis is Clay's childOffset (negative going down/right), so scrolled distance = -pos. */
 static nt_ui_vlist_range_t vlist_window(float pos_on_axis, float viewport, float item_extent, uint32_t count, int overscan) {
     nt_ui_vlist_range_t r = {1U, 0U}; /* empty sentinel: first > last */
@@ -92,8 +92,9 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     const float safe_extent = (isfinite(extent) && extent > 0.0F) ? extent : 0.0F;
     NT_ASSERT(isfinite(extent) && extent > 0.0F && "nt_ui_vlist_begin: item_extent+gap must be finite and > 0");
 
-    /* Exactly ONE scroll (one Clay clip) per vlist — never one clip per row (memory clay_scroll_container_gc).
-     * Axis selects the scroll axis + the inner layoutDirection (Pitfall 6: an X list needs LEFT_TO_RIGHT). */
+    /* Exactly ONE scroll (one Clay clip) per vlist — never one clip per row (each Clay clip is a
+     * persistent pool slot). Axis selects the scroll axis + the inner layoutDirection (an X-axis list
+     * needs LEFT_TO_RIGHT inner layout). */
     nt_ui_scroll_style_t ss = st.scroll;
     ss.scroll_x = (axis == NT_UI_AXIS_X);
     ss.scroll_y = (axis == NT_UI_AXIS_Y);

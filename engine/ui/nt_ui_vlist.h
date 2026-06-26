@@ -17,7 +17,7 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Scroll/window axis (D-70-08). Y = vertical list (default), X = horizontal. */
+/* Scroll/window axis. Y = vertical list (default), X = horizontal. */
 typedef enum { NT_UI_AXIS_Y = 0, NT_UI_AXIS_X } nt_ui_axis_t;
 
 /* Inclusive visible window. EMPTY when first > last (e.g. count == 0): a
@@ -55,8 +55,9 @@ nt_ui_vlist_style_t nt_ui_vlist_style_defaults(void);
 
 /* Collision-safe per-item id: maps index onto a bounded ring slot (index % ring, ring>1) then fmixes
  * base_id + slot into one widely-spread id so per-slot retained state never aliases a neighbor's Clay
- * anon-child space (D-70-09). NEVER base_id+index / nt_ui_derived_id — additive ids collide (memory
- * clay_additive_id_collision). ring<=1 disables recycling (slot = index). Pure: same (base,index,ring)
+ * anon-child space. NEVER base_id+index / nt_ui_derived_id — additive ids collide (Clay's anon-child
+ * id is seed+offset, so consecutive seeds' child spaces overlap). ring<=1 disables recycling (slot =
+ * index). Pure: same (base,index,ring)
  * -> same id every frame, and id_of(base,i,ring) == id_of(base,i+ring,ring). */
 static inline uint32_t nt_ui_vlist_item_id_of(uint32_t base_id, uint32_t index, uint32_t ring) {
     const uint32_t slot = (ring > 1U) ? (index % ring) : index;
