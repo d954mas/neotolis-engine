@@ -499,7 +499,7 @@ if(NOT EMSCRIPTEN)
         # test asserts it against nt_engine_version_string() directly. Needs the core group.
         if(NT_DEVAPI_GROUP_CORE)
             add_executable(test_devapi_core unit/test_devapi_core.c)
-            target_link_libraries(test_devapi_core PRIVATE nt_devapi_core cjson nt_window_stub nt_app_stub nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_core PRIVATE nt_devapi_core nt_devapi cjson nt_window_stub nt_app_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_core PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
@@ -511,7 +511,39 @@ if(NOT EMSCRIPTEN)
         # #ifdef-gate its per-group `features` assertions + expected group count.
         if(NT_DEVAPI_GROUP_DISCOVERY)
             add_executable(test_devapi_discovery unit/test_devapi_discovery.c)
-            target_link_libraries(test_devapi_discovery PRIVATE nt_devapi_default cjson nt_ui_stub nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub nt_core nt_log_stub unity)
+            # Discovery links the nt_devapi_default bundle (register_default registers every compiled-in
+            # group). GNU-ld is single-pass: each group lib must precede the provider stubs, so list the
+            # existing group libs explicitly (the bundle pulls them too; this pins the order) before the
+            # stubs. obs/entity_write/capture pull real providers -- list them gated so a discovery-only
+            # config (those groups OFF) links a minimal set.
+            set(_disc_group_provider_libs "")
+            if(NT_DEVAPI_GROUP_OBS)
+                list(APPEND _disc_group_provider_libs
+                    nt_log_ring nt_metrics nt_introspect nt_entity
+                    nt_material nt_pool nt_resource nt_shared nt_hash nt_http_stub nt_fs_stub)
+            endif()
+            if(NT_DEVAPI_GROUP_ENTITY_WRITE)
+                list(APPEND _disc_group_provider_libs
+                    nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
+                    nt_resource nt_math nt_shared nt_http_stub nt_fs_stub)
+            endif()
+            if(NT_DEVAPI_GROUP_CAPTURE)
+                list(APPEND _disc_group_provider_libs nt_fpng)
+            endif()
+            target_link_libraries(test_devapi_discovery PRIVATE
+                nt_devapi_default
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_core>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_time>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_input>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_ui>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_obs>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_entity_write>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_capture>
+                $<TARGET_NAME_IF_EXISTS:nt_devapi_discovery>
+                nt_devapi cjson
+                nt_ui_stub nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub
+                ${_disc_group_provider_libs}
+                nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_discovery PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
@@ -524,7 +556,7 @@ if(NOT EMSCRIPTEN)
         # (nt_gfx_get_frame_draw_calls -> 0 for render.info; the light gfx stub, no font/material chain).
         if(NT_DEVAPI_GROUP_TIME)
             add_executable(test_devapi_time unit/test_devapi_time.c)
-            target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_time PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
@@ -538,7 +570,7 @@ if(NOT EMSCRIPTEN)
         # (net_poll + advance-gated schedule tick keyed off g_nt_app.frame), not just the schedule TU.
         if(NT_DEVAPI_GROUP_INPUT)
             add_executable(test_devapi_input unit/test_devapi_input.c)
-            target_link_libraries(test_devapi_input PRIVATE nt_devapi_net nt_devapi_input nt_devapi_discovery cjson nt_window_stub nt_app_stub nt_input_stub nt_core nt_log_stub unity)
+            target_link_libraries(test_devapi_input PRIVATE nt_devapi_net nt_devapi_input nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub nt_input_stub nt_core nt_log_stub unity)
             target_compile_definitions(test_devapi_input PRIVATE
                 _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
             )
@@ -557,7 +589,7 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_OBS)
             add_executable(test_devapi_obs unit/test_devapi_obs.c)
             target_link_libraries(test_devapi_obs PRIVATE
-                nt_devapi_obs nt_devapi_discovery cjson nt_window_stub nt_app_stub
+                nt_devapi_obs nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub
                 nt_log_ring nt_metrics
                 nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp nt_comp_storage
                 nt_material nt_pool nt_resource nt_math nt_shared
@@ -577,7 +609,7 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_ENTITY_WRITE)
             add_executable(test_devapi_entity_write unit/test_devapi_entity_write.c)
             target_link_libraries(test_devapi_entity_write PRIVATE
-                nt_devapi_entity_write cjson nt_window_stub nt_app_stub
+                nt_devapi_entity_write nt_devapi cjson nt_window_stub nt_app_stub
                 nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_comp_storage
                 nt_resource nt_math nt_shared
                 nt_gfx_stub nt_input_stub nt_http_stub nt_fs_stub
@@ -600,7 +632,7 @@ if(NOT EMSCRIPTEN)
         if(NT_DEVAPI_GROUP_CAPTURE)
             add_executable(test_devapi_capture unit/test_devapi_capture.c)
             target_link_libraries(test_devapi_capture PRIVATE
-                nt_devapi_capture cjson nt_window_stub nt_app_stub
+                nt_devapi_capture nt_devapi cjson nt_window_stub nt_app_stub
                 nt_gfx_stub nt_fpng nt_core nt_log_stub unity
             )
             target_compile_definitions(test_devapi_capture PRIVATE
@@ -760,7 +792,7 @@ if(NOT EMSCRIPTEN)
         )
         target_include_directories(test_devapi_ui PRIVATE ${_nt_ui_test_helper_includes})
         target_link_libraries(test_devapi_ui PRIVATE
-            nt_devapi_net nt_devapi_ui cjson
+            nt_devapi_net nt_devapi_ui nt_devapi_input nt_devapi cjson
             nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
             nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay
             nt_window_stub nt_app_stub nt_gfx_stub nt_input_stub
