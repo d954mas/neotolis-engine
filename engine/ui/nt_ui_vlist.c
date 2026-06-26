@@ -70,6 +70,7 @@ nt_ui_vlist_style_t nt_ui_vlist_style_defaults(void) {
     s.scroll = nt_ui_scroll_style_defaults();
     s.overscan = 2; /* a couple of rows each side hides recycle pop on a fling */
     s.gap = 0.0F;
+    s.id_ring = 256U; /* recycle ids over 256 slots -> ~256 hashmap slots/list, never saturates */
     return s;
 }
 
@@ -102,7 +103,18 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(ctx, id);
     const float pos = (s != NULL) ? s->pos[(axis == NT_UI_AXIS_X) ? 0 : 1] : 0.0F;
 
-    const nt_ui_vlist_range_t r = vlist_window(pos, viewport, extent, count, st.overscan);
+    nt_ui_vlist_range_t r = vlist_window(pos, viewport, extent, count, st.overscan);
+
+    /* Hard window cap: with ring recycling, two SIMULTANEOUSLY-visible rows sharing a ring slot would
+     * declare the same Clay id -> CLAY_ERROR_TYPE_DUPLICATE_ID. Clamp the visible window to ring-1 so
+     * that can never happen, even for a pathological viewport. REAL clamp, not an assert: NT_ASSERT
+     * vanishes in NT_ASSERT_MODE=OFF. Only shrinks `last`, so it stays <= count-1 and >= first; the
+     * trailing spacer (vlist_end) recomputes from this clamped last, keeping content == count*extent. */
+    if (st.id_ring > 1U && r.first <= r.last && ((uint64_t)r.last - r.first + 1U) > (uint64_t)(st.id_ring - 1U)) {
+        r.last = r.first + (st.id_ring - 2U); /* window size = ring-1 (<= ring-1, > 0 since ring>1) */
+    }
+    NT_ASSERT(((r.first > r.last) || st.id_ring <= 1U || ((uint64_t)r.last - r.first + 1U) < (uint64_t)st.id_ring) && "vlist_begin: visible window must stay below id_ring (raise style.id_ring)");
+
     const bool empty = (r.first > r.last);
 
     vlist_emit_spacer((uint8_t)axis, empty ? 0.0F : ((float)r.first * extent));
@@ -110,6 +122,7 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     ctx->pending_vlist.base_id = id;
     ctx->pending_vlist.count = count;
     ctx->pending_vlist.last = r.last;
+    ctx->pending_vlist.ring = st.id_ring;
     ctx->pending_vlist.extent = extent;
     ctx->pending_vlist.axis = (uint8_t)axis;
     ctx->pending_vlist.empty = empty;
@@ -135,7 +148,7 @@ void nt_ui_vlist_end(nt_ui_context_t *ctx) {
 uint32_t nt_ui_vlist_item_id(nt_ui_context_t *ctx, uint32_t index) {
     NT_ASSERT(ctx != NULL && "nt_ui_vlist_item_id: ctx must be non-NULL");
     NT_ASSERT(ctx->pending_vlist.active && "nt_ui_vlist_item_id: no open vlist (call between begin/end)");
-    return nt_ui_vlist_item_id_of(ctx->pending_vlist.base_id, index);
+    return nt_ui_vlist_item_id_of(ctx->pending_vlist.base_id, index, ctx->pending_vlist.ring);
 }
 
 #ifdef NT_TEST_ACCESS

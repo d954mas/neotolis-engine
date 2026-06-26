@@ -96,18 +96,19 @@ static void test_vlist_window_degenerate_safe(void) {
     TEST_ASSERT_TRUE(r.first <= r.last);
 }
 
-/* ---- (d) recycle-id stability / distinctness / no adjacent-base collision ---- */
+/* ---- (d) per-id stability / distinctness / no adjacent-base collision (window <= ring) ---- */
 static void test_vlist_item_id_recycle(void) {
     const uint32_t base = 0x7711U;
+    const uint32_t ring = 512U; /* > 256 so the 0..255 indices below map to distinct slots */
     /* Stable across calls (== across frames, since it is pure). */
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_vlist_item_id_of(base, 42U), nt_ui_vlist_item_id_of(base, 42U));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_vlist_item_id_of(base, 42U, ring), nt_ui_vlist_item_id_of(base, 42U, ring));
 
-    /* Distinct per index + always nonzero, over a wide window. */
+    /* Distinct per index + always nonzero, over a wide window (all within one ring). */
     for (uint32_t i = 0U; i < 256U; ++i) {
-        const uint32_t id_i = nt_ui_vlist_item_id_of(base, i);
+        const uint32_t id_i = nt_ui_vlist_item_id_of(base, i, ring);
         TEST_ASSERT_NOT_EQUAL_UINT32(0U, id_i);
         for (uint32_t j = i + 1U; j < 256U; ++j) {
-            TEST_ASSERT_NOT_EQUAL_UINT32(id_i, nt_ui_vlist_item_id_of(base, j));
+            TEST_ASSERT_NOT_EQUAL_UINT32(id_i, nt_ui_vlist_item_id_of(base, j, ring));
         }
     }
 
@@ -115,14 +116,36 @@ static void test_vlist_item_id_recycle(void) {
      * for adjacent bases/indices (additive base+index would alias these). */
     for (uint32_t b = base; b < base + 32U; ++b) {
         for (uint32_t k = 0U; k < 32U; ++k) {
-            TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_vlist_item_id_of(b, k + 1U), nt_ui_vlist_item_id_of(b + 1U, k));
+            TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_vlist_item_id_of(b, k + 1U, ring), nt_ui_vlist_item_id_of(b + 1U, k, ring));
         }
     }
+}
+
+/* ---- (d2) ring recycle: index and index+ring share a slot/id; one window stays distinct ---- */
+static void test_vlist_item_id_ring(void) {
+    const uint32_t base = 0x1234U;
+    const uint32_t ring = 64U;
+    /* index and index+ring (and +2*ring) fold onto the same slot -> identical id (frame-stable recycle). */
+    for (uint32_t i = 0U; i < 200U; ++i) {
+        const uint32_t id_i = nt_ui_vlist_item_id_of(base, i, ring);
+        TEST_ASSERT_EQUAL_UINT32(id_i, nt_ui_vlist_item_id_of(base, i + ring, ring));
+        TEST_ASSERT_EQUAL_UINT32(id_i, nt_ui_vlist_item_id_of(base, i + (2U * ring), ring));
+    }
+    /* Within a single ring (one window) every slot is distinct -> no DUPLICATE_ID across visible rows. */
+    for (uint32_t i = 0U; i < ring; ++i) {
+        for (uint32_t j = i + 1U; j < ring; ++j) {
+            TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_vlist_item_id_of(base, i, ring), nt_ui_vlist_item_id_of(base, j, ring));
+        }
+    }
+    /* ring<=1 disables recycling: slot == index (every index distinct, never folds). */
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_vlist_item_id_of(base, 0U, 1U), nt_ui_vlist_item_id_of(base, 1U, 1U));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_vlist_item_id_of(base, 5U, 0U), nt_ui_vlist_item_id_of(base, 5U + 64U, 0U));
 }
 
 /* ---- Full-frame fixture: a 200x200 vlist over `count` rows of `extent`. ---- */
 #define VL_ID 0x5111C17U
 #define VL_VIEW 200.0F
+#define VL_RING (nt_ui_vlist_style_defaults().id_ring) /* default-style recycle modulus (matches vlist_frame) */
 #define VL_SCRL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
 
 static nt_ui_vlist_range_t vlist_frame(nt_ui_axis_t axis, uint32_t count, float extent) {
@@ -149,8 +172,8 @@ static void test_vlist_axis_y_layout(void) {
     /* Y list: consecutive rows stack on Y (same X). */
     vlist_frame(NT_UI_AXIS_Y, 100U, 40.0F);
     vlist_frame(NT_UI_AXIS_Y, 100U, 40.0F);
-    const nt_ui_bbox_t b0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U));
-    const nt_ui_bbox_t b1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U));
+    const nt_ui_bbox_t b0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U, VL_RING));
+    const nt_ui_bbox_t b1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U, VL_RING));
     TEST_ASSERT_TRUE(b0.found);
     TEST_ASSERT_TRUE(b1.found);
     TEST_ASSERT_TRUE(b1.y > b0.y);
@@ -161,8 +184,8 @@ static void test_vlist_axis_x_layout(void) {
     /* X list: consecutive rows run along X (same Y). */
     vlist_frame(NT_UI_AXIS_X, 100U, 40.0F);
     vlist_frame(NT_UI_AXIS_X, 100U, 40.0F);
-    const nt_ui_bbox_t b0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U));
-    const nt_ui_bbox_t b1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U));
+    const nt_ui_bbox_t b0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U, VL_RING));
+    const nt_ui_bbox_t b1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U, VL_RING));
     TEST_ASSERT_TRUE(b0.found);
     TEST_ASSERT_TRUE(b1.found);
     TEST_ASSERT_TRUE(b1.x > b0.x);
@@ -185,12 +208,12 @@ static void test_vlist_spacer_content_size(void) {
     TEST_ASSERT_TRUE(fabsf(scd.contentDimensions.height - ((float)count * extent)) < 1.0F);
 
     /* At rest (top) first == 0: the first row sits at the container's top edge (leading spacer = 0). */
-    const nt_ui_bbox_t row0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U));
+    const nt_ui_bbox_t row0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U, VL_RING));
     const nt_ui_bbox_t cont = nt_ui_get_bbox(s_fx.ctx, VL_ID);
     TEST_ASSERT_TRUE(row0.found && cont.found);
     TEST_ASSERT_TRUE(fabsf(row0.y - cont.y) < 0.5F);
     /* Each row advances by exactly `extent` (childGap 0, item_extent stride). */
-    const nt_ui_bbox_t row1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U));
+    const nt_ui_bbox_t row1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U, VL_RING));
     TEST_ASSERT_TRUE(row1.found);
     TEST_ASSERT_TRUE(fabsf((row1.y - row0.y) - extent) < 0.5F);
 }
@@ -204,20 +227,48 @@ static void test_vlist_one_clip(void) {
     TEST_ASSERT_EQUAL_UINT32(VL_ID, nt_ui_scroll_test_last_scroll_id());
     TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, VL_ID, VL_SCRL_TAG));
     /* Rows are NOT scroll containers (no clip-per-row). */
-    TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U), VL_SCRL_TAG));
-    TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 3U), VL_SCRL_TAG));
+    TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U, VL_RING), VL_SCRL_TAG));
+    TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 3U, VL_RING), VL_SCRL_TAG));
 }
 
-/* ---- (h) regression: nested vlists swept back and forth must never crash build_tree ----
- * The Phase-70 QA crash: scrolling a 10k-row vlist back and forth saturates Clay's PERSISTENT
+/* ---- (h) ring clamp on a pathological viewport: visible window stays below id_ring ----
+ * A viewport that would show MANY rows must never let two simultaneously-visible rows share a recycle
+ * slot (that would be CLAY_ERROR_TYPE_DUPLICATE_ID). begin hard-clamps the window to id_ring-1. */
+static void test_vlist_window_ring_clamp(void) {
+    const uint32_t ring = 8U;
+    nt_ui_vlist_range_t r = {1U, 0U};
+    for (int f = 0; f < 2; ++f) { /* frame 1 establishes the bbox; frame 2 sees the real viewport */
+        nt_mem_scratch_reset();
+        nt_pointer_t p = {0};
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
+        CLAY({.id = CLAY_ID("rclamp_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
+            nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
+            st.id_ring = ring; /* tiny ring; the 200px viewport over 10px rows would otherwise show ~29 rows */
+            st.overscan = 4;
+            const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
+            r = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl);
+            for (uint32_t i = r.first; i <= r.last && i < 1000U; ++i) {
+                CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(s_fx.ctx, i)}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(10.0F)}}}) {}
+            }
+            nt_ui_vlist_end(s_fx.ctx);
+        }
+        nt_ui_end(s_fx.ctx);
+    }
+    const uint32_t window = (r.last >= r.first) ? (r.last - r.first + 1U) : 0U;
+    TEST_ASSERT_TRUE(window > 0U);   /* still renders rows */
+    TEST_ASSERT_TRUE(window < ring); /* (last-first+1) <= ring-1: no two visible rows alias a slot */
+}
+
+/* ---- (i) nested vlists swept back and forth: recycling keeps Clay's hashmap bounded ----
+ * The Phase-70 QA crash: scrolling a 10k-row vlist back and forth USED to saturate Clay's PERSISTENT
  * element hashmap (one permanent slot per distinct id, cap == maxElementCount) with the vlist's
  * distinct per-row ids. Once full, Clay__AddHashMapItem stops refreshing existing entries, so a
- * scroll container's stored layoutElement goes STALE; the floating scrollbar's resolved parent
- * index then no longer precedes the bar and build_tree used to NT_ASSERT-trap. vlist_x is declared
- * AFTER vlist_y so its container's declaration index shifts with vlist_y's (position-dependent)
- * rendered-row count — that is what lets a stale (saturation-frame) parent index exceed the bar's
- * current index. The fix degrades to an identity seed; this asserts both no-trap and that the
- * degrade path actually ran (so the test cannot pass vacuously). */
+ * scroll container's stored layoutElement goes STALE; the floating scrollbar's resolved parent index
+ * then no longer precedes the bar and build_tree degrades (counted by stale_floating_parent). With
+ * ring id-recycling the distinct ids per list are bounded by id_ring, so the SAME sweep no longer
+ * saturates: the degrade count stays 0. vlist_x is declared AFTER vlist_y exactly as in the original
+ * repro so the position-dependent row count still shifts its container index. id_ring==0 disables
+ * recycling (absolute ids) -> reproduces the old saturation, keeping the build_tree backstop tested. */
 #define VL_OUTER_ID 0x0C0FFEE1U
 #define VL_Y_ID 0x0C0FFEE2U
 #define VL_X_ID 0x0C0FFEE3U
@@ -225,7 +276,7 @@ static void test_vlist_one_clip(void) {
 #define VL_BIG_ROW_H 34.0F
 #define VL_BIG_COL_W 80.0F
 
-static void vlist_nested_sweep_frame(float pos_y) {
+static void vlist_nested_sweep_frame(float pos_y, uint32_t id_ring) {
     nt_mem_scratch_reset(); /* per-frame UI scratch (element_data/payloads), exactly like the app loop */
     nt_pointer_t p = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
@@ -244,6 +295,7 @@ static void vlist_nested_sweep_frame(float pos_y) {
 
     nt_ui_scroll_style_t outer = nt_ui_scroll_style_defaults(); /* ALWAYS bar => a floating tree root */
     nt_ui_vlist_style_t vst = nt_ui_vlist_style_defaults();     /* owned scroll: ALWAYS bar */
+    vst.id_ring = id_ring;                                      /* 0 = no recycle (saturates), default = bounded */
     const Clay_ElementDeclaration ydecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
     const Clay_ElementDeclaration xdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(60.0F)}}};
 
@@ -267,30 +319,39 @@ static void vlist_nested_sweep_frame(float pos_y) {
     nt_ui_end(s_fx.ctx);
 }
 
-static void test_vlist_nested_scroll_reversals_no_crash(void) {
+/* Sweep vlist_y top<->bottom several times over 10k rows. Returns the build_tree degrade count. */
+static uint32_t vlist_nested_sweep(uint32_t id_ring) {
     nt_ui_internal_test_reset_stale_floating_parent_count();
 
     const float content = (float)VL_BIG_COUNT * VL_BIG_ROW_H; /* 340000 */
     const float maxpos = -(content - VL_VIEW);                /* most-negative offset (fully scrolled) */
 
     /* Frame 1 establishes dims (the pin is a no-op: the state cell is created during this frame). */
-    vlist_nested_sweep_frame(0.0F);
+    vlist_nested_sweep_frame(0.0F, id_ring);
 
-    /* Sweep vlist_y top<->bottom repeatedly. With steps this fine the windows do not overlap, so each
-     * frame contributes ~viewport-worth of NEW distinct row ids; one sweep already far exceeds the
-     * default 1024-id hashmap. The top/mid/bottom rendered-row-count variation then makes a stale
-     * parent index exceed its bar index on many post-saturation frames. */
     const int steps = 200;
     for (int rev = 0; rev < 4; ++rev) {
         for (int k = 0; k <= steps; ++k) {
             const float t = (float)k / (float)steps;
             const float frac = ((rev & 1) == 0) ? t : (1.0F - t); /* alternate sweep direction */
-            vlist_nested_sweep_frame(maxpos * frac);
+            vlist_nested_sweep_frame(maxpos * frac, id_ring);
         }
     }
+    return nt_ui_internal_test_stale_floating_parent_count();
+}
 
-    /* Survived every frame without the build_tree trap, AND the saturation/degrade path actually ran. */
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_internal_test_stale_floating_parent_count() > 0U, "regression failed to reproduce Clay hashmap saturation -> stale floating parent");
+/* PROOF the recycle fix works: with default id_ring the distinct ids stay bounded, so the same
+ * 10k sweep that used to saturate now never does -> degrade count == 0, and no build_tree trap. */
+static void test_vlist_nested_scroll_reversals_no_crash(void) {
+    const uint32_t degrades = vlist_nested_sweep(nt_ui_vlist_style_defaults().id_ring);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, degrades, "ring recycling must keep Clay's hashmap bounded (no saturation/degrade)");
+}
+
+/* BACKSTOP coverage: with recycling disabled (id_ring==0) the same sweep saturates the hashmap
+ * deterministically, exercising build_tree's identity-seed degrade path (no trap, count > 0). */
+static void test_vlist_degrade_backstop_on_saturation(void) {
+    const uint32_t degrades = vlist_nested_sweep(0U);
+    TEST_ASSERT_TRUE_MESSAGE(degrades > 0U, "absolute-id sweep must reproduce Clay hashmap saturation -> build_tree degrade backstop");
 }
 
 int main(void) {
@@ -299,10 +360,13 @@ int main(void) {
     RUN_TEST(test_vlist_window_edge_clamp);
     RUN_TEST(test_vlist_window_degenerate_safe);
     RUN_TEST(test_vlist_item_id_recycle);
+    RUN_TEST(test_vlist_item_id_ring);
     RUN_TEST(test_vlist_axis_y_layout);
     RUN_TEST(test_vlist_axis_x_layout);
     RUN_TEST(test_vlist_spacer_content_size);
     RUN_TEST(test_vlist_one_clip);
+    RUN_TEST(test_vlist_window_ring_clamp);
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
+    RUN_TEST(test_vlist_degrade_backstop_on_saturation);
     return UNITY_END();
 }

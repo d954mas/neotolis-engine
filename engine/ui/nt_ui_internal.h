@@ -285,6 +285,7 @@ struct nt_ui_context {
         uint32_t base_id; /* vlist id = scroll id; scope for the per-item fmix */
         uint32_t count;   /* total row count (for the trailing spacer) */
         uint32_t last;    /* last visible index (trailing spacer = (count-1-last)*extent) */
+        uint32_t ring;    /* id recycle modulus (style.id_ring); per-row slot = index % ring */
         float extent;     /* per-row stride (item_extent + style.gap) */
         uint8_t axis;     /* nt_ui_axis_t */
         bool empty;       /* count==0 or degenerate -> no spacers */
