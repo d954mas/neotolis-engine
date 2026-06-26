@@ -453,6 +453,13 @@ static uint32_t s_id_sel_item[4]; /* select-all children -- distinct fmix ids (n
 static uint32_t s_id_slider_f, s_id_slider_i;
 static uint32_t s_id_slider_vert;           /* vertical volume slider */
 static uint32_t s_id_vlist_y, s_id_vlist_x; /* 10k-row windowed lists (vertical + horizontal) */
+/* Per-row selection for the vertical 10k list, keyed by ABSOLUTE row index. The vlist recycles row
+ * ids by a ring, so selection state is GAME-owned by absolute index (never hung off the recycled id);
+ * re-fed into the row bg each frame. 10k bits = 1250 B. */
+#define SHOWCASE_VLIST_COUNT 10000
+static uint32_t s_vlist_sel[(SHOWCASE_VLIST_COUNT + 31) / 32];
+static inline bool vlist_sel_get(uint32_t i) { return (s_vlist_sel[i >> 5U] & (1U << (i & 31U))) != 0U; }
+static inline void vlist_sel_toggle(uint32_t i) { s_vlist_sel[i >> 5U] ^= (1U << (i & 31U)); }
 static uint32_t s_id_progress;
 static uint32_t s_id_progress_crop, s_id_progress_vert; /* CROP + vertical progress variants */
 static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / ALWAYS lists */
@@ -1448,15 +1455,20 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
+/* Per-row clickable surface id, derived from the (recycled) row id so it recycles WITH the row —
+ * hover/press/capture follow the screen slot, exactly like the row's own retained state. */
+#define VLIST_ROW_HIT_SALT 0x711C0000U
+
 /* Virtualized list: two nt_ui_vlist clippers over a 10k-row dataset (a vertical column + a
  * horizontal strip). Each owns ONE scroll / ONE Clay clip; cost ~ the visible window, not 10k.
- * The game loops first..last and keys each row with nt_ui_vlist_item_id so retained per-row state
- * follows the item across recycle. A header readout shows the visible window vs the 10k total. */
+ * The game loops first..last and keys each row with nt_ui_vlist_item_id; ids RECYCLE by a ring, so
+ * the vertical rows are clickable selectables whose selection is stored GAME-side by ABSOLUTE index
+ * (s_vlist_sel) — selection persists across scroll even though the row ids recycle. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)st;
-    char buf[80];
-    enum { VLIST_COUNT = 10000 };
+    char buf[96];
+    enum { VLIST_COUNT = SHOWCASE_VLIST_COUNT };
     const float row_h = 34.0F; /* vertical-list item extent (Y) */
     const float col_w = 96.0F; /* horizontal-strip item extent (X) */
 
@@ -1466,23 +1478,46 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
 
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 12}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Virtualized list -- 10,000 rows, windowed to the viewport (cost ~ the visible count, not 10k).", g_current->body);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a row to (de)select; selection is keyed by ABSOLUTE index, so it persists across scroll while the row ids recycle.", g_current->caption);
 
-        /* Vertical 10k-row column. */
+        /* Total selected across the WHOLE dataset (game-owned, absolute) — proves persistence beyond
+         * the visible window. Popcount over the bitset is ~313 words, trivial. */
+        uint32_t sel_total = 0U;
+        for (size_t w = 0; w < (sizeof s_vlist_sel / sizeof s_vlist_sel[0]); ++w) {
+            sel_total += (uint32_t)__builtin_popcount(s_vlist_sel[w]);
+        }
+
+        /* Vertical 10k-row column of selectable rows. */
         const nt_ui_vlist_range_t ry = nt_ui_vlist_begin(ctx, NULL, s_id_vlist_y, (uint32_t)VLIST_COUNT, row_h, NT_UI_AXIS_Y, &vstyle,
                                                          &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIXED(320)}, .padding = CLAY_PADDING_ALL(6)},
                                                                                     .backgroundColor = g_current->bg,
                                                                                     .cornerRadius = CLAY_CORNER_RADIUS(8)});
         for (uint32_t i = ry.first; i <= ry.last; ++i) {
-            (void)snprintf(buf, sizeof buf, "Vertical row %u", i);
-            CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(ctx, i)},
-                  .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {.left = 12}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = ((i & 1U) != 0U) ? g_current->list_bg : g_current->panel,
-                  .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
-                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+            const uint32_t row_id = nt_ui_vlist_item_id(ctx, i);
+            const uint32_t hit_id = nt_ui_derived_id(row_id, VLIST_ROW_HIT_SALT); /* recycles WITH the row */
+            const nt_ui_events_t ev = nt_ui_events(ctx, hit_id, NULL);
+            if (ev.clicked) {
+                vlist_sel_toggle(i); /* dispatch by ABSOLUTE index, NEVER by the recycled id */
+            }
+            const bool selected = vlist_sel_get(i);
+            /* Selected (game-owned, absolute) wins; otherwise transient hover tint follows the screen slot. */
+            Clay_Color row_bg = ((i & 1U) != 0U) ? g_current->list_bg : g_current->panel; /* zebra stripe */
+            if (selected) {
+                row_bg = g_current->list_sel;
+            } else if (ev.hovered) {
+                row_bg = g_current->panel_alt;
+            }
+            (void)snprintf(buf, sizeof buf, "%s Vertical row %u", selected ? "[x]" : "[  ]", i);
+            CLAY({.id = (Clay_ElementId){.id = row_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}}, .backgroundColor = row_bg, .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
+                CLAY({.id = (Clay_ElementId){.id = hit_id},
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 12}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+                    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, selected ? g_current->row_sel : g_current->body);
+                }
             }
         }
         nt_ui_vlist_end(ctx);
-        (void)snprintf(buf, sizeof buf, "Vertical: rows %u..%u visible (%u of %d rendered)", ry.first, ry.last, (ry.last >= ry.first) ? (ry.last - ry.first + 1U) : 0U, VLIST_COUNT);
+        (void)snprintf(buf, sizeof buf, "Vertical: rows %u..%u visible (%u of %d rendered) -- %u selected total", ry.first, ry.last, (ry.last >= ry.first) ? (ry.last - ry.first + 1U) : 0U,
+                       VLIST_COUNT, sel_total);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
 
         /* Horizontal 10k-cell strip. */
