@@ -3316,8 +3316,9 @@ static void declare_content(nt_ui_context_t *ctx) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->link);
 
         /* Vertical scroll bounds the content to the card height; the inner column FITs (grows taller
-         * than the viewport on tall tabs -> scrolls). */
-        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_always, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+         * than the viewport on tall tabs -> scrolls). AUTO_HIDE (not ALWAYS): tabs whose content fits
+         * (e.g. Sliders) must not show a dead, full-thumb phantom bar — match the props-panel sibling. */
+        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
         nt_ui_scroll_end(ctx);
     }
