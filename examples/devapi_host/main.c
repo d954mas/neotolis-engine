@@ -230,7 +230,7 @@ int main(void) {
     nt_input_init();
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.
-       The obs devapi group self-registers under NT_DEVAPI_GROUP_OBS — no host register call. */
+       The obs group's commands are registered by nt_devapi_register_default() above. */
     nt_log_ring_init();
     nt_log_add_sink(nt_log_ring_sink, NULL);
     nt_metrics_init();
@@ -240,6 +240,7 @@ int main(void) {
         printf("Failed to initialize devapi\n");
         goto shutdown_base;
     }
+    nt_devapi_register_default(); /* full host: register every compiled-in group. */
     result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
     if (result != NT_OK) {
         printf("[devapi_host] failed to register game.echo: error %d\n", result);
@@ -247,8 +248,8 @@ int main(void) {
     }
 
     /* Probe-able "hud" UI context. nt_mem_scratch backs CLAY's per-element data; nt_ui_module_init is
-       self-contained (no gfx/font). The host registers only the CTX — the ui group's commands
-       self-register inside nt_devapi_register_ui under the gate. */
+       self-contained (no gfx/font). The host registers the CTX here; the ui group's commands are
+       registered by nt_devapi_register_default() above. */
     nt_mem_scratch_init((size_t)64U * 1024U);
     nt_ui_module_init();
     {

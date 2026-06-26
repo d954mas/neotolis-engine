@@ -23,6 +23,7 @@ void setUp(void) {
     nt_drawable_comp_desc_t ddesc = nt_drawable_comp_desc_defaults();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_drawable_comp_init(&ddesc));
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();
 }
 
 void tearDown(void) {

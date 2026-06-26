@@ -50,6 +50,7 @@ void setUp(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_comp_init(&mcdesc));
 
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();
 }
 
 void tearDown(void) {

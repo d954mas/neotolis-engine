@@ -92,6 +92,7 @@ void setUp(void) {
     g_nt_app.frame = 0; /* deferred targets are g_nt_app.frame + N — start each test at a known frame. */
     s_producer_ctx_freed = 0;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();
     register_defer();
     register_defer_result();
 }

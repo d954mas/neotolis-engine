@@ -24,9 +24,10 @@
 #define EXPECT_DEVICE_Y(y_up) ((float)TEST_FB_HEIGHT - (float)(y_up))
 
 void setUp(void) {
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* re-registers input -> resets the schedule */
-    nt_input_init();                            /* clean immediate buffer + key/pointer state */
-    g_nt_window.fb_height = TEST_FB_HEIGHT;     /* deterministic basis for the Y-up flip */
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();           /* re-registers input -> resets the schedule */
+    nt_input_init();                        /* clean immediate buffer + key/pointer state */
+    g_nt_window.fb_height = TEST_FB_HEIGHT; /* deterministic basis for the Y-up flip */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }

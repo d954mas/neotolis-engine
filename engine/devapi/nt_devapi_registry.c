@@ -74,36 +74,13 @@ nt_result_t nt_devapi_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     s_count = 0;
-    s_tick_count = 0; /* groups re-register their lifecycle hooks below. */
+    s_tick_count = 0; /* groups re-register their lifecycle hooks when a host registers them. */
     s_reset_count = 0;
     s_initialized = true;
 
-    /* Wire compiled-in engine groups; each is opt-in via its NT_DEVAPI_GROUP_<GROUP> define. */
-#ifdef NT_DEVAPI_GROUP_CORE
-    nt_devapi_register_core();
-#endif
-#ifdef NT_DEVAPI_GROUP_TIME
-    nt_devapi_register_time();
-#endif
-#ifdef NT_DEVAPI_GROUP_INPUT
-    nt_devapi_register_input();
-#endif
-#ifdef NT_DEVAPI_GROUP_UI
-    nt_devapi_register_ui();
-#endif
-#ifdef NT_DEVAPI_GROUP_OBS
-    nt_devapi_register_obs();
-#endif
-#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
-    nt_devapi_register_entity_write();
-#endif
-#ifdef NT_DEVAPI_GROUP_DISCOVERY
-    nt_devapi_register_discovery();
-#endif
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-    nt_devapi_register_capture();
-#endif
-
+    /* No group wiring here: init builds only the framework. A host registers the groups it wants
+       AFTER init — nt_devapi_register_default() for all compiled-in, or specific
+       nt_devapi_register_<group>() calls for a minimal surface (see nt_devapi_groups.h). */
     return NT_OK;
 }
 

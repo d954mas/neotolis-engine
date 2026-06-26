@@ -36,6 +36,7 @@ static int s_base_cmds;
 
 void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();
     s_base_cmds = nt_devapi_registry_count();
 }
 

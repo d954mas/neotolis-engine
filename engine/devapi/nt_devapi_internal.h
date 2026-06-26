@@ -180,18 +180,6 @@ const nt_devapi_slot *nt_devapi_registry_find(const char *method);
    each distinct group once, derived from the registered commands. */
 bool nt_devapi_group_is_first(int index);
 
-/* Engine `core` group registrar (per-group #ifdef). Defined in
-   nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_GROUP_CORE
-void nt_devapi_register_core(void);
-#endif
-
-/* Engine `time`/`render`/`frame` group registrar (per-group #ifdef). Defined in
-   nt_devapi_time.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_GROUP_TIME
-void nt_devapi_register_time(void);
-#endif
-
 /* The single inject scheduler lives in the input group, but the ui group reuses it (one scheduler,
    one cap <= the immediate buffer — so two sibling groups can never over-subscribe the buffer). Its
    cap + the cross-group reuse wrappers are therefore visible when EITHER group is built. */
@@ -212,11 +200,7 @@ bool nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, 
 bool nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame);
 #endif
 
-/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
-   nt_devapi_init under the same compile gate; registers the group's commands + lifecycle hooks. */
 #ifdef NT_DEVAPI_GROUP_INPUT
-void nt_devapi_register_input(void);
-
 /* Per-tick schedule driver (the tick hook): on a real sim-advance releases due entries into the
    inject buffer. Exposed for tests that drive the per-tick path directly. */
 void nt_devapi_input_update(void);
@@ -224,39 +208,6 @@ void nt_devapi_input_update(void);
 /* Reset hook: drop pending entries, release applied held synthetic input, re-seed the advance clock.
    Also called from tests for order-independence. */
 void nt_devapi_input_reset(void);
-#endif
-
-/* Engine `ui` group registrar. ui.click/drag/scroll delegate scheduling to the input group's single
-   scheduler (see the reuse wrappers above), so the ui group registers NO tick hook of its own.
-   (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
-#ifdef NT_DEVAPI_GROUP_UI
-void nt_devapi_register_ui(void);
-#endif
-
-/* Observability group registrar (per-group #ifdef). Defined in nt_devapi_obs.c, invoked from
-   nt_devapi_init under the same compile gate. The obs group is pure immediate reads — it
-   registers NO tick/reset hook. */
-#ifdef NT_DEVAPI_GROUP_OBS
-void nt_devapi_register_obs(void);
-#endif
-
-/* Entity-write group registrar (per-group #ifdef). Defined in nt_devapi_entity_write.c, invoked from
-   nt_devapi_init under the same compile gate. A dev-only DEBUG write; registers no tick/reset hook. */
-#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
-void nt_devapi_register_entity_write(void);
-#endif
-
-/* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
-   nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_GROUP_DISCOVERY
-void nt_devapi_register_discovery(void);
-#endif
-
-/* Capture group registrar (per-group #ifdef). Defined in nt_devapi_capture.c, invoked from
-   nt_devapi_init under the same compile gate. capture.frame/region are the first DEFERRED
-   data-returning commands; the producer they supply runs at nt_devapi_capture_on_pre_swap. */
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-void nt_devapi_register_capture(void);
 #endif
 
 #endif /* NT_DEVAPI_INTERNAL_H */

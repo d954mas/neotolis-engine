@@ -18,6 +18,7 @@ void setUp(void) {
     /* Known app state so forwarding + frame.current assertions are deterministic. */
     g_nt_app = (nt_app_t){.max_dt = 0.1F, .scale = 1.0F, .step_dt = 1.0F / 60.0F, .render_enabled = true};
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
