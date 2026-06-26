@@ -65,9 +65,9 @@ def main():
     two = _two_tone(60, 40)
 
     # 1. not-blank: a uniform frame must FAIL check() (ptp==0); a two-tone frame passes.
-    _expect_assert(lambda: pixel_health.check(Image.fromarray(np.full((40, 60, 3), 120, np.uint8), "RGB"), 60, 40),
+    _expect_assert(lambda: pixel_health.check(Image.fromarray(np.full((40, 60, 3), 120, np.uint8)), 60, 40),
                    "uniform frame not-blank")
-    pixel_health.check(Image.fromarray(two, "RGB"), 60, 40)
+    pixel_health.check(Image.fromarray(two), 60, 40)
 
     # 2. dims: check_payload must FAIL on a wrong reported size, pass on the right one.
     _expect_assert(lambda: pixel_health.check_payload(_payload(two), 61, 40), "wrong-width dims")
