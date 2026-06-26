@@ -278,6 +278,19 @@ struct nt_ui_context {
         bool active; /* a tab element is open (between tab_begin/tab_end) */
     } pending_tab;
 
+    /* Active-vlist scratch: vlist_begin parks the base id + window so vlist_item_id can derive
+     * per-row ids and vlist_end can size the trailing spacer without re-passing them. Vlists do
+     * not nest (asserted). */
+    struct {
+        uint32_t base_id; /* vlist id = scroll id; scope for the per-item fmix */
+        uint32_t count;   /* total row count (for the trailing spacer) */
+        uint32_t last;    /* last visible index (trailing spacer = (count-1-last)*extent) */
+        float extent;     /* per-row stride (item_extent + style.gap) */
+        uint8_t axis;     /* nt_ui_axis_t */
+        bool empty;       /* count==0 or degenerate -> no spacers */
+        bool active;      /* between vlist_begin/vlist_end */
+    } pending_vlist;
+
     /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
      * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
      * void*-decoupled and cheap, so they stay below. */
