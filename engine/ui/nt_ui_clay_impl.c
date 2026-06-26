@@ -505,15 +505,21 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     }
 }
 
-#ifdef NT_TEST_ACCESS
-/* Counts build_tree's stale-floating-parent degrade (Clay hashmap saturation) so the vlist
- * regression test can prove it exercised the non-crashing path, not just that it didn't trap. */
+/* build_tree's stale-floating-parent degrade (Clay element hashmap saturation): a non-crashing
+ * fallback to identity when a floating root's resolved parent index does not precede it. The counter
+ * is ALWAYS compiled so debug builds can observe the degrade without a crash; the test accessor reads
+ * the same value. Only bumped on the (rare) degrade path, so no per-frame overhead in release. */
 static uint32_t s_bt_stale_floating_parent = 0U;
+static void nt_bt_count_stale_floating_parent(void) {
+    s_bt_stale_floating_parent++;
+#ifdef NT_DEBUG
+    /* Fire-once: a saturated frame can degrade many times — surface the cause once, never per-frame. */
+    nt_log_warn_once("build_tree: floating parent unresolved (Clay element hashmap likely saturated) — degraded to identity");
+#endif
+}
+#ifdef NT_TEST_ACCESS
 uint32_t nt_ui_internal_test_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
 void nt_ui_internal_test_reset_stale_floating_parent_count(void) { s_bt_stale_floating_parent = 0U; }
-#define NT_BT_COUNT_STALE_FLOATING_PARENT() (s_bt_stale_floating_parent++)
-#else
-#define NT_BT_COUNT_STALE_FLOATING_PARENT() ((void)0)
 #endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -581,7 +587,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                     seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
                 } else {
                     seed = identity;
-                    NT_BT_COUNT_STALE_FLOATING_PARENT();
+                    nt_bt_count_stale_floating_parent();
                 }
             }
         }
