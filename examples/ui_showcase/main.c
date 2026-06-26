@@ -1455,10 +1455,6 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
     }
 }
 
-/* Per-row clickable surface id, derived from the (recycled) row id so it recycles WITH the row —
- * hover/press/capture follow the screen slot, exactly like the row's own retained state. */
-#define VLIST_ROW_HIT_SALT 0x711C0000U
-
 /* Virtualized list: two nt_ui_vlist clippers over a 10k-row dataset (a vertical column + a
  * horizontal strip). Each owns ONE scroll / ONE Clay clip; cost ~ the visible window, not 10k.
  * The game loops first..last and keys each row with nt_ui_vlist_item_id; ids RECYCLE by a ring, so
@@ -1494,7 +1490,7 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
                                                                                     .cornerRadius = CLAY_CORNER_RADIUS(8)});
         for (uint32_t i = ry.first; i <= ry.last; ++i) {
             const uint32_t row_id = nt_ui_vlist_item_id(ctx, i);
-            const uint32_t hit_id = nt_ui_derived_id(row_id, VLIST_ROW_HIT_SALT); /* recycles WITH the row */
+            const uint32_t hit_id = nt_ui_child_id(row_id, "row_hit"); /* recycles WITH the row; no magic salt */
             const nt_ui_events_t ev = nt_ui_events(ctx, hit_id, NULL);
             if (ev.clicked) {
                 vlist_sel_toggle(i); /* dispatch by ABSOLUTE index, NEVER by the recycled id */
