@@ -25,6 +25,9 @@ void nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn) {
         }
     }
     NT_ASSERT(s_pre_swap_hook_count < NT_WINDOW_MAX_PRE_SWAP_HOOKS);
+    if (s_pre_swap_hook_count >= NT_WINDOW_MAX_PRE_SWAP_HOOKS) {
+        return; /* OFF-build safety net: the assert is gone, so never write past the fixed array. */
+    }
     s_pre_swap_hooks[s_pre_swap_hook_count++] = fn;
 }
 
