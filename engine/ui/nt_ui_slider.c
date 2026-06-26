@@ -94,13 +94,14 @@ static inline uint32_t slider_view_id(uint32_t id) { return nt_ui_derived_id(id,
 /* Press-scoped drag resolve. Reads the prev-frame track bbox + grab cell, returns the new value
  * fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps; held: thumb
  * follows pointer minus the grab offset. */
-static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, float frac, float min, float max) {
+static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, nt_ui_fill_direction_t fill_dir, float frac, float min,
+                                 float max) {
     /* Axis-branch: vertical reads the Y component + track height/thumb height; BOTTOM_UP inverts. */
     const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
     const int axis = vertical ? 1 : 0;
     const float track_extent = vertical ? style->track_h : style->track_w;
     const float thumb_extent = vertical ? style->thumb_h : style->thumb_w;
-    const bool invert = vertical && (style->fill_direction == NT_UI_FILL_BOTTOM_UP);
+    const bool invert = vertical && (fill_dir == NT_UI_FILL_BOTTOM_UP);
     const float usable = (track_extent - thumb_extent > 0.0F) ? (track_extent - thumb_extent) : 0.0F;
     nt_ui_slider_drag_t *drag = (nt_ui_slider_drag_t *)nt_ui_state(ctx, slider_drag_id(id), (uint32_t)sizeof(nt_ui_slider_drag_t), NT_UI_STATE_TAG('s', 'l', 'd', 'g'));
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id); /* prev-frame track bbox */
@@ -131,7 +132,8 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
  * the OUTER track container (one clickable target). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, const nt_ui_slider_cell_t *cell,
-                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, float fraction, float eased_opacity, const Clay_ElementDeclaration *decl, bool enabled) {
+                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, nt_ui_fill_direction_t fill_dir, float fraction, float eased_opacity,
+                           const Clay_ElementDeclaration *decl, bool enabled) {
     const uint8_t layer = (data != NULL) ? data->layer : 0U;
     void *user = (data != NULL) ? data->user_data : NULL;
 
@@ -177,7 +179,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
         if (thumb_extent > 0.0F && track_extent > thumb_extent) {
             fill_frac = ((thumb_extent * 0.5F) + (fraction * (track_extent - thumb_extent))) / track_extent;
         }
-        nt_ui_fill_emit(ctx, layer, &fill_ref, cell->fill_tint, fill_frac, style->track_w, style->track_h, style->fill_mode, style->fill_direction, 1.0F);
+        nt_ui_fill_emit(ctx, layer, &fill_ref, cell->fill_tint, fill_frac, style->track_w, style->track_h, style->fill_mode, fill_dir, 1.0F);
     }
 
     /* Thumb child: offset along the axis by fraction*(track - thumb), centered on the cross axis.
@@ -188,7 +190,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
         if (vertical) {
             const float usable_h = style->track_h - style->thumb_h;
             const float travel = (usable_h > 0.0F) ? usable_h : 0.0F;
-            const bool invert = (style->fill_direction == NT_UI_FILL_BOTTOM_UP);
+            const bool invert = (fill_dir == NT_UI_FILL_BOTTOM_UP);
             const float pos_frac = invert ? (1.0F - fraction) : fraction;
             tt.offset_y = pos_frac * travel;
             attach = CLAY_ATTACH_POINT_CENTER_TOP;
@@ -272,15 +274,17 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     }
     NT_ASSERT(isfinite(step_frac) && step_frac >= 0.0F && "nt_ui_slider: step_frac must be finite >= 0");
     // #endregion
-    // #region axis guard (D-70-06: orientation = AXIS, fill_direction = anchor within it)
-    /* Coerce BEFORE the assert: NT_ASSERT is ((void)0) in shipping, so the hard coerce (a real if,
-     * never an assert side-effect) must self-heal the caller's style so release never maps/renders
-     * the wrong axis. The mutation is in place — same convention as the in-place ref resolve below. */
+    // #region axis guard (orientation = AXIS, fill_direction = anchor within it)
+    /* On a mismatch use a LOCAL effective direction; NEVER write back into the caller's (possibly
+     * shared/static) style — that would persist across frames and corrupt other widgets sharing it.
+     * NT_ASSERT is only a developer signal (vanishes in NT_ASSERT_MODE=OFF), so the local default is
+     * the real guard that keeps release from mapping/rendering the wrong axis. */
     const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
     const bool fill_is_h = (style->fill_direction == NT_UI_FILL_LTR || style->fill_direction == NT_UI_FILL_RTL);
     const bool axis_mismatch = vertical ? fill_is_h : !fill_is_h;
+    nt_ui_fill_direction_t effective_fill_direction = style->fill_direction;
     if (axis_mismatch) {
-        style->fill_direction = vertical ? NT_UI_FILL_BOTTOM_UP : NT_UI_FILL_LTR;
+        effective_fill_direction = vertical ? NT_UI_FILL_BOTTOM_UP : NT_UI_FILL_LTR;
     }
     NT_ASSERT(!axis_mismatch && "nt_ui_slider: fill_direction axis must match orientation");
     // #endregion
@@ -299,7 +303,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #region drag math (press-ON-thumb grab vs track jump)
     float frac = nt_ui_clampf(in_frac, 0.0F, 1.0F);
     if (enabled && (in.pressed_now || in.pressed)) {
-        frac = slider_resolve_drag(ctx, id, &in, style, frac, min, max);
+        frac = slider_resolve_drag(ctx, id, &in, style, effective_fill_direction, frac, min, max);
     } else {
         /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
         nt_ui_state_clear(ctx, slider_drag_id(id));
@@ -338,7 +342,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     view->track_w = style->track_w;
     view->thumb_w = style->thumb_w;
 
-    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, eased_frac, a->opacity, decl, enabled);
+    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, effective_fill_direction, eased_frac, a->opacity, decl, enabled);
 
     /* Changed when the drag moved the (snapped) fraction off the incoming game value. */
     *changed = enabled && (fabsf(frac - in_frac) > 1e-6F);

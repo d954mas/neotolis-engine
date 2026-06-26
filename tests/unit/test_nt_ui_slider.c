@@ -705,17 +705,20 @@ static void test_vertical_hit_pad_left_right(void) {
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
-/* axis mismatch (VERTICAL + LTR fill) asserts AND hard-coerces fill_direction to the axis
- * default (BOTTOM_UP) in place, so the no-assert/shipping path never maps the wrong axis. */
-static void test_vertical_axis_mismatch_coerce(void) {
+/* axis mismatch (VERTICAL + LTR fill) asserts but does NOT mutate the caller's style: the widget
+ * uses a LOCAL effective direction (vertical default BOTTOM_UP) so the no-assert/shipping path renders
+ * the right axis without corrupting a shared/static style across frames. */
+static void test_vertical_axis_mismatch_no_mutation(void) {
     init_vstyle(NT_UI_FILL_LTR); /* LTR is a HORIZONTAL anchor -> mismatch for VERTICAL */
+    const nt_ui_fill_direction_t before = s_style.fill_direction;
     float value = 0.0F;
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_vtrack_decl, true)); }
     nt_ui_end(s_fx.ctx);
-    /* The coerce ran before the assert longjmp: fill_direction snapped to the vertical default. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_FILL_BOTTOM_UP, s_style.fill_direction);
+    /* The caller's style is untouched: still LTR (the coerce lives in a local, not the struct). */
+    TEST_ASSERT_EQUAL_INT(before, s_style.fill_direction);
+    TEST_ASSERT_EQUAL_INT(NT_UI_FILL_LTR, s_style.fill_direction);
 }
 
 /* track_w == 0 -> assert. */
@@ -800,7 +803,7 @@ int main(void) {
     RUN_TEST(test_vertical_thumb_grab_top_down);
     RUN_TEST(test_vertical_hit_pad_left_right);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_vertical_axis_mismatch_coerce);
+    RUN_TEST(test_vertical_axis_mismatch_no_mutation);
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);
     RUN_TEST(test_assert_min_gt_max);
