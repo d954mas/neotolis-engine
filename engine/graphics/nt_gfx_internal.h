@@ -64,12 +64,13 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 
 /* Framebuffer readback. Writes w*h rgba8 pixels into out_rgba8 in
  * raw GL bottom-left order; the single Y-flip to top-left is done in the
- * shared nt_gfx.c layer (so this stays a raw backend op).
+ * shared nt_gfx.c layer (so this stays a raw backend op). Returns false if the
+ * read failed (GL error / incomplete FB) so the caller never encodes garbage.
  * Backend implementations:
  *   - gl/nt_gfx_gl.c: glPixelStorei(GL_PACK_ALIGNMENT,4) + glReadPixels(GL_RGBA, GL_UNSIGNED_BYTE)
  *   - stub/nt_gfx_stub.c: deterministic synthetic per-row gradient (no GL — CTest)
  */
-void nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
+bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot);

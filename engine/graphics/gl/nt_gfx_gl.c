@@ -676,9 +676,15 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { glViewport(x, y, 
 /* Raw GL readback, bottom-left origin. Y-flip to top-left is done once in
  * the shared layer (nt_gfx_read_pixels). rgba8 rows are 4*w bytes -> already
  * 4-aligned; set GL_PACK_ALIGNMENT=4 explicitly so it never depends on state. */
-void nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
+bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
+    while (glGetError() != GL_NO_ERROR) {
+    }
     glReadPixels(x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
+    /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
+       partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
+    return glGetError() == GL_NO_ERROR;
 }
 
 /* ---- Pipeline bind ---- */

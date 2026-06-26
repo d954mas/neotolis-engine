@@ -299,7 +299,9 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
     if (need > (uint64_t)out_cap) {
         return false;
     }
-    nt_gfx_backend_read_pixels(x, y, w, h, out);
+    if (!nt_gfx_backend_read_pixels(x, y, w, h, out)) {
+        return false; /* GL read error -> capture_failed, not an encode of uninitialized memory. */
+    }
 
     /* Single in-place row swap: GL bottom-left -> top-left. Row stride = w*4. */
     size_t stride = (size_t)(uint32_t)w * 4U;
