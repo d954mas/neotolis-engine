@@ -194,8 +194,24 @@ static void test_state_clear_hole_keeps_chain_reachable(void) {
     TEST_ASSERT_NULL(nt_ui_state_find(s_fx.ctx, id_b));
 }
 
+/* ---- nt_ui_child_id: string-labelled child id (no magic salts) ---- */
+static void test_child_id_stable_and_nonzero(void) {
+    const uint32_t parent = nt_ui_id("row/42");
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_child_id(parent, "btn"), nt_ui_child_id(parent, "btn")); /* deterministic */
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, nt_ui_child_id(parent, "btn"));                        /* never the 0 sentinel */
+}
+
+static void test_child_id_distinct_by_label_and_parent(void) {
+    const uint32_t p1 = nt_ui_id("row/1");
+    const uint32_t p2 = nt_ui_id("row/2");
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_child_id(p1, "btn"), nt_ui_child_id(p1, "icon")); /* label disambiguates */
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_child_id(p1, "btn"), nt_ui_child_id(p2, "btn"));  /* parent scopes */
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_child_id_stable_and_nonzero);
+    RUN_TEST(test_child_id_distinct_by_label_and_parent);
     RUN_TEST(test_state_create_returns_zeroed);
     RUN_TEST(test_state_reacquire_same_pointer);
     RUN_TEST(test_state_find_absent_null);

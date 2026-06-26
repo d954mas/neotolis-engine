@@ -495,6 +495,10 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
 /* Wraps Clay_GetElementId; result is never 0. Asserts s != NULL. */
 uint32_t nt_ui_id(const char *s);
 
+/* Child id from a parent scope + a string label (fmix, never 0) — game code derives per-widget
+ * ids without inventing numeric salts: nt_ui_child_id(row_id, "btn") recycles with row_id. */
+uint32_t nt_ui_child_id(uint32_t parent_id, const char *label);
+
 /* `found == false` if id was not declared the immediately preceding frame. */
 typedef struct {
     float x, y, width, height;
