@@ -818,6 +818,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_scroll
         test_nt_ui_modal
         test_nt_ui_slider
+        test_nt_ui_vlist
         test_ui_input
         test_nt_ui_progress
         test_ui_events
