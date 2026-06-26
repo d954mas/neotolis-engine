@@ -2732,6 +2732,33 @@ Symmetric to `entity.list` reads, the **`entity_write`** group adds **`entity.se
 
 **Own deployment tier.** `entity.set` is its own group `NT_DEVAPI_GROUP_ENTITY_WRITE` (default **OFF**), independent of `obs` — three tiers: no devapi / read-only (obs) / read-write (obs + entity_write). A `FATAL_ERROR` guard requires `NT_INTROSPECT_WRITE_ENABLED` (the component `apply()` hooks); with it OFF every component is read-only, so `entity.set` could only ever return `bad_params` — a false surface.
 
+## 24.10 Frame capture (devapi `capture.*`)
+
+A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it — with **no engine file I/O and no PPM**. Three layers, mirroring the other capability groups:
+
+- **L1 — engine capability (`nt_gfx_read_pixels`).** `nt_gfx_read_pixels(x, y, w, h, out, out_cap)` reads the default framebuffer into a caller buffer: explicit `GL_PACK_ALIGNMENT`, a single in-place Y-flip resolved once in the shared `nt_gfx` layer (the GL backend reads bottom-left; the contract is **top-left origin, straight alpha, `rgba8`**). It is cap-checked (`w*h*4 > out_cap` → false; the product is computed in `uint64` so it cannot overflow) and early-returns false on a lost context. A deterministic stub backend lets CTest exercise the contract (and the flip) with no GL.
+- **L2 — devapi veneer (`NT_DEVAPI_GROUP_CAPTURE`).** Two commands — `capture.frame` and `capture.region` — produce a uniform `{width, height, format:"png", data:<base64>}` payload, identical on native and (later) web. The readback is RGBA8 but the wire is a **24-bit RGB PNG** (the constant alpha is stripped: smaller, faster, lossless). The PNG is encoded by the vendored `fpng` (real PNG, native SIMD + scalar fallback) behind a thin `extern "C"` wrapper, then base64-encoded into the JSON envelope. The group inits its own encoder (`nt_fpng_init`) at `nt_devapi_init` — a host needs no fpng knowledge.
+- **Harness.** A Python pixel-health check decodes the payload (one code path) and asserts decode + dims + not-blank; Pillow/numpy are confined to that decode module, the harness core stays stdlib-only.
+
+**The command group:**
+
+| Command | Params | Result | Kind |
+|---|---|---|---|
+| `capture.frame` | `{scale?}` | `{width, height, format:"png", data:<base64>}` | **DEFERRED DATA** — capture the full framebuffer as a PNG; optional integer `scale ∈ {1,2,4}` box-average downscale |
+| `capture.region` | `{x, y, w, h, scale?}` | `{width, height, format:"png", data:<base64>}` | **DEFERRED DATA** — capture an `(x,y,w,h)` sub-rect (top-left origin), then optional `scale` after the crop |
+
+**Coordinates are top-left origin** on the wire, for both the full frame and the region rect — the L1 Y-flip and the region's `gl_y = fb_h - (y + h)` conversion hide GL's bottom-left from the bot. `scale` divides **after** the crop; the post-scale dimensions are what the payload reports.
+
+**Timing — deferred at the pre-swap seam.** `capture.*` is the first devapi command that **defers AND returns DATA**. The GL read is only valid after the frame is rendered and **before** the buffer swap (the back buffer is GL-undefined post-swap), which is a different point in the host loop than the transport pump (`nt_devapi_update`, which runs GL-free at frame start). So a capture **defers**: the handler validates params, enqueues a producer, and returns nothing; at the next pre-swap seam the producer runs the readback → strip → encode → base64 and fills the slot's payload; the following poll yields it. A drain-race guard withholds a producer-slot whose payload is still pending so the reply is never the content-free `{deferred:true}`.
+
+**The host installs the seam once.** Because the engine is code-first (the game owns the loop), the seam is a building block the host wires, not hidden behavior. A host calls **`nt_devapi_capture_install_seam()`** once at startup: it registers the capture seam as a generic **`nt_window` pre-swap hook** (run inside `nt_window_swap_buffers`, before the platform swap) and marks the host capture-capable. The frame loop then just renders + swaps — there is no per-frame call to forget, and render-off is inherited (no swap ⇒ no seam ⇒ the capture legitimately stalls until rendering resumes). A host that enables the group but never installs the seam (e.g. a headless host) rejects captures synchronously with `{error:"capture_unavailable"}` instead of hanging.
+
+**Failure is a distinguishable envelope.** A producer that runs and fails (lost context, OOM, encode error) yields `{ok:false, error:"capture_failed"}`, never an `ok:true` shape without `data`. Bad bot input (bad `scale`, out-of-bounds / zero-size / degenerate-scale rect) is rejected synchronously as `bad_params` and never asserts.
+
+**Caps (DoS backstops, `-D` overridable).** `NT_DEVAPI_CAPTURE_MAX_PIXELS` (default `4096*4096`) bounds a single capture before any allocation; the producer's `uint32` size math is `_Static_assert`-proven wrap-free under that cap (×8 covers the base64 expansion). `NT_DEVAPI_CAPTURE_MAX_INFLIGHT` (default `4`) bounds concurrent in-flight captures independently of the shared deferred queue, so a client flood cannot make one pre-swap seam encode an unbounded burst or hold an unbounded set of base64 payloads. The Python transport's recv-line cap is sized to cover the engine's worst-case capture line.
+
+**OFF semantics — dev-only, compiled out.** The whole group is gated by `NT_DEVAPI_GROUP_CAPTURE` (default **OFF**, opt-in). When off, `nt_devapi_capture.c` is not compiled, the commands are absent from the registry (`unknown_method`) and discovery, and the vendored fpng encoder is not linked into the binary (zero release delta); as with all of devapi it also vanishes when `NT_DEVAPI_ENABLED` is OFF. `nt_fpng` is built `EXCLUDE_FROM_ALL`, so it compiles only when a capture-enabled target links it.
+
 ---
 
 # 25. Engine/Game Boundary
