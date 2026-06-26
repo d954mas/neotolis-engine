@@ -122,11 +122,9 @@ bool nt_devapi_defer_current_time(double seconds);
    next frame — the managed host gates the seam on render-enabled (see examples/capture_host). */
 bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free);
 
-/* Host-facing pre-swap seam: for each in-use slot whose target frame has arrived AND that carries a
-   producer, run the producer once to fill the slot's payload. Call once per frame after render work,
-   BEFORE swap (D-05 — the GL read is only valid here; the back buffer is undefined post-swap). Slots
-   without a producer (frame.wait/time.step) are untouched. Idempotent per slot (fills only once). */
-void nt_devapi_capture_on_pre_swap(void);
+/* The host-facing pre-swap seam (nt_devapi_capture_on_pre_swap) is a PUBLIC host contract — declared in
+   the public capture header so a host drives captures without reaching into this internal header. */
+#include "devapi/nt_devapi_capture.h"
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */

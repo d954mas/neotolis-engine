@@ -2,7 +2,7 @@
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
-#include "devapi/nt_devapi_internal.h" /* nt_devapi_capture_on_pre_swap — the pre-swap producer seam. */
+#include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_on_pre_swap — the public pre-swap producer seam. */
 #include "devapi/nt_devapi_net.h"
 #include "fpng/nt_fpng.h"
 #include "graphics/nt_gfx.h"
