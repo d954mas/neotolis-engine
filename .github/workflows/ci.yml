@@ -494,7 +494,7 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri xvfb
 
-      # D-10: Pillow + numpy are the capture-path-only decode deps, pinned + installed ONLY here.
+      # Pillow + numpy are the capture-path-only decode deps, pinned + installed ONLY here.
       - name: Install capture-path Python deps (Pillow + numpy)
         run: python3 -m pip install --user -r tools/devapi/requirements-capture.txt
 

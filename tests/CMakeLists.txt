@@ -639,10 +639,10 @@ if(NOT EMSCRIPTEN)
 
         # L2 capture group (capture.frame / capture.region) via submit(): the FIRST deferred
         # data-returning command. Links nt_gfx_stub (the synthetic readback feeds the real
-        # strip+box+fpng+base64 chain when the seam is driven manually — no GL, Pitfall 2) +
+        # strip+box+fpng+base64 chain when the seam is driven manually — no GL) +
         # nt_fpng (the real PNG encoder) + nt_app_stub (g_nt_app the deferred queue reads) +
         # nt_window_stub (g_nt_window the handlers read for fb dims). Consumer-before-provider
-        # GNU-ld order: nt_devapi first, nt_gfx_stub/nt_fpng next, core/log trailing (Pitfall 3).
+        # GNU-ld order: nt_devapi first, nt_gfx_stub/nt_fpng next, core/log trailing.
         # The TU is #if-gated on NT_DEVAPI_GROUP_CAPTURE with an #else stub-main so a group-absent
         # compile links clean (zero release delta).
         if(NT_DEVAPI_GROUP_CAPTURE)
