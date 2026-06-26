@@ -21,6 +21,12 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_CHECKBOX_DEF;
 extern const nt_ui_widget_def_t NT_UI_RADIO_DEF;
 extern const nt_ui_widget_def_t NT_UI_TOGGLE_DEF;
+extern const nt_ui_widget_def_t NT_UI_CHECKBOX_TRI_DEF;
+
+/* Tristate value (game-owned). MIXED is a DISPLAY-only indeterminate state set by
+ * the game (aggregated from children); a click never reaches MIXED -- it resolves
+ * any non-ON value to ON, then toggles ON<->OFF. */
+typedef enum { NT_UI_TRI_OFF = 0, NT_UI_TRI_ON, NT_UI_TRI_MIXED } nt_ui_tristate_t;
 
 /* 2x4 grid index: value(unchecked/checked) x interaction. */
 enum { NT_UI_CB_IDLE = 0, NT_UI_CB_HOVER, NT_UI_CB_PRESSED, NT_UI_CB_DISABLED };
@@ -45,6 +51,7 @@ _Static_assert(sizeof(nt_ui_cb_state_t) == 64, "nt_ui_cb_state_t stable ABI (2x1
 typedef struct {
     nt_ui_cb_state_t unchecked[4]; /* idle/hover/pressed/disabled */
     nt_ui_cb_state_t checked[4];
+    nt_ui_cb_state_t mixed[4];     /* tristate MIXED dash row; inherit-from-idle like the others */
     nt_ui_label_style_t text_base; /* font/size/color/align/wrap -- parts that DON'T vary by state */
     float box_w, box_h;            /* indicator/track FIXED layout px; asserted > 0 */
     float overlay_w, overlay_h;    /* overlay px (set to art aspect) */
@@ -58,7 +65,7 @@ typedef struct {
 /* scale_label occupies one of label_side's former tail padding bytes -> size unchanged.
  * Layers are NOT in the style (mirrors button/label): the indicator layer comes from
  * data->layer, the label layer from the label_layer function arg. */
-_Static_assert(sizeof(nt_ui_checkbox_style_t) == 584, "nt_ui_checkbox_style_t stable ABI");
+_Static_assert(sizeof(nt_ui_checkbox_style_t) == 840, "nt_ui_checkbox_style_t stable ABI (+mixed[4] = +4*64)");
 
 /* All three are LEAF widgets (no begin/end). Returns `changed` = the frame the value
  * flipped (checkbox/toggle: *value = !*value; radio: *selected = my_value).
@@ -88,6 +95,12 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
  * render-only offset DELTA eased by value_t. */
 bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool *value, nt_ui_checkbox_style_t *style,
                   const Clay_ElementDeclaration *decl, bool enabled);
+
+/* Tristate checkbox: OFF / ON / MIXED. MIXED renders the `mixed` dash row but is
+ * NEVER produced by a click -- a click resolves any non-ON value to ON, else
+ * toggles ON->OFF. Same return contract as checkbox (true on the flip frame). */
+bool nt_ui_checkbox_tri(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, nt_ui_tristate_t *value, nt_ui_checkbox_style_t *style,
+                        const Clay_ElementDeclaration *decl, bool enabled);
 
 /* A valid baseline style: every cell scale/opacity = 1, no tint, sensible sizes and
  * speeds. The caller still supplies art (box/check refs) and overrides any field.

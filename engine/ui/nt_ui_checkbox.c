@@ -28,6 +28,11 @@ const nt_ui_widget_def_t NT_UI_TOGGLE_DEF = {
     .pill_color = 0xFF70D0D0U,
     ._reserved = 0U,
 };
+const nt_ui_widget_def_t NT_UI_CHECKBOX_TRI_DEF = {
+    .name = "nt_checkbox_tri",
+    .pill_color = 0xFF70C0E0U,
+    ._reserved = 0U,
+};
 
 /* Below this eased value the overlay is not worth a draw call — skip its emit. */
 #define NT_UI_CB_OVERLAY_EPS 0.01F
@@ -177,12 +182,12 @@ static void cb_emit_text(const cb_emit_args_t *e) {
     }
 }
 
-/* The single shared composition path for all three widgets.
- *   value_is_checked   selects the value row (game owns the bool/int).
+/* The single shared composition path for all widgets.
+ *   row_idx            selects the value row: 0=unchecked / 1=checked / 2=mixed.
  *   is_toggle          drives the thumb slide instead of centered pop.
  *   out_clicked        receives the release-over-widget edge for the wrapper. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, bool value_is_checked, bool is_toggle, const nt_ui_widget_def_t *def,
+static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, int row_idx, bool is_toggle, const nt_ui_widget_def_t *def,
                     nt_ui_checkbox_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *out_clicked) {
     // #region entry asserts
     NT_ASSERT(ctx != NULL && "nt_ui_checkbox: ctx must be non-NULL");
@@ -199,6 +204,9 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     NT_ASSERT((!is_toggle || (style->overlay_w + (2.0F * style->thumb_pad) <= style->box_w)) && "nt_ui_toggle: overlay_w + 2*thumb_pad must fit in box_w (thumb travel >= 0)");
     assert_row_valid(style->unchecked);
     assert_row_valid(style->checked);
+    if (row_idx == 2) {
+        assert_row_valid(style->mixed); /* only tristate uses it; bool widgets leave mixed[] zero */
+    }
     /* Engine owns id/image/backgroundColor/userData; caller's decl must leave these zero. */
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_checkbox: decl->id must be 0 (id is the explicit param)");
@@ -225,8 +233,15 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     *out_clicked = in.clicked;
     // #endregion
     // #region value-row + state pick
-    /* Non-const row so the resolve memoizes into the style-owned cell refs. */
-    nt_ui_cb_state_t *row = value_is_checked ? style->checked : style->unchecked;
+    /* Non-const row so the resolve memoizes into the style-owned cell refs.
+     * Any non-1/non-2 value coerces to unchecked -> row is bounded to the three
+     * known arrays (no over-index even on a corrupt value, T-70-01). */
+    nt_ui_cb_state_t *row = style->unchecked;
+    if (row_idx == 1) {
+        row = style->checked;
+    } else if (row_idx == 2) {
+        row = style->mixed;
+    }
     /* VISUAL pressed only while held AND over (drag off un-presses, re-presses on return); the
      * click/capture semantics (out_clicked = in.clicked) are untouched. */
     int state = NT_UI_CB_IDLE;
@@ -260,7 +275,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
         .rot_z = 0.0F,
         .opacity = cell->opacity,
         .tint_t = 0.0F,
-        .value_t = value_is_checked ? 1.0F : 0.0F,
+        .value_t = (row_idx != 0) ? 1.0F : 0.0F, /* checked AND mixed show the overlay at full opacity */
     };
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, style->value_speed);
     const float eased_value = a->value_t;
@@ -324,7 +339,7 @@ bool nt_ui_checkbox(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
                     const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_checkbox: value must be non-NULL");
     bool clicked = false;
-    cb_core(ctx, data, label_layer, id, label, *value, false, &NT_UI_CHECKBOX_DEF, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, *value ? 1 : 0, false, &NT_UI_CHECKBOX_DEF, style, decl, enabled, &clicked);
     if (clicked) {
         *value = !*value;
         return true;
@@ -339,7 +354,7 @@ bool nt_ui_radio(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
      * no engine-side group state is needed. value row = am I it? */
     const bool value_is_checked = (*selected == my_value);
     bool clicked = false;
-    cb_core(ctx, data, label_layer, id, label, value_is_checked, false, &NT_UI_RADIO_DEF, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, value_is_checked ? 1 : 0, false, &NT_UI_RADIO_DEF, style, decl, enabled, &clicked);
     /* Re-selecting the already-selected option is a no-op (no flicker). */
     if (clicked && *selected != my_value) {
         *selected = my_value;
@@ -354,9 +369,30 @@ bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_
     /* Same value logic as checkbox; is_toggle=true drives the always-visible
      * thumb + render-only offset_x slide DELTA in cb_emit_box. */
     bool clicked = false;
-    cb_core(ctx, data, label_layer, id, label, *value, true, &NT_UI_TOGGLE_DEF, style, decl, enabled, &clicked);
+    cb_core(ctx, data, label_layer, id, label, *value ? 1 : 0, true, &NT_UI_TOGGLE_DEF, style, decl, enabled, &clicked);
     if (clicked) {
         *value = !*value;
+        return true;
+    }
+    return false;
+}
+
+bool nt_ui_checkbox_tri(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, nt_ui_tristate_t *value, nt_ui_checkbox_style_t *style,
+                        const Clay_ElementDeclaration *decl, bool enabled) {
+    NT_ASSERT(value != NULL && "nt_ui_checkbox_tri: value must be non-NULL");
+    /* row_idx: ON->1 (checked), MIXED->2 (dash), anything else->0 (unchecked). */
+    int row_idx = 0;
+    if (*value == NT_UI_TRI_ON) {
+        row_idx = 1;
+    } else if (*value == NT_UI_TRI_MIXED) {
+        row_idx = 2;
+    }
+    bool clicked = false;
+    cb_core(ctx, data, label_layer, id, label, row_idx, false, &NT_UI_CHECKBOX_TRI_DEF, style, decl, enabled, &clicked);
+    if (clicked) {
+        /* Click resolves any non-ON (OFF or MIXED) to ON, else toggles ON->OFF.
+         * NEVER writes MIXED -- MIXED is a game-set display state only (D-70-04). */
+        *value = (*value == NT_UI_TRI_ON) ? NT_UI_TRI_OFF : NT_UI_TRI_ON;
         return true;
     }
     return false;
@@ -370,6 +406,7 @@ nt_ui_checkbox_style_t nt_ui_checkbox_style_defaults(void) {
     for (int i = 0; i < 4; ++i) {
         s.unchecked[i] = cell;
         s.checked[i] = cell;
+        s.mixed[i] = cell;
     }
     s.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
     s.box_w = 32.0F;
