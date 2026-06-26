@@ -65,7 +65,7 @@ static void test_vlist_window_edge_clamp(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, r.last);
 }
 
-/* ---- (c) degenerate inputs (bounds-safety, threat T-70-03, no-assert path) ---- */
+/* ---- (c) degenerate inputs (bounds-safety, no-assert path) ---- */
 static void test_vlist_window_degenerate_safe(void) {
     /* count == 0 -> empty window (first > last); a `for (i<=last)` loop never runs. */
     nt_ui_vlist_range_t r = nt_ui_vlist_test_window(-100.0F, 200.0F, 40.0F, 0U, 0);
