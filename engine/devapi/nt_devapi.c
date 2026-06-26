@@ -42,7 +42,7 @@ static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
 
 /* True once a host has installed the capture seam (nt_devapi_capture_install_seam -> nt_devapi_capture_arm):
    proves the running host drives captures. Reset only on shutdown (NOT on close_client) so a reconnecting
-   client on a capture host stays armed (F2). A host that never installs the seam rejects captures cleanly. */
+   client on a capture host stays armed. A host that never installs the seam rejects captures cleanly. */
 static bool s_capture_seam_armed;
 
 /* Set around the handler call in dispatch_one so nt_devapi_defer_current can signal the
@@ -139,7 +139,7 @@ void nt_devapi_resp_reset(void) {
     free(s_resp_buf);
     s_resp_buf = NULL;
     s_resp_cap = 0U;
-    s_capture_seam_armed = false; /* shutdown disarms; a fresh init is unarmed until the host seams (F2). */
+    s_capture_seam_armed = false; /* shutdown disarms; a fresh init is unarmed until the host installs the seam. */
     nt_devapi_deferred_reset();   /* shutdown path: drop any pending deferred slots. */
 }
 
@@ -505,7 +505,12 @@ static bool slot_ready(const nt_devapi_deferred_slot *slot) {
 }
 
 void nt_devapi_capture_on_pre_swap(void) {
-    NT_ASSERT(nt_devapi_initialized());
+    /* Registered as a window pre-swap hook, so it can fire after nt_devapi_shutdown (a host that swaps
+       once more during teardown, before the process-lifetime hook registry is cleared) — no-op safely
+       instead of trapping on a stale global hook. */
+    if (!nt_devapi_initialized()) {
+        return;
+    }
     /* Fill every ready producer-slot's payload at the GL-valid seam (D-05). The GL read MUST happen
        here, before swap — poll_response runs after the frame, where the back buffer is undefined.
        Idempotent per slot: producer is cleared after one run, so a re-call this frame is a no-op. */

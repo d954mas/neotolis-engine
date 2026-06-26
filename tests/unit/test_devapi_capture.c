@@ -16,7 +16,6 @@
 /* clang-format off */
 #include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
-#include "fpng/nt_fpng.h"
 #include "graphics/nt_gfx.h" /* g_nt_gfx.context_lost — the producer-failure (NULL) trigger. */
 #include "window/nt_window.h"
 #include "unity.h"
@@ -26,7 +25,8 @@
 #define CAP_FB_H 48
 
 void setUp(void) {
-    nt_fpng_init();     /* one-time CPU-feature detect; idempotent across tests. */
+    /* No nt_fpng_init() here: nt_devapi_init -> register_capture inits the encoder. This test proves a
+       host needs no explicit fpng init — installing/registering the capture group is sufficient. */
     g_nt_app.frame = 0; /* deferred targets are g_nt_app.frame + 1 — start at a known frame. */
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;

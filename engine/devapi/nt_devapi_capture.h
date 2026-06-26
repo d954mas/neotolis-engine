@@ -25,7 +25,7 @@ void nt_devapi_capture_arm(void); /* mark the host capture-capable (called by in
    static inline so the nt_window_add_pre_swap_hook reference lands in the HOST's translation unit (which
    links the real nt_window) — the devapi lib itself links only the header-only nt_window_interface, so a
    devapi unit test never needs nt_window. Idempotent; a host that never calls it rejects captures with
-   capture_unavailable instead of hanging (F2). */
+   capture_unavailable instead of hanging. */
 static inline void nt_devapi_capture_install_seam(void) {
     nt_window_add_pre_swap_hook(nt_devapi_capture_on_pre_swap);
     nt_devapi_capture_arm();

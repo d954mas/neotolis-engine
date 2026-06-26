@@ -318,6 +318,9 @@ static const nt_devapi_handler_fn k_capture_handlers[] = {
 _Static_assert(sizeof(k_capture_cmds) / sizeof(k_capture_cmds[0]) == sizeof(k_capture_handlers) / sizeof(k_capture_handlers[0]), "capture: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_capture(void) {
+    /* fpng needs a one-time CPU-feature detect before any encode; do it here so the encoder dependency
+       is the capture group's own concern, not something the game host must know to call. Idempotent. */
+    nt_fpng_init();
     /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: NT_ASSERT compiles
        out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
     int n = (int)(sizeof(k_capture_cmds) / sizeof(k_capture_cmds[0]));

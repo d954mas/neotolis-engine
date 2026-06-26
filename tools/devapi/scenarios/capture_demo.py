@@ -2,12 +2,12 @@
 """DevAPI capture demo — the live-socket UAT for the frame-capture group (CAP-01..04).
 
 Exercises capture.frame / capture.region end-to-end against a REAL running examples/capture_host over
-loopback TCP — the layer only a live socket + a real GL context proves: capture is the FIRST deferred
-command that returns DATA, so the drain-race (Pitfall 4 / Phase-66 D-12; MEMORY
-devapi-blocking-cmds-must-defer) only shows here, never in a unit binary. The host renders a known
-two-tone pattern; this UAT confirms the deferred command resolves AFTER a render with a decodable,
-non-blank PNG (NOT {deferred:true}), region/scale dims are correct, bad params return bad_params over
-the wire, and the pixel-health check (decode + dims + not-blank, D-09) passes.
+loopback TCP — the layer only a live socket + a real GL context proves: capture is a deferred command
+that returns DATA, so the drain-race (the reply must arrive only AFTER a render fills the payload) only
+shows here, never in a unit binary. The host renders a known two-tone pattern; this UAT confirms the
+deferred command resolves AFTER a render with a decodable, non-blank PNG (NOT {deferred:true}),
+region/scale dims are correct, bad params return bad_params over the wire, and the pixel-health check
+(decode + dims + not-blank) passes.
 
 devapi_host inits NO gfx (Pitfall 2), so this scenario launches CAPTURE_HOST (a dedicated gfx-backed
 host). By default it launches its own subprocess on a free port, drives the capture commands, and tears

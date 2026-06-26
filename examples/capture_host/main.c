@@ -4,7 +4,6 @@
 #include "devapi/nt_devapi.h"
 #include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_on_pre_swap — the public pre-swap producer seam. */
 #include "devapi/nt_devapi_net.h"
-#include "fpng/nt_fpng.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
 #include "window/nt_window.h"
@@ -97,7 +96,7 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .depth = true});
-    nt_fpng_init(); /* one-time CPU-feature detect, before any encode (D-02). */
+    /* No nt_fpng_init here: the capture group inits its own encoder dependency at nt_devapi_init. */
 
     /* devapi wiring. The capture group self-registers under NT_DEVAPI_GROUP_CAPTURE inside nt_devapi_init
        (no host register call); the host only wires the pre-swap seam in the frame loop. */
@@ -124,7 +123,7 @@ int main(void) {
 
     /* Install the capture seam ONCE: registers it as a window pre-swap hook (so the frame loop just
        renders + swaps, no per-frame seam call) and marks this host capture-capable. A host that skips
-       this (e.g. devapi_host) rejects captures with capture_unavailable instead of hanging (F2). */
+       this (e.g. devapi_host) rejects captures with capture_unavailable instead of hanging. */
     nt_devapi_capture_install_seam();
 
     nt_app_run(frame);
