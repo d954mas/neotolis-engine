@@ -256,11 +256,15 @@ int main(void) {
         const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
         s_hud_ctx = nt_ui_create_context(s_hud_arena, sizeof s_hud_arena, &ui_desc);
         NT_ASSERT(s_hud_ctx != NULL && "devapi_host: failed to create hud UI context");
-        nt_devapi_ui_register_context("hud", s_hud_ctx);
 
         s_hud_scaled_ctx = nt_ui_create_context(s_hud_scaled_arena, sizeof s_hud_scaled_arena, &ui_desc);
         NT_ASSERT(s_hud_scaled_ctx != NULL && "devapi_host: failed to create scaled hud UI context");
+#ifdef NT_DEVAPI_GROUP_UI
+        /* The ui group's host-facing registrar exists only when GROUP_UI is built; without it the host
+           still renders the hud, it is just not probe-able over devapi ui.*. */
+        nt_devapi_ui_register_context("hud", s_hud_ctx);
         nt_devapi_ui_register_context("hud_scaled", s_hud_scaled_ctx);
+#endif
     }
 
     /* Seed entities so entity.list / entity.set have live data; the comp inits register each

@@ -2,14 +2,16 @@ add_executable(capture_host main.c)
 
 # capture_host owns a REAL nt_gfx context (devapi_host inits none) and calls the pre-swap capture seam
 # (nt_devapi_capture_install_seam, from the PUBLIC devapi/nt_devapi_capture.h). It links ONLY the devapi
-# group libs it wires -- capture + core/discovery/time/input -- so it pulls nt_gfx + nt_fpng and NEVER
-# nt_ui/metrics/entity. That is exactly why it links cleanly in ANY config (no all-groups collision and
-# no EXCLUDE_FROM_ALL): a minimal host links a minimal set of group libs.
+# group libs it uses -- capture + core + discovery -- so it pulls nt_gfx + nt_fpng and NEVER
+# nt_ui/metrics/entity/time/input group libs: a minimal host links a minimal set of group libs, with no
+# all-groups collision and no EXCLUDE_FROM_ALL. The root gate requires CAPTURE+CORE+DISCOVERY so this
+# link never fails on a missing group lib. (nt_input below is the engine input MODULE for ESC handling,
+# not the devapi input command group.)
 # GNU ld is single-pass: each group lib (consumer) precedes its providers; nt_gfx's asset-activator IO
 # chain and core/log trail last.
 target_link_libraries(capture_host PRIVATE
     nt_core nt_app nt_input nt_window nt_log nt_devapi_net
-    nt_devapi_capture nt_devapi_core nt_devapi_discovery nt_devapi_time nt_devapi_input
+    nt_devapi_capture nt_devapi_core nt_devapi_discovery
     nt_gfx nt_fpng
     nt_resource nt_http nt_fs
     nt_platform)

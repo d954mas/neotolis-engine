@@ -161,9 +161,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)
         add_subdirectory(examples/devapi_host)
         # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
-        # It links only the devapi group libs it wires (capture + core/discovery/time/input), never the
-        # nt_ui/obs/entity chains, so it builds cleanly in any config (no all-groups collision).
-        if(NT_DEVAPI_GROUP_CAPTURE)
+        # It links only the devapi group libs it uses (capture + core + discovery), never the
+        # nt_ui/obs/entity chains. Gate on all three so a config that disables any of them skips the host
+        # cleanly instead of link-failing on a missing group lib.
+        if(NT_DEVAPI_GROUP_CAPTURE AND NT_DEVAPI_GROUP_CORE AND NT_DEVAPI_GROUP_DISCOVERY)
             add_subdirectory(examples/capture_host)
         endif()
     endif()
