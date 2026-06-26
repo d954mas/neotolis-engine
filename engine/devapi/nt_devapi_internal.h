@@ -12,6 +12,9 @@
 /* A deferred DATA producer (capture.*) ran and failed (readback / encode / OOM). Distinct from the
    content-free legacy {deferred:true} yield, so a client never sees ok:true without the result shape. */
 #define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
+/* The host advertises capture (the group is compiled in) but never drives the pre-swap seam, so a
+   deferred capture could never resolve — reject synchronously with this instead of hanging the client. */
+#define NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE "capture_unavailable"
 
 /* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success — OOM traps
    (fail-early) instead of silently producing an incomplete response. */
@@ -132,6 +135,13 @@ bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_
    uses it to cap concurrent captures independently of the shared deferred-queue size, bounding the
    per-seam encode burst + held-payload memory a single client flood can trigger. */
 int nt_devapi_deferred_data_inflight(void);
+
+/* True once the host has called the pre-swap seam at least once — i.e. the running host actually drives
+   captures. A host built with the capture group but NO seam call (e.g. devapi_host, which inits no GL)
+   stays false, so the capture handler rejects synchronously (capture_unavailable) instead of deferring a
+   slot that would never resolve. Stays true across render-off windows: a capture then legitimately
+   stalls until render resumes (the armed host IS capable — see the seam contract above). */
+bool nt_devapi_capture_seam_armed(void);
 
 /* The host-facing pre-swap seam (nt_devapi_capture_on_pre_swap) is a PUBLIC host contract — declared in
    the public capture header so a host drives captures without reaching into this internal header. */

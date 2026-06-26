@@ -195,6 +195,14 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
    rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
    top-left sub-rect matching the documented contract. Capture resolves after ~1 render (D-05). */
 static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
+    if (!nt_devapi_capture_seam_armed()) {
+        /* The host advertises capture but never drives the pre-swap seam (e.g. devapi_host, which inits
+           no GL) — a deferred slot would never resolve, hanging the client. Reject synchronously with a
+           distinct code instead. A capture host arms the seam at startup, so this never trips there. */
+        err->code = NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE;
+        err->message = "capture not available on this host (it does not drive the pre-swap capture seam)";
+        return false;
+    }
     if (nt_devapi_deferred_data_inflight() >= NT_DEVAPI_CAPTURE_MAX_INFLIGHT) {
         set_bad_params(err, "capture: too many captures in flight — drain pending results before requesting more");
         return false;

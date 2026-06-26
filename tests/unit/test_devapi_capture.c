@@ -31,6 +31,7 @@ void setUp(void) {
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_capture_on_pre_swap(); /* arm the capture seam (F2): stand in for a host that drives it. */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -226,6 +227,24 @@ static void test_capture_pixel_cap_bad_params(void) {
     /* setUp() restores CAP_FB_W/H before the next test. */
 }
 
+/* ---- Test 11: a host that never drives the seam -> capture rejected synchronously, never hangs ----
+   Re-init WITHOUT arming (a host like devapi_host that registers capture but inits no GL / no seam):
+   capture.frame must return {ok:false,error:capture_unavailable}, not defer a slot that never resolves. */
+static void test_capture_unarmed_host_unavailable(void) {
+    nt_devapi_shutdown();                       /* disarms the seam (resp_reset). */
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* unarmed: no seam call follows. */
+    const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\"}");
+    TEST_ASSERT_NOT_NULL(resp); /* synchronous reject, not a deferred NULL. */
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *code = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "error"), "code");
+    TEST_ASSERT_TRUE(cJSON_IsString(code));
+    TEST_ASSERT_EQUAL_STRING("capture_unavailable", code->valuestring);
+    cJSON_Delete(root);
+    /* tearDown shuts down; the next setUp re-inits + re-arms. */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_capture_frame_bad_scale_bad_params);
@@ -239,6 +258,7 @@ int main(void) {
     RUN_TEST(test_capture_producer_failure_yields_error);
     RUN_TEST(test_capture_inflight_cap_rejects_flood);
     RUN_TEST(test_capture_pixel_cap_bad_params);
+    RUN_TEST(test_capture_unarmed_host_unavailable);
     return UNITY_END();
 }
 
