@@ -54,12 +54,17 @@ static void init_style(void) {
     s_style = (nt_ui_checkbox_style_t){0};
     const nt_atlas_region_ref_t box = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     const nt_atlas_region_ref_t check = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    /* Mixed dash uses a DISTINCT region (packed sub-region) so the render-row test can
+     * tell the MIXED overlay apart from the checked overlay by region_index. */
+    const nt_atlas_region_ref_t dash = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
     for (int i = 0; i < 4; ++i) {
         s_style.unchecked[i] = (nt_ui_cb_state_t){.box = box, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
         s_style.checked[i] = (nt_ui_cb_state_t){.box = box, .check = check, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
+        s_style.mixed[i] = (nt_ui_cb_state_t){.box = box, .check = dash, .box_tint = 0xFFFFFFFFU, .check_tint = 0xFFFFFFFFU, .scale = 1.0F, .opacity = 1.0F};
     }
     s_style.unchecked[NT_UI_CB_DISABLED].opacity = 0.5F; /* disabled cell dims */
     s_style.checked[NT_UI_CB_DISABLED].opacity = 0.5F;
+    s_style.mixed[NT_UI_CB_DISABLED].opacity = 0.5F;
     s_style.text_base = s_label_style;
     s_style.box_w = 24.0F;
     s_style.box_h = 24.0F;
@@ -360,6 +365,119 @@ static void test_style_defaults_valid_baseline(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, count_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE));
 }
 
+/* ====================================================================== */
+/* Tristate (nt_ui_checkbox_tri) cases.                                     */
+/* ====================================================================== */
+
+/* One tristate frame at the pinned bbox; same driver shape as cb_frame. */
+static bool tri_frame(const nt_pointer_t *p, nt_ui_tristate_t *value, bool enabled) {
+    bool changed = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = CB_X, .y = CB_Y}}}) {
+        changed = nt_ui_checkbox_tri(s_fx.ctx, NULL, 0, nt_ui_id("tri"), "Enable", value, &s_style, &s_row_decl, enabled);
+    }
+    nt_ui_end(s_fx.ctx);
+    return changed;
+}
+
+/* Warm-up frame so Clay caches the row bbox for the next frame's hit-test. */
+static void tri_warmup(nt_ui_tristate_t *value) {
+    nt_pointer_t f = make_pointer(CB_CX, CB_CY, false, false, false);
+    (void)tri_frame(&f, value, true);
+}
+
+/* One press->release click over the row; returns changed on the release frame. */
+static bool tri_click(nt_ui_tristate_t *value) {
+    nt_pointer_t pd = make_pointer(CB_CX, CB_CY, true, true, false);
+    (void)tri_frame(&pd, value, true);
+    nt_pointer_t pu = make_pointer(CB_CX, CB_CY, false, false, true);
+    return tri_frame(&pu, value, true);
+}
+
+/* ---- Test: OFF -> click -> ON, returns changed. ---- */
+static void test_tri_off_click_on(void) {
+    nt_ui_tristate_t v = NT_UI_TRI_OFF;
+    tri_warmup(&v);
+    TEST_ASSERT_TRUE(tri_click(&v));
+    TEST_ASSERT_EQUAL_INT32((int32_t)NT_UI_TRI_ON, (int32_t)v);
+}
+
+/* ---- Test: ON -> click -> OFF, returns changed. ---- */
+static void test_tri_on_click_off(void) {
+    nt_ui_tristate_t v = NT_UI_TRI_ON;
+    tri_warmup(&v);
+    TEST_ASSERT_TRUE(tri_click(&v));
+    TEST_ASSERT_EQUAL_INT32((int32_t)NT_UI_TRI_OFF, (int32_t)v);
+}
+
+/* ---- Test: MIXED -> click -> ON (resolve-to-ON, NOT toggle-to-OFF). ---- */
+static void test_tri_mixed_click_on(void) {
+    nt_ui_tristate_t v = NT_UI_TRI_MIXED;
+    tri_warmup(&v);
+    TEST_ASSERT_TRUE(tri_click(&v));
+    TEST_ASSERT_EQUAL_INT32((int32_t)NT_UI_TRI_ON, (int32_t)v);
+}
+
+/* ---- Test: a click NEVER produces MIXED -- the value only cycles OFF<->ON. ---- */
+static void test_tri_never_mixed_via_click(void) {
+    nt_ui_tristate_t v = NT_UI_TRI_OFF;
+    tri_warmup(&v);
+    nt_ui_tristate_t expect = NT_UI_TRI_ON; /* first click resolves OFF -> ON */
+    for (int i = 0; i < 6; ++i) {
+        TEST_ASSERT_TRUE(tri_click(&v));
+        TEST_ASSERT_TRUE(v != NT_UI_TRI_MIXED);
+        TEST_ASSERT_EQUAL_INT32((int32_t)expect, (int32_t)v);
+        expect = (expect == NT_UI_TRI_ON) ? NT_UI_TRI_OFF : NT_UI_TRI_ON;
+    }
+}
+
+/* Render one no-interaction frame at value `v`; return the SECOND IMAGE command's
+ * region_index (the overlay), or UINT32_MAX when no overlay is emitted. */
+static uint32_t tri_overlay_region(nt_ui_tristate_t v) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox_tri(s_fx.ctx, NULL, 0, nt_ui_id("tri_r"), NULL, &v, &s_style, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+    int seen = 0;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            continue;
+        }
+        ++seen;
+        if (seen == 2) { /* box is first, overlay second */
+            const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+            return p->region_index;
+        }
+    }
+    return UINT32_MAX;
+}
+
+/* ---- Test: MIXED renders the dash overlay (distinct region from checked); OFF
+ *      renders NO overlay. The render-row selection is correct. ---- */
+static void test_tri_render_row_distinct(void) {
+    const uint32_t mixed_r = tri_overlay_region(NT_UI_TRI_MIXED);
+    const uint32_t checked_r = tri_overlay_region(NT_UI_TRI_ON);
+    const uint32_t off_r = tri_overlay_region(NT_UI_TRI_OFF);
+
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.packed_region_idx, mixed_r);  /* dash row art */
+    TEST_ASSERT_EQUAL_UINT32(s_fx.atlas.white_region_idx, checked_r); /* checkmark art */
+    TEST_ASSERT_TRUE(mixed_r != checked_r);                           /* visually distinct */
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, off_r);                      /* OFF: box only, no overlay */
+}
+
+/* ---- Test: bool nt_ui_checkbox still flips correctly through the widened cb_core. ---- */
+static void test_tri_bool_regression(void) {
+    bool value = false;
+    nt_pointer_t f1 = make_pointer(CB_CX, CB_CY, false, false, false);
+    TEST_ASSERT_FALSE(cb_frame(&f1, &value, true));
+    nt_pointer_t f2 = make_pointer(CB_CX, CB_CY, true, true, false);
+    TEST_ASSERT_FALSE(cb_frame(&f2, &value, true));
+    nt_pointer_t f3 = make_pointer(CB_CX, CB_CY, false, false, true);
+    TEST_ASSERT_TRUE(cb_frame(&f3, &value, true));
+    TEST_ASSERT_TRUE(value);
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -500,6 +618,12 @@ int main(void) {
     RUN_TEST(test_label_side_order);
     RUN_TEST(test_text_color_override);
     RUN_TEST(test_style_defaults_valid_baseline);
+    RUN_TEST(test_tri_off_click_on);
+    RUN_TEST(test_tri_on_click_off);
+    RUN_TEST(test_tri_mixed_click_on);
+    RUN_TEST(test_tri_never_mixed_via_click);
+    RUN_TEST(test_tri_render_row_distinct);
+    RUN_TEST(test_tri_bool_regression);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_data_flags_transform);
     RUN_TEST(test_assert_box_w_zero);
