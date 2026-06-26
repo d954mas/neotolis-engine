@@ -84,7 +84,7 @@ static void strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t f
 }
 
 /* Build the {width,height,format:"png",data:<base64>} payload from the encoded PNG. Owns nothing
-   on failure (returns NULL -> slot yields the legacy {deferred:true}). */
+   on failure (returns NULL -> the DATA slot yields the distinguishable capture_failed error). */
 static cJSON *build_payload(const uint8_t *png, uint32_t png_len, uint32_t out_w, uint32_t out_h) {
     uint32_t b64_need = ((png_len + 2U) / 3U) * 4U;
     char *b64 = (char *)malloc((size_t)b64_need + 1U); /* +1 for the NUL the JSON string needs. */

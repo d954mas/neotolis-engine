@@ -1,4 +1,4 @@
-/* CAP-01: nt_gfx_read_pixels contract — cap-reject / top-left orientation /
+/* nt_gfx_read_pixels contract — cap-reject / top-left orientation /
  * channel layout / bad-size reject. Links nt_gfx_stub (deterministic synthetic
  * gradient, no GL context — the only L1 readback layer CTest can prove headless). */
 

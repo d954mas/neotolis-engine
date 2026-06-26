@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermetic self-test for pixel_health (CAP-04) — no GL, no socket, no host.
+"""Hermetic self-test for pixel_health — no GL, no socket, no host.
 
 pixel_health is the harness's sole guard that a bad capture cannot slip through, but it otherwise runs
 only inside the GL-requiring live UAT (capture_demo.py / the capture-smoke job). This builds synthetic

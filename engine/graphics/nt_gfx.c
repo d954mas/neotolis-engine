@@ -283,14 +283,14 @@ void nt_gfx_end_frame(void) {
 
 uint32_t nt_gfx_get_frame_draw_calls(void) { return g_nt_gfx.frame_stats.draw_calls; }
 
-/* CAP-01: cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
+/* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
  * so bad size returns false (bot-param validation is the L2 concern). */
 bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
     if (w <= 0 || h <= 0) {
         return false;
     }
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
-       early-returns on this. Producer treats false as failure -> NULL -> {deferred:true}. */
+       early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
     if (g_nt_gfx.context_lost) {
         return false;
     }

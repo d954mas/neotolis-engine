@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DevAPI capture demo — the live-socket UAT for the frame-capture group (CAP-01..04).
+"""DevAPI capture demo — the live-socket UAT for the frame-capture group.
 
 Exercises capture.frame / capture.region end-to-end against a REAL running examples/capture_host over
 loopback TCP — the layer only a live socket + a real GL context proves: capture is a deferred command

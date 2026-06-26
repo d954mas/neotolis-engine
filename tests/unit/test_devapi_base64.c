@@ -1,4 +1,4 @@
-/* CAP-02 base64 util: known-vector round-trip incl. 0/1/2-byte padding edges +
+/* base64 util: known-vector round-trip incl. 0/1/2-byte padding edges +
  * cap-reject + empty input. Pure — nt_devapi_base64.c is compiled directly into
  * this target (no devapi core, no NT_DEVAPI_ENABLED gate). RFC 4648 vectors. */
 

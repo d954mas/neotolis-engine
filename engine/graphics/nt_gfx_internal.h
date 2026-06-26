@@ -62,7 +62,7 @@ void nt_gfx_backend_set_scissor(int x, int y, int w, int h);
 void nt_gfx_backend_set_scissor_enabled(bool enabled);
 void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 
-/* Framebuffer readback (CAP-01). Writes w*h rgba8 pixels into out_rgba8 in
+/* Framebuffer readback. Writes w*h rgba8 pixels into out_rgba8 in
  * raw GL bottom-left order; the single Y-flip to top-left is done in the
  * shared nt_gfx.c layer (so this stays a raw backend op).
  * Backend implementations:

@@ -1,4 +1,4 @@
-"""Pixel-health checks for captured frames (CAP-04).
+"""Pixel-health checks for captured frames.
 
 The ONE decode code path for capture payloads + a "something rendered" smoke: decode the base64 PNG,
 assert the decoded dimensions match what the command reported, and assert the frame is NOT a single

@@ -78,7 +78,7 @@ void nt_devapi_resp_reset(void);
 
 /* A pre-swap payload producer: invoked at the GL-valid seam (nt_devapi_capture_on_pre_swap) to
    build the slot's owned result object. Returns an owned cJSON* (the {width,height,format,data}
-   capture payload) or NULL on producer failure (slot then yields the legacy {deferred:true}).
+   capture payload) or NULL on producer failure (a DATA slot then yields the distinguishable capture_failed error).
    `ctx` is the producer-owned param block stored with the slot; the core never inspects it. */
 typedef cJSON *(*nt_devapi_payload_producer_fn)(void *ctx);
 

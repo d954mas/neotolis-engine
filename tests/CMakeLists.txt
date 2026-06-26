@@ -234,9 +234,9 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
-    # --- Graphics readback tests (CAP-01 nt_gfx_read_pixels) ---
+    # --- Graphics readback tests (nt_gfx_read_pixels) ---
     # nt_gfx_stub bundles the shared nt_gfx.c (nt_gfx_read_pixels orchestration)
-    # with the synthetic readback backend, so it alone proves CAP-01 headless.
+    # with the synthetic readback backend, so it alone proves the readback contract headless.
     add_executable(test_gfx_read_pixels unit/test_gfx_read_pixels.c)
     target_link_libraries(test_gfx_read_pixels PRIVATE nt_gfx_stub nt_log_stub unity)
     nt_set_warning_flags(test_gfx_read_pixels)
@@ -246,7 +246,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx_read_pixels COMMAND test_gfx_read_pixels)
 
-    # --- DevAPI base64 util (CAP-02) ---
+    # --- DevAPI base64 util ---
     # Pure encoder: compile nt_devapi_base64.c directly + link only unity (no
     # devapi core, no NT_DEVAPI_ENABLED gate). NT_ENGINE_ROOT resolves the
     # "devapi/nt_devapi_base64.h" include without pulling an engine lib.
