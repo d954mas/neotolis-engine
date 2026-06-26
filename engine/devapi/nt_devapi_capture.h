@@ -2,6 +2,13 @@
 
 #include "window/nt_window.h" /* nt_window_add_pre_swap_hook, for the inline install helper below. */
 
+/* Cap on concurrent in-flight captures, independent of the shared deferred queue. Bounds the per-seam
+   encode burst + held base64 payloads a flooding client can trigger (a full 4096x4096 capture is tens of
+   MiB each); raise with -D for a host that needs more pipelining. */
+#ifndef NT_DEVAPI_CAPTURE_MAX_INFLIGHT
+#define NT_DEVAPI_CAPTURE_MAX_INFLIGHT 4
+#endif
+
 /* Public host API for the devapi capture group (NT_DEVAPI_GROUP_CAPTURE).
  *
  * A host that enables the capture group calls nt_devapi_capture_install_seam() ONCE at startup (after

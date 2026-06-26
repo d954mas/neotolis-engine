@@ -209,11 +209,12 @@ static void test_capture_inflight_cap_rejects_flood(void) {
         }
         deferred++;
     }
-    TEST_ASSERT_TRUE(deferred >= 1);  /* captures are accepted... */
-    TEST_ASSERT_NOT_NULL(resp);       /* ...then the flood is rejected... */
-    TEST_ASSERT_TRUE(deferred <= 64); /* ...well before the 128-slot deferred queue fills (the in-flight cap tripped). */
-    assert_bad_params(resp);          /* clean bad_params, never an assert/crash. */
-    nt_devapi_deferred_reset();       /* clear pending slots so following tests start clean. */
+    TEST_ASSERT_NOT_NULL(resp); /* the flood is rejected... */
+    /* ...at EXACTLY the documented cap: MAX_INFLIGHT captures accepted (deferred), then the next is rejected
+       (well before the 128-slot deferred queue fills). An exact bound catches a silent cap regression. */
+    TEST_ASSERT_EQUAL_INT(NT_DEVAPI_CAPTURE_MAX_INFLIGHT, deferred);
+    assert_bad_params(resp);    /* clean bad_params, never an assert/crash. */
+    nt_devapi_deferred_reset(); /* clear pending slots so following tests start clean. */
 }
 
 /* ---- Test 10: pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously ----
@@ -247,6 +248,54 @@ static void test_capture_unarmed_host_unavailable(void) {
     /* tearDown shuts down; the next setUp re-inits + re-arms. */
 }
 
+/* ---- Test 12: a READY producer slot whose seam has NOT run is WITHHELD (poll NULL), not capture_failed ----
+   The anti-drain-race guard: poll must not serialize a frame-ready capture whose pre-swap producer has not
+   yet filled the payload (that would emit capture_failed and lose the image). Drives the host ordering
+   where a poll lands between the frame-advance and the seam. No GL — the seam-vs-poll ordering is the SUT. */
+static void test_capture_ready_before_seam_is_withheld(void) {
+    TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}")); /* defers. */
+    g_nt_app.frame++;                                                                      /* reach the slot's 1-frame target: the slot is now READY, but the seam has NOT run. */
+    /* Poll WITHOUT driving the seam: ready + producer-bearing + payload==NULL -> withheld, NOT capture_failed. */
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+    /* Now drive the seam: the producer fills the payload, and the next poll yields the real PNG. */
+    nt_devapi_capture_on_pre_swap();
+    const char *resp = nt_devapi_poll_response();
+    TEST_ASSERT_NOT_NULL(resp);
+    cJSON *root = cJSON_Parse(resp);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")));
+    cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+    TEST_ASSERT_EQUAL_STRING("png", cJSON_GetObjectItemCaseSensitive(result, "format")->valuestring);
+    TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItemCaseSensitive(root, "request_id")->valueint);
+    cJSON_Delete(root);
+    TEST_ASSERT_NULL(nt_devapi_poll_response());
+}
+
+/* ---- Test 13: box-average downscale produces the EXACT integer mean ----
+   Hermetic value check on the averager: the dims-only scale tests can't catch a wrong divisor (/factor vs
+   /area) or wrong in-box source pixels. A 2x2 -> 1x1 box has a hand-computable per-channel mean. */
+static void test_capture_box_average_exact_mean(void) {
+    /* 2x2 rgba8 source (row-major); the alpha is dropped by the strip. */
+    const uint8_t src[2 * 2 * 4] = {
+        10, 20, 30, 255, 20, 40, 60,  255, /* row 0 */
+        30, 60, 90, 255, 40, 80, 120, 255, /* row 1 */
+    };
+    uint8_t dst[3] = {0, 0, 0};
+    nt_devapi_capture_strip_and_box(src, 2, 2, 2, dst);
+    /* mean over the 4-texel box: R=(10+20+30+40)/4=25, G=(20+40+60+80)/4=50, B=(30+60+90+120)/4=75. */
+    TEST_ASSERT_EQUAL_UINT8(25, dst[0]);
+    TEST_ASSERT_EQUAL_UINT8(50, dst[1]);
+    TEST_ASSERT_EQUAL_UINT8(75, dst[2]);
+
+    /* factor==1 is a plain alpha-strip (RGB passthrough, alpha dropped). */
+    const uint8_t one[4] = {11, 22, 33, 99};
+    uint8_t out1[3] = {0, 0, 0};
+    nt_devapi_capture_strip_and_box(one, 1, 1, 1, out1);
+    TEST_ASSERT_EQUAL_UINT8(11, out1[0]);
+    TEST_ASSERT_EQUAL_UINT8(22, out1[1]);
+    TEST_ASSERT_EQUAL_UINT8(33, out1[2]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_capture_frame_bad_scale_bad_params);
@@ -261,6 +310,8 @@ int main(void) {
     RUN_TEST(test_capture_inflight_cap_rejects_flood);
     RUN_TEST(test_capture_pixel_cap_bad_params);
     RUN_TEST(test_capture_unarmed_host_unavailable);
+    RUN_TEST(test_capture_ready_before_seam_is_withheld);
+    RUN_TEST(test_capture_box_average_exact_mean);
     return UNITY_END();
 }
 

@@ -143,6 +143,12 @@ int nt_devapi_deferred_data_inflight(void);
    stalls until render resumes). nt_devapi_capture_arm itself is declared in the public capture header. */
 bool nt_devapi_capture_seam_armed(void);
 
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+/* Fused alpha-strip + integer box-average (rgba8 src -> RGB dst; dst = w/factor x h/factor, factor==1 is a
+   plain strip). Internal to the capture group; non-static so the capture unit test can value-check the mean. */
+void nt_devapi_capture_strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst);
+#endif
+
 /* The host-facing pre-swap seam (nt_devapi_capture_on_pre_swap) is a PUBLIC host contract — declared in
    the public capture header so a host drives captures without reaching into this internal header. */
 #include "devapi/nt_devapi_capture.h"

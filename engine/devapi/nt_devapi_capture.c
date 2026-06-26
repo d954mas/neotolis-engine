@@ -30,14 +30,9 @@
    cap — the uint32 size math is then provably safe end-to-end. */
 _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: the base64 size expansion (~w*h*8) would overflow the uint32 producer size math");
 
-/* Cap concurrent in-flight captures independently of the shared deferred queue (NT_DEVAPI_MAX_DEFERRED).
-   Without it a single client flood could queue up to the full queue of captures that the pre-swap seam
-   then encodes synchronously in one frame (render-thread stall) and holds as that many base64 payloads
-   (memory spike). 4 keeps the worst-case held memory small (a full 4096x4096 capture is tens of MiB
-   each) while still allowing a little pipelining; raise it with -D for a host that needs more. */
-#ifndef NT_DEVAPI_CAPTURE_MAX_INFLIGHT
-#define NT_DEVAPI_CAPTURE_MAX_INFLIGHT 4
-#endif
+/* NT_DEVAPI_CAPTURE_MAX_INFLIGHT (default 4) is defined in the public capture header so a host can -D it
+   and the unit test can assert the exact cap. It bounds the per-seam encode burst + held base64 payloads
+   a flooding client can trigger, independent of the shared deferred queue (NT_DEVAPI_MAX_DEFERRED). */
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
@@ -56,7 +51,7 @@ typedef struct capture_ctx {
 // #region seam producer
 /* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.
    factor==1 is a plain strip (1x1 box). Integer-only, no heap. */
-static void strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst) {
+void nt_devapi_capture_strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst) {
     uint32_t ow = w / factor;
     uint32_t oh = h / factor;
     uint32_t area = factor * factor;
@@ -138,7 +133,7 @@ static cJSON *capture_produce(void *vctx) {
         free(rgba);
         return NULL;
     }
-    strip_and_box(rgba, c->w, c->h, c->factor, rgb);
+    nt_devapi_capture_strip_and_box(rgba, c->w, c->h, c->factor, rgb);
     free(rgba);
 
     /* PNG is bounded by the raw RGB size + a small header overhead in the worst (uncompressible) case;
