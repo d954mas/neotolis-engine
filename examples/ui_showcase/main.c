@@ -1473,8 +1473,8 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
     vstyle.overscan = 3;                       /* a few rows each side hide recycle pop on a fling */
 
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 12}}) {
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Virtualized list -- 10,000 rows, windowed to the viewport (cost ~ the visible count, not 10k).", g_current->body);
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a row to (de)select; selection is keyed by ABSOLUTE index, so it persists across scroll while the row ids recycle.", g_current->caption);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "10,000 rows, windowed to the viewport -- cost ~ visible count, not 10k.", g_current->body);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a row to select; selection keys on the absolute index, so it survives scroll while ids recycle.", g_current->caption);
 
         /* Total selected across the WHOLE dataset (game-owned, absolute) — proves persistence beyond
          * the visible window. Popcount over the bitset is ~313 words, trivial. */
@@ -1485,7 +1485,7 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
 
         /* Vertical 10k-row column of selectable rows. */
         const nt_ui_vlist_range_t ry = nt_ui_vlist_begin(ctx, NULL, s_id_vlist_y, (uint32_t)VLIST_COUNT, row_h, NT_UI_AXIS_Y, &vstyle,
-                                                         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIXED(320)}, .padding = CLAY_PADDING_ALL(6)},
+                                                         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIXED(240)}, .padding = CLAY_PADDING_ALL(6)},
                                                                                     .backgroundColor = g_current->bg,
                                                                                     .cornerRadius = CLAY_CORNER_RADIUS(8)});
         for (uint32_t i = ry.first; i <= ry.last; ++i) {
