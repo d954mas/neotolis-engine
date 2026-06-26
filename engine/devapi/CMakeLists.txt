@@ -113,7 +113,8 @@ endif()
 # Capture group (capture.frame / capture.region): the first DEFERRED data-returning commands. The seam
 # producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
 # base64 (already in the always-compiled base). GNU-ld single-pass: nt_devapi (consumer) precedes the
-# nt_gfx/nt_fpng provider libs on the exe link line (Pitfall 3); core/log trail last — see tests.
+# nt_gfx/nt_fpng provider libs on the exe link line (GNU ld single-pass: consumer before provider);
+# core/log trail last — see tests.
 if(NT_DEVAPI_GROUP_CAPTURE)
     target_sources(nt_devapi PRIVATE nt_devapi_capture.c)
     target_compile_definitions(nt_devapi PRIVATE NT_DEVAPI_GROUP_CAPTURE=1)

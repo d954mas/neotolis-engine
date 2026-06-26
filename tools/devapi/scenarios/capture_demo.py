@@ -9,7 +9,7 @@ deferred command resolves AFTER a render with a decodable, non-blank PNG (NOT {d
 region/scale dims are correct, bad params return bad_params over the wire, and the pixel-health check
 (decode + dims + not-blank) passes.
 
-devapi_host inits NO gfx (Pitfall 2), so this scenario launches CAPTURE_HOST (a dedicated gfx-backed
+devapi_host inits NO gfx, so this scenario launches CAPTURE_HOST (a dedicated gfx-backed
 host). By default it launches its own subprocess on a free port, drives the capture commands, and tears
 it down. Point it at an already-running host with --port N (or env NT_DEVAPI_PORT) + --no-launch.
 
@@ -19,7 +19,7 @@ Returns exit 0 if every assertion passes, exit 1 on any failure (connect / timeo
 protocol), exit 2 on a usage / launch error.
 
 Harness-core stays stdlib-only (socket + json + subprocess); Pillow + numpy are imported LAZILY inside
-the capture branch via tools/devapi/pixel_health.py (D-10) — a non-capture run never pulls them.
+the capture branch via tools/devapi/pixel_health.py — a non-capture run never pulls them.
 """
 import os
 import subprocess
@@ -110,9 +110,9 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
 def run(client: DevApiClient, save_dir=None) -> None:
     """Drive every capture surface; raise AssertionError on any contract violation.
 
-    pixel_health (Pillow + numpy) is imported HERE, lazily — the harness core never pulls it (D-10).
+    pixel_health (Pillow + numpy) is imported HERE, lazily — the harness core never pulls it.
     """
-    from tools.devapi import pixel_health  # capture-scoped import (D-10): lazy, inside the capture branch.
+    from tools.devapi import pixel_health  # capture-scoped import: lazy, inside the capture branch.
 
     # Read the live framebuffer dims so expected sizes are derived, never pinned.
     view = client.result("view")
@@ -194,7 +194,7 @@ def run(client: DevApiClient, save_dir=None) -> None:
     print("PASS[4/5] bad params (scale=3, region w>fb_w, region h>fb_h, region w=0) -> bad_params over the wire.")
 
     # 5. Pixel-health summary: the full-frame image already passed decode + dims + not-blank above.
-    print("PASS[5/5] pixel-health: decode + dims + not-blank held on every captured frame (D-09).")
+    print("PASS[5/5] pixel-health: decode + dims + not-blank held on every captured frame.")
 
     print("PASS: capture.* end-to-end over the socket — drain-race + region + scale + bad_params + pixel-health all machine-asserted.")
 

@@ -31,7 +31,7 @@ void setUp(void) {
     g_nt_window.fb_width = CAP_FB_W;
     g_nt_window.fb_height = CAP_FB_H;
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
-    nt_devapi_capture_arm(); /* mark capture-capable (F2): the test drives the seam directly, no window hook. */
+    nt_devapi_capture_arm(); /* mark capture-capable: the test drives the seam directly, no window hook. */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }
@@ -63,7 +63,7 @@ static cJSON *capture_yield(const char *request) {
 
 static cJSON *result_of(cJSON *root) { return cJSON_GetObjectItemCaseSensitive(root, "result"); }
 
-/* ---- Test 1: bad scale -> bad_params (T-69-05-PARAM / V5) ---- */
+/* ---- Test 1: bad scale -> bad_params ---- */
 
 static void test_capture_frame_bad_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":3}}"));
@@ -71,7 +71,7 @@ static void test_capture_frame_bad_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":\"half\"}}"));
 }
 
-/* ---- Test 2: bad region -> bad_params (T-69-05-REGION / V5) ---- */
+/* ---- Test 2: bad region -> bad_params ---- */
 
 static void test_capture_region_out_of_bounds_bad_params(void) {
     /* x + w > fb_width. */
@@ -157,7 +157,7 @@ static void test_capture_region_scale_halves_dims(void) {
     cJSON_Delete(root);
 }
 
-/* ---- Test 7: degenerate scale>rect -> SYNCHRONOUS bad_params (post-#9, never {deferred:true}) ---- */
+/* ---- Test 7: degenerate scale>rect -> SYNCHRONOUS bad_params (never {deferred:true}) ---- */
 
 static void test_capture_region_degenerate_scale_bad_params(void) {
     /* w/scale==0 (3/4==0): the handler rejects synchronously, no defer, no image. */
@@ -215,7 +215,7 @@ static void test_capture_inflight_cap_rejects_flood(void) {
     nt_devapi_deferred_reset();       /* clear pending slots so following tests start clean. */
 }
 
-/* ---- Test 10: pixel cap (DoS backstop, V11) rejects an oversized framebuffer/rect synchronously ----
+/* ---- Test 10: pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously ----
    A framebuffer/rect above NT_DEVAPI_CAPTURE_MAX_PIXELS (default 4096^2) -> bad_params, no defer, no
    allocation — the security-relevant cap branch that the 64x48 fixture otherwise can't reach. */
 static void test_capture_pixel_cap_bad_params(void) {

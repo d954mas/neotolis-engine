@@ -12,8 +12,8 @@
 #include <stdlib.h>
 
 /* The capture_host renders a deterministic NON-BLANK pattern (two distinct colors) every frame so the
-   pixel-health not-blank check (D-09: not a single uniform color) has a real target. devapi_host inits
-   NO gfx (Pitfall 2), so this dedicated host owns a real GL context for the live capture UAT. */
+   pixel-health not-blank check (not a single uniform color) has a real target. devapi_host inits
+   NO gfx, so this dedicated host owns a real GL context for the live capture UAT. */
 
 /* Background + foreground clear colors: a known two-tone frame. The foreground sub-rect is cleared
    under scissor on top of the full-frame background, giving >=2 distinct colors (non-uniform). */
@@ -66,8 +66,8 @@ static void frame(void) {
     if (nt_app_render_enabled()) {
         render_pattern();
         /* The capture seam runs INSIDE nt_window_swap_buffers (registered once via
-           nt_devapi_capture_install_seam): post-render, pre-swap, where nt_gfx_read_pixels is GL-valid
-           (D-05). Gated implicitly with rendering — render off => no swap => seam doesn't run => a
+           nt_devapi_capture_install_seam): post-render, pre-swap, where nt_gfx_read_pixels is GL-valid.
+           Gated implicitly with rendering — render off => no swap => seam doesn't run => a
            capture stays pending until a real frame draws (never an ok:true stale/garbage frame). */
         nt_window_swap_buffers();
     }

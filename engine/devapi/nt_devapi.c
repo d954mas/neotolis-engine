@@ -511,7 +511,7 @@ void nt_devapi_capture_on_pre_swap(void) {
     if (!nt_devapi_initialized()) {
         return;
     }
-    /* Fill every ready producer-slot's payload at the GL-valid seam (D-05). The GL read MUST happen
+    /* Fill every ready producer-slot's payload at the GL-valid seam. The GL read MUST happen
        here, before swap — poll_response runs after the frame, where the back buffer is undefined.
        Idempotent per slot: producer is cleared after one run, so a re-call this frame is a no-op. */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
@@ -564,7 +564,7 @@ const char *nt_devapi_poll_response(void) {
         if (!slot_ready(&s_deferred[i])) {
             continue;
         }
-        /* Drain-race guard (T-69-06-RACE): a producer-slot is "ready" by frame deadline before the
+        /* Drain-race guard: a producer-slot is "ready" by frame deadline before the
            pre-swap seam (nt_devapi_capture_on_pre_swap) has filled its payload — net_poll's drain runs
            at frame start, the seam runs pre-swap at frame end. Yielding now would emit the legacy
            {deferred:true} and lose the data. Withhold a ready slot whose producer is still pending

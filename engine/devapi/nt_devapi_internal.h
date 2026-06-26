@@ -118,13 +118,13 @@ bool nt_devapi_defer_current_time(double seconds);
 /* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the pre-swap
    seam (nt_devapi_capture_on_pre_swap) the producer fills the slot's owned payload, which
    poll_response then yields as the ok-entry result (instead of the legacy {deferred:true}). The
-   first deferred command that RETURNS data (capture.frame, D-05). `ctx` is the producer's owned
+   first deferred command that RETURNS data (capture.frame). `ctx` is the producer's owned
    param block; `ctx_free` frees it on yield/reset (NULL if ctx is not heap-owned). The core never
    names the capture group — the handler supplies the producer (zero release delta when absent).
    Must be called from inside a handler dispatch.
 
    CONTRACT: a producer-bearing slot is withheld until the pre-swap seam fills it — poll_response
-   never yields {deferred:true} for it (that would re-introduce T-69-06-RACE). So the HOST MUST call
+   never yields {deferred:true} for it (that would re-introduce the drain race). So the HOST MUST call
    nt_devapi_capture_on_pre_swap on every frame it renders; while rendering is suppressed the producer
    slot legitimately stalls until render resumes (bounded per-session by close_client ->
    nt_devapi_deferred_reset). A capture therefore resolves on the next RENDERED frame, not merely the

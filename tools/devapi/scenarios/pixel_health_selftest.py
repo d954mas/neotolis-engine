@@ -7,7 +7,7 @@ PNGs in memory and exercises pixel_health's POSITIVE and NEGATIVE branches direc
 that silently weakens a check (drops not-blank, inverts a split-mean, skips a dims assert, or loses a
 channel-order distinction) fails fast instead of only on the heavyweight live path.
 
-Pillow + numpy only (D-10) — installed by the capture-smoke CI job. Run from the repo root:
+Pillow + numpy only — installed by the capture-smoke CI job. Run from the repo root:
   python3 tools/devapi/scenarios/pixel_health_selftest.py   (exit 0 == all checks held).
 """
 import base64
@@ -15,8 +15,8 @@ import io
 import os
 import sys
 
-from PIL import Image  # capture-scoped dep (D-10)
-import numpy as np  # noqa: E402  capture-scoped dep (D-10)
+from PIL import Image  # capture-scoped dep
+import numpy as np  # noqa: E402  capture-scoped dep
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))

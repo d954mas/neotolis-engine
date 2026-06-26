@@ -11,15 +11,15 @@
 #include "window/nt_window.h"
 
 /* Capture command group (capture.frame / capture.region): the FIRST deferred command that returns
-   DATA. Each handler validates its bot params (NEVER asserts — Phase 65/67 lesson) then defers with
-   a producer; the producer runs at the GL-valid pre-swap seam (D-05) and chains readback -> RGB strip
-   (D-04) -> optional box-average ½/¼ (D-06) -> fpng -> base64 -> {width,height,format:"png",data}.
-   Compiles out entirely when NT_DEVAPI_GROUP_CAPTURE is absent (zero release delta, Pitfall 5). */
+   DATA. Each handler validates its bot params (NEVER asserts) then defers with
+   a producer; the producer runs at the GL-valid pre-swap seam and chains readback -> RGB strip
+   -> optional box-average ½/¼ -> fpng -> base64 -> {width,height,format:"png",data}.
+   Compiles out entirely when NT_DEVAPI_GROUP_CAPTURE is absent (zero release delta). */
 
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 
 /* Bounded readback buffer: a region capped at the framebuffer keeps w*h*4 small, but the static cap
-   is the DoS backstop (V11). 4096x4096 rgba8 = 64 MiB — generous for any real demo FB; -D overridable. */
+   is the DoS backstop. 4096x4096 rgba8 = 64 MiB — generous for any real demo FB; -D overridable. */
 #ifndef NT_DEVAPI_CAPTURE_MAX_PIXELS
 #define NT_DEVAPI_CAPTURE_MAX_PIXELS (4096ULL * 4096ULL)
 #endif
@@ -33,10 +33,10 @@ _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DE
 /* Cap concurrent in-flight captures independently of the shared deferred queue (NT_DEVAPI_MAX_DEFERRED).
    Without it a single client flood could queue up to the full queue of captures that the pre-swap seam
    then encodes synchronously in one frame (render-thread stall) and holds as that many base64 payloads
-   (memory spike). 8 bounds the per-seam encode burst + held memory while leaving generous pipelining.
-   -D overridable. */
+   (memory spike). 4 keeps the worst-case held memory small (a full 4096x4096 capture is tens of MiB
+   each) while still allowing a little pipelining; raise it with -D for a host that needs more. */
 #ifndef NT_DEVAPI_CAPTURE_MAX_INFLIGHT
-#define NT_DEVAPI_CAPTURE_MAX_INFLIGHT 8
+#define NT_DEVAPI_CAPTURE_MAX_INFLIGHT 4
 #endif
 
 static void set_bad_params(nt_devapi_error *err, const char *message) {
@@ -54,7 +54,7 @@ typedef struct capture_ctx {
 } capture_ctx;
 
 // #region seam producer
-/* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor (D-04/D-06).
+/* Fused alpha-strip + box-average: rgba8 src -> RGB dst, dst dims = w/factor x h/factor.
    factor==1 is a plain strip (1x1 box). Integer-only, no heap. */
 static void strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst) {
     uint32_t ow = w / factor;
@@ -111,7 +111,7 @@ static cJSON *build_payload(const uint8_t *png, uint32_t png_len, uint32_t out_w
     return payload;
 }
 
-/* The pre-swap seam producer (D-05): readback -> strip+box -> fpng -> base64 -> payload. Runs once
+/* The pre-swap seam producer: readback -> strip+box -> fpng -> base64 -> payload. Runs once
    per slot at the GL-valid seam; failure at any bounded stage returns NULL (no assert on the path
    that bot params can reach). */
 static cJSON *capture_produce(void *vctx) {
@@ -166,7 +166,7 @@ static void capture_ctx_free(void *ctx) { free(ctx); }
 
 // #region handlers
 /* Parse an optional scale param to a divisor factor in {1,2,4}. Absent -> 1. Anything else (non-number,
-   non-integer, not {1,2,4}) -> bad_params (NEVER asserts on bot input, T-69-05-SCALE). */
+   non-integer, not {1,2,4}) -> bad_params (NEVER asserts on bot input). */
 static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *err, const char *who) {
     *factor = 1U;
     const cJSON *js = cJSON_GetObjectItemCaseSensitive(params, "scale");
@@ -193,7 +193,7 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
 
 /* Defer with a producer carrying the captured rect + factor. `gl_y` is the GL bottom-left y of the
    rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
-   top-left sub-rect matching the documented contract. Capture resolves after ~1 render (D-05). */
+   top-left sub-rect matching the documented contract. Capture resolves after ~1 render. */
 static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
     if (!nt_devapi_capture_seam_armed()) {
         /* The host advertises capture but never drives the pre-swap seam (e.g. devapi_host, which inits
@@ -243,7 +243,7 @@ static bool cmd_capture_frame(const cJSON *params, cJSON *result, nt_devapi_erro
 }
 
 /* capture.region {x,y,w,h,scale?}: validates the rect against the framebuffer (overflow-safe) then
-   defers a sub-rect capture; scale applies after readback (orthogonal to region, D-06). */
+   defers a sub-rect capture; scale applies after readback (orthogonal to region). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_capture_region(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)result;

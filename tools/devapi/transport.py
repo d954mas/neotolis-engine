@@ -16,7 +16,7 @@ DEFAULT_READ_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 # Matches the host's NT_DEVAPI_DEFAULT_PORT.
 DEFAULT_PORT = 17890
-# recv_line memory-safety bound: a single framed JSON line may not exceed this many CHARACTERS (D-07).
+# recv_line memory-safety bound: a single framed JSON line may not exceed this many CHARACTERS.
 # The socket is read in text mode, so readline()/len() count characters; the capture payload is pure
 # ASCII (base64 + JSON structure), so 1 char == 1 byte and this is an exact byte bound for it (multi-
 # byte UTF-8, which no capture command frames, would be looser but still finite). It is a framing-desync

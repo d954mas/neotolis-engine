@@ -1,4 +1,4 @@
-# Capture-path-only Python deps (D-10). Installed ONLY by the CI capture-smoke job and by a developer
+# Capture-path-only Python deps. Installed ONLY by the CI capture-smoke job and by a developer
 # running tools/devapi/scenarios/capture_demo.py — the harness CORE (transport / client / other
 # scenarios) stays stdlib-only. Pinned for a reproducible, supply-chain-bounded decode path.
 Pillow==10.4.0

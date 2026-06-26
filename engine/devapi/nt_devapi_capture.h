@@ -8,7 +8,7 @@
  * nt_devapi_init + a window/GL context). It registers the pre-swap capture seam as a WINDOW pre-swap
  * hook and marks the host capture-capable. The host then just renders + calls nt_window_swap_buffers()
  * as usual — the seam runs automatically inside swap_buffers, while the freshly-rendered back buffer is
- * still valid (D-05; the back buffer is undefined post-swap). There is NO per-frame call to forget, and
+ * still valid (the back buffer is undefined post-swap). There is NO per-frame call to forget, and
  * a host that never installs the seam rejects captures with {error:capture_unavailable} (never hangs).
  *
  * nt_devapi_capture_on_pre_swap is the seam itself — the registered hook target. It is also exposed for

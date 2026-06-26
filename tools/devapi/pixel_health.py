@@ -1,18 +1,18 @@
-"""Pixel-health checks for captured frames (CAP-04, D-09).
+"""Pixel-health checks for captured frames (CAP-04).
 
 The ONE decode code path for capture payloads + a "something rendered" smoke: decode the base64 PNG,
 assert the decoded dimensions match what the command reported, and assert the frame is NOT a single
 uniform color (a black / frozen / empty screen is the failure this catches).
 
-D-10 dependency boundary: Pillow + numpy are imported HERE only — the harness CORE (transport / client /
+Dependency boundary: Pillow + numpy are imported HERE only — the harness CORE (transport / client /
 other scenarios) stays stdlib-only. A scenario imports this module lazily, inside its capture branch, so
 a non-capture run never pulls these deps. The CI capture-smoke job installs the pinned versions.
 """
 import base64
 import io
 
-from PIL import Image  # capture-scoped dep (D-10) — never imported by the harness core.
-import numpy as np  # noqa: E402  capture-scoped dep (D-10).
+from PIL import Image  # capture-scoped dep — never imported by the harness core.
+import numpy as np  # noqa: E402  capture-scoped dep.
 
 
 def decode(b64: str) -> Image.Image:
@@ -24,11 +24,11 @@ def decode(b64: str) -> Image.Image:
 
 
 def check(img: Image.Image, expected_w: int, expected_h: int) -> None:
-    """Assert decode + dims match + not-blank (D-09). Raises AssertionError on any violation.
+    """Assert decode + dims match + not-blank. Raises AssertionError on any violation.
 
     not-blank = the decoded pixels are not a single uniform color. A std-dev (or peak-to-peak) of 0
     across all channels means every pixel is identical — a black / frozen / empty screen — which is the
-    exact failure D-09 is designed to catch. The capture_host renders a deterministic two-tone pattern,
+    exact failure this check is designed to catch. The capture_host renders a deterministic two-tone pattern,
     so a healthy frame has >= 2 distinct colors and a non-zero variance.
     """
     assert img.width == expected_w, f"pixel-health: decoded width {img.width} != expected {expected_w}"
@@ -43,7 +43,7 @@ def check(img: Image.Image, expected_w: int, expected_h: int) -> None:
 def vertical_split_means(img: Image.Image) -> tuple:
     """Return (top_half_mean, bottom_half_mean) of per-pixel mean intensity.
 
-    Lets a caller assert vertical ORIENTATION without importing numpy (D-10): a region Y-origin flip
+    Lets a caller assert vertical ORIENTATION without importing numpy: a region Y-origin flip
     (top-left vs bottom-left readback) swaps which half a known feature lands in, so the two means
     invert. Returns plain floats so the numpy dependency stays confined to this module.
     """
@@ -53,7 +53,7 @@ def vertical_split_means(img: Image.Image) -> tuple:
 
 
 def horizontal_split_means(img: Image.Image) -> tuple:
-    """Return (left_half_mean, right_half_mean) of per-pixel mean intensity (D-10, numpy stays here).
+    """Return (left_half_mean, right_half_mean) of per-pixel mean intensity (numpy stays here).
 
     Symmetric to vertical_split_means for the horizontal axis: a region X-origin error (reading from
     the wrong column) shifts which half a known feature lands in, inverting the two means.
@@ -64,7 +64,7 @@ def horizontal_split_means(img: Image.Image) -> tuple:
 
 
 def center_channel_means(img: Image.Image) -> tuple:
-    """Return (r, g, b) means of the image's central quarter (D-10, numpy stays here).
+    """Return (r, g, b) means of the image's central quarter (numpy stays here).
 
     For a host whose foreground sits in the center, this samples the fg color so a caller can assert
     channel ORDER (RGB vs BGR): a red/blue swap in the GL readback or the RGB strip inverts r vs b,
