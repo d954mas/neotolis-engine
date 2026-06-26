@@ -20,7 +20,7 @@ static nt_ui_vlist_range_t vlist_window(float pos_on_axis, float viewport, float
     if (count == 0U) {
         return r;
     }
-    const long maxidx = (long)(count - 1U);
+    const int64_t maxidx = (int64_t)count - 1; /* int64: long is 32-bit on Windows/WASM, so a near-UINT32_MAX count would wrap */
     /* !(x > 0) also rejects NaN -> degenerate path, no div-by-zero. Render only item 0 (in range). */
     if (!(item_extent > 0.0F) || !(viewport > 0.0F)) {
         r.first = 0U;
@@ -34,15 +34,15 @@ static nt_ui_vlist_range_t vlist_window(float pos_on_axis, float viewport, float
     if (!(scrolled > 0.0F)) {
         scrolled = 0.0F; /* coerces a negative offset (rubber-band) or NaN to the top */
     }
-    long first_l = (long)floor((double)scrolled / (double)item_extent) - (long)overscan;
+    int64_t first_l = (int64_t)floor((double)scrolled / (double)item_extent) - (int64_t)overscan;
     if (first_l < 0) {
         first_l = 0;
     }
-    long visible = (long)ceil((double)viewport / (double)item_extent) + 1 + (2 * (long)overscan);
+    int64_t visible = (int64_t)ceil((double)viewport / (double)item_extent) + 1 + (2 * (int64_t)overscan);
     if (visible < 1) {
         visible = 1;
     }
-    long last_l = first_l + visible - 1;
+    int64_t last_l = first_l + visible - 1;
     if (first_l > maxidx) {
         first_l = maxidx;
     }

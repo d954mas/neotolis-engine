@@ -113,6 +113,22 @@ static void test_vlist_window_bad_stride_safe(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, r.last);
 }
 
+/* ---- (c3) huge count: int64 window math keeps first/last in [0, count-1] (no long overflow) ----
+ * `long` is 32-bit on Windows (LLP64) and WASM (ILP32), so a count near UINT32_MAX with a deep scroll
+ * or a large overscan would wrap a `long` intermediate and break the "last never exceeds count-1"
+ * contract. The int64 locals keep every clamp honest. */
+static void test_vlist_window_huge_count(void) {
+    const uint32_t count = 0xFFFFFFF0U; /* ~4.29e9, well past INT32_MAX */
+    /* Deep scroll + large overscan: the window must clamp into range with last >= first. */
+    nt_ui_vlist_range_t r = nt_ui_vlist_test_window(-1.0e9F, 200.0F, 40.0F, count, 1000000);
+    TEST_ASSERT_TRUE(r.first <= r.last);
+    TEST_ASSERT_TRUE(r.last <= count - 1U);
+    /* Fully scrolled past the end (scrolled/extent overflows a 32-bit long): last clamps to count-1. */
+    r = nt_ui_vlist_test_window(-((float)count * 40.0F), 200.0F, 40.0F, count, 8);
+    TEST_ASSERT_TRUE(r.first <= r.last);
+    TEST_ASSERT_EQUAL_UINT32(count - 1U, r.last);
+}
+
 /* ---- (d) per-id stability / distinctness / no adjacent-base collision (window <= ring) ---- */
 static void test_vlist_item_id_recycle(void) {
     const uint32_t base = 0x7711U;
@@ -397,6 +413,7 @@ int main(void) {
     RUN_TEST(test_vlist_window_edge_clamp);
     RUN_TEST(test_vlist_window_degenerate_safe);
     RUN_TEST(test_vlist_window_bad_stride_safe);
+    RUN_TEST(test_vlist_window_huge_count);
     RUN_TEST(test_vlist_item_id_recycle);
     RUN_TEST(test_vlist_item_id_ring);
     RUN_TEST(test_vlist_axis_y_layout);
