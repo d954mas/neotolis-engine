@@ -50,8 +50,9 @@ static nt_sock_t s_client = NT_INVALID_SOCK;
 static bool s_wsa_init = false;
 #endif
 
-/* Bounded line cap: an unterminated line larger than this is a framing desync / abuse on this
-   dev-only channel; the client is dropped. Mirrors the Python client's 1 MiB cap. Overridable. */
+/* Inbound request-line cap: an unterminated line past this is a framing desync / abuse on this
+   dev-only channel -> drop the client. Bounds client->server REQUESTS only, not the (pixel-capped)
+   capture response — that travels the other way, under the Python client's own recv cap. Overridable. */
 #ifndef NT_DEVAPI_NET_MAX_LINE
 #define NT_DEVAPI_NET_MAX_LINE ((size_t)1024U * 1024U)
 #endif
@@ -376,9 +377,9 @@ void nt_devapi_net_poll(void) {
             s_recv_len = rest;
         }
     }
-    /* Bounded line cap (mirrors the Python client's 1 MiB cap): an unterminated remainder larger
-       than the cap is a framing desync / abuse — drop the client (it may reconnect) rather than
-       grow the buffer without limit. Complete lines were already consumed above. */
+    /* Inbound request-line cap: an unterminated remainder larger than the cap is a framing desync /
+       abuse — drop the client (it may reconnect) rather than grow the buffer without limit. Complete
+       lines were already consumed above. */
     if (s_recv_len > NT_DEVAPI_NET_MAX_LINE) {
         close_client();
         return;
