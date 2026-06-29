@@ -15,20 +15,21 @@ nt_window_t g_nt_window = {.max_dpr = 2.0F, .resizable = true};
 static nt_window_pre_swap_hook_fn s_pre_swap_hooks[NT_WINDOW_MAX_PRE_SWAP_HOOKS];
 static int s_pre_swap_hook_count;
 
-void nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn) {
+bool nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn) {
     if (fn == NULL) {
-        return;
+        return false;
     }
     for (int i = 0; i < s_pre_swap_hook_count; i++) {
         if (s_pre_swap_hooks[i] == fn) {
-            return; /* idempotent: registering the same hook twice is a no-op. */
+            return true; /* idempotent: already registered counts as installed. */
         }
     }
     NT_ASSERT(s_pre_swap_hook_count < NT_WINDOW_MAX_PRE_SWAP_HOOKS);
     if (s_pre_swap_hook_count >= NT_WINDOW_MAX_PRE_SWAP_HOOKS) {
-        return; /* OFF-build safety net: the assert is gone, so never write past the fixed array. */
+        return false; /* OFF-build safety net: table full -> not installed, so the caller must not arm. */
     }
     s_pre_swap_hooks[s_pre_swap_hook_count++] = fn;
+    return true;
 }
 
 void nt_window_run_pre_swap_hooks(void) {

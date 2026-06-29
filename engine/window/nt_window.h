@@ -50,7 +50,7 @@ void nt_window_set_vsync(nt_vsync_t mode);
    back buffer is still valid (the GL-valid seam the devapi capture group needs). A system registers once
    at startup; the host then just renders + swaps as usual — there is no per-frame hook call to forget. */
 typedef void (*nt_window_pre_swap_hook_fn)(void);
-void nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn); /* idempotent for the same fn. */
+bool nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn); /* idempotent; false if the fixed hook table is full. */
 void nt_window_run_pre_swap_hooks(void);                         /* invoked by each backend's swap_buffers. */
 
 /* ---- Close management ---- */
