@@ -737,6 +737,18 @@ static void test_vertical_axis_mismatch_no_mutation(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_FILL_LTR, s_style.fill_direction);
 }
 
+/* horizontal RTL is an unsupported anchor (fill would right-anchor while drag/thumb/thumb_pos stay
+ * LTR): asserts AND coerces to the LTR default LOCALLY, never mutating the caller's style. */
+static void test_horizontal_rtl_unsupported_no_mutation(void) {
+    s_style.fill_direction = NT_UI_FILL_RTL; /* RTL is a HORIZONTAL anchor but unsupported by the slider */
+    float value = 0.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_INT(NT_UI_FILL_RTL, s_style.fill_direction); /* caller's style untouched (coerce is local) */
+}
+
 /* track_w == 0 -> assert. */
 static void test_assert_track_w_zero(void) {
     float value = 0.5F;
@@ -821,6 +833,7 @@ int main(void) {
     RUN_TEST(test_vertical_thumb_pos_exposed);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vertical_axis_mismatch_no_mutation);
+    RUN_TEST(test_horizontal_rtl_unsupported_no_mutation);
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);
     RUN_TEST(test_assert_min_gt_max);

@@ -245,10 +245,9 @@ static void slider_effective_pad(const nt_ui_slider_style_t *style, int16_t out[
     out[hi] = (int16_t)((style->hit_padding_lrtb[hi] > grow) ? style->hit_padding_lrtb[hi] : grow);
 }
 
-/* Shared core parameterized by a normalized [0,1] fraction in/out so float + int both
- * call it. step_frac quantizes the fraction onto the 0,step_frac,2*step_frac,... grid (0 =
- * continuous) BEFORE it feeds the anim/view/compose, so the thumb + fill snap WITH the value.
- * Returns the new clamped fraction; *changed set when it differs from in_frac. */
+/* Shared [0,1]-fraction core for float + int. step_frac quantizes onto the 0,step,2*step,... grid
+ * (0 = continuous) BEFORE anim/view/compose, so thumb + fill snap WITH the value. Returns the new
+ * clamped fraction; *changed when it differs from in_frac. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float in_frac, float min, float max, float step_frac,
                          nt_ui_slider_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *changed) {
@@ -277,18 +276,20 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     NT_ASSERT(isfinite(step_frac) && step_frac >= 0.0F && "nt_ui_slider: step_frac must be finite >= 0");
     // #endregion
     // #region axis guard (orientation = AXIS, fill_direction = anchor within it)
-    /* On a mismatch use a LOCAL effective direction; NEVER write back into the caller's (possibly
-     * shared/static) style — that would persist across frames and corrupt other widgets sharing it.
-     * NT_ASSERT is only a developer signal (vanishes in NT_ASSERT_MODE=OFF), so the local default is
-     * the real guard that keeps release from mapping/rendering the wrong axis. */
+    /* Coerce a bad anchor in a LOCAL effective direction; never write back into the caller's (maybe
+     * shared/static) style — that would corrupt other widgets across frames. The local default, not
+     * the NT_ASSERT (gone in OFF), is the real guard against rendering the wrong axis/anchor. */
     const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
     const bool fill_is_h = (style->fill_direction == NT_UI_FILL_LTR || style->fill_direction == NT_UI_FILL_RTL);
-    const bool axis_mismatch = vertical ? fill_is_h : !fill_is_h;
+    /* Supported anchors: vertical takes either vertical anchor (BOTTOM_UP/TOP_DOWN); horizontal takes
+     * ONLY LTR. Horizontal RTL is rejected — its fill right-anchors while drag/thumb/thumb_pos stay LTR
+     * (inconsistent), so it coerces to the LTR default like any axis mismatch. */
+    const bool bad_fill = vertical ? fill_is_h : (style->fill_direction != NT_UI_FILL_LTR);
     nt_ui_fill_direction_t effective_fill_direction = style->fill_direction;
-    if (axis_mismatch) {
+    if (bad_fill) {
         effective_fill_direction = vertical ? NT_UI_FILL_BOTTOM_UP : NT_UI_FILL_LTR;
     }
-    NT_ASSERT(!axis_mismatch && "nt_ui_slider: fill_direction axis must match orientation");
+    NT_ASSERT(!bad_fill && "nt_ui_slider: unsupported fill_direction for orientation (horizontal: LTR; vertical: BOTTOM_UP/TOP_DOWN)");
     // #endregion
     // #region interaction
     int16_t pad[4];
