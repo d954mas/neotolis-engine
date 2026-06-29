@@ -31,14 +31,16 @@ typedef struct {
 } nt_ui_slider_drag_t;
 
 /* Persistent thumb-view cell (separate salt; written EVERY frame, never cleared). Lets the
- * const-ctx nt_ui_slider_thumb_pos recover the eased fraction + thumb geometry without an
+ * const-ctx nt_ui_slider_thumb_pos recover the eased fraction + axis-aware thumb geometry without an
  * anim-pool accessor — the pool's no-eviction keeps last frame's value live. */
 #define NT_UI_SLIDER_VIEW_SALT 0x510D7E00U
 typedef struct {
     float fraction; /* last eased value fraction [0,1] */
-    float track_w;
-    float thumb_w;
-    uint8_t _pad[4];
+    float track_w, track_h;
+    float thumb_w, thumb_h;
+    uint8_t orientation; /* nt_ui_slider_orientation_t: thumb_pos branches on the AXIS */
+    uint8_t invert;      /* vertical BOTTOM_UP: thumb pos measured from the far (bottom) edge */
+    uint8_t _pad[2];
 } nt_ui_slider_view_t;
 
 /* Linear position->value map, clamped to [min,max]. usable = track_extent - thumb_extent.
@@ -336,11 +338,15 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     const float eased_frac = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     // #endregion
 
-    /* Persist the eased fraction + thumb geometry so const-ctx thumb_pos can recover it. */
+    /* Persist the eased fraction + axis-aware thumb geometry so const-ctx thumb_pos can recover it. */
     nt_ui_slider_view_t *view = (nt_ui_slider_view_t *)nt_ui_state(ctx, slider_view_id(id), (uint32_t)sizeof(nt_ui_slider_view_t), NT_UI_STATE_TAG('s', 'l', 'v', 'w'));
     view->fraction = eased_frac;
     view->track_w = style->track_w;
+    view->track_h = style->track_h;
     view->thumb_w = style->thumb_w;
+    view->thumb_h = style->thumb_h;
+    view->orientation = (uint8_t)style->orientation;
+    view->invert = (uint8_t)(vertical && (effective_fill_direction == NT_UI_FILL_BOTTOM_UP)); /* matches the emit invert */
 
     slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, effective_fill_direction, eased_frac, a->opacity, decl, enabled);
 
@@ -407,7 +413,13 @@ nt_ui_slider_thumb_t nt_ui_slider_thumb_pos(const nt_ui_context_t *ctx, uint32_t
     if (!bb.found || view == NULL) {
         return (nt_ui_slider_thumb_t){0.0F, 0.0F, false};
     }
-    /* Thumb center = track_left + fraction*(track_w - thumb_w) + thumb_w/2 (matches the emit). */
+    /* Thumb center = track_origin + pos_frac*(track - thumb) + thumb/2 along the AXIS, centered on the
+     * cross axis (matches the emit attach points). Vertical BOTTOM_UP measures pos from the far edge. */
+    if (view->orientation == NT_UI_SLIDER_VERTICAL) {
+        const float usable_h = (view->track_h - view->thumb_h > 0.0F) ? (view->track_h - view->thumb_h) : 0.0F;
+        const float pos_frac = (view->invert != 0U) ? (1.0F - view->fraction) : view->fraction;
+        return (nt_ui_slider_thumb_t){.x = bb.x + (bb.width * 0.5F), .y = bb.y + (pos_frac * usable_h) + (view->thumb_h * 0.5F), .found = true};
+    }
     const float usable_w = (view->track_w - view->thumb_w > 0.0F) ? (view->track_w - view->thumb_w) : 0.0F;
     return (nt_ui_slider_thumb_t){.x = bb.x + (view->fraction * usable_w) + (view->thumb_w * 0.5F), .y = bb.y + (bb.height * 0.5F), .found = true};
 }

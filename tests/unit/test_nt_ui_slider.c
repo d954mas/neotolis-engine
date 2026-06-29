@@ -702,6 +702,22 @@ static void test_vertical_hit_pad_left_right(void) {
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
 }
 
+/* ---- Test V5: nt_ui_slider_thumb_pos is axis-aware for a vertical slider — the thumb travels Y
+ *      (centered on the cross X axis); BOTTOM_UP measures the position from the bottom edge. ---- */
+static void test_vertical_thumb_pos_exposed(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    float value = 0.25F;
+    /* Two frames so the view cell + bbox latch the fraction (thumb_pos reads prev-frame). */
+    warmup_vfloat(&value, 0.0F, 1.0F);
+    nt_pointer_t idle = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    (void)slider_vfloat_frame(&idle, &value, 0.0F, 1.0F, 0.0F, true);
+
+    const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("vsl"));
+    TEST_ASSERT_TRUE(t.found);
+    TEST_ASSERT_TRUE(float_near(t.x, VT_CX, 1.0F));                  /* centered on the cross (X) axis */
+    TEST_ASSERT_TRUE(float_near(t.y, VT_Y_AT_FRAC_BU(0.25F), 1.0F)); /* travels Y, BOTTOM_UP inverted */
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -802,6 +818,7 @@ int main(void) {
     RUN_TEST(test_vertical_thumb_grab_bottom_up);
     RUN_TEST(test_vertical_thumb_grab_top_down);
     RUN_TEST(test_vertical_hit_pad_left_right);
+    RUN_TEST(test_vertical_thumb_pos_exposed);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vertical_axis_mismatch_no_mutation);
     RUN_TEST(test_assert_track_w_zero);
