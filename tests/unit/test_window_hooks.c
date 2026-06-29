@@ -1,7 +1,6 @@
-/* nt_window_add_pre_swap_hook contract: true on register / idempotent re-register, false on NULL, and
- * asserts on a full hook table. The bool return is what lets nt_devapi_capture_install_seam arm ONLY
- * when the seam actually registered (assert-off would return false, not silently leave a no-seam host
- * "capture-capable"). Links nt_window_stub for the real shared registry — no GL / GLFW. */
+/* nt_window_add_pre_swap_hook's bool return is what lets nt_devapi_capture_install_seam arm ONLY when
+ * the seam actually registered — a full table returns false (assert-off) instead of leaving a no-seam
+ * host "capture-capable". Links nt_window_stub for the shared registry, no GL/GLFW. */
 
 #include "test_helpers/nt_assert_trap.h"
 #include "window/nt_window.h"
