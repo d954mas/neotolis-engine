@@ -505,10 +505,9 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     }
 }
 
-/* build_tree's stale-floating-parent degrade (Clay element hashmap saturation): a non-crashing
- * fallback to identity when a floating root's resolved parent index does not precede it. The counter
- * is ALWAYS compiled so debug builds can observe the degrade without a crash; the test accessor reads
- * the same value. Only bumped on the (rare) degrade path, so no per-frame overhead in release. */
+/* build_tree stale-floating-parent degrade (Clay hashmap saturation): non-crashing fallback to
+ * identity when a floating root's parent index doesn't precede it. Counter ALWAYS compiled so the
+ * inspector/tests observe it; bumped only on the rare degrade path (no release per-frame cost). */
 static uint32_t s_bt_stale_floating_parent = 0U;
 static void nt_bt_count_stale_floating_parent(void) {
     s_bt_stale_floating_parent++;
@@ -517,6 +516,7 @@ static void nt_bt_count_stale_floating_parent(void) {
     nt_log_warn_once("build_tree: floating parent unresolved (Clay element hashmap likely saturated) — degraded to identity");
 #endif
 }
+uint32_t nt_ui_internal_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
 #ifdef NT_TEST_ACCESS
 uint32_t nt_ui_internal_test_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
 void nt_ui_internal_test_reset_stale_floating_parent_count(void) { s_bt_stale_floating_parent = 0U; }
@@ -577,11 +577,9 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                 seed = identity;
             } else {
                 const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
-                /* A real floating parent is baked already, so it must precede this root: 0 <= p < elem_idx
-                 * (and thus p < N). Anything else means Clay returned a STALE layoutElement — its persistent
-                 * element hashmap saturated with a big virtual list's distinct per-row ids (cap ==
-                 * maxElementCount) and stopped refreshing entries. Degrade to identity (the && short-circuit
-                 * keeps tree_baked[p] in range → memory-safe), never crash. */
+                /* A baked floating parent must precede this root: 0 <= p < elem_idx (so p < N). Anything
+                 * else = Clay returned a STALE layoutElement (persistent element hashmap saturated by a big
+                 * vlist's distinct per-row ids). Degrade to identity (< elem_idx keeps tree_baked[p] in range). */
                 if (p_elem_idx >= 0 && p_elem_idx < elem_idx) {
                     seed = ctx->tree_baked[p_elem_idx];
                     seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
