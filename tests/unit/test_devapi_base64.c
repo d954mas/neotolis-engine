@@ -18,7 +18,7 @@ static uint32_t encode_str(const char *in, char *out, uint32_t out_cap) {
     return n;
 }
 
-/* Test 1: 1 byte (%3==1) -> two '='. */
+/* 1 byte (%3==1) -> two '='. */
 void test_base64_padding_two_equals(void) {
     char out[16];
     uint32_t n = encode_str("M", out, sizeof(out));
@@ -26,7 +26,7 @@ void test_base64_padding_two_equals(void) {
     TEST_ASSERT_EQUAL_STRING("TQ==", out);
 }
 
-/* Test 2: 2 bytes (%3==2) -> one '='. */
+/* 2 bytes (%3==2) -> one '='. */
 void test_base64_padding_one_equal(void) {
     char out[16];
     uint32_t n = encode_str("Ma", out, sizeof(out));
@@ -34,7 +34,7 @@ void test_base64_padding_one_equal(void) {
     TEST_ASSERT_EQUAL_STRING("TWE=", out);
 }
 
-/* Test 3: 3 bytes (%3==0) -> no padding. */
+/* 3 bytes (%3==0) -> no padding. */
 void test_base64_no_padding(void) {
     char out[16];
     uint32_t n = encode_str("Man", out, sizeof(out));
@@ -42,7 +42,7 @@ void test_base64_no_padding(void) {
     TEST_ASSERT_EQUAL_STRING("TWFu", out);
 }
 
-/* Test 4: a longer known vector round-trips to its canonical RFC base64. */
+/* A longer known vector round-trips to its canonical RFC base64. */
 void test_base64_long_vector(void) {
     char out[64];
     const char *in = "Many hands make light work.";
@@ -52,8 +52,8 @@ void test_base64_long_vector(void) {
     TEST_ASSERT_EQUAL_STRING("TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu", out);
 }
 
-/* Test 5: out_cap one byte short of need -> returns 0, no write
- * past cap (the guard byte just past the intended output stays untouched). */
+/* out_cap one byte short of need -> returns 0, no write past cap
+ * (the guard byte just past the intended output stays untouched). */
 void test_base64_cap_reject(void) {
     const char *in = "Man"; /* need = ((3+2)/3)*4 = 4 */
     char buf[8];
@@ -67,7 +67,7 @@ void test_base64_cap_reject(void) {
     }
 }
 
-/* Test 6: empty input -> 0 bytes written, returns 0. */
+/* empty input -> 0 bytes written, returns 0. */
 void test_base64_empty_input(void) {
     char buf[8];
     const char kGuard = (char)0x7F;

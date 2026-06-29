@@ -15,7 +15,7 @@ void tearDown(void) {}
  *   R = r & 0xFF, G = c & 0xFF, B = 0x40, A = 0xFF.
  * After the shared-layer Y-flip, out row 0 must carry GL row (h-1). */
 
-/* Test 1 (69-L1-RD): out_cap < w*h*4 -> false, no write past the cap. */
+/* out_cap < w*h*4 -> false, no write past the cap. */
 void test_read_pixels_rejects_too_small_cap(void) {
     enum { W = 4, H = 4 };
     uint8_t buf[(W * H * 4) + 1];
@@ -31,8 +31,8 @@ void test_read_pixels_rejects_too_small_cap(void) {
     }
 }
 
-/* Test 2 (69-L1-OR): with a sufficient buffer the gradient comes back TOP-LEFT
- * oriented — out row 0 equals what the stub placed at GL row (h-1). */
+/* With a sufficient buffer the gradient comes back TOP-LEFT oriented —
+ * out row 0 equals what the stub placed at GL row (h-1). */
 void test_read_pixels_top_left_orientation(void) {
     enum { W = 4, H = 4 };
     uint8_t buf[W * H * 4];
@@ -52,7 +52,7 @@ void test_read_pixels_top_left_orientation(void) {
     }
 }
 
-/* Test 3 (channel contract): returned layout is 4-channel rgba8 — B marker and
+/* Channel contract: returned layout is 4-channel rgba8 — B marker and
  * opaque alpha present at every pixel. */
 void test_read_pixels_channel_layout_rgba8(void) {
     enum { W = 3, H = 2 };
@@ -68,7 +68,7 @@ void test_read_pixels_channel_layout_rgba8(void) {
     }
 }
 
-/* Test 4 (69-L1-BAD): w<=0 or h<=0 -> false; no overflow, no write. */
+/* w<=0 or h<=0 -> false; no overflow, no write. */
 void test_read_pixels_rejects_bad_size(void) {
     uint8_t buf[16];
     const uint8_t kGuard = 0xCDU;

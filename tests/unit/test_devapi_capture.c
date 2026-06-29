@@ -64,7 +64,7 @@ static cJSON *capture_yield(const char *request) {
 
 static cJSON *result_of(cJSON *root) { return cJSON_GetObjectItemCaseSensitive(root, "result"); }
 
-/* ---- Test 1: bad scale -> bad_params ---- */
+/* bad scale -> bad_params */
 
 static void test_capture_frame_bad_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":3}}"));
@@ -72,7 +72,7 @@ static void test_capture_frame_bad_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":\"half\"}}"));
 }
 
-/* ---- Test 2: bad region -> bad_params ---- */
+/* bad region -> bad_params */
 
 static void test_capture_region_out_of_bounds_bad_params(void) {
     /* x + w > fb_width. */
@@ -85,7 +85,7 @@ static void test_capture_region_out_of_bounds_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":40,\"w\":10,\"h\":40}}"));
 }
 
-/* ---- Test 3: a well-formed capture DEFERS (returns NULL, no sync yield, no assert) ---- */
+/* a well-formed capture DEFERS (returns NULL, no sync yield, no assert) */
 
 static void test_capture_frame_defers(void) {
     const char *resp = nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":1}");
@@ -94,7 +94,7 @@ static void test_capture_frame_defers(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response());
 }
 
-/* ---- Test 4: seam-driven encode (no socket) -> format:"png" + non-empty data ---- */
+/* seam-driven encode (no socket) -> format:"png" + non-empty data */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_capture_frame_seam_encode(void) {
@@ -123,7 +123,7 @@ static void test_capture_frame_seam_encode(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response()); /* queue drained. */
 }
 
-/* ---- Test 5: scale + region produce POST-scale dims ---- */
+/* scale + region produce POST-scale dims */
 
 static void test_capture_frame_scale_halves_dims(void) {
     cJSON *root = capture_yield("{\"method\":\"capture.frame\",\"params\":{\"scale\":2}}");
@@ -146,7 +146,7 @@ static void test_capture_region_dims_match_rect(void) {
     cJSON_Delete(root);
 }
 
-/* ---- Test 6: region + scale -> POST-scale dims (region scale=2 = rect / 2) ---- */
+/* region + scale -> POST-scale dims (region scale=2 = rect / 2) */
 
 static void test_capture_region_scale_halves_dims(void) {
     cJSON *root = capture_yield("{\"method\":\"capture.region\",\"params\":{\"x\":8,\"y\":4,\"w\":32,\"h\":16,\"scale\":2}}");
@@ -158,16 +158,16 @@ static void test_capture_region_scale_halves_dims(void) {
     cJSON_Delete(root);
 }
 
-/* ---- Test 7: degenerate scale>rect -> SYNCHRONOUS bad_params (never {deferred:true}) ---- */
+/* degenerate scale>rect -> SYNCHRONOUS bad_params (never {deferred:true}) */
 
 static void test_capture_region_degenerate_scale_bad_params(void) {
     /* w/scale==0 (3/4==0): the handler rejects synchronously, no defer, no image. */
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":3,\"h\":3,\"scale\":4}}"));
 }
 
-/* ---- Test 7b: scale that does not EVENLY divide the dims -> bad_params (not a silent edge crop) ----
+/* scale that does not EVENLY divide the dims -> bad_params (not a silent edge crop).
    Distinct from the degenerate case above: here floor(6/4)==1 is non-zero, so old floor-div would have
-   ACCEPTED it and silently dropped the 2 remainder pixels per axis. Option B rejects it instead. */
+   ACCEPTED it and silently dropped the 2 remainder pixels per axis. The handler rejects it instead. */
 static void test_capture_nondividing_scale_bad_params(void) {
     /* region 6x6 scale 4: 6%4==2 (non-zero floor, but not an even divide) -> bad_params. */
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":6,\"h\":6,\"scale\":4}}"));
@@ -176,7 +176,7 @@ static void test_capture_nondividing_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":4}}"));
 }
 
-/* ---- Test 8: producer RAN but returned NULL -> {ok:false,error:capture_failed} with correlated id ----
+/* producer RAN but returned NULL -> {ok:false,error:capture_failed} with correlated id.
    Drives a lost context so nt_gfx_read_pixels returns false -> the producer yields NULL -> the DATA slot
    resolves as a distinguishable capture_failed error (NOT the content-free legacy {deferred:true}, NOT a
    crash). A client thus never sees ok:true without the documented {width,height,format,data} shape. */
@@ -207,7 +207,7 @@ static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response());
 }
 
-/* ---- Test 9: in-flight capture cap -> a flood is rejected with bad_params, never queued unbounded ----
+/* in-flight capture cap -> a flood is rejected with bad_params, never queued unbounded.
    Captures defer (return NULL); once NT_DEVAPI_CAPTURE_MAX_INFLIGHT are pending, the next is rejected
    synchronously, well before the 128-slot deferred queue would fill (bounds the per-seam encode burst). */
 static void test_capture_inflight_cap_rejects_flood(void) {
@@ -228,7 +228,7 @@ static void test_capture_inflight_cap_rejects_flood(void) {
     nt_devapi_deferred_reset(); /* clear pending slots so following tests start clean. */
 }
 
-/* ---- Test 10: pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously ----
+/* pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously.
    A framebuffer/rect above NT_DEVAPI_CAPTURE_MAX_PIXELS (default 4096^2) -> bad_params, no defer, no
    allocation — the security-relevant cap branch that the 64x48 fixture otherwise can't reach. */
 static void test_capture_pixel_cap_bad_params(void) {
@@ -240,7 +240,7 @@ static void test_capture_pixel_cap_bad_params(void) {
     /* setUp() restores CAP_FB_W/H before the next test. */
 }
 
-/* ---- Test 11: a host that never drives the seam -> capture rejected synchronously, never hangs ----
+/* a host that never drives the seam -> capture rejected synchronously, never hangs.
    Re-init WITHOUT arming (a host like devapi_host that registers capture but inits no GL / no seam):
    capture.frame must return {ok:false,error:capture_unavailable}, not defer a slot that never resolves. */
 static void test_capture_unarmed_host_unavailable(void) {
@@ -259,7 +259,7 @@ static void test_capture_unarmed_host_unavailable(void) {
     /* tearDown shuts down; the next setUp re-inits + re-arms. */
 }
 
-/* ---- Test 12: a READY producer slot whose seam has NOT run is WITHHELD (poll NULL), not capture_failed ----
+/* a READY producer slot whose seam has NOT run is WITHHELD (poll NULL), not capture_failed.
    The anti-drain-race guard: poll must not serialize a frame-ready capture whose pre-swap producer has not
    yet filled the payload (that would emit capture_failed and lose the image). Drives the host ordering
    where a poll lands between the frame-advance and the seam. No GL — the seam-vs-poll ordering is the SUT. */
@@ -282,7 +282,7 @@ static void test_capture_ready_before_seam_is_withheld(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response());
 }
 
-/* ---- Test 13: box-average downscale produces the EXACT integer mean ----
+/* box-average downscale produces the EXACT integer mean.
    Hermetic value check on the averager: the dims-only scale tests can't catch a wrong divisor (/factor vs
    /area) or wrong in-box source pixels. A 2x2 -> 1x1 box has a hand-computable per-channel mean. */
 static void test_capture_box_average_exact_mean(void) {
