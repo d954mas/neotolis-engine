@@ -289,6 +289,10 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
     if (w <= 0 || h <= 0) {
         return false;
     }
+    NT_ASSERT(out != NULL); /* L1 writes the readback (and row-swaps) through out — NULL is a caller bug. */
+    if (out == NULL) {
+        return false;
+    }
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
        early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
     if (g_nt_gfx.context_lost) {
