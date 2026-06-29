@@ -11,10 +11,9 @@
 #include "ui/nt_ui_state.h"
 
 // #region window_math
-/* Pure, bounds-safe window derivation shared by begin + the test probe. All clamps are HARD
- * guards (not asserts): asserts vanish in NT_ASSERT_MODE=OFF, but a bad count/extent must never
- * over-read the spacer/state index. double avoids float blow-up on huge counts.
- * pos_on_axis is Clay's childOffset (negative going down/right), so scrolled distance = -pos. */
+/* HARD guards (not asserts — those vanish in OFF): a bad count/extent must never over-read the
+ * spacer/state index. double avoids float blow-up on huge counts. pos_on_axis is Clay's childOffset
+ * (negative going down/right), so scrolled distance = -pos. */
 static nt_ui_vlist_range_t vlist_window(float pos_on_axis, float viewport, float item_extent, uint32_t count, int overscan) {
     nt_ui_vlist_range_t r = {1U, 0U}; /* empty sentinel: first > last */
     if (count == 0U) {
@@ -111,10 +110,9 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
 
     nt_ui_vlist_range_t r = vlist_window(pos, viewport, safe_extent, count, st.overscan);
 
-    /* With ring recycling, two SIMULTANEOUSLY-visible rows sharing a ring slot would declare the same
-     * Clay id -> CLAY_ERROR_TYPE_DUPLICATE_ID. A visible window >= id_ring means id_ring is too small
-     * for this viewport (a developer misconfig): assert on the UNCLAMPED count so debug points at the
-     * real mistake, not at the silently-shrunk window the clamp below would otherwise leave. */
+    /* A window >= id_ring maps two SIMULTANEOUSLY-visible rows to one ring slot -> same Clay id ->
+     * DUPLICATE_ID, i.e. id_ring too small (dev misconfig). Assert on the UNCLAMPED count so debug
+     * points at the cause, not at the silently-shrunk window the clamp below leaves. */
     const uint64_t want = (r.first <= r.last) ? ((uint64_t)r.last - r.first + 1U) : 0U;
     NT_ASSERT((st.id_ring <= 1U || want < (uint64_t)st.id_ring) && "vlist_begin: visible window (viewport/item_extent + 2*overscan) must stay below style.id_ring — raise id_ring");
     /* Release/OFF fallback: NT_ASSERT vanishes in NT_ASSERT_MODE=OFF, so a REAL clamp must still keep

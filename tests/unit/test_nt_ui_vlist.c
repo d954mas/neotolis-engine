@@ -251,6 +251,37 @@ static void test_vlist_spacer_content_size(void) {
     TEST_ASSERT_TRUE(fabsf((row1.y - row0.y) - extent) < 0.5F);
 }
 
+/* ---- (f-x) X-axis parity: content measures count*extent on WIDTH, the clip scrolls on X (not Y),
+ * and rows advance along X — the "horizontal strip + scrollbar tracks the giant list" contract. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — inflated by the TEST_ASSERT macro expansion
+static void test_vlist_spacer_content_size_x(void) {
+    const uint32_t count = 100U;
+    const float extent = 40.0F;
+    vlist_frame(NT_UI_AXIS_X, count, extent);
+    vlist_frame(NT_UI_AXIS_X, count, extent);
+
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(s_fx.ctx->clay);
+    const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = VL_ID});
+    Clay_SetCurrentContext(saved);
+    TEST_ASSERT_TRUE(scd.found);
+    /* Content WIDTH = leading + visible + trailing = count*extent (X is the scroll axis here). */
+    TEST_ASSERT_TRUE(fabsf(scd.contentDimensions.width - ((float)count * extent)) < 1.0F);
+    /* The clip + its scrollbar live on X only (horizontal strip), never Y. */
+    TEST_ASSERT_TRUE(scd.config.horizontal);
+    TEST_ASSERT_FALSE(scd.config.vertical);
+
+    /* At rest (left) first == 0: row 0 sits at the container's LEFT edge (leading spacer = 0). */
+    const nt_ui_bbox_t row0 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U, VL_RING));
+    const nt_ui_bbox_t cont = nt_ui_get_bbox(s_fx.ctx, VL_ID);
+    TEST_ASSERT_TRUE(row0.found && cont.found);
+    TEST_ASSERT_TRUE(fabsf(row0.x - cont.x) < 0.5F);
+    /* Each row advances by exactly `extent` along X. */
+    const nt_ui_bbox_t row1 = nt_ui_get_bbox(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 1U, VL_RING));
+    TEST_ASSERT_TRUE(row1.found);
+    TEST_ASSERT_TRUE(fabsf((row1.x - row0.x) - extent) < 0.5F);
+}
+
 /* ---- (g) one-clip-only: exactly one scroll container, never one per row ---- */
 static void test_vlist_one_clip(void) {
     vlist_frame(NT_UI_AXIS_Y, 100U, 40.0F);
@@ -448,6 +479,7 @@ int main(void) {
     RUN_TEST(test_vlist_axis_y_layout);
     RUN_TEST(test_vlist_axis_x_layout);
     RUN_TEST(test_vlist_spacer_content_size);
+    RUN_TEST(test_vlist_spacer_content_size_x);
     RUN_TEST(test_vlist_one_clip);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_window_exceeds_ring_asserts);
