@@ -4,6 +4,11 @@
 
 #include <glad/gl.h>
 
+/* Unconditional: nt_assert.h pulls core/nt_platform.h, which DEFINES NT_DEBUG — the guards
+   below see it only if it is defined first. nt_log.h gives NT_LOG_ERROR. */
+#include "core/nt_assert.h"
+#include "log/nt_log.h"
+
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     (void)desc;
     /* Window + GL context already created by nt_window_init().
@@ -60,4 +65,32 @@ bool nt_gfx_gl_ctx_enable_debug_groups(void) {
      * KHR_debug is widely supported by modern desktop drivers; if absent
      * we no-op the labeling (segments still work, just unlabeled). */
     return GLAD_GL_KHR_debug != 0;
+}
+
+#ifdef NT_DEBUG
+/* GLAD_API_PTR matches GLDEBUGPROC's calling convention (__stdcall on Windows); a plain
+   function pointer would mismatch the stack on the driver's callback. */
+static void GLAD_API_PTR nt_gl_debug_cb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *user) {
+    (void)source;
+    (void)length;
+    (void)user;
+    NT_LOG_ERROR("GL debug type=0x%04X id=%u sev=0x%04X: %s", type, id, severity, message);
+    NT_ASSERT(type != GL_DEBUG_TYPE_ERROR && "GL error — see log above");
+}
+#endif
+
+bool nt_gfx_gl_ctx_enable_debug_callback(void) {
+#ifdef NT_DEBUG
+    if (GLAD_GL_KHR_debug == 0) {
+        return false; /* driver lacks KHR_debug — silently no-op, mirrors enable_debug_groups. */
+    }
+    glEnable(GL_DEBUG_OUTPUT);
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); /* deliver on the offending call's stack so a breakpoint lands right. */
+    glDebugMessageCallback(nt_gl_debug_cb, NULL);
+    /* Mute notification-severity chatter (buffer-mapping hints etc.) at the driver, not per-callback. */
+    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, NULL, GL_FALSE);
+    return true;
+#else
+    return false;
+#endif
 }

@@ -409,6 +409,8 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     /* Probe KHR_debug for segment labeling. If absent, push/pop become
      * no-ops; segment timing still works. */
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
+    /* Native+debug: route GL errors to log/assert at the offending call. No-op in release / web. */
+    nt_gfx_gl_ctx_enable_debug_callback();
     s_segment_count = 0;
     s_active_segment = -1;
     return true;

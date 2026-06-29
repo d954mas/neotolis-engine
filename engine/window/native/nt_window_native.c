@@ -1,6 +1,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include "core/nt_platform.h"        /* NT_DEBUG for the debug-context hint below. */
 #include "input/nt_input_internal.h" /* nt_input_buffer_* */
 #include "log/nt_log.h"
 #include "window/nt_window.h"
@@ -193,6 +194,9 @@ void nt_window_init(void) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, g_nt_window.resizable ? GLFW_TRUE : GLFW_FALSE);
+#ifdef NT_DEBUG
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE); /* spec-guarantees KHR_debug message delivery; debug-only. */
+#endif
 
     const char *title = g_nt_window.title ? g_nt_window.title : "Neotolis";
 
