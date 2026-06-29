@@ -111,15 +111,18 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
 
     nt_ui_vlist_range_t r = vlist_window(pos, viewport, safe_extent, count, st.overscan);
 
-    /* Hard window cap: with ring recycling, two SIMULTANEOUSLY-visible rows sharing a ring slot would
-     * declare the same Clay id -> CLAY_ERROR_TYPE_DUPLICATE_ID. Clamp the visible window to ring-1 so
-     * that can never happen, even for a pathological viewport. REAL clamp, not an assert: NT_ASSERT
-     * vanishes in NT_ASSERT_MODE=OFF. Only shrinks `last`, so it stays <= count-1 and >= first; the
+    /* With ring recycling, two SIMULTANEOUSLY-visible rows sharing a ring slot would declare the same
+     * Clay id -> CLAY_ERROR_TYPE_DUPLICATE_ID. A visible window >= id_ring means id_ring is too small
+     * for this viewport (a developer misconfig): assert on the UNCLAMPED count so debug points at the
+     * real mistake, not at the silently-shrunk window the clamp below would otherwise leave. */
+    const uint64_t want = (r.first <= r.last) ? ((uint64_t)r.last - r.first + 1U) : 0U;
+    NT_ASSERT((st.id_ring <= 1U || want < (uint64_t)st.id_ring) && "vlist_begin: visible window (viewport/item_extent + 2*overscan) must stay below style.id_ring — raise id_ring");
+    /* Release/OFF fallback: NT_ASSERT vanishes in NT_ASSERT_MODE=OFF, so a REAL clamp must still keep
+     * two visible rows off the same slot. Only shrinks `last` (stays <= count-1 and >= first); the
      * trailing spacer (vlist_end) recomputes from this clamped last, keeping content == count*extent. */
-    if (st.id_ring > 1U && r.first <= r.last && ((uint64_t)r.last - r.first + 1U) > (uint64_t)(st.id_ring - 1U)) {
+    if (st.id_ring > 1U && want > (uint64_t)(st.id_ring - 1U)) {
         r.last = r.first + (st.id_ring - 2U); /* window size = ring-1 (<= ring-1, > 0 since ring>1) */
     }
-    NT_ASSERT(((r.first > r.last) || st.id_ring <= 1U || ((uint64_t)r.last - r.first + 1U) < (uint64_t)st.id_ring) && "vlist_begin: visible window must stay below id_ring (raise style.id_ring)");
 
     const bool empty = (r.first > r.last);
 
