@@ -120,6 +120,14 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_metrics PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_metrics)
 
+    # --- Window pre-swap hook registry (L1, no GL/GLFW) ---
+    # nt_window_stub = the real shared nt_window.c (hook registry) + a stubbed backend. nt_assert_trap.c
+    # backs the table-full death-test; needs unit/ on the include path for "test_helpers/nt_assert_trap.h".
+    add_executable(test_window_hooks unit/test_window_hooks.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_window_hooks PRIVATE nt_window_stub nt_core nt_log_stub unity)
+    target_include_directories(test_window_hooks PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_window_hooks)
+
     # --- Log API tests (domain functions, macros, level filtering) ---
     add_executable(test_log_api unit/test_log_api.c)
     target_link_libraries(test_log_api PRIVATE nt_log unity)
