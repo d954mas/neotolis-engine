@@ -1,10 +1,6 @@
-/* L2 devapi capture group (capture.frame / capture.region) via submit() (no socket): the FIRST
-   deferred command that returns DATA. Asserts the bot-param validation (bad scale / out-of-bounds
-   region / zero-size -> bad_params, NEVER assert), the defer path (submit returns NULL, no sync
-   yield), and the seam-driven encode end-to-end against the nt_gfx_stub synthetic buffer (no GL):
-   driving nt_devapi_capture_on_pre_swap then polling yields {format:"png", non-empty data} with
-   the post-scale dims. The whole TU is gated on NT_DEVAPI_GROUP_CAPTURE so the OFF mirror links a
-   stub main (zero release delta). */
+/* L2 capture group via submit() (no socket): bot-param validation -> bad_params (never assert), the
+   defer path (submit -> NULL), and seam-driven encode against nt_gfx_stub (no GL). Gated on
+   NT_DEVAPI_GROUP_CAPTURE so the OFF mirror links a stub main (zero release delta). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -165,9 +161,8 @@ static void test_capture_region_degenerate_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":3,\"h\":3,\"scale\":4}}"));
 }
 
-/* scale that does not EVENLY divide the dims -> bad_params (not a silent edge crop).
-   Distinct from the degenerate case above: here floor(6/4)==1 is non-zero, so old floor-div would have
-   ACCEPTED it and silently dropped the 2 remainder pixels per axis. The handler rejects it instead. */
+/* scale that does not EVENLY divide the dims -> bad_params, not a silent edge crop: floor(6/4)==1 is
+   non-zero, so a floor-div would accept it and drop the 2 remainder pixels per axis. */
 static void test_capture_nondividing_scale_bad_params(void) {
     /* region 6x6 scale 4: 6%4==2 (non-zero floor, but not an even divide) -> bad_params. */
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.region\",\"params\":{\"x\":0,\"y\":0,\"w\":6,\"h\":6,\"scale\":4}}"));
@@ -176,10 +171,9 @@ static void test_capture_nondividing_scale_bad_params(void) {
     assert_bad_params(nt_devapi_submit("{\"method\":\"capture.frame\",\"params\":{\"scale\":4}}"));
 }
 
-/* producer RAN but returned NULL -> {ok:false,error:capture_failed} with correlated id.
-   Drives a lost context so nt_gfx_read_pixels returns false -> the producer yields NULL -> the DATA slot
-   resolves as a distinguishable capture_failed error (NOT the content-free legacy {deferred:true}, NOT a
-   crash). A client thus never sees ok:true without the documented {width,height,format,data} shape. */
+/* producer RAN but returned NULL -> a distinguishable {ok:false,error:capture_failed} with the correlated
+   id, never the content-free {deferred:true} nor a crash. A lost context makes nt_gfx_read_pixels fail so
+   the producer yields NULL. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_capture_producer_failure_yields_error(void) {
@@ -259,10 +253,9 @@ static void test_capture_unarmed_host_unavailable(void) {
     /* tearDown shuts down; the next setUp re-inits + re-arms. */
 }
 
-/* a READY producer slot whose seam has NOT run is WITHHELD (poll NULL), not capture_failed.
-   The anti-drain-race guard: poll must not serialize a frame-ready capture whose pre-swap producer has not
-   yet filled the payload (that would emit capture_failed and lose the image). Drives the host ordering
-   where a poll lands between the frame-advance and the seam. No GL — the seam-vs-poll ordering is the SUT. */
+/* drain-race guard: a frame-READY slot whose pre-swap producer has NOT run yet is WITHHELD (poll NULL),
+   not emitted as capture_failed (which would lose the image). Drives a poll landing between the
+   frame-advance and the seam; no GL — the seam-vs-poll ordering is the SUT. */
 static void test_capture_ready_before_seam_is_withheld(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"capture.frame\",\"request_id\":9}")); /* defers. */
     g_nt_app.frame++;                                                                      /* reach the slot's 1-frame target: the slot is now READY, but the seam has NOT run. */

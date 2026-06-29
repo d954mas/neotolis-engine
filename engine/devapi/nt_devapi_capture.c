@@ -10,11 +10,9 @@
 #include "graphics/nt_gfx.h"
 #include "window/nt_window.h"
 
-/* Capture command group (capture.frame / capture.region): the FIRST deferred command that returns
-   DATA. Each handler validates its bot params (NEVER asserts) then defers with
-   a producer; the producer runs at the GL-valid pre-swap seam and chains readback -> RGB strip
-   -> optional box-average ½/¼ -> fpng -> base64 -> {width,height,format:"png",data}.
-   Compiles out entirely when NT_DEVAPI_GROUP_CAPTURE is absent (zero release delta). */
+/* Capture command group (capture.frame / capture.region). Handlers validate bot params (never assert),
+   then DEFER a producer that runs at the GL-valid pre-swap seam — that timing is why capture returns its
+   data asynchronously. Compiles out entirely without NT_DEVAPI_GROUP_CAPTURE. */
 
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 
@@ -24,10 +22,9 @@
 #define NT_DEVAPI_CAPTURE_MAX_PIXELS (4096ULL * 4096ULL)
 #endif
 
-/* The producer sizes rgba (w*h*4), the PNG cap (rgb*1.5 + 1024 ~= w*h*6), AND the base64 expansion
-   (b64_need = png_len*4/3, which at the worst-case png_cap is w*h*6 + ~1368) in uint32. Bound by *8 so
-   the LARGEST product (the base64 need, not just the PNG cap) stays free of wraparound for ANY -D-raised
-   cap — the uint32 size math is then provably safe end-to-end. */
+/* The producer's largest uint32 product is the base64 need (~w*h*8, above the rgba and png-cap sizes).
+   The *8 bound keeps it wraparound-free for any -D-raised cap, so the uint32 size math is provably safe
+   end-to-end. */
 _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: the base64 size expansion (~w*h*8) would overflow the uint32 producer size math");
 
 /* NT_DEVAPI_CAPTURE_MAX_INFLIGHT (default 4) is defined in the public capture header so a host can -D it
