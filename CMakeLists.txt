@@ -14,6 +14,16 @@ include(cmake/nt_shell.cmake)
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
 
+# Web counterpart to the native KHR_debug callback. ONE flag enables Emscripten GL_ASSERTIONS (validate
+# GL call params) + GL_DEBUG (log every GL call). OFF by default EVEN in debug: GL_DEBUG logs every GL
+# call, so it is opt-in for active GL bug-hunts only. Inert on native builds (warned below).
+option(NT_GFX_WEB_GL_DEBUG "Enable Emscripten GL_ASSERTIONS + GL_DEBUG on WASM builds." OFF)
+if(NT_GFX_WEB_GL_DEBUG AND NOT EMSCRIPTEN)
+    message(WARNING "NT_GFX_WEB_GL_DEBUG=ON has no effect on a native build — it only adds Emscripten "
+        "GL_ASSERTIONS/GL_DEBUG to WASM link lines. Native GL errors go through the KHR_debug callback "
+        "(debug builds, always on, no flag).")
+endif()
+
 # Inspector + hit-zone overlay; OFF strips ~30 KB binary and ~9 KB ctx state.
 # The 0/1 define is attached PUBLIC to the nt_ui target inside engine/ui/CMakeLists.txt
 # so external consumers see the same value via target_link_libraries.
@@ -91,6 +101,11 @@ if(EMSCRIPTEN)
     # Closure Compiler minifies JS glue code (~60% reduction)
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         add_link_options(--closure 1)
+    endif()
+
+    # Opt-in web GL debug (NT_GFX_WEB_GL_DEBUG): link-time GL glue validation + per-call logging.
+    if(NT_GFX_WEB_GL_DEBUG)
+        add_link_options(-sGL_ASSERTIONS=1 -sGL_DEBUG=1)
     endif()
 endif()
 
