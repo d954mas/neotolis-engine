@@ -14,7 +14,7 @@ if(NOT EMSCRIPTEN)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
-        nt_shape_renderer nt_mem_scratch nt_metrics
+        nt_shape_renderer nt_mem_scratch nt_metrics nt_devapi_net
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -494,6 +494,16 @@ if(NOT EMSCRIPTEN)
             _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
         )
         nt_setup_test_target(test_devapi_deferred)
+
+        # Loopback transport backpressure: a large response survives a full send buffer (EWOULDBLOCK ->
+        # select-wait) intact, and a wedged peer is dropped on a bounded timeout, not busy-spun. Links
+        # nt_devapi_net (socket code + ws2_32) ahead of nt_devapi + stubs. Group-independent.
+        add_executable(test_devapi_net_backpressure unit/test_devapi_net_backpressure.c)
+        target_link_libraries(test_devapi_net_backpressure PRIVATE nt_devapi_net nt_devapi cjson nt_app_stub nt_core nt_log_stub unity)
+        target_compile_definitions(test_devapi_net_backpressure PRIVATE
+            _CRT_SECURE_NO_WARNINGS NT_DEVAPI_ENABLED=1
+        )
+        nt_setup_test_target(test_devapi_net_backpressure)
 
         # core command group via submit(). engine.info.version comes from nt_core, so the
         # test asserts it against nt_engine_version_string() directly. Needs the core group.

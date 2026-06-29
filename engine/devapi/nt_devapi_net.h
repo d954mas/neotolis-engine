@@ -49,4 +49,13 @@ bool nt_devapi_net_has_client(void);
    bot must push setup before frame 0; normal per-frame accept continues after it returns. */
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms);
 
+// #region test_access
+#ifdef NT_TEST_ACCESS
+/* Self-contained loopback backpressure check (socket code stays here, the platform boundary, so the
+   test driver is platform-agnostic). Returns 0, or the first failed step code: a large payload must
+   survive EWOULDBLOCK intact and a wedged peer must be dropped on a timeout, not busy-spun. */
+int nt_devapi_net_backpressure_selftest(void);
+#endif
+// #endregion
+
 #endif /* NT_DEVAPI_NET_H */
