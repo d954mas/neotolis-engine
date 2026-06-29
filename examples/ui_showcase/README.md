@@ -94,13 +94,13 @@ lighten and writes the index on click).
 
 ## Parity-widget controls (Toggles / Sliders / Virtual List tabs)
 
-The three Phase-70 parity widgets are **Model D**: the game owns the value(s); the engine
+The three parity widgets are **Model D**: the game owns the value(s); the engine
 stores only the eased visual + scroll physics. All three are wired into the **existing**
 vitrine tabs (no new example dir).
 
 | Input | Action |
 |-------|--------|
-| **Toggles** — toggle some (not all) child checkboxes | the "Select all" parent shows the indeterminate **MIXED** dash (the game aggregates the children each frame; MIXED is display-only, D-70-04) |
+| **Toggles** — toggle some (not all) child checkboxes | the "Select all" parent shows the indeterminate **MIXED** dash (the game aggregates the children each frame; MIXED is display-only) |
 | **Toggles** — toggle ALL / NONE of the children | the parent resolves to the **checkmark** (all on) / **empty** box (all off) |
 | **Toggles** — click the "Select all" parent | `nt_ui_checkbox_tri` resolves any non-ON to ON then toggles ON↔OFF (a click **never** produces MIXED); the game then writes every child to match |
 | **Sliders** — drag the vertical "Mixer" thumb up/down | the value rises dragging **up**; the fill anchors at the **bottom** (`NT_UI_SLIDER_VERTICAL` + `NT_UI_FILL_BOTTOM_UP`); the thumb overhang is clickable (cross-axis hit-pad) |
@@ -112,11 +112,10 @@ vitrine tabs (no new example dir).
 The GL surface is **not reliably headless-capturable** here, so the parity widgets are verified
 by the **user's eyes** at the BLOCKING visual-QA gate — there is no automated screenshot
 regression. All headless math (tristate click resolution, vertical drag/anchor/coerce, vlist
-windowing / recycle-id / spacers / one-clip) is already proven green in the Plan 01-03 unit
-tests; this gate confirms the pixel-level outcomes. If any showcase atlas asset changed,
-**force-delete the stale `.ntpack`** before this run (the pack depends only on the builder exe,
-not the asset source — see memory `shader_pack_no_dep`) so QA sees fresh art. Build + run the
-native showcase (see **Build & run** below), then confirm:
+windowing / recycle-id / spacers / one-clip) is already proven green in the unit tests; this gate
+confirms the pixel-level outcomes. If any showcase atlas asset changed, **force-delete the stale
+`.ntpack`** before this run (the pack depends only on the builder exe, not the asset source) so QA
+sees fresh art. Build + run the native showcase (see **Build & run** below), then confirm:
 
 1. **MIXED dash** (Toggles tab) — with some children on and some off, the parent renders a
    **centered**, full-opacity dash that is clearly **DISTINCT** from the checkmark (different
@@ -133,12 +132,10 @@ native showcase (see **Build & run** below), then confirm:
 4. **Dark/Light parity** — press **T**; both palettes restyle all three new demos correctly.
 5. *(Optional)* load the wasm-debug build in a browser and confirm WebGL2 parity.
 
-> **ROADMAP↔CONTEXT divergence (flagged per AGENTS.md):** ROADMAP §Phase 70 success criteria #3
-> and #5 still list a standalone **"Segmented control"** widget + demo. CONTEXT **D-70-01
-> SUPERSEDES** this — the existing `nt_ui_tabbar` (horizontal dir + `NT_UI_TABBAR_ACCENT_NONE` +
-> filled `selected` state + one-call `nt_ui_tabbar(labels, icons, count, int *active)`) already
-> satisfies **WIDGET-EXT-06**. **No** segmented widget / preset / demo is created; the existing
-> **Tabs** tab is the segmented reference. CONTEXT is authoritative.
+> **No standalone "Segmented control" widget:** the existing `nt_ui_tabbar` (horizontal dir +
+> `NT_UI_TABBAR_ACCENT_NONE` + filled `selected` state + one-call
+> `nt_ui_tabbar(labels, icons, count, int *active)`) already serves as the segmented control, so no
+> separate segmented widget / preset / demo exists — the **Tabs** tab is the reference.
 
 ## Input controls (Input tab)
 
