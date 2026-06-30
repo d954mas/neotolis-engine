@@ -127,17 +127,23 @@ class PlaywrightTransport(Transport):
         self._timeout = read_timeout
         # Lines received synchronously from submit() but not yet handed to recv_line().
         self._inbox = []
-        # Tracked from time.set_mode: under MANUAL the frame counter advances only on time.step, so a
-        # frame-keyed deferred (capture) never drains on rAF alone — recv_line pumps a step when manual.
+        # Outbound bookkeeping for the MANUAL frame pump: the last method sent and whether the host is in
+        # MANUAL (where the frame counter advances only on time.step, so a frame-keyed deferred like
+        # capture never drains on rAF alone).
         self._manual = False
+        self._last_method = None
 
-    def _note_mode(self, line: str) -> None:
-        """Sniff time.set_mode so recv_line can advance MANUAL frames (rAF alone freezes the MANUAL counter)."""
+    def _note_outbound(self, line: str) -> None:
+        """Track the outbound method + MANUAL mode so recv_line pumps frames correctly."""
+        self._last_method = None
         try:
             msg = json.loads(line)
         except ValueError:
             return
-        if isinstance(msg, dict) and msg.get("method") == "time.set_mode":
+        if not isinstance(msg, dict):
+            return  # a batch array — no single method
+        self._last_method = msg.get("method")
+        if self._last_method == "time.set_mode":
             mode = (msg.get("params") or {}).get("mode")
             if mode in ("manual", "run"):
                 self._manual = mode == "manual"
@@ -145,7 +151,7 @@ class PlaywrightTransport(Transport):
     def send(self, line: str) -> None:
         if len(line.encode("utf-8")) > MAX_LINE_BYTES:
             raise ValueError("outbound line exceeds MAX_LINE_BYTES")
-        self._note_mode(line)
+        self._note_outbound(line)
         # submit returns "" on defer (C returned NULL), else the synchronous response line.
         resp = self._page.evaluate("(l) => window.__devapi.submit(l)", line)
         if resp:
@@ -157,19 +163,26 @@ class PlaywrightTransport(Transport):
         # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast.
         deadline = time.time() + self._timeout
         while time.time() < deadline:
-            # Under MANUAL the frame counter only advances on time.step, so a frame-keyed deferred
-            # (capture) never drains on rAF alone — advance one MANUAL step (tick's response is consumed
-            # by the bridge, not queued) before the render barrier. Under RUN the rAF below advances it.
-            if self._manual:
+            # Advance one MANUAL frame so a frame-keyed deferred (capture) drains — but NOT when the
+            # caller's own command is time.step, which is itself a deferred sim-advance (an extra step
+            # would over-advance the sim). Under RUN the rAF below advances the frame.
+            if self._manual and self._last_method != "time.step":
                 self._page.evaluate("() => window.__devapi.tick(1)")
-            # Advance a real rendered frame so a pending capture's pre-swap producer fills its payload,
-            # THEN poll; rAF cadence lets the seam run, the MANUAL step above makes progress determinate.
             self._page.evaluate(_RAF_BARRIER_JS)
             line = self._page.evaluate("() => window.__devapi.poll()")
-            if line:
-                if len(line.encode("utf-8")) >= MAX_LINE_BYTES:
-                    raise ConnectionError("oversized line from window.__devapi.poll — framing/cap desync")
-                return line
+            if not line:
+                continue
+            if len(line.encode("utf-8")) >= MAX_LINE_BYTES:
+                raise ConnectionError("oversized line from window.__devapi.poll — framing/cap desync")
+            # Drop the pump's own step replies (the bridge tick uses NEGATIVE request_ids; a caller only
+            # ever allocates positive ones) so they never pollute the client's correlation map.
+            try:
+                rid = json.loads(line).get("request_id")
+            except ValueError:
+                rid = None
+            if isinstance(rid, int) and rid < 0:
+                continue
+            return line
         raise TimeoutError("no web devapi line within read_timeout")
 
     def close(self) -> None:

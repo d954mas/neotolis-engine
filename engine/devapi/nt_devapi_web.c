@@ -30,8 +30,9 @@ EM_JS(void, nt_devapi_web_install_shim, (void), {
             var p = _nt_devapi_web_poll();
             return p ? UTF8ToString(p) : "";
         },
-        /* Internal MANUAL-step pump. Uses a distinct DECREASING request_id so a step reply never
-           collides with a caller's positive id; the reply is fire-and-forget (time.step is synchronous). */
+        /* Internal MANUAL-step pump. time.step DEFERS (its reply arrives later via poll), so use a
+           distinct DECREASING request_id that never collides with a caller's positive id; a caller that
+           does not await it ignores it by id (the Python pump drops these negative-id replies). */
         tick: function(n) {
             window.__devapi._step_rid -= 1;
             return window.__devapi.submit(JSON.stringify(
