@@ -575,3 +575,8 @@ const char *nt_devapi_poll_response(void) {
     }
     return NULL; /* nothing ready this call. */
 }
+
+/* Core per-tick entry: runs only the registered tick hooks. Each transport (native net, web)
+   registers its own poll+deferred-drain as a tick hook, so both share this one frame-keyed seam
+   without the core naming either transport. */
+void nt_devapi_update(void) { nt_devapi_run_tick_hooks(); }

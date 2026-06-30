@@ -258,6 +258,10 @@ bool nt_devapi_net_start(uint16_t port) {
 #endif
         return false; /* port taken / refused — API-contract return, not an assert. */
     }
+    /* Register recv+deferred-drain as a tick hook. Must precede the input group's tick hook so a
+       line submitted this frame schedules its input edge BEFORE the input schedule tick runs — hosts
+       therefore call net_start before register_default (hooks run in registration order). */
+    nt_devapi_register_tick(nt_devapi_net_poll);
     return true;
 }
 
@@ -397,15 +401,6 @@ void nt_devapi_net_poll(void) {
     // #endregion
 }
 // #endregion
-
-/* TODO(transport-split): this is the game-facing per-tick entry but lives in the TCP module and only
-   drives net_poll. When a second transport (web) lands, move the transport poll to the core and poll
-   every registered transport so both share the frame-keyed deferred drain. Single transport today ->
-   kept here (YAGNI). */
-void nt_devapi_update(void) {
-    nt_devapi_net_poll(); /* handlers enqueue first, then per-tick hooks release due entries. */
-    nt_devapi_run_tick_hooks();
-}
 
 // #region wait_for_client (opt-in pre-loop gate, bounded)
 /* Monotonic WALL clock: clock() measures CPU time (wrong for a wall-clock spin timeout). */

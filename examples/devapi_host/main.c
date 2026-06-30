@@ -240,6 +240,17 @@ int main(void) {
         printf("Failed to initialize devapi\n");
         goto shutdown_base;
     }
+    /* Start the transport BEFORE registering groups: net_start registers net_poll as a tick hook, and
+       it must precede the input group's tick hook (registration order) so a line submitted this frame
+       schedules its input edge before the input schedule tick (T-70-01-ORDER). */
+    {
+        uint16_t port = resolve_port();
+        if (!nt_devapi_net_start(port)) {
+            printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
+            goto shutdown_devapi;
+        }
+        printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
+    }
     nt_devapi_register_default(); /* full host: register every compiled-in group. */
     result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
     if (result != NT_OK) {
@@ -283,16 +294,8 @@ int main(void) {
         nt_drawable_comp_add(seed_c);
     }
 
-    {
-        uint16_t port = resolve_port();
-        if (!nt_devapi_net_start(port)) {
-            printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
-            goto shutdown_scene;
-        }
-        printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
-        /* Seed the log ring so log.tail has at least one entry the moment a bot connects. */
-        nt_log_info("devapi_host listening on 127.0.0.1:%u", port);
-    }
+    /* Seed the log ring so log.tail has at least one entry the moment a bot connects. */
+    nt_log_info("devapi_host listening (devapi TCP server already started above)");
 
     /* Opt-in pre-loop gate so a bot can hand over setup before frame 0.
        Bounded; the host does NOT require a client to start. */
@@ -306,7 +309,7 @@ int main(void) {
     status = 0; /* clean run */
 
     nt_devapi_net_stop();
-shutdown_scene: /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
+    /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();

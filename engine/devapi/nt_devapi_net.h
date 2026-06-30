@@ -30,12 +30,6 @@ bool nt_devapi_net_start(uint16_t port);
    before a client connects. */
 void nt_devapi_net_poll(void);
 
-/* Per-tick devapi update — the game calls this once per frame (where it calls net_poll today). It
-   drives transport I/O + the frame-keyed deferred drain (resolved against g_nt_app.frame, so it is
-   the game clock that advances waits, not the call count). Currently wraps the TCP poll; a future
-   web transport will split the transport poll (net/web) out of this core entry so both share it. */
-void nt_devapi_update(void);
-
 /* Close the client + listen sockets and tear down platform networking (WSACleanup on Windows). */
 void nt_devapi_net_stop(void);
 
