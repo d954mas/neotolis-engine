@@ -257,7 +257,8 @@ static void frame(void) {
     nt_metrics_count("frames", s_frame_counter);
     nt_metrics_count_f("frame_cpu_ms", (double)cpu_ms);
 
-    /* This host inits no gfx, so gpu_ms is the "no timer" sentinel and draw_calls is 0. */
+    /* No GPU timer and no draw count fed to metrics here, so gpu_ms is the "no timer" sentinel and the
+       metrics draw_calls stays 0 (render.info's own draw_calls comes from nt_gfx, not this frame). */
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
        on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
     static uint64_t s_mem_used;

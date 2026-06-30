@@ -38,9 +38,9 @@ void nt_devapi_net_stop(void);
    disconnect, so game-owned time/mode recovery is application policy, not the library's. */
 bool nt_devapi_net_has_client(void);
 
-/* Opt-in pre-loop gate: bounded-busy non-blocking accept until a client connects or timeout_ms
-   elapses. Returns true if a client is connected. The game wires this BEFORE its loop when the
-   bot must push setup before frame 0; normal per-frame accept continues after it returns. */
+/* Opt-in pre-loop gate: blocks in select() on the listen socket until a client connects or timeout_ms
+   elapses (bounded, not busy-spun). Returns true if a client is connected. The game wires this BEFORE
+   its loop when the bot must push setup before frame 0; normal per-frame accept continues after it returns. */
 bool nt_devapi_net_wait_for_client(uint32_t timeout_ms);
 
 // #region test_access

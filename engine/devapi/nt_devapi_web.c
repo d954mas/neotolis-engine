@@ -1,8 +1,6 @@
-/* Web (Emscripten) devapi transport — a push/pull ccall bridge instead of a socket (no listener on
-   web). JS pushes a request line through nt_devapi_web_submit and pulls queued deferred responses
-   through nt_devapi_web_poll; both return the SAME const char* the core already owns (the core's
-   growing response buffer, valid until the next submit/poll), so the web side adds NO new buffer and
-   NO new validation surface — every line goes through the same nt_devapi_submit parse. */
+/* Web (Emscripten) devapi transport: a push/pull ccall bridge, NO socket/listener. submit/poll return
+   the core's OWN response buffer (valid until the next submit/poll), so the web side adds no new buffer
+   and no new validation surface — every line still goes through nt_devapi_submit. */
 
 #include <emscripten.h>
 
