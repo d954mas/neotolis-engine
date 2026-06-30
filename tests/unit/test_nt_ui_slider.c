@@ -155,6 +155,16 @@ static void warmup_vfloat(float *value, float min, float max) {
     (void)slider_vfloat_frame(&f0, value, min, max, 0.0F, true);
 }
 
+static bool slider_vint_frame(const nt_pointer_t *p, int *value, int min, int max, int step, bool enabled) {
+    bool changed = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = VT_X, .y = VT_Y}}}) {
+        changed = nt_ui_slider_int(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, value, min, max, step, &s_style, &s_vtrack_decl, enabled);
+    }
+    nt_ui_end(s_fx.ctx);
+    return changed;
+}
+
 /* ---- Test 1: track-press jumps the value to the click point (left edge -> min,
  *      right edge -> max, midpoint -> mid). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -718,6 +728,19 @@ static void test_vertical_thumb_pos_exposed(void) {
     TEST_ASSERT_TRUE(float_near(t.y, VT_Y_AT_FRAC_BU(0.25F), 1.0F)); /* travels Y, BOTTOM_UP inverted */
 }
 
+/* ---- Vertical slider_int: the public _int entry's axis branch + BOTTOM_UP quantize ---- */
+static void test_vertical_int_track_jump_bottom_up(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    int value = 0;
+    nt_pointer_t f0 = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    (void)slider_vint_frame(&f0, &value, 0, 10, 1, true); /* warm-up: cache the track bbox */
+    /* Press at the screen Y for fraction 0.7 -> value 7 (BOTTOM_UP inverts; int step 1 quantizes). */
+    nt_pointer_t pj = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.7F), true, true, false);
+    const bool changed = slider_vint_frame(&pj, &value, 0, 10, 1, true);
+    TEST_ASSERT_TRUE(changed);
+    TEST_ASSERT_EQUAL_INT(7, value);
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
@@ -726,14 +749,12 @@ static void test_vertical_thumb_pos_exposed(void) {
  * the right axis without corrupting a shared/static style across frames. */
 static void test_vertical_axis_mismatch_no_mutation(void) {
     init_vstyle(NT_UI_FILL_LTR); /* LTR is a HORIZONTAL anchor -> mismatch for VERTICAL */
-    const nt_ui_fill_direction_t before = s_style.fill_direction;
     float value = 0.0F;
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_vtrack_decl, true)); }
     nt_ui_end(s_fx.ctx);
     /* The caller's style is untouched: still LTR (the coerce lives in a local, not the struct). */
-    TEST_ASSERT_EQUAL_INT(before, s_style.fill_direction);
     TEST_ASSERT_EQUAL_INT(NT_UI_FILL_LTR, s_style.fill_direction);
 }
 
@@ -842,6 +863,7 @@ int main(void) {
     RUN_TEST(test_vertical_thumb_grab_top_down);
     RUN_TEST(test_vertical_hit_pad_left_right);
     RUN_TEST(test_vertical_thumb_pos_exposed);
+    RUN_TEST(test_vertical_int_track_jump_bottom_up);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vertical_axis_mismatch_no_mutation);
     RUN_TEST(test_horizontal_rtl_unsupported_no_mutation);

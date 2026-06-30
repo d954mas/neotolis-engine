@@ -63,8 +63,8 @@ typedef struct {
 } nt_ui_slider_thumb_t;
 
 /* Returns true the frame the (quantized) value changed. value lives in the game.
- * step != 0 quantizes (0 = continuous for float; int step likewise). min != max
- * required. Engine owns .id/.clip/.userData on the decl; data must NOT set
+ * step quantizes onto the min+k*step grid (float: 0 = continuous; int always quantizes,
+ * step <= 0 falls back to 1). min != max required. Engine owns .id/.clip/.userData on the decl; data must NOT set
  * HAS_TRANSFORM/HAS_OPACITY. enabled=false short-circuits interaction + dims.
  *
  * Out-of-range *value: clamped to [min,max] AND written back (returns true that

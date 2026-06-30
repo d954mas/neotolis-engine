@@ -394,22 +394,6 @@ static bool tri_click(nt_ui_tristate_t *value) {
     return tri_frame(&pu, value, true);
 }
 
-/* ---- Test: OFF -> click -> ON, returns changed. ---- */
-static void test_tri_off_click_on(void) {
-    nt_ui_tristate_t v = NT_UI_TRI_OFF;
-    tri_warmup(&v);
-    TEST_ASSERT_TRUE(tri_click(&v));
-    TEST_ASSERT_EQUAL_INT32((int32_t)NT_UI_TRI_ON, (int32_t)v);
-}
-
-/* ---- Test: ON -> click -> OFF, returns changed. ---- */
-static void test_tri_on_click_off(void) {
-    nt_ui_tristate_t v = NT_UI_TRI_ON;
-    tri_warmup(&v);
-    TEST_ASSERT_TRUE(tri_click(&v));
-    TEST_ASSERT_EQUAL_INT32((int32_t)NT_UI_TRI_OFF, (int32_t)v);
-}
-
 /* ---- Test: MIXED -> click -> ON (resolve-to-ON, NOT toggle-to-OFF). ---- */
 static void test_tri_mixed_click_on(void) {
     nt_ui_tristate_t v = NT_UI_TRI_MIXED;
@@ -418,7 +402,7 @@ static void test_tri_mixed_click_on(void) {
     TEST_ASSERT_EQUAL_INT32((int32_t)NT_UI_TRI_ON, (int32_t)v);
 }
 
-/* ---- Test: a click NEVER produces MIXED -- the value only cycles OFF<->ON. ---- */
+/* ---- Test: clicks cycle OFF<->ON (each returns changed) and NEVER produce MIXED. ---- */
 static void test_tri_never_mixed_via_click(void) {
     nt_ui_tristate_t v = NT_UI_TRI_OFF;
     tri_warmup(&v);
@@ -627,8 +611,6 @@ int main(void) {
     RUN_TEST(test_label_side_order);
     RUN_TEST(test_text_color_override);
     RUN_TEST(test_style_defaults_valid_baseline);
-    RUN_TEST(test_tri_off_click_on);
-    RUN_TEST(test_tri_on_click_off);
     RUN_TEST(test_tri_mixed_click_on);
     RUN_TEST(test_tri_never_mixed_via_click);
     RUN_TEST(test_tri_render_row_distinct);

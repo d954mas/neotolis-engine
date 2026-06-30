@@ -410,8 +410,7 @@ static struct tab_state s_state = {
     .cb_locked = true, /* demos a locked-ON feature; disabled so it stays fixed. */
     .radio_sel = 1,
     .toggle_value = false,
-    .sel_all = NT_UI_TRI_MIXED, /* start partially-checked so the MIXED dash shows on first paint */
-    .sel_items = {true, false, true, false},
+    .sel_items = {true, false, true, false}, /* 2 on -> render_toggles aggregates to MIXED on first paint */
     .slider_float = 0.65F,
     .slider_int = 4,
     .slider_vert = 0.5F,
@@ -460,6 +459,14 @@ static uint32_t s_id_vlist_y, s_id_vlist_x; /* 10k-row windowed lists (vertical 
 static uint32_t s_vlist_sel[(SHOWCASE_VLIST_COUNT + 31) / 32];
 static inline bool vlist_sel_get(uint32_t i) { return (s_vlist_sel[i >> 5U] & (1U << (i & 31U))) != 0U; }
 static inline void vlist_sel_toggle(uint32_t i) { s_vlist_sel[i >> 5U] ^= (1U << (i & 31U)); }
+/* Portable popcount (no toolchain __builtin_*): the select-all readout sums the selection bitset. */
+static inline uint32_t vlist_popcount_u32(uint32_t v) {
+    uint32_t c = 0U;
+    for (; v != 0U; v &= v - 1U) {
+        ++c;
+    }
+    return c;
+}
 static uint32_t s_id_progress;
 static uint32_t s_id_progress_crop, s_id_progress_vert; /* CROP + vertical progress variants */
 static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / ALWAYS lists */
@@ -1480,7 +1487,7 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
          * the visible window. Popcount over the bitset is ~313 words, trivial. */
         uint32_t sel_total = 0U;
         for (size_t w = 0; w < (sizeof s_vlist_sel / sizeof s_vlist_sel[0]); ++w) {
-            sel_total += (uint32_t)__builtin_popcount(s_vlist_sel[w]);
+            sel_total += vlist_popcount_u32(s_vlist_sel[w]);
         }
 
         /* Vertical 10k-row column of selectable rows. */

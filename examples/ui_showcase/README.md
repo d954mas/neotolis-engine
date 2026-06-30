@@ -31,8 +31,8 @@ lighten and writes the index on click).
    a live insets/size properties panel.
 5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle +
    a **tristate "select all"** (`nt_ui_checkbox_tri`) whose parent reflects the
-   children (all on / all off / indeterminate MIXED dash); see the **Parity-widget
-   controls** + **Parity-widget visual-QA protocol** below.
+   children (all on / all off / indeterminate MIXED dash); see the **New-widget
+   controls** + **Visual-QA protocol** below.
 6. **Sliders & Progress** - float + int sliders + a **vertical** volume/mixer
    slider (`NT_UI_SLIDER_VERTICAL`, BOTTOM_UP fill) + a progress bar with a live
    value / auto-animate properties panel.
@@ -41,8 +41,8 @@ lighten and writes the index on click).
 8. **Virtual List** - two `nt_ui_vlist` clippers over a **10,000-row** dataset
    (a vertical column + a horizontal strip); each owns ONE scroll / ONE Clay clip
    and renders only the visible window, so cost ~ the visible count, not 10k. A
-   header readout shows the live window vs the total; see the **Parity-widget
-   visual-QA protocol** below.
+   header readout shows the live window vs the total; see the **Visual-QA
+   protocol** below.
 9. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
 10. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
     (`nt_ui_input_text`); see the **Input controls** table below.
@@ -92,11 +92,11 @@ lighten and writes the index on click).
 | **Esc** (modal up) | close the TOP modal only |
 | backdrop click (modal up) | close-on-backdrop (the backdrop blocks click-through) |
 
-## Parity-widget controls (Toggles / Sliders / Virtual List tabs)
+## New-widget controls (Toggles / Sliders / Virtual List tabs)
 
-The three parity widgets are **Model D**: the game owns the value(s); the engine
-stores only the eased visual + scroll physics. All three are wired into the **existing**
-vitrine tabs (no new example dir).
+The tristate checkbox, vertical slider, and virtual list are **Model D**: the game owns
+the value(s); the engine stores only the eased visual + scroll physics. All three are wired
+into the **existing** vitrine tabs (no new example dir).
 
 | Input | Action |
 |-------|--------|
@@ -107,15 +107,13 @@ vitrine tabs (no new example dir).
 | **Virtual List** — wheel / drag-fling the vertical column | the 10k-row list scrolls; only the visible window (+ overscan) is rendered; the header readout shows `rows X..Y visible (N of 10000 rendered)` |
 | **Virtual List** — wheel / drag-fling the horizontal strip | the same windowing on the X axis (`NT_UI_AXIS_X`); the scrollbar thumb size tracks the giant list |
 
-## Parity-widget visual-QA protocol
+## Visual-QA protocol (Toggles / Sliders / Virtual List)
 
-The GL surface is **not reliably headless-capturable** here, so the parity widgets are verified
-by the **user's eyes** at the BLOCKING visual-QA gate — there is no automated screenshot
-regression. All headless math (tristate click resolution, vertical drag/anchor/coerce, vlist
-windowing / recycle-id / spacers / one-clip) is already proven green in the unit tests; this gate
-confirms the pixel-level outcomes. If any showcase atlas asset changed, **force-delete the stale
-`.ntpack`** before this run (the pack depends only on the builder exe, not the asset source) so QA
-sees fresh art. Build + run the native showcase (see **Build & run** below), then confirm:
+The GL surface is **not reliably headless-capturable** here, so these widgets are verified
+by the **user's eyes** — there is no automated screenshot regression. If any showcase atlas
+asset changed, **force-delete the stale `.ntpack`** before this run (the pack depends only on the
+builder exe, not the asset source) so QA sees fresh art. Build + run the native showcase (see
+**Build & run** below), then confirm:
 
 1. **MIXED dash** (Toggles tab) — with some children on and some off, the parent renders a
    **centered**, full-opacity dash that is clearly **DISTINCT** from the checkmark (different
@@ -132,10 +130,9 @@ sees fresh art. Build + run the native showcase (see **Build & run** below), the
 4. **Dark/Light parity** — press **T**; both palettes restyle all three new demos correctly.
 5. *(Optional)* load the wasm-debug build in a browser and confirm WebGL2 parity.
 
-> **No standalone "Segmented control" widget:** the existing `nt_ui_tabbar` (horizontal dir +
-> `NT_UI_TABBAR_ACCENT_NONE` + filled `selected` state + one-call
-> `nt_ui_tabbar(labels, icons, count, int *active)`) already serves as the segmented control, so no
-> separate segmented widget / preset / demo exists — the **Tabs** tab is the reference.
+> **Segmented control:** `nt_ui_tabbar` (horizontal dir + `NT_UI_TABBAR_ACCENT_NONE` + filled
+> `selected` state + one-call `nt_ui_tabbar(labels, icons, count, int *active)`) doubles as the
+> segmented control — the **Tabs** tab is the reference.
 
 ## Input controls (Input tab)
 
@@ -195,7 +192,7 @@ vertex-pie facets) and bakes the angles into a per-vertex custom attribute so ma
 | **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
 | **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
 | **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
-| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched, D-66-07) |
+| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched) |
 
 ## Radial visual-QA protocol
 
