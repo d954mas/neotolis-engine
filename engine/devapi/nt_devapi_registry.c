@@ -44,6 +44,15 @@ void nt_devapi_run_reset_hooks(void) {
         s_reset_hooks[i]();
     }
 }
+
+bool nt_devapi_tick_is_registered(nt_devapi_hook_fn fn) {
+    for (int i = 0; i < s_tick_count; i++) {
+        if (s_tick_hooks[i] == fn) {
+            return true;
+        }
+    }
+    return false;
+}
 // #endregion
 
 /* Local strdup: portable under strict C17 (POSIX strdup not guaranteed declared). */

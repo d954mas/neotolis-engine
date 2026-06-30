@@ -126,6 +126,10 @@ typedef void (*nt_devapi_hook_fn)(void);
 void nt_devapi_register_tick(nt_devapi_hook_fn fn);
 void nt_devapi_register_reset(nt_devapi_hook_fn fn);
 
+/* True if fn is already in the tick table (append-only, no unregister) — lets a transport register its
+   poll at most once per devapi init so a stop->start restart cannot enqueue a duplicate. */
+bool nt_devapi_tick_is_registered(nt_devapi_hook_fn fn);
+
 /* Run all registered tick / reset hooks in registration order. */
 void nt_devapi_run_tick_hooks(void);
 void nt_devapi_run_reset_hooks(void);

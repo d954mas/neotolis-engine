@@ -260,8 +260,11 @@ bool nt_devapi_net_start(uint16_t port) {
     }
     /* Register recv+deferred-drain as a tick hook. Must precede the input group's tick hook so a
        line submitted this frame schedules its input edge BEFORE the input schedule tick runs — hosts
-       therefore call net_start before register_default (hooks run in registration order). */
-    nt_devapi_register_tick(nt_devapi_net_poll);
+       therefore call net_start before register_default (hooks run in registration order). Register at
+       most once: the table is append-only, so a stop->start restart must not enqueue a second poll. */
+    if (!nt_devapi_tick_is_registered(nt_devapi_net_poll)) {
+        nt_devapi_register_tick(nt_devapi_net_poll);
+    }
     return true;
 }
 
