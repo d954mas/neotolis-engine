@@ -432,12 +432,17 @@ static void test_vlist_nested_scroll_reversals_no_crash(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, degrades, "ring recycling must keep Clay's hashmap bounded (no saturation/degrade)");
 }
 
-/* BACKSTOP coverage: with recycling disabled (id_ring==0) the same sweep saturates the hashmap
- * deterministically, exercising build_tree's identity-seed degrade path (no trap, count > 0). */
-static void test_vlist_degrade_backstop_on_saturation(void) {
+/* BACKSTOP coverage: recycling disabled (id_ring==0) saturates Clay's hashmap deterministically -> a
+ * stale floating parent. FULL: build_tree asserts (developer error). OFF: the assert is compiled out,
+ * seed degrades to identity and the counter records it (count > 0). */
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_vlist_saturation_asserts(void) { NT_TEST_EXPECT_ASSERT((void)vlist_nested_sweep(0U)); }
+#else
+static void test_vlist_saturation_degrades_off(void) {
     const uint32_t degrades = vlist_nested_sweep(0U);
-    TEST_ASSERT_TRUE_MESSAGE(degrades > 0U, "absolute-id sweep must reproduce Clay hashmap saturation -> build_tree degrade backstop");
+    TEST_ASSERT_TRUE_MESSAGE(degrades > 0U, "absolute-id sweep must saturate Clay's hashmap -> build_tree degrade in OFF");
 }
+#endif
 
 /* ---- Death tests (NT_ASSERT_FULL only): begin signals a developer error on a bad stride ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -479,7 +484,11 @@ int main(void) {
     RUN_TEST(test_vlist_window_ring_clamp_off);
 #endif
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
-    RUN_TEST(test_vlist_degrade_backstop_on_saturation);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_vlist_saturation_asserts);
+#else
+    RUN_TEST(test_vlist_saturation_degrades_off);
+#endif
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_begin_negative_gap_asserts);
     RUN_TEST(test_vlist_begin_nan_gap_asserts);

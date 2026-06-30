@@ -505,15 +505,15 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     }
 }
 
-/* build_tree stale-floating-parent degrade (Clay hashmap saturation): non-crashing fallback to
- * identity when a floating root's parent index doesn't precede it. Counter ALWAYS compiled so the
- * inspector/tests observe it; bumped only on the rare degrade path (no release per-frame cost). */
+/* build_tree stale-floating-parent: Clay element hashmap saturation leaves a floating root's parent
+ * index stale — a developer error, so build_tree ASSERTS (raise the list's id_ring). Counter ALWAYS
+ * compiled so the inspector/tests observe it in OFF, where the assert is gone and seed -> identity. */
 static uint32_t s_bt_stale_floating_parent = 0U;
 static void nt_bt_count_stale_floating_parent(void) {
     s_bt_stale_floating_parent++;
 #ifdef NT_DEBUG
     /* Fire-once: a saturated frame can degrade many times — surface the cause once, never per-frame. */
-    nt_log_warn_once("build_tree: floating parent unresolved (Clay element hashmap likely saturated) — degraded to identity");
+    nt_log_warn_once("build_tree: floating parent index stale (Clay element hashmap saturated) — raise the list's id_ring");
 #endif
 }
 uint32_t nt_ui_internal_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
@@ -577,15 +577,16 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
                 seed = identity;
             } else {
                 const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
-                /* A baked floating parent must precede this root: 0 <= p < elem_idx (so p < N). Anything
-                 * else = Clay returned a STALE layoutElement (persistent element hashmap saturated by a big
-                 * vlist's distinct per-row ids). Degrade to identity (< elem_idx keeps tree_baked[p] in range). */
+                /* A baked floating parent must precede this root: 0 <= p < elem_idx. Anything else = a STALE
+                 * layoutElement (Clay element hashmap saturated by a list's distinct ids) -> developer error, ASSERT.
+                 * seed=identity is only the OFF floor (NT_ASSERT gone there); the < elem_idx guard prevents OOB. */
                 if (p_elem_idx >= 0 && p_elem_idx < elem_idx) {
                     seed = ctx->tree_baked[p_elem_idx];
                     seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
                 } else {
                     seed = identity;
                     nt_bt_count_stale_floating_parent();
+                    NT_ASSERT(false && "build_tree: floating parent index stale — Clay element hashmap saturated; raise the list's id_ring");
                 }
             }
         }
