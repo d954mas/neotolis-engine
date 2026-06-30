@@ -295,11 +295,9 @@ static void test_vlist_one_clip(void) {
     TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 3U, VL_RING), VL_SCRL_TAG));
 }
 
-/* ---- (h) oversized window vs id_ring: a viewport needing MORE than id_ring-1 rows is a developer
- * misconfig (id_ring too small) — two simultaneously-visible rows would otherwise share a recycle slot
- * and declare the same Clay id (CLAY_ERROR_TYPE_DUPLICATE_ID). NT_ASSERT_FULL asserts on the UNCLAMPED
- * visible count; NT_ASSERT_MODE=OFF compiles the assert out and the release fallback clamps to
- * id_ring-1. Each build tests the path it actually takes. ---- */
+/* ---- (h) oversized window vs id_ring (a too-small id_ring would alias two visible rows onto one
+ * recycle slot -> DUPLICATE_ID). FULL asserts on the unclamped count; OFF clamps to id_ring-1. Each
+ * build tests the path it takes. ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_vlist_window_exceeds_ring_asserts(void) {
     nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
@@ -352,16 +350,9 @@ static void test_vlist_window_ring_clamp_off(void) {
 }
 #endif
 
-/* ---- (i) nested vlists swept back and forth: recycling keeps Clay's hashmap bounded ----
- * Without recycling, scrolling a 10k-row vlist back and forth saturates Clay's PERSISTENT element
- * hashmap (one permanent slot per distinct id, cap == maxElementCount) with the vlist's distinct
- * per-row ids. Once full, Clay__AddHashMapItem stops refreshing existing entries, so a scroll
- * container's stored layoutElement goes STALE; the floating scrollbar's resolved parent index then
- * no longer precedes the bar and build_tree degrades (counted by stale_floating_parent). With ring
- * id-recycling the distinct ids per list are bounded by id_ring, so the SAME sweep no longer
- * saturates: the degrade count stays 0. vlist_x is declared AFTER vlist_y so the position-dependent
- * row count still shifts its container index. id_ring==0 disables recycling (absolute ids) ->
- * reproduces the saturation, keeping the build_tree backstop tested. */
+/* ---- (i) nested vlists swept back and forth ---- Without recycling, a 10k-row sweep's distinct
+ * per-row ids saturate Clay's persistent element hashmap -> stale layoutElement -> build_tree degrade.
+ * id_ring bounds the ids (degrade stays 0); id_ring==0 reproduces the saturation backstop. */
 #define VL_OUTER_ID 0x0C0FFEE1U
 #define VL_Y_ID 0x0C0FFEE2U
 #define VL_X_ID 0x0C0FFEE3U
@@ -401,6 +392,7 @@ static void vlist_nested_sweep_frame(float pos_y, uint32_t id_ring) {
             }
             nt_ui_vlist_end(s_fx.ctx);
 
+            /* vlist_x AFTER vlist_y: its position-dependent row count shifts the container index (the repro). */
             const nt_ui_vlist_range_t rx = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_X_ID, VL_BIG_COUNT, VL_BIG_COL_W, NT_UI_AXIS_X, &vst, &xdecl);
             for (uint32_t i = rx.first; i <= rx.last && i < VL_BIG_COUNT; ++i) {
                 CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(s_fx.ctx, i)}, .layout = {.sizing = {CLAY_SIZING_FIXED(VL_BIG_COL_W), CLAY_SIZING_GROW(0)}}}) {}
