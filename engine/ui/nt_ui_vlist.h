@@ -4,8 +4,8 @@
 /* Code-first virtualized-list clipper. vlist_begin owns ONE internal nt_ui_scroll (one Clay
  * clip), derives a {first,last} window from scroll pos + viewport + item_extent, and emits a
  * LEADING spacer; the game loops first..last; vlist_end emits the TRAILING spacer and closes the
- * scroll. Leading+trailing spacers size content to count*extent so scrollbar geometry stays
- * correct. Fixed item_extent, both axes (1-D). */
+ * scroll. Leading+trailing spacers reserve the off-screen rows (incl. style.gap) so the scrollbar
+ * geometry tracks the full list. Fixed item_extent, both axes (1-D). */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -28,7 +28,7 @@ typedef struct {
 typedef struct {
     nt_ui_scroll_style_t scroll; /* the owned scroll's tunables (one clip) */
     int32_t overscan;            /* extra rows rendered each side of the viewport (hides recycle pop) */
-    float gap;                   /* folded into the per-row stride (extent = item_extent + gap) */
+    float gap;                   /* inter-row spacing (px, >= 0, rounded to int); rendered as the scroll container's childGap */
     /* Id recycle modulus: per-row id keys on (index % id_ring), so distinct ids per list are bounded
      * by id_ring, NOT the row count — a 10k list never saturates Clay's PERSISTENT element hashmap
      * (one permanent slot per distinct id ever declared). MUST exceed the max simultaneously-visible
@@ -60,11 +60,7 @@ nt_ui_vlist_style_t nt_ui_vlist_style_defaults(void);
  * -> same id every frame, and id_of(base,i,ring) == id_of(base,i+ring,ring). */
 static inline uint32_t nt_ui_vlist_item_id_of(uint32_t base_id, uint32_t index, uint32_t ring) {
     const uint32_t slot = (ring > 1U) ? (index % ring) : index;
-    uint32_t h = base_id * 0x9E3779B1U;
-    h = (h ^ ((slot + 1U) * 0x85EBCA6BU));
-    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = h ^ (h >> 16);
-    return (h != 0U) ? h : 1U; /* 0 = "no widget" sentinel */
+    return nt_ui_fmix_id(base_id, slot + 1U);
 }
 
 /* Opens the owned scroll (one Clay clip), emits the leading spacer, returns the visible

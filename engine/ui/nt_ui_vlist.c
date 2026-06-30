@@ -56,8 +56,12 @@ static nt_ui_vlist_range_t vlist_window(float pos_on_axis, float viewport, float
     return r;
 }
 
-/* Spacer with a FIXED extent on the scroll axis and GROW(0) on the cross axis. */
+/* Spacer with a FIXED extent on the scroll axis and GROW(0) on the cross axis. Skips emit at extent
+ * <= 0: a zero-size spacer would still trip the container's childGap and shift the visible rows. */
 static void vlist_emit_spacer(uint8_t axis, float extent) {
+    if (!(extent > 0.0F)) {
+        return;
+    }
     const Clay_Sizing sz = (axis == NT_UI_AXIS_X) ? (Clay_Sizing){CLAY_SIZING_FIXED(extent), CLAY_SIZING_GROW(0)} : (Clay_Sizing){CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(extent)};
     CLAY({.layout = {.sizing = sz}}) {}
 }
@@ -84,12 +88,17 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     NT_ASSERT(isfinite(item_extent) && "nt_ui_vlist_begin: item_extent must be finite");
 
     const nt_ui_vlist_style_t st = (style != NULL) ? *style : nt_ui_vlist_style_defaults();
-    const float extent = item_extent + st.gap; /* gap folds into the stride so content == count*extent exactly */
-    /* Clamp the FULL stride: a negative or NaN gap can drive extent <= 0, which would otherwise emit a
-     * negative/NaN FIXED spacer in vlist_end. safe_extent (not the assert) is the real guard — NT_ASSERT
-     * vanishes in NT_ASSERT_MODE=OFF — and feeds the window, both spacers, and pending_vlist.extent. */
-    const float safe_extent = (isfinite(extent) && extent > 0.0F) ? extent : 0.0F;
-    NT_ASSERT(isfinite(extent) && extent > 0.0F && "nt_ui_vlist_begin: item_extent+gap must be finite and > 0");
+    NT_ASSERT(isfinite(item_extent) && item_extent > 0.0F && "nt_ui_vlist_begin: item_extent must be finite and > 0");
+    NT_ASSERT(st.overscan >= 0 && "nt_ui_vlist_begin: style.overscan must be >= 0");
+    NT_ASSERT(isfinite(st.gap) && st.gap >= 0.0F && "nt_ui_vlist_begin: style.gap must be finite and >= 0");
+    /* gap is the inter-row spacing: applied as the scroll container's childGap (renders between rows) AND
+     * folded into the per-row stride so the window + spacers reserve it. Clay childGap is integer px, so
+     * round ONCE and use that same value everywhere (stride, spacers, childGap) — no float/int drift.
+     * HARD guards (NT_ASSERT vanishes in OFF): a bad item_extent/gap must never feed a negative/NaN FIXED
+     * spacer or a negative childGap. safe_extent/gap_px are the real guards. */
+    const uint16_t gap_px = (isfinite(st.gap) && st.gap > 0.0F) ? (uint16_t)st.gap : 0U;
+    const float gap = (float)gap_px;
+    const float safe_extent = (isfinite(item_extent) && item_extent > 0.0F) ? (item_extent + gap) : 0.0F;
 
     /* Exactly ONE scroll (one Clay clip) per vlist — never one clip per row (each Clay clip is a
      * persistent pool slot). Axis selects the scroll axis + the inner layoutDirection (an X-axis list
@@ -99,6 +108,7 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     ss.scroll_y = (axis == NT_UI_AXIS_Y);
     Clay_ElementDeclaration sd = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     sd.layout.layoutDirection = (axis == NT_UI_AXIS_X) ? CLAY_LEFT_TO_RIGHT : CLAY_TOP_TO_BOTTOM;
+    sd.layout.childGap = gap_px; /* vlist owns inter-row spacing — renders the gap the stride alone can't */
     nt_ui_scroll_begin(ctx, data, id, &ss, &sd);
 
     /* Viewport at a 1-frame lag (prev-frame bbox); 0 on frame 1 -> a safe small default window. The
@@ -124,13 +134,17 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
 
     const bool empty = (r.first > r.last);
 
-    vlist_emit_spacer((uint8_t)axis, empty ? 0.0F : ((float)r.first * safe_extent));
+    /* Leading spacer puts row `first` at first*stride: size = first*stride - gap, because the childGap
+     * between the spacer and row `first` supplies the boundary gap. -gap at first==0 skips the spacer. */
+    const float lead = empty ? 0.0F : (((float)r.first * safe_extent) - gap);
+    vlist_emit_spacer((uint8_t)axis, lead);
 
     ctx->pending_vlist.base_id = id;
     ctx->pending_vlist.count = count;
     ctx->pending_vlist.last = r.last;
     ctx->pending_vlist.ring = st.id_ring;
     ctx->pending_vlist.extent = safe_extent;
+    ctx->pending_vlist.gap = gap;
     ctx->pending_vlist.axis = (uint8_t)axis;
     ctx->pending_vlist.empty = empty;
     ctx->pending_vlist.active = true;
@@ -144,7 +158,9 @@ void nt_ui_vlist_end(nt_ui_context_t *ctx) {
 
     float trail = 0.0F;
     if (!ctx->pending_vlist.empty && ctx->pending_vlist.count > 0U && ctx->pending_vlist.last < (ctx->pending_vlist.count - 1U)) {
-        trail = (float)(ctx->pending_vlist.count - 1U - ctx->pending_vlist.last) * ctx->pending_vlist.extent;
+        /* Symmetric to the leading spacer: (count-1-last)*stride - gap; the childGap before it supplies
+         * the boundary gap, so total content == count*item_extent + (count-1)*gap. */
+        trail = ((float)(ctx->pending_vlist.count - 1U - ctx->pending_vlist.last) * ctx->pending_vlist.extent) - ctx->pending_vlist.gap;
     }
     vlist_emit_spacer(ctx->pending_vlist.axis, trail);
 

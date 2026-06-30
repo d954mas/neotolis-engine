@@ -506,20 +506,16 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
 }
 
 /* build_tree stale-floating-parent: Clay element hashmap saturation leaves a floating root's parent
- * index stale — a developer error, so build_tree ASSERTS (raise the list's id_ring). Counter ALWAYS
- * compiled so the inspector/tests observe it in OFF, where the assert is gone and seed -> identity. */
-static uint32_t s_bt_stale_floating_parent = 0U;
-static void nt_bt_count_stale_floating_parent(void) {
-    s_bt_stale_floating_parent++;
-#ifdef NT_DEBUG
-    /* Fire-once: a saturated frame can degrade many times — surface the cause once, never per-frame. */
-    nt_log_warn_once("build_tree: floating parent index stale (Clay element hashmap saturated) — raise the list's id_ring");
-#endif
-}
-uint32_t nt_ui_internal_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
+ * index stale — a developer error, so build_tree ASSERTS (raise the list's id_ring). The counter is a
+ * TEST-ONLY instrument: the recycling test asserts it stays 0 over a 10k-row sweep, the OFF backstop
+ * asserts > 0. seed -> identity is the OFF floor (NT_ASSERT gone there). No-op in production builds. */
 #ifdef NT_TEST_ACCESS
+static uint32_t s_bt_stale_floating_parent = 0U;
+static void nt_bt_count_stale_floating_parent(void) { s_bt_stale_floating_parent++; }
 uint32_t nt_ui_internal_test_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
 void nt_ui_internal_test_reset_stale_floating_parent_count(void) { s_bt_stale_floating_parent = 0U; }
+#else
+static inline void nt_bt_count_stale_floating_parent(void) {}
 #endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -573,8 +569,12 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         } else {
             Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
             if (p_item == &Clay_LayoutElementHashMapItem_DEFAULT) {
-                NT_ASSERT(false && "build_tree: floating root's parentId not in hashmap (Clay error path)");
+                /* Same saturation symptom as the stale-index branch below: a parent added past Clay's
+                 * maxElementCount is never inserted, so its id misses the hashmap. Count + assert alike so
+                 * the recycling test's "degrade count 0" stays airtight whichever symptom a list hits. */
                 seed = identity;
+                nt_bt_count_stale_floating_parent();
+                NT_ASSERT(false && "build_tree: floating root's parentId missing — Clay element hashmap saturated; raise the list's id_ring");
             } else {
                 const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
                 /* A baked floating parent must precede this root: 0 <= p < elem_idx. Anything else = a STALE

@@ -85,10 +85,8 @@ const char *nt_ui_internal_format_mem_line(const nt_ui_context_t *ctx, char *buf
     /* elems len/cap = live Clay element pressure; the inspector truncates its tree as len nears cap.
      * Sampled at header-emit time, so it undercounts the frame's final total (the inspector tree +
      * panes are still emitted after this line). */
-    /* `deg` = build_tree stale-floating-parent count (Clay hashmap saturation). NT_ASSERT_MODE=OFF degrades
-     * to identity silently here (FULL asserts instead); nonzero => raise that list's id_ring. Cumulative. */
-    (void)snprintf(buf, buf_size, "UI mem: %u/%u slots  %u B  anim_coll:%u  elems %d/%u  deg:%u", nt_ui_state_used_slots(ctx), (uint32_t)NT_UI_STATE_SLOTS, nt_ui_state_used_bytes(ctx),
-                   nt_ui_get_anim_collision_count(ctx), nt_ui_internal_get_layout_element_count(ctx), ctx->max_elements, nt_ui_internal_stale_floating_parent_count());
+    (void)snprintf(buf, buf_size, "UI mem: %u/%u slots  %u B  anim_coll:%u  elems %d/%u", nt_ui_state_used_slots(ctx), (uint32_t)NT_UI_STATE_SLOTS, nt_ui_state_used_bytes(ctx),
+                   nt_ui_get_anim_collision_count(ctx), nt_ui_internal_get_layout_element_count(ctx), ctx->max_elements);
     return buf;
 }
 // #endregion

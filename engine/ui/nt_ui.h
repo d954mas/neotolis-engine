@@ -495,6 +495,17 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
 /* Wraps Clay_GetElementId; result is never 0. Asserts s != NULL. */
 uint32_t nt_ui_id(const char *s);
 
+/* Collision-safe 32-bit id fold (Knuth/Murmur mix): spreads (base, key) far apart so consecutive
+ * seeds' Clay anon-child spaces never overlap (an additive base+key would alias -> DUPLICATE_ID).
+ * Pure; folds 0 to 1 (the no-widget sentinel). Shared by child ids, vlist rows, tabbar tabs. */
+static inline uint32_t nt_ui_fmix_id(uint32_t base, uint32_t key) {
+    uint32_t h = base * 0x9E3779B1U;
+    h = h ^ (key * 0x85EBCA6BU);
+    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
+    h = h ^ (h >> 16);
+    return (h != 0U) ? h : 1U;
+}
+
 /* Child id from a parent scope + a string label (fmix, never 0) — game code derives per-widget
  * ids without inventing numeric salts: nt_ui_child_id(row_id, "btn") recycles with row_id. */
 uint32_t nt_ui_child_id(uint32_t parent_id, const char *label);

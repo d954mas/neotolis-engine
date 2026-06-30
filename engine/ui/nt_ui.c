@@ -2174,12 +2174,8 @@ uint32_t nt_ui_id(const char *s) {
 
 uint32_t nt_ui_child_id(uint32_t parent_id, const char *label) {
     NT_ASSERT(label != NULL && "nt_ui_child_id: label must be non-NULL");
-    /* fmix-fold parent + label hash (NOT XOR/additive — same DUPLICATE_ID reason as tabbar_tab_id). */
-    uint32_t h = parent_id * 0x9E3779B1U;
-    h = h ^ (nt_ui_id(label) * 0x85EBCA6BU);
-    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = h ^ (h >> 16);
-    return (h != 0U) ? h : 1U; /* 0 = "no widget" sentinel */
+    /* fmix-fold parent + label hash (NOT XOR/additive — that aliases Clay's anon-child space). */
+    return nt_ui_fmix_id(parent_id, nt_ui_id(label));
 }
 
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {

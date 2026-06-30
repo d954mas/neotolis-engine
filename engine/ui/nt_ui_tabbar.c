@@ -54,23 +54,11 @@ nt_ui_tabbar_style_t nt_ui_tabbar_style_defaults(void) {
  * sibling tab ids CONSECUTIVE; Clay's anon-child hash (HashNumber starts seed+offset) then aliases child
  * k+1 of tab N with child k of tab N+1 -> DUPLICATE_ID once a tab holds >=2 children. A mixed hash spreads
  * seeds far apart so child-index spaces never overlap. (Same reason nt_ui_menu dropped additive salts.) */
-static inline uint32_t tabbar_tab_id(uint32_t base_id, uint32_t index) {
-    uint32_t h = base_id * 0x9E3779B1U;
-    h = (h ^ ((index + 1U) * 0x85EBCA6BU));
-    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = h ^ (h >> 16);
-    return (h != 0U) ? h : 1U; /* 0 = "no widget" sentinel */
-}
+static inline uint32_t tabbar_tab_id(uint32_t base_id, uint32_t index) { return nt_ui_fmix_id(base_id, index + 1U); }
 
 /* Per-tab label cell id (distinct from the tab id so the wrapper's label child carries a stable,
  * non-aliasing id the icon-gutter probe can query). Salts base_id+index through the same mixed hash. */
-static inline uint32_t tabbar_label_id(uint32_t base_id, uint32_t index) {
-    uint32_t h = (base_id ^ 0x7AB1B00DU) * 0x9E3779B1U;
-    h = (h ^ ((index + 1U) * 0x85EBCA6BU));
-    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = h ^ (h >> 16);
-    return (h != 0U) ? h : 1U;
-}
+static inline uint32_t tabbar_label_id(uint32_t base_id, uint32_t index) { return nt_ui_fmix_id(base_id ^ 0x7AB1B00DU, index + 1U); }
 
 /* Fail early on out-of-range state values — a silent "almost works" would otherwise leak. */
 static void assert_state_valid(const nt_ui_tab_state_t *st) {

@@ -286,7 +286,8 @@ struct nt_ui_context {
         uint32_t count;   /* total row count (for the trailing spacer) */
         uint32_t last;    /* last visible index (trailing spacer = (count-1-last)*extent) */
         uint32_t ring;    /* id recycle modulus (style.id_ring); per-row slot = index % ring */
-        float extent;     /* per-row stride (item_extent + style.gap) */
+        float extent;     /* per-row stride (item_extent + rounded gap) */
+        float gap;        /* rounded inter-row gap (px); trailing spacer subtracts the boundary gap */
         uint8_t axis;     /* nt_ui_axis_t */
         bool empty;       /* count==0 or degenerate -> no spacers */
         bool active;      /* between vlist_begin/vlist_end */
@@ -521,16 +522,13 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
  * coords regardless of whether a widget stepped first. No-op after the first call each frame. */
 void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx);
 
-/* build_tree stale-floating-parent degrade count (Clay element-hashmap saturation), process-global &
- * ALWAYS compiled so the inspector can surface it as a diagnostic metric. No reset in normal use. */
-uint32_t nt_ui_internal_stale_floating_parent_count(void);
-
 #ifdef NT_TEST_ACCESS
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
 int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);
-/* Times build_tree took the stale-floating-parent degrade (Clay element-hashmap saturation), so a
- * regression test can prove it hit the non-crashing path. Process-global; reset before measuring. */
+/* Times build_tree took the stale-floating-parent path (Clay element-hashmap saturation), so the
+ * recycling test can prove the default id_ring never saturates (count 0) and the OFF backstop proves
+ * the disabled-ring sweep does (count > 0). Process-global; reset before measuring. */
 uint32_t nt_ui_internal_test_stale_floating_parent_count(void);
 void nt_ui_internal_test_reset_stale_floating_parent_count(void);
 #endif
