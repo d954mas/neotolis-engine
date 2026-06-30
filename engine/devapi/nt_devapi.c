@@ -513,16 +513,15 @@ static bool slot_ready(const nt_devapi_deferred_slot *slot) {
     return (int32_t)(g_nt_app.frame - slot->target_frame) >= 0; /* frame deadline (wrap-safe). */
 }
 
-void nt_devapi_capture_on_pre_swap(void) {
-    /* Registered as a window pre-swap hook, so it can fire after nt_devapi_shutdown (a host that swaps
-       once more during teardown, before the process-lifetime hook registry is cleared) — no-op safely
-       instead of trapping on a stale global hook. */
+void nt_devapi_run_pre_swap_producers(void) {
+    /* May fire after nt_devapi_shutdown (a host that swaps once more during teardown, before the
+       process-lifetime hook registry is cleared) — no-op safely instead of trapping on stale globals. */
     if (!nt_devapi_initialized()) {
         return;
     }
-    /* Fill every ready producer-slot's payload at the GL-valid seam. The GL read MUST happen
-       here, before swap — poll_response runs after the frame, where the back buffer is undefined.
-       Idempotent per slot: producer is cleared after one run, so a re-call this frame is a no-op. */
+    /* Fill every ready producer-slot's payload at the pre-swap seam (GL-valid for a GL producer). The
+       read MUST happen here, before swap — poll_response runs after the frame, where the back buffer is
+       undefined. Idempotent per slot: producer is cleared after one run, so a re-call this frame no-ops. */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         nt_devapi_deferred_slot *slot = &s_deferred[i];
         if (!slot->in_use || slot->producer == NULL || !slot_ready(slot)) {
@@ -565,7 +564,7 @@ const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
     /* Pop the FIRST in-flight slot whose target game-frame has been reached. Reads g_nt_app.frame
        (the game clock) — idempotent, so it is safe to call every tick / every loop iteration. GL-free:
-       a producer-slot's payload was already produced at the pre-swap seam (nt_devapi_capture_on_pre_swap). */
+       a producer-slot's payload was already produced at the pre-swap seam (nt_devapi_run_pre_swap_producers). */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (!s_deferred[i].in_use) {
             continue;
@@ -574,7 +573,7 @@ const char *nt_devapi_poll_response(void) {
             continue;
         }
         /* Drain-race guard: a producer-slot is "ready" by frame deadline before the
-           pre-swap seam (nt_devapi_capture_on_pre_swap) has filled its payload — net_poll's drain runs
+           pre-swap seam (nt_devapi_run_pre_swap_producers) has filled its payload — net_poll's drain runs
            at frame start, the seam runs pre-swap at frame end. Yielding now would emit the legacy
            {deferred:true} and lose the data. Withhold a ready slot whose producer is still pending
            (payload NULL, producer present); the seam fills it this frame and the next drain yields the

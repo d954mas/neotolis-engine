@@ -245,8 +245,8 @@ static void test_overflow_rejected_structured(void) {
 static void test_payload_yield_via_producer(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":42}"));
 
-    g_nt_app.frame++;                /* reach the slot's 1-frame target. */
-    nt_devapi_capture_on_pre_swap(); /* GL-valid seam fills the payload (synthetic — no GL). */
+    g_nt_app.frame++;                   /* reach the slot's 1-frame target. */
+    nt_devapi_run_pre_swap_producers(); /* GL-valid seam fills the payload (synthetic — no GL). */
     /* The producer's input ctx is consumed + freed once at the seam (one-shot); the produced
        payload now lives on the slot, to be yielded next. */
     TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed);
@@ -279,7 +279,7 @@ static void test_legacy_yield_unaffected(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer\",\"request_id\":5,\"params\":{\"frames\":1}}"));
 
     g_nt_app.frame++;
-    nt_devapi_capture_on_pre_swap(); /* a producer-less slot is untouched by the seam. */
+    nt_devapi_run_pre_swap_producers(); /* a producer-less slot is untouched by the seam. */
 
     const char *resp = nt_devapi_poll_response();
     TEST_ASSERT_NOT_NULL(resp);
@@ -298,7 +298,7 @@ static void test_legacy_yield_unaffected(void) {
 static void test_reset_frees_filled_payload(void) {
     TEST_ASSERT_NULL(nt_devapi_submit("{\"method\":\"test.defer_result\",\"request_id\":1}"));
     g_nt_app.frame++;
-    nt_devapi_capture_on_pre_swap();                /* payload now owned by the slot, unyielded. */
+    nt_devapi_run_pre_swap_producers();             /* payload now owned by the slot, unyielded. */
     TEST_ASSERT_EQUAL_INT(1, s_producer_ctx_freed); /* ctx already consumed/freed at the seam. */
 
     nt_devapi_deferred_reset();                  /* must free the filled-but-unyielded payload (LSan). */

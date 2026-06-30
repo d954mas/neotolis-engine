@@ -5,6 +5,8 @@
 
 #include "base64/nt_base64.h"
 #include "core/nt_assert.h"
+#include "devapi/nt_devapi_capture.h"
+#include "devapi/nt_devapi_capture_internal.h"
 #include "devapi/nt_devapi_internal.h"
 #include "fpng/nt_fpng.h"
 #include "graphics/nt_gfx.h"
@@ -321,6 +323,10 @@ static const nt_devapi_handler_fn k_capture_handlers[] = {
     cmd_capture_region,
 };
 _Static_assert(sizeof(k_capture_cmds) / sizeof(k_capture_cmds[0]) == sizeof(k_capture_handlers) / sizeof(k_capture_handlers[0]), "capture: descriptor/handler arrays must have equal length");
+
+/* Public host-facing seam (the window pre-swap hook target) — delegates to the generic core producer
+   runner, which fills any ready producer-slot's payload at the GL-valid point. */
+void nt_devapi_capture_on_pre_swap(void) { nt_devapi_run_pre_swap_producers(); }
 
 void nt_devapi_register_capture(void) {
     s_seam_armed = false; /* fresh init starts unarmed; the host (re-)arms via install_seam. */

@@ -11,6 +11,8 @@
 
 /* clang-format off */
 #include "app/nt_app.h"
+#include "devapi/nt_devapi_capture.h"          /* on_pre_swap / arm / MAX_INFLIGHT — host contract. */
+#include "devapi/nt_devapi_capture_internal.h" /* strip_and_box — group internal, value-checked here. */
 #include "devapi/nt_devapi_internal.h"
 #include "graphics/nt_gfx.h" /* g_nt_gfx.context_lost — the producer-failure (NULL) trigger. */
 #include "window/nt_window.h"

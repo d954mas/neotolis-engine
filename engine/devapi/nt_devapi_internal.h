@@ -6,8 +6,8 @@
 
 #include "devapi/nt_devapi.h"
 
-/* Stable machine error tokens emitted by the generic dispatch core. Group-specific codes (e.g. the
-   capture group's) live in the group — the core never names a group. */
+/* Stable machine error tokens emitted by the generic dispatch core. Group-specific codes live in the
+   group itself (passed in as err->code / a slot fail_code) — the core never names a group. */
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 
@@ -124,20 +124,14 @@ bool nt_devapi_defer_current_time(double seconds);
    render resumes (bounded per-session by close_client -> nt_devapi_deferred_reset). */
 bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg);
 
-/* Count of in-flight DATA (producer-bearing) deferred slots not yet drained. A data group (capture)
-   uses it to cap concurrent captures independently of the shared deferred-queue size, bounding the
-   per-seam encode burst + held-payload memory a single client flood can trigger. */
+/* Count of in-flight DATA (producer-bearing) deferred slots not yet drained. A data group uses it to
+   cap concurrent in-flight producers independently of the shared deferred-queue size, bounding the
+   per-seam producer burst + held-payload memory a single client flood can trigger. */
 int nt_devapi_deferred_data_inflight(void);
 
-#ifdef NT_DEVAPI_GROUP_CAPTURE
-/* Fused alpha-strip + integer box-average (rgba8 src -> RGB dst; dst = w/factor x h/factor, factor==1 is a
-   plain strip). Internal to the capture group; non-static so the capture unit test can value-check the mean. */
-void nt_devapi_capture_strip_and_box(const uint8_t *src, uint32_t w, uint32_t h, uint32_t factor, uint8_t *dst);
-#endif
-
-/* The host-facing pre-swap seam (nt_devapi_capture_on_pre_swap) is a PUBLIC host contract — declared in
-   the public capture header so a host drives captures without reaching into this internal header. */
-#include "devapi/nt_devapi_capture.h"
+/* Run every ready producer-slot's producer at the pre-swap seam (fills the slot's payload). The generic
+   core entry; a producer-bearing group wraps it with its own host-facing seam. */
+void nt_devapi_run_pre_swap_producers(void);
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */

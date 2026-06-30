@@ -124,7 +124,7 @@ endif()
 # producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
 # nt_base64. nt_devapi_capture.h is the host-facing pre-swap-seam header.
 if(NT_DEVAPI_GROUP_CAPTURE)
-    nt_add_module(nt_devapi_capture LOG_DOMAIN "devapi" nt_devapi_capture.c nt_devapi_capture.h)
+    nt_add_module(nt_devapi_capture LOG_DOMAIN "devapi" nt_devapi_capture.c nt_devapi_capture.h nt_devapi_capture_internal.h)
     target_link_libraries(nt_devapi_capture PUBLIC nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_base64 nt_window_interface)
     target_compile_definitions(nt_devapi_capture PUBLIC NT_DEVAPI_GROUP_CAPTURE=1)
 endif()
