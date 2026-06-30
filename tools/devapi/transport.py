@@ -102,7 +102,7 @@ class SocketTransport(Transport):
 
 # A deterministic rAF barrier: a Promise that resolves after two nested requestAnimationFrame
 # callbacks. One nested rAF lets the deferred capture's pre-swap seam run (the producer fills its
-# payload INSIDE the swap that the second rAF schedules); copied from tests/browser/input.spec.ts:26.
+# payload INSIDE the swap that the second rAF schedules).
 _RAF_BARRIER_JS = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))"
 
 
@@ -117,9 +117,8 @@ class PlaywrightTransport(Transport):
     SocketTransport's bounded read so a deferred-forever capture can never hang CI.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
-    web wire. The Playwright import would be lazy if needed, but this class touches only
-    the page handle the caller already constructed, so no import is required here — keeping the
-    module stdlib-only importable for the native SocketTransport path.
+    web wire and touches only the page handle the caller constructed, so the module stays stdlib-only
+    importable for the native SocketTransport path.
     """
 
     def __init__(self, page, read_timeout: float = DEFAULT_READ_TIMEOUT) -> None:

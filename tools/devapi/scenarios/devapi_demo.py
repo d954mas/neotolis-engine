@@ -1,33 +1,19 @@
 #!/usr/bin/env python3
-"""DevAPI canonical demo — the ONE run(client) scenario driven over BOTH transports.
+"""DevAPI canonical demo — one run(client) scenario driven over both transports (native SocketTransport,
+self-launched here; web PlaywrightTransport / the devapi.spec.ts gate), proving native<->web parity.
 
-This is the single source of truth proving native<->web parity: the IDENTICAL run(client) is driven
-by SocketTransport (native devapi_host, self-launched here) and by PlaywrightTransport / the
-devapi.spec.ts browser gate (web devapi_host). It exercises:
-
-  * discovery        — ping + endpoints/command.describe/features (game.echo + game.poke registered
-                       with ZERO engine edits),
+It exercises:
+  * discovery        — ping + endpoints/command.describe/features (game.echo + game.poke, zero engine edits),
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
-  * the riskiest web path — a deferred capture.frame/region that must resolve to a REAL PNG (NOT
-                       {deferred:true}) on a host that drives the pre-swap seam,
-  * the deferred items (advertised-aware) — perf.stats' mem_used read, a render.set_enabled toggle,
-                       and time.step; a command this host lists in endpoints MUST pass (not best-effort).
-
-CAPTURE CAPABILITY: the native devapi_host inits NO GL and does NOT arm the capture seam, so
-capture.frame returns capture_unavailable there (the engine rejects synchronously rather than defer
-forever — nt_devapi_capture.c:200). The WEB devapi_host (capture build) DOES arm the seam, so the
-deferred capture yields a real PNG. run(client) is therefore capability-aware: it asserts the real
-PNG when the host drives capture, and accepts capture_unavailable as the documented native outcome —
-NEVER skipping the deferred-capture path on a capture-capable (web) host. The deep pixel decode lives
-in capture_demo.py against capture_host; here the PNG payload contract (format/data/not-deferred) is
-what proves the web deferred path.
+  * deferred capture — capture.frame/region must resolve to a REAL PNG (not {deferred:true}) on a
+                       capture-capable host; the native host has no GL, so it returns capture_unavailable,
+  * deferred items   — perf.stats mem_used + render.set_enabled + time.step (advertised commands MUST pass).
 
 Usage: python tools/devapi/scenarios/devapi_demo.py [--port N] [--no-launch] [--host-bin PATH]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
 Exit 0 if every assertion passes, 1 on assertion / protocol / transport failure, 2 on usage / launch.
 
-Stdlib only (the SocketTransport native path needs no pip dep); the web driver is the TS spec +
-PlaywrightTransport for local runs.
+Stdlib only; the web driver is the TS spec + PlaywrightTransport for local runs.
 """
 import os
 import subprocess
@@ -84,8 +70,7 @@ def _find_host_bin(argv) -> str:
             return a.split("=", 1)[1]
     exe = "devapi_host.exe" if os.name == "nt" else "devapi_host"
     base = os.path.join(REPO_ROOT, "build", "examples", "devapi_host")
-    # The per-preset build nests the binary under a preset subdir (e.g. native-debug); fall back to
-    # the flat layout. A caller may pass --host-bin to pin an exact build.
+    # Per-preset build nests under a preset subdir; fall back to the flat layout (--host-bin pins exactly).
     for cand in (os.path.join(base, "native-debug", exe), os.path.join(base, exe)):
         if os.path.isfile(cand):
             return cand
@@ -106,12 +91,10 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
 
 
 def _drive_deferred_capture(client: DevApiClient) -> None:
-    """The riskiest cross-transport path: a deferred capture.frame/region.
+    """Deferred capture.frame/region — the drain race only a live transport exposes.
 
-    On a capture-capable host (the web devapi_host arms the pre-swap seam) the deferred reply
-    MUST carry a real PNG, never {deferred:true} — the drain-race that only a live transport exposes.
-    On the native devapi_host (no GL, no seam) the engine rejects synchronously with
-    capture_unavailable; that is the documented native outcome (NOT a skip of the web path).
+    A capture-capable host (web: pre-swap seam armed) MUST reply with a real PNG, never {deferred:true};
+    the native host (no GL/seam) rejects synchronously with capture_unavailable (the documented outcome).
     """
     try:
         full = client.capture_frame()
@@ -136,17 +119,12 @@ def _drive_deferred_capture(client: DevApiClient) -> None:
 
 
 def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
-    """Exercise the web deferrals live over the canonical scenario, advertised-aware.
-
-    NOT blanket best-effort: a command this host lists in `endpoints` MUST succeed — swallowing its
-    error would let a real obs/render/time break still print PASS. A command absent from this host's
-    build is the only thing skipped (groups the host did not compile in are optional, never a gate).
-    The three items: (1) the obs memory read (perf.stats' mem_used channel), (2) a render toggle,
-    (3) time.step — the web pump's MANUAL progress primitive.
+    """Exercise the web deferrals, advertised-aware: a command this host lists in endpoints MUST pass
+    (swallowing its error would let a real obs/render/time break still print PASS); a command absent
+    from the host's build is skipped. Items: perf.stats mem_used, a render toggle, time.step.
     """
     exercised = []
-    # (1) obs memory read — perf.stats exposes the mem_used channel (perf.snapshot is the last-frame view
-    #     and does NOT carry it). A filtered query proves the obs path answers a memory read over the wire.
+    # (1) obs memory read — perf.snapshot is last-frame and lacks mem_used; perf.stats carries it.
     if "perf.stats" in advertised:
         stats = client.result("perf.stats", {"channels": ["mem_used"]})
         mem = stats.get("channels", {}).get("mem_used")

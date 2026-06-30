@@ -345,11 +345,9 @@ static void test_sched_offset0_applies_on_advance(void) {
 }
 
 /* A frozen tick releases NOTHING: an enqueued down@0 stays unscheduled while the frame is unchanged
-   (pause / manual-idle), then lands on the next real advance. This is the new pause-freeze semantic
-   (replaces the old frames_remaining-on-pause freeze inside nt_input).
-   Order-independent: nt_devapi_input_reset re-seeds the advance clock against the current
-   g_nt_app.frame, so the first tick_no_advance below can never see a spurious forced-advance no
-   matter which test ran first (a prior advancing test left s_last_frame elsewhere). */
+   (pause / manual-idle), then lands on the next real advance. Order-independent: nt_devapi_input_reset
+   re-seeds the advance clock against the current g_nt_app.frame, so the first tick_no_advance below
+   never sees a spurious forced-advance regardless of which test ran first. */
 static void test_sched_pause_freeze(void) {
     nt_devapi_input_reset(); /* seed the clock to the current frame so a frozen tick stays frozen. */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));

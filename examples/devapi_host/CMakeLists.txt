@@ -1,19 +1,12 @@
 add_executable(devapi_host main.c)
-# The host now wires a REAL nt_ui "hud" context so ui.tree / ui.element / ui.click resolve against a
-# genuine probe-able tree (the stub returned an empty tree). Real nt_ui pulls its renderer chain
-# (nt_resource/nt_font/nt_material/nt_atlas/nt_sprite_renderer/nt_text_renderer + real nt_gfx) — the
-# host never calls nt_ui_walk, but those symbols must resolve at the final link. nt_gfx (real, not the
-# stub) also supplies render.info's nt_gfx_get_frame_draw_calls; the host issues no draw, so draw_calls
-# stays 0.
-# GNU ld is single-pass: list every CONSUMER before its PROVIDER. nt_devapi (references the gfx +
-# nt_ui probe symbols) precedes nt_ui + nt_gfx; nt_ui (references the renderer/resource chain) precedes
-# those providers. nt_devapi is already pulled transitively by nt_devapi_net; listing it explicitly
-# pins the order.
-# Transport split (mirrors engine/devapi/CMakeLists.txt): web links nt_devapi_web (the
-# push/pull ccall bridge, NO socket) + nt_platform_web; native links nt_devapi_net (TCP).
-# Both consume the same nt_devapi core + nt_devapi_default group bundle. The web path also pulls a
-# real GL context (nt_gfx) for the deferred-capture seam; the capture group already links nt_fpng
-# transitively via nt_devapi_default.
+# The host wires a REAL nt_ui "hud" so ui.* resolve against a probe-able tree; nt_ui pulls its full
+# renderer chain (resource/font/material/atlas/sprite+text/nt_gfx) which must resolve at link even
+# though the host never calls nt_ui_walk. nt_gfx also supplies render.info's draw_calls (0 here, no draw).
+# GNU ld is single-pass — list each CONSUMER before its PROVIDER: nt_devapi before nt_ui+nt_gfx, nt_ui
+# before its renderer chain. nt_devapi is transitive via nt_devapi_net; pin it explicitly.
+# Transport split (mirrors engine/devapi/CMakeLists.txt): web links nt_devapi_web (push/pull ccall
+# bridge, NO socket) + nt_platform_web; native links nt_devapi_net (TCP). Both consume nt_devapi_default;
+# web also pulls nt_gfx for the deferred-capture seam.
 if(EMSCRIPTEN)
     set(DEVAPI_HOST_TRANSPORT nt_devapi_web nt_platform_web)
 else()

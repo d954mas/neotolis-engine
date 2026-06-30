@@ -7,10 +7,8 @@
 #include "devapi/nt_devapi.h"
 #ifdef __EMSCRIPTEN__
 #include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge. */
-/* Capture is an opt-in group (NT_DEVAPI_GROUP_CAPTURE). Only when it is compiled does the web host pull
-   a real GL context + install the pre-swap seam, so the host links nt_gfx/nt_fpng ONLY for the capture
-   build (the canonical deferred-capture scenario); a capture-OFF web build still serves
-   submit/poll/poke. */
+/* Capture group (NT_DEVAPI_GROUP_CAPTURE) pulls a real GL context + the pre-swap seam; a capture-OFF
+   web build still serves submit/poll/poke. */
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 #define NT_DEVAPI_HOST_WEB_CAPTURE 1
 #include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
@@ -36,9 +34,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* game-layer command: echo {msg} back as {msg}. Registered via the public
-   nt_devapi_register path only — zero engine edits. Uses the public cJSON
-   API for the result (devapi_add_* is internal to the devapi module). */
+/* game-layer command via the public nt_devapi_register path — zero engine edits. Result uses the
+   public cJSON API (devapi_add_* is devapi-internal). */
 static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *msg = cJSON_GetObjectItemCaseSensitive(params, "msg");
@@ -63,9 +60,8 @@ static const nt_devapi_command_desc k_game_echo = {
     .side_effects = "none",
 };
 
-/* game-layer WRITE command: flip an observable host bool, return the new value as {poked}. The
-   harness drives it to prove a write command mutates host state on BOTH transports;
-   registered via the public nt_devapi_register path only — zero engine edits. */
+/* game-layer WRITE command via the public register path — zero engine edits: flips an observable host
+   bool and returns it as {poked}, proving a write mutates host state over either transport. */
 static bool s_game_poked = false; /* the observable: each game.poke toggles it. */
 
 static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
@@ -109,9 +105,8 @@ static uint16_t resolve_port(void) {
 }
 #endif /* !__EMSCRIPTEN__ */
 
-/* A small probe-able "hud" UI context — asset-free (layout + the registered-widget slot only; the
-   host never calls nt_ui_walk). "hud_btn" carries a togglable enabled flag a synthetic ui.click
-   flips, observable via ui.element. */
+/* Asset-free probe hud (layout + registered-widget slots only; host never calls nt_ui_walk). A button
+   carries a togglable enabled flag a synthetic ui.click flips, observable via ui.element. */
 /* Sized to clear nt_ui_min_arena_size for the default desc (create asserts on a too-small arena). */
 #define HUD_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
@@ -127,9 +122,8 @@ static NT_UI_DECLARE_ARENA(s_hud_scaled_arena, HUD_ARENA_SIZE);
 static nt_ui_context_t *s_hud_scaled_ctx;
 static bool s_scaled_btn_on = true;
 
-/* Declare the hud tree once per frame. A click on "hud_btn" (real device or a synthetic ui.click,
-   bot==human) flips s_hud_btn_on; the widget re-registers each frame with enabled=s_hud_btn_on so
-   the toggle surfaces through the probe's `enabled` field. */
+/* Re-declared each frame: a click on "hud_btn" (real or synthetic ui.click) flips s_hud_btn_on, and
+   the widget re-registers with enabled=s_hud_btn_on so the toggle surfaces through the probe. */
 static void declare_hud(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -150,10 +144,9 @@ static void declare_hud(void) {
     nt_ui_end(s_hud_ctx);
 }
 
-/* Declare the scaled hud tree once per frame. Identical layout to the hud, but the ctx viewport is
-   overridden to the nt_ui_scale content rect so the ctx converts the raw device pointer device->layout
-   internally — a synthetic ui.click resolved layout->device by the devapi lands on the widget. The
-   viewport MUST be set after nt_ui_begin and before the first hit-test (here: step_interaction). */
+/* Scaled hud: same layout, but the ctx viewport is the nt_ui_scale content rect so the ctx maps the
+   device pointer device->layout internally. The viewport MUST be set after nt_ui_begin and before the
+   first hit-test (step_interaction). */
 static void declare_hud_scaled(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -190,10 +183,8 @@ static void recover_on_disconnect(void) {
 #endif /* !__EMSCRIPTEN__ */
 
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-/* Web capture build: a deterministic two-tone NON-BLANK frame so the pre-swap capture seam reads
-   a real PNG, not a uniform clear. Mirrors examples/capture_host render_pattern: full-frame background,
-   then a scissored centered sub-rect in a second color (glClear honors GL_SCISSOR_TEST). devapi_host
-   inits no gfx natively (the probe needs none); the WEB path gives it a real GL context for capture. */
+/* Deterministic two-tone non-blank frame so the pre-swap capture seam reads a real PNG, not a uniform
+   clear: full-frame background, then a scissored centered sub-rect (glClear honors GL_SCISSOR_TEST). */
 static const float k_bg_color[4] = {0.10F, 0.20F, 0.45F, 1.0F};
 static const float k_fg_color[4] = {0.90F, 0.55F, 0.10F, 1.0F};
 
@@ -237,10 +228,9 @@ static void frame(void) {
     declare_hud();
     declare_hud_scaled();
 
-    /* Native: no real renderer (the host issues no draw — nt_ui_walk is unnecessary for the probe);
-       swap only under the render flag so draw_calls stays 0 / render.* stays honest. Web: draw the
-       deterministic two-tone pattern first so the pre-swap capture seam reads a non-blank frame.
-       The capture seam runs INSIDE nt_window_swap_buffers (post-render, pre-swap GL-valid point). */
+    /* Swap only under the render flag so draw_calls / render.* stay honest. The capture seam runs INSIDE
+       nt_window_swap_buffers (post-render, pre-swap GL-valid point); web draws the two-tone pattern first
+       so that seam reads a non-blank frame. */
     if (nt_app_render_enabled()) {
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
         render_pattern();
@@ -295,9 +285,8 @@ int main(void) {
         return 1; /* nothing inited yet */
     }
 
-    /* Partial-init teardown ladder: each fail point jumps to the label that releases exactly what was
-       inited so far. The cleanup is written once and shared with the clean-exit path, so a future
-       subsystem can't be silently left out of an error path. status stays 1 until a clean run. */
+    /* Partial-init teardown ladder: each fail jumps to the label that releases exactly what was inited,
+       sharing one cleanup path with the clean exit. status stays 1 until a clean run. */
     int status = 1;
 
     g_nt_window.width = 800;
@@ -409,9 +398,9 @@ int main(void) {
     nt_app_run(frame);
 
 #ifdef __EMSCRIPTEN__
-    /* Web nt_app_run registers a callback RAF loop and RETURNS; the runtime stays alive for the RAF frame
-       + window.__devapi bridge, so the clean path must NOT tear down — freeing devapi/scratch here traps the
-       first JS submit and the next RAF frame (init-error paths above still goto the ladder). Cf. ui_showcase. */
+    /* Web nt_app_run registers a callback RAF loop and RETURNS, so the clean path must NOT tear down:
+       freeing devapi/scratch here would trap the first window.__devapi submit and the next RAF frame
+       (init-error paths above still goto the ladder). */
     return 0;
 #else
     status = 0; /* clean run: the native loop returned on quit. */

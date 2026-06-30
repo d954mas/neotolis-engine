@@ -19,16 +19,14 @@ declare global {
 // arrival order (an unrelated line must not be mistaken for the capture result).
 let nextId = 1;
 
-// Web-smoke gate for the devapi web transport: a real headless Chromium drives the window.__devapi
-// bridge (submit/poll/tick) against the capture-build devapi_host wasm — discovery + the two game
-// commands + a deferred capture.frame that must resolve to a real PNG (not {deferred:true}) only after
-// a rendered frame fills the pre-swap seam (a drain race unit tests cannot see).
+// Web-smoke gate: only a real headless Chromium exposes the deferred-capture drain race — the PNG
+// resolves to real pixels (not {deferred:true}) only after a rendered frame fills the pre-swap seam.
 test('devapi web transport: discovery + game.* + deferred capture yields a non-blank PNG', async ({ page }) => {
   await page.goto('/index.html');
 
   // Frame barrier: resolve after two nested requestAnimationFrame calls — one real rendered frame.
   // The deferred capture's pre-swap producer only fills its payload INSIDE the swap this schedules
-  // (a render-disabled frame won't fill it). Mirrors tests/browser/input.spec.ts:26.
+  // (a render-disabled frame won't fill it).
   const frame = () =>
     page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 

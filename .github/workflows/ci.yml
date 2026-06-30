@@ -497,13 +497,10 @@ jobs:
       - name: Pixel-health self-test (hermetic)
         run: python3 tools/devapi/scenarios/pixel_health_selftest.py
 
-      # The full devapi_host links nt_ui/nt_metrics/nt_entity, so it serves every group the canonical
-      # scenario touches: CORE/DISCOVERY/TIME (ping/endpoints/command.describe/features + game.*/
-      # render.set_enabled/time.step), CAPTURE (deferred capture.frame — answers capture_unavailable on
-      # the native no-GL-render host, the documented native outcome), and OBS (the perf.snapshot
-      # mem read). NT_PRESET_NAME pins the binary at build/examples/devapi_host/native-debug so
-      # devapi_demo.py's self-launch finds it with no --host-bin. Default presets keep these groups OFF
-      # (zero release delta); this is an opt-in dev-only build.
+      # devapi_host serves every group the canonical scenario touches (see -DNT_DEVAPI_GROUP_* below);
+      # CAPTURE answers capture_unavailable on the native no-GL host, OBS supplies the perf.stats mem read.
+      # NT_PRESET_NAME pins the binary at build/examples/devapi_host/native-debug so devapi_demo.py's
+      # self-launch finds it with no --host-bin. Default presets keep these groups OFF (zero release delta).
       # NT_UI_DEBUG_TOOLS=ON supplies OBS's hard deps (log ring + metrics + introspect); without it the
       # GROUP_OBS guard fatal-errors at configure (this raw cmake does not inherit the native-debug preset).
       - name: Configure devapi host (groups the canonical scenario needs)
@@ -512,10 +509,9 @@ jobs:
       - name: Build devapi_host
         run: cmake --build build/examples/devapi_host/native-debug --target devapi_host
 
-      # The live-socket UAT: devapi_demo.py self-launches devapi_host over the native socket and drives
-      # the ONE canonical run(client) — discovery + game.echo/game.poke + observe + deferred capture +
-      # the deferred items. xvfb-run supplies the headless X for nt_window_init(). Exit 0 == the whole
-      # canonical scenario PASSED over the native transport (exit-code gated).
+      # devapi_demo.py self-launches devapi_host over the native socket and drives the canonical
+      # run(client) — discovery + game.* + observe + deferred capture + deferred items. xvfb-run supplies
+      # the headless X for nt_window_init(); exit 0 gates that the scenario passed over the native transport.
       - name: Run devapi live-socket UAT
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
@@ -523,11 +519,10 @@ jobs:
     name: Web Smoke (devapi, blocking)
     runs-on: ubuntu-latest
     needs: wasm
-    # BLOCKING gate: merge-gating because the deferred-capture-over-web drain race is invisible to unit
-    # tests (only a real headless-Chromium run proves it). Viable as a blocking gate ONLY because
-    # devapi.spec.ts pumps frames deterministically via time.step, not via rAF cadence — no flake. NO
-    # git-LFS pull / pack-builder: the devapi_host loads no asset pack (capture renders a deterministic
-    # glClear+scissor pattern), unlike browser_smoke.
+    # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium
+    # proves it, and devapi.spec.ts pumps frames deterministically via time.step (not rAF cadence) so it
+    # does not flake. NO git-LFS pull / pack-builder: the devapi_host loads no asset pack (capture renders
+    # a deterministic glClear+scissor pattern), unlike browser_smoke.
     steps:
       - uses: actions/checkout@v4
 
