@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 0da5eb1
+# Commit: ca7a3e0
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  22 B
-Code               63845 B
+Code               63898 B
 Data                8062 B
 Custom              3265 B
 ---------------- ----------
-TOTAL              75990 B
+TOTAL              76043 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-13026 B   frame
+13079 B   frame
 12087 B   main
  3002 B   fmt_fp
  2931 B   rebuild_shapes
@@ -55,7 +55,7 @@ TOTAL              75990 B
   359 B   cosf
 
 Total functions: 83
-Total code size: 63705 B
+Total code size: 63758 B
 
 ## Per-Module Contributions
 
@@ -65,17 +65,18 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 2666 B
 libnt_core.a                2628 B
-libnt_gfx.a                54290 B
+libnt_gfx.a                55034 B
 libnt_input.a              19520 B
 libnt_log.a                11954 B
 libnt_shape_renderer.a   1140976 B
-libnt_window.a              4028 B
+libnt_window.a              4616 B
 ------------------------ ----------
-TOTAL (linked)           1236062 B
+TOTAL (linked)           1237394 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            2620 B
 libnt_atlas.a               6728 B
+libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -86,7 +87,7 @@ libnt_entity.a              6348 B
 libnt_font.a              197560 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx_stub.a           31220 B
+libnt_gfx_stub.a           31960 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -113,7 +114,7 @@ libnt_transform_comp.a      6872 B
 libnt_ui.a                603580 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
-libnt_window_stub.a         1888 B
+libnt_window_stub.a         2476 B
 
 
 ## Data Segments Summary

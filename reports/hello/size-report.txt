@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 0da5eb1
+# Commit: ca7a3e0
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                45 B
 Elem                  14 B
-Code               17228 B
+Code               17278 B
 Data                 859 B
 Custom              1170 B
 ---------------- ----------
-TOTAL              19584 B
+TOTAL              19634 B
 
 ## Top 30 Functions by Size
 
@@ -26,14 +26,14 @@ TOTAL              19584 B
  3000 B   fmt_fp
  2605 B   printf_core
  2191 B   nt_input_web_on_blur
- 1401 B   frame
+ 1448 B   frame
   785 B   nt_input_web_on_pointer_move
   745 B   nt_input_web_on_pointer_down
   690 B   pop_arg_long_double
   519 B   __memcpy
   470 B   main
   464 B   pad
-  398 B   nt_log_write
+  401 B   nt_log_write
   372 B   __stdio_write
   354 B   nt_app_web_frame
   325 B   nt_input_web_on_pointer_up
@@ -55,7 +55,7 @@ TOTAL              19584 B
    50 B   nt_input_web_on_char
 
 Total functions: 36
-Total code size: 17167 B
+Total code size: 17217 B
 
 ## Per-Module Contributions
 
@@ -67,13 +67,14 @@ libnt_app.a                 2666 B
 libnt_core.a                2628 B
 libnt_input.a              19520 B
 libnt_log.a                11954 B
-libnt_window.a              4028 B
+libnt_window.a              4616 B
 ------------------------ ----------
-TOTAL (linked)             40796 B
+TOTAL (linked)             41384 B
 
 Not linked to hello:
 libnt_app_stub.a            2620 B
 libnt_atlas.a               6728 B
+libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -84,8 +85,8 @@ libnt_entity.a              6348 B
 libnt_font.a              197560 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx.a                54290 B
-libnt_gfx_stub.a           31220 B
+libnt_gfx.a                55034 B
+libnt_gfx_stub.a           31960 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -113,7 +114,7 @@ libnt_transform_comp.a      6872 B
 libnt_ui.a                603580 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
-libnt_window_stub.a         1888 B
+libnt_window_stub.a         2476 B
 
 
 ## Data Segments Summary

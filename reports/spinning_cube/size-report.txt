@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 0da5eb1
+# Commit: ca7a3e0
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  39 B
-Code               63690 B
+Code               63740 B
 Data                8724 B
 Custom              3461 B
 ---------------- ----------
-TOTAL              76695 B
+TOTAL              76745 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-18540 B   frame
+18590 B   frame
 13086 B   main
  3002 B   fmt_fp
  2603 B   printf_core
@@ -55,7 +55,7 @@ TOTAL              76695 B
   313 B   nt_gfx_bind_instance_buffer
 
 Total functions: 94
-Total code size: 63536 B
+Total code size: 63586 B
 
 ## Per-Module Contributions
 
@@ -66,18 +66,19 @@ Module                         Size
 libnt_app.a                 2666 B
 libnt_core.a                2628 B
 libnt_drawable_comp.a       5530 B
-libnt_gfx.a                54290 B
+libnt_gfx.a                55034 B
 libnt_input.a              19520 B
 libnt_log.a                11954 B
 libnt_shape_renderer.a   1140976 B
 libnt_transform_comp.a      6872 B
-libnt_window.a              4028 B
+libnt_window.a              4616 B
 ------------------------ ----------
-TOTAL (linked)           1248464 B
+TOTAL (linked)           1249796 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            2620 B
 libnt_atlas.a               6728 B
+libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -87,7 +88,7 @@ libnt_entity.a              6348 B
 libnt_font.a              197560 B
 libnt_fs.a                  2706 B
 libnt_fs_stub.a             2706 B
-libnt_gfx_stub.a           31220 B
+libnt_gfx_stub.a           31960 B
 libnt_hash.a                4108 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
@@ -113,7 +114,7 @@ libnt_time.a                 900 B
 libnt_ui.a                603580 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
-libnt_window_stub.a         1888 B
+libnt_window_stub.a         2476 B
 
 
 ## Data Segments Summary

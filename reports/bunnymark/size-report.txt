@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 0da5eb1
+# Commit: ca7a3e0
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                 186 B
-Code              628927 B
+Code              628980 B
 Data              234232 B
 Custom             36741 B
 ---------------- ----------
-TOTAL             901716 B
+TOTAL             901769 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-47902 B   frame
+47955 B   frame
 47110 B   nt_gfx_activate_texture
 34486 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 32805 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
@@ -55,7 +55,7 @@ TOTAL             901716 B
  4825 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
 
 Total functions: 372
-Total code size: 628277 B
+Total code size: 628330 B
 
 ## Per-Module Contributions
 
@@ -64,18 +64,19 @@ Total code size: 628277 B
 Module                         Size
 ------------------------ ----------
 libnt_fs.a                  2706 B
-libnt_gfx.a                54290 B
+libnt_gfx.a                55034 B
 libnt_http.a                6188 B
 libnt_http_stub.a           3242 B
 libnt_log.a                11954 B
 libnt_platform.a             824 B
 ------------------------ ----------
-TOTAL (linked)             79204 B
+TOTAL (linked)             79948 B
 
 Not linked to bunnymark:
 libnt_app.a                 2666 B
 libnt_app_stub.a            2620 B
 libnt_atlas.a               6728 B
+libnt_base64.a               964 B
 libnt_basisu_transcoder.a 1305734 B
 libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
@@ -86,7 +87,7 @@ libnt_drawable_comp.a       5530 B
 libnt_entity.a              6348 B
 libnt_font.a              197560 B
 libnt_fs_stub.a             2706 B
-libnt_gfx_stub.a           31220 B
+libnt_gfx_stub.a           31960 B
 libnt_hash.a                4108 B
 libnt_input.a              19520 B
 libnt_input_stub.a         23432 B
@@ -112,8 +113,8 @@ libnt_transform_comp.a      6872 B
 libnt_ui.a                603580 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
-libnt_window.a              4028 B
-libnt_window_stub.a         1888 B
+libnt_window.a              4616 B
+libnt_window_stub.a         2476 B
 
 
 ## Data Segments Summary
