@@ -406,11 +406,15 @@ int main(void) {
 #endif /* __EMSCRIPTEN__ */
 
     nt_app_run(frame);
-    status = 0; /* clean run (web: nt_app_run drives the RAF loop and does not return here). */
 
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+    /* Web nt_app_run registers a callback RAF loop and RETURNS; the runtime stays alive for the RAF frame
+       + window.__devapi bridge, so the clean path must NOT tear down — freeing devapi/scratch here traps the
+       first JS submit and the next RAF frame (init-error paths above still goto the ladder). Cf. ui_showcase. */
+    return 0;
+#else
+    status = 0; /* clean run: the native loop returned on quit. */
     nt_devapi_net_stop();
-#endif
     /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
@@ -419,6 +423,7 @@ int main(void) {
     nt_drawable_comp_shutdown();
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
+#endif
 shutdown_devapi:
     nt_devapi_shutdown();
 shutdown_base:
