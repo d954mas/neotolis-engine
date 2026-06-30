@@ -29,10 +29,6 @@
    end-to-end. */
 _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DEVAPI_CAPTURE_MAX_PIXELS too large: the base64 size expansion (~w*h*8) would overflow the uint32 producer size math");
 
-/* NT_DEVAPI_CAPTURE_MAX_INFLIGHT (default 4) is defined in the public capture header so a host can -D it
-   and the unit test can assert the exact cap. It bounds the per-seam encode burst + held base64 payloads
-   a flooding client can trigger, independent of the shared deferred queue (NT_DEVAPI_MAX_DEFERRED). */
-
 /* Capture wire error codes (group-owned; the generic core never names them — it yields whatever the
    handler supplies as the slot's fail_code / err->code). */
 #define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
@@ -208,10 +204,6 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
            distinct code instead. A capture host arms the seam at startup, so this never trips there. */
         err->code = NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE;
         err->message = "capture not available on this host (it does not drive the pre-swap capture seam)";
-        return false;
-    }
-    if (nt_devapi_deferred_data_inflight() >= NT_DEVAPI_CAPTURE_MAX_INFLIGHT) {
-        set_bad_params(err, "capture: too many captures in flight — drain pending results before requesting more");
         return false;
     }
     capture_ctx *ctx = (capture_ctx *)malloc(sizeof(capture_ctx));

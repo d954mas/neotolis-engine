@@ -11,7 +11,7 @@
 
 /* clang-format off */
 #include "app/nt_app.h"
-#include "devapi/nt_devapi_capture.h"          /* on_pre_swap / arm / MAX_INFLIGHT — host contract. */
+#include "devapi/nt_devapi_capture.h"          /* on_pre_swap / arm — host contract. */
 #include "devapi/nt_devapi_capture_internal.h" /* strip_and_box — group internal, value-checked here. */
 #include "devapi/nt_devapi_internal.h"
 #include "graphics/nt_gfx.h" /* g_nt_gfx.context_lost — the producer-failure (NULL) trigger. */
@@ -203,27 +203,6 @@ static void test_capture_producer_failure_yields_error(void) {
     TEST_ASSERT_NULL(nt_devapi_poll_response());
 }
 
-/* in-flight capture cap -> a flood is rejected with bad_params, never queued unbounded.
-   Captures defer (return NULL); once NT_DEVAPI_CAPTURE_MAX_INFLIGHT are pending, the next is rejected
-   synchronously, well before the 128-slot deferred queue would fill (bounds the per-seam encode burst). */
-static void test_capture_inflight_cap_rejects_flood(void) {
-    int deferred = 0;
-    const char *resp = NULL;
-    for (int i = 0; i < 200; i++) {
-        resp = nt_devapi_submit("{\"method\":\"capture.frame\"}");
-        if (resp != NULL) {
-            break; /* a synchronous response == rejection (an accepted capture defers -> NULL). */
-        }
-        deferred++;
-    }
-    TEST_ASSERT_NOT_NULL(resp); /* the flood is rejected... */
-    /* ...at EXACTLY the documented cap: MAX_INFLIGHT captures accepted (deferred), then the next is rejected
-       (well before the 128-slot deferred queue fills). An exact bound catches a silent cap regression. */
-    TEST_ASSERT_EQUAL_INT(NT_DEVAPI_CAPTURE_MAX_INFLIGHT, deferred);
-    assert_bad_params(resp);    /* clean bad_params, never an assert/crash. */
-    nt_devapi_deferred_reset(); /* clear pending slots so following tests start clean. */
-}
-
 /* pixel cap (DoS backstop) rejects an oversized framebuffer/rect synchronously.
    A framebuffer/rect above NT_DEVAPI_CAPTURE_MAX_PIXELS (default 4096^2) -> bad_params, no defer, no
    allocation — the security-relevant cap branch that the 64x48 fixture otherwise can't reach. */
@@ -314,7 +293,6 @@ int main(void) {
     RUN_TEST(test_capture_region_degenerate_scale_bad_params);
     RUN_TEST(test_capture_nondividing_scale_bad_params);
     RUN_TEST(test_capture_producer_failure_yields_error);
-    RUN_TEST(test_capture_inflight_cap_rejects_flood);
     RUN_TEST(test_capture_pixel_cap_bad_params);
     RUN_TEST(test_capture_unarmed_host_unavailable);
     RUN_TEST(test_capture_ready_before_seam_is_withheld);

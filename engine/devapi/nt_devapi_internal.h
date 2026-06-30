@@ -103,11 +103,6 @@ bool nt_devapi_defer_current_time(double seconds);
    render resumes (bounded per-session by close_client -> nt_devapi_deferred_reset). */
 bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg);
 
-/* Count of in-flight DATA (producer-bearing) deferred slots not yet drained. A data group uses it to
-   cap concurrent in-flight producers independently of the shared deferred-queue size, bounding the
-   per-seam producer burst + held-payload memory a single client flood can trigger. */
-int nt_devapi_deferred_data_inflight(void);
-
 /* Run every ready producer-slot's producer at the pre-swap seam (fills the slot's payload). The generic
    core entry; a producer-bearing group wraps it with its own host-facing seam. */
 void nt_devapi_run_pre_swap_producers(void);

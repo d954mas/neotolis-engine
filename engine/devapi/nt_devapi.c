@@ -112,17 +112,6 @@ static void slot_clear(nt_devapi_deferred_slot *slot) {
     slot->by_time = false;
 }
 
-/* Count in-flight DATA slots (producer-bearing, not yet drained) so a data group can cap concurrency. */
-int nt_devapi_deferred_data_inflight(void) {
-    int n = 0;
-    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
-        if (s_deferred[i].in_use && s_deferred[i].is_data) {
-            n++;
-        }
-    }
-    return n;
-}
-
 /* Free owned ids/payloads/ctx + clear the queue. Called from shutdown so init->shutdown->init is
    leak-free (the owned-payload lifecycle: set on fill, transferred/freed on yield, freed here). */
 void nt_devapi_deferred_reset(void) {
