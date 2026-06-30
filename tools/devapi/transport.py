@@ -16,6 +16,10 @@ DEFAULT_READ_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 # Matches the host's NT_DEVAPI_DEFAULT_PORT.
 DEFAULT_PORT = 17890
+# recv_line memory bound: a framing-desync guard, NOT a protocol limit. Sized to cover the engine's
+# capture cap (NT_DEVAPI_CAPTURE_MAX_PIXELS = 4096*4096 worst-case base64 PNG ~= 100 MB) with margin,
+# so the client can always read what the server can produce while the read stays bounded.
+MAX_LINE_BYTES = 112 * 1024 * 1024
 
 
 class Transport(ABC):
@@ -70,7 +74,7 @@ class SocketTransport(Transport):
     def recv_line(self) -> str:
         # Bound the read so a desynced stream can never grow memory without limit.
         try:
-            line = self._f.readline(1_048_576)
+            line = self._f.readline(MAX_LINE_BYTES)
         except (socket.timeout, TimeoutError) as exc:
             # On py3.8 socket.timeout is NOT a TimeoutError subclass; normalize so callers catch
             # one type. A mid-read timeout also leaves the buffered reader in an undefined state,
@@ -80,7 +84,7 @@ class SocketTransport(Transport):
         if line == "":
             # Orderly disconnect: recv returned b"" (mirrors the server-side close path). Fail fast, never hang.
             raise ConnectionError("server closed the connection")
-        if len(line) >= 1_048_576 and not line.endswith("\n"):
+        if len(line) >= MAX_LINE_BYTES and not line.endswith("\n"):
             raise ConnectionError("oversized/unterminated line — framing desync")
         return line.rstrip("\r\n")
 

@@ -6,7 +6,8 @@
 
 #include "devapi/nt_devapi.h"
 
-/* Stable machine error tokens, shared by the dispatch core and discovery handlers. */
+/* Stable machine error tokens emitted by the generic dispatch core. Group-specific codes live in the
+   group itself (passed in as err->code / a slot fail_code) — the core never names a group. */
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
 
@@ -49,35 +50,34 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_MAX_DEFERRED 128
 #endif
 
-/* Upper bound for frame.wait{frames}, sized to the default 5s client read-timeout: at 60fps a
-   256-frame RUN wait is ~4.3s, under the timeout (a bigger ceiling rejects nothing the client
-   could wait for anyway). Not the slot-count cap. Override per build with -D. */
-#ifndef NT_DEVAPI_FRAME_WAIT_MAX
-#define NT_DEVAPI_FRAME_WAIT_MAX 256
-#endif
+/* A pre-swap payload producer: invoked at the pre-swap seam to build the slot's owned result object.
+   Returns an owned cJSON* (the result payload) or NULL on failure (a DATA slot then yields its
+   command-supplied fail_code). `ctx` is the producer-owned param block; the core never inspects it. */
+typedef cJSON *(*nt_devapi_payload_producer_fn)(void *ctx);
 
-/* Upper bound for time.step{count}: a fail-fast ceiling + sane batch size, NOT a UB/overflow guard
-   (cJSON clamps to INT_MAX, nt_app_step saturates). Crunch runs uncapped, so 2^20 is ~a second of
-   fast frames; heavier per-frame work wants smaller batches or a raised client timeout. -D to override. */
-#ifndef NT_DEVAPI_STEP_MAX
-#define NT_DEVAPI_STEP_MAX 1048576
-#endif
-
-/* Upper bound for time.wait{seconds} (game-time deadline), sized to the default 5s read-timeout:
-   at scale 1 a wait runs at wall rate, so >5s never resolves before the client gives up. 4s leaves
-   margin; longer waits need scale>1 or a raised client timeout. Override per build with -D. */
-#ifndef NT_DEVAPI_TIME_WAIT_MAX_SECONDS
-#define NT_DEVAPI_TIME_WAIT_MAX_SECONDS 4.0
-#endif
+/* Frees a producer's owned ctx block. Called exactly once per slot (on yield or reset); NULL when
+   the ctx is not heap-owned. Distinct from nt_devapi_hook_fn — it takes the ctx pointer. */
+typedef void (*nt_devapi_ctx_free_fn)(void *ctx);
 
 /* One pending deferred response. The slot owns the duplicated request_id and the
    continuation state ONLY — never a pointer into the shared s_resp_buf. */
 typedef struct nt_devapi_deferred_slot {
-    cJSON *id;             /* owned duplicate of request_id (number or string); NULL if absent. */
-    double target_time;    /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
-    uint32_t target_frame; /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
-    bool by_time;          /* selects which deadline field slot_ready compares. */
+    /* 8-byte members first (pointers + double) so the trailing small fields pack with minimal padding. */
+    cJSON *id;          /* owned duplicate of request_id (number or string); NULL if absent. */
+    double target_time; /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
+    /* Result-payload continuation (producer-bearing commands). producer fills `payload` at the pre-swap
+       seam; the core names no group — the producer + fail strings are supplied by the handler. */
+    nt_devapi_payload_producer_fn producer;  /* NULL for legacy frame.wait/time.step slots. */
+    void *producer_ctx;                      /* owned param block; freed via producer_ctx_free. */
+    nt_devapi_ctx_free_fn producer_ctx_free; /* frees producer_ctx on yield/reset; NULL if ctx is unowned. */
+    cJSON *payload;                          /* owned serialized producer result; NULL until the seam fills it. */
+    const char *fail_code;                   /* DATA slot: wire error code + message the core yields if the */
+    const char *fail_msg;                    /* producer returns NULL — command-supplied, so the core names no group. */
+    uint32_t target_frame;                   /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
+    bool by_time;                            /* selects which deadline field slot_ready compares. */
     bool in_use;
+    bool is_data; /* a DATA (producer-bearing) slot: outlives `producer` (cleared at the seam) so a
+                     producer-ran-but-failed slot yields its fail_code, not the legacy {deferred:true}. */
 } nt_devapi_deferred_slot;
 
 /* Mark the in-flight command as deferred: submit() returns NULL and the response is yielded once
@@ -89,6 +89,23 @@ bool nt_devapi_defer_current(int frames);
    `seconds` past submit. For time.wait (RUN, where dt is variable so a frame count can't be
    precomputed). Must be called from inside a handler dispatch. */
 bool nt_devapi_defer_current_time(double seconds);
+
+/* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the pre-swap seam the
+   producer fills the slot's owned payload, which poll_response then yields as the ok-entry result (instead
+   of the legacy {deferred:true}). `ctx`/`ctx_free` are the producer's owned param block + its destructor
+   (NULL if unowned). `fail_code`/`fail_msg` are the wire error the core yields if the producer returns NULL
+   — static literals supplied by the handler, so the core names no group (zero release delta when absent).
+   Must be called from inside a handler dispatch.
+
+   CONTRACT: a producer-bearing slot is withheld until the pre-swap seam fills it — poll_response never
+   yields {deferred:true} for it (that would re-introduce the drain race). So the HOST MUST drive the
+   pre-swap seam on every rendered frame; while rendering is suppressed the slot legitimately stalls until
+   render resumes (bounded per-session by close_client -> nt_devapi_deferred_reset). */
+bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg);
+
+/* Run every ready producer-slot's producer at the pre-swap seam (fills the slot's payload). The generic
+   core entry; a producer-bearing group wraps it with its own host-facing seam. */
+void nt_devapi_run_pre_swap_producers(void);
 
 /* Free any owned deferred-slot ids + clear the queue. Called from shutdown alongside
    nt_devapi_resp_reset so init->shutdown->init stays leak-free. */
@@ -123,76 +140,7 @@ const nt_devapi_slot *nt_devapi_registry_find(const char *method);
    each distinct group once, derived from the registered commands. */
 bool nt_devapi_group_is_first(int index);
 
-/* Engine `core` group registrar (per-group #ifdef). Defined in
-   nt_devapi_core.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_GROUP_CORE
-void nt_devapi_register_core(void);
-#endif
-
-/* Engine `time`/`render`/`frame` group registrar (per-group #ifdef). Defined in
-   nt_devapi_time.c, invoked from nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_GROUP_TIME
-void nt_devapi_register_time(void);
-#endif
-
 /* The single inject scheduler lives in the input group, but the ui group reuses it (one scheduler,
    one cap <= the immediate buffer — so two sibling groups can never over-subscribe the buffer). Its
    cap + the cross-group reuse wrappers are therefore visible when EITHER group is built. */
-#if defined(NT_DEVAPI_GROUP_INPUT) || defined(NT_DEVAPI_GROUP_UI)
-#include "input/nt_input.h" /* nt_inject_kind_t for the reuse-wrapper signature below. */
-
-/* Bounded BSS schedule cap (-D overridable). Lives here, not in nt_devapi_input.c, so the unit
-   tests + the ui drag cap derive their sizes from the real cap. */
-#ifndef NT_DEVAPI_INPUT_SCHED_MAX
-#define NT_DEVAPI_INPUT_SCHED_MAX 256
-#endif
-
-/* Reuse surface for the ui group: it resolves coords then DELEGATES scheduling here, so there is one
-   scheduler on the immediate buffer. Whole-or-nothing: preflight can_reserve(N), then issue N
-   sched_* calls (single-threaded -> atomic). */
-bool nt_devapi_input_sched_can_reserve(uint32_t n);
-bool nt_devapi_input_sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame);
-bool nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame);
-#endif
-
-/* Engine `input` group registrar (per-group #ifdef). Defined in nt_devapi_input.c, invoked from
-   nt_devapi_init under the same compile gate; registers the group's commands + lifecycle hooks. */
-#ifdef NT_DEVAPI_GROUP_INPUT
-void nt_devapi_register_input(void);
-
-/* Per-tick schedule driver (the tick hook): on a real sim-advance releases due entries into the
-   inject buffer. Exposed for tests that drive the per-tick path directly. */
-void nt_devapi_input_update(void);
-
-/* Reset hook: drop pending entries, release applied held synthetic input, re-seed the advance clock.
-   Also called from tests for order-independence. */
-void nt_devapi_input_reset(void);
-#endif
-
-/* Engine `ui` group registrar. ui.click/drag/scroll delegate scheduling to the input group's single
-   scheduler (see the reuse wrappers above), so the ui group registers NO tick hook of its own.
-   (nt_devapi_ui_register_context is host-facing — see nt_devapi.h, not this internal header.) */
-#ifdef NT_DEVAPI_GROUP_UI
-void nt_devapi_register_ui(void);
-#endif
-
-/* Observability group registrar (per-group #ifdef). Defined in nt_devapi_obs.c, invoked from
-   nt_devapi_init under the same compile gate. The obs group is pure immediate reads — it
-   registers NO tick/reset hook. */
-#ifdef NT_DEVAPI_GROUP_OBS
-void nt_devapi_register_obs(void);
-#endif
-
-/* Entity-write group registrar (per-group #ifdef). Defined in nt_devapi_entity_write.c, invoked from
-   nt_devapi_init under the same compile gate. A dev-only DEBUG write; registers no tick/reset hook. */
-#ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
-void nt_devapi_register_entity_write(void);
-#endif
-
-/* Discovery group registrar (per-group #ifdef). Defined in nt_devapi_discovery.c, invoked from
-   nt_devapi_init under the same compile gate. */
-#ifdef NT_DEVAPI_GROUP_DISCOVERY
-void nt_devapi_register_discovery(void);
-#endif
-
 #endif /* NT_DEVAPI_INTERNAL_H */

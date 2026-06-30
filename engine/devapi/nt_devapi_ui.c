@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "devapi/nt_devapi_input_internal.h" /* the input scheduler reuse surface ui delegates to. */
 #include "devapi/nt_devapi_internal.h"
 #include "input/nt_input.h"   /* nt_inject_kind_t + the reserved mouse id; ui delegates to the input scheduler. */
 #include "ui/nt_ui.h"         /* nt_ui_probe_collect + the POD node + nt_ui_id (resolve via the probe). */

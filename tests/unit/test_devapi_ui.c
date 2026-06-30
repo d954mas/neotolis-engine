@@ -12,6 +12,7 @@
 #include "clay.h"
 #include "app/nt_app.h"
 #include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_input_internal.h" /* NT_DEVAPI_INPUT_SCHED_MAX — the ui drag cap derives from it */
 #include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_net.h"      /* nt_devapi_update — drives the shared inject schedule on a sim-advance */
 #include "input/nt_input.h"            /* g_nt_input + the reserved inject pointer id, for the Y-up flip read-back */
@@ -138,6 +139,8 @@ void setUp(void) {
     /* nt_devapi_init re-registers the ui group, which CLEARS the host ctx table — so register the
        ctx AFTER init, every test, or ui.* would see an empty table. */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_input(); /* ui.* delegates scheduling to the input group + the test drives input.* */
+    nt_devapi_register_ui();
     nt_input_init();
     nt_devapi_ui_register_context("hud", s_fx.ctx);
 

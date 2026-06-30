@@ -1141,7 +1141,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         v_min,
     };
 
-    /* UV flip after split computation (D-54-19). */
+    /* UV flip after split computation. */
     if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
         uint16_t t0 = us[0];
         us[0] = us[3];

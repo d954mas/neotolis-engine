@@ -100,3 +100,7 @@ bool nt_gfx_gl_ctx_enable_timer_query(void) { return nt_gfx_js_enable_timer_quer
  * the JS call level and wouldn't see glPushDebugGroup anyway. Return false
  * — segment labeling becomes a no-op on web. */
 bool nt_gfx_gl_ctx_enable_debug_groups(void) { return false; }
+
+/* WebGL2 has no KHR_debug / glDebugMessageCallback — GL errors surface via the browser console
+ * (always on) and Emscripten GL_ASSERTIONS in debug builds. No-op here. */
+bool nt_gfx_gl_ctx_enable_debug_callback(void) { return false; }

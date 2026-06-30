@@ -37,8 +37,9 @@ static const nt_devapi_command_desc k_game_poke = {
 
 void setUp(void) {
     s_game_poked = false;
-    /* init registers core + discovery groups. */
+    /* register_default registers all compiled-in groups (core, discovery, ...). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_default();
     /* Register the game command through the public API only — the test touches
        no engine devapi source to add it (zero engine edits). */
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&k_game_poke, cmd_game_poke, &s_game_poked));
@@ -251,6 +252,14 @@ static void test_features_lists_active_groups(void) {
     expected += 1; /* entity.set */
 #else
     TEST_ASSERT_FALSE(array_has_string(groups, "entity_write"));
+#endif
+
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+    /* capture.frame + capture.region collapse to one distinct group: capture. */
+    TEST_ASSERT_TRUE(array_has_string(groups, "capture"));
+    expected += 1; /* capture */
+#else
+    TEST_ASSERT_FALSE(array_has_string(groups, "capture"));
 #endif
 
     /* an absent group is not listed. */
