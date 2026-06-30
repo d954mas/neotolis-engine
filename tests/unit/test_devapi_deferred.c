@@ -72,7 +72,7 @@ static bool defer_result_handler(const cJSON *params, cJSON *result_obj, nt_deva
     int *ctx = (int *)malloc(sizeof(int));
     TEST_ASSERT_NOT_NULL(ctx);
     *ctx = 0xA5;
-    return nt_devapi_defer_current_with_result(1, synthetic_producer, ctx, synthetic_ctx_free);
+    return nt_devapi_defer_current_with_result(1, synthetic_producer, ctx, synthetic_ctx_free, "producer_failed", "synthetic producer failed");
 }
 
 static void register_defer_result(void) {

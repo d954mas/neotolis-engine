@@ -6,15 +6,10 @@
 
 #include "devapi/nt_devapi.h"
 
-/* Stable machine error tokens, shared by the dispatch core and discovery handlers. */
+/* Stable machine error tokens emitted by the generic dispatch core. Group-specific codes (e.g. the
+   capture group's) live in the group — the core never names a group. */
 #define NT_DEVAPI_ERR_BAD_PARAMS "bad_params"
 #define NT_DEVAPI_ERR_UNKNOWN_METHOD "unknown_method"
-/* A deferred DATA producer (capture.*) ran and failed (readback / encode / OOM). Distinct from the
-   content-free legacy {deferred:true} yield, so a client never sees ok:true without the result shape. */
-#define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
-/* The host advertises capture (the group is compiled in) but never drives the pre-swap seam, so a
-   deferred capture could never resolve — reject synchronously with this instead of hanging the client. */
-#define NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE "capture_unavailable"
 
 /* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success — OOM traps
    (fail-early) instead of silently producing an incomplete response. */
@@ -76,10 +71,9 @@ void nt_devapi_resp_reset(void);
 #define NT_DEVAPI_TIME_WAIT_MAX_SECONDS 4.0
 #endif
 
-/* A pre-swap payload producer: invoked at the GL-valid seam (nt_devapi_capture_on_pre_swap) to
-   build the slot's owned result object. Returns an owned cJSON* (the {width,height,format,data}
-   capture payload) or NULL on producer failure (a DATA slot then yields the distinguishable capture_failed error).
-   `ctx` is the producer-owned param block stored with the slot; the core never inspects it. */
+/* A pre-swap payload producer: invoked at the pre-swap seam to build the slot's owned result object.
+   Returns an owned cJSON* (the result payload) or NULL on failure (a DATA slot then yields its
+   command-supplied fail_code). `ctx` is the producer-owned param block; the core never inspects it. */
 typedef cJSON *(*nt_devapi_payload_producer_fn)(void *ctx);
 
 /* Frees a producer's owned ctx block. Called exactly once per slot (on yield or reset); NULL when
@@ -92,17 +86,19 @@ typedef struct nt_devapi_deferred_slot {
     /* 8-byte members first (pointers + double) so the trailing small fields pack with minimal padding. */
     cJSON *id;          /* owned duplicate of request_id (number or string); NULL if absent. */
     double target_time; /* by_time == true: yields once g_nt_app.time reaches this (game seconds). */
-    /* Result-payload continuation (capture-style commands). producer fills `payload` at the
-       pre-swap seam; the core names no capture symbol — the producer is supplied by the handler. */
+    /* Result-payload continuation (producer-bearing commands). producer fills `payload` at the pre-swap
+       seam; the core names no group — the producer + fail strings are supplied by the handler. */
     nt_devapi_payload_producer_fn producer;  /* NULL for legacy frame.wait/time.step slots. */
     void *producer_ctx;                      /* owned param block; freed via producer_ctx_free. */
     nt_devapi_ctx_free_fn producer_ctx_free; /* frees producer_ctx on yield/reset; NULL if ctx is unowned. */
-    cJSON *payload;                          /* owned serialized capture result; NULL until the seam fills it. */
+    cJSON *payload;                          /* owned serialized producer result; NULL until the seam fills it. */
+    const char *fail_code;                   /* DATA slot: wire error code + message the core yields if the */
+    const char *fail_msg;                    /* producer returns NULL — command-supplied, so the core names no group. */
     uint32_t target_frame;                   /* by_time == false: yields once g_nt_app.frame reaches this (wrap-safe). */
     bool by_time;                            /* selects which deadline field slot_ready compares. */
     bool in_use;
     bool is_data; /* a DATA (producer-bearing) slot: outlives `producer` (cleared at the seam) so a
-                     producer-ran-but-failed slot yields capture_failed, not the legacy {deferred:true}. */
+                     producer-ran-but-failed slot yields its fail_code, not the legacy {deferred:true}. */
 } nt_devapi_deferred_slot;
 
 /* Mark the in-flight command as deferred: submit() returns NULL and the response is yielded once
@@ -115,21 +111,18 @@ bool nt_devapi_defer_current(int frames);
    precomputed). Must be called from inside a handler dispatch. */
 bool nt_devapi_defer_current_time(double seconds);
 
-/* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the pre-swap
-   seam (nt_devapi_capture_on_pre_swap) the producer fills the slot's owned payload, which
-   poll_response then yields as the ok-entry result (instead of the legacy {deferred:true}). The
-   first deferred command that RETURNS data (capture.frame). `ctx` is the producer's owned
-   param block; `ctx_free` frees it on yield/reset (NULL if ctx is not heap-owned). The core never
-   names the capture group — the handler supplies the producer (zero release delta when absent).
+/* Like nt_devapi_defer_current but ASSOCIATES a result producer with the slot: at the pre-swap seam the
+   producer fills the slot's owned payload, which poll_response then yields as the ok-entry result (instead
+   of the legacy {deferred:true}). `ctx`/`ctx_free` are the producer's owned param block + its destructor
+   (NULL if unowned). `fail_code`/`fail_msg` are the wire error the core yields if the producer returns NULL
+   — static literals supplied by the handler, so the core names no group (zero release delta when absent).
    Must be called from inside a handler dispatch.
 
-   CONTRACT: a producer-bearing slot is withheld until the pre-swap seam fills it — poll_response
-   never yields {deferred:true} for it (that would re-introduce the drain race). So the HOST MUST call
-   nt_devapi_capture_on_pre_swap on every frame it renders; while rendering is suppressed the producer
-   slot legitimately stalls until render resumes (bounded per-session by close_client ->
-   nt_devapi_deferred_reset). A capture therefore resolves on the next RENDERED frame, not merely the
-   next frame — the managed host gates the seam on render-enabled (see examples/capture_host). */
-bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free);
+   CONTRACT: a producer-bearing slot is withheld until the pre-swap seam fills it — poll_response never
+   yields {deferred:true} for it (that would re-introduce the drain race). So the HOST MUST drive the
+   pre-swap seam on every rendered frame; while rendering is suppressed the slot legitimately stalls until
+   render resumes (bounded per-session by close_client -> nt_devapi_deferred_reset). */
+bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg);
 
 /* Count of in-flight DATA (producer-bearing) deferred slots not yet drained. A data group (capture)
    uses it to cap concurrent captures independently of the shared deferred-queue size, bounding the

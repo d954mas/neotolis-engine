@@ -31,6 +31,11 @@ _Static_assert((uint64_t)NT_DEVAPI_CAPTURE_MAX_PIXELS * 8U <= UINT32_MAX, "NT_DE
    and the unit test can assert the exact cap. It bounds the per-seam encode burst + held base64 payloads
    a flooding client can trigger, independent of the shared deferred queue (NT_DEVAPI_MAX_DEFERRED). */
 
+/* Capture wire error codes (group-owned; the generic core never names them — it yields whatever the
+   handler supplies as the slot's fail_code / err->code). */
+#define NT_DEVAPI_ERR_CAPTURE_FAILED "capture_failed"
+#define NT_DEVAPI_ERR_CAPTURE_UNAVAILABLE "capture_unavailable"
+
 static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->code = NT_DEVAPI_ERR_BAD_PARAMS;
     err->message = message;
@@ -214,7 +219,7 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
     ctx->w = w;
     ctx->h = h;
     ctx->factor = factor;
-    return nt_devapi_defer_current_with_result(1, capture_produce, ctx, capture_ctx_free);
+    return nt_devapi_defer_current_with_result(1, capture_produce, ctx, capture_ctx_free, NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
 }
 
 /* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */

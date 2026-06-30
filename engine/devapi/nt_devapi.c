@@ -50,6 +50,8 @@ static bool s_defer_by_time;
 static nt_devapi_payload_producer_fn s_defer_producer;
 static void *s_defer_producer_ctx;
 static nt_devapi_ctx_free_fn s_defer_producer_ctx_free;
+static const char *s_defer_fail_code; /* wire error the core yields if a producer returns NULL — command-supplied. */
+static const char *s_defer_fail_msg;
 
 bool nt_devapi_defer_current(int frames) {
     NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
@@ -67,14 +69,16 @@ bool nt_devapi_defer_current_time(double seconds) {
     return true;
 }
 
-bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free) {
+bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg) {
     NT_ASSERT(s_out_deferred != NULL && producer != NULL); /* only valid inside a handler dispatch. */
     *s_out_deferred = true;
     s_defer_frames = frames;
-    s_defer_by_time = false; /* capture is frame-deferred — read at the next pre-swap seam. */
+    s_defer_by_time = false; /* producer slots are frame-deferred — read at the next pre-swap seam. */
     s_defer_producer = producer;
     s_defer_producer_ctx = ctx;
     s_defer_producer_ctx_free = ctx_free;
+    s_defer_fail_code = fail_code;
+    s_defer_fail_msg = fail_msg;
     return true;
 }
 
@@ -99,6 +103,8 @@ static void slot_clear(nt_devapi_deferred_slot *slot) {
         slot->payload = NULL;
     }
     slot_release_producer(slot);
+    slot->fail_code = NULL;
+    slot->fail_msg = NULL;
     slot->in_use = false;
     slot->is_data = false;
     slot->target_frame = 0;
@@ -116,7 +122,6 @@ int nt_devapi_deferred_data_inflight(void) {
     }
     return n;
 }
-
 
 /* Free owned ids/payloads/ctx + clear the queue. Called from shutdown so init->shutdown->init is
    leak-free (the owned-payload lifecycle: set on fill, transferred/freed on yield, freed here). */
@@ -287,6 +292,8 @@ typedef struct deferred_continuation {
     nt_devapi_payload_producer_fn producer;
     void *producer_ctx;
     nt_devapi_ctx_free_fn producer_ctx_free;
+    const char *fail_code; /* wire error yielded if the producer returns NULL (command-supplied). */
+    const char *fail_msg;
 } deferred_continuation;
 
 /* Enqueue a deferred command: store the owned duplicated id + continuation into a free
@@ -306,6 +313,8 @@ static bool deferred_enqueue(const cJSON *req, const deferred_continuation *cont
         s_deferred[i].producer = cont->producer; /* NULL for legacy content-free defers. */
         s_deferred[i].producer_ctx = cont->producer_ctx;
         s_deferred[i].producer_ctx_free = cont->producer_ctx_free;
+        s_deferred[i].fail_code = cont->fail_code;
+        s_deferred[i].fail_msg = cont->fail_msg;
         s_deferred[i].payload = NULL;                     /* filled at the pre-swap seam, if a producer is present. */
         s_deferred[i].is_data = (cont->producer != NULL); /* outlives `producer` for the failure-vs-legacy split. */
         s_deferred[i].in_use = true;
@@ -390,6 +399,8 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     nt_devapi_payload_producer_fn prev_defer_producer = s_defer_producer;
     void *prev_defer_producer_ctx = s_defer_producer_ctx;
     nt_devapi_ctx_free_fn prev_defer_producer_ctx_free = s_defer_producer_ctx_free;
+    const char *prev_defer_fail_code = s_defer_fail_code;
+    const char *prev_defer_fail_msg = s_defer_fail_msg;
     s_out_deferred = &deferred;
     s_defer_frames = 0;
     s_defer_seconds = 0.0;
@@ -397,6 +408,8 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     s_defer_producer = NULL;
     s_defer_producer_ctx = NULL;
     s_defer_producer_ctx_free = NULL;
+    s_defer_fail_code = NULL;
+    s_defer_fail_msg = NULL;
     bool ok = slot->handler(params, result_obj, &err, slot->user_data);
     deferred_continuation cont = {
         .by_time = s_defer_by_time, /* capture this dispatch's values before restore. */
@@ -405,6 +418,8 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
         .producer = s_defer_producer,
         .producer_ctx = s_defer_producer_ctx,
         .producer_ctx_free = s_defer_producer_ctx_free,
+        .fail_code = s_defer_fail_code,
+        .fail_msg = s_defer_fail_msg,
     };
     s_out_deferred = prev_out_deferred;
     s_defer_frames = prev_defer_frames;
@@ -413,6 +428,8 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     s_defer_producer = prev_defer_producer;
     s_defer_producer_ctx = prev_defer_producer_ctx;
     s_defer_producer_ctx_free = prev_defer_producer_ctx_free;
+    s_defer_fail_code = prev_defer_fail_code;
+    s_defer_fail_msg = prev_defer_fail_msg;
 
     if (deferred) {
         /* No ok/error entry: the deferred outcome enqueues the continuation (and the owned
@@ -526,10 +543,10 @@ static cJSON *serialize_slot(nt_devapi_deferred_slot *slot) {
         slot->payload = NULL;              /* so slot_clear doesn't double-free. */
         entry = make_ok_entry(result_obj);
     } else if (slot->is_data) {
-        /* A DATA slot resolved with NO payload: its producer ran and FAILED (readback/encode/OOM).
-           Yield a distinguishable error envelope, NOT the content-free legacy {deferred:true} — so a
-           client never sees ok:true without the documented {width,height,format,data} shape. */
-        entry = make_error_entry(NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
+        /* A DATA slot resolved with NO payload: its producer ran and FAILED. Yield the command-supplied
+           error envelope (NOT the content-free legacy {deferred:true}) so a client never sees ok:true
+           without the documented result shape. */
+        entry = make_error_entry(slot->fail_code, slot->fail_msg);
     } else {
         /* Legacy content-free yield (frame.wait/time.step) — unchanged. */
         cJSON *result_obj = cJSON_CreateObject();
