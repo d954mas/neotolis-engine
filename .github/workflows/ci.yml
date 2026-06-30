@@ -504,8 +504,10 @@ jobs:
       # mem read). NT_PRESET_NAME pins the binary at build/examples/devapi_host/native-debug so
       # devapi_demo.py's self-launch finds it with no --host-bin. Default presets keep these groups OFF
       # (zero release delta); this is an opt-in dev-only build.
+      # NT_UI_DEBUG_TOOLS=ON supplies OBS's hard deps (log ring + metrics + introspect); without it the
+      # GROUP_OBS guard fatal-errors at configure (this raw cmake does not inherit the native-debug preset).
       - name: Configure devapi host (groups the canonical scenario needs)
-        run: cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
+        run: cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_UI_DEBUG_TOOLS=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
 
       - name: Build devapi_host
         run: cmake --build build/examples/devapi_host/native-debug --target devapi_host
