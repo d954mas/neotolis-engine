@@ -10,8 +10,8 @@ devapi.spec.ts browser gate (web devapi_host). It exercises:
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
   * the riskiest web path — a deferred capture.frame/region that must resolve to a REAL PNG (NOT
                        {deferred:true}) on a host that drives the pre-swap seam,
-  * the deferred items best-effort — perf.snapshot memory (the "mem_total" obs read),
-                       render.set_enabled toggle, and time.step RAF time control (no value asserts).
+  * the deferred items (advertised-aware) — perf.stats' mem_used read, a render.set_enabled toggle,
+                       and time.step; a command this host lists in endpoints MUST pass (not best-effort).
 
 CAPTURE CAPABILITY: the native devapi_host inits NO GL and does NOT arm the capture seam, so
 capture.frame returns capture_unavailable there (the engine rejects synchronously rather than defer
@@ -135,34 +135,35 @@ def _drive_deferred_capture(client: DevApiClient) -> None:
     print(f"PASS capture: deferred capture.frame + capture.region yielded real PNGs ({full.get('width')}x{full.get('height')}), not {{deferred:true}}.")
 
 
-def _drive_deferred_items_best_effort(client: DevApiClient) -> None:
-    """Exercise the web deferrals live over the canonical scenario.
+def _drive_deferred_items(client: DevApiClient, advertised: set) -> None:
+    """Exercise the web deferrals live over the canonical scenario, advertised-aware.
 
-    Best-effort — any non-error response passes; values are NOT asserted (the value gates live in the
-    per-group demos). Covered live by the one scenario, not by separate gates. The three items: (1) the
-    obs memory read ("mem_total" — surfaced by the obs group as perf.snapshot's mem_used channel),
-    (2) a render toggle, (3) time.step RAF time control.
+    NOT blanket best-effort: a command this host lists in `endpoints` MUST succeed — swallowing its
+    error would let a real obs/render/time break still print PASS. A command absent from this host's
+    build is the only thing skipped (groups the host did not compile in are optional, never a gate).
+    The three items: (1) the obs memory read (perf.stats' mem_used channel), (2) a render toggle,
+    (3) time.step — the web pump's MANUAL progress primitive.
     """
-    # (1) obs memory read — the "mem_total via obs" item. The obs group names this channel
-    #     mem_used in perf.snapshot; reading it proves the obs path answers over the transport.
-    try:
-        snap = client.result("perf.snapshot")
-        _mem_total = snap.get("mem_used")  # the "mem_total" observable (obs channel name: mem_used).
-        del _mem_total
-    except DevApiResultError:
-        pass  # obs group not built into this host — best-effort, never a gate.
+    exercised = []
+    # (1) obs memory read — perf.stats exposes the mem_used channel (perf.snapshot is the last-frame view
+    #     and does NOT carry it). A filtered query proves the obs path answers a memory read over the wire.
+    if "perf.stats" in advertised:
+        stats = client.result("perf.stats", {"channels": ["mem_used"]})
+        mem = stats.get("channels", {}).get("mem_used")
+        assert isinstance(mem, dict) and "samples" in mem, (
+            f"perf.stats advertised but the requested mem_used channel is missing/malformed: {stats}"
+        )
+        exercised.append("perf.stats[mem_used]")
     # (2) render toggle — flip the host render flag off then back on.
-    try:
+    if "render.set_enabled" in advertised:
         client.render_set_enabled(False)
         client.render_set_enabled(True)
-    except DevApiResultError:
-        pass
-    # (3) time.step RAF time control — a deterministic MANUAL advance (the web pump's progress primitive).
-    try:
+        exercised.append("render.set_enabled")
+    # (3) time.step — a deterministic MANUAL advance.
+    if "time.step" in advertised:
         client.step(1)
-    except DevApiResultError:
-        pass
-    print("PASS deferred-items best-effort: obs mem read + render toggle + time.step exercised (no value asserts).")
+        exercised.append("time.step")
+    print(f"PASS deferred-items: {', '.join(exercised) or '(none advertised)'} exercised (advertised commands asserted).")
 
 
 def run(client: DevApiClient) -> None:
@@ -198,8 +199,8 @@ def run(client: DevApiClient) -> None:
     client.set_mode("manual")
     _drive_deferred_capture(client)
 
-    # 4. deferred items, best-effort (no value assertions).
-    _drive_deferred_items_best_effort(client)
+    # 4. deferred items — advertised-aware: a command this host lists in endpoints MUST pass.
+    _drive_deferred_items(client, methods)
 
     print("PASS: canonical run(client) — discovery + game.* + deferred capture + deferred items all machine-checked.")
 
