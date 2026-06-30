@@ -434,11 +434,12 @@ If a decision can be deferred without loss of base architecture — it is deferr
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
-- a command/RPC API in the shipped runtime (NOTE: the `nt_devapi` milestone adds a
+- a command/RPC API in the shipped runtime (NOTE: the `nt_devapi` milestone has shipped a
   dev-only, self-describing JSON command surface for engine introspection and
-  automation. It is gated by `NT_DEVAPI_ENABLED` (OFF by default) and the
-  `engine/devapi` subdir is compile-excluded from release, so it is **not** part of
-  the shipped runtime or the asset/format pipeline. See §24.5.)
+  automation, over both a native loopback-TCP transport and a web `ccall` bridge. It is gated
+  by `NT_DEVAPI_ENABLED` (OFF by default) and the `engine/devapi` subdir is compile-excluded
+  from release, so it remains **not** part of the shipped runtime or the asset/format
+  pipeline. See §24.5.)
 
 ---
 
@@ -2606,7 +2607,14 @@ Recommended stats: frame time, fps, cpu/gpu time, draw call count, plus any game
 
 `nt_devapi` is an **optional, dev-only** self-describing command surface for engine introspection and automation (probing, testing, external tooling). It is gated by `NT_DEVAPI_ENABLED` (OFF by default); the `engine/devapi` subdirectory is excluded at the CMake level when off, so a release binary contains zero devapi code or symbols. A CI "zero-delta" check asserts a devapi-OFF WASM has no `nt_devapi_*` symbols. devapi is the one sanctioned exception to the runtime's no-parser rule — it is dev-only and compiled out of release.
 
-**Transport-agnostic core.** The dispatch core is `submit(line) -> response line`: one JSON request line in, one JSON response line out, with no platform/socket/transport code. A command may also **defer** its response: `submit` returns `NULL`, the command records a deadline of `g_nt_app.frame + N` game frames at submit time, and the result is delivered later by `nt_devapi_poll_response()` once `g_nt_app.frame` has reached that deadline. The host drains ready responses each tick (via `nt_devapi_update()`); because readiness is a comparison against the game frame counter, it counts real simulation advances, not poll calls — a paused game never advances its frame, so a wait never resolves. Real transports (loopback TCP, web `ccall`) are separate, opt-in, and added by later phases.
+**Transport-agnostic core.** The dispatch core is `submit(line) -> response line`: one JSON request line in, one JSON response line out, with no platform/socket/transport code. A command may also **defer** its response: `submit` returns `NULL`, the command records a deadline of `g_nt_app.frame + N` game frames at submit time, and the result is delivered later by `nt_devapi_poll_response()` once `g_nt_app.frame` has reached that deadline. The host drains ready responses each tick (via `nt_devapi_update()`); because readiness is a comparison against the game frame counter, it counts real simulation advances, not poll calls — a paused game never advances its frame, so a wait never resolves. The two real transports (loopback TCP on native, a `ccall` bridge on web) are separate, opt-in libraries that share this one core — both are described below.
+
+**Unified transport model.** Two parallel transports wrap the **one** core dispatch — not a single swappable interface, but two thin libraries that both feed `submit` and drain `poll_response`. The core (`nt_devapi`) owns `nt_devapi_update()` and the frame-keyed deferred drain; each transport registers its own per-tick poll (or nothing) into the core's fixed-array **lifecycle-hook registry**, so both transports run the **same** shared drain and neither is hard-referenced by the core.
+
+- **Native — loopback TCP (`nt_devapi_net`).** A single-client, JSON-lines, non-blocking TCP listener. It binds **`127.0.0.1` only** (`INADDR_LOOPBACK`) on `NT_DEVAPI_DEFAULT_PORT` (`17890`, env-overridable via `NT_DEVAPI_PORT`), and registers its `nt_devapi_net_poll` (non-blocking accept + recv + framed dispatch + send + deferred drain) as the core's tick hook. The sole socket boundary in the layer — all `_WIN32` (Winsock) vs POSIX `#ifdef` code lives in this one module.
+- **Web — `ccall` bridge (`nt_devapi_web`).** Push/pull instead of a socket: JS on the **same page** calls the `EMSCRIPTEN_KEEPALIVE`-exported `nt_devapi_web_submit(line)` to push a request and `nt_devapi_web_poll()` to pull queued responses, reached through `window.__devapi`. There is **no socket and no listener** — the bridge is driven by the host page's JS, so the web transport registers **no** tick poll (it is push-driven); the core's frame-keyed drain still delivers deferred replies for the JS side to pull.
+
+**Security model — native vs web.** This is the headline: **there is no open devapi port in the browser.** On native, the listener is a **loopback `127.0.0.1`-only** socket — never reachable off the machine. On web, there is **no listener at all**: `window.__devapi` is callable only by **same-page JS** in the same origin, and only when the build defines `NT_DEVAPI_ENABLED` (OFF by default — the whole `engine/devapi` subdir is compile-excluded from release, so a shipped web build carries zero devapi code or symbols). A devapi-enabled web build opens no network surface; an attacker would already need to be running same-origin script in the page.
 
 **Self-describing registry.** Commands are registered once into a fixed-size table, each with a 7-field descriptor (`method`, `group`, `summary`, `params_shape`, `result_shape`, `frame_behavior`, `side_effects`). The discovery commands (`endpoints`, `command.describe`, `features`) expose the whole surface so a client reads it without source. A game registers `group="game"` commands through the public API with zero engine edits. `features` lists the distinct `group` values across all registered commands — which groups exist depends on which commands are compiled in (engine) or registered at runtime (game).
 
