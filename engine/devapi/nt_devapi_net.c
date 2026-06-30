@@ -459,7 +459,7 @@ bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
         FD_ZERO(&rfds);
         FD_SET(s_listen, &rfds);
         struct timeval tv = {.tv_sec = (long)(remaining / 1000ULL), .tv_usec = (long)((remaining % 1000ULL) * 1000ULL)};
-        (void)select((int)(s_listen + 1), &rfds, NULL, NULL, &tv);
+        (void)select((int)s_listen + 1, &rfds, NULL, NULL, &tv);
     }
 }
 // #endregion
