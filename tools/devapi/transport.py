@@ -8,6 +8,7 @@ crashed / deferred-forever engine can never hang the bot or CI.
 Stdlib only (socket) — no pip deps. Python 3.8+.
 """
 import socket
+import time
 from abc import ABC, abstractmethod
 
 # Default loopback read timeout (seconds). Bounded so a dead/deferred-forever
@@ -95,3 +96,60 @@ class SocketTransport(Transport):
         finally:
             if self._sock is not None:
                 self._sock.close()
+
+
+# A deterministic rAF barrier: a Promise that resolves after two nested requestAnimationFrame
+# callbacks. One nested rAF lets the deferred capture's pre-swap seam run (the producer fills its
+# payload INSIDE the swap that the second rAF schedules); copied from tests/browser/input.spec.ts:26.
+_RAF_BARRIER_JS = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))"
+
+
+class PlaywrightTransport(Transport):
+    """JSON-lines over window.__devapi.submit/poll, pumped once per rAF until a line arrives.
+
+    No socket — drives the web devapi bridge over a Playwright page. send() calls
+    window.__devapi.submit and stashes the SYNCHRONOUS response (a non-deferred command returns its
+    response line immediately; a deferred command — C returned NULL — returns "" and its data line
+    arrives later via poll()). recv_line() returns a stashed line, else loops a rAF barrier +
+    window.__devapi.poll() until a line appears or the MANDATORY read_timeout fires — mirroring
+    SocketTransport's bounded read so a deferred-forever capture can never hang CI (D-01).
+
+    Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
+    HARNESS-03 web wire. The Playwright import would be lazy if needed, but this class touches only
+    the page handle the caller already constructed, so no import is required here — keeping the
+    module stdlib-only importable for the native SocketTransport path.
+    """
+
+    def __init__(self, page, read_timeout: float = DEFAULT_READ_TIMEOUT) -> None:
+        self._page = page
+        self._timeout = read_timeout
+        # Lines received synchronously from submit() but not yet handed to recv_line().
+        self._inbox = []
+
+    def send(self, line: str) -> None:
+        if len(line.encode("utf-8")) > MAX_LINE_BYTES:
+            raise ValueError("outbound line exceeds MAX_LINE_BYTES")
+        # submit returns "" on defer (C returned NULL), else the synchronous response line.
+        resp = self._page.evaluate("(l) => window.__devapi.submit(l)", line)
+        if resp:
+            self._inbox.append(resp)
+
+    def recv_line(self) -> str:
+        if self._inbox:
+            return self._inbox.pop(0)
+        # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast (D-01).
+        deadline = time.time() + self._timeout
+        while time.time() < deadline:
+            # Advance a real rendered frame so a pending capture's pre-swap producer fills its payload,
+            # THEN poll; rAF cadence only lets the seam run — MANUAL time.step makes progress determinate.
+            self._page.evaluate(_RAF_BARRIER_JS)
+            line = self._page.evaluate("() => window.__devapi.poll()")
+            if line:
+                if len(line.encode("utf-8")) >= MAX_LINE_BYTES:
+                    raise ConnectionError("oversized line from window.__devapi.poll — framing/cap desync")
+                return line
+        raise TimeoutError("no web devapi line within read_timeout")
+
+    def close(self) -> None:
+        # The page lifecycle is owned by the scenario / Playwright fixture, not the transport.
+        pass
