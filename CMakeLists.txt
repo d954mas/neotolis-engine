@@ -173,9 +173,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/ui_showcase)
     # Minimal standalone web smoke-test app (window.__nt hooks the browser specs drive).
     add_subdirectory(tests/browser/app)
-    # devapi host links nt_devapi via the D-18 transport split: native nt_devapi_net (TCP) OR web
+    # devapi host links nt_devapi via the transport split: native nt_devapi_net (TCP) OR web
     # nt_devapi_web (the push/pull ccall bridge, no socket). Builds on BOTH native and EMSCRIPTEN now —
-    # the web target is the Playwright web-smoke gate (Plan 03/04). Gate only on the layer being enabled.
+    # the web target is the Playwright web-smoke gate. Gate only on the layer being enabled.
     if(NT_DEVAPI_ENABLED)
         add_subdirectory(examples/devapi_host)
         # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).

@@ -500,7 +500,7 @@ jobs:
       # The full devapi_host links nt_ui/nt_metrics/nt_entity, so it serves every group the canonical
       # scenario touches: CORE/DISCOVERY/TIME (ping/endpoints/command.describe/features + game.*/
       # render.set_enabled/time.step), CAPTURE (deferred capture.frame — answers capture_unavailable on
-      # the native no-GL-render host, the documented native outcome), and OBS (the D-12 perf.snapshot
+      # the native no-GL-render host, the documented native outcome), and OBS (the perf.snapshot
       # mem read). NT_PRESET_NAME pins the binary at build/examples/devapi_host/native-debug so
       # devapi_demo.py's self-launch finds it with no --host-bin. Default presets keep these groups OFF
       # (zero release delta); this is an opt-in dev-only build.
@@ -514,8 +514,8 @@ jobs:
 
       # The live-socket UAT: devapi_demo.py self-launches devapi_host over the native socket and drives
       # the ONE canonical run(client) — discovery + game.echo/game.poke + observe + deferred capture +
-      # the D-12 items. xvfb-run supplies the headless X for nt_window_init(). Exit 0 == the whole
-      # canonical scenario PASSED over the native transport (D-10/D-11).
+      # the deferred items. xvfb-run supplies the headless X for nt_window_init(). Exit 0 == the whole
+      # canonical scenario PASSED over the native transport (exit-code gated).
       - name: Run devapi live-socket UAT
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
@@ -523,11 +523,11 @@ jobs:
     name: Web Smoke (devapi, blocking)
     runs-on: ubuntu-latest
     needs: wasm
-    # BLOCKING gate (D-09): merge-gating because the deferred-capture-over-web drain race is invisible
-    # to unit tests (only a real headless-Chromium run proves it). Viable as a blocking gate ONLY
-    # because devapi.spec.ts pumps frames deterministically via time.step (D-02 -> D-09 invariant),
-    # not via rAF cadence — no flake. NO git-LFS pull / pack-builder: the devapi_host loads no asset
-    # pack (capture renders a deterministic glClear+scissor pattern), unlike browser_smoke (RD-5).
+    # BLOCKING gate: merge-gating because the deferred-capture-over-web drain race is invisible to unit
+    # tests (only a real headless-Chromium run proves it). Viable as a blocking gate ONLY because
+    # devapi.spec.ts pumps frames deterministically via time.step, not via rAF cadence — no flake. NO
+    # git-LFS pull / pack-builder: the devapi_host loads no asset pack (capture renders a deterministic
+    # glClear+scissor pattern), unlike browser_smoke.
     steps:
       - uses: actions/checkout@v4
 
@@ -552,8 +552,8 @@ jobs:
 
       # Build the devapi_host wasm with the capture group ON so the web host arms the pre-swap seam
       # (NT_DEVAPI_HOST_WEB_CAPTURE) — the deferred capture.frame resolves to a REAL PNG, the exact
-      # behavior the live spec asserts. This is the first fpng WASM link with FPNG_NO_SSE (Pitfall 7 /
-      # R4), exercised here. No pack-builder: devapi_host loads no asset pack (RD-5).
+      # behavior the live spec asserts. This is the first fpng WASM link with FPNG_NO_SSE (scalar path
+      # only), exercised here. No pack-builder: devapi_host loads no asset pack.
       - name: Build devapi_host wasm (debug, capture ON)
         run: |
           emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
@@ -571,7 +571,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      # serve.mjs serves the devapi_host wasm output (NT_SHOWCASE_DIR override, RD-5); the spec drives
+      # serve.mjs serves the devapi_host wasm output (NT_SHOWCASE_DIR override); the spec drives
       # window.__devapi deterministically and asserts the deferred capture is a decodable non-blank PNG.
       - name: Run devapi web smoke test
         run: cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/examples/devapi_host/wasm-debug" npx playwright test devapi.spec.ts

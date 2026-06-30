@@ -142,8 +142,8 @@ endforeach()
 
 # engine.info pulls version/build/preset from nt_core (nt_engine_*_string()).
 
-# Transport target -- selected by platform (D-18): two PARALLEL transports over the one core, not a
-# single swappable interface. Web (Emscripten) is a push/pull ccall bridge with NO socket (D-16);
+# Transport target -- selected by platform: two PARALLEL transports over the one core, not a
+# single swappable interface. Web (Emscripten) is a push/pull ccall bridge with NO socket;
 # native is the loopback TCP transport. A core-only consumer pulls neither's deps. The core
 # (nt_devapi) owns nt_devapi_update + the frame-keyed deferred drain; each transport registers its own
 # poll (native) or nothing (web, push-driven) as a tick hook.
@@ -153,7 +153,7 @@ if(EMSCRIPTEN)
         nt_devapi_web.h
     )
     # PUBLIC nt_devapi: the transport wraps the core dispatch and re-exposes NT_DEVAPI_ENABLED.
-    # No ws2_32 / no socket: web is a JS ccall bridge (D-16).
+    # No ws2_32 / no socket: web is a JS ccall bridge.
     target_link_libraries(nt_devapi_web PUBLIC nt_devapi)
 else()
     nt_add_module(nt_devapi_net LOG_DOMAIN "devapi_net"
