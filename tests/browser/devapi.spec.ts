@@ -19,12 +19,10 @@ declare global {
 // arrival order (an unrelated line must not be mistaken for the capture result).
 let nextId = 1;
 
-// FIRST web-smoke gate for the devapi web transport: a real headless Chromium drives the genuine
-// window.__devapi bridge (submit/poll/tick) against the capture-build devapi_host wasm, exercising
-// discovery + the two game commands + the riskiest web path — a deferred capture.frame that must
-// resolve to a real PNG (not {deferred:true}) only AFTER a rendered frame fills the pre-swap seam
-// (the drain-race unit tests cannot see). The full live run is the orchestrator's
-// mandatory UAT; this is its test body.
+// Web-smoke gate for the devapi web transport: a real headless Chromium drives the window.__devapi
+// bridge (submit/poll/tick) against the capture-build devapi_host wasm — discovery + the two game
+// commands + a deferred capture.frame that must resolve to a real PNG (not {deferred:true}) only after
+// a rendered frame fills the pre-swap seam (a drain race unit tests cannot see).
 test('devapi web transport: discovery + game.* + deferred capture yields a non-blank PNG', async ({ page }) => {
   await page.goto('/index.html');
 

@@ -85,7 +85,7 @@ def _find_host_bin(argv) -> str:
     exe = "devapi_host.exe" if os.name == "nt" else "devapi_host"
     base = os.path.join(REPO_ROOT, "build", "examples", "devapi_host")
     # The per-preset build nests the binary under a preset subdir (e.g. native-debug); fall back to
-    # the flat layout. The orchestrator may pass --host-bin to pin an exact build.
+    # the flat layout. A caller may pass --host-bin to pin an exact build.
     for cand in (os.path.join(base, "native-debug", exe), os.path.join(base, exe)):
         if os.path.isfile(cand):
             return cand

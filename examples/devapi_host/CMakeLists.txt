@@ -13,7 +13,7 @@ add_executable(devapi_host main.c)
 # push/pull ccall bridge, NO socket) + nt_platform_web; native links nt_devapi_net (TCP).
 # Both consume the same nt_devapi core + nt_devapi_default group bundle. The web path also pulls a
 # real GL context (nt_gfx) for the deferred-capture seam; the capture group already links nt_fpng
-# transitively via nt_devapi_default, so the FIRST fpng WASM link rides this target.
+# transitively via nt_devapi_default.
 if(EMSCRIPTEN)
     set(DEVAPI_HOST_TRANSPORT nt_devapi_web nt_platform_web)
 else()
@@ -37,8 +37,8 @@ if(WIN32)
 endif()
 
 if(EMSCRIPTEN)
-    # fpng's first WASM link: fpng auto-detects non-x86 (EMSCRIPTEN) and takes its scalar path, but
-    # pin FPNG_NO_SSE=1 explicitly so the WASM build never reaches the SSE intrinsics.
+    # fpng auto-detects non-x86 (EMSCRIPTEN) and takes its scalar path, but pin FPNG_NO_SSE=1 explicitly
+    # so the WASM build never reaches the SSE intrinsics.
     target_compile_definitions(nt_fpng PRIVATE FPNG_NO_SSE=1)
 
     # Emit index.html via the shared shell; export the two KEEPALIVE transport wrappers + main, and the

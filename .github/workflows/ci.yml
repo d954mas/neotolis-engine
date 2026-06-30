@@ -493,7 +493,7 @@ jobs:
 
       # Hermetic pixel-health self-test (no GL/socket): exercises pixel_health's negative branches
       # (not-blank, dims, orientation, channel-order) with synthetic PNGs, so a silent weakening of the
-      # capture safety net fails here, not only in the heavyweight live UAT below.
+      # capture safety net fails here, not only in the live socket run below.
       - name: Pixel-health self-test (hermetic)
         run: python3 tools/devapi/scenarios/pixel_health_selftest.py
 
@@ -552,8 +552,8 @@ jobs:
 
       # Build the devapi_host wasm with the capture group ON so the web host arms the pre-swap seam
       # (NT_DEVAPI_HOST_WEB_CAPTURE) — the deferred capture.frame resolves to a REAL PNG, the exact
-      # behavior the live spec asserts. This is the first fpng WASM link with FPNG_NO_SSE (scalar path
-      # only), exercised here. No pack-builder: devapi_host loads no asset pack.
+      # behavior the live spec asserts. FPNG_NO_SSE keeps the WASM fpng build on its scalar path.
+      # No pack-builder: devapi_host loads no asset pack.
       - name: Build devapi_host wasm (debug, capture ON)
         run: |
           emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
