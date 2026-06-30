@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """DevAPI capture demo — the live-socket UAT for the frame-capture group.
 
-Exercises capture.frame / capture.region end-to-end against a REAL running examples/capture_host over
-loopback TCP — the layer only a live socket + a real GL context proves: capture is a deferred command
-that returns DATA, so the drain-race (the reply must arrive only AFTER a render fills the payload) only
-shows here, never in a unit binary. The host renders a known two-tone pattern; this UAT confirms the
-deferred command resolves AFTER a render with a decodable, non-blank PNG (NOT {deferred:true}),
-region/scale dims are correct, bad params return bad_params over the wire, and the pixel-health check
-(decode + dims + not-blank) passes.
+Exercises capture.frame / capture.region end-to-end against a real running examples/capture_host over
+loopback TCP. Capture is a deferred DATA command, so the drain-race (the reply must arrive only after a
+render fills the payload) only surfaces with a live socket + real GL context, never in a unit binary.
+The host renders a known two-tone pattern; this UAT confirms the command resolves after a render with a
+decodable, non-blank PNG (not {deferred:true}), region/scale dims are correct, bad params return
+bad_params over the wire, and the pixel-health check passes.
 
-devapi_host inits NO gfx, so this scenario launches CAPTURE_HOST (a dedicated gfx-backed
-host). By default it launches its own subprocess on a free port, drives the capture commands, and tears
-it down. Point it at an already-running host with --port N (or env NT_DEVAPI_PORT) + --no-launch.
+devapi_host inits no gfx, so this scenario launches capture_host (a dedicated gfx-backed host). By
+default it launches its own subprocess on a free port and tears it down; attach to an already-running
+host with --no-launch.
 
 Usage: python tools/devapi/scenarios/capture_demo.py [--port N] [--no-launch] [--host-bin PATH] [--save DIR]
   Port resolution: --port N  >  env NT_DEVAPI_PORT  >  default 17890.
-Returns exit 0 if every assertion passes, exit 1 on any failure (connect / timeout / assertion /
-protocol), exit 2 on a usage / launch error.
+Exit 0 if every assertion passes, 1 on any failure (connect / timeout / assertion / protocol),
+2 on a usage / launch error.
 
-Harness-core stays stdlib-only (socket + json + subprocess); Pillow + numpy are imported LAZILY inside
-the capture branch via tools/devapi/pixel_health.py — a non-capture run never pulls them.
+Pillow + numpy are imported lazily inside the capture branch via tools/devapi/pixel_health.py — the
+harness core stays stdlib-only.
 """
 import os
 import subprocess
@@ -71,9 +70,8 @@ def resolve_port(argv) -> int:
 def _find_host_bin(argv) -> str:
     """--host-bin PATH override, else the per-preset capture_host built by the capture config.
 
-    capture_host is a CAPTURE-focused host (CORE/DISCOVERY/TIME/CAPTURE groups only), built into a
-    dedicated config dir — the shared native-debug build enables every devapi group, which would couple
-    the host to subsystems (nt_ui / metrics) it never inits. The cap-host preset dir is the default.
+    capture_host enables only CORE/DISCOVERY/TIME/CAPTURE groups, built into a dedicated cap-host dir —
+    the shared native-debug build enables every group, coupling the host to subsystems it never inits.
     """
     for i, a in enumerate(argv):
         if a == "--host-bin" and i + 1 < len(argv):
@@ -120,15 +118,13 @@ def run(client: DevApiClient, save_dir=None) -> None:
     fb_h = int(view["fb_height"])
     assert fb_w > 0 and fb_h > 0, f"view returned a zero-size framebuffer ({fb_w}x{fb_h})"
 
-    # 1. Drain-race: capture.frame is DEFERRED, so the reply must arrive only AFTER a render carrying a
-    #    real PNG payload — NOT the legacy {deferred:true}. result() blocks through the deferred yield
-    #    via request_id correlation; receiving width/height/format/data proves the pre-swap producer ran.
+    # 1. Drain-race: capture.frame is deferred, so the reply must arrive only after a render fills the
+    #    payload — not the legacy {deferred:true}. Receiving width/height/format/data proves it ran.
     full = client.capture_frame()
     assert full.get("deferred") is not True, "capture.frame returned {deferred:true} — the producer never ran (drain-race)"
     img = pixel_health.check_payload(full, fb_w, fb_h)
-    # Channel order (RGB vs BGR): the host's centered foreground box is R-dominant orange; a red/blue
-    # swap in the GL readback or the RGB strip would invert it and slip past every channel-symmetric
-    # check (not-blank, split-means). Sample the central fg and assert it reads red-dominant.
+    # Channel order (RGB vs BGR): the centered fg box is R-dominant orange; a red/blue swap would invert
+    # it and slip past every channel-symmetric check (not-blank, split-means).
     r_mean, _g_mean, b_mean = pixel_health.center_channel_means(img)
     assert r_mean > b_mean, (
         f"capture channel order looks swapped (RGB vs BGR): center-fg mean R={r_mean:.1f} <= B={b_mean:.1f} "
@@ -139,26 +135,21 @@ def run(client: DevApiClient, save_dir=None) -> None:
         img.save(os.path.join(save_dir, "capture_frame.png"))
     print(f"PASS[1/5] capture.frame: deferred-yield carried a decodable {img.width}x{img.height} PNG, not {{deferred:true}}.")
 
-    # 2. capture.region: a sub-rect returns dims matching the rect (no resampling at scale 1). The rect
-    #    spans the host's two-tone boundary (centered fg box at fb/4..3fb/4) so not-blank has >=2 colors
-    #    under Mesa llvmpipe. The dims + not-blank check is position-BLIND, so the region Y-origin is
-    #    verified SEPARATELY below (a flip passes dims+not-blank but lands the fg in the wrong band).
+    # 2. capture.region: a sub-rect returns dims matching the rect. The dims + not-blank check is
+    #    position-blind, so the region origin is verified separately below (a flip passes dims+not-blank).
     rx, ry, rw, rh = 0, 0, fb_w * 3 // 4, fb_h * 3 // 4
     region = client.capture_region(rx, ry, rw, rh)
     region_img = pixel_health.check_payload(region, rw, rh)
-    # Region Y-origin: under the top-left contract the orange fg box sits in the LOWER band of this
-    # top-left crop (fg spans frame y fb_h/4..3fb_h/4; the top fb_h/4 rows are pure bg). Orange reads
-    # brighter than the blue bg, so the bottom half must out-mean the top half — a flipped (bottom-left)
-    # readback inverts this. Catches a region Y-flip regression the dims/not-blank check cannot see.
+    # Region Y-origin: under top-left origin the orange fg sits in the lower band of this crop (top
+    # fb_h/4 rows are pure bg), so bottom must out-mean top — a bottom-left readback inverts this.
     top_mean, bottom_mean = pixel_health.vertical_split_means(region_img)
     assert bottom_mean > top_mean, (
         f"capture.region y-origin looks flipped: top-half mean {top_mean:.1f} >= bottom-half "
         f"{bottom_mean:.1f} (the orange foreground must sit in the lower band under top-left origin)"
     )
-    # Region X-origin: a rect straddling the fg box's RIGHT edge — its left half lands inside the orange
-    # fg, its right half in the blue bg, so left must out-mean right. A dropped/shifted x crop offset
-    # would move the fg and invert this. Symmetric to the Y-origin check; the stub-backed C tests cannot
-    # see the x offset (the stub discards x/y), so this is the only end-to-end x-origin guard.
+    # Region X-origin: a rect straddling the fg box's right edge — left half inside the fg, right half in
+    # the bg, so left must out-mean right. The stub-backed C tests discard x/y, so this is the only
+    # end-to-end x-origin guard.
     xr, xy, xw, xh = fb_w // 2, fb_h // 4, fb_w // 2, fb_h // 2
     xspan_img = pixel_health.check_payload(client.capture_region(xr, xy, xw, xh), xw, xh)
     left_mean, right_mean = pixel_health.horizontal_split_means(xspan_img)
@@ -177,9 +168,8 @@ def run(client: DevApiClient, save_dir=None) -> None:
     pixel_health.check_payload(quarter, fb_w // 4, fb_h // 4)
     print(f"PASS[3/5] capture.frame scale 1/2 -> {fb_w // 2}x{fb_h // 2}, 1/4 -> {fb_w // 4}x{fb_h // 4}.")
 
-    # 4. Bad params -> bad_params over the wire (never an assert / crash on untrusted bot input). Carry
-    #    the wire method EXPLICITLY in the tuple (not inferred from the label). Both axes are proven
-    #    OOB over the real framebuffer: w>fb_w (X) and h>fb_h (Y) (AGENTS.md axis-swap guidance).
+    # 4. Bad params -> bad_params over the wire (never an assert / crash on untrusted bot input). Both
+    #    axes are proven OOB over the real framebuffer: w>fb_w (X) and h>fb_h (Y).
     for method, params, label in (
         ("capture.frame", {"scale": 3}, "capture.frame scale=3"),
         ("capture.region", {"x": 0, "y": 0, "w": fb_w + 1, "h": fb_h}, "capture.region w>fb_w"),

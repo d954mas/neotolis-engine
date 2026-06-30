@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Hermetic self-test for pixel_health — no GL, no socket, no host.
 
-pixel_health is the harness's sole guard that a bad capture cannot slip through, but it otherwise runs
-only inside the GL-requiring live UAT (capture_demo.py / the capture-smoke job). This builds synthetic
-PNGs in memory and exercises pixel_health's POSITIVE and NEGATIVE branches directly, so a regression
-that silently weakens a check (drops not-blank, inverts a split-mean, skips a dims assert, or loses a
-channel-order distinction) fails fast instead of only on the heavyweight live path.
+pixel_health otherwise runs only inside the GL-requiring live UAT. This builds synthetic PNGs in memory
+and exercises its positive and negative branches directly, so a regression that silently weakens a
+check (drops not-blank, inverts a split-mean, skips a dims assert, loses a channel-order distinction)
+fails fast instead of only on the heavyweight live path.
 
-Pillow + numpy only — installed by the capture-smoke CI job. Run from the repo root:
+Run from the repo root:
   python3 tools/devapi/scenarios/pixel_health_selftest.py   (exit 0 == all checks held).
 """
 import base64
@@ -41,7 +40,7 @@ def _payload(arr):
 
 
 def _payload_mismatched(reported_w, reported_h, png_arr):
-    """A payload whose REPORTED dims are decoupled from the actual PNG pixel dims — a producer that
+    """A payload whose reported dims are decoupled from the actual PNG pixel dims — a producer that
     encodes a wrong-sized image yet reports the expected size, which only check()'s decoded-dims guard catches."""
     return {"width": reported_w, "height": reported_h, "format": "png", "data": _png_b64(png_arr)}
 
@@ -73,9 +72,8 @@ def main():
     _expect_assert(lambda: pixel_health.check_payload(_payload(two), 61, 40), "wrong-width dims")
     pixel_health.check_payload(_payload(two), 60, 40)
 
-    # 2b. decoded-vs-reported mismatch: the REPORTED dims match expected (so check_payload's reported-dims
-    #     assert passes), but the PNG decodes to a different size -> check()'s DECODED-dims assert must fire.
-    #     Without this case a producer that lies about its size (reports 60x40, encodes 30x20) slips through.
+    # 2b. decoded-vs-reported mismatch: reported dims match expected (passing check_payload's reported-dims
+    #     assert) but the PNG decodes to a different size -> check()'s decoded-dims assert must fire.
     _expect_assert(lambda: pixel_health.check_payload(_payload_mismatched(60, 40, _two_tone(30, 20)), 60, 40),
                    "decoded-vs-reported dims mismatch")
 

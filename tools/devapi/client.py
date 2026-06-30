@@ -437,15 +437,13 @@ class DevApiClient:
 
     # #endregion
 
-    # #region capture.* wrappers — deferred DATA commands; result() blocks until the pre-swap producer
-    # fills the payload (a render must happen), returning {width,height,format:"png",data:<base64>}.
+    # #region capture.* wrappers — deferred DATA commands; result() blocks until a render fills the payload.
     def capture_frame(self, scale: Optional[int] = None) -> Dict[str, Any]:
-        """Capture the full framebuffer as a PNG (base64 in result.data).
+        """Capture the full framebuffer as a PNG. Result: {width,height,format:"png",data:<base64>}.
 
-        DEFERRED: the command is withheld until the next pre-swap seam reads the freshly-rendered
-        framebuffer, so result() returns the real PNG payload (NOT {deferred:true}) — the drain-race
-        only resolves once a render advances. `scale` is the integer divisor {1,2,4} (1=full, 2=half,
-        4=quarter); omitted -> full resolution. Result: {width,height,format:"png",data:<base64>}.
+        Deferred: result() blocks until the next pre-swap render fills the payload, so it returns the
+        real PNG (NOT {deferred:true}). `scale` is the integer divisor {1,2,4} (1=full, 2=half,
+        4=quarter); omitted -> full resolution.
         """
         params: Dict[str, Any] = {}
         if scale is not None:
@@ -455,11 +453,11 @@ class DevApiClient:
     def capture_region(
         self, x: int, y: int, w: int, h: int, scale: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Capture an (x,y,w,h) sub-rect of the framebuffer as a PNG (base64 in result.data).
+        """Capture an (x,y,w,h) sub-rect of the framebuffer as a PNG. Result: {width,height,format:"png",data:<base64>}.
 
-        DEFERRED like capture_frame. The rect is top-left origin, bounded to the framebuffer (an
-        out-of-bounds / zero-size / over-cap rect -> bad_params over the wire). `scale` is the integer
-        divisor {1,2,4} applied after the sub-rect crop. Result: {width,height,format:"png",data:<base64>}.
+        Deferred like capture_frame. Top-left origin, bounded to the framebuffer (out-of-bounds /
+        zero-size / over-cap -> bad_params over the wire). `scale` is the integer divisor {1,2,4}
+        applied after the crop.
         """
         params: Dict[str, Any] = {"x": x, "y": y, "w": w, "h": h}
         if scale is not None:

@@ -65,10 +65,9 @@ static void frame(void) {
 
     if (nt_app_render_enabled()) {
         render_pattern();
-        /* The capture seam runs INSIDE nt_window_swap_buffers (registered once via
-           nt_devapi_capture_install_seam): post-render, pre-swap, where nt_gfx_read_pixels is GL-valid.
-           Gated implicitly with rendering — render off => no swap => seam doesn't run => a
-           capture stays pending until a real frame draws (never an ok:true stale/garbage frame). */
+        /* The capture seam runs INSIDE nt_window_swap_buffers (post-render, pre-swap, where
+           nt_gfx_read_pixels is GL-valid). Gated implicitly with rendering: render off => no swap =>
+           seam doesn't run => a capture stays pending until a real frame draws, never a stale frame. */
         nt_window_swap_buffers();
     }
 

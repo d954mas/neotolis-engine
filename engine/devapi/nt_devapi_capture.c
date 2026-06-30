@@ -39,10 +39,9 @@ static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->message = message;
 }
 
-/* "This host drives the pre-swap seam" — set via install_seam (or a manual host calling arm directly),
-   reset each register_capture so a fresh init starts unarmed. defer_capture reads it to reject with
-   capture_unavailable rather than defer a slot that never resolves. NOT reset on client-reset, so a
-   reconnecting client on a capture host stays armed. */
+/* "This host drives the pre-swap seam" — set via install_seam; reset each register_capture (fresh init
+   starts unarmed). defer_capture reads it to reject rather than defer a slot that never resolves. NOT
+   reset on client-reset, so a reconnecting client on a capture host stays armed. */
 static bool s_seam_armed;
 
 void nt_devapi_capture_arm(void) { s_seam_armed = true; }

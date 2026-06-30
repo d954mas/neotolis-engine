@@ -6,7 +6,7 @@
 
 # nt_devapi -- the framework ONLY: dispatch + self-describing registry + lifecycle-hook registry + the
 # host-facing registration API (nt_devapi_groups.h). It references NO group, so any set of group libs
-# can link it without conflict (this is what removed the all-groups link collision).
+# can link it without conflict.
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
     nt_devapi_registry.c

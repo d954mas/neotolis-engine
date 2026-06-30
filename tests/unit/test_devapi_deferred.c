@@ -42,10 +42,9 @@ static void register_defer(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_register(&desc, defer_handler, NULL));
 }
 
-/* Synthetic payload producer — no GL, no capture group. Stands in for the Plan 05 capture producer:
-   builds a known {probe:"ok"} result so the payload-yield path is provable in a pure unit binary.
-   Reads a heap-owned ctx flag so the ctx-free lifecycle (set on defer, freed on yield/reset) is
-   exercised; freed-once is asserted by the global s_producer_ctx_freed counter under ASan/LSan. */
+/* Synthetic payload producer — no GL, no capture group — so the payload-yield path is provable in a
+   pure unit binary. Exercises the owned-ctx lifecycle (set on defer, freed once on yield/reset);
+   freed-once is asserted via s_producer_ctx_freed under ASan/LSan. */
 static int s_producer_ctx_freed; /* incremented once per ctx free — proves no double / no leak. */
 
 static void synthetic_ctx_free(void *ctx) {

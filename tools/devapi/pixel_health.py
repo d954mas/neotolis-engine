@@ -1,12 +1,12 @@
 """Pixel-health checks for captured frames.
 
-The ONE decode code path for capture payloads + a "something rendered" smoke: decode the base64 PNG,
-assert the decoded dimensions match what the command reported, and assert the frame is NOT a single
-uniform color (a black / frozen / empty screen is the failure this catches).
+The single decode path for capture payloads plus a "something rendered" smoke: decode the base64 PNG,
+assert decoded dims match the reported dims, and assert the frame is not a single uniform color
+(black / frozen / empty screen).
 
-Dependency boundary: Pillow + numpy are imported HERE only — the harness CORE (transport / client /
-other scenarios) stays stdlib-only. A scenario imports this module lazily, inside its capture branch, so
-a non-capture run never pulls these deps. The CI capture-smoke job installs the pinned versions.
+Dependency boundary: Pillow + numpy are imported HERE only — the harness core (transport / client /
+other scenarios) stays stdlib-only. Scenarios import this lazily inside their capture branch so a
+non-capture run never pulls these deps.
 """
 import base64
 import io
@@ -24,28 +24,24 @@ def decode(b64: str) -> Image.Image:
 
 
 def check(img: Image.Image, expected_w: int, expected_h: int) -> None:
-    """Assert decode + dims match + not-blank. Raises AssertionError on any violation.
+    """Assert decoded dims match expected and the frame is not blank. Raises AssertionError on violation.
 
-    not-blank = the decoded pixels are not a single uniform color. A std-dev (or peak-to-peak) of 0
-    across all channels means every pixel is identical — a black / frozen / empty screen — which is the
-    exact failure this check is designed to catch. The capture_host renders a deterministic two-tone pattern,
-    so a healthy frame has >= 2 distinct colors and a non-zero variance.
+    not-blank = the pixels are not a single uniform color (ptp == 0 on every channel means every pixel
+    is identical — a black / frozen / empty screen, the exact failure this catches). The capture_host
+    renders a two-tone pattern, so a healthy frame has >= 2 distinct colors.
     """
     assert img.width == expected_w, f"pixel-health: decoded width {img.width} != expected {expected_w}"
     assert img.height == expected_h, f"pixel-health: decoded height {img.height} != expected {expected_h}"
     arr = np.asarray(img)
     assert arr.size > 0, "pixel-health: decoded image is empty"
-    # not-blank: a single uniform color has ptp == 0 on every channel (std == 0 too). Either metric
-    # > 0 proves the frame carries real content, not a flat fill.
     assert float(np.ptp(arr)) > 0.0, "pixel-health: frame is a single uniform color (blank/frozen/empty screen)"
 
 
 def vertical_split_means(img: Image.Image) -> tuple:
     """Return (top_half_mean, bottom_half_mean) of per-pixel mean intensity.
 
-    Lets a caller assert vertical ORIENTATION without importing numpy: a region Y-origin flip
-    (top-left vs bottom-left readback) swaps which half a known feature lands in, so the two means
-    invert. Returns plain floats so the numpy dependency stays confined to this module.
+    Lets a caller assert vertical orientation: a Y-origin flip (top-left vs bottom-left readback) swaps
+    which half a known feature lands in, so the two means invert. Plain floats keep numpy confined here.
     """
     arr = np.asarray(img)
     half = arr.shape[0] // 2
@@ -53,10 +49,10 @@ def vertical_split_means(img: Image.Image) -> tuple:
 
 
 def horizontal_split_means(img: Image.Image) -> tuple:
-    """Return (left_half_mean, right_half_mean) of per-pixel mean intensity (numpy stays here).
+    """Return (left_half_mean, right_half_mean) of per-pixel mean intensity.
 
-    Symmetric to vertical_split_means for the horizontal axis: a region X-origin error (reading from
-    the wrong column) shifts which half a known feature lands in, inverting the two means.
+    Horizontal counterpart to vertical_split_means: an X-origin error shifts which half a known feature
+    lands in, inverting the two means.
     """
     arr = np.asarray(img)
     half = arr.shape[1] // 2
@@ -64,11 +60,10 @@ def horizontal_split_means(img: Image.Image) -> tuple:
 
 
 def center_channel_means(img: Image.Image) -> tuple:
-    """Return (r, g, b) means of the image's central quarter (numpy stays here).
+    """Return (r, g, b) means of the image's central quarter.
 
-    For a host whose foreground sits in the center, this samples the fg color so a caller can assert
-    channel ORDER (RGB vs BGR): a red/blue swap in the GL readback or the RGB strip inverts r vs b,
-    which the channel-symmetric not-blank / split-mean checks cannot see.
+    Samples a host's centered foreground so a caller can assert channel order (RGB vs BGR): a red/blue
+    swap inverts r vs b, which the channel-symmetric not-blank / split-mean checks cannot see.
     """
     arr = np.asarray(img)
     h, w = arr.shape[0], arr.shape[1]
@@ -79,9 +74,8 @@ def center_channel_means(img: Image.Image) -> tuple:
 def check_payload(payload: dict, expected_w: int, expected_h: int) -> Image.Image:
     """Validate a {width,height,format:"png",data:<base64>} capture result end-to-end, return the image.
 
-    Asserts the reported format is png, the reported dims equal the expected dims, then decode()s the
-    base64 payload and runs check() over the decoded pixels. Returns the decoded image so a caller can
-    optionally save it for human viewing.
+    Asserts format/reported-dims, decodes the payload, then runs check() over the pixels. Returns the
+    decoded image so a caller can optionally save it for human viewing.
     """
     assert payload.get("format") == "png", f"capture: format is {payload.get('format')!r}, expected 'png'"
     rw = payload.get("width")
