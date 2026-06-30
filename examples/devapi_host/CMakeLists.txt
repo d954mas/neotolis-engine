@@ -9,8 +9,18 @@ add_executable(devapi_host main.c)
 # nt_ui probe symbols) precedes nt_ui + nt_gfx; nt_ui (references the renderer/resource chain) precedes
 # those providers. nt_devapi is already pulled transitively by nt_devapi_net; listing it explicitly
 # pins the order.
+# Transport split (D-18, mirrors engine/devapi/CMakeLists.txt): web links nt_devapi_web (the
+# push/pull ccall bridge, NO socket — D-16) + nt_platform_web; native links nt_devapi_net (TCP).
+# Both consume the same nt_devapi core + nt_devapi_default group bundle. The web path also pulls a
+# real GL context (nt_gfx) for the deferred-capture seam; the capture group already links nt_fpng
+# transitively via nt_devapi_default, so the FIRST fpng WASM link rides this target (Pitfall 7 / R4).
+if(EMSCRIPTEN)
+    set(DEVAPI_HOST_TRANSPORT nt_devapi_web nt_platform_web)
+else()
+    set(DEVAPI_HOST_TRANSPORT nt_devapi_net)
+endif()
 target_link_libraries(devapi_host PRIVATE
-    nt_core nt_app nt_input nt_window nt_log nt_devapi_net nt_devapi_default
+    nt_core nt_app nt_input nt_window nt_log ${DEVAPI_HOST_TRANSPORT} nt_devapi_default
     nt_ui
     nt_sprite_renderer nt_text_renderer nt_material nt_font nt_atlas nt_resource
     nt_http nt_fs
@@ -24,6 +34,25 @@ if(WIN32)
     # ws2_32 is inherited transitively from nt_devapi_net (PUBLIC link); nt_devapi (core) pulls it via nt_devapi_net.
     # getenv() for the NT_DEVAPI_PORT override (single-threaded host startup).
     target_compile_definitions(devapi_host PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+if(EMSCRIPTEN)
+    # fpng's first WASM link: fpng auto-detects non-x86 (EMSCRIPTEN) and takes its scalar path, but
+    # pin FPNG_NO_SSE=1 explicitly so the WASM build never reaches the SSE intrinsics (Pitfall 7 / R4).
+    target_compile_definitions(nt_fpng PRIVATE FPNG_NO_SSE=1)
+
+    # Emit index.html via the shared shell; export the two KEEPALIVE transport wrappers + main, and the
+    # ccall/UTF8ToString runtime methods the window.__devapi bridge needs (RD-2). WebGL2 for the GL
+    # context the capture seam reads, mirroring tests/browser/app browser_smoke.
+    set_target_properties(devapi_host PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
+    nt_configure_shell(devapi_host TITLE "DevAPI Host - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
+    target_link_options(devapi_host PRIVATE
+        "SHELL:-sUSE_WEBGL2=1"
+        "SHELL:-sMAX_WEBGL_VERSION=2"
+        "SHELL:-sMIN_WEBGL_VERSION=2"
+        "SHELL:-sEXPORTED_FUNCTIONS=['_main','_nt_devapi_web_submit','_nt_devapi_web_poll']"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall','UTF8ToString']"
+    )
 endif()
 
 # Strict warning and sanitizer policy
