@@ -469,17 +469,18 @@ jobs:
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
-  capture-smoke:
-    name: Capture Smoke (live socket UAT)
+  devapi-smoke:
+    name: DevAPI Smoke (live socket UAT)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # No git-LFS pull: capture_host renders a deterministic glClear+scissor pattern and loads no asset
-      # packs, so this job never reads the LFS-tracked assets (Sponza). Checkout's pointer files suffice.
+      # No git-LFS pull: devapi_host renders no asset packs (native inits a window but no GL/capture
+      # render — capture.frame answers capture_unavailable there), so this job never reads the
+      # LFS-tracked assets (Sponza). Checkout's pointer files suffice.
 
-      # libgl1-mesa-dri provides the llvmpipe software GL driver so xvfb's headless X server gives
-      # capture_host a real (software-rendered) GL context — the live capture UAT needs a real readback.
+      # libgl1-mesa-dri provides the llvmpipe software GL driver so xvfb's headless X server gives the
+      # host a real X/GL context for nt_window_init() — the live socket UAT runs under a headless X.
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build python3 python3-pip \
@@ -492,24 +493,83 @@ jobs:
 
       # Hermetic pixel-health self-test (no GL/socket): exercises pixel_health's negative branches
       # (not-blank, dims, orientation, channel-order) with synthetic PNGs, so a silent weakening of the
-      # capture safety net fails here, not only in the heavyweight live UAT below.
+      # capture safety net fails here, not only in the live socket run below.
       - name: Pixel-health self-test (hermetic)
         run: python3 tools/devapi/scenarios/pixel_health_selftest.py
 
-      # capture_host is a CAPTURE-focused host (CORE/DISCOVERY/TIME/CAPTURE groups only) so it links only
-      # the providers those groups need — the full-group native-debug build would couple it to nt_ui/metrics
-      # it never inits. Default presets stay OFF (zero release delta); this is an opt-in dev-only build.
-      - name: Configure capture host (devapi capture group ON)
-        run: cmake -B build/_cmake/cap-host -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+      # devapi_host serves every group the canonical scenario touches (see -DNT_DEVAPI_GROUP_* below);
+      # CAPTURE answers capture_unavailable on the native no-GL host, OBS supplies the perf.stats mem read.
+      # NT_PRESET_NAME pins the binary at build/examples/devapi_host/native-debug so devapi_demo.py's
+      # self-launch finds it with no --host-bin. Default presets keep these groups OFF (zero release delta).
+      # NT_UI_DEBUG_TOOLS=ON supplies OBS's hard deps (log ring + metrics + introspect); without it the
+      # GROUP_OBS guard fatal-errors at configure (this raw cmake does not inherit the native-debug preset).
+      - name: Configure devapi host (groups the canonical scenario needs)
+        run: cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_UI_DEBUG_TOOLS=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
 
-      - name: Build capture_host
-        run: cmake --build build/_cmake/cap-host --target capture_host
+      - name: Build devapi_host
+        run: cmake --build build/examples/devapi_host/native-debug --target devapi_host
 
-      # The live-socket drain-race UAT: capture_demo.py self-launches capture_host, drives capture.frame/
-      # region/scale/bad_params, and runs pixel-health (decode + dims + not-blank). xvfb-run supplies the
-      # headless GL context. Exit 0 == the deferred capture resolved with a decodable non-blank PNG.
-      - name: Run capture live-socket UAT
-        run: xvfb-run -a python3 tools/devapi/scenarios/capture_demo.py
+      # devapi_demo.py self-launches devapi_host over the native socket and drives the canonical
+      # run(client) — discovery + game.* + observe + deferred capture + deferred items. xvfb-run supplies
+      # the headless X for nt_window_init(); exit 0 gates that the scenario passed over the native transport.
+      - name: Run devapi live-socket UAT
+        run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
+
+  web-smoke:
+    name: Web Smoke (devapi, blocking)
+    runs-on: ubuntu-latest
+    needs: wasm
+    # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium
+    # proves it, and devapi.spec.ts pumps frames deterministically via time.step (not rAF cadence) so it
+    # does not flake. NO git-LFS pull / pack-builder: the devapi_host loads no asset pack (capture renders
+    # a deterministic glClear+scissor pattern), unlike browser_smoke.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
+
+      - name: Read emsdk version
+        id: emsdk-version
+        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ steps.emsdk-version.outputs.version }}
+          actions-cache-folder: 'emsdk-cache'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Build the devapi_host wasm with the capture group ON so the web host arms the pre-swap seam
+      # (NT_DEVAPI_HOST_WEB_CAPTURE) — the deferred capture.frame resolves to a REAL PNG, the exact
+      # behavior the live spec asserts. FPNG_NO_SSE keeps the WASM fpng build on its scalar path.
+      # No pack-builder: devapi_host loads no asset pack.
+      - name: Build devapi_host wasm (debug, capture ON)
+        run: |
+          emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
+          cmake --build --preset wasm-debug --target devapi_host
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/browser/package-lock.json') }}
+
+      - name: Install Playwright (pinned via lockfile) + Chromium
+        run: |
+          cd tests/browser
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # serve.mjs serves the devapi_host wasm output (NT_SHOWCASE_DIR override); the spec drives
+      # window.__devapi deterministically and asserts the deferred capture is a decodable non-blank PNG.
+      - name: Run devapi web smoke test
+        run: cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/examples/devapi_host/wasm-debug" npx playwright test devapi.spec.ts
 
   lint:
     name: Format & Tidy
@@ -616,8 +676,11 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
+      # This job serves the browser_smoke (ui_showcase) wasm, so run only the specs that target it.
+      # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
+      # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts
 
   deploy:
     name: Deploy

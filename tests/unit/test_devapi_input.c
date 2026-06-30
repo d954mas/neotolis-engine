@@ -9,8 +9,7 @@
 /* clang-format off */
 #include "app/nt_app.h"
 #include "devapi/nt_devapi_input_internal.h" /* sched cap + input_update/reset, driven directly here */
-#include "devapi/nt_devapi_internal.h"
-#include "devapi/nt_devapi_net.h" /* nt_devapi_update — ticks the schedule on a sim-advance */
+#include "devapi/nt_devapi_internal.h" /* nt_devapi_update (via nt_devapi.h) — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h" /* inject API: fill the buffer to probe whole-or-nothing */
 #include "window/nt_window.h"        /* g_nt_window.fb_height — the basis for the input.* Y-up flip */
@@ -346,11 +345,9 @@ static void test_sched_offset0_applies_on_advance(void) {
 }
 
 /* A frozen tick releases NOTHING: an enqueued down@0 stays unscheduled while the frame is unchanged
-   (pause / manual-idle), then lands on the next real advance. This is the new pause-freeze semantic
-   (replaces the old frames_remaining-on-pause freeze inside nt_input).
-   Order-independent: nt_devapi_input_reset re-seeds the advance clock against the current
-   g_nt_app.frame, so the first tick_no_advance below can never see a spurious forced-advance no
-   matter which test ran first (a prior advancing test left s_last_frame elsewhere). */
+   (pause / manual-idle), then lands on the next real advance. Order-independent: nt_devapi_input_reset
+   re-seeds the advance clock against the current g_nt_app.frame, so the first tick_no_advance below
+   never sees a spurious forced-advance regardless of which test ran first. */
 static void test_sched_pause_freeze(void) {
     nt_devapi_input_reset(); /* seed the clock to the current frame so a frozen tick stays frozen. */
     cJSON_Delete(parse_ok(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\"}}")));

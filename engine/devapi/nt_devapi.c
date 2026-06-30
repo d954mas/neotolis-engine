@@ -575,3 +575,11 @@ const char *nt_devapi_poll_response(void) {
     }
     return NULL; /* nothing ready this call. */
 }
+
+/* Core per-tick entry: runs the transport-poll phase (each transport's recv + drain) then the tick
+   phase (e.g. the input schedule release), naming neither transport. The phase order is what guarantees
+   a received line is scheduled before the tick reads it, so a host may register the two in any order. */
+void nt_devapi_update(void) {
+    nt_devapi_run_transport_hooks();
+    nt_devapi_run_tick_hooks();
+}

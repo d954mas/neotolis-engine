@@ -12,16 +12,25 @@ static int s_count;
 static bool s_initialized;
 
 // #region lifecycle hooks
-/* Fixed hook tables: one slot per registrable group is plenty (only the input group registers any
-   today). A hook is registered once per init by a group's registrar under its own compile gate. */
+/* Two ordered phases run every update: transport-poll hooks (recv + enqueue) before tick hooks (the
+   input schedule release), so a line received this tick is scheduled before the tick phase reads it.
+   The ordering is the PHASE, not registration order — registrars may run in any order. Reset hooks
+   fire on a client drop. Fixed tables; each hook registers once per init under its group's gate. */
 #ifndef NT_DEVAPI_MAX_HOOKS
 #define NT_DEVAPI_MAX_HOOKS 8
 #endif
 
+static nt_devapi_hook_fn s_transport_hooks[NT_DEVAPI_MAX_HOOKS];
+static int s_transport_count;
 static nt_devapi_hook_fn s_tick_hooks[NT_DEVAPI_MAX_HOOKS];
 static int s_tick_count;
 static nt_devapi_hook_fn s_reset_hooks[NT_DEVAPI_MAX_HOOKS];
 static int s_reset_count;
+
+void nt_devapi_register_transport_poll(nt_devapi_hook_fn fn) {
+    NT_ASSERT(fn != NULL && s_transport_count < NT_DEVAPI_MAX_HOOKS);
+    s_transport_hooks[s_transport_count++] = fn;
+}
 
 void nt_devapi_register_tick(nt_devapi_hook_fn fn) {
     NT_ASSERT(fn != NULL && s_tick_count < NT_DEVAPI_MAX_HOOKS);
@@ -31,6 +40,12 @@ void nt_devapi_register_tick(nt_devapi_hook_fn fn) {
 void nt_devapi_register_reset(nt_devapi_hook_fn fn) {
     NT_ASSERT(fn != NULL && s_reset_count < NT_DEVAPI_MAX_HOOKS);
     s_reset_hooks[s_reset_count++] = fn;
+}
+
+void nt_devapi_run_transport_hooks(void) {
+    for (int i = 0; i < s_transport_count; i++) {
+        s_transport_hooks[i]();
+    }
 }
 
 void nt_devapi_run_tick_hooks(void) {
@@ -43,6 +58,15 @@ void nt_devapi_run_reset_hooks(void) {
     for (int i = 0; i < s_reset_count; i++) {
         s_reset_hooks[i]();
     }
+}
+
+bool nt_devapi_transport_is_registered(nt_devapi_hook_fn fn) {
+    for (int i = 0; i < s_transport_count; i++) {
+        if (s_transport_hooks[i] == fn) {
+            return true;
+        }
+    }
+    return false;
 }
 // #endregion
 
@@ -74,7 +98,8 @@ nt_result_t nt_devapi_init(void) {
         return NT_ERR_INIT_FAILED;
     }
     s_count = 0;
-    s_tick_count = 0; /* groups re-register their lifecycle hooks when a host registers them. */
+    s_transport_count = 0; /* groups re-register their lifecycle hooks when a host registers them. */
+    s_tick_count = 0;
     s_reset_count = 0;
     s_initialized = true;
 
@@ -89,7 +114,8 @@ void nt_devapi_shutdown(void) {
         slot_free(&s_slots[i]);
     }
     s_count = 0;
-    s_tick_count = 0; /* drop group hooks so init->shutdown->init re-registers cleanly. */
+    s_transport_count = 0; /* drop group hooks so init->shutdown->init re-registers cleanly. */
+    s_tick_count = 0;
     s_reset_count = 0;
     nt_devapi_resp_reset(); /* symmetric teardown of the dispatch-core response buffer. */
     s_initialized = false;

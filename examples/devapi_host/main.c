@@ -5,7 +5,18 @@
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
+#ifdef __EMSCRIPTEN__
+#include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge. */
+/* Capture group (NT_DEVAPI_GROUP_CAPTURE) pulls a real GL context + the pre-swap seam; a capture-OFF
+   web build still serves submit/poll/poke. */
+#ifdef NT_DEVAPI_GROUP_CAPTURE
+#define NT_DEVAPI_HOST_WEB_CAPTURE 1
+#include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
+#include "graphics/nt_gfx.h"          /* real GL context + a non-blank frame so capture has a target. */
+#endif
+#else
 #include "devapi/nt_devapi_net.h"
+#endif
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "input/nt_input.h"
@@ -23,9 +34,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* game-layer command: echo {msg} back as {msg}. Registered via the public
-   nt_devapi_register path only — zero engine edits. Uses the public cJSON
-   API for the result (devapi_add_* is internal to the devapi module). */
+/* game-layer command via the public nt_devapi_register path — zero engine edits. Result uses the
+   public cJSON API (devapi_add_* is devapi-internal). */
 static bool cmd_game_echo(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     (void)ud;
     const cJSON *msg = cJSON_GetObjectItemCaseSensitive(params, "msg");
@@ -50,8 +60,35 @@ static const nt_devapi_command_desc k_game_echo = {
     .side_effects = "none",
 };
 
+/* game-layer WRITE command via the public register path — zero engine edits: flips an observable host
+   bool and returns it as {poked}, proving a write mutates host state over either transport. */
+static bool s_game_poked = false; /* the observable: each game.poke toggles it. */
+
+static bool cmd_game_poke(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
+    (void)params;
+    (void)err;
+    (void)ud;
+    s_game_poked = !s_game_poked;
+    cJSON *added = cJSON_AddBoolToObject(result, "poked", s_game_poked);
+    NT_ASSERT(added != NULL);
+    (void)added;
+    return true;
+}
+
+static const nt_devapi_command_desc k_game_poke = {
+    .method = "game.poke",
+    .group = "game",
+    .summary = "flip an observable host bool, return {poked}",
+    .params_shape = "{}",
+    .result_shape = "{poked:bool}",
+    .frame_behavior = "any",
+    .side_effects = "flips game state",
+};
+
+#ifndef __EMSCRIPTEN__
 /* Resolve the listen port: NT_DEVAPI_DEFAULT_PORT, overridden by env NT_DEVAPI_PORT.
-   Falls back to the default on a missing / unparseable / out-of-range value. */
+   Falls back to the default on a missing / unparseable / out-of-range value. Native-only: web has
+   no listener, so no port to resolve. */
 static uint16_t resolve_port(void) {
     // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded host startup, getenv is fine
     const char *env = getenv("NT_DEVAPI_PORT");
@@ -66,10 +103,10 @@ static uint16_t resolve_port(void) {
     }
     return (uint16_t)v;
 }
+#endif /* !__EMSCRIPTEN__ */
 
-/* A small probe-able "hud" UI context — asset-free (layout + the registered-widget slot only; the
-   host never calls nt_ui_walk). "hud_btn" carries a togglable enabled flag a synthetic ui.click
-   flips, observable via ui.element. */
+/* Asset-free probe hud (layout + registered-widget slots only; host never calls nt_ui_walk). A button
+   carries a togglable enabled flag a synthetic ui.click flips, observable via ui.element. */
 /* Sized to clear nt_ui_min_arena_size for the default desc (create asserts on a too-small arena). */
 #define HUD_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 static NT_UI_DECLARE_ARENA(s_hud_arena, HUD_ARENA_SIZE);
@@ -85,9 +122,8 @@ static NT_UI_DECLARE_ARENA(s_hud_scaled_arena, HUD_ARENA_SIZE);
 static nt_ui_context_t *s_hud_scaled_ctx;
 static bool s_scaled_btn_on = true;
 
-/* Declare the hud tree once per frame. A click on "hud_btn" (real device or a synthetic ui.click,
-   bot==human) flips s_hud_btn_on; the widget re-registers each frame with enabled=s_hud_btn_on so
-   the toggle surfaces through the probe's `enabled` field. */
+/* Re-declared each frame: a click on "hud_btn" (real or synthetic ui.click) flips s_hud_btn_on, and
+   the widget re-registers with enabled=s_hud_btn_on so the toggle surfaces through the probe. */
 static void declare_hud(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -108,10 +144,9 @@ static void declare_hud(void) {
     nt_ui_end(s_hud_ctx);
 }
 
-/* Declare the scaled hud tree once per frame. Identical layout to the hud, but the ctx viewport is
-   overridden to the nt_ui_scale content rect so the ctx converts the raw device pointer device->layout
-   internally — a synthetic ui.click resolved layout->device by the devapi lands on the widget. The
-   viewport MUST be set after nt_ui_begin and before the first hit-test (here: step_interaction). */
+/* Scaled hud: same layout, but the ctx viewport is the nt_ui_scale content rect so the ctx maps the
+   device pointer device->layout internally. The viewport MUST be set after nt_ui_begin and before the
+   first hit-test (step_interaction). */
 static void declare_hud_scaled(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -130,9 +165,11 @@ static void declare_hud_scaled(void) {
     nt_ui_end(s_hud_scaled_ctx);
 }
 
+#ifndef __EMSCRIPTEN__
 /* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
    bot that drops mid-MANUAL leaves the host frozen. On the connected->disconnected edge, force RUN so
-   the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop. */
+   the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop.
+   Native-only: web has no listener / no client to drop. */
 static void recover_on_disconnect(void) {
     static bool was_connected = false;
     bool now = nt_devapi_net_has_client();
@@ -143,6 +180,30 @@ static void recover_on_disconnect(void) {
     }
     was_connected = now;
 }
+#endif /* !__EMSCRIPTEN__ */
+
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+/* Deterministic two-tone non-blank frame so the pre-swap capture seam reads a real PNG, not a uniform
+   clear: full-frame background, then a scissored centered sub-rect (glClear honors GL_SCISSOR_TEST). */
+static const float k_bg_color[4] = {0.10F, 0.20F, 0.45F, 1.0F};
+static const float k_fg_color[4] = {0.90F, 0.55F, 0.10F, 1.0F};
+
+static void render_pattern(void) {
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg_color[0], k_bg_color[1], k_bg_color[2], k_bg_color[3]}, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+
+    const int fb_w = (int)g_nt_window.fb_width;
+    const int fb_h = (int)g_nt_window.fb_height;
+    nt_gfx_set_scissor(fb_w / 4, fb_h / 4, fb_w / 2, fb_h / 2); /* GL bottom-left; placement is irrelevant to not-blank. */
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_set_scissor_enabled(false); /* leave scissor off so the next frame's bg clear covers the whole FB. */
+
+    nt_gfx_end_frame();
+}
+#endif /* NT_DEVAPI_HOST_WEB_CAPTURE */
 
 static void frame(void) {
     /* Host owns measurement; nt_metrics only stores. */
@@ -155,7 +216,9 @@ static void frame(void) {
     nt_window_poll();
     /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
-    recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop. */
+#ifndef __EMSCRIPTEN__
+    recover_on_disconnect(); /* host policy: unfreeze after an (ungraceful) bot drop (native only). */
+#endif
     nt_input_poll();
 
     /* Build the hud tree AFTER input_poll so this frame's (possibly injected) pointer drives the
@@ -165,9 +228,13 @@ static void frame(void) {
     declare_hud();
     declare_hud_scaled();
 
-    /* No real renderer here (the host issues no draw — nt_ui_walk is unnecessary for the probe). Swap
-       only under the render flag so draw_calls stays 0 / render.* stays honest. */
+    /* Swap only under the render flag so draw_calls / render.* stay honest. The capture seam runs INSIDE
+       nt_window_swap_buffers (post-render, pre-swap GL-valid point); web draws the two-tone pattern first
+       so that seam reads a non-blank frame. */
     if (nt_app_render_enabled()) {
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+        render_pattern();
+#endif
         nt_window_swap_buffers();
     }
 
@@ -180,7 +247,8 @@ static void frame(void) {
     nt_metrics_count("frames", s_frame_counter);
     nt_metrics_count_f("frame_cpu_ms", (double)cpu_ms);
 
-    /* This host inits no gfx, so gpu_ms is the "no timer" sentinel and draw_calls is 0. */
+    /* No GPU timer and no draw count fed to metrics here, so gpu_ms is the "no timer" sentinel and the
+       metrics draw_calls stays 0 (render.info's own draw_calls comes from nt_gfx, not this frame). */
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)
        on web); in-use bytes drift slowly, so sample every 30 frames and push the cached value. */
     static uint64_t s_mem_used;
@@ -217,9 +285,8 @@ int main(void) {
         return 1; /* nothing inited yet */
     }
 
-    /* Partial-init teardown ladder: each fail point jumps to the label that releases exactly what was
-       inited so far. The cleanup is written once and shared with the clean-exit path, so a future
-       subsystem can't be silently left out of an error path. status stays 1 until a clean run. */
+    /* Partial-init teardown ladder: each fail jumps to the label that releases exactly what was inited,
+       sharing one cleanup path with the clean exit. status stays 1 until a clean run. */
     int status = 1;
 
     g_nt_window.width = 800;
@@ -228,6 +295,11 @@ int main(void) {
     /* vsync OFF so time.set_fps{fps:0} truly uncaps the managed loop. */
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+    /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame.
+       The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .depth = true});
+#endif
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.
        The obs group's commands are registered by nt_devapi_register_default() above. */
@@ -240,10 +312,28 @@ int main(void) {
         printf("Failed to initialize devapi\n");
         goto shutdown_base;
     }
-    nt_devapi_register_default(); /* full host: register every compiled-in group. */
+#ifndef __EMSCRIPTEN__
+    /* Native: start the loopback TCP transport. Placed early to fail fast on a taken port before
+       building the UI/entity surface; order vs register_default no longer matters — net_poll runs in
+       the transport-poll phase, ahead of the input tick. Web has no listener, so nothing to start. */
+    {
+        uint16_t port = resolve_port();
+        if (!nt_devapi_net_start(port)) {
+            printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
+            goto shutdown_devapi;
+        }
+        printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
+    }
+#endif                            /* !__EMSCRIPTEN__ */
+    nt_devapi_register_default(); /* full host: register every compiled-in group (incl. capture). */
     result = nt_devapi_register(&k_game_echo, cmd_game_echo, NULL);
     if (result != NT_OK) {
         printf("[devapi_host] failed to register game.echo: error %d\n", result);
+        goto shutdown_devapi;
+    }
+    result = nt_devapi_register(&k_game_poke, cmd_game_poke, NULL);
+    if (result != NT_OK) {
+        printf("[devapi_host] failed to register game.poke: error %d\n", result);
         goto shutdown_devapi;
     }
 
@@ -283,30 +373,38 @@ int main(void) {
         nt_drawable_comp_add(seed_c);
     }
 
-    {
-        uint16_t port = resolve_port();
-        if (!nt_devapi_net_start(port)) {
-            printf("[devapi_host] failed to start TCP server on port %u (taken?)\n", port);
-            goto shutdown_scene;
-        }
-        printf("[devapi_host] listening on 127.0.0.1:%u\n", port);
-        /* Seed the log ring so log.tail has at least one entry the moment a bot connects. */
-        nt_log_info("devapi_host listening on 127.0.0.1:%u", port);
-    }
+    /* Seed the log ring so log.tail has at least one entry the moment a bot connects. */
+    nt_log_info("devapi_host listening");
 
-    /* Opt-in pre-loop gate so a bot can hand over setup before frame 0.
+#ifdef __EMSCRIPTEN__
+    /* Web: install the push/pull bridge (window.__devapi). NO listener — the page's own JS is
+       the only caller, under the OFF-by-default NT_DEVAPI_ENABLED gate. */
+    nt_devapi_web_install_shim();
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+    /* Capture build only: install the pre-swap seam; it needs the real GL context inited above so the
+       deferred capture reads a non-blank PNG. */
+    nt_devapi_capture_install_seam();
+#endif
+#else
+    /* Native: opt-in pre-loop gate so a bot can hand over setup before frame 0.
        Bounded; the host does NOT require a client to start. */
     if (nt_devapi_net_wait_for_client(2000)) {
         printf("[devapi_host] client connected before loop\n");
     } else {
         printf("[devapi_host] no client yet; per-frame accept continues\n");
     }
+#endif /* __EMSCRIPTEN__ */
 
     nt_app_run(frame);
-    status = 0; /* clean run */
 
-    nt_devapi_net_stop();
-shutdown_scene: /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
+#ifdef __EMSCRIPTEN__
+    /* Web nt_app_run registers a callback RAF loop and RETURNS, so the clean path must NOT tear down:
+       freeing devapi/scratch here would trap the first window.__devapi submit and the next RAF frame
+       (init-error paths above still goto the ladder). */
+    return 0;
+#else
+    status = 0; /* clean run: the native loop returned on quit. */
+    /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
     nt_ui_module_shutdown();
@@ -314,9 +412,16 @@ shutdown_scene: /* reverse-init: scene (ui borrows scratch; comps borrow entity)
     nt_drawable_comp_shutdown();
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
+#endif
 shutdown_devapi:
+#ifndef __EMSCRIPTEN__
+    nt_devapi_net_stop(); /* clean + register-fail paths; a no-op if the socket was never started. */
+#endif
     nt_devapi_shutdown();
 shutdown_base:
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+    nt_gfx_shutdown(); /* paired with the nt_gfx_init on the web capture path above. */
+#endif
     nt_input_shutdown();
     nt_window_shutdown();
     nt_engine_shutdown();

@@ -173,15 +173,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/ui_showcase)
     # Minimal standalone web smoke-test app (window.__nt hooks the browser specs drive).
     add_subdirectory(tests/browser/app)
-    # devapi host links nt_devapi (+ nt_devapi_net.c) which exist only when the
-    # layer is enabled and only on native builds — gate on both.
-    if(NT_DEVAPI_ENABLED AND NOT EMSCRIPTEN)
+    # devapi host links nt_devapi via the transport split: native nt_devapi_net (TCP) OR web
+    # nt_devapi_web (the push/pull ccall bridge, no socket). Builds on BOTH native and EMSCRIPTEN now —
+    # the web target is the Playwright web-smoke gate. Gate only on the layer being enabled.
+    if(NT_DEVAPI_ENABLED)
         add_subdirectory(examples/devapi_host)
         # capture_host needs the deferred-data capture group + a real GL context (the live capture UAT).
         # It links only the devapi group libs it uses (capture + core + discovery), never the
-        # nt_ui/obs/entity chains. Gate on all three so a config that disables any of them skips the host
-        # cleanly instead of link-failing on a missing group lib.
-        if(NT_DEVAPI_GROUP_CAPTURE AND NT_DEVAPI_GROUP_CORE AND NT_DEVAPI_GROUP_DISCOVERY)
+        # nt_ui/obs/entity chains. Native-only: it wires the TCP transport unconditionally. Gate on all
+        # three groups so a config that disables any of them skips the host cleanly instead of
+        # link-failing on a missing group lib.
+        if(NOT EMSCRIPTEN AND NT_DEVAPI_GROUP_CAPTURE AND NT_DEVAPI_GROUP_CORE AND NT_DEVAPI_GROUP_DISCOVERY)
             add_subdirectory(examples/capture_host)
         endif()
     endif()

@@ -38,6 +38,11 @@ const char *nt_devapi_submit(const char *line);
    call (it shares the same growing buffer as submit). Drain in a loop until it returns NULL. */
 const char *nt_devapi_poll_response(void);
 
+/* Per-tick devapi update — the game calls this once per frame. Core owns the entry; it runs only
+   the registered tick hooks (each transport registers its own poll + frame-keyed deferred drain via
+   the hook registry, so native net and web share this one seam). */
+void nt_devapi_update(void);
+
 #ifdef NT_DEVAPI_GROUP_UI
 /* Host-facing: register a UI context under a name so the `ui` group can resolve it.
    Call AFTER nt_devapi_init(): init clears the host ctx table, so a pre-init registration is
