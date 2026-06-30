@@ -18,6 +18,7 @@ typedef int nt_socklen_t;
 #include <netinet/in.h>
 #include <netinet/tcp.h> /* TCP_NODELAY */
 #include <signal.h>
+#include <sys/select.h> /* select() for writability waits */
 #include <sys/socket.h>
 #include <unistd.h>
 typedef int nt_sock_t;
@@ -49,10 +50,18 @@ static nt_sock_t s_client = NT_INVALID_SOCK;
 static bool s_wsa_init = false;
 #endif
 
-/* Bounded line cap: an unterminated line larger than this is a framing desync / abuse on this
-   dev-only channel; the client is dropped. Mirrors the Python client's 1 MiB cap. Overridable. */
+/* Inbound request-line cap: an unterminated line past this is a framing desync / abuse on this
+   dev-only channel -> drop the client. Bounds client->server REQUESTS only, not the (pixel-capped)
+   capture response — that travels the other way, under the Python client's own recv cap. Overridable. */
 #ifndef NT_DEVAPI_NET_MAX_LINE
 #define NT_DEVAPI_NET_MAX_LINE ((size_t)1024U * 1024U)
+#endif
+
+/* Per-stall writability timeout (ms): a peer that cannot accept a byte within this window on the
+   dev-only loopback channel is wedged -> drop it. Timed per EWOULDBLOCK stall and reset on every
+   successful send, so a healthy but slow reader is never dropped — only a non-draining one. Overridable. */
+#ifndef NT_DEVAPI_NET_SEND_TIMEOUT_MS
+#define NT_DEVAPI_NET_SEND_TIMEOUT_MS 2000
 #endif
 
 /* Growing recv accumulation buffer; JSON-lines split on '\n'. s_recv_len bytes are the unconsumed
@@ -129,12 +138,34 @@ static void set_client_opts(nt_sock_t s) {
 }
 // #endregion
 
-// #region send (partial-send safe)
-/* Returns false on a real peer error so the caller drops the client. EWOULDBLOCK gets a short
-   bounded retry — devapi payloads are tiny/low-frequency, never a forever busy-spin. */
-static bool send_all(const char *p, size_t len) {
+// #region send (partial-send safe, yields on backpressure)
+/* select() instead of a busy-spin on EWOULDBLOCK: a tight spin pins a core AND starves the loopback
+   reader of the CPU it needs to drain — self-defeating, so a healthy reader gets falsely dropped.
+   false = the timeout elapsed with the peer still not draining. */
+static bool sock_wait_writable(nt_sock_t s, int timeout_ms) {
+    for (;;) {
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        FD_SET(s, &wfds);
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (long)(timeout_ms % 1000) * 1000;
+#ifdef _WIN32
+        int rc = select(0, NULL, &wfds, NULL, &tv); /* nfds is ignored by Winsock. */
+#else
+        int rc = select((int)s + 1, NULL, &wfds, NULL, &tv);
+        if (rc < 0 && nt_sock_errno() == EINTR) {
+            continue; /* a signal is not a peer error — wait again. */
+        }
+#endif
+        return rc > 0;
+    }
+}
+
+/* On EWOULDBLOCK, wait for writability (yielding to the reader) instead of busy-spinning; a peer that
+   never drains within timeout_ms is wedged -> false, and the caller drops it. */
+static bool send_all(nt_sock_t s, const char *p, size_t len, int timeout_ms) {
     size_t off = 0;
-    int eagain_spins = 0;
     while (off < len) {
         int flags = 0;
 #if defined(MSG_NOSIGNAL)
@@ -142,20 +173,18 @@ static bool send_all(const char *p, size_t len) {
 #endif
 #ifdef _WIN32
         NT_ASSERT((len - off) <= (size_t)INT_MAX); /* send() takes int; guard the narrowing cast. */
-        int chunk = (int)(len - off);
-        int n = send(s_client, p + off, chunk, flags);
+        int n = send(s, p + off, (int)(len - off), flags);
 #else
-        ssize_t n = send(s_client, p + off, len - off, flags);
+        ssize_t n = send(s, p + off, len - off, flags);
 #endif
         if (n > 0) {
             off += (size_t)n;
-            eagain_spins = 0;
             continue;
         }
         int e = nt_sock_errno();
         if (e == NT_EWOULDBLOCK) {
-            if (++eagain_spins > 10000) {
-                return false; /* socket buffer wedged far past any sane dev payload — give up. */
+            if (!sock_wait_writable(s, timeout_ms)) {
+                return false; /* buffer stayed full for the whole window — peer wedged, give up. */
             }
             continue;
         }
@@ -174,10 +203,10 @@ static bool send_all(const char *p, size_t len) {
 static bool send_line(const char *resp) {
     size_t len = strlen(resp);
     NT_ASSERT(memchr(resp, '\n', len) == NULL);
-    if (!send_all(resp, len)) {
+    if (!send_all(s_client, resp, len, NT_DEVAPI_NET_SEND_TIMEOUT_MS)) {
         return false;
     }
-    return send_all("\n", 1U);
+    return send_all(s_client, "\n", 1U, NT_DEVAPI_NET_SEND_TIMEOUT_MS);
 }
 // #endregion
 
@@ -348,9 +377,9 @@ void nt_devapi_net_poll(void) {
             s_recv_len = rest;
         }
     }
-    /* Bounded line cap (mirrors the Python client's 1 MiB cap): an unterminated remainder larger
-       than the cap is a framing desync / abuse — drop the client (it may reconnect) rather than
-       grow the buffer without limit. Complete lines were already consumed above. */
+    /* Inbound request-line cap: an unterminated remainder larger than the cap is a framing desync /
+       abuse — drop the client (it may reconnect) rather than grow the buffer without limit. Complete
+       lines were already consumed above. */
     if (s_recv_len > NT_DEVAPI_NET_MAX_LINE) {
         close_client();
         return;
@@ -411,3 +440,192 @@ bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
     }
 }
 // #endregion
+
+#ifdef NT_TEST_ACCESS
+// #region test_access — self-contained loopback backpressure check
+static bool sock_set_int(nt_sock_t s, int opt, int v) { return setsockopt(s, SOL_SOCKET, opt, (const char *)&v, (nt_socklen_t)sizeof v) == 0; }
+
+static int sock_get_int(nt_sock_t s, int opt) {
+    int v = 0;
+    nt_socklen_t len = (nt_socklen_t)sizeof v;
+    if (getsockopt(s, SOL_SOCKET, opt, (char *)&v, &len) != 0) {
+        return 0;
+    }
+    return v;
+}
+
+/* Connected loopback pair: *w writer (non-blocking), *r reader (blocking). reader_rcvbuf is set BEFORE
+   connect on purpose — only then does it cap the window AND disable Windows receive auto-tuning, so a
+   small value actually induces backpressure on a non-reading peer. */
+static bool loopback_pair(nt_sock_t *w, nt_sock_t *r, int writer_sndbuf, int reader_rcvbuf) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0; /* ephemeral port. */
+    nt_socklen_t alen = (nt_socklen_t)sizeof addr;
+    nt_sock_t cli = NT_INVALID_SOCK;
+    nt_sock_t srv = NT_INVALID_SOCK;
+    nt_sock_t lst = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (lst == NT_INVALID_SOCK) {
+        return false;
+    }
+    if (bind(lst, (struct sockaddr *)&addr, alen) != 0 || listen(lst, 1) != 0) {
+        goto fail;
+    }
+    if (getsockname(lst, (struct sockaddr *)&addr, &alen) != 0) {
+        goto fail;
+    }
+    cli = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (cli == NT_INVALID_SOCK) {
+        goto fail;
+    }
+    (void)sock_set_int(cli, SO_RCVBUF, reader_rcvbuf); /* before connect: caps window + disables Win auto-tuning. */
+    if (connect(cli, (struct sockaddr *)&addr, (nt_socklen_t)sizeof addr) != 0) {
+        goto fail;
+    }
+    srv = accept(lst, NULL, NULL);
+    if (srv == NT_INVALID_SOCK) {
+        goto fail;
+    }
+    nt_close_sock(lst);
+    set_nonblocking(srv);
+    (void)sock_set_int(srv, SO_SNDBUF, writer_sndbuf);
+    *w = srv;
+    *r = cli;
+    return true;
+fail:
+    if (cli != NT_INVALID_SOCK) {
+        nt_close_sock(cli);
+    }
+    nt_close_sock(lst);
+    return false;
+}
+
+/* Send until the OS itself reports the buffer full (EWOULDBLOCK), peer never draining — adapts to the
+   real/auto-tuned buffer instead of guessing a size that wedges (Windows loopback ignores a small
+   SO_RCVBUF). false if it never blocked within the cap. */
+static bool fill_until_block(nt_sock_t s) {
+    int flags = 0;
+#if defined(MSG_NOSIGNAL)
+    flags = MSG_NOSIGNAL;
+#endif
+    static char chunk[65536];                             /* static: 64 KiB off the stack, zero-init. */
+    for (size_t total = 0; total < ((size_t)64 << 20);) { /* 64 MiB cap: backpressure must show first. */
+#ifdef _WIN32
+        int n = send(s, chunk, (int)sizeof chunk, flags);
+#else
+        ssize_t n = send(s, chunk, sizeof chunk, flags);
+#endif
+        if (n > 0) {
+            total += (size_t)n;
+            continue;
+        }
+        return nt_sock_errno() == NT_EWOULDBLOCK;
+    }
+    return false;
+}
+
+/* See the header. 0 = pass; non-zero = the first failed step. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+int nt_devapi_net_backpressure_selftest(void) {
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        return 1;
+    }
+#endif
+    int code = 0;
+    nt_sock_t w = NT_INVALID_SOCK;
+    nt_sock_t r = NT_INVALID_SOCK;
+    char *send_buf = NULL;
+    char *recv_buf = NULL;
+    int rcv = 0;
+    size_t plen = 0;
+    size_t got = 0;
+
+    /* Pair A — large receive window: the success path. 4 KB writer send buffer forces EWOULDBLOCK. */
+    if (!loopback_pair(&w, &r, 4096, 1 << 20)) {
+        code = 2;
+        goto done;
+    }
+
+    /* Step 3: a fresh empty-buffer writer is immediately writable. */
+    if (!sock_wait_writable(w, 200)) {
+        code = 3;
+        goto done;
+    }
+
+    /* Step 4-6: a large payload survives backpressure intact. The 4 KB SNDBUF forces EWOULDBLOCK ->
+       exercises the select-wait recovery; the large RCVBUF lets the single-threaded reader drain it
+       AFTER send_all returns (a healthy reader, even slow, must NOT be dropped). */
+    rcv = sock_get_int(r, SO_RCVBUF);
+    plen = (rcv > 8192) ? (size_t)(rcv / 4) : 4096U; /* /4: stay well inside the receive window. */
+    send_buf = (char *)malloc(plen);
+    recv_buf = (char *)malloc(plen);
+    if (send_buf == NULL || recv_buf == NULL) {
+        code = 4;
+        goto done;
+    }
+    for (size_t i = 0; i < plen; i++) {
+        send_buf[i] = (char)(i & 0x7F);
+    }
+    if (!send_all(w, send_buf, plen, 2000)) {
+        code = 5;
+        goto done;
+    }
+    while (got < plen) {
+#ifdef _WIN32
+        int n = recv(r, recv_buf + got, (int)(plen - got), 0);
+#else
+        ssize_t n = recv(r, recv_buf + got, plen - got, 0);
+#endif
+        if (n <= 0) {
+            break;
+        }
+        got += (size_t)n;
+    }
+    if (got != plen || memcmp(send_buf, recv_buf, plen) != 0) {
+        code = 6;
+        goto done;
+    }
+    nt_close_sock(w);
+    w = NT_INVALID_SOCK;
+    nt_close_sock(r);
+    r = NT_INVALID_SOCK;
+
+    /* Step 7-9: the wedge path. Fill the writer until the OS reports the buffer full, reader never
+       draining; then send_all must TIME OUT and return false — a wedged peer is dropped, not spun on
+       (a hang would instead trip the ctest timeout). Short 200 ms window keeps it fast. */
+    if (!loopback_pair(&w, &r, 4096, 4096)) {
+        code = 7;
+        goto done;
+    }
+    if (!fill_until_block(w)) {
+        code = 8; /* never reached backpressure within the cap -> cannot exercise the wedge here. */
+        goto done;
+    }
+    {
+        char probe[64] = {0};
+        if (send_all(w, probe, sizeof probe, 200)) {
+            code = 9; /* buffer full + reader idle, yet send_all reported success -> wedge not detected. */
+            goto done;
+        }
+    }
+
+done:
+    free(send_buf);
+    free(recv_buf);
+    if (w != NT_INVALID_SOCK) {
+        nt_close_sock(w);
+    }
+    if (r != NT_INVALID_SOCK) {
+        nt_close_sock(r);
+    }
+#ifdef _WIN32
+    WSACleanup();
+#endif
+    return code;
+}
+// #endregion
+#endif /* NT_TEST_ACCESS */

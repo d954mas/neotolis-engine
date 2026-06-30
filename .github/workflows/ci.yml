@@ -406,7 +406,7 @@ jobs:
       # devapi + ui/obs/entity_write groups ON so the devapi test targets (incl. the ui.* + obs.* +
       # entity.set tests) build + run. GROUP_UI / GROUP_OBS / GROUP_ENTITY_WRITE are opt-in (default OFF).
       - name: Configure native debug tests (FULL asserts, devapi ON)
-        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
+        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
 
       - name: Build native debug tests
         run: cmake --build --preset native-debug-test
@@ -469,6 +469,48 @@ jobs:
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
+  capture-smoke:
+    name: Capture Smoke (live socket UAT)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No git-LFS pull: capture_host renders a deterministic glClear+scissor pattern and loads no asset
+      # packs, so this job never reads the LFS-tracked assets (Sponza). Checkout's pointer files suffice.
+
+      # libgl1-mesa-dri provides the llvmpipe software GL driver so xvfb's headless X server gives
+      # capture_host a real (software-rendered) GL context — the live capture UAT needs a real readback.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang ninja-build python3 python3-pip \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri xvfb
+
+      # Pillow + numpy are the capture-path-only decode deps, pinned + installed ONLY here.
+      - name: Install capture-path Python deps (Pillow + numpy)
+        run: python3 -m pip install --user -r tools/devapi/requirements-capture.txt
+
+      # Hermetic pixel-health self-test (no GL/socket): exercises pixel_health's negative branches
+      # (not-blank, dims, orientation, channel-order) with synthetic PNGs, so a silent weakening of the
+      # capture safety net fails here, not only in the heavyweight live UAT below.
+      - name: Pixel-health self-test (hermetic)
+        run: python3 tools/devapi/scenarios/pixel_health_selftest.py
+
+      # capture_host is a CAPTURE-focused host (CORE/DISCOVERY/TIME/CAPTURE groups only) so it links only
+      # the providers those groups need — the full-group native-debug build would couple it to nt_ui/metrics
+      # it never inits. Default presets stay OFF (zero release delta); this is an opt-in dev-only build.
+      - name: Configure capture host (devapi capture group ON)
+        run: cmake -B build/_cmake/cap-host -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+
+      - name: Build capture_host
+        run: cmake --build build/_cmake/cap-host --target capture_host
+
+      # The live-socket drain-race UAT: capture_demo.py self-launches capture_host, drives capture.frame/
+      # region/scale/bad_params, and runs pixel-health (decode + dims + not-blank). xvfb-run supplies the
+      # headless GL context. Exit 0 == the deferred capture resolved with a decodable non-blank PNG.
+      - name: Run capture live-socket UAT
+        run: xvfb-run -a python3 tools/devapi/scenarios/capture_demo.py
+
   lint:
     name: Format & Tidy
     runs-on: ubuntu-latest
@@ -503,7 +545,7 @@ jobs:
       # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
       # GROUP_UI / GROUP_OBS opt-in off) they would be linted with wrong flags or missing.
       - name: Configure
-        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON
+        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug

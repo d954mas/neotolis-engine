@@ -377,6 +377,11 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
  * by nt_debug_overlay; equivalent to reading frame_stats.draw_calls directly. */
 uint32_t nt_gfx_get_frame_draw_calls(void);
 
+/* Reads an (x,y,w,h) sub-rect of the bound default framebuffer into caller-owned `out`:
+ * rgba8 (row pitch w*4), TOP-LEFT origin (GL's bottom-left read is y-flipped once here),
+ * straight alpha. Returns false on w<=0 || h<=0 or w*h*4 > out_cap (no write past the cap). */
+bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
+
 /* ---- Instance buffer ---- */
 
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf);

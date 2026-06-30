@@ -46,6 +46,12 @@ static bool *s_out_deferred;
 static int s_defer_frames;
 static double s_defer_seconds;
 static bool s_defer_by_time;
+/* Producer continuation captured by defer_current_with_result; NULL for legacy (content-free) defers. */
+static nt_devapi_payload_producer_fn s_defer_producer;
+static void *s_defer_producer_ctx;
+static nt_devapi_ctx_free_fn s_defer_producer_ctx_free;
+static const char *s_defer_fail_code; /* wire error the core yields if a producer returns NULL — command-supplied. */
+static const char *s_defer_fail_msg;
 
 bool nt_devapi_defer_current(int frames) {
     NT_ASSERT(s_out_deferred != NULL); /* only valid inside a handler dispatch. */
@@ -63,17 +69,54 @@ bool nt_devapi_defer_current_time(double seconds) {
     return true;
 }
 
-/* Free owned ids + clear the queue. Called from shutdown so init->shutdown->init is leak-free. */
+bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_fn producer, void *ctx, nt_devapi_ctx_free_fn ctx_free, const char *fail_code, const char *fail_msg) {
+    NT_ASSERT(s_out_deferred != NULL && producer != NULL); /* only valid inside a handler dispatch. */
+    *s_out_deferred = true;
+    s_defer_frames = frames;
+    s_defer_by_time = false; /* producer slots are frame-deferred — read at the next pre-swap seam. */
+    s_defer_producer = producer;
+    s_defer_producer_ctx = ctx;
+    s_defer_producer_ctx_free = ctx_free;
+    s_defer_fail_code = fail_code;
+    s_defer_fail_msg = fail_msg;
+    return true;
+}
+
+/* Release a slot's owned producer ctx (once) and clear the producer fields. */
+static void slot_release_producer(nt_devapi_deferred_slot *slot) {
+    if (slot->producer_ctx != NULL && slot->producer_ctx_free != NULL) {
+        slot->producer_ctx_free(slot->producer_ctx);
+    }
+    slot->producer = NULL;
+    slot->producer_ctx = NULL;
+    slot->producer_ctx_free = NULL;
+}
+
+/* Clear one slot back to the free state, freeing every owned resource (id, payload, ctx). */
+static void slot_clear(nt_devapi_deferred_slot *slot) {
+    if (slot->id != NULL) {
+        cJSON_Delete(slot->id);
+        slot->id = NULL;
+    }
+    if (slot->payload != NULL) {
+        cJSON_Delete(slot->payload);
+        slot->payload = NULL;
+    }
+    slot_release_producer(slot);
+    slot->fail_code = NULL;
+    slot->fail_msg = NULL;
+    slot->in_use = false;
+    slot->is_data = false;
+    slot->target_frame = 0;
+    slot->target_time = 0.0;
+    slot->by_time = false;
+}
+
+/* Free owned ids/payloads/ctx + clear the queue. Called from shutdown so init->shutdown->init is
+   leak-free (the owned-payload lifecycle: set on fill, transferred/freed on yield, freed here). */
 void nt_devapi_deferred_reset(void) {
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
-        if (s_deferred[i].id != NULL) {
-            cJSON_Delete(s_deferred[i].id);
-        }
-        s_deferred[i].id = NULL;
-        s_deferred[i].in_use = false;
-        s_deferred[i].target_frame = 0;
-        s_deferred[i].target_time = 0.0;
-        s_deferred[i].by_time = false;
+        slot_clear(&s_deferred[i]);
     }
 }
 // #endregion
@@ -229,24 +272,73 @@ static const char *request_reject_reason(const cJSON *req) {
 static cJSON s_deferred_marker;
 #define DEFERRED_SENTINEL (&s_deferred_marker)
 
+/* The producer continuation captured for the in-flight defer (NULL for legacy content-free defers).
+   Bundled so deferred_enqueue stays one logical "defer outcome" argument. */
+typedef struct deferred_continuation {
+    bool by_time;
+    int frames;
+    double seconds;
+    nt_devapi_payload_producer_fn producer;
+    void *producer_ctx;
+    nt_devapi_ctx_free_fn producer_ctx_free;
+    const char *fail_code; /* wire error yielded if the producer returns NULL (command-supplied). */
+    const char *fail_msg;
+} deferred_continuation;
+
 /* Enqueue a deferred command: store the owned duplicated id + continuation into a free
    slot. Returns true on success; false on overflow (caller emits a structured error). */
-static bool deferred_enqueue(const cJSON *req, bool by_time, int frames, double seconds) {
+static bool deferred_enqueue(const cJSON *req, const deferred_continuation *cont) {
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (s_deferred[i].in_use) {
             continue;
         }
         s_deferred[i].id = dup_request_id(req); /* owned; NULL if absent — fine. */
-        s_deferred[i].by_time = by_time;
-        if (by_time) {
-            s_deferred[i].target_time = g_nt_app.time + seconds; /* absolute game-time deadline. */
+        s_deferred[i].by_time = cont->by_time;
+        if (cont->by_time) {
+            s_deferred[i].target_time = g_nt_app.time + cont->seconds; /* absolute game-time deadline. */
         } else {
-            s_deferred[i].target_frame = g_nt_app.frame + (uint32_t)frames; /* absolute game-frame deadline. */
+            s_deferred[i].target_frame = g_nt_app.frame + (uint32_t)cont->frames; /* absolute game-frame deadline. */
         }
+        s_deferred[i].producer = cont->producer; /* NULL for legacy content-free defers. */
+        s_deferred[i].producer_ctx = cont->producer_ctx;
+        s_deferred[i].producer_ctx_free = cont->producer_ctx_free;
+        s_deferred[i].fail_code = cont->fail_code;
+        s_deferred[i].fail_msg = cont->fail_msg;
+        s_deferred[i].payload = NULL;                     /* filled at the pre-swap seam, if a producer is present. */
+        s_deferred[i].is_data = (cont->producer != NULL); /* outlives `producer` for the failure-vs-legacy split. */
         s_deferred[i].in_use = true;
         return true;
     }
     return false; /* no free slot — fail-early, leave no partial slot. */
+}
+
+/* Free a continuation's owned producer ctx (if any) — used on the defer reject paths where the
+   slot was never stored, so nothing else will ever free it. */
+static void continuation_free_ctx(const deferred_continuation *cont) {
+    if (cont->producer_ctx != NULL && cont->producer_ctx_free != NULL) {
+        cont->producer_ctx_free(cont->producer_ctx);
+    }
+}
+
+/* The deferred outcome: enqueue the continuation (DEFERRED_SENTINEL, emit nothing) or reject it
+   with a structured error (batch-disallowed / queue-full). On either reject the producer ctx is
+   freed here — the slot was never stored, so this is its only owner. */
+static cJSON *dispatch_deferred(const cJSON *req, bool allow_defer, const deferred_continuation *cont) {
+    if (!allow_defer) {
+        /* A batch is one ordered response array; a deferred reply cannot go in it. Reject this
+           entry explicitly instead of enqueuing a slot that would later fire as a stray envelope. */
+        continuation_free_ctx(cont);
+        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred commands are not supported inside a batch");
+        echo_request_id(entry, req);
+        return entry;
+    }
+    if (!deferred_enqueue(req, cont)) {
+        continuation_free_ctx(cont);
+        cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred queue full");
+        echo_request_id(entry, req);
+        return entry;
+    }
+    return DEFERRED_SENTINEL;
 }
 
 /* Dispatch one request object → an owned response entry, DEFERRED_SENTINEL if the command
@@ -293,37 +385,46 @@ static cJSON *dispatch_one(const cJSON *req, bool allow_defer) {
     int prev_defer_frames = s_defer_frames;
     double prev_defer_seconds = s_defer_seconds;
     bool prev_defer_by_time = s_defer_by_time;
+    nt_devapi_payload_producer_fn prev_defer_producer = s_defer_producer;
+    void *prev_defer_producer_ctx = s_defer_producer_ctx;
+    nt_devapi_ctx_free_fn prev_defer_producer_ctx_free = s_defer_producer_ctx_free;
+    const char *prev_defer_fail_code = s_defer_fail_code;
+    const char *prev_defer_fail_msg = s_defer_fail_msg;
     s_out_deferred = &deferred;
     s_defer_frames = 0;
     s_defer_seconds = 0.0;
     s_defer_by_time = false;
+    s_defer_producer = NULL;
+    s_defer_producer_ctx = NULL;
+    s_defer_producer_ctx_free = NULL;
+    s_defer_fail_code = NULL;
+    s_defer_fail_msg = NULL;
     bool ok = slot->handler(params, result_obj, &err, slot->user_data);
-    int defer_frames = s_defer_frames; /* capture this dispatch's values before restore. */
-    double defer_seconds = s_defer_seconds;
-    bool defer_by_time = s_defer_by_time;
+    deferred_continuation cont = {
+        .by_time = s_defer_by_time, /* capture this dispatch's values before restore. */
+        .frames = s_defer_frames,
+        .seconds = s_defer_seconds,
+        .producer = s_defer_producer,
+        .producer_ctx = s_defer_producer_ctx,
+        .producer_ctx_free = s_defer_producer_ctx_free,
+        .fail_code = s_defer_fail_code,
+        .fail_msg = s_defer_fail_msg,
+    };
     s_out_deferred = prev_out_deferred;
     s_defer_frames = prev_defer_frames;
     s_defer_seconds = prev_defer_seconds;
     s_defer_by_time = prev_defer_by_time;
+    s_defer_producer = prev_defer_producer;
+    s_defer_producer_ctx = prev_defer_producer_ctx;
+    s_defer_producer_ctx_free = prev_defer_producer_ctx_free;
+    s_defer_fail_code = prev_defer_fail_code;
+    s_defer_fail_msg = prev_defer_fail_msg;
 
     if (deferred) {
-        /* No ok/error entry: enqueue the continuation (with the owned request_id) and emit
-           nothing. Overflow rejects the command whole — fail-early, no partial slot. */
+        /* No ok/error entry: the deferred outcome enqueues the continuation (and the owned
+           request_id) or rejects it; emit nothing on the enqueue path. */
         cJSON_Delete(result_obj);
-        if (!allow_defer) {
-            /* A batch is one ordered response array; a deferred reply cannot go in it. Reject
-               this entry explicitly instead of enqueuing a slot that would later fire as a
-               stray envelope (and never return DEFERRED_SENTINEL into the array). */
-            cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred commands are not supported inside a batch");
-            echo_request_id(entry, req);
-            return entry;
-        }
-        if (!deferred_enqueue(req, defer_by_time, defer_frames, defer_seconds)) {
-            cJSON *entry = make_error_entry(NT_DEVAPI_ERR_BAD_PARAMS, "deferred queue full");
-            echo_request_id(entry, req);
-            return entry;
-        }
-        return DEFERRED_SENTINEL;
+        return dispatch_deferred(req, allow_defer, &cont);
     }
 
     cJSON *entry;
@@ -401,10 +502,58 @@ static bool slot_ready(const nt_devapi_deferred_slot *slot) {
     return (int32_t)(g_nt_app.frame - slot->target_frame) >= 0; /* frame deadline (wrap-safe). */
 }
 
+void nt_devapi_run_pre_swap_producers(void) {
+    /* May fire after nt_devapi_shutdown (a host that swaps once more during teardown, before the
+       process-lifetime hook registry is cleared) — no-op safely instead of trapping on stale globals. */
+    if (!nt_devapi_initialized()) {
+        return;
+    }
+    /* Fill every ready producer-slot's payload at the pre-swap seam (GL-valid for a GL producer). The
+       read MUST happen here, before swap — poll_response runs after the frame, where the back buffer is
+       undefined. Idempotent per slot: producer is cleared after one run, so a re-call this frame no-ops. */
+    for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
+        nt_devapi_deferred_slot *slot = &s_deferred[i];
+        if (!slot->in_use || slot->producer == NULL || !slot_ready(slot)) {
+            continue;
+        }
+        slot->payload = slot->producer(slot->producer_ctx); /* owned cJSON*, or NULL on producer failure. */
+        slot_release_producer(slot);                        /* one-shot: free ctx, drop the producer. */
+    }
+}
+
+/* Build the yield entry for a ready slot, transferring its owned payload/id into the tree. A
+   filled payload becomes the ok-entry result; absent payload falls back to the legacy
+   {deferred:true}. Mirrors the id transfer so reset never double-frees. */
+static cJSON *serialize_slot(nt_devapi_deferred_slot *slot) {
+    cJSON *entry;
+    if (slot->payload != NULL) {
+        cJSON *result_obj = slot->payload; /* transfer ownership into the entry. */
+        slot->payload = NULL;              /* so slot_clear doesn't double-free. */
+        entry = make_ok_entry(result_obj);
+    } else if (slot->is_data) {
+        /* A DATA slot resolved with NO payload: its producer ran and FAILED. Yield the command-supplied
+           error envelope (NOT the content-free legacy {deferred:true}) so a client never sees ok:true
+           without the documented result shape. */
+        entry = make_error_entry(slot->fail_code, slot->fail_msg);
+    } else {
+        /* Legacy content-free yield (frame.wait/time.step) — unchanged. */
+        cJSON *result_obj = cJSON_CreateObject();
+        NT_ASSERT(result_obj != NULL);
+        devapi_add_bool(result_obj, "deferred", true);
+        entry = make_ok_entry(result_obj);
+    }
+    if (slot->id != NULL) {
+        attach_request_id(entry, slot->id); /* transfer ownership into the tree (ok or error entry). */
+        slot->id = NULL;                    /* so slot_clear doesn't double-free. */
+    }
+    return entry;
+}
+
 const char *nt_devapi_poll_response(void) {
     NT_ASSERT(nt_devapi_initialized());
     /* Pop the FIRST in-flight slot whose target game-frame has been reached. Reads g_nt_app.frame
-       (the game clock) — idempotent, so it is safe to call every tick / every loop iteration. */
+       (the game clock) — idempotent, so it is safe to call every tick / every loop iteration. GL-free:
+       a producer-slot's payload was already produced at the pre-swap seam (nt_devapi_run_pre_swap_producers). */
     for (int i = 0; i < NT_DEVAPI_MAX_DEFERRED; i++) {
         if (!s_deferred[i].in_use) {
             continue;
@@ -412,24 +561,16 @@ const char *nt_devapi_poll_response(void) {
         if (!slot_ready(&s_deferred[i])) {
             continue;
         }
-
-        /* Minimal continuation result — the slot only proves the yield path; real per-command
-           shapes land with their respective deferred commands. */
-        cJSON *result_obj = cJSON_CreateObject();
-        NT_ASSERT(result_obj != NULL);
-        devapi_add_bool(result_obj, "deferred", true);
-        cJSON *entry = make_ok_entry(result_obj); /* takes ownership of result_obj. */
-        if (s_deferred[i].id != NULL) {
-            attach_request_id(entry, s_deferred[i].id); /* transfer ownership into the tree. */
-            s_deferred[i].id = NULL;                    /* so reset doesn't double-free. */
+        /* Drain-race guard: drain runs at frame start, the pre-swap seam at frame end, so a slot can
+           be frame-ready before its payload is filled. Yielding then would emit the legacy
+           {deferred:true} and lose the data — withhold until the seam fills it next frame. */
+        if (s_deferred[i].producer != NULL && s_deferred[i].payload == NULL) {
+            continue;
         }
-
+        cJSON *entry = serialize_slot(&s_deferred[i]);
         const char *out = resp_serialize(entry);
         cJSON_Delete(entry);
-        s_deferred[i].in_use = false;
-        s_deferred[i].target_frame = 0;
-        s_deferred[i].target_time = 0.0;
-        s_deferred[i].by_time = false;
+        slot_clear(&s_deferred[i]); /* free any remaining owned resources, mark free. */
         return out;
     }
     return NULL; /* nothing ready this call. */

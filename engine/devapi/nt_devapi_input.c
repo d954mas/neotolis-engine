@@ -3,6 +3,7 @@
 
 #include "app/nt_app.h" /* g_nt_app.frame — the advance clock the schedule ticks on. */
 #include "core/nt_assert.h"
+#include "devapi/nt_devapi_input_internal.h"
 #include "devapi/nt_devapi_internal.h"
 #include "input/nt_input.h"
 #include "input/nt_input_internal.h"
@@ -16,7 +17,7 @@
 /* Schedule lives in devapi, not nt_input: only the devtool legitimately knows g_nt_app.frame. */
 
 /* NT_DEVAPI_INPUT_SCHED_MAX (bounded BSS schedule cap, -D overridable) is defined in
-   nt_devapi_internal.h so the unit tests derive fill sizes from the real cap. */
+   nt_devapi_input_internal.h so the ui group + the unit tests derive their sizes from the real cap. */
 
 /* Links the two caps so a full schedule's release can never exceed the immediate buffer. */
 _Static_assert(NT_DEVAPI_INPUT_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "schedule must never release more than the immediate buffer can hold");
@@ -125,7 +126,7 @@ static bool sched_wheel(float dx, float dy, uint16_t at_frame) {
 }
 
 /* Cross-group reuse wrappers (the ui group delegates here so there is ONE scheduler on the immediate
-   buffer — see nt_devapi_internal.h). Thin pass-throughs to the static scheduler; whole-or-nothing
+   buffer — see nt_devapi_input_internal.h). Thin pass-throughs to the static scheduler; whole-or-nothing
    semantics are the caller's (preflight can_reserve(N) then issue N sched_* calls, single-threaded). */
 bool nt_devapi_input_sched_can_reserve(uint32_t n) { return sched_can_reserve(n); }
 

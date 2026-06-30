@@ -283,6 +283,46 @@ void nt_gfx_end_frame(void) {
 
 uint32_t nt_gfx_get_frame_draw_calls(void) { return g_nt_gfx.frame_stats.draw_calls; }
 
+/* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
+ * so bad size returns false (bot-param validation is the L2 concern). */
+bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    if (w <= 0 || h <= 0) {
+        return false;
+    }
+    NT_ASSERT(out != NULL); /* L1 writes the readback (and row-swaps) through out — NULL is a caller bug. */
+    if (out == NULL) {
+        return false;
+    }
+    /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
+       early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
+    if (g_nt_gfx.context_lost) {
+        return false;
+    }
+    /* Compute in uint64_t so w*h*4 cannot overflow before the cap check. */
+    uint64_t need = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U;
+    if (need > (uint64_t)out_cap) {
+        return false;
+    }
+    if (!nt_gfx_backend_read_pixels(x, y, w, h, out)) {
+        return false; /* GL read error -> capture_failed, not an encode of uninitialized memory. */
+    }
+
+    /* Single in-place row swap: GL bottom-left -> top-left. Row stride = w*4. */
+    size_t stride = (size_t)(uint32_t)w * 4U;
+    uint8_t *top = out;
+    uint8_t *bot = out + (stride * (size_t)((uint32_t)h - 1U));
+    while (top < bot) {
+        for (size_t i = 0; i < stride; i++) {
+            uint8_t tmp = top[i];
+            top[i] = bot[i];
+            bot[i] = tmp;
+        }
+        top += stride;
+        bot -= stride;
+    }
+    return true;
+}
+
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     if (g_nt_gfx.context_lost) {
         return;

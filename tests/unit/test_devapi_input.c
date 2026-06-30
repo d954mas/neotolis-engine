@@ -8,6 +8,7 @@
 
 /* clang-format off */
 #include "app/nt_app.h"
+#include "devapi/nt_devapi_input_internal.h" /* sched cap + input_update/reset, driven directly here */
 #include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_net.h" /* nt_devapi_update — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"
@@ -24,9 +25,11 @@
 #define EXPECT_DEVICE_Y(y_up) ((float)TEST_FB_HEIGHT - (float)(y_up))
 
 void setUp(void) {
-    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init()); /* re-registers input -> resets the schedule */
-    nt_input_init();                            /* clean immediate buffer + key/pointer state */
-    g_nt_window.fb_height = TEST_FB_HEIGHT;     /* deterministic basis for the Y-up flip */
+    TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
+    nt_devapi_register_input();             /* re-registers input -> resets the schedule */
+    nt_devapi_register_discovery();         /* the test verifies input.* via endpoints / command.describe */
+    nt_input_init();                        /* clean immediate buffer + key/pointer state */
+    g_nt_window.fb_height = TEST_FB_HEIGHT; /* deterministic basis for the Y-up flip */
 }
 
 void tearDown(void) { nt_devapi_shutdown(); }

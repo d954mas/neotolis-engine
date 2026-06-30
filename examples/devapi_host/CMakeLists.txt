@@ -10,7 +10,7 @@ add_executable(devapi_host main.c)
 # those providers. nt_devapi is already pulled transitively by nt_devapi_net; listing it explicitly
 # pins the order.
 target_link_libraries(devapi_host PRIVATE
-    nt_core nt_app nt_input nt_window nt_log nt_devapi_net nt_devapi
+    nt_core nt_app nt_input nt_window nt_log nt_devapi_net nt_devapi_default
     nt_ui
     nt_sprite_renderer nt_text_renderer nt_material nt_font nt_atlas nt_resource
     nt_http nt_fs

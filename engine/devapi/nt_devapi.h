@@ -11,7 +11,8 @@
 
 #include "cJSON.h"
 #include "core/nt_types.h"
-#include "devapi/nt_devapi_types.h" /* nt_devapi_error / _command_desc / _handler_fn (shared with the stub) */
+#include "devapi/nt_devapi_groups.h" /* host-facing register_<group>() / register_default surface. */
+#include "devapi/nt_devapi_types.h"  /* nt_devapi_error / _command_desc / _handler_fn (shared with the stub) */
 
 /* Registry table cap. Dev-only static slots; lookup scans s_count, not the cap.
    512 leaves wide headroom for engine + game groups (~18KB BSS wasm32, dev-only). */

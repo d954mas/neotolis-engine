@@ -62,6 +62,11 @@ void nt_gfx_backend_set_scissor(int x, int y, int w, int h);
 void nt_gfx_backend_set_scissor_enabled(bool enabled);
 void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 
+/* Framebuffer readback. Writes w*h rgba8 pixels into out_rgba8 in raw GL
+ * bottom-left order; the single Y-flip to top-left is done in the shared
+ * nt_gfx.c layer. Returns false on read failure so the caller never encodes garbage. */
+bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
+
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot);
 

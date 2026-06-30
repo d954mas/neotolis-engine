@@ -60,6 +60,26 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
     (void)h;
 }
 
+/* Deterministic synthetic readback (no GL). Encodes the GL row index (r) and
+ * column index (g) per pixel so the shared-layer Y-flip is observable in CTest:
+ * after the flip, out row 0 must carry GL row (h-1). Bottom-left order, matching
+ * the real glReadPixels backend. b = 0x40 marker, a = 0xFF (opaque). */
+bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
+    (void)x;
+    (void)y;
+    uint8_t *p = (uint8_t *)out_rgba8;
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
+            size_t i = (((size_t)row * (size_t)w) + (size_t)col) * 4U;
+            p[i + 0U] = (uint8_t)(row & 0xFF);
+            p[i + 1U] = (uint8_t)(col & 0xFF);
+            p[i + 2U] = 0x40U;
+            p[i + 3U] = 0xFFU;
+        }
+    }
+    return true; /* synthetic fill always writes the full buffer. */
+}
+
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     (void)desc;
     return 1;
