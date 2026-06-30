@@ -36,6 +36,14 @@ static void set_bad_params(nt_devapi_error *err, const char *message) {
     err->message = message;
 }
 
+/* "This host drives the pre-swap seam" — set via install_seam (or a manual host calling arm directly),
+   reset each register_capture so a fresh init starts unarmed. defer_capture reads it to reject with
+   capture_unavailable rather than defer a slot that never resolves. NOT reset on client-reset, so a
+   reconnecting client on a capture host stays armed. */
+static bool s_seam_armed;
+
+void nt_devapi_capture_arm(void) { s_seam_armed = true; }
+
 /* Producer params: the captured rect + scale divisor, owned by the slot (freed at the seam). */
 typedef struct capture_ctx {
     uint32_t x;
@@ -187,7 +195,7 @@ static bool parse_scale(const cJSON *params, uint32_t *factor, nt_devapi_error *
    rect (top-left y converted by the caller); the row-flip in nt_gfx_read_pixels then yields a
    top-left sub-rect matching the documented contract. Capture resolves after ~1 render. */
 static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uint32_t factor, nt_devapi_error *err) {
-    if (!nt_devapi_capture_seam_armed()) {
+    if (!s_seam_armed) {
         /* The host advertises capture but never drives the pre-swap seam (e.g. devapi_host, which inits
            no GL) — a deferred slot would never resolve, hanging the client. Reject synchronously with a
            distinct code instead. A capture host arms the seam at startup, so this never trips there. */
@@ -310,6 +318,7 @@ static const nt_devapi_handler_fn k_capture_handlers[] = {
 _Static_assert(sizeof(k_capture_cmds) / sizeof(k_capture_cmds[0]) == sizeof(k_capture_handlers) / sizeof(k_capture_handlers[0]), "capture: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_capture(void) {
+    s_seam_armed = false; /* fresh init starts unarmed; the host (re-)arms via install_seam. */
     /* fpng needs a one-time CPU-feature detect before any encode; do it here so the encoder dependency
        is the capture group's own concern, not something the game host must know to call. Idempotent. */
     nt_fpng_init();

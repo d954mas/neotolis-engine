@@ -40,11 +40,6 @@ static void resp_reserve(size_t need) {
    pointer into s_resp_buf; the envelope is serialized at yield time. */
 static nt_devapi_deferred_slot s_deferred[NT_DEVAPI_MAX_DEFERRED];
 
-/* True once a host has installed the capture seam (nt_devapi_capture_install_seam -> nt_devapi_capture_arm):
-   proves the running host drives captures. Reset only on shutdown (NOT on close_client) so a reconnecting
-   client on a capture host stays armed. A host that never installs the seam rejects captures cleanly. */
-static bool s_capture_seam_armed;
-
 /* Set around the handler call in dispatch_one so nt_devapi_defer_current can signal the
    third "deferred" outcome without changing the bool handler ABI (out-param route). */
 static bool *s_out_deferred;
@@ -122,8 +117,6 @@ int nt_devapi_deferred_data_inflight(void) {
     return n;
 }
 
-void nt_devapi_capture_arm(void) { s_capture_seam_armed = true; }
-bool nt_devapi_capture_seam_armed(void) { return s_capture_seam_armed; }
 
 /* Free owned ids/payloads/ctx + clear the queue. Called from shutdown so init->shutdown->init is
    leak-free (the owned-payload lifecycle: set on fill, transferred/freed on yield, freed here). */
@@ -139,8 +132,7 @@ void nt_devapi_resp_reset(void) {
     free(s_resp_buf);
     s_resp_buf = NULL;
     s_resp_cap = 0U;
-    s_capture_seam_armed = false; /* shutdown disarms; a fresh init is unarmed until the host installs the seam. */
-    nt_devapi_deferred_reset();   /* shutdown path: drop any pending deferred slots. */
+    nt_devapi_deferred_reset(); /* shutdown path: drop any pending deferred slots. */
 }
 
 /* Serialize `tree` into the growing buffer and return it (valid until the next submit). */

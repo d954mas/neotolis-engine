@@ -136,13 +136,6 @@ bool nt_devapi_defer_current_with_result(int frames, nt_devapi_payload_producer_
    per-seam encode burst + held-payload memory a single client flood can trigger. */
 int nt_devapi_deferred_data_inflight(void);
 
-/* True once a host has installed the capture seam (public nt_devapi_capture_install_seam ->
-   nt_devapi_capture_arm). A host that never installs it (e.g. devapi_host, which inits no GL) stays
-   unarmed, so the capture handler rejects synchronously (capture_unavailable) instead of deferring a slot
-   that would never resolve. Armed stays true across render-off windows (the capture then legitimately
-   stalls until render resumes). nt_devapi_capture_arm itself is declared in the public capture header. */
-bool nt_devapi_capture_seam_armed(void);
-
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 /* Fused alpha-strip + integer box-average (rgba8 src -> RGB dst; dst = w/factor x h/factor, factor==1 is a
    plain strip). Internal to the capture group; non-static so the capture unit test can value-check the mean. */
