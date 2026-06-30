@@ -1,8 +1,7 @@
-/* base64 util: known-vector round-trip incl. 0/1/2-byte padding edges +
- * cap-reject + empty input. Pure — nt_devapi_base64.c is compiled directly into
- * this target (no devapi core, no NT_DEVAPI_ENABLED gate). RFC 4648 vectors. */
+/* nt_base64 encoder: known-vector round-trip incl. 0/1/2-byte padding edges + cap-reject + empty
+ * input. Links the standalone nt_base64 module (no devapi). RFC 4648 vectors. */
 
-#include "devapi/nt_devapi_base64.h"
+#include "base64/nt_base64.h"
 #include "unity.h"
 
 #include <stdint.h>
@@ -13,7 +12,7 @@ void tearDown(void) {}
 
 /* Encode `in` into a NUL-terminated `out`; returns the encoded byte count. */
 static uint32_t encode_str(const char *in, char *out, uint32_t out_cap) {
-    uint32_t n = nt_devapi_base64_encode((const uint8_t *)in, (uint32_t)strlen(in), out, out_cap);
+    uint32_t n = nt_base64_encode((const uint8_t *)in, (uint32_t)strlen(in), out, out_cap);
     out[n] = '\0';
     return n;
 }
@@ -60,7 +59,7 @@ void test_base64_cap_reject(void) {
     const char kGuard = (char)0x7F;
     memset(buf, kGuard, sizeof(buf));
 
-    uint32_t n = nt_devapi_base64_encode((const uint8_t *)in, 3U, buf, 3U); /* cap 3 < need 4 */
+    uint32_t n = nt_base64_encode((const uint8_t *)in, 3U, buf, 3U); /* cap 3 < need 4 */
     TEST_ASSERT_EQUAL_UINT32(0U, n);
     for (size_t i = 0; i < sizeof(buf); i++) {
         TEST_ASSERT_EQUAL_INT8(kGuard, buf[i]); /* nothing written */
@@ -73,7 +72,7 @@ void test_base64_empty_input(void) {
     const char kGuard = (char)0x7F;
     memset(buf, kGuard, sizeof(buf));
 
-    uint32_t n = nt_devapi_base64_encode((const uint8_t *)"", 0U, buf, sizeof(buf));
+    uint32_t n = nt_base64_encode((const uint8_t *)"", 0U, buf, sizeof(buf));
     TEST_ASSERT_EQUAL_UINT32(0U, n);
     TEST_ASSERT_EQUAL_INT8(kGuard, buf[0]); /* nothing written */
 }

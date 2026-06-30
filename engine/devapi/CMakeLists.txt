@@ -4,17 +4,15 @@
 # full host links nt_devapi_default (every compiled-in group + nt_devapi_register_default()). Each
 # NT_DEVAPI_GROUP_<X> option gates building that group's library.
 
-# nt_devapi -- the framework ONLY: dispatch + self-describing registry + lifecycle-hook registry +
-# base64 + the host-facing registration API (nt_devapi_groups.h). It references NO group, so any set of
-# group libs can link it without conflict (this is what removed the all-groups link collision).
+# nt_devapi -- the framework ONLY: dispatch + self-describing registry + lifecycle-hook registry + the
+# host-facing registration API (nt_devapi_groups.h). It references NO group, so any set of group libs
+# can link it without conflict (this is what removed the all-groups link collision).
 nt_add_module(nt_devapi LOG_DOMAIN "devapi"
     nt_devapi.c
     nt_devapi_registry.c
-    nt_devapi_base64.c
     nt_devapi.h
     nt_devapi_groups.h
     nt_devapi_internal.h
-    nt_devapi_base64.h
     nt_devapi_stub.h
 )
 
@@ -124,10 +122,10 @@ endif()
 
 # Capture group (capture.frame / capture.region): the first DEFERRED data-returning commands. The seam
 # producer chains nt_gfx_read_pixels (readback) -> RGB strip + box-average -> nt_fpng (PNG encode) ->
-# base64 (in the framework). nt_devapi_capture.h is the host-facing pre-swap-seam header.
+# nt_base64. nt_devapi_capture.h is the host-facing pre-swap-seam header.
 if(NT_DEVAPI_GROUP_CAPTURE)
     nt_add_module(nt_devapi_capture LOG_DOMAIN "devapi" nt_devapi_capture.c nt_devapi_capture.h)
-    target_link_libraries(nt_devapi_capture PUBLIC nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_window_interface)
+    target_link_libraries(nt_devapi_capture PUBLIC nt_devapi PRIVATE nt_gfx_interface nt_fpng nt_base64 nt_window_interface)
     target_compile_definitions(nt_devapi_capture PUBLIC NT_DEVAPI_GROUP_CAPTURE=1)
 endif()
 

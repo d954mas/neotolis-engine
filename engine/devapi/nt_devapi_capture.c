@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "base64/nt_base64.h"
 #include "core/nt_assert.h"
-#include "devapi/nt_devapi_base64.h"
 #include "devapi/nt_devapi_internal.h"
 #include "fpng/nt_fpng.h"
 #include "graphics/nt_gfx.h"
@@ -83,7 +83,7 @@ static cJSON *build_payload(const uint8_t *png, uint32_t png_len, uint32_t out_w
     if (b64 == NULL) {
         return NULL;
     }
-    uint32_t b64_len = nt_devapi_base64_encode(png, png_len, b64, b64_need);
+    uint32_t b64_len = nt_base64_encode(png, png_len, b64, b64_need);
     if (b64_len == 0U) {
         free(b64);
         return NULL;
