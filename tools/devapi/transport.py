@@ -7,6 +7,7 @@ crashed / deferred-forever engine can never hang the bot or CI.
 
 Stdlib only (socket) — no pip deps. Python 3.8+.
 """
+import json
 import socket
 import time
 from abc import ABC, abstractmethod
@@ -125,10 +126,25 @@ class PlaywrightTransport(Transport):
         self._timeout = read_timeout
         # Lines received synchronously from submit() but not yet handed to recv_line().
         self._inbox = []
+        # Tracked from time.set_mode: under MANUAL the frame counter advances only on time.step, so a
+        # frame-keyed deferred (capture) never drains on rAF alone — recv_line pumps a step when manual.
+        self._manual = False
+
+    def _note_mode(self, line: str) -> None:
+        """Sniff time.set_mode so recv_line can advance MANUAL frames (rAF alone freezes the MANUAL counter)."""
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return
+        if isinstance(msg, dict) and msg.get("method") == "time.set_mode":
+            mode = (msg.get("params") or {}).get("mode")
+            if mode in ("manual", "run"):
+                self._manual = mode == "manual"
 
     def send(self, line: str) -> None:
         if len(line.encode("utf-8")) > MAX_LINE_BYTES:
             raise ValueError("outbound line exceeds MAX_LINE_BYTES")
+        self._note_mode(line)
         # submit returns "" on defer (C returned NULL), else the synchronous response line.
         resp = self._page.evaluate("(l) => window.__devapi.submit(l)", line)
         if resp:
@@ -140,8 +156,13 @@ class PlaywrightTransport(Transport):
         # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast (D-01).
         deadline = time.time() + self._timeout
         while time.time() < deadline:
+            # Under MANUAL the frame counter only advances on time.step, so a frame-keyed deferred
+            # (capture) never drains on rAF alone — advance one MANUAL step (tick's response is consumed
+            # by the bridge, not queued) before the render barrier. Under RUN the rAF below advances it.
+            if self._manual:
+                self._page.evaluate("() => window.__devapi.tick(1)")
             # Advance a real rendered frame so a pending capture's pre-swap producer fills its payload,
-            # THEN poll; rAF cadence only lets the seam run — MANUAL time.step makes progress determinate.
+            # THEN poll; rAF cadence lets the seam run, the MANUAL step above makes progress determinate.
             self._page.evaluate(_RAF_BARRIER_JS)
             line = self._page.evaluate("() => window.__devapi.poll()")
             if line:
