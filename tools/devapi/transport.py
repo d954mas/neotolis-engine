@@ -60,8 +60,9 @@ class SocketTransport(Transport):
         self._sock = socket.create_connection((host, port), timeout=connect_timeout)
         # The read timeout is mandatory, not optional — never block forever.
         self._sock.settimeout(read_timeout)
-        # makefile handles partial-recv reassembly + UTF-8 decode; readline frames on '\n'.
-        self._f = self._sock.makefile("r", encoding="utf-8")
+        # Binary makefile handles partial-recv reassembly; readline frames on b'\n' and caps the read in
+        # BYTES (a text-mode makefile would cap MAX_LINE_BYTES in CHARACTERS, diverging from the contract).
+        self._f = self._sock.makefile("rb")
 
     def __enter__(self) -> "SocketTransport":
         return self
@@ -74,21 +75,21 @@ class SocketTransport(Transport):
         self._sock.sendall((line + "\n").encode("utf-8"))
 
     def recv_line(self) -> str:
-        # Bound the read so a desynced stream can never grow memory without limit.
+        # Bound the read (in BYTES) so a desynced stream can never grow memory without limit.
         try:
-            line = self._f.readline(MAX_LINE_BYTES)
+            raw = self._f.readline(MAX_LINE_BYTES)
         except (socket.timeout, TimeoutError) as exc:
             # On py3.8 socket.timeout is NOT a TimeoutError subclass; normalize so callers catch
             # one type. A mid-read timeout also leaves the buffered reader in an undefined state,
             # so invalidate the transport — a retry must fail fast, not read corrupted framing.
             self.close()
             raise TimeoutError(str(exc) or "read timed out") from exc
-        if line == "":
+        if raw == b"":
             # Orderly disconnect: recv returned b"" (mirrors the server-side close path). Fail fast, never hang.
             raise ConnectionError("server closed the connection")
-        if len(line) >= MAX_LINE_BYTES and not line.endswith("\n"):
+        if len(raw) >= MAX_LINE_BYTES and not raw.endswith(b"\n"):
             raise ConnectionError("oversized/unterminated line — framing desync")
-        return line.rstrip("\r\n")
+        return raw.decode("utf-8").rstrip("\r\n")
 
     def close(self) -> None:
         try:
@@ -113,10 +114,10 @@ class PlaywrightTransport(Transport):
     response line immediately; a deferred command — C returned NULL — returns "" and its data line
     arrives later via poll()). recv_line() returns a stashed line, else loops a rAF barrier +
     window.__devapi.poll() until a line appears or the MANDATORY read_timeout fires — mirroring
-    SocketTransport's bounded read so a deferred-forever capture can never hang CI (D-01).
+    SocketTransport's bounded read so a deferred-forever capture can never hang CI.
 
     Playwright Python is NOT a CI dep (the CI web gate is the TS spec); this class is the local/dev
-    HARNESS-03 web wire. The Playwright import would be lazy if needed, but this class touches only
+    web wire. The Playwright import would be lazy if needed, but this class touches only
     the page handle the caller already constructed, so no import is required here — keeping the
     module stdlib-only importable for the native SocketTransport path.
     """
@@ -153,7 +154,7 @@ class PlaywrightTransport(Transport):
     def recv_line(self) -> str:
         if self._inbox:
             return self._inbox.pop(0)
-        # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast (D-01).
+        # Bounded poll: never an unbounded loop — a deferred-forever capture must fail fast.
         deadline = time.time() + self._timeout
         while time.time() < deadline:
             # Under MANUAL the frame counter only advances on time.step, so a frame-keyed deferred

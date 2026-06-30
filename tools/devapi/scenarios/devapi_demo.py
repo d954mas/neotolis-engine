@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""DevAPI canonical demo — the ONE run(client) scenario driven over BOTH transports (HARNESS-03).
+"""DevAPI canonical demo — the ONE run(client) scenario driven over BOTH transports.
 
 This is the single source of truth proving native<->web parity: the IDENTICAL run(client) is driven
 by SocketTransport (native devapi_host, self-launched here) and by PlaywrightTransport / the
 devapi.spec.ts browser gate (web devapi_host). It exercises:
 
   * discovery        — ping + endpoints/command.describe/features (game.echo + game.poke registered
-                       with ZERO engine edits, HARNESS-05),
+                       with ZERO engine edits),
   * game.* round-trip — game.echo {msg} read-back + game.poke write flipping an observable host bool,
   * the riskiest web path — a deferred capture.frame/region that must resolve to a REAL PNG (NOT
-                       {deferred:true}) on a host that drives the pre-swap seam (D-04/D-05),
-  * the D-12 deferred items best-effort — perf.snapshot memory (the "mem_total" obs read),
+                       {deferred:true}) on a host that drives the pre-swap seam,
+  * the deferred items best-effort — perf.snapshot memory (the "mem_total" obs read),
                        render.set_enabled toggle, and time.step RAF time control (no value asserts).
 
 CAPTURE CAPABILITY: the native devapi_host inits NO GL and does NOT arm the capture seam, so
@@ -27,7 +27,7 @@ Usage: python tools/devapi/scenarios/devapi_demo.py [--port N] [--no-launch] [--
 Exit 0 if every assertion passes, 1 on assertion / protocol / transport failure, 2 on usage / launch.
 
 Stdlib only (the SocketTransport native path needs no pip dep); the web driver is the TS spec +
-PlaywrightTransport for local HARNESS-03.
+PlaywrightTransport for local runs.
 """
 import os
 import subprocess
@@ -108,7 +108,7 @@ def _connect_with_retry(port: int, deadline_s: float = 10.0) -> SocketTransport:
 def _drive_deferred_capture(client: DevApiClient) -> None:
     """The riskiest cross-transport path: a deferred capture.frame/region.
 
-    On a capture-capable host (the web devapi_host arms the pre-swap seam, D-04) the deferred reply
+    On a capture-capable host (the web devapi_host arms the pre-swap seam) the deferred reply
     MUST carry a real PNG, never {deferred:true} — the drain-race that only a live transport exposes.
     On the native devapi_host (no GL, no seam) the engine rejects synchronously with
     capture_unavailable; that is the documented native outcome (NOT a skip of the web path).
@@ -122,11 +122,11 @@ def _drive_deferred_capture(client: DevApiClient) -> None:
         raise
     # Capture-capable host (web): the deferred producer must have run.
     assert full.get("deferred") is not True, (
-        "capture.frame returned {deferred:true} — the pre-swap producer never ran (web drain-race, Pitfall 3)"
+        "capture.frame returned {deferred:true} — the pre-swap producer never ran (web drain-race)"
     )
     assert full.get("format") == "png", f"capture.frame format is {full.get('format')!r}, expected 'png'"
     assert full.get("data"), "capture.frame returned an empty data payload"
-    # CAP-03 web half: a sub-rect crop returns the same png contract.
+    # web half: a sub-rect crop returns the same png contract.
     view = client.result("view")
     fb_w, fb_h = int(view["fb_width"]), int(view["fb_height"])
     region = client.capture_region(0, 0, fb_w * 3 // 4, fb_h * 3 // 4)
@@ -136,14 +136,14 @@ def _drive_deferred_capture(client: DevApiClient) -> None:
 
 
 def _drive_deferred_items_best_effort(client: DevApiClient) -> None:
-    """D-12: exercise the Phase 64-68 web deferrals live over the canonical scenario.
+    """Exercise the web deferrals live over the canonical scenario.
 
     Best-effort — any non-error response passes; values are NOT asserted (the value gates live in the
-    per-group demos). This is how D-12 is genuinely closed: covered live by the one scenario, not by
-    separate gates. The three items: (1) the obs memory read ("mem_total" — surfaced by the obs group
-    as perf.snapshot's mem_used channel), (2) a render toggle, (3) time.step RAF time control.
+    per-group demos). Covered live by the one scenario, not by separate gates. The three items: (1) the
+    obs memory read ("mem_total" — surfaced by the obs group as perf.snapshot's mem_used channel),
+    (2) a render toggle, (3) time.step RAF time control.
     """
-    # (1) obs memory read — the D-12 "mem_total via obs" item. The obs group names this channel
+    # (1) obs memory read — the "mem_total via obs" item. The obs group names this channel
     #     mem_used in perf.snapshot; reading it proves the obs path answers over the transport.
     try:
         snap = client.result("perf.snapshot")
@@ -162,7 +162,7 @@ def _drive_deferred_items_best_effort(client: DevApiClient) -> None:
         client.step(1)
     except DevApiResultError:
         pass
-    print("PASS D-12 best-effort: obs mem read + render toggle + time.step exercised (no value asserts).")
+    print("PASS deferred-items best-effort: obs mem read + render toggle + time.step exercised (no value asserts).")
 
 
 def run(client: DevApiClient) -> None:
@@ -194,14 +194,14 @@ def run(client: DevApiClient) -> None:
     assert bool(poked2["poked"]) != before, "game.poke did not flip the observable host bool"
     print("PASS discovery + game.echo/game.poke: endpoints list both, echo round-trips, poke flips host state.")
 
-    # 3. Deterministic pump (D-02) + the riskiest web path: a deferred capture -> real PNG.
+    # 3. Deterministic pump + the riskiest web path: a deferred capture -> real PNG.
     client.set_mode("manual")
     _drive_deferred_capture(client)
 
-    # 4. D-12 deferred items, best-effort (no value assertions).
+    # 4. deferred items, best-effort (no value assertions).
     _drive_deferred_items_best_effort(client)
 
-    print("PASS: canonical run(client) — discovery + game.* + deferred capture + D-12 items all machine-checked.")
+    print("PASS: canonical run(client) — discovery + game.* + deferred capture + deferred items all machine-checked.")
 
 
 def main(argv) -> int:

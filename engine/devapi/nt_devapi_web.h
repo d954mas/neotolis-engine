@@ -6,7 +6,7 @@
    stays transport-agnostic (it owns nt_devapi_update + the frame-keyed deferred drain). Web-only
    (compiled out of the native build); dev-only, gated by NT_DEVAPI_ENABLED with the rest of the
    layer. The host calls only nt_devapi_web_install_shim once at startup; the two KEEPALIVE wrappers
-   below are reached from JS through window.__devapi (no socket / no listener, D-16). */
+   below are reached from JS through window.__devapi (no socket / no listener). */
 
 /* Must come from the nt_devapi target compile-defines; consumers without the link see stubs that mismatch ABI. */
 #ifndef NT_DEVAPI_ENABLED
@@ -18,7 +18,7 @@
 void nt_devapi_web_install_shim(void);
 
 /* JS-facing transport wrappers (reached via window.__devapi, not by the host directly). They return
-   the SAME const char* the core owns (D-03), NULL when deferred / nothing ready. */
+   the SAME const char* the core owns, NULL when deferred / nothing ready. */
 const char *nt_devapi_web_submit(const char *line);
 const char *nt_devapi_web_poll(void);
 
