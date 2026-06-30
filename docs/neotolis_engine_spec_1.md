@@ -267,7 +267,11 @@ If a decision can be deferred without loss of base architecture — it is deferr
   thumb with a symmetric `thumb_pad` end-margin. On the click-release frame the
   widget renders the PRE-flip value and returns `changed` after drawing, so the
   pop/slide animation begins the next frame — the same intrinsic 1-frame IM lag as
-  hit-test and arbitration. `nt_ui_slider` / `nt_ui_progress` extend the same
+  hit-test and arbitration. `nt_ui_checkbox_tri` adds a tristate (OFF/ON/MIXED) over the
+  same core, additive to the bool checkbox: MIXED renders a dedicated `mixed` dash row but is a
+  DISPLAY-only state the game sets (e.g. aggregated from children) — a click NEVER produces MIXED
+  (it resolves any non-ON value to ON, else toggles ON↔OFF), so Model D holds.
+  `nt_ui_slider` / `nt_ui_progress` extend the same
   game-owns-the-value model: the float/int value lives in the game, the engine eases
   only the visual fraction (`value_t`); the slider exposes its thumb screen position
   (`nt_ui_slider_thumb_pos`) so the game can draw drag-bubbles via a Clay floating
@@ -278,7 +282,12 @@ If a decision can be deferred without loss of base architecture — it is deferr
   `*value` is clamped AND written back so game memory matches what is drawn. A live drag
   returns `changed` every frame; act-once callers poll the release edge (commit-on-release).
   Hit padding inflates the touch target and auto-grows vertically to cover the thumb's
-  overhang past the track even at zero style pad. Slider and progress share one fill-emit
+  overhang past the track even at zero style pad. An `orientation` style field selects the drag
+  AXIS (horizontal default / vertical): the SAME `nt_ui_slider_float` / `_int` branch on it, with
+  `fill_direction` the anchor WITHIN the axis (vertical defaults to BOTTOM_UP — value 0 at the
+  bottom; horizontal to LTR). A `fill_direction` whose axis disagrees with `orientation` is a
+  developer assert and falls back to the axis default locally — the caller's style is never mutated.
+  Slider and progress share one fill-emit
   helper (STRETCH slice9 stretch vs CROP scissor-reveal × four directions).
 
   **Custom scroll physics.** `nt_ui` scroll containers bypass Clay's built-in
@@ -329,6 +338,23 @@ If a decision can be deferred without loss of base architecture — it is deferr
   v1.7-era assumption that Clay drives scroll; the
   "Scissor limitation" note below still holds (AABB clip of a rotated scroll
   container is unchanged).
+
+  **Virtual list.** `nt_ui_vlist_begin` / `nt_ui_vlist_end` is a code-first virtualized-list
+  clipper (the immediate-mode analogue of Dear ImGui's `ImGuiListClipper`) over ONE engine-owned
+  scroll/clip. From the scroll position + viewport + a fixed `item_extent` it derives an inclusive
+  `{first,last}` visible window (returned to the game), emits a LEADING spacer, lets the game loop
+  `for (i = first; i <= last; ++i)` emitting only the visible rows, then emits a TRAILING spacer so
+  the content still measures `count × extent` and the existing scrollbar geometry stays correct — a
+  10k-row list costs ~the visible count, not the row count. Per-row ids RECYCLE over a frame-stable
+  ring (`id_ring`, slot = `index % id_ring`), so the distinct ids per list are bounded by the ring,
+  never the row count, and a long list never saturates Clay's persistent element hashmap; the visible
+  window is hard-clamped below the ring so two simultaneously-visible rows can never alias a slot.
+  Because ids follow the screen SLOT, the game dispatches per-row ACTIONS by the ABSOLUTE index and
+  keeps per-row PERSISTENT state game-owned (keyed by absolute index), never hung off the recycled
+  id — transient UI state (hover/press) follows the slot, standard IM virtualization. Both axes (Y
+  default, X). The general `nt_ui_child_id(parent_id, "label")` helper derives a per-widget id from a
+  parent scope + a string label (fmix-folded, never 0), so game code derives child ids without
+  inventing numeric salts.
 
   **Text input.** `nt_ui_input_text` is a single-line field over a game-owned
   `char*` buffer (Model D — the engine never reallocs or owns the string; it stores

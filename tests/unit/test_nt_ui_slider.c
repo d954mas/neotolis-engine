@@ -111,6 +111,60 @@ static void warmup_float(float *value, float min, float max) {
     (void)slider_float_frame(&f0, value, min, max, 0.0F, true);
 }
 
+/* ---- Vertical slider fixture: narrow tall track, wide short thumb (overhang on left/right). ---- */
+#define VT_X 100.0F
+#define VT_Y 200.0F
+#define VT_W 20.0F  /* narrow track */
+#define VT_H 200.0F /* tall track */
+#define VT_TW 24.0F /* wide thumb (overhangs the track by 2px each side) */
+#define VT_TH 20.0F /* short thumb */
+#define VT_CX (VT_X + (VT_W * 0.5F))
+#define VT_USABLE (VT_H - VT_TH) /* travel of the thumb TOP edge */
+
+/* Pointer-Y that maps to value fraction f. BOTTOM_UP: value-up = screen-up (inverted). */
+#define VT_Y_AT_FRAC_BU(f) (VT_Y + ((1.0F - (f)) * VT_USABLE) + (VT_TH * 0.5F))
+/* TOP_DOWN: value-up = screen-down (plain). */
+#define VT_Y_AT_FRAC_TD(f) (VT_Y + ((f) * VT_USABLE) + (VT_TH * 0.5F))
+
+static const Clay_ElementDeclaration s_vtrack_decl = {
+    .layout = {.sizing = {CLAY_SIZING_FIXED(VT_W), CLAY_SIZING_FIXED(VT_H)}},
+};
+
+/* Same base art/speeds as init_style, then swap to a vertical axis with the given anchor. */
+static void init_vstyle(nt_ui_fill_direction_t dir) {
+    s_style.track_w = VT_W;
+    s_style.track_h = VT_H;
+    s_style.thumb_w = VT_TW;
+    s_style.thumb_h = VT_TH;
+    s_style.orientation = NT_UI_SLIDER_VERTICAL;
+    s_style.fill_direction = dir;
+}
+
+static bool slider_vfloat_frame(const nt_pointer_t *p, float *value, float min, float max, float step, bool enabled) {
+    bool changed = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = VT_X, .y = VT_Y}}}) {
+        changed = nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, value, min, max, step, &s_style, &s_vtrack_decl, enabled);
+    }
+    nt_ui_end(s_fx.ctx);
+    return changed;
+}
+
+static void warmup_vfloat(float *value, float min, float max) {
+    nt_pointer_t f0 = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    (void)slider_vfloat_frame(&f0, value, min, max, 0.0F, true);
+}
+
+static bool slider_vint_frame(const nt_pointer_t *p, int *value, int min, int max, int step, bool enabled) {
+    bool changed = false;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = VT_X, .y = VT_Y}}}) {
+        changed = nt_ui_slider_int(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, value, min, max, step, &s_style, &s_vtrack_decl, enabled);
+    }
+    nt_ui_end(s_fx.ctx);
+    return changed;
+}
+
 /* ---- Test 1: track-press jumps the value to the click point (left edge -> min,
  *      right edge -> max, midpoint -> mid). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -564,8 +618,157 @@ static void test_thumb_clipped_in_scroll(void) {
     TEST_ASSERT_TRUE(thumb_bottom > clip_top);           /* sanity: overlaps the viewport */
 }
 
+/* ---- Test V1: vertical track-jump value map, BOTTOM_UP (top edge -> max, bottom -> min). ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_vertical_track_jump_bottom_up(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    float value = 0.5F;
+    warmup_vfloat(&value, 0.0F, 1.0F);
+
+    /* Press at the TOP edge -> value 1 (up = more under BOTTOM_UP). */
+    nt_pointer_t pt = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), true, true, false);
+    (void)slider_vfloat_frame(&pt, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
+
+    /* Release, press at the BOTTOM edge -> value 0. */
+    nt_pointer_t up = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), false, false, true);
+    (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
+    nt_pointer_t pb = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), true, true, false);
+    (void)slider_vfloat_frame(&pb, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
+
+    /* Release, press at the MIDDLE -> value 0.5. */
+    nt_pointer_t up2 = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), false, false, true);
+    (void)slider_vfloat_frame(&up2, &value, 0.0F, 1.0F, 0.0F, true);
+    nt_pointer_t pm = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
+    (void)slider_vfloat_frame(&pm, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
+}
+
+/* ---- Test V2: vertical track-jump value map, TOP_DOWN (top edge -> min, bottom -> max). ---- */
+static void test_vertical_track_jump_top_down(void) {
+    init_vstyle(NT_UI_FILL_TOP_DOWN);
+    float value = 0.5F;
+    warmup_vfloat(&value, 0.0F, 1.0F);
+
+    /* Press at the TOP edge -> value 0 (down = more under TOP_DOWN). */
+    nt_pointer_t pt = make_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), true, true, false);
+    (void)slider_vfloat_frame(&pt, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
+
+    /* Release, press at the BOTTOM edge -> value 1. */
+    nt_pointer_t up = make_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), false, false, true);
+    (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
+    nt_pointer_t pb = make_pointer(VT_CX, VT_Y_AT_FRAC_TD(1.0F), true, true, false);
+    (void)slider_vfloat_frame(&pb, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
+}
+
+/* ---- Test V3a: vertical thumb-grab relative drag under BOTTOM_UP. Dragging the pointer UP
+ *      INCREASES the value (screen-Y inversion: up = more). ---- */
+static void test_vertical_thumb_grab_bottom_up(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    float value = 0.5F;
+    warmup_vfloat(&value, 0.0F, 1.0F);
+    const float thumb_center = VT_Y_AT_FRAC_BU(0.5F);
+    nt_pointer_t grab = make_pointer(VT_CX, thumb_center, true, true, false);
+    (void)slider_vfloat_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
+    nt_pointer_t up = make_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
+    (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.75F, 0.03F)); /* up = more */
+}
+
+/* ---- Test V3b: vertical thumb-grab relative drag under TOP_DOWN. Dragging the pointer UP
+ *      DECREASES the value (plain mapping: down = more). ---- */
+static void test_vertical_thumb_grab_top_down(void) {
+    init_vstyle(NT_UI_FILL_TOP_DOWN);
+    float value = 0.5F;
+    warmup_vfloat(&value, 0.0F, 1.0F);
+    const float thumb_center = VT_Y_AT_FRAC_TD(0.5F);
+    nt_pointer_t grab = make_pointer(VT_CX, thumb_center, true, true, false);
+    (void)slider_vfloat_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
+    nt_pointer_t up = make_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
+    (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.25F, 0.03F)); /* up = less */
+}
+
+/* ---- Test V4: a wide thumb (thumb_w > track_w) auto-grows the hit pad on LEFT/RIGHT for a
+ *      vertical slider; a press just LEFT of the thin track (inside the overhang pad) drags. ---- */
+static void test_vertical_hit_pad_left_right(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    s_style.hit_padding_lrtb[0] = 0; /* no style pad: overhang = (24-20)/2 = 2px auto-grown each side */
+    s_style.hit_padding_lrtb[1] = 0;
+    float value = 0.0F;
+    warmup_vfloat(&value, 0.0F, 1.0F);
+
+    /* Press 1px LEFT of the track left edge (inside the 2px auto-grown left pad), at the vertical
+     * middle -> a drag must start and jump the value to ~0.5. Misses the bare thin track. */
+    const float left_x = VT_X - 1.0F;
+    TEST_ASSERT_TRUE(left_x < VT_X); /* genuinely outside the visual track */
+    nt_pointer_t p = make_pointer(left_x, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
+    (void)slider_vfloat_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
+    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
+}
+
+/* ---- Test V5: nt_ui_slider_thumb_pos is axis-aware for a vertical slider — the thumb travels Y
+ *      (centered on the cross X axis); BOTTOM_UP measures the position from the bottom edge. ---- */
+static void test_vertical_thumb_pos_exposed(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    float value = 0.25F;
+    /* Two frames so the view cell + bbox latch the fraction (thumb_pos reads prev-frame). */
+    warmup_vfloat(&value, 0.0F, 1.0F);
+    nt_pointer_t idle = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    (void)slider_vfloat_frame(&idle, &value, 0.0F, 1.0F, 0.0F, true);
+
+    const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("vsl"));
+    TEST_ASSERT_TRUE(t.found);
+    TEST_ASSERT_TRUE(float_near(t.x, VT_CX, 1.0F));                  /* centered on the cross (X) axis */
+    TEST_ASSERT_TRUE(float_near(t.y, VT_Y_AT_FRAC_BU(0.25F), 1.0F)); /* travels Y, BOTTOM_UP inverted */
+}
+
+/* ---- Vertical slider_int: the public _int entry's axis branch + BOTTOM_UP quantize ---- */
+static void test_vertical_int_track_jump_bottom_up(void) {
+    init_vstyle(NT_UI_FILL_BOTTOM_UP);
+    int value = 0;
+    nt_pointer_t f0 = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    (void)slider_vint_frame(&f0, &value, 0, 10, 1, true); /* warm-up: cache the track bbox */
+    /* Press at the screen Y for fraction 0.7 -> value 7 (BOTTOM_UP inverts; int step 1 quantizes). */
+    nt_pointer_t pj = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.7F), true, true, false);
+    const bool changed = slider_vint_frame(&pj, &value, 0, 10, 1, true);
+    TEST_ASSERT_TRUE(changed);
+    TEST_ASSERT_EQUAL_INT(7, value);
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
+
+/* axis mismatch (VERTICAL + LTR fill) asserts but does NOT mutate the caller's style: the widget
+ * uses a LOCAL effective direction (vertical default BOTTOM_UP) so the no-assert/shipping path renders
+ * the right axis without corrupting a shared/static style across frames. */
+static void test_vertical_axis_mismatch_no_mutation(void) {
+    init_vstyle(NT_UI_FILL_LTR); /* LTR is a HORIZONTAL anchor -> mismatch for VERTICAL */
+    float value = 0.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("vsl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_vtrack_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+    /* The caller's style is untouched: still LTR (the coerce lives in a local, not the struct). */
+    TEST_ASSERT_EQUAL_INT(NT_UI_FILL_LTR, s_style.fill_direction);
+}
+
+/* horizontal RTL is an unsupported anchor (fill would right-anchor while drag/thumb/thumb_pos stay
+ * LTR): asserts AND coerces to the LTR default LOCALLY, never mutating the caller's style. */
+static void test_horizontal_rtl_unsupported_no_mutation(void) {
+    s_style.fill_direction = NT_UI_FILL_RTL; /* RTL is a HORIZONTAL anchor but unsupported by the slider */
+    float value = 0.0F;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_INT(NT_UI_FILL_RTL, s_style.fill_direction); /* caller's style untouched (coerce is local) */
+}
 
 /* track_w == 0 -> assert. */
 static void test_assert_track_w_zero(void) {
@@ -622,6 +825,17 @@ static void test_assert_negative_step(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* orientation not HORIZONTAL/VERTICAL -> assert (a garbage enum must not silently render horizontal). */
+static void test_assert_orientation_invalid(void) {
+    float value = 0.5F;
+    nt_ui_slider_style_t bad = s_style;
+    bad.orientation = (nt_ui_slider_orientation_t)7; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &bad, &s_track_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -643,12 +857,22 @@ int main(void) {
     RUN_TEST(test_step_thumb_visual_snap);
     RUN_TEST(test_out_of_range_writeback);
     RUN_TEST(test_thumb_clipped_in_scroll);
+    RUN_TEST(test_vertical_track_jump_bottom_up);
+    RUN_TEST(test_vertical_track_jump_top_down);
+    RUN_TEST(test_vertical_thumb_grab_bottom_up);
+    RUN_TEST(test_vertical_thumb_grab_top_down);
+    RUN_TEST(test_vertical_hit_pad_left_right);
+    RUN_TEST(test_vertical_thumb_pos_exposed);
+    RUN_TEST(test_vertical_int_track_jump_bottom_up);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_vertical_axis_mismatch_no_mutation);
+    RUN_TEST(test_horizontal_rtl_unsupported_no_mutation);
     RUN_TEST(test_assert_track_w_zero);
     RUN_TEST(test_assert_min_eq_max);
     RUN_TEST(test_assert_min_gt_max);
     RUN_TEST(test_assert_data_flags_transform);
     RUN_TEST(test_assert_negative_step);
+    RUN_TEST(test_assert_orientation_invalid);
 #endif
     return UNITY_END();
 }

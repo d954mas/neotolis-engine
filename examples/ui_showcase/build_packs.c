@@ -240,6 +240,30 @@ int main(int argc, char *argv[]) {
     opts.name = "gold";
     nt_builder_atlas_add_raw(ctx, icon_gold, ICON_DIM, ICON_DIM, &opts);
 
+    /* Tristate MIXED indicator: a centered horizontal dash (white, tintable) on a transparent
+     * 28x28 field. slice9 borders keep the source UNTRIMMED so the dash stays CENTERED with
+     * vertical breathing room when drawn at the checkbox overlay size (trim would strip the
+     * transparent margins and stretch the bar to fill the box). */
+    enum { DASH_DIM = 28, DASH_BAR_X0 = 4, DASH_BAR_X1 = 24, DASH_BAR_Y0 = 12, DASH_BAR_Y1 = 16 };
+    static uint8_t mixed_dash[DASH_DIM * DASH_DIM * 4];
+    for (int y = 0; y < DASH_DIM; ++y) {
+        for (int x = 0; x < DASH_DIM; ++x) {
+            uint8_t *px = &mixed_dash[(((size_t)y * DASH_DIM) + (size_t)x) * 4U];
+            bool bar = (x >= DASH_BAR_X0 && x < DASH_BAR_X1) && (y >= DASH_BAR_Y0 && y < DASH_BAR_Y1);
+            px[0] = 255;
+            px[1] = 255;
+            px[2] = 255;
+            px[3] = bar ? 255 : 0;
+        }
+    }
+    opts = nt_atlas_sprite_opts_defaults();
+    opts.name = "mixed_dash";
+    opts.slice9_left = 1;
+    opts.slice9_right = 1;
+    opts.slice9_top = 1;
+    opts.slice9_bottom = 1;
+    nt_builder_atlas_add_raw(ctx, mixed_dash, DASH_DIM, DASH_DIM, &opts);
+
     (void)printf("  Atlas: widgets + 3 panels (s9:%d) + 3 buttons (s9:%d) + icon + heart/gold inline icons\n", PANEL_BORDER, BUTTON_BORDER);
 
     /* White pixel for UI rects (panel backgrounds, tab list). */

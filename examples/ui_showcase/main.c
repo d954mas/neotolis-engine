@@ -43,6 +43,7 @@
 #include "ui/nt_ui_state.h"
 #include "ui/nt_ui_tabbar.h"
 #include "ui/nt_ui_tooltip.h"
+#include "ui/nt_ui_vlist.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -115,6 +116,8 @@ static nt_ui_checkbox_style_t s_switch_dark, s_switch_light;
 static nt_ui_slider_style_t s_slider_dark, s_slider_light;
 /* Narrower slider for the focused-properties card: track+thumb fit inside the card's inner width. */
 static nt_ui_slider_style_t s_slider_props_dark, s_slider_props_light;
+/* Vertical (volume/mixer) slider: drag axis = Y, fill anchored BOTTOM_UP. */
+static nt_ui_slider_style_t s_slider_vert_dark, s_slider_vert_light;
 static nt_ui_progress_style_t s_progress_dark, s_progress_light;
 static nt_ui_progress_style_t s_progress_crop_dark, s_progress_crop_light;
 static nt_ui_progress_style_t s_progress_vert_dark, s_progress_vert_light;
@@ -158,6 +161,7 @@ typedef struct {
     nt_ui_checkbox_style_t *check, *radio, *toggle;
     nt_ui_slider_style_t *slider;
     nt_ui_slider_style_t *slider_props; /* card-fitted slider for the focused-properties panel */
+    nt_ui_slider_style_t *slider_vert;  /* vertical volume/mixer slider (BOTTOM_UP) */
     nt_ui_progress_style_t *progress;
     nt_ui_progress_style_t *progress_crop, *progress_vert;
     nt_ui_scroll_style_t *scroll_hide, *scroll_always, *scroll_horiz, *scroll_xy;
@@ -192,6 +196,7 @@ static ui_palette_t g_dark = {
     .toggle = &s_switch_dark,
     .slider = &s_slider_dark,
     .slider_props = &s_slider_props_dark,
+    .slider_vert = &s_slider_vert_dark,
     .progress = &s_progress_dark,
     .progress_crop = &s_progress_crop_dark,
     .progress_vert = &s_progress_vert_dark,
@@ -235,6 +240,7 @@ static ui_palette_t g_light = {
     .toggle = &s_switch_light,
     .slider = &s_slider_light,
     .slider_props = &s_slider_props_light,
+    .slider_vert = &s_slider_vert_light,
     .progress = &s_progress_light,
     .progress_crop = &s_progress_crop_light,
     .progress_vert = &s_progress_vert_light,
@@ -368,9 +374,14 @@ struct tab_state {
     bool cb_locked; /* disabled-checkbox demo: own fixed value (enabled=false never toggles it). */
     int radio_sel;
     bool toggle_value;
+    /* Tristate "select all": the game aggregates the children into the parent each frame; MIXED is
+     * display-only (game-set). Clicking the parent (ON/OFF) then writes every child to match. */
+    nt_ui_tristate_t sel_all;
+    bool sel_items[4];
     /* Sliders tab. */
     float slider_float;
     int slider_int;
+    float slider_vert; /* vertical volume/mixer slider 0..1 */
     /* Props params. */
     slice9_params_t s9;
     progress_params_t prog;
@@ -399,8 +410,10 @@ static struct tab_state s_state = {
     .cb_locked = true, /* demos a locked-ON feature; disabled so it stays fixed. */
     .radio_sel = 1,
     .toggle_value = false,
+    .sel_items = {true, false, true, false}, /* 2 on -> render_toggles aggregates to MIXED on first paint */
     .slider_float = 0.65F,
     .slider_int = 4,
+    .slider_vert = 0.5F,
     .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 300, .target_h = 150, .slice9_scale = 1.0F},
     .prog = {.value = 0.4F, .auto_anim = false, .ramp_up = true},
     .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
@@ -434,7 +447,26 @@ typedef struct {
 static uint32_t s_id_cb;
 static uint32_t s_id_radio_a, s_id_radio_b, s_id_radio_c;
 static uint32_t s_id_toggle;
+static uint32_t s_id_sel_all;     /* tristate select-all parent (children use distinct string ids) */
+static uint32_t s_id_sel_item[4]; /* select-all children -- distinct fmix ids (no additive collision) */
 static uint32_t s_id_slider_f, s_id_slider_i;
+static uint32_t s_id_slider_vert;           /* vertical volume slider */
+static uint32_t s_id_vlist_y, s_id_vlist_x; /* 10k-row windowed lists (vertical + horizontal) */
+/* Per-row selection for the vertical 10k list, keyed by ABSOLUTE row index. The vlist recycles row
+ * ids by a ring, so selection state is GAME-owned by absolute index (never hung off the recycled id);
+ * re-fed into the row bg each frame. 10k bits = 1250 B. */
+#define SHOWCASE_VLIST_COUNT 10000
+static uint32_t s_vlist_sel[(SHOWCASE_VLIST_COUNT + 31) / 32];
+static inline bool vlist_sel_get(uint32_t i) { return (s_vlist_sel[i >> 5U] & (1U << (i & 31U))) != 0U; }
+static inline void vlist_sel_toggle(uint32_t i) { s_vlist_sel[i >> 5U] ^= (1U << (i & 31U)); }
+/* Portable popcount (no toolchain __builtin_*): the select-all readout sums the selection bitset. */
+static inline uint32_t vlist_popcount_u32(uint32_t v) {
+    uint32_t c = 0U;
+    for (; v != 0U; v &= v - 1U) {
+        ++c;
+    }
+    return c;
+}
 static uint32_t s_id_progress;
 static uint32_t s_id_progress_crop, s_id_progress_vert; /* CROP + vertical progress variants */
 static uint32_t s_id_scroll_hide, s_id_scroll_always;   /* vertical AUTO_HIDE / ALWAYS lists */
@@ -560,6 +592,7 @@ static void render_slice9(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
@@ -588,6 +621,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Toggles & Radios", "Checkbox + exclusive radio group + sliding toggle.", "examples/ui_showcase/main.c:render_toggles", render_toggles, NULL},
     {"Sliders & Progress", "Float + int sliders + a progress bar driven by a live value panel.", "examples/ui_showcase/main.c:render_sliders", render_sliders, props_progress},
     {"Scroll", "Four scroll variants: vertical AUTO_HIDE / ALWAYS bar / horizontal-only / both axes.", "examples/ui_showcase/main.c:render_scroll", render_scroll, NULL},
+    {"Virtual List", "10k-row windowed list, vertical + horizontal; cost ~visible count.", "examples/ui_showcase/main.c:render_vlist", render_vlist, NULL},
     {"Modals", "Confirm + nested depth-2 modal; Esc/backdrop close; live transition panel.", "examples/ui_showcase/main.c:render_modals", render_modals, props_modal},
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
@@ -608,6 +642,7 @@ static const showcase_entry_t g_tabs[] = {
 static void init_styles(void) {
     const nt_atlas_region_ref_t box = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_BOX_OFF.value);
     const nt_atlas_region_ref_t check = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_CHECKMARK.value);
+    const nt_atlas_region_ref_t mixed_dash = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_MIXED_DASH.value);
     const nt_atlas_region_ref_t ring = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_RADIO_RING.value);
     const nt_atlas_region_ref_t dot = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_RADIO_DOT.value);
     const nt_atlas_region_ref_t track_off = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_TRACK_OFF.value);
@@ -714,11 +749,17 @@ static void init_styles(void) {
     check_base.checked[NT_UI_CB_IDLE].box = box;
     check_base.checked[NT_UI_CB_IDLE].check = check;
     check_base.checked[NT_UI_CB_IDLE].check_tint = 0xFF7CE08C;
+    /* Tristate MIXED row: same box, the centered dash overlay in a distinct amber tint so the
+     * indeterminate state reads apart from the green checkmark (radio/toggle never render it). */
+    check_base.mixed[NT_UI_CB_IDLE].box = box;
+    check_base.mixed[NT_UI_CB_IDLE].check = mixed_dash;
+    check_base.mixed[NT_UI_CB_IDLE].check_tint = 0xFF40C0FF; /* amber (0xAABBGGRR) */
     /* Disabled dim: box/check refs left {0} inherit the idle art (engine ref_or); only opacity
      * differs per cell (no fallback), so set it here to match the buttons' 0.4 disabled dim.
      * On check_base => radio/toggle inherit the same disabled look. */
     check_base.unchecked[NT_UI_CB_DISABLED].opacity = 0.4F;
     check_base.checked[NT_UI_CB_DISABLED].opacity = 0.4F;
+    check_base.mixed[NT_UI_CB_DISABLED].opacity = 0.4F;
     s_check_dark = check_base;
     s_check_light = check_base;
     s_check_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
@@ -779,6 +820,20 @@ static void init_styles(void) {
     slider_props.track_w = 290;
     s_slider_props_dark = slider_props;
     s_slider_props_light = slider_props;
+
+    /* Vertical volume/mixer slider: orientation = Y, fill anchored BOTTOM_UP; narrow tall track,
+     * same round thumb. The cross-axis (left/right) hit-pad auto-grows for the thumb overhang. */
+    nt_ui_slider_style_t slider_vert = slider_base;
+    slider_vert.orientation = NT_UI_SLIDER_VERTICAL;
+    slider_vert.fill_direction = NT_UI_FILL_BOTTOM_UP;
+    slider_vert.track_w = 18;
+    slider_vert.track_h = 180;
+    slider_vert.hit_padding_lrtb[0] = 13;
+    slider_vert.hit_padding_lrtb[1] = 13;
+    slider_vert.hit_padding_lrtb[2] = 0;
+    slider_vert.hit_padding_lrtb[3] = 0;
+    s_slider_vert_dark = slider_vert;
+    s_slider_vert_light = slider_vert;
 
     /* ---- Progress: track + smooth STRETCH slice9 fill. ---- */
     nt_ui_progress_style_t progress_base = nt_ui_progress_style_defaults();
@@ -1246,6 +1301,36 @@ static void render_toggles(nt_ui_context_t *ctx, tab_state_t *st) {
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Toggle", g_current->caption);
     (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_toggle, "Dark mode", &st->toggle_value, g_current->toggle, &row, true);
+
+    /* Tristate "select all": the GAME aggregates the children into the parent each frame -- all on =>
+     * ON, all off => OFF, otherwise the indeterminate MIXED dash (MIXED is game-set only).
+     * Clicking the parent resolves ON/OFF (nt_ui_checkbox_tri never produces MIXED); the game then
+     * writes every child to match. */
+    static const char *const sel_labels[4] = {"Notifications", "Auto-update", "Telemetry", "Beta features"};
+    int n_on = 0;
+    for (int i = 0; i < 4; ++i) {
+        n_on += st->sel_items[i] ? 1 : 0;
+    }
+    if (n_on == 0) {
+        st->sel_all = NT_UI_TRI_OFF;
+    } else if (n_on == 4) {
+        st->sel_all = NT_UI_TRI_ON;
+    } else {
+        st->sel_all = NT_UI_TRI_MIXED;
+    }
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Tristate \"select all\" (parent reflects children)", g_current->caption);
+    if (nt_ui_checkbox_tri(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_sel_all, "Select all", &st->sel_all, g_current->check, &row, true)) {
+        const bool all = (st->sel_all == NT_UI_TRI_ON);
+        for (int i = 0; i < 4; ++i) {
+            st->sel_items[i] = all;
+        }
+    }
+    /* Children indented under the parent (a left-padded row decl). */
+    static const Clay_ElementDeclaration child_row = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .padding = {.left = 36}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    for (int i = 0; i < 4; ++i) {
+        (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_sel_item[i], sel_labels[i], &st->sel_items[i], g_current->check, &child_row, true);
+    }
 }
 
 static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1260,6 +1345,12 @@ static void render_sliders(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "Count   %d", st->slider_int);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     (void)nt_ui_slider_int(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_slider_i, NULL, &st->slider_int, 0, 10, 1, g_current->slider, &sdecl, true);
+
+    /* Vertical volume/mixer slider: drag the thumb up to raise the value; the fill anchors BOTTOM_UP. */
+    static const Clay_ElementDeclaration vdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(18), CLAY_SIZING_FIXED(180)}}};
+    (void)snprintf(buf, sizeof buf, "Mixer (vertical)  %.2f", (double)st->slider_vert);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+    (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_slider_vert, NULL, &st->slider_vert, 0.0F, 1.0F, 0.0F, g_current->slider_vert, &vdecl, true);
 
     /* Progress: STRETCH (slice9) + CROP (clip, shaped fill) side by side, plus a vertical mana bar.
      * All three read the same panel-driven value, so they animate together. */
@@ -1368,6 +1459,87 @@ static void render_scroll(nt_ui_context_t *ctx, tab_state_t *st) {
                 nt_ui_scroll_end(ctx);
             }
         }
+    }
+}
+
+/* Virtualized list: two nt_ui_vlist clippers over a 10k-row dataset (a vertical column + a
+ * horizontal strip). Each owns ONE scroll / ONE Clay clip; cost ~ the visible window, not 10k.
+ * The game loops first..last and keys each row with nt_ui_vlist_item_id; ids RECYCLE by a ring, so
+ * the vertical rows are clickable selectables whose selection is stored GAME-side by ABSOLUTE index
+ * (s_vlist_sel) — selection persists across scroll even though the row ids recycle. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
+    (void)st;
+    char buf[96];
+    enum { VLIST_COUNT = SHOWCASE_VLIST_COUNT };
+    const float row_h = 34.0F; /* vertical-list item extent (Y) */
+    const float col_w = 96.0F; /* horizontal-strip item extent (X) */
+
+    nt_ui_vlist_style_t vstyle = nt_ui_vlist_style_defaults();
+    vstyle.scroll = *g_current->scroll_always; /* reuse the themed scrollbar art (always-on bar) */
+    vstyle.overscan = 3;                       /* a few rows each side hide recycle pop on a fling */
+
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 12}}) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "10,000 rows, windowed to the viewport -- cost ~ visible count, not 10k.", g_current->body);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Click a row to select; selection keys on the absolute index, so it survives scroll while ids recycle.", g_current->caption);
+
+        /* Total selected across the WHOLE dataset (game-owned, absolute) — proves persistence beyond
+         * the visible window. Popcount over the bitset is ~313 words, trivial. */
+        uint32_t sel_total = 0U;
+        for (size_t w = 0; w < (sizeof s_vlist_sel / sizeof s_vlist_sel[0]); ++w) {
+            sel_total += vlist_popcount_u32(s_vlist_sel[w]);
+        }
+
+        /* Vertical 10k-row column of selectable rows. */
+        const nt_ui_vlist_range_t ry = nt_ui_vlist_begin(ctx, NULL, s_id_vlist_y, (uint32_t)VLIST_COUNT, row_h, NT_UI_AXIS_Y, &vstyle,
+                                                         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(420), CLAY_SIZING_FIXED(240)}, .padding = CLAY_PADDING_ALL(6)},
+                                                                                    .backgroundColor = g_current->bg,
+                                                                                    .cornerRadius = CLAY_CORNER_RADIUS(8)});
+        for (uint32_t i = ry.first; i <= ry.last; ++i) {
+            const uint32_t row_id = nt_ui_vlist_item_id(ctx, i);
+            const uint32_t hit_id = nt_ui_child_id(row_id, "row_hit"); /* recycles WITH the row; no magic salt */
+            const nt_ui_events_t ev = nt_ui_events(ctx, hit_id, NULL);
+            if (ev.clicked) {
+                vlist_sel_toggle(i); /* dispatch by ABSOLUTE index, NEVER by the recycled id */
+            }
+            const bool selected = vlist_sel_get(i);
+            /* Selected (game-owned, absolute) wins; otherwise transient hover tint follows the screen slot. */
+            Clay_Color row_bg = ((i & 1U) != 0U) ? g_current->list_bg : g_current->panel; /* zebra stripe */
+            if (selected) {
+                row_bg = g_current->list_sel;
+            } else if (ev.hovered) {
+                row_bg = g_current->panel_alt;
+            }
+            (void)snprintf(buf, sizeof buf, "%s Vertical row %u", selected ? "[x]" : "[  ]", i);
+            CLAY({.id = (Clay_ElementId){.id = row_id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}}, .backgroundColor = row_bg, .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
+                CLAY({.id = (Clay_ElementId){.id = hit_id},
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 12}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
+                    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, selected ? g_current->row_sel : g_current->body);
+                }
+            }
+        }
+        nt_ui_vlist_end(ctx);
+        (void)snprintf(buf, sizeof buf, "Vertical: rows %u..%u visible (%u of %d rendered) -- %u selected total", ry.first, ry.last, (ry.last >= ry.first) ? (ry.last - ry.first + 1U) : 0U,
+                       VLIST_COUNT, sel_total);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+
+        /* Horizontal 10k-cell strip. */
+        const nt_ui_vlist_range_t rx = nt_ui_vlist_begin(ctx, NULL, s_id_vlist_x, (uint32_t)VLIST_COUNT, col_w, NT_UI_AXIS_X, &vstyle,
+                                                         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(640), CLAY_SIZING_FIXED(80)}, .padding = CLAY_PADDING_ALL(6)},
+                                                                                    .backgroundColor = g_current->bg,
+                                                                                    .cornerRadius = CLAY_CORNER_RADIUS(8)});
+        for (uint32_t i = rx.first; i <= rx.last; ++i) {
+            (void)snprintf(buf, sizeof buf, "#%u", i);
+            CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(ctx, i)},
+                  .layout = {.sizing = {CLAY_SIZING_FIXED(col_w), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = ((i & 1U) != 0U) ? g_current->list_bg : g_current->panel,
+                  .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
+            }
+        }
+        nt_ui_vlist_end(ctx);
+        (void)snprintf(buf, sizeof buf, "Horizontal: cells %u..%u visible (%u of %d rendered)", rx.first, rx.last, (rx.last >= rx.first) ? (rx.last - rx.first + 1U) : 0U, VLIST_COUNT);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     }
 }
 
@@ -3016,8 +3188,16 @@ static void ensure_ids(void) {
     s_id_radio_b = nt_ui_id("showcase/radio_b");
     s_id_radio_c = nt_ui_id("showcase/radio_c");
     s_id_toggle = nt_ui_id("showcase/toggle");
+    s_id_sel_all = nt_ui_id("showcase/sel_all");
+    s_id_sel_item[0] = nt_ui_id("showcase/sel_item_0");
+    s_id_sel_item[1] = nt_ui_id("showcase/sel_item_1");
+    s_id_sel_item[2] = nt_ui_id("showcase/sel_item_2");
+    s_id_sel_item[3] = nt_ui_id("showcase/sel_item_3");
     s_id_slider_f = nt_ui_id("showcase/slider_f");
     s_id_slider_i = nt_ui_id("showcase/slider_i");
+    s_id_slider_vert = nt_ui_id("showcase/slider_vert");
+    s_id_vlist_y = nt_ui_id("showcase/vlist_y");
+    s_id_vlist_x = nt_ui_id("showcase/vlist_x");
     s_id_progress = nt_ui_id("showcase/progress");
     s_id_progress_crop = nt_ui_id("showcase/progress_crop");
     s_id_progress_vert = nt_ui_id("showcase/progress_vert");
@@ -3174,8 +3354,9 @@ static void declare_content(nt_ui_context_t *ctx) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), e->code_url, g_current->link);
 
         /* Vertical scroll bounds the content to the card height; the inner column FITs (grows taller
-         * than the viewport on tall tabs -> scrolls). */
-        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_always, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+         * than the viewport on tall tabs -> scrolls). AUTO_HIDE (not ALWAYS): tabs whose content fits
+         * (e.g. Sliders) must not show a dead, full-thumb phantom bar — match the props-panel sibling. */
+        nt_ui_scroll_begin(ctx, NULL, s_id_stage_scroll, g_current->scroll_hide, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 10}}) { e->render(ctx, &s_state); }
         nt_ui_scroll_end(ctx);
     }

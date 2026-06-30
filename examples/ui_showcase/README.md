@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (17 entries)
+## Tabs (18 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -29,24 +29,33 @@ lighten and writes the index on click).
    scaled, and offset.
 4. **Images & Slice9** - slice9 panels at several sizes (corners stay crisp) +
    a live insets/size properties panel.
-5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle.
-6. **Sliders & Progress** - float + int sliders + a progress bar with a live
+5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle +
+   a **tristate "select all"** (`nt_ui_checkbox_tri`) whose parent reflects the
+   children (all on / all off / indeterminate MIXED dash); see the **New-widget
+   controls** + **Visual-QA protocol** below.
+6. **Sliders & Progress** - float + int sliders + a **vertical** volume/mixer
+   slider (`NT_UI_SLIDER_VERTICAL`, BOTTOM_UP fill) + a progress bar with a live
    value / auto-animate properties panel.
 7. **Scroll** - four independent (non-nested) scroll containers in a 2x2 grid:
    vertical AUTO_HIDE bar / vertical ALWAYS bar / horizontal-only / both axes (XY).
-8. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
-9. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
-   (`nt_ui_input_text`); see the **Input controls** table below.
-10. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
+8. **Virtual List** - two `nt_ui_vlist` clippers over a **10,000-row** dataset
+   (a vertical column + a horizontal strip); each owns ONE scroll / ONE Clay clip
+   and renders only the visible window, so cost ~ the visible count, not 10k. A
+   header readout shows the live window vs the total; see the **Visual-QA
+   protocol** below.
+9. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
+10. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
+    (`nt_ui_input_text`); see the **Input controls** table below.
+11. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
     `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
-11. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
+12. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
     looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
     `hold_progress`, ring + oval shape variants, the **four reveal modes**
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
-12. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
+13. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
     the code-first push/pop builder AND the runtime `<markup>` parser. Demos
     **real** bold / italic / bold-italic faces (DejaVu R/B/I/BI baked into the
@@ -56,21 +65,21 @@ lighten and writes the index on click).
     off the game clock), and an **interactive link** that brightens + grows on
     hover and flips to a green "Accepted" latch on click; see the **Rich Text
     controls** + **Rich Text visual-QA protocol** below.
-13. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+14. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
     (`nt_ui_combo_preview_begin`/`end`).
-14. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+15. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-15. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+16. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
     `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
     rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
     nested **submenu**, and a custom `activatable=false` row whose inner button owns
     the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-16. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+17. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
-17. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+18. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -82,6 +91,48 @@ lighten and writes the index on click).
 | **Esc** (native) | unfocus the focused field; else quit |
 | **Esc** (modal up) | close the TOP modal only |
 | backdrop click (modal up) | close-on-backdrop (the backdrop blocks click-through) |
+
+## New-widget controls (Toggles / Sliders / Virtual List tabs)
+
+The tristate checkbox, vertical slider, and virtual list are **Model D**: the game owns
+the value(s); the engine stores only the eased visual + scroll physics. All three are wired
+into the **existing** vitrine tabs (no new example dir).
+
+| Input | Action |
+|-------|--------|
+| **Toggles** — toggle some (not all) child checkboxes | the "Select all" parent shows the indeterminate **MIXED** dash (the game aggregates the children each frame; MIXED is display-only) |
+| **Toggles** — toggle ALL / NONE of the children | the parent resolves to the **checkmark** (all on) / **empty** box (all off) |
+| **Toggles** — click the "Select all" parent | `nt_ui_checkbox_tri` resolves any non-ON to ON then toggles ON↔OFF (a click **never** produces MIXED); the game then writes every child to match |
+| **Sliders** — drag the vertical "Mixer" thumb up/down | the value rises dragging **up**; the fill anchors at the **bottom** (`NT_UI_SLIDER_VERTICAL` + `NT_UI_FILL_BOTTOM_UP`); the thumb overhang is clickable (cross-axis hit-pad) |
+| **Virtual List** — wheel / drag-fling the vertical column | the 10k-row list scrolls; only the visible window (+ overscan) is rendered; the header readout shows `rows X..Y visible (N of 10000 rendered)` |
+| **Virtual List** — wheel / drag-fling the horizontal strip | the same windowing on the X axis (`NT_UI_AXIS_X`); the scrollbar thumb size tracks the giant list |
+
+## Visual-QA protocol (Toggles / Sliders / Virtual List)
+
+The GL surface is **not reliably headless-capturable** here, so these widgets are verified
+by the **user's eyes** — there is no automated screenshot regression. If any showcase atlas
+asset changed, **force-delete the stale `.ntpack`** before this run (the pack depends only on the
+builder exe, not the asset source) so QA sees fresh art. Build + run the native showcase (see
+**Build & run** below), then confirm:
+
+1. **MIXED dash** (Toggles tab) — with some children on and some off, the parent renders a
+   **centered**, full-opacity dash that is clearly **DISTINCT** from the checkmark (different
+   shape AND tint); all-on shows the check, all-off shows the empty box; clicking the parent
+   visibly sets every child.
+2. **Vertical slider** (Sliders tab) — the thumb travels the **full** track top↔bottom, the fill
+   is **bottom-anchored** (BOTTOM_UP), dragging **up raises** the value, and the thumb overhang
+   is clickable (the cross-axis hit-pad catches the round thumb past the narrow track).
+3. **10k-row scroll feel** (Virtual List tab) — fling **both** the vertical column and the
+   horizontal strip: windowing is **smooth** with NO pop-in / blank rows / overlapping rows on a
+   fast fling, momentum / rubber-band is intact, and the scrollbar thumb **size + position track
+   a giant list correctly** in both orientations; the header readout shows cost ~ the visible
+   count, **not** 10k.
+4. **Dark/Light parity** — press **T**; both palettes restyle all three new demos correctly.
+5. *(Optional)* load the wasm-debug build in a browser and confirm WebGL2 parity.
+
+> **Segmented control:** `nt_ui_tabbar` (horizontal dir + `NT_UI_TABBAR_ACCENT_NONE` + filled
+> `selected` state + one-call `nt_ui_tabbar(labels, icons, count, int *active)`) doubles as the
+> segmented control — the **Tabs** tab is the reference.
 
 ## Input controls (Input tab)
 
@@ -141,7 +192,7 @@ vertex-pie facets) and bakes the angles into a per-vertex custom attribute so ma
 | **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
 | **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
 | **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
-| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched, D-66-07) |
+| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched) |
 
 ## Radial visual-QA protocol
 

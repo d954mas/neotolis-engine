@@ -70,6 +70,8 @@ set(NT_UI_SOURCES
     nt_ui_state.h
     nt_ui_scroll.c
     nt_ui_scroll.h
+    nt_ui_vlist.c
+    nt_ui_vlist.h
     nt_ui_popup.c
     nt_ui_popup.h
     nt_ui_popup_internal.h

@@ -46,6 +46,7 @@
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD ((nt_hash64_t){0x11BC737C9AB940E9ULL}) /* ui_showcase_atlas/gold */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_HEART ((nt_hash64_t){0x55874DF1F139ABBAULL}) /* ui_showcase_atlas/heart */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_ICON_BUNNY ((nt_hash64_t){0x8BCA833565A72C8EULL}) /* ui_showcase_atlas/icon_bunny */
+#define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_MIXED_DASH ((nt_hash64_t){0xE6C3D9A8183D168BULL}) /* ui_showcase_atlas/mixed_dash */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BEIGE ((nt_hash64_t){0x0AE1CE33078EC907ULL}) /* ui_showcase_atlas/panel_beige */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BLUE ((nt_hash64_t){0xD19BE6D11F48A883ULL}) /* ui_showcase_atlas/panel_blue */
 #define ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_PANEL_BROWN ((nt_hash64_t){0xAF4C0086E593897FULL}) /* ui_showcase_atlas/panel_brown */
@@ -88,6 +89,7 @@ static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("ui_showcase_atlas/gold");
     (void)nt_hash64_str("ui_showcase_atlas/heart");
     (void)nt_hash64_str("ui_showcase_atlas/icon_bunny");
+    (void)nt_hash64_str("ui_showcase_atlas/mixed_dash");
     (void)nt_hash64_str("ui_showcase_atlas/panel_beige");
     (void)nt_hash64_str("ui_showcase_atlas/panel_blue");
     (void)nt_hash64_str("ui_showcase_atlas/panel_brown");

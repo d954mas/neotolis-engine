@@ -34,19 +34,26 @@ typedef struct {
 } nt_ui_slider_cell_t;
 _Static_assert(sizeof(nt_ui_slider_cell_t) == 64, "nt_ui_slider_cell_t stable ABI (3x16 ref + 3 tint + 1 float)");
 
+/* Drag AXIS. orientation is the source of truth; fill_direction is the anchor WITHIN
+ * the axis (VERTICAL -> BOTTOM_UP/TOP_DOWN, HORIZONTAL -> LTR only — RTL is rejected, as
+ * its fill would right-anchor while drag/thumb/thumb_pos stay LTR). */
+typedef enum { NT_UI_SLIDER_HORIZONTAL = 0, NT_UI_SLIDER_VERTICAL } nt_ui_slider_orientation_t;
+
 typedef struct {
-    nt_ui_slider_cell_t states[4];         /* idle/hover/pressed/disabled, inherit-from-idle */
-    float track_w, track_h;                /* track FIXED layout px; asserted > 0 */
-    float thumb_w, thumb_h;                /* thumb FIXED layout px; asserted finite >= 0 */
-    nt_ui_fill_mode_t fill_mode;           /* STRETCH (slice9) | CROP */
-    nt_ui_fill_direction_t fill_direction; /* LTR default */
-    float state_speed;                     /* hover/press/disabled ease (nt_ui_anim state group) */
-    float value_speed;                     /* GAME-driven preset ease (0 = instant); 1:1 during drag */
-    /* Touch-target inflation (button parity). Vertical pad auto-grows to at least
-     * (thumb_h - track_h)/2 so the thumb overhang is always clickable even at zero pad. */
+    nt_ui_slider_cell_t states[4];          /* idle/hover/pressed/disabled, inherit-from-idle */
+    float track_w, track_h;                 /* track FIXED layout px; asserted > 0 */
+    float thumb_w, thumb_h;                 /* thumb FIXED layout px; asserted finite >= 0 */
+    nt_ui_fill_mode_t fill_mode;            /* STRETCH (slice9) | CROP */
+    nt_ui_fill_direction_t fill_direction;  /* anchor within axis; LTR default (vertical: BOTTOM_UP) */
+    nt_ui_slider_orientation_t orientation; /* the AXIS; HORIZONTAL default */
+    float state_speed;                      /* hover/press/disabled ease (nt_ui_anim state group) */
+    float value_speed;                      /* GAME-driven preset ease (0 = instant); 1:1 during drag */
+    /* Touch-target inflation (button parity). The thumb-overhang pad auto-grows along the
+     * CROSS axis: horizontal grows top/bottom by (thumb_h-track_h)/2, vertical grows left/right
+     * by (thumb_w-track_w)/2 — so the overhang is always clickable even at zero pad. */
     int16_t hit_padding_lrtb[4];
 } nt_ui_slider_style_t;
-_Static_assert(sizeof(nt_ui_slider_style_t) == 296, "nt_ui_slider_style_t stable ABI (288 + 4x int16 hit pad)");
+_Static_assert(sizeof(nt_ui_slider_style_t) == 304, "nt_ui_slider_style_t stable ABI (296 + 4B orientation, 8-byte aligned)");
 
 /* Thumb screen position for game-drawn drag-bubbles. found=false if the
  * slider was not declared the immediately preceding frame. */
@@ -56,8 +63,8 @@ typedef struct {
 } nt_ui_slider_thumb_t;
 
 /* Returns true the frame the (quantized) value changed. value lives in the game.
- * step != 0 quantizes (0 = continuous for float; int step likewise). min != max
- * required. Engine owns .id/.clip/.userData on the decl; data must NOT set
+ * step quantizes onto the min+k*step grid (float: 0 = continuous; int always quantizes,
+ * step <= 0 falls back to 1). min != max required. Engine owns .id/.clip/.userData on the decl; data must NOT set
  * HAS_TRANSFORM/HAS_OPACITY. enabled=false short-circuits interaction + dims.
  *
  * Out-of-range *value: clamped to [min,max] AND written back (returns true that
@@ -77,7 +84,7 @@ bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
  * value fraction. {0,0,false} if the slider was not declared last frame. */
 nt_ui_slider_thumb_t nt_ui_slider_thumb_pos(const nt_ui_context_t *ctx, uint32_t id);
 
-/* Valid baseline: every cell opacity = 1, no tint, sensible sizes/speeds, STRETCH/LTR.
+/* Valid baseline: every cell opacity = 1, no tint, sensible sizes/speeds, STRETCH/LTR/HORIZONTAL.
  * Caller supplies art (track/fill/thumb refs). Avoids the zero-init trap. */
 nt_ui_slider_style_t nt_ui_slider_style_defaults(void);
 

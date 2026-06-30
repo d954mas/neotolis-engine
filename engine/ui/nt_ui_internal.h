@@ -278,6 +278,21 @@ struct nt_ui_context {
         bool active; /* a tab element is open (between tab_begin/tab_end) */
     } pending_tab;
 
+    /* Active-vlist scratch: vlist_begin parks the base id + window so vlist_item_id can derive
+     * per-row ids and vlist_end can size the trailing spacer without re-passing them. Vlists do
+     * not nest (asserted). */
+    struct {
+        uint32_t base_id; /* vlist id = scroll id; scope for the per-item fmix */
+        uint32_t count;   /* total row count (for the trailing spacer) */
+        uint32_t last;    /* last visible index (trailing spacer = (count-1-last)*extent) */
+        uint32_t ring;    /* id recycle modulus (style.id_ring); per-row slot = index % ring */
+        float extent;     /* per-row stride (item_extent + rounded gap) */
+        float gap;        /* rounded inter-row gap (px); trailing spacer subtracts the boundary gap */
+        uint8_t axis;     /* nt_ui_axis_t */
+        bool empty;       /* count==0 or degenerate -> no spacers */
+        bool active;      /* between vlist_begin/vlist_end */
+    } pending_vlist;
+
     /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
      * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
      * void*-decoupled and cheap, so they stay below. */
@@ -511,6 +526,11 @@ void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx);
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
 int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);
+/* Times build_tree took the stale-floating-parent path (Clay element-hashmap saturation), so the
+ * recycling test can prove the default id_ring never saturates (count 0) and the OFF backstop proves
+ * the disabled-ring sweep does (count > 0). Process-global; reset before measuring. */
+uint32_t nt_ui_internal_test_stale_floating_parent_count(void);
+void nt_ui_internal_test_reset_stale_floating_parent_count(void);
 #endif
 
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */

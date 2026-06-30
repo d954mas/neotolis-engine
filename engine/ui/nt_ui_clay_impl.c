@@ -505,6 +505,19 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     }
 }
 
+/* build_tree stale-floating-parent: Clay element hashmap saturation leaves a floating root's parent
+ * index stale — a developer error, so build_tree ASSERTS (raise the list's id_ring). The counter is a
+ * TEST-ONLY instrument: the recycling test asserts it stays 0 over a 10k-row sweep, the OFF backstop
+ * asserts > 0. seed -> identity is the OFF floor (NT_ASSERT gone there). No-op in production builds. */
+#ifdef NT_TEST_ACCESS
+static uint32_t s_bt_stale_floating_parent = 0U;
+static void nt_bt_count_stale_floating_parent(void) { s_bt_stale_floating_parent++; }
+uint32_t nt_ui_internal_test_stale_floating_parent_count(void) { return s_bt_stale_floating_parent; }
+void nt_ui_internal_test_reset_stale_floating_parent_count(void) { s_bt_stale_floating_parent = 0U; }
+#else
+static inline void nt_bt_count_stale_floating_parent(void) {}
+#endif
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && ctx->clay != NULL && "build_tree: ctx + clay required");
@@ -556,18 +569,24 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         } else {
             Clay_LayoutElementHashMapItem *p_item = Clay__GetHashMapItem(root->parentId);
             if (p_item == &Clay_LayoutElementHashMapItem_DEFAULT) {
-                NT_ASSERT(false && "build_tree: floating root's parentId not in hashmap (Clay error path)");
+                /* Same saturation symptom as the stale-index branch below: a parent added past Clay's
+                 * maxElementCount is never inserted, so its id misses the hashmap. Count + assert alike so
+                 * the recycling test's "degrade count 0" stays airtight whichever symptom a list hits. */
                 seed = identity;
+                nt_bt_count_stale_floating_parent();
+                NT_ASSERT(false && "build_tree: floating root's parentId missing — Clay element hashmap saturated; raise the list's id_ring");
             } else {
                 const int32_t p_elem_idx = (int32_t)(p_item->layoutElement - cc->layoutElements.internalArray);
-                if (p_elem_idx < 0 || p_elem_idx >= N) {
-                    NT_ASSERT(false && "build_tree: parent elem_idx out of bounds");
-                    seed = identity;
-                } else {
-                    /* Floating parent must precede child in declaration order or seed would be identity. */
-                    NT_ASSERT(p_elem_idx < elem_idx && "build_tree: floating parent must precede child in declaration order (Clay invariant broken)");
+                /* A baked floating parent must precede this root: 0 <= p < elem_idx. Anything else = a STALE
+                 * layoutElement (Clay element hashmap saturated by a list's distinct ids) -> developer error, ASSERT.
+                 * seed=identity is only the OFF floor (NT_ASSERT gone there); the < elem_idx guard prevents OOB. */
+                if (p_elem_idx >= 0 && p_elem_idx < elem_idx) {
                     seed = ctx->tree_baked[p_elem_idx];
                     seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
+                } else {
+                    seed = identity;
+                    nt_bt_count_stale_floating_parent();
+                    NT_ASSERT(false && "build_tree: floating parent index stale — Clay element hashmap saturated; raise the list's id_ring");
                 }
             }
         }

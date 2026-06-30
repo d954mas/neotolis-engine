@@ -31,20 +31,27 @@ typedef struct {
 } nt_ui_slider_drag_t;
 
 /* Persistent thumb-view cell (separate salt; written EVERY frame, never cleared). Lets the
- * const-ctx nt_ui_slider_thumb_pos recover the eased fraction + thumb geometry without an
+ * const-ctx nt_ui_slider_thumb_pos recover the eased fraction + axis-aware thumb geometry without an
  * anim-pool accessor — the pool's no-eviction keeps last frame's value live. */
 #define NT_UI_SLIDER_VIEW_SALT 0x510D7E00U
 typedef struct {
     float fraction; /* last eased value fraction [0,1] */
-    float track_w;
-    float thumb_w;
-    uint8_t _pad[4];
+    float track_w, track_h;
+    float thumb_w, thumb_h;
+    uint8_t orientation; /* nt_ui_slider_orientation_t: thumb_pos branches on the AXIS */
+    uint8_t invert;      /* vertical BOTTOM_UP: thumb pos measured from the far (bottom) edge */
+    uint8_t _pad[2];
 } nt_ui_slider_view_t;
 
-/* Linear position->value map, clamped to [min,max]. usable_w = track_w - thumb_w. */
-static float slider_pos_to_value(float pointer_x, float track_left, float usable_w, float thumb_w, float min, float max) {
-    const float thumb_left = pointer_x - track_left - (thumb_w * 0.5F);
-    const float frac = (usable_w > 0.0F) ? nt_ui_clampf(thumb_left / usable_w, 0.0F, 1.0F) : 0.0F;
+/* Linear position->value map, clamped to [min,max]. usable = track_extent - thumb_extent.
+ * Axis-neutral: callers pass either X (horizontal) or Y (vertical) coordinates. invert
+ * flips the fraction for BOTTOM_UP (screen-Y grows down, value grows up). */
+static float slider_pos_to_value(float pointer_pos, float track_origin, float usable, float thumb_extent, float min, float max, bool invert) {
+    const float thumb_lead = pointer_pos - track_origin - (thumb_extent * 0.5F);
+    float frac = (usable > 0.0F) ? nt_ui_clampf(thumb_lead / usable, 0.0F, 1.0F) : 0.0F;
+    if (invert) {
+        frac = 1.0F - frac;
+    }
     return min + ((max - min) * frac);
 }
 
@@ -89,26 +96,35 @@ static inline uint32_t slider_view_id(uint32_t id) { return nt_ui_derived_id(id,
 /* Press-scoped drag resolve. Reads the prev-frame track bbox + grab cell, returns the new value
  * fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps; held: thumb
  * follows pointer minus the grab offset. */
-static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, float frac, float min, float max) {
-    const float usable_w = (style->track_w - style->thumb_w > 0.0F) ? (style->track_w - style->thumb_w) : 0.0F;
+static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, nt_ui_fill_direction_t fill_dir, float frac, float min,
+                                 float max) {
+    /* Axis-branch: vertical reads the Y component + track height/thumb height; BOTTOM_UP inverts. */
+    const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
+    const int axis = vertical ? 1 : 0;
+    const float track_extent = vertical ? style->track_h : style->track_w;
+    const float thumb_extent = vertical ? style->thumb_h : style->thumb_w;
+    const bool invert = vertical && (fill_dir == NT_UI_FILL_BOTTOM_UP);
+    const float usable = (track_extent - thumb_extent > 0.0F) ? (track_extent - thumb_extent) : 0.0F;
     nt_ui_slider_drag_t *drag = (nt_ui_slider_drag_t *)nt_ui_state(ctx, slider_drag_id(id), (uint32_t)sizeof(nt_ui_slider_drag_t), NT_UI_STATE_TAG('s', 'l', 'd', 'g'));
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id); /* prev-frame track bbox */
-    const float track_left = bb.found ? bb.x : in->press_pos[0];
+    const float bb_origin = vertical ? bb.y : bb.x;
+    const float track_origin = bb.found ? bb_origin : in->press_pos[axis];
 
     if (in->pressed_now) {
-        const float thumb_left = track_left + (frac * usable_w);
-        const bool on_thumb = bb.found && in->press_pos[0] >= thumb_left && in->press_pos[0] <= (thumb_left + style->thumb_w);
+        const float pos_frac = invert ? (1.0F - frac) : frac; /* thumb screen position fraction from the origin edge */
+        const float thumb_lead = track_origin + (pos_frac * usable);
+        const bool on_thumb = bb.found && in->press_pos[axis] >= thumb_lead && in->press_pos[axis] <= (thumb_lead + thumb_extent);
         drag->active = 1U;
         if (on_thumb) {
-            drag->grab_offset = in->press_pos[0] - thumb_left; /* relative grab, value unchanged this frame */
+            drag->grab_offset = in->press_pos[axis] - thumb_lead; /* relative grab, value unchanged this frame */
             return frac;
         }
-        drag->grab_offset = style->thumb_w * 0.5F; /* track jump: thumb centers under the click */
-        const float v = slider_pos_to_value(in->press_pos[0], track_left, usable_w, style->thumb_w, min, max);
+        drag->grab_offset = thumb_extent * 0.5F; /* track jump: thumb centers under the click */
+        const float v = slider_pos_to_value(in->press_pos[axis], track_origin, usable, thumb_extent, min, max, invert);
         return slider_value_to_frac(v, min, max);
     }
     if (drag->active != 0U) { /* held: thumb follows pointer keeping the grab offset */
-        const float v = slider_pos_to_value(in->pos[0] - drag->grab_offset + (style->thumb_w * 0.5F), track_left, usable_w, style->thumb_w, min, max);
+        const float v = slider_pos_to_value(in->pos[axis] - drag->grab_offset + (thumb_extent * 0.5F), track_origin, usable, thumb_extent, min, max, invert);
         return slider_value_to_frac(v, min, max);
     }
     return frac;
@@ -118,7 +134,8 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
  * the OUTER track container (one clickable target). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, const nt_ui_slider_cell_t *cell,
-                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, float fraction, float eased_opacity, const Clay_ElementDeclaration *decl, bool enabled) {
+                           const nt_ui_slider_cell_t *idle, const nt_ui_slider_style_t *style, nt_ui_fill_direction_t fill_dir, float fraction, float eased_opacity,
+                           const Clay_ElementDeclaration *decl, bool enabled) {
     const uint8_t layer = (data != NULL) ? data->layer : 0U;
     void *user = (data != NULL) ? data->user_data : NULL;
 
@@ -152,34 +169,47 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
     nt_ui_clay_priv_configure_open_element(track_decl);
     nt_ui_widget_register(ctx, id, &NT_UI_SLIDER_DEF, NULL, enabled);
 
-    /* Fill child (shared helper). The fill edge meets the THUMB CENTER, not fraction*track_w —
-     * the thumb travels [thumb_w/2 .. track_w - thumb_w/2], a raw fraction under/overshoots it. */
+    const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
+
+    /* Fill child (shared helper). The fill edge meets the THUMB CENTER, not fraction*track —
+     * the thumb travels [thumb/2 .. track - thumb/2], a raw fraction under/overshoots it.
+     * fill_direction picks the axis (vertical anchors BOTTOM_UP/TOP_DOWN inside nt_ui_fill_emit). */
     if (fill_ref.atlas.id != 0U && fill_ref.region != NT_ATLAS_INVALID_REGION) {
         float fill_frac = fraction;
-        if (style->thumb_w > 0.0F && style->track_w > style->thumb_w) {
-            fill_frac = ((style->thumb_w * 0.5F) + (fraction * (style->track_w - style->thumb_w))) / style->track_w;
+        const float track_extent = vertical ? style->track_h : style->track_w;
+        const float thumb_extent = vertical ? style->thumb_h : style->thumb_w;
+        if (thumb_extent > 0.0F && track_extent > thumb_extent) {
+            fill_frac = ((thumb_extent * 0.5F) + (fraction * (track_extent - thumb_extent))) / track_extent;
         }
-        nt_ui_fill_emit(ctx, layer, &fill_ref, cell->fill_tint, fill_frac, style->track_w, style->track_h, style->fill_mode, style->fill_direction, 1.0F);
+        nt_ui_fill_emit(ctx, layer, &fill_ref, cell->fill_tint, fill_frac, style->track_w, style->track_h, style->fill_mode, fill_dir, 1.0F);
     }
 
-    /* Thumb child: offset by fraction*(track_w - thumb_w), vertically centered. No-art skip. */
+    /* Thumb child: offset along the axis by fraction*(track - thumb), centered on the cross axis.
+     * Vertical BOTTOM_UP places value 0 at the bottom (offset measured down from the top). No-art skip. */
     if (thumb_ref.atlas.id != 0U && thumb_ref.region != NT_ATLAS_INVALID_REGION) {
-        const float usable_w = style->track_w - style->thumb_w;
-        const float thumb_x = fraction * ((usable_w > 0.0F) ? usable_w : 0.0F);
         nt_ui_transform_t tt = nt_ui_transform_defaults();
-        tt.offset_x = thumb_x;
+        Clay_FloatingAttachPointType attach = CLAY_ATTACH_POINT_LEFT_CENTER;
+        if (vertical) {
+            const float usable_h = style->track_h - style->thumb_h;
+            const float travel = (usable_h > 0.0F) ? usable_h : 0.0F;
+            const bool invert = (fill_dir == NT_UI_FILL_BOTTOM_UP);
+            const float pos_frac = invert ? (1.0F - fraction) : fraction;
+            tt.offset_y = pos_frac * travel;
+            attach = CLAY_ATTACH_POINT_CENTER_TOP;
+        } else {
+            const float usable_w = style->track_w - style->thumb_w;
+            tt.offset_x = fraction * ((usable_w > 0.0F) ? usable_w : 0.0F);
+        }
         nt_ui_element_data_t *thumb_data = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
         NT_ASSERT(thumb_data != NULL && "nt_ui_slider: scratch alloc failed (thumb data)");
         *thumb_data = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
         nt_ui_image_style_t thumb_style = nt_ui_image_style_defaults();
         thumb_style.color_packed = cell->thumb_tint;
-        /* Floating so the thumb x-offset overlays the track without consuming layout. clipTo the
+        /* Floating so the thumb offset overlays the track without consuming layout. clipTo the
          * attached parent so a slider inside a scroll container can't leak its thumb past the clip. */
         const Clay_ElementDeclaration thumb_decl = {
             .layout = {.sizing = {CLAY_SIZING_FIXED(style->thumb_w), CLAY_SIZING_FIXED(style->thumb_h)}},
-            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                         .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
-                         .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
+            .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = attach, .parent = attach}},
         };
         nt_atlas_region_ref_t tref = thumb_ref;
         nt_ui_image(ctx, thumb_data, &tref, &thumb_style, &thumb_decl);
@@ -194,24 +224,30 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
     nt_ui_clay_priv_close_element();
 }
 
-/* Effective hit pad: style pad, with the vertical components auto-grown so the thumb's vertical
- * overhang past the track is always clickable even at zero style pad. Derived, no style requirement. */
+/* Effective hit pad: style pad, with the CROSS-axis components auto-grown so the thumb's overhang
+ * past the track is always clickable even at zero style pad. Horizontal grows top/bottom by
+ * (thumb_h-track_h)/2; vertical grows left/right by (thumb_w-track_w)/2. Derived, no style requirement. */
 static void slider_effective_pad(const nt_ui_slider_style_t *style, int16_t out[4]) {
-    const float overhang = (style->thumb_h - style->track_h) * 0.5F;
+    const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
+    const float overhang = (vertical ? (style->thumb_w - style->track_w) : (style->thumb_h - style->track_h)) * 0.5F;
     int16_t grow = 0;
     if (overhang > 0.0F) {
         grow = (int16_t)ceilf(overhang);
     }
     out[0] = style->hit_padding_lrtb[0];
     out[1] = style->hit_padding_lrtb[1];
-    out[2] = (int16_t)((style->hit_padding_lrtb[2] > grow) ? style->hit_padding_lrtb[2] : grow);
-    out[3] = (int16_t)((style->hit_padding_lrtb[3] > grow) ? style->hit_padding_lrtb[3] : grow);
+    out[2] = style->hit_padding_lrtb[2];
+    out[3] = style->hit_padding_lrtb[3];
+    /* Grow the cross axis: left/right for vertical, top/bottom for horizontal. */
+    const int lo = vertical ? 0 : 2;
+    const int hi = vertical ? 1 : 3;
+    out[lo] = (int16_t)((style->hit_padding_lrtb[lo] > grow) ? style->hit_padding_lrtb[lo] : grow);
+    out[hi] = (int16_t)((style->hit_padding_lrtb[hi] > grow) ? style->hit_padding_lrtb[hi] : grow);
 }
 
-/* Shared core parameterized by a normalized [0,1] fraction in/out so float + int both
- * call it. step_frac quantizes the fraction onto the 0,step_frac,2*step_frac,... grid (0 =
- * continuous) BEFORE it feeds the anim/view/compose, so the thumb + fill snap WITH the value.
- * Returns the new clamped fraction; *changed set when it differs from in_frac. */
+/* Shared [0,1]-fraction core for float + int. step_frac quantizes onto the 0,step,2*step,... grid
+ * (0 = continuous) BEFORE anim/view/compose, so thumb + fill snap WITH the value. Returns the new
+ * clamped fraction; *changed when it differs from in_frac. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, float in_frac, float min, float max, float step_frac,
                          nt_ui_slider_style_t *style, const Clay_ElementDeclaration *decl, bool enabled, bool *changed) {
@@ -239,6 +275,22 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     }
     NT_ASSERT(isfinite(step_frac) && step_frac >= 0.0F && "nt_ui_slider: step_frac must be finite >= 0");
     // #endregion
+    // #region axis guard (orientation = AXIS, fill_direction = anchor within it)
+    NT_ASSERT((style->orientation == NT_UI_SLIDER_HORIZONTAL || style->orientation == NT_UI_SLIDER_VERTICAL) && "nt_ui_slider: style.orientation must be HORIZONTAL or VERTICAL");
+    /* Coerce a bad/unknown anchor in a LOCAL effective direction; never write back into the caller's
+     * (maybe shared/static) style — that would corrupt other widgets across frames. The local default,
+     * not the NT_ASSERT (gone in OFF), is the real guard against rendering the wrong axis/anchor. */
+    const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
+    /* Supported anchors: vertical -> BOTTOM_UP/TOP_DOWN; horizontal -> LTR only. Horizontal RTL is
+     * rejected (fill right-anchors while drag/thumb/thumb_pos stay LTR — inconsistent); any UNKNOWN enum
+     * value also fails the explicit test and coerces to the axis default. */
+    const bool bad_fill = vertical ? !(style->fill_direction == NT_UI_FILL_BOTTOM_UP || style->fill_direction == NT_UI_FILL_TOP_DOWN) : (style->fill_direction != NT_UI_FILL_LTR);
+    nt_ui_fill_direction_t effective_fill_direction = style->fill_direction;
+    if (bad_fill) {
+        effective_fill_direction = vertical ? NT_UI_FILL_BOTTOM_UP : NT_UI_FILL_LTR;
+    }
+    NT_ASSERT(!bad_fill && "nt_ui_slider: unsupported fill_direction for orientation (horizontal: LTR; vertical: BOTTOM_UP/TOP_DOWN)");
+    // #endregion
     // #region interaction
     int16_t pad[4];
     slider_effective_pad(style, pad);
@@ -254,7 +306,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #region drag math (press-ON-thumb grab vs track jump)
     float frac = nt_ui_clampf(in_frac, 0.0F, 1.0F);
     if (enabled && (in.pressed_now || in.pressed)) {
-        frac = slider_resolve_drag(ctx, id, &in, style, frac, min, max);
+        frac = slider_resolve_drag(ctx, id, &in, style, effective_fill_direction, frac, min, max);
     } else {
         /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
         nt_ui_state_clear(ctx, slider_drag_id(id));
@@ -287,13 +339,17 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     const float eased_frac = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     // #endregion
 
-    /* Persist the eased fraction + thumb geometry so const-ctx thumb_pos can recover it. */
+    /* Persist the eased fraction + axis-aware thumb geometry so const-ctx thumb_pos can recover it. */
     nt_ui_slider_view_t *view = (nt_ui_slider_view_t *)nt_ui_state(ctx, slider_view_id(id), (uint32_t)sizeof(nt_ui_slider_view_t), NT_UI_STATE_TAG('s', 'l', 'v', 'w'));
     view->fraction = eased_frac;
     view->track_w = style->track_w;
+    view->track_h = style->track_h;
     view->thumb_w = style->thumb_w;
+    view->thumb_h = style->thumb_h;
+    view->orientation = (uint8_t)style->orientation;
+    view->invert = (uint8_t)(vertical && (effective_fill_direction == NT_UI_FILL_BOTTOM_UP)); /* matches the emit invert */
 
-    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, eased_frac, a->opacity, decl, enabled);
+    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, effective_fill_direction, eased_frac, a->opacity, decl, enabled);
 
     /* Changed when the drag moved the (snapped) fraction off the incoming game value. */
     *changed = enabled && (fabsf(frac - in_frac) > 1e-6F);
@@ -358,7 +414,13 @@ nt_ui_slider_thumb_t nt_ui_slider_thumb_pos(const nt_ui_context_t *ctx, uint32_t
     if (!bb.found || view == NULL) {
         return (nt_ui_slider_thumb_t){0.0F, 0.0F, false};
     }
-    /* Thumb center = track_left + fraction*(track_w - thumb_w) + thumb_w/2 (matches the emit). */
+    /* Thumb center = track_origin + pos_frac*(track - thumb) + thumb/2 along the AXIS, centered on the
+     * cross axis (matches the emit attach points). Vertical BOTTOM_UP measures pos from the far edge. */
+    if (view->orientation == NT_UI_SLIDER_VERTICAL) {
+        const float usable_h = (view->track_h - view->thumb_h > 0.0F) ? (view->track_h - view->thumb_h) : 0.0F;
+        const float pos_frac = (view->invert != 0U) ? (1.0F - view->fraction) : view->fraction;
+        return (nt_ui_slider_thumb_t){.x = bb.x + (bb.width * 0.5F), .y = bb.y + (pos_frac * usable_h) + (view->thumb_h * 0.5F), .found = true};
+    }
     const float usable_w = (view->track_w - view->thumb_w > 0.0F) ? (view->track_w - view->thumb_w) : 0.0F;
     return (nt_ui_slider_thumb_t){.x = bb.x + (view->fraction * usable_w) + (view->thumb_w * 0.5F), .y = bb.y + (bb.height * 0.5F), .found = true};
 }
@@ -376,6 +438,7 @@ nt_ui_slider_style_t nt_ui_slider_style_defaults(void) {
     s.thumb_h = 24.0F;
     s.fill_mode = NT_UI_FILL_STRETCH;
     s.fill_direction = NT_UI_FILL_LTR;
+    s.orientation = NT_UI_SLIDER_HORIZONTAL; /* explicit; vertical opts in via the style */
     s.state_speed = 14.0F;
     s.value_speed = 12.0F;
     return s;
