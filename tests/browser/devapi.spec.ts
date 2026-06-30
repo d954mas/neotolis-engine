@@ -86,39 +86,32 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     // Non-deferred (a capture-OFF host would answer synchronously) — accept the immediate envelope.
     captureResp = JSON.parse(submitted);
   } else {
+    // poll() DEQUEUES, so the matching line is returned exactly once — keep it the instant it appears (a
+    // second poll for the same id returns "" because the queue already drained it). Assert on the kept
+    // line, never a re-drive (the re-drive would always see an empty queue — T-70-03-RACE).
+    let captureLine = '';
     await expect
       .poll(
         async () => {
           await page.evaluate(() => window.__devapi!.tick(1)); // advance one MANUAL sim step
           await frame(); // force a real rendered frame -> pre-swap seam fills the payload
-          return page.evaluate((rid) => {
+          const s = await page.evaluate((rid) => {
             // Drain queued deferred lines; return the one whose request_id matches the capture.
             for (let i = 0; i < 8; i++) {
-              const s = window.__devapi!.poll();
-              if (!s) break;
-              const obj = JSON.parse(s);
-              if (obj.request_id === rid) return s;
+              const line = window.__devapi!.poll();
+              if (!line) break;
+              const obj = JSON.parse(line);
+              if (obj.request_id === rid) return line;
             }
             return '';
           }, captureId);
+          if (s) captureLine = s; // keep the first matching line; poll() won't return it again
+          return captureLine;
         },
         { timeout: 20_000 },
       )
       .not.toBe('');
-    // Re-drive once more to fetch the matched line for assertion (the poll above proved it arrives).
-    const line = await page.evaluate(async (rid) => {
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-        for (let i = 0; i < 8; i++) {
-          const s = window.__devapi!.poll();
-          if (!s) break;
-          const obj = JSON.parse(s);
-          if (obj.request_id === rid) return s;
-        }
-      }
-      return '';
-    }, captureId);
-    captureResp = line ? JSON.parse(line) : null;
+    captureResp = captureLine ? JSON.parse(captureLine) : null;
   }
 
   // CAP web half / Pitfall 3: the deferred capture must be a real PNG, NOT {deferred:true}, with a
