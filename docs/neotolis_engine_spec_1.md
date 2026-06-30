@@ -2767,6 +2767,35 @@ A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it �
 
 **OFF semantics — dev-only, compiled out.** The whole group is gated by `NT_DEVAPI_GROUP_CAPTURE` (default **OFF**, opt-in). When off, `nt_devapi_capture.c` is not compiled, the commands are absent from the registry (`unknown_method`) and discovery, and the vendored fpng encoder is not linked into the binary (zero release delta); as with all of devapi it also vanishes when `NT_DEVAPI_ENABLED` is OFF. `nt_fpng` is built `EXCLUDE_FROM_ALL`, so it compiles only when a capture-enabled target links it.
 
+## 24.11 Override-able compile-time options
+
+The engine follows "use only what you need" — most subsystems are gated by a CMake `option(...)` or a `-D` override with a sane default, so a build pulls in only the code it asks for. This section is the **seed** of that catalogue, listing the **devapi** flags; other engine `-D` defaults fold in here over time (it is not yet an exhaustive index of every define).
+
+**devapi build gates** (CMake `option(...)`, set at configure time):
+
+| Flag | Default | Effect |
+|---|---|---|
+| `NT_DEVAPI_ENABLED` | OFF | Master gate. ON compiles the `engine/devapi` subdir and defines `NT_DEVAPI_ENABLED=1`; OFF compile-excludes the whole layer (zero devapi code/symbols in release). Every group flag below is a no-op while this is OFF. |
+| `NT_DEVAPI_GROUP_CORE` | ON | Build the core group: `ping` / `engine.info` / `view`. |
+| `NT_DEVAPI_GROUP_DISCOVERY` | ON | Build the discovery group: `endpoints` / `command.describe` / `features` (the live, self-describing catalog). |
+| `NT_DEVAPI_GROUP_TIME` | ON | Build the `time.*` / `render.*` / `frame.*` group. |
+| `NT_DEVAPI_GROUP_INPUT` | ON | Build the `input.*` synthetic-input group (player gate + inject scheduler). |
+| `NT_DEVAPI_GROUP_UI` | OFF | Build the `ui.*` group (UI tree extraction + widget input). Requires `NT_UI_DEBUG_TOOLS` + `NT_DEVAPI_GROUP_INPUT` (hard CMake guards). |
+| `NT_DEVAPI_GROUP_OBS` | OFF | Build the `log.*` / `perf.*` / `entity.*` / `resource.*` reads. Requires `NT_LOG_RING_ENABLED` + `NT_METRICS_ENABLED` + `NT_INTROSPECT_ENABLED`. |
+| `NT_DEVAPI_GROUP_ENTITY_WRITE` | OFF | Build the `entity.set` component-write group. Requires `NT_INTROSPECT_WRITE_ENABLED`. |
+| `NT_DEVAPI_GROUP_CAPTURE` | OFF | Build the `capture.frame` / `capture.region` PNG framebuffer-capture group (links `nt_gfx` + `nt_fpng`). |
+
+**devapi caps & tunables** (`-D` overridable preprocessor defines, with their defaults):
+
+| Define | Default | Effect |
+|---|---|---|
+| `NT_DEVAPI_DEFAULT_PORT` | `17890` | The native loopback-TCP listen port (env-overridable at host startup via `NT_DEVAPI_PORT`). |
+| `NT_DEVAPI_STEP_MAX` | `1048576` (`1<<20`) | DoS backstop on `time.step{count}` / `{seconds}` — a request above it is `bad_params`, never a runaway advance. |
+| `NT_DEVAPI_CAPTURE_MAX_PIXELS` | `4096*4096` | DoS backstop on a single `capture.*` before any allocation; the producer's `uint32` size math is `_Static_assert`-proven wrap-free under this cap. |
+| `NT_INPUT_INJECT_QUEUE_MAX` | `256` | The bounded static-BSS immediate inject buffer `nt_input_poll` drains whole each poll. |
+
+Each devapi group is its **own** static library (`nt_devapi_<group>`) that links only its deps, so a host links `nt_devapi` plus only the groups it wants (a capture-only host pulls `nt_gfx` + `nt_fpng`, never `nt_ui`); `nt_devapi_default` is the "every compiled-in group" bundle.
+
 ---
 
 # 25. Engine/Game Boundary
