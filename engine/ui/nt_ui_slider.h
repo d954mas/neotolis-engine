@@ -35,7 +35,8 @@ typedef struct {
 _Static_assert(sizeof(nt_ui_slider_cell_t) == 64, "nt_ui_slider_cell_t stable ABI (3x16 ref + 3 tint + 1 float)");
 
 /* Drag AXIS. orientation is the source of truth; fill_direction is the anchor WITHIN
- * the axis (VERTICAL -> BOTTOM_UP/TOP_DOWN, HORIZONTAL -> LTR/RTL). */
+ * the axis (VERTICAL -> BOTTOM_UP/TOP_DOWN, HORIZONTAL -> LTR only — RTL is rejected, as
+ * its fill would right-anchor while drag/thumb/thumb_pos stay LTR). */
 typedef enum { NT_UI_SLIDER_HORIZONTAL = 0, NT_UI_SLIDER_VERTICAL } nt_ui_slider_orientation_t;
 
 typedef struct {

@@ -1,12 +1,11 @@
 #ifndef NT_UI_VLIST_H
 #define NT_UI_VLIST_H
 
-/* Code-first virtualized-list clipper (== ImGui ImGuiListClipper, no fn-ptr indirection).
- * vlist_begin owns ONE internal nt_ui_scroll (one Clay clip), derives a {first,last} window
- * from the scroll pos + viewport + item_extent, and emits a LEADING spacer; the game loops
- * first..last; vlist_end emits the TRAILING spacer and closes the scroll. Leading+trailing
- * spacers size the content to count*extent so the existing scrollbar geometry stays correct.
- * A 10k-row list costs ~the visible count. Fixed item_extent, both axes (1-D). */
+/* Code-first virtualized-list clipper. vlist_begin owns ONE internal nt_ui_scroll (one Clay
+ * clip), derives a {first,last} window from scroll pos + viewport + item_extent, and emits a
+ * LEADING spacer; the game loops first..last; vlist_end emits the TRAILING spacer and closes the
+ * scroll. Leading+trailing spacers size content to count*extent so scrollbar geometry stays
+ * correct. Fixed item_extent, both axes (1-D). */
 
 #include <stdbool.h>
 #include <stdint.h>

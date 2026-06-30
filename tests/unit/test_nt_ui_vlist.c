@@ -97,11 +97,8 @@ static void test_vlist_window_degenerate_safe(void) {
 }
 
 /* ---- (c2) invalid stride (item_extent+gap <= 0 or NaN): safe window -> zero spacers ----
- * vlist_begin clamps the full stride (item_extent + gap) to safe_extent before deriving the window and
- * the leading/trailing spacers. The pure probe stands in for that window math: a non-positive / NaN
- * stride collapses to {0,0}, so leading (first*safe_extent) and trailing ((count-1-last)*safe_extent)
- * are 0 -- never a negative or NaN FIXED spacer. (begin also asserts the bad stride in debug; see the
- * death tests below. The clamp is the real guard in NT_ASSERT_MODE=OFF.) */
+ * A non-positive / NaN stride collapses the window to {0,0}, so both spacers are 0 -- never a negative
+ * or NaN FIXED spacer. (begin also asserts the bad stride in debug; the clamp is the real OFF guard.) */
 static void test_vlist_window_bad_stride_safe(void) {
     /* item_extent=10, gap=-20 -> stride -10: safe single in-range item, never negative. */
     nt_ui_vlist_range_t r = nt_ui_vlist_test_window(-100.0F, 200.0F, 10.0F + (-20.0F), 100U, 2);
