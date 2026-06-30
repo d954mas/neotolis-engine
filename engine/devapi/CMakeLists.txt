@@ -37,7 +37,7 @@ endif()
 
 # Time group (time.*/render.*/frame.*): render.info reads draw_calls -> nt_gfx_interface.
 if(NT_DEVAPI_GROUP_TIME)
-    nt_add_module(nt_devapi_time LOG_DOMAIN "devapi" nt_devapi_time.c)
+    nt_add_module(nt_devapi_time LOG_DOMAIN "devapi" nt_devapi_time.c nt_devapi_time_internal.h)
     target_link_libraries(nt_devapi_time PUBLIC nt_devapi PRIVATE nt_gfx_interface)
     target_compile_definitions(nt_devapi_time PUBLIC NT_DEVAPI_GROUP_TIME=1)
 endif()

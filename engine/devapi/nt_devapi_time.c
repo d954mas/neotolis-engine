@@ -5,6 +5,7 @@
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "devapi/nt_devapi_internal.h"
+#include "devapi/nt_devapi_time_internal.h"
 #include "graphics/nt_gfx.h"
 
 /* time/render/frame command group. Bot input is range/type-checked → bad_params; never assert

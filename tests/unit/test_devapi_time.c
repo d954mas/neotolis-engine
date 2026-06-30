@@ -11,6 +11,7 @@
 /* clang-format off */
 #include "app/nt_app.h"
 #include "devapi/nt_devapi_internal.h"
+#include "devapi/nt_devapi_time_internal.h"
 #include "unity.h"
 /* clang-format on */
 
