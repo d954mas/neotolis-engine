@@ -605,6 +605,15 @@ static void test_assert_overlay_w_inf(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* tri *value not in {OFF,ON,MIXED} -> assert (a garbage enum must not silently render as OFF). */
+static void test_assert_tri_value_invalid(void) {
+    nt_ui_tristate_t value = (nt_ui_tristate_t)7; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_checkbox_tri(s_fx.ctx, NULL, 0, nt_ui_id("tri"), "x", &value, &s_style, &s_row_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -636,6 +645,7 @@ int main(void) {
     RUN_TEST(test_assert_label_side_invalid);
     RUN_TEST(test_assert_box_w_inf);
     RUN_TEST(test_assert_overlay_w_inf);
+    RUN_TEST(test_assert_tri_value_invalid);
 #endif
     return UNITY_END();
 }

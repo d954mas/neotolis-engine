@@ -276,15 +276,15 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     NT_ASSERT(isfinite(step_frac) && step_frac >= 0.0F && "nt_ui_slider: step_frac must be finite >= 0");
     // #endregion
     // #region axis guard (orientation = AXIS, fill_direction = anchor within it)
-    /* Coerce a bad anchor in a LOCAL effective direction; never write back into the caller's (maybe
-     * shared/static) style — that would corrupt other widgets across frames. The local default, not
-     * the NT_ASSERT (gone in OFF), is the real guard against rendering the wrong axis/anchor. */
+    NT_ASSERT((style->orientation == NT_UI_SLIDER_HORIZONTAL || style->orientation == NT_UI_SLIDER_VERTICAL) && "nt_ui_slider: style.orientation must be HORIZONTAL or VERTICAL");
+    /* Coerce a bad/unknown anchor in a LOCAL effective direction; never write back into the caller's
+     * (maybe shared/static) style — that would corrupt other widgets across frames. The local default,
+     * not the NT_ASSERT (gone in OFF), is the real guard against rendering the wrong axis/anchor. */
     const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
-    const bool fill_is_h = (style->fill_direction == NT_UI_FILL_LTR || style->fill_direction == NT_UI_FILL_RTL);
-    /* Supported anchors: vertical takes either vertical anchor (BOTTOM_UP/TOP_DOWN); horizontal takes
-     * ONLY LTR. Horizontal RTL is rejected — its fill right-anchors while drag/thumb/thumb_pos stay LTR
-     * (inconsistent), so it coerces to the LTR default like any axis mismatch. */
-    const bool bad_fill = vertical ? fill_is_h : (style->fill_direction != NT_UI_FILL_LTR);
+    /* Supported anchors: vertical -> BOTTOM_UP/TOP_DOWN; horizontal -> LTR only. Horizontal RTL is
+     * rejected (fill right-anchors while drag/thumb/thumb_pos stay LTR — inconsistent); any UNKNOWN enum
+     * value also fails the explicit test and coerces to the axis default. */
+    const bool bad_fill = vertical ? !(style->fill_direction == NT_UI_FILL_BOTTOM_UP || style->fill_direction == NT_UI_FILL_TOP_DOWN) : (style->fill_direction != NT_UI_FILL_LTR);
     nt_ui_fill_direction_t effective_fill_direction = style->fill_direction;
     if (bad_fill) {
         effective_fill_direction = vertical ? NT_UI_FILL_BOTTOM_UP : NT_UI_FILL_LTR;

@@ -804,6 +804,17 @@ static void test_assert_negative_step(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* orientation not HORIZONTAL/VERTICAL -> assert (a garbage enum must not silently render horizontal). */
+static void test_assert_orientation_invalid(void) {
+    float value = 0.5F;
+    nt_ui_slider_style_t bad = s_style;
+    bad.orientation = (nt_ui_slider_orientation_t)7; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &bad, &s_track_decl, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -839,6 +850,7 @@ int main(void) {
     RUN_TEST(test_assert_min_gt_max);
     RUN_TEST(test_assert_data_flags_transform);
     RUN_TEST(test_assert_negative_step);
+    RUN_TEST(test_assert_orientation_invalid);
 #endif
     return UNITY_END();
 }

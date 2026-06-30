@@ -380,6 +380,7 @@ bool nt_ui_toggle(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_
 bool nt_ui_checkbox_tri(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *label, nt_ui_tristate_t *value, nt_ui_checkbox_style_t *style,
                         const Clay_ElementDeclaration *decl, bool enabled) {
     NT_ASSERT(value != NULL && "nt_ui_checkbox_tri: value must be non-NULL");
+    NT_ASSERT((*value == NT_UI_TRI_OFF || *value == NT_UI_TRI_ON || *value == NT_UI_TRI_MIXED) && "nt_ui_checkbox_tri: *value must be OFF/ON/MIXED");
     /* row_idx: ON->1 (checked), MIXED->2 (dash), anything else->0 (unchecked). */
     int row_idx = 0;
     if (*value == NT_UI_TRI_ON) {
