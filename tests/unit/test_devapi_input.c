@@ -8,6 +8,7 @@
 
 /* clang-format off */
 #include "app/nt_app.h"
+#include "devapi/nt_devapi_input_internal.h" /* sched cap + input_update/reset, driven directly here */
 #include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_net.h" /* nt_devapi_update — ticks the schedule on a sim-advance */
 #include "input/nt_input.h"

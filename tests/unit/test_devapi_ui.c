@@ -12,6 +12,7 @@
 #include "clay.h"
 #include "app/nt_app.h"
 #include "devapi/nt_devapi.h"
+#include "devapi/nt_devapi_input_internal.h" /* NT_DEVAPI_INPUT_SCHED_MAX — the ui drag cap derives from it */
 #include "devapi/nt_devapi_internal.h"
 #include "devapi/nt_devapi_net.h"      /* nt_devapi_update — drives the shared inject schedule on a sim-advance */
 #include "input/nt_input.h"            /* g_nt_input + the reserved inject pointer id, for the Y-up flip read-back */

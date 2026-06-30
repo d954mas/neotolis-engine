@@ -65,7 +65,7 @@ endif()
 # Input group: the synthetic-input scheduler + input.* veneer. NT_INPUT_AUTOMATION_ENABLED is PUBLIC so
 # every consumer (and the ui group, which reuses the scheduler) sees nt_input's inject API decls.
 if(NT_DEVAPI_GROUP_INPUT)
-    nt_add_module(nt_devapi_input LOG_DOMAIN "devapi" nt_devapi_input.c)
+    nt_add_module(nt_devapi_input LOG_DOMAIN "devapi" nt_devapi_input.c nt_devapi_input_internal.h)
     target_link_libraries(nt_devapi_input PUBLIC nt_devapi nt_input_interface)
     target_compile_definitions(nt_devapi_input PUBLIC NT_DEVAPI_GROUP_INPUT=1 NT_INPUT_AUTOMATION_ENABLED=1)
 endif()
