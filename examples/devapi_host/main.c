@@ -6,11 +6,11 @@
 #include "core/nt_platform.h"
 #include "devapi/nt_devapi.h"
 #ifdef __EMSCRIPTEN__
-#include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge (D-16). */
+#include "devapi/nt_devapi_web.h" /* nt_devapi_web_install_shim — the web push/pull bridge. */
 /* Capture is an opt-in group (NT_DEVAPI_GROUP_CAPTURE). Only when it is compiled does the web host pull
    a real GL context + install the pre-swap seam, so the host links nt_gfx/nt_fpng ONLY for the capture
-   build (the canonical deferred-capture scenario, D-04/D-05); a capture-OFF web build still serves
-   submit/poll/poke. The capture group itself links nt_fpng (first WASM fpng link, Pitfall 7 / R4). */
+   build (the canonical deferred-capture scenario); a capture-OFF web build still serves
+   submit/poll/poke. The capture group itself links nt_fpng (first WASM fpng link, scalar path only). */
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 #define NT_DEVAPI_HOST_WEB_CAPTURE 1
 #include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
@@ -64,7 +64,7 @@ static const nt_devapi_command_desc k_game_echo = {
 };
 
 /* game-layer WRITE command: flip an observable host bool, return the new value as {poked}. The
-   harness drives it to prove a write command mutates host state on BOTH transports (HARNESS-05/D-07);
+   harness drives it to prove a write command mutates host state on BOTH transports;
    registered via the public nt_devapi_register path only — zero engine edits. */
 static bool s_game_poked = false; /* the observable: each game.poke toggles it. */
 
@@ -92,7 +92,7 @@ static const nt_devapi_command_desc k_game_poke = {
 #ifndef __EMSCRIPTEN__
 /* Resolve the listen port: NT_DEVAPI_DEFAULT_PORT, overridden by env NT_DEVAPI_PORT.
    Falls back to the default on a missing / unparseable / out-of-range value. Native-only: web has
-   no listener (D-16), so no port to resolve. */
+   no listener, so no port to resolve. */
 static uint16_t resolve_port(void) {
     // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded host startup, getenv is fine
     const char *env = getenv("NT_DEVAPI_PORT");
@@ -176,7 +176,7 @@ static void declare_hud_scaled(void) {
 /* Host-owned disconnect recovery: the engine resets only devapi-owned state on a client drop, so a
    bot that drops mid-MANUAL leaves the host frozen. On the connected->disconnected edge, force RUN so
    the bare host stays usable. A graceful bot restores mode itself; this only catches an ungraceful drop.
-   Native-only: web has no listener / no client to drop (D-16). */
+   Native-only: web has no listener / no client to drop. */
 static void recover_on_disconnect(void) {
     static bool was_connected = false;
     bool now = nt_devapi_net_has_client();
@@ -190,7 +190,7 @@ static void recover_on_disconnect(void) {
 #endif /* !__EMSCRIPTEN__ */
 
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-/* Web capture build: a deterministic two-tone NON-BLANK frame so the pre-swap capture seam (D-04) reads
+/* Web capture build: a deterministic two-tone NON-BLANK frame so the pre-swap capture seam reads
    a real PNG, not a uniform clear. Mirrors examples/capture_host render_pattern: full-frame background,
    then a scissored centered sub-rect in a second color (glClear honors GL_SCISSOR_TEST). devapi_host
    inits no gfx natively (the probe needs none); the WEB path gives it a real GL context for capture. */
@@ -239,7 +239,7 @@ static void frame(void) {
 
     /* Native: no real renderer (the host issues no draw — nt_ui_walk is unnecessary for the probe);
        swap only under the render flag so draw_calls stays 0 / render.* stays honest. Web: draw the
-       deterministic two-tone pattern first so the pre-swap capture seam reads a non-blank frame (D-04).
+       deterministic two-tone pattern first so the pre-swap capture seam reads a non-blank frame.
        The capture seam runs INSIDE nt_window_swap_buffers (post-render, pre-swap GL-valid point). */
     if (nt_app_render_enabled()) {
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
@@ -306,7 +306,7 @@ int main(void) {
     nt_window_set_vsync(NT_VSYNC_OFF);
     nt_input_init();
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-    /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame (D-04/D-05).
+    /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame.
        The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .depth = true});
 #endif
@@ -323,9 +323,9 @@ int main(void) {
         goto shutdown_base;
     }
 #ifndef __EMSCRIPTEN__
-    /* Native: start the TCP transport BEFORE registering groups — net_start registers net_poll as a
-       tick hook, and it must precede the input group's tick hook (registration order) so a line
-       submitted this frame schedules its input edge before the input schedule tick (T-70-01-ORDER). */
+    /* Native: start the loopback TCP transport. Placed early to fail fast on a taken port before
+       building the UI/entity surface; order vs register_default no longer matters — net_poll runs in
+       the transport-poll phase, ahead of the input tick. Web has no listener, so nothing to start. */
     {
         uint16_t port = resolve_port();
         if (!nt_devapi_net_start(port)) {
@@ -387,12 +387,12 @@ int main(void) {
     nt_log_info("devapi_host listening");
 
 #ifdef __EMSCRIPTEN__
-    /* Web: install the push/pull bridge (window.__devapi). NO listener (D-16) — the page's own JS is
+    /* Web: install the push/pull bridge (window.__devapi). NO listener — the page's own JS is
        the only caller, under the OFF-by-default NT_DEVAPI_ENABLED gate. */
     nt_devapi_web_install_shim();
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
     /* Capture build only: install the pre-swap seam; it needs the real GL context inited above so the
-       deferred capture reads a non-blank PNG (D-04/D-05). */
+       deferred capture reads a non-blank PNG. */
     nt_devapi_capture_install_seam();
 #endif
 #else

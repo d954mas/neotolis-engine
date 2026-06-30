@@ -123,14 +123,16 @@ typedef void (*nt_devapi_hook_fn)(void);
 
 /* Register a per-tick / client-reset hook. Cleared on shutdown, re-registered each init;
    overflow asserts (build-time bug). */
+/* Two ordered phases: transport-poll hooks (recv + enqueue) run before tick hooks (schedule release).
+   transport_is_registered lets a transport register its poll at most once per init (the table is
+   append-only, so a stop->start restart must not duplicate it). */
+void nt_devapi_register_transport_poll(nt_devapi_hook_fn fn);
 void nt_devapi_register_tick(nt_devapi_hook_fn fn);
 void nt_devapi_register_reset(nt_devapi_hook_fn fn);
+bool nt_devapi_transport_is_registered(nt_devapi_hook_fn fn);
 
-/* True if fn is already in the tick table (append-only, no unregister) — lets a transport register its
-   poll at most once per devapi init so a stop->start restart cannot enqueue a duplicate. */
-bool nt_devapi_tick_is_registered(nt_devapi_hook_fn fn);
-
-/* Run all registered tick / reset hooks in registration order. */
+/* Run the transport-poll phase, then the tick phase; reset hooks fire on a client drop. */
+void nt_devapi_run_transport_hooks(void);
 void nt_devapi_run_tick_hooks(void);
 void nt_devapi_run_reset_hooks(void);
 // #endregion

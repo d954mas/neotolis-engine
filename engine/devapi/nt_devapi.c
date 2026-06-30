@@ -576,7 +576,10 @@ const char *nt_devapi_poll_response(void) {
     return NULL; /* nothing ready this call. */
 }
 
-/* Core per-tick entry: runs only the registered tick hooks. Each transport (native net, web)
-   registers its own poll+deferred-drain as a tick hook, so both share this one frame-keyed seam
-   without the core naming either transport. */
-void nt_devapi_update(void) { nt_devapi_run_tick_hooks(); }
+/* Core per-tick entry: runs the transport-poll phase (each transport's recv + drain) then the tick
+   phase (e.g. the input schedule release), naming neither transport. The phase order is what guarantees
+   a received line is scheduled before the tick reads it, so a host may register the two in any order. */
+void nt_devapi_update(void) {
+    nt_devapi_run_transport_hooks();
+    nt_devapi_run_tick_hooks();
+}

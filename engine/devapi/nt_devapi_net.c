@@ -258,12 +258,11 @@ bool nt_devapi_net_start(uint16_t port) {
 #endif
         return false; /* port taken / refused — API-contract return, not an assert. */
     }
-    /* Register recv+deferred-drain as a tick hook. Must precede the input group's tick hook so a
-       line submitted this frame schedules its input edge BEFORE the input schedule tick runs — hosts
-       therefore call net_start before register_default (hooks run in registration order). Register at
-       most once: the table is append-only, so a stop->start restart must not enqueue a second poll. */
-    if (!nt_devapi_tick_is_registered(nt_devapi_net_poll)) {
-        nt_devapi_register_tick(nt_devapi_net_poll);
+    /* Register recv+deferred-drain in the transport-poll phase, which the core runs before the tick
+       phase — so a line received this tick is scheduled before the input tick reads it, regardless of
+       registration order. Register at most once: the table is append-only, so a restart must not dup. */
+    if (!nt_devapi_transport_is_registered(nt_devapi_net_poll)) {
+        nt_devapi_register_transport_poll(nt_devapi_net_poll);
     }
     return true;
 }
@@ -298,8 +297,25 @@ static void try_accept(void) {
         s_client = c;
         s_recv_len = 0;
         set_client_opts(c);
+        return;
     }
-    /* else EWOULDBLOCK == no pending connection — try again next frame. */
+    /* accept failed: EWOULDBLOCK (no pending connection) and an interrupted/aborted attempt are
+       transient — retry next frame. Anything else (e.g. EMFILE fd exhaustion) is a real fault; assert
+       loud rather than mask it as a phantom never-connects (a dev-only host fails fast). */
+    int e = nt_sock_errno();
+    if (e == NT_EWOULDBLOCK) {
+        return;
+    }
+#ifndef _WIN32
+    if (e == EAGAIN || e == EINTR || e == ECONNABORTED) {
+        return;
+    }
+#else
+    if (e == WSAECONNRESET || e == WSAEINTR) {
+        return;
+    }
+#endif
+    NT_ASSERT(0 && "devapi_net accept() failed with an unexpected error (fd exhaustion?)");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -432,9 +448,18 @@ bool nt_devapi_net_wait_for_client(uint32_t timeout_ms) {
         if (s_client != NT_INVALID_SOCK) {
             return true;
         }
-        if (now_ms() >= deadline) {
+        uint64_t now = now_ms();
+        if (now >= deadline) {
             return false; /* bounded — never an unbounded spin. */
         }
+        /* Block on the listen socket instead of busy-spinning try_accept (which would pin a core for
+           the whole wait); wake on a pending connection or the remaining timeout. */
+        uint64_t remaining = deadline - now;
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(s_listen, &rfds);
+        struct timeval tv = {.tv_sec = (long)(remaining / 1000ULL), .tv_usec = (long)((remaining % 1000ULL) * 1000ULL)};
+        (void)select((int)(s_listen + 1), &rfds, NULL, NULL, &tv);
     }
 }
 // #endregion
