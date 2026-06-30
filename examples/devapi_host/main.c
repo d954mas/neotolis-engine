@@ -10,7 +10,7 @@
 /* Capture is an opt-in group (NT_DEVAPI_GROUP_CAPTURE). Only when it is compiled does the web host pull
    a real GL context + install the pre-swap seam, so the host links nt_gfx/nt_fpng ONLY for the capture
    build (the canonical deferred-capture scenario); a capture-OFF web build still serves
-   submit/poll/poke. The capture group itself links nt_fpng (first WASM fpng link, scalar path only). */
+   submit/poll/poke. */
 #ifdef NT_DEVAPI_GROUP_CAPTURE
 #define NT_DEVAPI_HOST_WEB_CAPTURE 1
 #include "devapi/nt_devapi_capture.h" /* nt_devapi_capture_install_seam — pre-swap capture seam. */
@@ -414,7 +414,6 @@ int main(void) {
     return 0;
 #else
     status = 0; /* clean run: the native loop returned on quit. */
-    nt_devapi_net_stop();
     /* reverse-init: scene (ui borrows scratch; comps borrow entity) before devapi before base. */
     nt_ui_destroy_context(s_hud_ctx);
     nt_ui_destroy_context(s_hud_scaled_ctx);
@@ -425,6 +424,9 @@ int main(void) {
     nt_entity_shutdown();
 #endif
 shutdown_devapi:
+#ifndef __EMSCRIPTEN__
+    nt_devapi_net_stop(); /* clean + register-fail paths; a no-op if the socket was never started. */
+#endif
     nt_devapi_shutdown();
 shutdown_base:
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
