@@ -287,18 +287,27 @@ static void resource_resolve_pass(void) {
 
         // #region PIN_BLOB ref-transfer (OQ-1 Option A: resolve-pass owns the pin, no on_cleanup dependency)
         if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
-            /* Aggregate pins each winning pack once; transfer only when the winner's pack changes. */
-            const bool prev_has_winner = slot->prev_resolve_asset_idx < s_resource.asset_hwm;
-            const uint16_t old_pack = prev_has_winner ? s_resource.assets[slot->prev_resolve_asset_idx].pack_index : UINT16_MAX;
+            /* Pin identity is the winning pack's mount_seq, NOT its packs[] index: a same-step
+             * unmount+remount of one pack_id reuses the index but is a DIFFERENT blob. Keying on
+             * mount_seq re-pins the fresh mount; the stale pin was already zeroed by unmount's
+             * memset, so the guarded decrement no-ops when that mount is gone. */
             const uint16_t new_pack = next_has_real_winner ? s_resource.assets[next_asset_idx].pack_index : UINT16_MAX;
-            if (old_pack != new_pack) {
-                /* Real if-guard, not NT_ASSERT — assert is a no-op in shipping (NT_ASSERT_MODE=OFF). */
-                if (old_pack < NT_RESOURCE_MAX_PACKS && s_resource.packs[old_pack].blob_ref > 0) {
-                    s_resource.packs[old_pack].blob_ref--;
+            const uint16_t new_seq = (new_pack < NT_RESOURCE_MAX_PACKS) ? s_resource.packs[new_pack].mount_seq : 0;
+            const uint16_t old_seq = slot->pinned_pack_seq; /* 0 = this slot holds no pin */
+            if (old_seq != new_seq) {
+                /* Release the previous pin only if that exact mount is still resident. Real if-guards,
+                 * not NT_ASSERT — assert is a no-op in shipping (NT_ASSERT_MODE=OFF). */
+                if (old_seq != 0) {
+                    const bool prev_has_winner = slot->prev_resolve_asset_idx < s_resource.asset_hwm;
+                    const uint16_t old_pack = prev_has_winner ? s_resource.assets[slot->prev_resolve_asset_idx].pack_index : UINT16_MAX;
+                    if (old_pack < NT_RESOURCE_MAX_PACKS && s_resource.packs[old_pack].mount_seq == old_seq && s_resource.packs[old_pack].blob_ref > 0) {
+                        s_resource.packs[old_pack].blob_ref--;
+                    }
                 }
                 if (new_pack < NT_RESOURCE_MAX_PACKS) {
                     s_resource.packs[new_pack].blob_ref++;
                 }
+                slot->pinned_pack_seq = new_seq;
             }
         }
         // #endregion
@@ -435,6 +444,7 @@ nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
         s_resource.free_queue[i] = (uint16_t)(NT_RESOURCE_MAX_SLOTS - i); /* top has lowest */
     }
 
+    s_resource.next_mount_seq = 1; /* 0 reserved as the "unpinned" sentinel for NtResourceSlot.pinned_pack_seq */
     s_resource.activate_time_budget_ms = NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS;
     s_resource.retry_max_attempts = 0; /* infinite by default */
     s_resource.retry_base_delay_ms = 500;
@@ -737,6 +747,7 @@ static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
     slot->prev_resolve_asset_idx = UINT16_MAX;
     slot->user_data_asset_idx = UINT16_MAX;
     slot->prev_runtime_handle = 0;
+    slot->pinned_pack_seq = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
     slot->user_data = NULL;
@@ -1427,7 +1438,8 @@ bool nt_resource_asset_info(uint16_t i, nt_resource_asset_info_t *out) {
             uint16_t si = slot_map_find(meta->resource_id);
             if (si != 0) {
                 const NtResourceSlot *slot = &s_resource.slots[si];
-                if (slot->asset_type == meta->asset_type && slot->resolve_asset_idx == a && (s_resource.activators[slot->asset_type].behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
+                if (slot->asset_type == meta->asset_type && slot->asset_type < NT_RESOURCE_MAX_ASSET_TYPES && slot->resolve_asset_idx == a &&
+                    (s_resource.activators[slot->asset_type].behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
                     blob_ref = s_resource.packs[meta->pack_index].blob_ref;
                 }
             }

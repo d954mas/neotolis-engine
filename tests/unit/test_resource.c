@@ -1450,6 +1450,47 @@ void test_blob_pin_ref_absent_without_flag(void) {
     free(blob);
 }
 
+/* CR-02: a same-step unmount+remount of the SAME pack_id reuses the packs[] index; the pin
+ * transfer must re-key on mount_seq (not index) so the fresh mount stays pinned. Before the fix
+ * old_pack == new_pack skipped the transfer and blob_ref stayed 0 -> UAF on the live font blob. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_ref_survives_reregister(void) {
+    nt_hash32_t pid = nt_hash32_str("pin_reregister_pack");
+    nt_hash64_t rid = nt_hash64_str("pin_reregister_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0)); /* winner pins the first mount */
+
+    /* Same-step hot-reload: unmount + remount the same pack_id -> packs[] index 0 is reused,
+     * but the new mount gets a fresh mount_seq. No resolve/step between unmount and remount. */
+    nt_resource_unmount(pid);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    uint32_t size2 = 0;
+    uint8_t *blob2 = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size2);
+    TEST_ASSERT_NOT_NULL(blob2);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob2, size2));
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 200);
+    nt_resource_step();
+
+    /* Winner re-pinned on the reused index; before the mount_seq re-key this was 0. */
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_ref(0));
+
+    free(blob);
+    free(blob2);
+}
+
 /* ---- PIN_BLOB eviction / unmount safety (FONT-03 / D-06/D-07/D-08) ---- */
 
 /* D-06: a referenced NT_BLOB_AUTO blob survives TTL expiry (timer-freeze); ref->0 -> fresh TTL grace, then evicts. */
@@ -2701,6 +2742,7 @@ int main(void) {
     /* PIN_BLOB ref-balance tests (FONT-03 / D-05) */
     RUN_TEST(test_blob_pin_ref_balance_winner_change);
     RUN_TEST(test_blob_pin_ref_absent_without_flag);
+    RUN_TEST(test_blob_pin_ref_survives_reregister);
 
     /* PIN_BLOB eviction / unmount safety (FONT-03 / D-06/D-07/D-08) */
     RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);
