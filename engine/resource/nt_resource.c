@@ -285,6 +285,24 @@ static void resource_resolve_pass(void) {
         const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
         const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
+        // #region PIN_BLOB ref-transfer (OQ-1 Option A: resolve-pass owns the pin, no on_cleanup dependency)
+        if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
+            /* Aggregate pins each winning pack once; transfer only when the winner's pack changes. */
+            const bool prev_has_winner = slot->prev_resolve_asset_idx < s_resource.asset_hwm;
+            const uint16_t old_pack = prev_has_winner ? s_resource.assets[slot->prev_resolve_asset_idx].pack_index : UINT16_MAX;
+            const uint16_t new_pack = next_has_real_winner ? s_resource.assets[next_asset_idx].pack_index : UINT16_MAX;
+            if (old_pack != new_pack) {
+                /* Real if-guard, not NT_ASSERT — assert is a no-op in shipping (NT_ASSERT_MODE=OFF). */
+                if (old_pack < NT_RESOURCE_MAX_PACKS && s_resource.packs[old_pack].blob_ref > 0) {
+                    s_resource.packs[old_pack].blob_ref--;
+                }
+                if (new_pack < NT_RESOURCE_MAX_PACKS) {
+                    s_resource.packs[new_pack].blob_ref++;
+                }
+            }
+        }
+        // #endregion
+
         bool target_missing_aux = false;
         if (aux_backed && tmp->target_asset_idx < s_resource.asset_hwm) {
             const NtAssetMeta *target = &s_resource.assets[tmp->target_asset_idx];
@@ -1612,6 +1630,13 @@ void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_ind
             return;
         }
     }
+}
+
+uint32_t nt_resource_test_pack_blob_ref(uint16_t pack_index) {
+    if (pack_index >= NT_RESOURCE_MAX_PACKS) {
+        return 0;
+    }
+    return s_resource.packs[pack_index].blob_ref;
 }
 
 #endif /* NT_TEST_ACCESS */
