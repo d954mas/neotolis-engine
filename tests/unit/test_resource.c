@@ -1604,6 +1604,42 @@ void test_blob_pin_unmount_while_referenced(void) {
     free(blob);
 }
 
+/* A PIN_BLOB winner whose NT_BLOB_AUTO blob was evicted before any consumer
+ * pinned it must NOT publish READY — the zero-copy provider would view into
+ * freed memory. asset_is_publishable gates it (needs a resident blob). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
+    nt_hash32_t pid = nt_hash32_str("pin_unpub_pack");
+    nt_hash64_t rid = nt_hash64_str("pin_unpub_res");
+
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PIN_BLOB);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+
+    /* No consumer yet -> blob_ref stays 0; TTL expiry evicts the blob before
+     * any pin is established. */
+    nt_time_sleep(0.005);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_ref(0));
+
+    /* Consumer arrives; the asset reports READY but its blob is gone. The
+     * PIN_BLOB provider must NOT publish as a usable winner. */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 99);
+    nt_resource_step();
+
+    TEST_ASSERT_FALSE(nt_resource_is_ready(h)); /* unpublishable without a resident blob */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
+
+    free(blob);
+}
+
 /* ---- Invalidate tests ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2748,6 +2784,7 @@ int main(void) {
     RUN_TEST(test_blob_pin_eviction_skip_and_timer_freeze);
     RUN_TEST(test_blob_pin_auto_as_keep_one_shot_log);
     RUN_TEST(test_blob_pin_unmount_while_referenced);
+    RUN_TEST(test_blob_pin_unpublishable_when_blob_evicted_before_pin);
 
     /* Invalidate tests */
     RUN_TEST(test_invalidate_marks_registered);

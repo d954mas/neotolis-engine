@@ -122,10 +122,15 @@ static bool asset_blob_resident(const NtAssetMeta *meta) {
 static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAssetMeta *meta) { return (meta->asset_type == NT_ASSET_BLOB) ? asset_index : meta->runtime_handle; }
 
 static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *meta, uint16_t asset_index, uint8_t behavior_flags) {
-    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0) {
-        return true;
+    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) != 0) {
+        return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
     }
-    return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
+    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0) {
+        /* Zero-copy provider views into the blob — publishing READY without it
+         * resident hands on_resolve data=NULL and reports a usable tofu winner. */
+        return asset_blob_resident(meta);
+    }
+    return true;
 }
 
 static const uint8_t *asset_data_ptr(const NtAssetMeta *meta, uint32_t *out_size) {
@@ -313,9 +318,10 @@ static void resource_resolve_pass(void) {
         // #endregion
 
         bool target_missing_aux = false;
-        if (aux_backed && tmp->target_asset_idx < s_resource.asset_hwm) {
+        const bool pin_blob = (behavior_flags & NT_RESOURCE_BEHAVIOR_PIN_BLOB) != 0;
+        if ((aux_backed || pin_blob) && tmp->target_asset_idx < s_resource.asset_hwm) {
             const NtAssetMeta *target = &s_resource.assets[tmp->target_asset_idx];
-            target_missing_aux = !slot_user_data_synced_for(slot, tmp->target_asset_idx) && !asset_blob_resident(target);
+            target_missing_aux = aux_backed ? (!slot_user_data_synced_for(slot, tmp->target_asset_idx) && !asset_blob_resident(target)) : !asset_blob_resident(target);
             if (target_missing_aux) {
                 schedule_pack_redownload_if_needed(&s_resource.packs[target->pack_index]);
             }
